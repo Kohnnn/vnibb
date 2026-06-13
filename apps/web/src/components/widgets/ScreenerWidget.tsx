@@ -28,6 +28,7 @@ import { SavedScreensDropdown, type SavedScreen } from './screener/SavedScreensD
 import { PerformanceTable } from './screener/PerformanceTable';
 import { ChartGridCard } from './screener/ChartGridCard';
 import { getLatestTimestampValue } from '@/lib/dataFreshness';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface ScreenerWidgetProps {
     id: string;
@@ -38,6 +39,7 @@ interface ScreenerWidgetProps {
     onSymbolClick?: (symbol: string) => void;
     widgetGroup?: WidgetGroupId;
     config?: Record<string, unknown>;
+    onDataChange?: (data: unknown) => void;
 }
 
 type ViewMode = 'table' | 'chart' | 'performance';
@@ -186,6 +188,7 @@ export function ScreenerWidget({
     onSymbolClick,
     widgetGroup,
     config,
+    onDataChange,
 }: ScreenerWidgetProps) {
     const { updateWidget } = useDashboard();
     const widgetLocation = useDashboardWidget(id);
@@ -345,6 +348,18 @@ export function ScreenerWidget({
             screenerData?.meta?.last_data_date,
             ...(screenerData?.data ?? []).map((row) => row.updated_at),
         ]) ?? dataUpdatedAt;
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/screener',
+            endpoint: '/api/v1/screener/stocks',
+            sourceLabel: 'VNIBB screener',
+            lastDataDate: typeof sourceUpdatedAt === 'string' ? sourceUpdatedAt : undefined,
+            derived: Boolean(search.trim() || serializedFilters),
+            extra: { count: filteredData.length, market, sort },
+        }))
+    }, [filteredData.length, hasData, market, onDataChange, search, serializedFilters, sort, sourceUpdatedAt]);
 
     const handleSort = useCallback((field: string) => {
         captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {

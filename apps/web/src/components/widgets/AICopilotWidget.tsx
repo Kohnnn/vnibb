@@ -23,6 +23,7 @@ import { CopilotFeedbackBar } from '@/components/ui/CopilotFeedbackBar';
 import { CopilotActionPanel } from '@/components/ui/CopilotActionPanel';
 import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
 import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface WidgetContext {
     widgetType: string;
@@ -49,6 +50,7 @@ interface AICopilotWidgetProps {
     isEditing?: boolean;
     onRemove?: () => void;
     initialContext?: WidgetContext;
+    onDataChange?: (data: unknown) => void;
 }
 
 interface PromptTemplate {
@@ -145,7 +147,7 @@ function renderContentWithCitations(message: Message): string {
     return `${rendered}\n\n${citations}`;
 }
 
-export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopilotWidgetProps) {
+export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataChange }: AICopilotWidgetProps) {
     const [messages, setMessages] = useState<Message[]>([
         {
             id: 'welcome',
@@ -162,6 +164,18 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
     const [showDetails, setShowDetails] = useState<Record<string, boolean>>({});
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
+
+    useEffect(() => {
+        const responseCount = messages.filter((message) => message.role === 'assistant' && message.id !== 'welcome').length;
+        onDataChange?.(buildWidgetRuntime({
+            empty: responseCount === 0,
+            apiGroup: '/copilot',
+            endpoint: '/api/v1/copilot/chat/stream',
+            sourceLabel: 'VNIBB copilot stream',
+            derived: true,
+            extra: { messages: messages.length, responses: responseCount, streaming: isLoading },
+        }))
+    }, [isLoading, messages, onDataChange]);
 
     // Update context when initialContext changes (from widget "Ask AI" button)
     useEffect(() => {

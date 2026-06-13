@@ -1,6 +1,6 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useEffect } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { useMarketOverview } from '@/lib/queries';
 import { ArrowUp, ArrowDown, Activity } from 'lucide-react';
@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 const INDICES = [
   { symbol: 'VNINDEX', name: 'VN-Index' },
@@ -16,11 +17,21 @@ const INDICES = [
   { symbol: 'UPCOM', name: 'UPCOM-Index' },
 ];
 
-function IndexComparisonWidgetComponent() {
+function IndexComparisonWidgetComponent({ onDataChange }: { onDataChange?: (data: unknown) => void }) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMarketOverview();
   const dataList = data?.data || [];
   const hasData = dataList.length > 0;
   const isFallback = Boolean(error && hasData);
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/equity',
+      endpoint: '/api/v1/market/overview',
+      sourceLabel: 'VNIBB market overview',
+      extra: { count: dataList.length },
+    }))
+  }, [dataList.length, hasData, onDataChange]);
 
   return (
     <WidgetContainer title="Index Comparison" onRefresh={() => refetch()} isLoading={isLoading && !hasData}>

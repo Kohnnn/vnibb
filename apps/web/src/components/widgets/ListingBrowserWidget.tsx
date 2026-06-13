@@ -16,12 +16,14 @@ import {
   saveListingBrowserView,
   type ListingBrowserView,
 } from '@/lib/listingBrowserViews';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface ListingBrowserWidgetProps {
   id: string;
   hideHeader?: boolean;
   onRemove?: () => void;
   onSymbolClick?: (symbol: string) => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 type ExchangeFilter = 'ALL' | 'HOSE' | 'HNX' | 'UPCOM'
@@ -35,6 +37,7 @@ export function ListingBrowserWidget({
   hideHeader,
   onRemove,
   onSymbolClick,
+  onDataChange,
 }: ListingBrowserWidgetProps) {
   const [exchange, setExchange] = useState<ExchangeFilter>('ALL')
   const [group, setGroup] = useState<GroupFilter>('ALL')
@@ -102,6 +105,17 @@ export function ListingBrowserWidget({
   const hasActiveFilters = exchange !== 'ALL' || group !== 'ALL' || industry !== 'ALL' || search.trim() !== '' || sortMode !== 'symbol'
   const viewInput = { exchange, group, industry, search, sortMode }
   const filterSummary = buildListingBrowserFilterSummary(viewInput)
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/listing',
+      endpoint: group === 'ALL' ? '/api/v1/symbols' : `/api/v1/symbols/group/${group}`,
+      sourceLabel: 'VNIBB listing universe',
+      derived: hasActiveFilters,
+      extra: { count: rows.length, group, exchange },
+    }))
+  }, [exchange, group, hasActiveFilters, hasData, onDataChange, rows.length])
 
   const clearFilters = () => {
     setExchange('ALL')

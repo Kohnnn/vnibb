@@ -12,12 +12,14 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { useDerivativesContracts, useDerivativesHistory } from '@/lib/queries';
 import { formatDate } from '@/lib/format';
 import { formatAxisValue, formatNumber } from '@/lib/units';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface DerivativesPriceHistoryWidgetProps {
   id: string;
   config?: Record<string, unknown>;
   hideHeader?: boolean;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 export function DerivativesPriceHistoryWidget({
@@ -25,6 +27,7 @@ export function DerivativesPriceHistoryWidget({
   config,
   hideHeader,
   onRemove,
+  onDataChange,
 }: DerivativesPriceHistoryWidgetProps) {
   const contractsQuery = useDerivativesContracts(true)
   const defaultSymbol = typeof config?.contractSymbol === 'string' ? config.contractSymbol : ''
@@ -51,6 +54,17 @@ export function DerivativesPriceHistoryWidget({
   )
 
   const latest = historyQuery.data?.data?.[historyQuery.data.data.length - 1]
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: chartData.length === 0,
+      apiGroup: '/derivatives',
+      endpoint: `/api/v1/derivatives/history/${symbol || ':symbol'}`,
+      sourceLabel: 'VNIBB derivatives history',
+      lastDataDate: latest?.time,
+      extra: { symbol: symbol || null, count: historyQuery.data?.count ?? chartData.length },
+    }))
+  }, [chartData.length, historyQuery.data?.count, latest?.time, onDataChange, symbol])
 
   return (
     <WidgetContainer

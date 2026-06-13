@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Sigma, TrendingUp } from 'lucide-react';
@@ -16,10 +16,12 @@ import { buildDerivativesCurveRows, classifyDerivativesCurve } from '@/lib/deriv
 import { formatDate } from '@/lib/format';
 import { formatNumber, formatPercent } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface DerivativesAnalyticsWidgetProps {
   id: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 function formatCompact(value: number | null | undefined) {
@@ -29,7 +31,7 @@ function formatCompact(value: number | null | undefined) {
   return formatNumber(value, { decimals: 0 })
 }
 
-export function DerivativesAnalyticsWidget({ id, onRemove }: DerivativesAnalyticsWidgetProps) {
+export function DerivativesAnalyticsWidget({ id, onRemove, onDataChange }: DerivativesAnalyticsWidgetProps) {
   const contractsQuery = useDerivativesContracts(true)
   const sortedContracts = useMemo(
     () => [...(contractsQuery.data?.data || [])].sort((left, right) => new Date(left.expiry).getTime() - new Date(right.expiry).getTime()).slice(0, 4),
@@ -83,6 +85,17 @@ export function DerivativesAnalyticsWidget({ id, onRemove }: DerivativesAnalytic
             detail: 'Only one priced contract is available, so curve slope classification is limited.',
           }
         : undefined
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/derivatives',
+      endpoint: '/api/v1/derivatives/contracts + /api/v1/derivatives/history/:symbol',
+      sourceLabel: 'VNIBB derivatives analytics',
+      derived: true,
+      extra: { contracts: curveRows.length, priced: pricedContracts },
+    }))
+  }, [curveRows.length, hasData, onDataChange, pricedContracts])
 
   const refresh = () => {
     void contractsQuery.refetch()

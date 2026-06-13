@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { Grid3X3, Link2, ShieldMinus, Shuffle } from 'lucide-react'
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer'
@@ -10,11 +10,13 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { useCorrelationMatrix } from '@/lib/queries'
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink'
 import { cn } from '@/lib/utils'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface CorrelationMatrixWidgetProps {
   id: string
   symbol: string
   onRemove?: () => void
+  onDataChange?: (data: unknown) => void
 }
 
 function getCellColor(value: number | null | undefined) {
@@ -41,7 +43,7 @@ function getSectorRead(value: number | null) {
   return { label: 'Loose dispersion', tone: 'text-amber-200' }
 }
 
-function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationMatrixWidgetProps) {
+function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }: CorrelationMatrixWidgetProps) {
   const [days, setDays] = useState(60)
   const [topN, setTopN] = useState(10)
   const [hoverTicker, setHoverTicker] = useState<string | null>(null)
@@ -110,6 +112,19 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
   const coverageDetail = payload?.returns_count
     ? `Only ${payload.returns_count} aligned return rows passed validation. Need at least ${minOverlapDays} overlapping daily returns for ${upperSymbol} and peers. Try a longer window or expand the peer set; daily price history may be incomplete.`
     : `No overlapping daily price history found for ${upperSymbol} and its peer universe. Try another symbol or wait for the next EOD sync.`
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/comparison',
+      endpoint: `/api/v1/comparison/correlation/${upperSymbol || ':symbol'}`,
+      sourceLabel: 'VNIBB correlation matrix',
+      lastDataDate: lastDataDateStr,
+      derived: true,
+      stale: isStaleData,
+      extra: { symbol: upperSymbol, days, topN, rows: returnsCount },
+    }))
+  }, [days, hasData, isStaleData, lastDataDateStr, onDataChange, returnsCount, topN, upperSymbol])
 
   return (
     <WidgetContainer

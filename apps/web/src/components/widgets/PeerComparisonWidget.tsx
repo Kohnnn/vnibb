@@ -31,6 +31,7 @@ import { useDashboard } from '@/contexts/DashboardContext';
 import { useUnit } from '@/contexts/UnitContext';
 import { logClientError } from '@/lib/clientLogger';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import {
 
     Radar as ReRadar,
@@ -52,6 +53,7 @@ interface PeerComparisonWidgetProps {
     config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 type TabMode = 'table' | 'radar' | 'performance';
@@ -145,7 +147,7 @@ function parseSortDirection(config: Record<string, unknown> | undefined): SortDi
     return config?.comparisonSortDirection === 'desc' ? 'desc' : 'asc';
 }
 
-export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove }: PeerComparisonWidgetProps) {
+export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, onDataChange }: PeerComparisonWidgetProps) {
     const { updateWidget } = useDashboard();
     const { config: unitConfig } = useUnit();
     const widgetLocation = useDashboardWidget(id);
@@ -286,6 +288,17 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove }
 
     const hasData = Boolean(normalizedMetrics.length && Object.keys(comparisonData).length);
     const isFallback = Boolean(error && hasData);
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/comparison',
+            endpoint: '/api/v1/comparison/stocks',
+            sourceLabel: 'VNIBB peer comparison',
+            derived: true,
+            extra: { symbols: peers.length, period, metrics: normalizedMetrics.length },
+        }))
+    }, [hasData, normalizedMetrics.length, onDataChange, peers.length, period]);
 
     const allMetricValues = useMemo(() => {
         if (!Object.keys(comparisonData).length) return {};

@@ -9,6 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { env } from '@/lib/env';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface TableData {
   name: string;
@@ -95,7 +96,7 @@ function downloadCSV(csv: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh }: { onRemove?: () => void, lastRefresh?: number }) {
+function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange }: { onRemove?: () => void, lastRefresh?: number, onDataChange?: (data: unknown) => void }) {
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -155,6 +156,17 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh }: { onRemove?
   };
 
   const hasTables = Boolean(stats?.tables?.length);
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasTables,
+      apiGroup: '/admin',
+      endpoint: selectedTable ? `/api/v1/admin/database/sample/${selectedTable}` : '/api/v1/admin/database/stats',
+      sourceLabel: 'VNIBB admin database inspector',
+      lastDataDate: stats?.last_sync,
+      extra: { tables: stats?.tables?.length ?? 0, selected: selectedTable },
+    }))
+  }, [hasTables, onDataChange, selectedTable, stats?.last_sync, stats?.tables?.length]);
 
   return (
     <WidgetContainer

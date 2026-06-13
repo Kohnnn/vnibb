@@ -30,12 +30,14 @@ import { cn } from '@/lib/utils'
 import { ResearchSourceCard } from '@/components/widgets/research/ResearchSourceCard'
 import { useDashboard } from '@/contexts/DashboardContext'
 import { useDashboardWidget } from '@/hooks/useDashboardWidget'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface ResearchBrowserWidgetProps {
   id: string
   symbol?: string
   config?: Record<string, unknown>
   onRemove?: () => void
+  onDataChange?: (data: unknown) => void
 }
 
 type SourceMode = 'external' | 'rss'
@@ -241,7 +243,7 @@ function parseLastVisited(config: Record<string, unknown> | undefined, id: strin
   )
 }
 
-export function ResearchBrowserWidget({ id, symbol, config, onRemove }: ResearchBrowserWidgetProps) {
+export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChange }: ResearchBrowserWidgetProps) {
   const { updateWidget } = useDashboard()
   const widgetLocation = useDashboardWidget(id)
   const persistedSourceId = useMemo(() => parseResearchSourceId(config, id), [config, id])
@@ -481,6 +483,16 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove }: Research
     refetchIntervalInBackground: false,
     networkMode: 'online',
   })
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: activeMode === 'rss' ? !(rssQuery.data?.data?.length) : !activeUrl,
+      apiGroup: activeMode === 'rss' ? '/equity' : 'local',
+      endpoint: activeMode === 'rss' && rssSource ? `/api/v1/research/rss/${rssSource}` : activeUrl,
+      sourceLabel: activeMode === 'rss' ? 'VNIBB research RSS' : 'External research link',
+      extra: { symbol: normalizedSymbol || null, mode: activeMode, saved: Boolean(activeSavedSite) },
+    }))
+  }, [activeMode, activeSavedSite, activeUrl, normalizedSymbol, onDataChange, rssQuery.data?.data?.length, rssSource])
 
   return (
     <WidgetContainer title="External Intelligence Hub" onClose={onRemove} noPadding widgetId={id}>

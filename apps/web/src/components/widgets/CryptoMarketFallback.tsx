@@ -6,6 +6,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface CryptoCoin {
   id: string;
@@ -21,9 +22,11 @@ interface CryptoCoin {
 interface CryptoMarketFallbackProps {
   id: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 const COINGECKO_URL = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1&sparkline=false&price_change_percentage=24h';
+const COINGECKO_SOURCE_LABEL = 'CoinGecko (third-party fallback)';
 
 function formatPrice(value: number): string {
   if (value >= 1) return `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -46,7 +49,7 @@ function formatLargeNumber(value: number): string {
  * and refreshes on demand. Static during the cycle so we don't hammer
  * the API.
  */
-export function CryptoMarketFallback({ id, onRemove }: CryptoMarketFallbackProps) {
+export function CryptoMarketFallback({ id, onRemove, onDataChange }: CryptoMarketFallbackProps) {
   const [coins, setCoins] = useState<CryptoCoin[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -75,6 +78,21 @@ export function CryptoMarketFallback({ id, onRemove }: CryptoMarketFallbackProps
   }, []);
 
   const hasData = coins.length > 0;
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: 'external',
+      endpoint: 'https://api.coingecko.com/api/v3/...',
+      sourceLabel: COINGECKO_SOURCE_LABEL,
+      lastDataDate: updatedAt || undefined,
+      derived: true,
+      stale: Boolean(error && hasData),
+      extra: {
+        rows: coins,
+      },
+    }));
+  }, [coins, error, hasData, onDataChange, updatedAt]);
 
   return (
     <WidgetContainer
@@ -161,7 +179,7 @@ export function CryptoMarketFallback({ id, onRemove }: CryptoMarketFallbackProps
         )}
 
         <div className="flex items-center justify-between border-t border-[var(--border-subtle)] px-3 py-1.5 text-[9px] text-[var(--text-muted)]">
-          <span>TradingView embed unavailable; showing CoinGecko fallback</span>
+          <span>Source: {COINGECKO_SOURCE_LABEL}</span>
           <a
             href="https://www.coingecko.com/"
             target="_blank"

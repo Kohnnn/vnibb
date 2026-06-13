@@ -2,6 +2,7 @@
 
 'use client';
 
+import { useEffect } from 'react';
 import { Users } from 'lucide-react';
 import { usePeerCompanies } from '@/lib/queries';
 import { useUnit } from '@/contexts/UnitContext';
@@ -11,12 +12,14 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { WidgetGroupId } from '@/types/widget';
 import { formatCompactValueForUnit } from '@/lib/units';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface SimilarStocksWidgetProps {
     symbol: string;
     widgetGroup?: WidgetGroupId;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function firstPositiveFiniteNumber(...values: unknown[]): number | null {
@@ -27,7 +30,7 @@ function firstPositiveFiniteNumber(...values: unknown[]): number | null {
     return null;
 }
 
-export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidgetProps) {
+export function SimilarStocksWidget({ symbol, widgetGroup, onDataChange }: SimilarStocksWidgetProps) {
     const upperSymbol = symbol?.toUpperCase() || '';
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'similar_stocks' });
     const { config: unitConfig } = useUnit();
@@ -43,6 +46,16 @@ export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidget
     const peers = data?.peers || [];
     const hasData = peers.length > 0;
     const isFallback = Boolean(error && hasData);
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/comparison',
+            endpoint: `/api/v1/comparison/peers/${upperSymbol || ':symbol'}`,
+            sourceLabel: 'VNIBB peer companies',
+            extra: { symbol: upperSymbol, count: peers.length },
+        }))
+    }, [hasData, onDataChange, peers.length, upperSymbol]);
 
     if (!upperSymbol) {
         return <WidgetEmpty message="Select a symbol to view peers" icon={<Users size={18} />} />;

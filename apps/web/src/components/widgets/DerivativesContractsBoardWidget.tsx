@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search, Sigma, TimerReset } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -9,11 +9,13 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useDerivativesContracts } from '@/lib/queries';
 import { formatDate } from '@/lib/format';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface DerivativesContractsBoardWidgetProps {
   id: string;
   hideHeader?: boolean;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 function daysUntilExpiry(expiry: string): number | null {
@@ -27,6 +29,7 @@ export function DerivativesContractsBoardWidget({
   id,
   hideHeader,
   onRemove,
+  onDataChange,
 }: DerivativesContractsBoardWidgetProps) {
   const [search, setSearch] = useState('')
   const contractsQuery = useDerivativesContracts(true)
@@ -42,6 +45,16 @@ export function DerivativesContractsBoardWidget({
   }, [contractsQuery.data?.data, search])
 
   const hasData = contracts.length > 0
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/derivatives',
+      endpoint: '/api/v1/derivatives/contracts',
+      sourceLabel: 'VNIBB derivatives contracts',
+      extra: { count: contractsQuery.data?.count ?? contracts.length },
+    }))
+  }, [contracts.length, contractsQuery.data?.count, hasData, onDataChange])
 
   return (
     <WidgetContainer

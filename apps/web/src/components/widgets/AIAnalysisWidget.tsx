@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, memo, useCallback } from 'react';
+import { useState, memo, useCallback, useEffect } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { useProfile, useStockQuote, useFinancialRatios } from '@/lib/queries';
 import { Sparkles, RefreshCw, BrainCircuit, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
@@ -24,11 +24,13 @@ import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { readStoredAISettings } from '@/lib/aiSettings';
 import { logClientError } from '@/lib/clientLogger';
 import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface AIAnalysisWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 function appendReasoningStep(existing: string[], step: CopilotReasoningStep): string[] {
@@ -36,7 +38,7 @@ function appendReasoningStep(existing: string[], step: CopilotReasoningStep): st
   return existing[existing.length - 1] === line ? existing : [...existing, line]
 }
 
-function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetProps) {
+function AIAnalysisWidgetComponent({ id, symbol, onRemove, onDataChange }: AIAnalysisWidgetProps) {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [sources, setSources] = useState<CopilotSourceRef[]>([]);
   const [artifacts, setArtifacts] = useState<CopilotArtifact[]>([]);
@@ -52,6 +54,17 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
   const { data: profile } = useProfile(symbol);
   const { data: quote } = useStockQuote(symbol);
   const { data: ratios } = useFinancialRatios(symbol);
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !analysis,
+      apiGroup: '/copilot',
+      endpoint: '/api/v1/copilot/chat/stream',
+      sourceLabel: 'VNIBB copilot analysis',
+      derived: true,
+      extra: { symbol, sources: sources.length, model: responseMeta?.model || null },
+    }))
+  }, [analysis, onDataChange, responseMeta?.model, sources.length, symbol]);
 
   const runAnalysis = useCallback(async () => {
     if (isLoading) return;

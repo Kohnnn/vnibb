@@ -32,6 +32,7 @@ import { cn } from '@/lib/utils'
 import { DEFAULT_TICKER } from '@/lib/defaultTicker'
 import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units'
 import type { FinancialRatioData } from '@/types/equity'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 const CATEGORY_DEFINITIONS = [
   {
@@ -156,6 +157,7 @@ interface ComparisonAnalysisWidgetProps {
   symbol?: string
   initialSymbols?: string[]
   onRemove?: () => void
+  onDataChange?: (data: unknown) => void
 }
 
 function normalizePerformanceData(payload: unknown): Array<Record<string, string | number>> {
@@ -195,6 +197,7 @@ function ComparisonAnalysisWidgetComponent({
   symbol,
   initialSymbols = [DEFAULT_TICKER, 'FPT'],
   onRemove,
+  onDataChange,
 }: ComparisonAnalysisWidgetProps) {
   const [symbols, setSymbols] = useState<string[]>(() => {
     const seeded = [symbol, ...initialSymbols]
@@ -323,6 +326,17 @@ function ComparisonAnalysisWidgetComponent({
   const { timedOut: ratioGridTimedOut, resetTimeout: resetRatioGridTimeout } = useLoadingTimeout(
     ratioGridQuery.isLoading && !hasRatioGridData
   )
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/comparison',
+      endpoint: '/api/v1/comparison/stocks + /api/v1/comparison/performance + /api/v1/equity/ratios/:symbol',
+      sourceLabel: 'VNIBB comparison analysis',
+      derived: true,
+      extra: { symbols: symbols.length, period, stocks: comparisonStocks.length },
+    }))
+  }, [comparisonStocks.length, hasData, onDataChange, period, symbols.length])
 
   const filteredMetrics = useMemo(() => {
     const selected = CATEGORY_DEFINITIONS.find((category) => category.id === activeCategory)

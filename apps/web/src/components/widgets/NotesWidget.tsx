@@ -7,6 +7,7 @@ import { StickyNote, Save, Trash2 } from 'lucide-react';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface NotesWidgetProps {
     id: string;
@@ -14,6 +15,7 @@ interface NotesWidgetProps {
     config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function parseNotesBySymbol(value: unknown): Record<string, string> {
@@ -26,7 +28,7 @@ function parseNotesBySymbol(value: unknown): Record<string, string> {
     );
 }
 
-export function NotesWidget({ id, symbol, config, isEditing, onRemove }: NotesWidgetProps) {
+export function NotesWidget({ id, symbol, config, isEditing, onRemove, onDataChange }: NotesWidgetProps) {
     const { updateWidget } = useDashboard();
     const widgetLocation = useDashboardWidget(id);
     const persistedNotes = parseNotesBySymbol(config?.notesBySymbol);
@@ -39,6 +41,16 @@ export function NotesWidget({ id, symbol, config, isEditing, onRemove }: NotesWi
         setNotes(persistedNotes[symbol] || '');
         setIsSaved(true);
     }, [persistedNotes, symbol]);
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: notes.length === 0,
+            apiGroup: 'local',
+            endpoint: 'local:dashboard-notes',
+            sourceLabel: 'Browser-local dashboard notes',
+            extra: { symbol, characters: notes.length, localOnly: true },
+        }))
+    }, [notes.length, onDataChange, symbol]);
 
     const saveNote = () => {
         const updated = { ...savedNotes, [symbol]: notes };

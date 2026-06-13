@@ -13,11 +13,13 @@ import {
   type NotebookItem,
 } from '@/lib/researchNotebook';
 import { exportToMarkdown } from '@/lib/exportWidget';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface ResearchNotebookWidgetProps {
   id?: string;
   widgetId?: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 const KIND_LABEL: Record<NotebookItem['kind'], string> = {
@@ -27,7 +29,7 @@ const KIND_LABEL: Record<NotebookItem['kind'], string> = {
   note: 'Note',
 };
 
-function ResearchNotebookWidgetComponent({ id, widgetId, onRemove }: ResearchNotebookWidgetProps) {
+function ResearchNotebookWidgetComponent({ id, widgetId, onRemove, onDataChange }: ResearchNotebookWidgetProps) {
   const [items, setItems] = useState<NotebookItem[]>([]);
 
   const refresh = useCallback(() => {
@@ -41,6 +43,16 @@ function ResearchNotebookWidgetComponent({ id, widgetId, onRemove }: ResearchNot
     window.addEventListener(RESEARCH_NOTEBOOK_EVENT, handler);
     return () => window.removeEventListener(RESEARCH_NOTEBOOK_EVENT, handler);
   }, [refresh]);
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: items.length === 0,
+      apiGroup: 'local',
+      endpoint: 'local:research-notebook',
+      sourceLabel: 'Browser-local research notebook',
+      extra: { count: items.length, localOnly: true },
+    }))
+  }, [items.length, onDataChange]);
 
   const handleExport = () => {
     if (!items.length) return;
