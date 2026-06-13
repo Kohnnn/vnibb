@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BarChart2 } from 'lucide-react';
 import { useHistoricalPrices, useMicrostructureAnalysis } from '@/lib/queries';
 import { calculateVolumeProfile, type OHLCData } from '@/lib/chartUtils';
@@ -9,9 +9,11 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface VolumeProfileWidgetProps {
   symbol: string;
+  onDataChange?: (data: unknown) => void;
 }
 
 interface VolumeBin {
@@ -74,7 +76,7 @@ function calculateValueArea(profile: VolumeBin[], targetShare = 0.7) {
   };
 }
 
-export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
+export function VolumeProfileWidget({ symbol, onDataChange }: VolumeProfileWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
   const [period, setPeriod] = useState<QuantPeriodOption>('6M');
   const {
@@ -148,6 +150,23 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
   const pocPrice = pickFinite(microProfile?.poc_price, fallbackValueArea.pocPrice);
   const vahPrice = pickFinite(microProfile?.vah_price, fallbackValueArea.vahPrice);
   const valPrice = pickFinite(microProfile?.val_price, fallbackValueArea.valPrice);
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/microstructure',
+        endpoint: hasMicroProfile
+          ? `/microstructure/${upperSymbol}?interval=5m&lookback_days=7&value_area_pct=0.7`
+          : `/equity/historical?symbol=${upperSymbol}`,
+        sourceLabel: hasMicroProfile ? 'Volume profile · trade ticks' : 'Volume profile (derived)',
+        lastDataDate: hasMicroProfile ? microUpdatedAt : dataUpdatedAt,
+        stale: isFallback,
+        derived: !hasMicroProfile,
+        extra: hasData ? { bins: profile.length, pocPrice } : undefined,
+      }),
+    );
+  }, [onDataChange, hasData, hasMicroProfile, isFallback, microUpdatedAt, dataUpdatedAt, upperSymbol, profile.length, pocPrice]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view volume profile" icon={<BarChart2 size={18} />} />;

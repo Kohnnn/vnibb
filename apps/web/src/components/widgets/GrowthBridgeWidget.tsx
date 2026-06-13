@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { TrendingUp } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -10,12 +10,14 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useGrowthRates } from '@/lib/queries';
 import { buildGrowthBridgeRows } from '@/lib/financialDiscovery';
 import { formatPercent } from '@/lib/units';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 interface GrowthBridgeWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 function widthForChange(value: number | null) {
@@ -23,7 +25,7 @@ function widthForChange(value: number | null) {
   return Math.min(Math.abs(value), 100)
 }
 
-export function GrowthBridgeWidget({ id, symbol, onRemove }: GrowthBridgeWidgetProps) {
+export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: GrowthBridgeWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const query = useGrowthRates(upperSymbol, Boolean(upperSymbol))
 
@@ -49,6 +51,20 @@ export function GrowthBridgeWidget({ id, symbol, onRemove }: GrowthBridgeWidgetP
           detail: `${availableGrowthPoints} of ${expectedGrowthPoints} annual/quarter growth points are available.`,
         }
       : undefined
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/equity',
+        endpoint: `/equity/${upperSymbol}/growth`,
+        sourceLabel: 'Growth bridge',
+        lastDataDate: query.dataUpdatedAt,
+        stale: Boolean(query.error && hasData),
+        extra: hasData ? { points: availableGrowthPoints } : undefined,
+      }),
+    )
+  }, [onDataChange, hasData, query.dataUpdatedAt, query.error, upperSymbol, availableGrowthPoints])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view growth bridge" icon={<TrendingUp size={18} />} />

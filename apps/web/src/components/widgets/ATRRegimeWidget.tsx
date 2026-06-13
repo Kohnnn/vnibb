@@ -1,14 +1,17 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Gauge, ShieldAlert, TrendingDown, TrendingUp } from 'lucide-react';
 import { useHistoricalPrices } from '@/lib/queries';
 import { calculateATR, type OHLCData } from '@/lib/chartUtils';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface ATRRegimeWidgetProps {
   symbol: string;
+  onDataChange?: (data: unknown) => void;
 }
 
 function percentileRank(values: number[], value: number): number {
@@ -41,7 +44,7 @@ function getRegime(percentile: number) {
   return { label: 'High Vol', className: 'text-red-300', stopMultiple: 2.0 };
 }
 
-export function ATRRegimeWidget({ symbol }: ATRRegimeWidgetProps) {
+export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
   const {
     data,
@@ -61,6 +64,21 @@ export function ATRRegimeWidget({ symbol }: ATRRegimeWidgetProps) {
   const atrSeries = calculateATR(candles, 14);
   const hasData = atrSeries.length > 20;
   const isFallback = Boolean(error && hasData);
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/equity',
+        endpoint: `/equity/historical?symbol=${upperSymbol}`,
+        sourceLabel: 'ATR regime (derived)',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        derived: true,
+        extra: hasData ? { bars: atrSeries.length } : undefined,
+      }),
+    );
+  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, atrSeries.length]);
 
   const lastAtr = atrSeries[atrSeries.length - 1]?.value ?? 0;
   const lastClose = candles[candles.length - 1]?.close ?? 0;

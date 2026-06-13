@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { ChartBar } from 'lucide-react';
 
 import { useIncomeStatement } from '@/lib/queries';
@@ -12,14 +12,16 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useUnit } from '@/contexts/UnitContext';
 import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey } from '@/lib/financialPeriods';
 import { convertFinancialValueForUnit, formatNumber, formatPercent } from '@/lib/units';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface EarningsHistoryWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
-export function EarningsHistoryWidget({ symbol }: EarningsHistoryWidgetProps) {
+export function EarningsHistoryWidget({ symbol, onDataChange }: EarningsHistoryWidgetProps) {
     const { config: unitConfig } = useUnit();
     const {
         data,
@@ -37,6 +39,20 @@ export function EarningsHistoryWidget({ symbol }: EarningsHistoryWidgetProps) {
         [data?.data]
     );
     const hasData = rows.length > 0;
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/equity',
+                endpoint: `/equity/${symbol}/income-statement?period=quarter&limit=8`,
+                sourceLabel: 'Earnings history',
+                lastDataDate: dataUpdatedAt,
+                stale: Boolean(error && hasData),
+                extra: hasData ? { quarters: rows.length } : undefined,
+            }),
+        );
+    }, [onDataChange, hasData, error, dataUpdatedAt, symbol, rows.length]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view earnings" icon={<ChartBar size={18} />} />;

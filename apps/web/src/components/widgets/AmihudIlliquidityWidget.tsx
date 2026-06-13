@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Droplets, TrendingDown, TrendingUp } from 'lucide-react'
 import { useHistoricalPrices } from '@/lib/queries'
 import type { OHLCData } from '@/lib/chartUtils'
@@ -9,9 +9,11 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface AmihudIlliquidityWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 interface AmihudPoint {
@@ -131,7 +133,7 @@ function resolveLiquidityState(trendPct: number) {
   return { label: 'Stable', className: 'text-cyan-300' }
 }
 
-export function AmihudIlliquidityWidget({ symbol }: AmihudIlliquidityWidgetProps) {
+export function AmihudIlliquidityWidget({ symbol, onDataChange }: AmihudIlliquidityWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('1Y')
 
@@ -159,6 +161,21 @@ export function AmihudIlliquidityWidget({ symbol }: AmihudIlliquidityWidgetProps
   const recent = rolling20.slice(-12)
   const maxRecent = recent.reduce((max, row) => Math.max(max, row.value), 1)
   const maxYearly = yearly.reduce((max, row) => Math.max(max, row.value), 1)
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/equity',
+        endpoint: `/equity/historical?symbol=${upperSymbol}`,
+        sourceLabel: 'Amihud illiquidity (derived)',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        derived: true,
+        extra: hasData ? { current, liquidity: liquidityState.label } : undefined,
+      }),
+    )
+  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, current, liquidityState.label])
 
   if (!upperSymbol) {
     return (

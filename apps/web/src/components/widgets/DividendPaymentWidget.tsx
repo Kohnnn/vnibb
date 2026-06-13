@@ -2,18 +2,21 @@
 
 'use client';
 
+import { useEffect } from 'react';
 import { Calendar } from 'lucide-react';
 import { useDividends } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { formatDividendYield, formatVND } from '@/lib/formatters';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { DividendRecord } from '@/lib/api';
 
 interface DividendPaymentWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function formatDividendType(type: string | null | undefined): string {

@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { TrendingUp, TrendingDown, Info } from 'lucide-react';
 import { useFullTechnicalAnalysis } from '@/lib/queries';
 import { Badge } from '@/components/ui/badge';
@@ -13,12 +13,14 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { Signal, Timeframe } from '@/types/technical';
 
 interface TechnicalSummaryWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function getSignalColor(signal: string): string {
@@ -81,7 +83,7 @@ function buildSignalGaugeBackground(buyCount: number, neutralCount: number, sell
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 
-export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: TechnicalSummaryWidgetProps) {
+export function TechnicalSummaryWidget({ symbol, isEditing, onRemove, onDataChange }: TechnicalSummaryWidgetProps) {
     const [timeframe, setTimeframe] = useState<Timeframe>('D');
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useFullTechnicalAnalysis(symbol, { timeframe });
 
@@ -108,6 +110,20 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
         [buyCount, neutralCount, sellCount]
     );
     const signalBias = Math.round(((buyCount - sellCount) / totalSignals) * 100);
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/technical',
+                endpoint: `/analysis/ta/${symbol}/full?timeframe=${timeframe}`,
+                sourceLabel: 'Technical analysis',
+                lastDataDate: dataUpdatedAt,
+                stale: isFallback,
+                extra: hasData ? { overallSignal, signalBias } : undefined,
+            }),
+        );
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, timeframe, overallSignal, signalBias]);
 
     const timeframeLabel = {
         'D': 'Daily',

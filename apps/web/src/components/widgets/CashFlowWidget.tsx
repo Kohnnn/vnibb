@@ -1,9 +1,10 @@
 // Cash Flow Widget - Operating, Investing, Financing with Chart View
 'use client';
 
-import { useState, useMemo, memo } from 'react';
+import { useState, useMemo, useEffect, memo } from 'react';
 import { Banknote, Table, BarChart3 } from 'lucide-react';
 import { useCashFlow } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -40,6 +41,7 @@ interface CashFlowWidgetProps {
     config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 type ViewMode = 'table' | 'chart';
@@ -117,7 +119,7 @@ function getRawMetric(entry: CashFlowData, metricKey: string): number | null {
     return null;
 }
 
-function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: CashFlowWidgetProps) {
+function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDataChange }: CashFlowWidgetProps) {
     const periodSyncGroup = typeof config?.periodSyncGroup === 'string' ? config.periodSyncGroup : undefined;
     const defaultPeriod =
         config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
@@ -160,6 +162,20 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: Ca
     const hasData = displayItems.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/equity',
+                endpoint: `/equity/${symbol}/cash-flow?period=${apiPeriod}`,
+                sourceLabel: 'Cash flow',
+                lastDataDate: dataUpdatedAt,
+                stale: isFallback,
+                extra: hasData ? { periods: displayItems.length } : undefined,
+            }),
+        );
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
 
     const chartData = useMemo(() => {
         if (!displayItems.length) return [];

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ActivitySquare } from 'lucide-react'
 import {
   Bar,
@@ -22,10 +22,12 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface MACDCrossoverWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 type CrossoverRow = {
@@ -49,7 +51,7 @@ function stateClass(state: string): string {
   return 'text-[var(--text-secondary)]'
 }
 
-export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
+export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
@@ -99,6 +101,20 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
   const hasData = macdSeries.length > 0 || crossovers.length > 0
   const quantWarning = extractQuantWarning(data, 'macd_crossovers')
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/quant',
+        endpoint: `/quant/${upperSymbol}?metrics=macd_crossovers&period=${period}`,
+        sourceLabel: 'MACD crossovers',
+        lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt,
+        adjustmentMode: 'adjusted',
+        extra: metric?.current_state ? { state: metric.current_state, crossovers: crossovers.length } : undefined,
+      }),
+    )
+  }, [onDataChange, hasData, upperSymbol, period, data?.data?.last_data_date, data?.data?.computed_at, dataUpdatedAt, metric?.current_state, crossovers.length])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view MACD crossovers" icon={<ActivitySquare size={18} />} />

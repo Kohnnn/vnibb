@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Activity, TrendingDown, TrendingUp } from 'lucide-react';
 import { useHistoricalPrices } from '@/lib/queries';
 import { calculateOBV, type OHLCData } from '@/lib/chartUtils';
@@ -7,9 +8,11 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface OBVDivergenceWidgetProps {
   symbol: string;
+  onDataChange?: (data: unknown) => void;
 }
 
 type DivergenceSignal = 'bullish' | 'bearish' | 'none';
@@ -70,7 +73,7 @@ function detectDivergence(candles: OHLCData[], lookback: number) {
   };
 }
 
-export function OBVDivergenceWidget({ symbol }: OBVDivergenceWidgetProps) {
+export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
   const {
     data,
@@ -93,6 +96,21 @@ export function OBVDivergenceWidget({ symbol }: OBVDivergenceWidgetProps) {
 
   const lookback = 20;
   const { signal, priceDeltaPct, obvDeltaPct, confidence } = detectDivergence(candles, lookback);
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/equity',
+        endpoint: `/equity/historical?symbol=${upperSymbol}`,
+        sourceLabel: 'OBV divergence (derived)',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        derived: true,
+        extra: hasData ? { signal, confidence } : undefined,
+      }),
+    );
+  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, signal, confidence]);
 
   const recent = candles.slice(-lookback);
   const recentObv = calculateOBV(recent);

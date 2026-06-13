@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import { ChartNoAxesColumnIncreasing } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -15,15 +15,17 @@ import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, ty
 import { formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { buildCashFlowWaterfallModel } from '@/lib/financialVisualizations';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { CashFlowWaterfallChart } from '@/components/widgets/charts/CashFlowWaterfallChart';
 
 interface CashflowWaterfallWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
-function CashflowWaterfallWidgetComponent({ id, symbol, onRemove }: CashflowWaterfallWidgetProps) {
+function CashflowWaterfallWidgetComponent({ id, symbol, onRemove, onDataChange }: CashflowWaterfallWidgetProps) {
   const { period, setPeriod } = usePeriodState({
     widgetId: id || 'cashflow_waterfall',
     defaultPeriod: 'FY',
@@ -51,6 +53,20 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove }: CashflowWate
   );
   const model = useMemo(() => buildCashFlowWaterfallModel(displayItems), [displayItems]);
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 10000 });
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/equity',
+        endpoint: `/equity/${symbol}/cash-flow?period=${apiPeriod}`,
+        sourceLabel: 'Cash bridge',
+        lastDataDate: dataUpdatedAt,
+        stale: Boolean(error && hasData),
+        extra: hasData ? { periods: displayItems.length } : undefined,
+      }),
+    );
+  }, [onDataChange, hasData, error, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
   const latestLabel = model
     ? formatFinancialPeriodLabel(model.period, { mode: periodMode, index: displayItems.length - 1, total: displayItems.length })
     : period === 'FY'

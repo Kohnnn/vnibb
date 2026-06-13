@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Rows3 } from 'lucide-react';
 import { useMicrostructureAnalysis } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -8,9 +9,11 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useMarketState } from '@/hooks/useMarketState';
 import { describeIntradayUnavailable } from '@/lib/marketHours';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface FootprintProxyWidgetProps {
   symbol: string;
+  onDataChange?: (data: unknown) => void;
 }
 
 function formatCompact(value: number): string {
@@ -21,7 +24,7 @@ function formatCompact(value: number): string {
   return value.toFixed(0);
 }
 
-export function FootprintProxyWidget({ symbol }: FootprintProxyWidgetProps) {
+export function FootprintProxyWidget({ symbol, onDataChange }: FootprintProxyWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
   const marketState = useMarketState();
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMicrostructureAnalysis(upperSymbol, {
@@ -42,6 +45,19 @@ export function FootprintProxyWidget({ symbol }: FootprintProxyWidgetProps) {
   const hasData = bars.length > 0;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
   const recent = bars.slice(-8).reverse();
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/microstructure',
+        endpoint: `/microstructure/${upperSymbol}?features=footprint&interval=5m&lookback_days=7`,
+        sourceLabel: 'Footprint proxy · trade ticks',
+        lastDataDate: dataUpdatedAt,
+        extra: hasData ? { bars: bars.length, quality: footprintStatus } : undefined,
+      }),
+    );
+  }, [onDataChange, hasData, dataUpdatedAt, upperSymbol, bars.length, footprintStatus]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view footprint proxy" icon={<Rows3 size={18} />} />;

@@ -2,16 +2,19 @@
 
 'use client';
 
+import { useEffect } from 'react';
 import { BarChart2, TrendingUp, TrendingDown } from 'lucide-react';
 import { useHistoricalPrices } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface VolumeAnalysisWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function formatVolume(vol: number): string {
@@ -21,7 +24,7 @@ function formatVolume(vol: number): string {
     return vol.toLocaleString();
 }
 
-export function VolumeAnalysisWidget({ symbol }: VolumeAnalysisWidgetProps) {
+export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWidgetProps) {
     const {
         data,
         isLoading,
@@ -52,6 +55,21 @@ export function VolumeAnalysisWidget({ symbol }: VolumeAnalysisWidgetProps) {
 
     const hasData = prices.length > 0;
     const isFallback = Boolean(error && hasData);
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/equity',
+                endpoint: `/equity/historical?symbol=${symbol}`,
+                sourceLabel: 'Volume analysis (derived)',
+                lastDataDate: dataUpdatedAt,
+                stale: isFallback,
+                derived: true,
+                extra: hasData ? { bars: prices.length, avgVolume } : undefined,
+            }),
+        );
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, prices.length, avgVolume]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view volume" />;

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useMemo, memo } from 'react';
+import { useState, useMemo, useEffect, memo } from 'react';
 import { useIncomeStatement, useBalanceSheet, useCashFlow, useFinancialRatios } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { cn } from '@/lib/utils';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -36,6 +37,7 @@ interface FinancialsWidgetProps {
     symbol: string;
     hideHeader?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 // Per-share metrics (EPS/BVPS/DPS) are absolute VND-per-share values and must NOT be
@@ -250,7 +252,7 @@ function readRatioValue(row: Record<string, any>, key: string): any {
     return null;
 }
 
-function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: FinancialsWidgetProps) {
+function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataChange }: FinancialsWidgetProps) {
     const [activeTab, setActiveTab] = useState<FinancialTab>('income_statement');
     const [period, setPeriod] = useState('FY');
     const { config: unitConfig } = useUnit();
@@ -438,6 +440,28 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                 : activeTab === 'balance_sheet'
                     ? 'Balance sheet'
                     : 'Cash flow statement'
+
+    useEffect(() => {
+        const endpointPath =
+            activeTab === 'ratios'
+                ? `/equity/${symbol}/ratios?period=${period}`
+                : activeTab === 'income_statement'
+                    ? `/equity/${symbol}/income-statement?period=${period}`
+                    : activeTab === 'balance_sheet'
+                        ? `/equity/${symbol}/balance-sheet?period=${period}`
+                        : `/equity/${symbol}/cash-flow?period=${period}`
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/equity',
+                endpoint: endpointPath,
+                sourceLabel,
+                lastDataDate: activeQuery?.dataUpdatedAt,
+                stale: isFallback,
+                extra: hasData ? { tab: activeTab, periods: tableData?.periods.length ?? 0 } : undefined,
+            }),
+        );
+    }, [onDataChange, hasData, isFallback, activeQuery?.dataUpdatedAt, symbol, period, activeTab, sourceLabel, tableData?.periods.length]);
 
     const tableScale = useMemo(() => {
         if (!tableData || activeTab === 'ratios') return resolveUnitScale([], unitConfig);

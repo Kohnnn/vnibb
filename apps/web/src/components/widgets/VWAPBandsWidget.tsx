@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Activity } from 'lucide-react';
 import { useMicrostructureAnalysis } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -8,16 +9,18 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useMarketState } from '@/hooks/useMarketState';
 import { describeIntradayUnavailable } from '@/lib/marketHours';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface VWAPBandsWidgetProps {
   symbol: string;
+  onDataChange?: (data: unknown) => void;
 }
 
 function formatPrice(value: number | null | undefined): string {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '-';
 }
 
-export function VWAPBandsWidget({ symbol }: VWAPBandsWidgetProps) {
+export function VWAPBandsWidget({ symbol, onDataChange }: VWAPBandsWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
   const marketState = useMarketState();
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMicrostructureAnalysis(upperSymbol, {
@@ -42,6 +45,19 @@ export function VWAPBandsWidget({ symbol }: VWAPBandsWidgetProps) {
   const minValue = values.length ? Math.min(...values) : 0;
   const maxValue = values.length ? Math.max(...values) : 1;
   const span = maxValue - minValue || 1;
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/microstructure',
+        endpoint: `/microstructure/${upperSymbol}?features=vwap&interval=5m&lookback_days=7`,
+        sourceLabel: 'VWAP bands · trade ticks',
+        lastDataDate: dataUpdatedAt,
+        extra: hasData ? { points: points.length, quality: vwapStatus } : undefined,
+      }),
+    );
+  }, [onDataChange, hasData, dataUpdatedAt, upperSymbol, points.length, vwapStatus]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view VWAP bands" icon={<Activity size={18} />} />;

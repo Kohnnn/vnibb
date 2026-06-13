@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CircleDot, Minimize2 } from 'lucide-react'
 import {
   CartesianGrid,
@@ -20,9 +20,11 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface BollingerSqueezeWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 interface WidthPoint {
@@ -31,7 +33,7 @@ interface WidthPoint {
   close: number | null
 }
 
-export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) {
+export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueezeWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('3Y')
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
@@ -63,6 +65,20 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
   const hasData = bbWidth > 0 || widthSeries.length > 0
   const bbPctProgress = Math.max(0, Math.min(100, bbPct * 100))
   const quantWarning = extractQuantWarning(data, 'bollinger')
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/quant',
+        endpoint: `/quant/${upperSymbol}?metrics=bollinger&period=${period}`,
+        sourceLabel: 'Bollinger squeeze',
+        lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt,
+        adjustmentMode: 'adjusted',
+        extra: metric ? { squeezeActive: Boolean(metric.squeeze_active), bbWidth } : undefined,
+      }),
+    )
+  }, [onDataChange, hasData, upperSymbol, period, data?.data?.last_data_date, data?.data?.computed_at, dataUpdatedAt, metric, bbWidth])
 
   // E: client-side threshold sweep over the returned width series. Shows how
   // the squeeze definition shifts across percentile choices — the backend's

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   CartesianGrid,
   Line,
@@ -16,6 +16,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 const PERIOD_OPTIONS = [
   { label: '1M', days: 31 },
@@ -31,7 +32,7 @@ function finiteNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-export function FibonacciWidget({ symbol }: { symbol?: string }) {
+export function FibonacciWidget({ symbol, onDataChange }: { symbol?: string; onDataChange?: (data: unknown) => void }) {
   const [lookbackDays, setLookbackDays] = useState<number>(252)
   const upperSymbol = symbol?.toUpperCase() || ''
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useFibonacciRetracement(upperSymbol, {
@@ -71,6 +72,20 @@ export function FibonacciWidget({ symbol }: { symbol?: string }) {
   const isFallback = Boolean(error && hasData)
 
   const activePeriod = PERIOD_OPTIONS.find((option) => option.days === lookbackDays)?.label || '1Y'
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/technical',
+        endpoint: `/analysis/ta/${upperSymbol}/fibonacci?lookback_days=${lookbackDays}&direction=auto`,
+        sourceLabel: 'Fibonacci',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        extra: data?.nearest_level ? { nearestLevel: data.nearest_level } : undefined,
+      }),
+    )
+  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, lookbackDays, data?.nearest_level])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Fibonacci levels" icon={<Route size={18} />} />

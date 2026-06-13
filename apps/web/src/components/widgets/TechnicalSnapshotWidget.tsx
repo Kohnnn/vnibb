@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Activity } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -8,11 +9,13 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useFullTechnicalAnalysis } from '@/lib/queries';
 import { formatNumber } from '@/lib/format';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface TechnicalSnapshotWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 function formatSignal(signal?: string) {
@@ -27,7 +30,7 @@ function signalColor(signal?: string) {
   return 'text-[var(--text-secondary)]';
 }
 
-export function TechnicalSnapshotWidget({ id, symbol, onRemove }: TechnicalSnapshotWidgetProps) {
+export function TechnicalSnapshotWidget({ id, symbol, onRemove, onDataChange }: TechnicalSnapshotWidgetProps) {
   const {
     data,
     isLoading,
@@ -44,6 +47,20 @@ export function TechnicalSnapshotWidget({ id, symbol, onRemove }: TechnicalSnaps
   const adx = data?.volatility?.adx?.adx;
   const support = data?.levels?.support_resistance?.nearest_support;
   const resistance = data?.levels?.support_resistance?.nearest_resistance;
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/technical',
+        endpoint: `/analysis/ta/${symbol}/full?timeframe=D`,
+        sourceLabel: 'Technical snapshot',
+        lastDataDate: dataUpdatedAt,
+        stale: Boolean(error && hasData),
+        extra: data?.signals?.overall_signal ? { overallSignal: data.signals.overall_signal } : undefined,
+      }),
+    );
+  }, [onDataChange, hasData, dataUpdatedAt, error, symbol, data?.signals?.overall_signal]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view technicals" />;

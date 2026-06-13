@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Activity } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -9,15 +10,17 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useUnit } from '@/contexts/UnitContext';
 import { useTTMSnapshot } from '@/lib/queries';
 import { buildTTMSnapshotCards } from '@/lib/financialDiscovery';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 interface TTMSnapshotWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
-export function TTMSnapshotWidget({ id, symbol, onRemove }: TTMSnapshotWidgetProps) {
+export function TTMSnapshotWidget({ id, symbol, onRemove, onDataChange }: TTMSnapshotWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const { config: unitConfig } = useUnit()
   const query = useTTMSnapshot(upperSymbol, Boolean(upperSymbol))
@@ -40,10 +43,23 @@ export function TTMSnapshotWidget({ id, symbol, onRemove }: TTMSnapshotWidgetPro
         }
       : undefined
 
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/equity',
+        endpoint: `/equity/${upperSymbol}/ttm`,
+        sourceLabel: 'TTM snapshot',
+        lastDataDate: query.dataUpdatedAt,
+        stale: Boolean(query.error && hasData),
+        extra: hasData ? { cards: cards.length } : undefined,
+      }),
+    )
+  }, [onDataChange, hasData, query.dataUpdatedAt, query.error, upperSymbol, cards.length])
+
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to inspect TTM snapshot" icon={<Activity size={18} />} />
   }
-
   return (
     <WidgetContainer
       title="TTM Snapshot"

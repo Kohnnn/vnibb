@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { DenseFinancialTable, type DenseTableColumn, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
@@ -13,14 +13,15 @@ import { usePeriodState } from '@/hooks/usePeriodState';
 import { useBalanceSheet, useCashFlow, useFinancialRatios, useIncomeStatement, useProfile } from '@/lib/queries';
 import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { convertFinancialValueForUnit, formatNumber, formatPercent, formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { BalanceSheetData, CashFlowData, FinancialRatioData, IncomeStatementData } from '@/types/equity';
-
 interface FinancialSnapshotWidgetProps {
     id: string;
     symbol: string;
     config?: Record<string, unknown>;
     hideHeader?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 type SnapshotPeriod = 'FY' | 'Q' | 'TTM';
@@ -584,7 +585,7 @@ const RATIOS_SECTION: SnapshotSectionDefinition = {
 
 const SNAPSHOT_SECTIONS: SnapshotSectionDefinition[] = [PL_SECTION, BS_SECTION, CF_SECTION, RATIOS_SECTION];
 
-function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRemove }: FinancialSnapshotWidgetProps) {
+function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRemove, onDataChange }: FinancialSnapshotWidgetProps) {
     const periodSyncGroup = typeof config?.periodSyncGroup === 'string' ? config.periodSyncGroup : undefined;
     const defaultPeriod = config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
         ? (config.defaultPeriod as SnapshotPeriod)
@@ -698,6 +699,20 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
         cashFlowQuery.dataUpdatedAt,
         ratiosQuery.dataUpdatedAt
     );
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasPeriods,
+                apiGroup: '/equity',
+                endpoint: `/equity/${symbol}/income-statement,balance-sheet,cash-flow,ratios?period=${ratioPeriod}`,
+                sourceLabel: 'Financial snapshot',
+                lastDataDate: updatedAt,
+                stale: Boolean(combinedError && hasPeriods),
+                extra: hasPeriods ? { periods: periods.length } : undefined,
+            }),
+        );
+    }, [onDataChange, hasPeriods, combinedError, updatedAt, symbol, ratioPeriod, periods.length]);
 
     return (
         <WidgetContainer

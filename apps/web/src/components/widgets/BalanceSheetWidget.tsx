@@ -1,9 +1,10 @@
 // Balance Sheet Widget - Assets, Liabilities, Equity with Chart View
 'use client';
 
-import { useState, useMemo, memo } from 'react';
+import { useState, useMemo, useEffect, memo } from 'react';
 import { Scale, Table, BarChart3 } from 'lucide-react';
 import { useBalanceSheet } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -35,6 +36,7 @@ interface BalanceSheetWidgetProps {
     config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 type ViewMode = 'table' | 'chart';
@@ -62,7 +64,7 @@ const TABLE_YEAR_LIMIT = 20;
 const QUARTER_PERIOD_LIMIT = 40;
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
-function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }: BalanceSheetWidgetProps) {
+function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, onDataChange }: BalanceSheetWidgetProps) {
     const periodSyncGroup = typeof config?.periodSyncGroup === 'string' ? config.periodSyncGroup : undefined;
     const defaultPeriod =
         config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
@@ -105,6 +107,20 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
     const hasData = displayItems.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/equity',
+                endpoint: `/equity/${symbol}/balance-sheet?period=${apiPeriod}`,
+                sourceLabel: 'Balance sheet',
+                lastDataDate: dataUpdatedAt,
+                stale: isFallback,
+                extra: hasData ? { periods: displayItems.length } : undefined,
+            }),
+        );
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
 
     const chartData = useMemo(() => {
         if (!displayItems.length) return [];

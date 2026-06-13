@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import { GitBranchPlus } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -15,15 +15,17 @@ import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, ty
 import { formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { buildIncomeSankeyModel } from '@/lib/financialVisualizations';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { IncomeSankeyChart } from '@/components/widgets/charts/IncomeSankeyChart';
 
 interface IncomeSankeyWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
-function IncomeSankeyWidgetComponent({ id, symbol, onRemove }: IncomeSankeyWidgetProps) {
+function IncomeSankeyWidgetComponent({ id, symbol, onRemove, onDataChange }: IncomeSankeyWidgetProps) {
   const { period, setPeriod } = usePeriodState({
     widgetId: id || 'income_sankey',
     defaultPeriod: 'FY',
@@ -52,6 +54,20 @@ function IncomeSankeyWidgetComponent({ id, symbol, onRemove }: IncomeSankeyWidge
   );
   const model = useMemo(() => buildIncomeSankeyModel(displayItems), [displayItems]);
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 10000 });
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/equity',
+        endpoint: `/equity/${symbol}/income-statement?period=${apiPeriod}`,
+        sourceLabel: 'Income flow',
+        lastDataDate: dataUpdatedAt,
+        stale: Boolean(error && hasData),
+        extra: hasData ? { periods: displayItems.length } : undefined,
+      }),
+    );
+  }, [onDataChange, hasData, error, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
   const latestLabel = model
     ? formatFinancialPeriodLabel(model.period, { mode: periodMode, index: displayItems.length - 1, total: displayItems.length })
     : period === 'FY'

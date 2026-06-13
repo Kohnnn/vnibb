@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowDownCircle, ArrowUpCircle, CalendarClock } from 'lucide-react';
 import { useHistoricalPrices } from '@/lib/queries';
 import type { OHLCData } from '@/lib/chartUtils';
@@ -9,9 +9,11 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface GapFillStatsWidgetProps {
   symbol: string;
+  onDataChange?: (data: unknown) => void;
 }
 
 interface GapEvent {
@@ -70,7 +72,7 @@ function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-export function GapFillStatsWidget({ symbol }: GapFillStatsWidgetProps) {
+export function GapFillStatsWidget({ symbol, onDataChange }: GapFillStatsWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
   const [period, setPeriod] = useState<QuantPeriodOption>('1Y');
   const {
@@ -108,6 +110,21 @@ export function GapFillStatsWidget({ symbol }: GapFillStatsWidgetProps) {
   );
 
   const recentEvents = events.slice(-10).reverse();
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/equity',
+        endpoint: `/equity/historical?symbol=${upperSymbol}`,
+        sourceLabel: 'Gap fill stats (derived)',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        derived: true,
+        extra: hasData ? { gaps: events.length, fillRate } : undefined,
+      }),
+    );
+  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, events.length, fillRate]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view gap fill stats" icon={<CalendarClock size={18} />} />;

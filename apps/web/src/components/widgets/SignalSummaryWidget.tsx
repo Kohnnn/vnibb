@@ -1,12 +1,13 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { useFullTechnicalAnalysis } from '@/lib/queries'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import type { Signal, Timeframe } from '@/types/technical'
 
 const TIMEFRAME_OPTIONS: Array<{ value: Timeframe; label: string }> = [
@@ -30,7 +31,7 @@ function signalTone(signal: Signal | string) {
   }
 }
 
-export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
+export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string; onDataChange?: (data: unknown) => void }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('W')
   const upperSymbol = symbol?.toUpperCase() || ''
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useFullTechnicalAnalysis(upperSymbol, {
@@ -72,6 +73,21 @@ export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
       balance,
     }
   }, [data])
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/technical',
+        endpoint: `/analysis/ta/${upperSymbol}/full?timeframe=${timeframe}`,
+        sourceLabel: 'Signal summary (derived)',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        derived: true,
+        extra: data?.signals?.overall_signal ? { overallSignal: data.signals.overall_signal, consensus: derived?.consensus } : undefined,
+      }),
+    )
+  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, timeframe, data?.signals?.overall_signal, derived?.consensus])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view trade signals" icon={<ShieldAlert size={18} />} />

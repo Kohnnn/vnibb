@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Area,
   ComposedChart,
@@ -16,12 +16,14 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 const PERIOD_OPTIONS = ['1M', '3M', '6M', '1Y', '3Y', '5Y'] as const
 type PeriodOption = (typeof PERIOD_OPTIONS)[number]
 
 interface IchimokuWidgetProps {
   symbol?: string
+  onDataChange?: (data: unknown) => void
 }
 
 function labelTone(value: string) {
@@ -37,7 +39,7 @@ function finiteNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-export function IchimokuWidget({ symbol }: IchimokuWidgetProps) {
+export function IchimokuWidget({ symbol, onDataChange }: IchimokuWidgetProps) {
   const [period, setPeriod] = useState<PeriodOption>('1Y')
   const upperSymbol = symbol?.toUpperCase() || ''
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useIchimokuSeries(upperSymbol, {
@@ -90,6 +92,20 @@ export function IchimokuWidget({ symbol }: IchimokuWidgetProps) {
   const latest = chartData[chartData.length - 1]
   const hasData = chartData.length > 1
   const isFallback = Boolean(error && hasData)
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/technical',
+        endpoint: `/analysis/ta/${upperSymbol}/ichimoku?period=${period}`,
+        sourceLabel: 'Ichimoku',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        extra: data?.signal ? { signal: data.signal } : undefined,
+      }),
+    )
+  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, period, data?.signal])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Ichimoku cloud" icon={<CloudSun size={18} />} />

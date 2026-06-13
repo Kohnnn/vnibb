@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { ArrowDownToLine, ArrowUpToLine, Scale } from 'lucide-react'
 import { useHistoricalPrices, useMicrostructureAnalysis } from '@/lib/queries'
 import type { OHLCData } from '@/lib/chartUtils'
@@ -7,9 +8,11 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface VolumeDeltaWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 interface VolumeDeltaPoint {
@@ -144,7 +147,7 @@ function getDivergenceSignal(points: VolumeDeltaPoint[]) {
   }
 }
 
-export function VolumeDeltaWidget({ symbol }: VolumeDeltaWidgetProps) {
+export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useHistoricalPrices(
@@ -203,6 +206,23 @@ export function VolumeDeltaWidget({ symbol }: VolumeDeltaWidgetProps) {
 
   const recentPoints = deltaSeries.slice(-12)
   const maxAbsDelta = recentPoints.reduce((max, point) => Math.max(max, Math.abs(point.delta)), 1)
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/microstructure',
+        endpoint: hasMicroData
+          ? `/microstructure/${upperSymbol}?interval=5m&lookback_days=7`
+          : `/equity/historical?symbol=${upperSymbol}`,
+        sourceLabel: hasMicroData ? 'Volume delta · trade ticks' : 'Volume delta (derived)',
+        lastDataDate: hasMicroData ? microUpdatedAt : dataUpdatedAt,
+        stale: isFallback,
+        derived: !hasMicroData,
+        extra: hasData ? { cumulativeDelta: lastPoint?.cumulativeDelta ?? 0 } : undefined,
+      }),
+    )
+  }, [onDataChange, hasData, hasMicroData, isFallback, microUpdatedAt, dataUpdatedAt, upperSymbol, lastPoint?.cumulativeDelta])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view volume delta" icon={<Scale size={18} />} />

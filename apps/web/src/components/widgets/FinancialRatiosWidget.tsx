@@ -1,9 +1,10 @@
 // Financial Ratios Widget - Historical P/E, P/B, ROE, etc.
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import { BarChart3 } from 'lucide-react';
 import { useFinancialRatios, useIncomeStatement } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -21,6 +22,7 @@ interface FinancialRatiosWidgetProps {
     config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function formatRatio(value: number | null | undefined, decimals = 2): string {
@@ -105,7 +107,7 @@ function normalizeRatioPeriod(period: string | null | undefined): string | null 
     return normalizeFinancialPeriod(period);
 }
 
-function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemove }: FinancialRatiosWidgetProps) {
+function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemove, onDataChange }: FinancialRatiosWidgetProps) {
     const periodSyncGroup = typeof config?.periodSyncGroup === 'string' ? config.periodSyncGroup : undefined;
     const defaultPeriod =
         config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
@@ -161,6 +163,20 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
     const hasData = ratios.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/equity',
+                endpoint: `/equity/${symbol}/ratios?period=${apiPeriod}`,
+                sourceLabel: 'Financial ratios',
+                lastDataDate: dataUpdatedAt,
+                stale: isFallback,
+                extra: hasData ? { periods: ratios.length } : undefined,
+            }),
+        );
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, ratios.length]);
     const categoryMetrics = {
         valuation: ['pe', 'pb', 'ps', 'ev_sales', 'ev_ebitda', 'peg_ratio'],
         liquidity: ['current_ratio', 'quick_ratio', 'cash_ratio'],
