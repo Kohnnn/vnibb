@@ -19,7 +19,7 @@ interface EarningsReleaseRecapWidgetProps {
     symbol: string;
     hideHeader?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function yoyChange(current: number | null | undefined, previous: number | null | undefined): number | null {

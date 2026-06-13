@@ -15,7 +15,7 @@ interface DerivativesContractsBoardWidgetProps {
   id: string;
   hideHeader?: boolean;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function daysUntilExpiry(expiry: string): number | null {

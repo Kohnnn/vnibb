@@ -18,7 +18,7 @@ interface InsiderTradingWidgetProps {
   symbol?: string;
   isEditing?: boolean;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatCurrency(value: number | null | undefined): string {

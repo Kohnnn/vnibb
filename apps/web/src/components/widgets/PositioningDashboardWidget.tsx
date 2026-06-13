@@ -13,7 +13,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 interface PositioningDashboardWidgetProps {
   symbol?: string
   onSymbolClick?: (symbol: string) => void
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 type UniverseGroup = 'VN30' | 'VN100' | 'HNX30'

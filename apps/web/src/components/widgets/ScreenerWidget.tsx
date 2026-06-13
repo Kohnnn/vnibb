@@ -39,7 +39,7 @@ interface ScreenerWidgetProps {
     onSymbolClick?: (symbol: string) => void;
     widgetGroup?: WidgetGroupId;
     config?: Record<string, unknown>;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 type ViewMode = 'table' | 'chart' | 'performance';

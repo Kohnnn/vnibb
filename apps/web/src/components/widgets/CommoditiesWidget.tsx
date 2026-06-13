@@ -12,7 +12,7 @@ function formatPrice(value: number | null | undefined): string {
     return value.toLocaleString('en-US', { maximumFractionDigits: 0 });
 }
 
-export function CommoditiesWidget({ onDataChange }: { onDataChange?: (data: unknown) => void }) {
+export function CommoditiesWidget({ onDataChange }: { onDataChange?: (data: WidgetDataPayload) => void }) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useCommodities();
 
     const rows = data?.data || [];

@@ -17,7 +17,7 @@ interface NewsFlowWidgetProps {
   symbol?: string;
   initialSymbols?: string[];
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataChange }: NewsFlowWidgetProps) {

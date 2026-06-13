@@ -13,7 +13,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface DrawdownDeepDiveWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 interface DrawdownPoint {

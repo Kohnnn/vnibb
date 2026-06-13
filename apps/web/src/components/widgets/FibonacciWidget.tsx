@@ -32,7 +32,7 @@ function finiteNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-export function FibonacciWidget({ symbol, onDataChange }: { symbol?: string; onDataChange?: (data: unknown) => void }) {
+export function FibonacciWidget({ symbol, onDataChange }: { symbol?: string; onDataChange?: (data: WidgetDataPayload) => void }) {
   const [lookbackDays, setLookbackDays] = useState<number>(252)
   const upperSymbol = symbol?.toUpperCase() || ''
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useFibonacciRetracement(upperSymbol, {

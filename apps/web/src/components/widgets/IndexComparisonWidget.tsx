@@ -17,7 +17,7 @@ const INDICES = [
   { symbol: 'UPCOM', name: 'UPCOM-Index' },
 ];
 
-function IndexComparisonWidgetComponent({ onDataChange }: { onDataChange?: (data: unknown) => void }) {
+function IndexComparisonWidgetComponent({ onDataChange }: { onDataChange?: (data: WidgetDataPayload) => void }) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMarketOverview();
   const dataList = data?.data || [];
   const hasData = dataList.length > 0;

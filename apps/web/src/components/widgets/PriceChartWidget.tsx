@@ -43,7 +43,7 @@ interface PriceChartWidgetProps {
   timeframe?: string;
   config?: Record<string, unknown>;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 interface SnapshotMetric {

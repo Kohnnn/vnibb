@@ -23,7 +23,7 @@ type PeriodOption = (typeof PERIOD_OPTIONS)[number]
 
 interface IchimokuWidgetProps {
   symbol?: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 function labelTone(value: string) {

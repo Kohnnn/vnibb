@@ -50,7 +50,7 @@ interface AICopilotWidgetProps {
     isEditing?: boolean;
     onRemove?: () => void;
     initialContext?: WidgetContext;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 interface PromptTemplate {

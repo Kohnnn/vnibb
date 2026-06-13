@@ -14,7 +14,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface EMARespectWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 type EmaLevel = {

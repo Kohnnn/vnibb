@@ -12,7 +12,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface SeasonalityHeatmapWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 const GRANULARITY_OPTIONS: Array<{ value: SeasonalityGranularity; label: string; note: string }> = [

@@ -12,7 +12,7 @@ interface ValuationLabWidgetProps {
   symbol: string
   isEditing?: boolean
   onRemove?: () => void
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 function pickNumber(record: Record<string, unknown> | null | undefined, keys: string[]): number | null {

@@ -24,7 +24,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface BollingerSqueezeWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 interface WidthPoint {

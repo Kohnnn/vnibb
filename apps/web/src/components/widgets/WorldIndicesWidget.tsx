@@ -12,7 +12,7 @@ function formatValue(value: number | null | undefined): string {
     return value.toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
 
-export function WorldIndicesWidget({ onDataChange }: { onDataChange?: (data: unknown) => void }) {
+export function WorldIndicesWidget({ onDataChange }: { onDataChange?: (data: WidgetDataPayload) => void }) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useWorldIndices();
 
     const rows = data?.data || [];

@@ -96,7 +96,7 @@ function downloadCSV(csv: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange }: { onRemove?: () => void, lastRefresh?: number, onDataChange?: (data: unknown) => void }) {
+function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange }: { onRemove?: () => void, lastRefresh?: number, onDataChange?: (data: WidgetDataPayload) => void }) {
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 

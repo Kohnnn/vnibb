@@ -37,11 +37,13 @@ export interface WidgetRuntimeInput {
   extra?: Record<string, unknown>
 }
 
+export type WidgetDataPayload = Record<string, unknown>
+
 /**
  * Build a `{ __widgetRuntime: { layoutHint, provenance }, ...extra }` payload.
  * Pass the result straight to `onDataChange?.(...)`.
  */
-export function buildWidgetRuntime(input: WidgetRuntimeInput): Record<string, unknown> {
+export function buildWidgetRuntime(input: WidgetRuntimeInput): WidgetDataPayload {
   const provenance: Partial<ExportProvenance> = {
     sourceLabel: input.sourceLabel ?? (input.derived ? 'Derived (client)' : undefined),
     apiGroup: input.apiGroup,

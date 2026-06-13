@@ -16,7 +16,7 @@ interface CompanyFilingsWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function getEventTypeColor(type: string): string {

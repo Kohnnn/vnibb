@@ -25,7 +25,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface DrawdownRecoveryWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 type UnderwaterPoint = {

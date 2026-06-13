@@ -21,7 +21,7 @@ interface FinancialSnapshotWidgetProps {
     config?: Record<string, unknown>;
     hideHeader?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 type SnapshotPeriod = 'FY' | 'Q' | 'TTM';

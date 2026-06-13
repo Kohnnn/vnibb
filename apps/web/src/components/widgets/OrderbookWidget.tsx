@@ -16,7 +16,7 @@ import type { WidgetHealthState } from '@/lib/widgetHealth';
 interface OrderbookWidgetProps {
   symbol?: string;
   widgetId?: string;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 type DepthEntry = PriceDepthResponse['data']['entries'][number];

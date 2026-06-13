@@ -23,7 +23,7 @@ interface MarketHeatmapWidgetProps {
     id: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function clampLabelSize(width: number, height: number): number {
@@ -240,12 +240,14 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                         }
 
                                         return (
-                                            <svg
-                                                width="100%"
-                                                height="100%"
-                                                viewBox={`0 0 ${Math.max(320, Math.floor(containerWidth))} ${Math.max(240, Math.floor(containerHeight))}`}
-                                                preserveAspectRatio="none"
-                                            >
+                                             <svg
+                                                 width="100%"
+                                                 height="100%"
+                                                 viewBox={`0 0 ${Math.max(320, Math.floor(containerWidth))} ${Math.max(240, Math.floor(containerHeight))}`}
+                                                 preserveAspectRatio="none"
+                                                 role="img"
+                                                 aria-label={`Market heatmap grouped by ${groupBy}`}
+                                             >
                                                 {treemapLayout.leaves().map((node: any) => {
                                                     const width = node.x1 - node.x0;
                                                     const height = node.y1 - node.y0;

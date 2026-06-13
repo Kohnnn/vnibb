@@ -13,7 +13,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface SeasonalitySpiralHeatmapWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 type SpiralGranularity = Extract<SeasonalityGranularity, 'daily' | 'weekly'>

@@ -23,7 +23,7 @@ interface ListingBrowserWidgetProps {
   hideHeader?: boolean;
   onRemove?: () => void;
   onSymbolClick?: (symbol: string) => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 type ExchangeFilter = 'ALL' | 'HOSE' | 'HNX' | 'UPCOM'

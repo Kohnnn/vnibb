@@ -15,7 +15,7 @@ import type { WidgetHealthState } from '@/lib/widgetHealth';
 interface MarketSentimentWidgetProps {
   id: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 const sentimentConfig = {

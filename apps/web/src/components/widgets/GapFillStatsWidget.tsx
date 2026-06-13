@@ -13,7 +13,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface GapFillStatsWidgetProps {
   symbol: string;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 interface GapEvent {

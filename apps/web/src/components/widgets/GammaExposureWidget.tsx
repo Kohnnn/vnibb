@@ -13,7 +13,7 @@ interface GammaExposureWidgetProps {
   symbol: string
   isEditing?: boolean
   onRemove?: () => void
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 function estimateGammaRegime(zScore: number): { label: string; tone: string } {

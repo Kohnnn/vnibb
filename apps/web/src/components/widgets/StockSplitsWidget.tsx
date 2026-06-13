@@ -14,7 +14,7 @@ interface StockSplitsWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function parseSplitRatio(value?: string): { from: string; to: string } {

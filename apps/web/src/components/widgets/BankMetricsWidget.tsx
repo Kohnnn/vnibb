@@ -17,7 +17,7 @@ interface BankMetricsWidgetProps {
   symbol: string;
   isEditing?: boolean;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 const BANK_METRIC_LABELS: Record<string, string> = {

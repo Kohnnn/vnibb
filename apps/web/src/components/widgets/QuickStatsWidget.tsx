@@ -15,7 +15,7 @@ interface QuickStatsWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps) {

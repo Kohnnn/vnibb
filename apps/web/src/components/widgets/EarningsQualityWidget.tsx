@@ -12,7 +12,7 @@ interface EarningsQualityWidgetProps {
   symbol: string
   isEditing?: boolean
   onRemove?: () => void
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 function pct(value: number | null | undefined): string {

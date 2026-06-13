@@ -16,7 +16,7 @@ interface RelativeRotationWidgetProps {
   symbol: string
   isEditing?: boolean
   onRemove?: () => void
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 function quadrantTone(quadrant: string): string {

@@ -1,9 +1,9 @@
 'use client';
 
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type HTMLAttributes, type ReactNode, useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
-interface ChartMountGuardProps {
+interface ChartMountGuardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'children'> {
   children: ReactNode;
   className?: string;
   minHeight?: number;
@@ -23,6 +23,7 @@ export function ChartMountGuard({
   minHeight = 120,
   minWidth = 32,
   fallback,
+  ...divProps
 }: ChartMountGuardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isReady, setIsReady] = useState(false);
@@ -79,6 +80,7 @@ export function ChartMountGuard({
 
   return (
     <div
+      {...divProps}
       ref={containerRef}
       className={cn('w-full', className)}
       style={{ minHeight }}

@@ -24,7 +24,7 @@ import { QuantRunHistoryPanel } from '@/components/widgets/QuantRunHistoryPanel'
 
 interface PairLabWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 function fmt(value: number | null | undefined, digits = 2): string {
@@ -236,7 +236,7 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
               <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Log-Spread Z-Score (1:1)</div>
               <div className="text-[10px] text-[var(--text-secondary)]">full-period mean/std · descriptive</div>
             </div>
-            <ChartMountGuard className="flex-1 min-h-[130px]" minHeight={130}>
+            <ChartMountGuard className="flex-1 min-h-[130px]" minHeight={130} role="img" aria-label={`${symbol} versus ${effectivePair} log-spread z-score chart`}>
               <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.22)" vertical={false} />

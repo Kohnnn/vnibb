@@ -37,7 +37,7 @@ interface QuantSummaryWidgetProps {
   id: string
   symbol: string
   onRemove?: () => void
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 type SeasonalityMetric = {

@@ -20,7 +20,7 @@ interface TechnicalSummaryWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function getSignalColor(signal: string): string {

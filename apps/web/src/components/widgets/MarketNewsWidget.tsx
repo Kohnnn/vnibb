@@ -84,7 +84,7 @@ interface MarketNewsFeed {
   mode: 'all' | 'related';
 }
 
-function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: string; config?: Record<string, unknown>; onDataChange?: (data: unknown) => void }) {
+function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: string; config?: Record<string, unknown>; onDataChange?: (data: WidgetDataPayload) => void }) {
   const upperSymbol = symbol?.toUpperCase() || '';
   const preferredMode: 'all' | 'related' = config?.mode === 'all' || config?.mode === 'related'
     ? (config.mode as 'all' | 'related')

@@ -37,7 +37,7 @@ interface FinancialsWidgetProps {
     symbol: string;
     hideHeader?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 // Per-share metrics (EPS/BVPS/DPS) are absolute VND-per-share values and must NOT be

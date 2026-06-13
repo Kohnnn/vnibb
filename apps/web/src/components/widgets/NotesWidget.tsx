@@ -15,7 +15,7 @@ interface NotesWidgetProps {
     config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function parseNotesBySymbol(value: unknown): Record<string, string> {

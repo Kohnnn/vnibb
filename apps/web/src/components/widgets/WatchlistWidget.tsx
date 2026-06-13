@@ -42,7 +42,7 @@ interface WatchlistWidgetProps {
     config?: Record<string, unknown>;
     isEditing?: boolean;
     widgetGroup?: WidgetGroupId;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function hasOwnConfigKey(config: Record<string, unknown> | undefined, key: string): boolean {

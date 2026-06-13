@@ -14,7 +14,7 @@ function formatRate(value: number | null | undefined): string {
 }
 
 interface ForexRatesWidgetProps {
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 export function ForexRatesWidget({ onDataChange }: ForexRatesWidgetProps) {

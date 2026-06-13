@@ -12,7 +12,7 @@ import { QuantRunHistoryPanel } from '@/components/widgets/QuantRunHistoryPanel'
 
 interface MonteCarloLabWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 const HORIZON_OPTIONS = [63, 126, 252] as const
@@ -132,7 +132,7 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
             <div className="mb-1 text-[10px] uppercase tracking-widest text-[var(--text-muted)]">
               Forward {stats.horizonDays}D Max Drawdown
             </div>
-            <table className="w-full text-[11px]">
+            <table className="w-full text-[11px]" aria-label={`${symbol} bootstrap max drawdown percentiles`}>
               <thead className="text-[9px] uppercase tracking-wide text-[var(--text-muted)]">
                 <tr>
                   <th className="px-1 py-0.5 text-left">P5 (mild)</th>
@@ -158,7 +158,7 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
             <div className="mb-1 text-[10px] uppercase tracking-widest text-[var(--text-muted)]">
               Terminal Return after {stats.horizonDays}D
             </div>
-            <table className="w-full text-[11px]">
+            <table className="w-full text-[11px]" aria-label={`${symbol} bootstrap terminal return percentiles`}>
               <thead className="text-[9px] uppercase tracking-wide text-[var(--text-muted)]">
                 <tr>
                   <th className="px-1 py-0.5 text-left">P5</th>

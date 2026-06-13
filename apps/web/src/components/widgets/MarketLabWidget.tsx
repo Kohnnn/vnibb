@@ -19,7 +19,7 @@ interface MarketLabWidgetProps {
   symbol: string
   isEditing?: boolean
   onRemove?: () => void
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 function valueTone(value: number | null, goodPositive = true): string {

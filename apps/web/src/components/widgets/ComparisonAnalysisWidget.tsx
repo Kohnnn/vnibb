@@ -157,7 +157,7 @@ interface ComparisonAnalysisWidgetProps {
   symbol?: string
   initialSymbols?: string[]
   onRemove?: () => void
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 function normalizePerformanceData(payload: unknown): Array<Record<string, string | number>> {

@@ -21,7 +21,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 interface DerivativesAnalyticsWidgetProps {
   id: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatCompact(value: number | null | undefined) {

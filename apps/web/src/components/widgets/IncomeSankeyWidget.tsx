@@ -22,7 +22,7 @@ interface IncomeSankeyWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function IncomeSankeyWidgetComponent({ id, symbol, onRemove, onDataChange }: IncomeSankeyWidgetProps) {

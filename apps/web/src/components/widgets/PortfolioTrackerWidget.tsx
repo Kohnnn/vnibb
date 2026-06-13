@@ -25,7 +25,7 @@ interface PortfolioTrackerWidgetProps {
     onRemove?: () => void;
     onSymbolClick?: (symbol: string) => void;
     widgetGroup?: WidgetGroupId;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 interface PositionWithPL extends Position {

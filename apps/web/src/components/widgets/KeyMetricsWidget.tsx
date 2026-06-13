@@ -24,7 +24,7 @@ interface KeyMetricsWidgetProps {
     isEditing?: boolean;
     hideHeader?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: any) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 interface MetricRowProps {

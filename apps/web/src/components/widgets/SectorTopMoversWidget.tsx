@@ -35,7 +35,7 @@ interface SectorTopMoversWidgetProps {
   id: string;
   onRemove?: () => void;
   widgetGroup?: WidgetGroupId;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup, onDataChange }: SectorTopMoversWidgetProps) {

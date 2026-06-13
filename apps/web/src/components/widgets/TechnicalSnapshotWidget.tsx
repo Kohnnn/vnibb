@@ -15,7 +15,7 @@ interface TechnicalSnapshotWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatSignal(signal?: string) {

@@ -14,7 +14,7 @@ interface IntradayTradesWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatTime(timeStr: string | null | undefined): string {

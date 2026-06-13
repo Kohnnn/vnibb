@@ -47,7 +47,7 @@ interface TickerInfoWidgetProps {
   symbol: string;
   hideHeader?: boolean;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataChange }: TickerInfoWidgetProps) {

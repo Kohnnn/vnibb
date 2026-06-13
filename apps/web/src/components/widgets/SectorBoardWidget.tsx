@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 interface SectorBoardWidgetProps {
   id: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 const SORT_OPTIONS = [

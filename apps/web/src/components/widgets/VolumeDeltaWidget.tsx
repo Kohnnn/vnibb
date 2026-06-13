@@ -12,7 +12,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface VolumeDeltaWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 interface VolumeDeltaPoint {

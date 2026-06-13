@@ -14,7 +14,7 @@ import { getMarketState } from '@/lib/marketHours';
 interface MarketOverviewWidgetProps {
   isEditing?: boolean;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatValue(value: number | null | undefined): string {

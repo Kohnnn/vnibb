@@ -53,7 +53,7 @@ interface PeerComparisonWidgetProps {
     config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 type TabMode = 'table' | 'radar' | 'performance';

@@ -18,7 +18,7 @@ interface EarningsHistoryWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 export function EarningsHistoryWidget({ symbol, onDataChange }: EarningsHistoryWidgetProps) {

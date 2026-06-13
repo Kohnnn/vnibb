@@ -20,7 +20,7 @@ interface EarningsSeasonMonitorWidgetProps {
   symbol?: string;
   widgetGroup?: WidgetGroupId;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 const EXCHANGES = ['ALL', 'HOSE', 'HNX', 'UPCOM'] as const;

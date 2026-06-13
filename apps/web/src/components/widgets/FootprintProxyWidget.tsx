@@ -13,7 +13,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface FootprintProxyWidgetProps {
   symbol: string;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatCompact(value: number): string {

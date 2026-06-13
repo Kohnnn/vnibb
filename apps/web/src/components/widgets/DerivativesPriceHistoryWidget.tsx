@@ -19,7 +19,7 @@ interface DerivativesPriceHistoryWidgetProps {
   config?: Record<string, unknown>;
   hideHeader?: boolean;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 export function DerivativesPriceHistoryWidget({

@@ -15,7 +15,7 @@ interface MarketMoversSectorsWidgetProps {
   id: string;
   widgetGroup?: WidgetGroupId;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataChange }: MarketMoversSectorsWidgetProps) {

@@ -30,7 +30,7 @@ interface ForeignTradingWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatVolume(vol: number | null | undefined): string {

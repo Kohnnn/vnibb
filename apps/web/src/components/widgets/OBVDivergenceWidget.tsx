@@ -12,7 +12,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface OBVDivergenceWidgetProps {
   symbol: string;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 type DivergenceSignal = 'bullish' | 'bearish' | 'none';

@@ -18,7 +18,7 @@ interface ShareStatisticsWidgetProps {
   hideHeader?: boolean
   isEditing?: boolean
   onRemove?: () => void
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 interface StatRowProps {

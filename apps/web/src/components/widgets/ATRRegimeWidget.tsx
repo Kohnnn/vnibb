@@ -11,7 +11,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface ATRRegimeWidgetProps {
   symbol: string;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function percentileRank(values: number[], value: number): number {

@@ -28,7 +28,7 @@ interface MoneyFlowTrendWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 type Timeframe = 'short' | 'medium' | 'long';

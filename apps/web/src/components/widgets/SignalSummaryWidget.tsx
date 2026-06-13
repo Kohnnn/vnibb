@@ -31,7 +31,7 @@ function signalTone(signal: Signal | string) {
   }
 }
 
-export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string; onDataChange?: (data: unknown) => void }) {
+export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string; onDataChange?: (data: WidgetDataPayload) => void }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('W')
   const upperSymbol = symbol?.toUpperCase() || ''
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useFullTechnicalAnalysis(upperSymbol, {

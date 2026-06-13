@@ -16,7 +16,7 @@ interface NewsCorporateActionsWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function getSentimentClasses(sentiment: string | null | undefined): string {

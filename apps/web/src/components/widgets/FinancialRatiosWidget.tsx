@@ -22,7 +22,7 @@ interface FinancialRatiosWidgetProps {
     config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatRatio(value: number | null | undefined, decimals = 2): string {

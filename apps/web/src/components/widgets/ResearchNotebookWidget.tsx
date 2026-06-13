@@ -19,7 +19,7 @@ interface ResearchNotebookWidgetProps {
   id?: string;
   widgetId?: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 const KIND_LABEL: Record<NotebookItem['kind'], string> = {

@@ -17,7 +17,7 @@ interface GrowthBridgeWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function widthForChange(value: number | null) {

@@ -15,7 +15,7 @@ import type { WidgetHealthState } from '@/lib/widgetHealth';
 interface MarketBreadthWidgetProps {
   id: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatPct(value: number | null | undefined): string {

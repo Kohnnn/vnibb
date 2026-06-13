@@ -19,7 +19,7 @@ interface SimilarStocksWidgetProps {
     widgetGroup?: WidgetGroupId;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function firstPositiveFiniteNumber(...values: unknown[]): number | null {

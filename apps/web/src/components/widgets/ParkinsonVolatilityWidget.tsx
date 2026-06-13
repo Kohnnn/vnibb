@@ -26,7 +26,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface ParkinsonVolatilityWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 type Regime = 'low' | 'normal' | 'high' | 'extreme'

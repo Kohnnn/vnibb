@@ -13,7 +13,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface VWAPBandsWidgetProps {
   symbol: string;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatPrice(value: number | null | undefined): string {

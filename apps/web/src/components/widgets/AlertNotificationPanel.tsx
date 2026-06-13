@@ -13,7 +13,7 @@ import { formatTimestamp } from '@/lib/format';
 
 interface AlertNotificationPanelProps {
   userId?: number;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function getAlertIcon(type: AlertType) {

@@ -20,7 +20,7 @@ import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 
 interface ValuationWidgetProps {
   symbol: string;
-  onDataChange?: (data: any) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 export function ValuationWidget({ symbol, onDataChange }: ValuationWidgetProps) {

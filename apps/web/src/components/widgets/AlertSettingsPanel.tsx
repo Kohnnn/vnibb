@@ -14,7 +14,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface AlertSettingsPanelProps {
   userId?: number;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPanelProps) {

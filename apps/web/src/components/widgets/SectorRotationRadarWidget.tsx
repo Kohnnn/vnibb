@@ -15,7 +15,7 @@ interface SectorRotationRadarWidgetProps {
   id: string;
   widgetGroup?: WidgetGroupId;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 export function SectorRotationRadarWidget({ id, widgetGroup, onRemove, onDataChange }: SectorRotationRadarWidgetProps) {

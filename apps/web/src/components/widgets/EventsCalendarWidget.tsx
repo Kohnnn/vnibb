@@ -16,7 +16,7 @@ interface EventsCalendarWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 const eventTypeIcons: Record<string, typeof Calendar> = {

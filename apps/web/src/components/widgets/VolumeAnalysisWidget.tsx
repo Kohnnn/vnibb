@@ -14,7 +14,7 @@ interface VolumeAnalysisWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatVolume(vol: number): string {

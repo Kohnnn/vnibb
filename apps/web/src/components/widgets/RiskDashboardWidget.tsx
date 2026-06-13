@@ -22,7 +22,7 @@ interface RiskDashboardWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 interface BenchmarkRiskMetric {

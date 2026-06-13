@@ -30,7 +30,7 @@ interface AIAnalysisWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function appendReasoningStep(existing: string[], step: CopilotReasoningStep): string[] {

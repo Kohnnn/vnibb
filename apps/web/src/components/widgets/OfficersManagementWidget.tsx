@@ -16,7 +16,7 @@ interface OfficersManagementWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatShares(shares: number | null | undefined): string {

@@ -17,7 +17,7 @@ import {
 interface SignalRobustnessLabWidgetProps {
   symbol?: string
   onSymbolClick?: (symbol: string) => void
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 // Candidate signal metrics that exist on the screener row.

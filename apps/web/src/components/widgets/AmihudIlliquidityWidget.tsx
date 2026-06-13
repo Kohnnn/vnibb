@@ -13,7 +13,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface AmihudIlliquidityWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 interface AmihudPoint {

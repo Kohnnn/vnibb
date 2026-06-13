@@ -29,7 +29,7 @@ interface TransactionFlowWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 const SCOPE_OPTIONS = [

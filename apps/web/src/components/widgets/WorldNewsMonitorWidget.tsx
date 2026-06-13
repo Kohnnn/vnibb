@@ -139,7 +139,7 @@ function WorldNewsMonitorWidgetComponent({
   config?: Record<string, unknown>;
   onRemove?: () => void;
   hideHeader?: boolean;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }) {
   const [region, setRegion] = useState<RegionFilter>(() => getInitialRegion(config));
   const [category, setCategory] = useState<CategoryFilter>(() => getInitialCategory(config));

@@ -17,7 +17,7 @@ interface TTMSnapshotWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 export function TTMSnapshotWidget({ id, symbol, onRemove, onDataChange }: TTMSnapshotWidgetProps) {

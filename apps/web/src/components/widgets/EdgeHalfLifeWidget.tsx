@@ -23,7 +23,7 @@ import { QuantRunHistoryPanel } from '@/components/widgets/QuantRunHistoryPanel'
 
 interface EdgeHalfLifeWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 const WINDOW_OPTIONS = [21, 63, 126] as const
@@ -160,7 +160,7 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
               <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Rolling {window}D Sharpe</div>
               <div className="text-[10px] text-[var(--text-secondary)]">past window stats, not a forecast</div>
             </div>
-            <ChartMountGuard className="flex-1 min-h-[140px]" minHeight={140}>
+            <ChartMountGuard className="flex-1 min-h-[140px]" minHeight={140} role="img" aria-label={`${symbol} rolling ${window} day Sharpe chart`}>
               <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.22)" vertical={false} />

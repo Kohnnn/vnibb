@@ -16,7 +16,7 @@ interface DividendPaymentWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatDividendType(type: string | null | undefined): string {

@@ -11,7 +11,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 interface BigFlowMonitorWidgetProps {
   symbol?: string
   onSymbolClick?: (symbol: string) => void
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 // Minimum single-trade value thresholds, in VND billions.

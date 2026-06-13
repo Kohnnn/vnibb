@@ -13,7 +13,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface HurstMarketStructureWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 function formatNumber(value: number, digits = 3): string {

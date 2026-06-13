@@ -14,7 +14,7 @@ interface OwnershipChangesWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 export function OwnershipChangesWidget({ id, symbol, onRemove, onDataChange }: OwnershipChangesWidgetProps) {

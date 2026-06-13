@@ -16,7 +16,7 @@ interface CorrelationMatrixWidgetProps {
   id: string
   symbol: string
   onRemove?: () => void
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 function getCellColor(value: number | null | undefined) {

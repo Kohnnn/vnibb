@@ -18,7 +18,7 @@ interface TopMoversWidgetProps {
   onRemove?: () => void;
   onSymbolClick?: (symbol: string) => void;
   widgetGroup?: WidgetGroupId;
-  onDataChange?: (data: unknown) => void;
+  onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 type ViewMode = 'gainer' | 'loser';

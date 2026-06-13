@@ -14,7 +14,7 @@ interface SubsidiariesWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
-    onDataChange?: (data: unknown) => void;
+    onDataChange?: (data: WidgetDataPayload) => void;
 }
 
 function formatCapital(value: number | null | undefined): string {

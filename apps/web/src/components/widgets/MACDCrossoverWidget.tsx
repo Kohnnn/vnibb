@@ -27,7 +27,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface MACDCrossoverWidgetProps {
   symbol: string
-  onDataChange?: (data: unknown) => void
+  onDataChange?: (data: WidgetDataPayload) => void
 }
 
 type CrossoverRow = {
