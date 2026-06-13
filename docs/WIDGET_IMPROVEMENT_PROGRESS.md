@@ -35,10 +35,10 @@ Prereq reading: `AGENTS.md`, `docs/WIDGET_SYSTEM_REFERENCE.md`, `docs/QUANT_REMA
 | # | Tranche | Scope | OCI? | Status |
 |---|---------|-------|------|--------|
 | C | Dead-code cleanup + economic_calendar retirement | alias `economic_calendar→tradingview_economic_calendar`, delete fake widget + orphans/dupe | No | ☑ |
-| B0 | Generalize provenance helper | `lib/widgetRuntime.ts` `buildWidgetRuntime`; `buildQuantRuntime` delegates | No | ☐ |
-| B1 | Fix 3 broken emitters | KeyMetrics / TickerInfo / Valuation | No | ☐ |
-| A2 | CryptoMarketFallback transparency | visible "Source: CoinGecko (third-party)" label | No | ☐ |
-| B2–B8 | Provenance rollout (~121 widgets) | batched by API family, ~12–15/commit | No | ☐ |
+| B0 | Generalize provenance helper | `lib/widgetRuntime.ts` `buildWidgetRuntime`; `buildQuantRuntime` delegates | No | ☑ |
+| B1 | Fix 3 broken emitters | KeyMetrics / TickerInfo / Valuation | No | ☑ |
+| A2 | CryptoMarketFallback transparency | visible "Source: CoinGecko (third-party)" label | No | ☑ |
+| B2–B8 | Provenance rollout (~121 widgets) | batched by API family, ~12–15/commit | No | ☑ |
 | D | Test coverage | math-lib `__tests__` + top-widget smoke tests | No | ☐ |
 | E | A11y + type safety | roles/aria-labels on charts/tables; shared `WidgetDataPayload`, kill `: any` | No | ☐ |
 
@@ -80,3 +80,18 @@ Prereq reading: `AGENTS.md`, `docs/WIDGET_SYSTEM_REFERENCE.md`, `docs/QUANT_REMA
   `ComparisonWidget.tsx` (+ barrel exports). Note: `ConnectBackendModal.tsx` is now
   unreferenced (was only used by deleted DataSourcesTab) — left in place pending re-wire.
   ci:gate green (69 FE jest, 351 BE pytest).
+- 2026-06-12: **B0+B1 shipped** (`33a4753`). Added `lib/widgetRuntime.ts`, refactored
+  `buildQuantRuntime` to delegate to it, and fixed the 3 broken provenance emitters:
+  `KeyMetricsWidget`, `TickerInfoWidget`, `ValuationWidget`. ci:gate green.
+- 2026-06-12: **B2+B3 shipped** (`2e92c4c`). Added runtime provenance to market,
+  movers, sector, news, world-news, events, and earnings-season widgets. ci:gate green.
+- 2026-06-12: **B4+B5 shipped** (`d7f05d2`). Added runtime provenance to financial
+  statements, valuation charts, dividends, and technical-analysis widgets. ci:gate green.
+- 2026-06-12: **B6+B7 shipped** (`be4df80`). Added runtime provenance to RS, quant,
+  ownership, insider, alert, and portfolio widgets. ci:gate green.
+- 2026-06-12: **B8+A2 shipped** (`570c418`, `c9b7ee0`). Added runtime provenance to
+  derivatives, comparison, research, utility/local widgets, final data-widget stragglers,
+  and made `CryptoMarketFallback` visibly cite `CoinGecko (third-party fallback)`.
+  A scan now shows only infrastructure/TradingView wrapper components without runtime
+  emission (`WidgetLibrary`, `WidgetPreview`, `TickerCombobox`, etc.); data widgets are
+  covered. ci:gate green for each commit.
