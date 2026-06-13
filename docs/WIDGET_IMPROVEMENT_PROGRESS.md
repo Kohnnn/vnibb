@@ -39,8 +39,8 @@ Prereq reading: `AGENTS.md`, `docs/WIDGET_SYSTEM_REFERENCE.md`, `docs/QUANT_REMA
 | B1 | Fix 3 broken emitters | KeyMetrics / TickerInfo / Valuation | No | ☑ |
 | A2 | CryptoMarketFallback transparency | visible "Source: CoinGecko (third-party)" label | No | ☑ |
 | B2–B8 | Provenance rollout (~121 widgets) | batched by API family, ~12–15/commit | No | ☑ |
-| D | Test coverage | math-lib `__tests__` + top-widget smoke tests | No | ☐ |
-| E | A11y + type safety | roles/aria-labels on charts/tables; shared `WidgetDataPayload`, kill `: any` | No | ☐ |
+| D | Test coverage | math-lib `__tests__` + top-widget smoke tests | No | ☑ |
+| E | A11y + type safety | roles/aria-labels on charts/tables; shared `WidgetDataPayload`, kill `: any` | No | ☑ |
 
 ### Provenance rollout batches (B2–B8)
 1. market / movers / sectors (+ A2 crypto label)
@@ -95,3 +95,10 @@ Prereq reading: `AGENTS.md`, `docs/WIDGET_SYSTEM_REFERENCE.md`, `docs/QUANT_REMA
   A scan now shows only infrastructure/TradingView wrapper components without runtime
   emission (`WidgetLibrary`, `WidgetPreview`, `TickerCombobox`, etc.); data widgets are
   covered. ci:gate green for each commit.
+- 2026-06-13: **D shipped** (`010b2f2`). Added `quantAnalytics.test.ts` covering
+  quant math, seeded bootstrap determinism, volume profile/value area, DCF/reverse DCF,
+  ownership summary scoring, and derivatives curve classification. ci:gate green.
+- 2026-06-13: **E shipped** (`6523c8f`). Added shared `WidgetDataPayload`, typed widget
+  `onDataChange` callbacks through the shared runtime payload, extended `ChartMountGuard`
+  for HTML/ARIA props, and added accessible labels to high-traffic quant charts/tables
+  and the market heatmap SVG. ci:gate green.
