@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 
-from vnibb.api.v1.equity import _ratio_has_metric_value, _to_ratio_data
+from vnibb.api.v1.equity import _normalize_statement_unit_outliers, _ratio_has_metric_value, _to_ratio_data
 from vnibb.api.v1.equity import _enrich_missing_ratio_metrics
 from vnibb.api.v1.equity import _compute_rolling_high_low, _load_mongo_financial_ratio_rows, _load_mongo_financial_statement_rows
 from vnibb.models.company import Company
@@ -11,6 +11,7 @@ from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
+from vnibb.providers.vnstock.financials import FinancialStatementData
 
 
 class FakeMongoMarketDataService:
@@ -28,6 +29,18 @@ class FakeMongoMarketDataService:
         self.requests.append({"symbol": symbol, "dataset": "market_prices_eod", "lookback_days": lookback_days, "limit": limit})
         return self.rows
 
+
+def test_normalize_statement_unit_outliers_repairs_single_1000x_row():
+    rows = [
+        FinancialStatementData(symbol="FPT", period="Q1-2025", statement_type="balance", total_assets=73_997_673_121_789, cash=5_342_746_710_936),
+        FinancialStatementData(symbol="FPT", period="Q2-2025", statement_type="balance", total_assets=81_266_075_455_371, cash=7_755_450_852_909),
+        FinancialStatementData(symbol="FPT", period="Q3-2025", statement_type="balance", total_assets=81_601_597_008_000_000, cash=7_755_450_853_000_000),
+    ]
+
+    normalized = _normalize_statement_unit_outliers(rows)
+
+    assert normalized[2].total_assets == 81_601_597_008_000
+    assert normalized[2].cash == 7_755_450_853_000
 
 def make_ratio_row(**overrides):
     base = {

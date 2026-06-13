@@ -438,11 +438,12 @@ export function DenseFinancialTable({
                           }
                         }}
                       >
-                        <span>{displayValue}</span>
+                        <div className="flex min-h-[28px] flex-col items-end justify-center gap-0.5">
+                          <span className="block leading-4">{displayValue}</span>
                         {growthPct !== null ? (
                           <span
                             className={cn(
-                              'ml-1 inline-flex rounded px-1 py-0.5 text-[9px] font-semibold',
+                              'inline-flex rounded px-1 py-0.5 text-[9px] font-semibold leading-none',
                               growthPct === 0
                                 ? 'bg-slate-500/15 text-slate-300'
                                 : growthPct >= 0
@@ -454,6 +455,7 @@ export function DenseFinancialTable({
                             {growthPct.toFixed(1)}%
                           </span>
                         ) : null}
+                        </div>
                       </td>
                     )
                   })}

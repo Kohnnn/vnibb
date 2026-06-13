@@ -689,6 +689,50 @@ def _merge_financial_statement_rows(
     return merged
 
 
+_STATEMENT_SCALE_FIELDS = {
+    "revenue", "gross_profit", "operating_income", "net_income", "ebitda",
+    "cost_of_revenue", "pre_tax_profit", "profit_before_tax", "tax_expense",
+    "interest_expense", "depreciation", "selling_general_admin", "research_development",
+    "other_income", "total_assets", "total_liabilities", "total_equity",
+    "cash_and_equivalents", "equity", "cash", "inventory", "current_assets",
+    "fixed_assets", "current_liabilities", "long_term_liabilities", "retained_earnings",
+    "short_term_debt", "long_term_debt", "accounts_receivable", "accounts_payable",
+    "customer_deposits", "goodwill", "intangible_assets", "operating_cash_flow",
+    "investing_cash_flow", "financing_cash_flow", "free_cash_flow", "net_change_in_cash",
+    "net_cash_flow", "capex", "capital_expenditure", "dividends_paid", "stock_repurchased",
+    "debt_repayment",
+}
+
+
+def _median_abs(values: list[float]) -> float | None:
+    finite = sorted(abs(value) for value in values if math.isfinite(value) and value != 0)
+    if not finite:
+        return None
+    midpoint = len(finite) // 2
+    if len(finite) % 2:
+        return finite[midpoint]
+    return (finite[midpoint - 1] + finite[midpoint]) / 2
+
+
+def _normalize_statement_unit_outliers(rows: list[FinancialStatementData]) -> list[FinancialStatementData]:
+    if len(rows) < 3:
+        return rows
+    for field_name in _STATEMENT_SCALE_FIELDS:
+        values = [float(getattr(row, field_name)) for row in rows if isinstance(getattr(row, field_name, None), (int, float))]
+        baseline = _median_abs(values)
+        if baseline is None or baseline <= 0:
+            continue
+        for row in rows:
+            value = getattr(row, field_name, None)
+            if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                continue
+            abs_value = abs(float(value))
+            scaled_abs = abs_value / 1000
+            if abs_value > baseline * 100 and baseline / 5 <= scaled_abs <= baseline * 5:
+                setattr(row, field_name, float(value) / 1000)
+    return rows
+
+
 def _normalize_financial_metric_key(raw_key: Any) -> str:
     cleaned = str(raw_key or "").strip().lower()
     if not cleaned:
@@ -1046,7 +1090,7 @@ def _enrich_financial_statement_rows(
         ):
             item.ebitda = item.operating_income + abs(item.depreciation)
 
-    return _sort_financial_statement_rows(rows)
+    return _sort_financial_statement_rows(_normalize_statement_unit_outliers(rows))
 
 
 async def _cross_fill_income_statement_rows(
