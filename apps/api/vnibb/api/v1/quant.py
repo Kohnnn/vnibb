@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Literal
 
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -146,6 +146,62 @@ class SeasonalityMatrixResponseData(BaseModel):
     hit_rate_pct: float | None = None
     current_period: Dict[str, Any] | None = None
     warning: str | None = None
+
+
+class MovingAverageCrossoverStrategy(BaseModel):
+    type: Literal["moving_average_crossover"] = "moving_average_crossover"
+    fast_window: int = Field(default=20, ge=2, le=250)
+    slow_window: int = Field(default=50, ge=3, le=500)
+
+
+class QuantBacktestRequest(BaseModel):
+    strategy: MovingAverageCrossoverStrategy = Field(default_factory=MovingAverageCrossoverStrategy)
+    period: str = "5Y"
+    initial_capital: float = Field(default=100_000_000, gt=0, le=1_000_000_000_000)
+    fee_bps: float = Field(default=15.0, ge=0, le=100)
+    source: str = Field(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$")
+    adjustment_mode: Literal["raw", "adjusted"] = "adjusted"
+
+
+class QuantSweepRequest(BaseModel):
+    period: str = "5Y"
+    initial_capital: float = Field(default=100_000_000, gt=0, le=1_000_000_000_000)
+    fee_bps: float = Field(default=15.0, ge=0, le=100)
+    source: str = Field(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$")
+    adjustment_mode: Literal["raw", "adjusted"] = "adjusted"
+    fast_windows: List[int] = Field(default_factory=lambda: [10, 20, 50], min_length=1, max_length=8)
+    slow_windows: List[int] = Field(default_factory=lambda: [50, 100, 200], min_length=1, max_length=8)
+    objective: Literal[
+        "total_return_pct",
+        "sharpe_daily_rf0",
+        "max_drawdown_pct",
+        "annualized_return_pct",
+    ] = "sharpe_daily_rf0"
+
+
+class QuantBacktestResponseData(BaseModel):
+    symbol: str
+    strategy: Dict[str, Any]
+    period: str
+    adjustment_mode: str
+    computed_at: datetime
+    last_data_date: datetime | None = None
+    metrics: Dict[str, Any]
+    equity_curve_summary: Dict[str, Any]
+    trades: List[Dict[str, Any]]
+    warnings: List[str] = []
+
+
+class QuantSweepResponseData(BaseModel):
+    symbol: str
+    period: str
+    adjustment_mode: str
+    objective: str
+    computed_at: datetime
+    last_data_date: datetime | None = None
+    best: Dict[str, Any] | None = None
+    cells: List[Dict[str, Any]]
+    warnings: List[str] = []
 
 
 def _safe_float(value: Any, decimals: int = 4) -> float | None:
@@ -735,6 +791,205 @@ def _compute_seasonality(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
+def _build_moving_average_backtest(
+    frame: pd.DataFrame,
+    *,
+    strategy: MovingAverageCrossoverStrategy,
+    initial_capital: float,
+    fee_bps: float,
+) -> tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[str]]:
+    data = frame[["time", "close"]].copy()
+    data["time"] = pd.to_datetime(data["time"], errors="coerce")
+    data["close"] = pd.to_numeric(data["close"], errors="coerce")
+    data = data.dropna(subset=["time", "close"]).sort_values("time").reset_index(drop=True)
+
+    warnings: list[str] = []
+    if strategy.fast_window >= strategy.slow_window:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_STRATEGY",
+                "message": "fast_window must be smaller than slow_window.",
+            },
+        )
+    min_points_required = strategy.slow_window + 2
+    if len(data) < min_points_required:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INSUFFICIENT_BACKTEST_DATA",
+                "message": (
+                    f"Expected at least {min_points_required} sessions for this strategy, "
+                    f"got {len(data)}."
+                ),
+            },
+        )
+
+    fee_rate = fee_bps / 10_000
+    data["fast_ma"] = data["close"].rolling(strategy.fast_window).mean()
+    data["slow_ma"] = data["close"].rolling(strategy.slow_window).mean()
+    data["signal"] = (data["fast_ma"] > data["slow_ma"]).astype(int)
+
+    cash = float(initial_capital)
+    shares = 0.0
+    open_trade: dict[str, Any] | None = None
+    trades: list[dict[str, Any]] = []
+    curve: list[dict[str, Any]] = []
+
+    for idx, row in data.iterrows():
+        price = float(row["close"])
+        timestamp = pd.to_datetime(row["time"]).to_pydatetime()
+        signal = int(row["signal"])
+        previous_signal = int(data.loc[idx - 1, "signal"]) if idx > 0 else 0
+
+        if signal == 1 and previous_signal == 0 and cash > 0:
+            gross_cash = cash
+            shares = (cash * (1 - fee_rate)) / price
+            fee = gross_cash * fee_rate
+            cash = 0.0
+            open_trade = {
+                "entry_date": timestamp.date().isoformat(),
+                "entry_price": _safe_float(price),
+                "shares": _safe_float(shares, 6),
+                "entry_fee": _safe_float(fee),
+            }
+        elif signal == 0 and previous_signal == 1 and shares > 0:
+            gross_value = shares * price
+            fee = gross_value * fee_rate
+            cash = gross_value - fee
+            if open_trade is not None:
+                entry_price = float(open_trade["entry_price"] or 0)
+                entry_fee = float(open_trade["entry_fee"] or 0)
+                total_fee = entry_fee + fee
+                pnl = cash - (shares * entry_price) - entry_fee
+                trades.append(
+                    {
+                        **open_trade,
+                        "exit_date": timestamp.date().isoformat(),
+                        "exit_price": _safe_float(price),
+                        "exit_fee": _safe_float(fee),
+                        "total_fee": _safe_float(total_fee),
+                        "pnl": _safe_float(pnl),
+                        "return_pct": _safe_float(((price / entry_price) - 1) * 100 if entry_price else None),
+                        "holding_days": int(
+                            (timestamp.date() - date.fromisoformat(open_trade["entry_date"])).days
+                        ),
+                    }
+                )
+            shares = 0.0
+            open_trade = None
+
+        equity = cash + shares * price
+        curve.append(
+            {
+                "date": timestamp.date().isoformat(),
+                "equity": equity,
+                "close": price,
+                "position": 1 if shares > 0 else 0,
+            }
+        )
+
+    if shares > 0 and open_trade is not None:
+        last = data.iloc[-1]
+        last_price = float(last["close"])
+        last_date = pd.to_datetime(last["time"]).date()
+        unrealized_pnl = (shares * last_price) - (shares * float(open_trade["entry_price"] or 0))
+        trades.append(
+            {
+                **open_trade,
+                "exit_date": None,
+                "exit_price": None,
+                "exit_fee": None,
+                "total_fee": open_trade["entry_fee"],
+                "pnl": _safe_float(unrealized_pnl),
+                "return_pct": _safe_float(
+                    ((last_price / float(open_trade["entry_price"] or last_price)) - 1) * 100
+                ),
+                "holding_days": int((last_date - date.fromisoformat(open_trade["entry_date"])).days),
+                "status": "open",
+            }
+        )
+        warnings.append("Last trade remains open at the end of the backtest window.")
+
+    equity_series = pd.Series([point["equity"] for point in curve], dtype="float64")
+    returns = equity_series.pct_change().dropna()
+    running_peak = equity_series.cummax()
+    drawdown = (equity_series / running_peak) - 1
+    final_equity = float(equity_series.iloc[-1])
+    completed_trades = [trade for trade in trades if trade.get("exit_date")]
+    winning_trades = [trade for trade in completed_trades if float(trade.get("pnl") or 0) > 0]
+
+    years = max((data["time"].iloc[-1] - data["time"].iloc[0]).days / 365.25, 1 / 365.25)
+    total_return = (final_equity / initial_capital) - 1
+    annualized_return = ((final_equity / initial_capital) ** (1 / years) - 1) if final_equity > 0 else None
+    sharpe = None
+    if len(returns) > 1 and float(returns.std(ddof=1)) > 0:
+        sharpe = (float(returns.mean()) / float(returns.std(ddof=1))) * np.sqrt(252)
+
+    metrics = {
+        "initial_capital": _safe_float(initial_capital),
+        "final_equity": _safe_float(final_equity),
+        "total_return_pct": _safe_float(total_return * 100),
+        "annualized_return_pct": _safe_float(annualized_return * 100 if annualized_return is not None else None),
+        "max_drawdown_pct": _safe_float(float(drawdown.min()) * 100),
+        "sharpe_daily_rf0": _safe_float(sharpe),
+        "trade_count": len(completed_trades),
+        "open_trade_count": len(trades) - len(completed_trades),
+        "win_rate_pct": _safe_float((len(winning_trades) / len(completed_trades)) * 100 if completed_trades else None),
+        "exposure_pct": _safe_float(
+            (sum(1 for point in curve if point["position"] == 1) / len(curve)) * 100
+        ),
+    }
+
+    sample_indexes = sorted({0, len(curve) // 4, len(curve) // 2, (len(curve) * 3) // 4, len(curve) - 1})
+    equity_curve_summary = {
+        "points": [
+            {
+                "date": curve[index]["date"],
+                "equity": _safe_float(curve[index]["equity"]),
+                "position": curve[index]["position"],
+            }
+            for index in sample_indexes
+        ],
+        "start_date": curve[0]["date"],
+        "end_date": curve[-1]["date"],
+        "data_points": len(curve),
+        "min_equity": _safe_float(float(equity_series.min())),
+        "max_equity": _safe_float(float(equity_series.max())),
+    }
+
+    if len(trades) > 100:
+        warnings.append("Trade list truncated to the first 100 entries.")
+
+    return metrics, equity_curve_summary, trades[:100], warnings
+
+
+def _bounded_unique_windows(values: list[int], *, min_value: int, max_value: int) -> list[int]:
+    windows = sorted({int(value) for value in values if min_value <= int(value) <= max_value})
+    if not windows:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_SWEEP_WINDOWS",
+                "message": f"Expected at least one window between {min_value} and {max_value}.",
+            },
+        )
+    return windows[:8]
+
+
+def _rank_sweep_cell(cell: dict[str, Any], objective: str) -> float:
+    value = cell.get(objective)
+    if value is None:
+        return float("-inf")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return float("-inf")
+    if objective == "max_drawdown_pct":
+        return -abs(numeric)
+    return numeric
+
+
 def _build_seasonality_matrix_from_period_returns(
     period_returns: list[dict[str, Any]],
     columns: list[str],
@@ -919,6 +1174,10 @@ async def _get_quant_metric_alias_response(
             },
         )
 
+    period_upper = _normalize_quant_period(period)
+    end_date = date.today()
+    start_date = _resolve_start_date(period_upper, end_date)
+
     benchmark_frame: pd.DataFrame | None = None
     if canonical_metric == "benchmark_risk":
         benchmark_frame = await _load_benchmark_frame(
@@ -928,9 +1187,6 @@ async def _get_quant_metric_alias_response(
             source=source,
         )
 
-    period_upper = _normalize_quant_period(period)
-    end_date = date.today()
-    start_date = _resolve_start_date(period_upper, end_date)
     frame, warning = await _load_quant_frame_with_warning(
         db=db,
         symbol=symbol_upper,
@@ -3356,6 +3612,161 @@ async def get_pair_diagnostics(
             last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
         ),
         error=error,
+    )
+
+
+@router.post("/{symbol}/backtest", response_model=StandardResponse[QuantBacktestResponseData])
+async def run_quant_backtest(
+    symbol: str,
+    request: QuantBacktestRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    symbol_upper = symbol.upper().strip()
+    if not symbol_upper:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+
+    period_upper = _normalize_quant_period(request.period)
+    end_date = date.today()
+    start_date = _resolve_start_date(period_upper, end_date)
+    adjustment_mode = _normalize_adjustment_mode(request.adjustment_mode)
+
+    frame, data_warning = await _load_quant_frame_with_warning(
+        db=db,
+        symbol=symbol_upper,
+        start_date=start_date,
+        end_date=end_date,
+        source=request.source,
+        period=period_upper,
+        adjustment_mode=adjustment_mode,
+    )
+    last_data_timestamp = _resolve_frame_last_timestamp(frame)
+
+    metrics, equity_curve_summary, trades, backtest_warnings = _build_moving_average_backtest(
+        frame,
+        strategy=request.strategy,
+        initial_capital=request.initial_capital,
+        fee_bps=request.fee_bps,
+    )
+    warnings = [warning for warning in [data_warning, *backtest_warnings] if warning]
+
+    payload = QuantBacktestResponseData(
+        symbol=symbol_upper,
+        strategy=request.strategy.model_dump(),
+        period=period_upper,
+        adjustment_mode=adjustment_mode,
+        computed_at=last_data_timestamp or datetime.utcnow(),
+        last_data_date=last_data_timestamp,
+        metrics=metrics,
+        equity_curve_summary=equity_curve_summary,
+        trades=trades,
+        warnings=warnings,
+    )
+    return StandardResponse(
+        data=payload,
+        meta=MetaData(
+            count=len(trades),
+            symbol=symbol_upper,
+            data_points=equity_curve_summary["data_points"],
+            last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+        ),
+    )
+
+
+@router.post("/{symbol}/sweep", response_model=StandardResponse[QuantSweepResponseData])
+async def run_quant_sweep(
+    symbol: str,
+    request: QuantSweepRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    symbol_upper = symbol.upper().strip()
+    if not symbol_upper:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+
+    fast_windows = _bounded_unique_windows(request.fast_windows, min_value=2, max_value=250)
+    slow_windows = _bounded_unique_windows(request.slow_windows, min_value=3, max_value=500)
+    combos = [(fast, slow) for fast in fast_windows for slow in slow_windows if fast < slow]
+    if not combos:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_SWEEP_GRID",
+                "message": "At least one fast_window must be smaller than one slow_window.",
+            },
+        )
+    if len(combos) > 64:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "SWEEP_TOO_LARGE", "message": "Sweep grid is capped at 64 valid cells."},
+        )
+
+    period_upper = _normalize_quant_period(request.period)
+    end_date = date.today()
+    start_date = _resolve_start_date(period_upper, end_date)
+    adjustment_mode = _normalize_adjustment_mode(request.adjustment_mode)
+    frame, data_warning = await _load_quant_frame_with_warning(
+        db=db,
+        symbol=symbol_upper,
+        start_date=start_date,
+        end_date=end_date,
+        source=request.source,
+        period=period_upper,
+        adjustment_mode=adjustment_mode,
+    )
+    last_data_timestamp = _resolve_frame_last_timestamp(frame)
+
+    cells: list[dict[str, Any]] = []
+    warnings = [data_warning] if data_warning else []
+    for fast_window, slow_window in combos:
+        strategy = MovingAverageCrossoverStrategy(
+            fast_window=fast_window,
+            slow_window=slow_window,
+        )
+        metrics, summary, trades, backtest_warnings = _build_moving_average_backtest(
+            frame,
+            strategy=strategy,
+            initial_capital=request.initial_capital,
+            fee_bps=request.fee_bps,
+        )
+        warnings.extend(backtest_warnings)
+        cells.append(
+            {
+                "fast_window": fast_window,
+                "slow_window": slow_window,
+                "total_return_pct": metrics.get("total_return_pct"),
+                "annualized_return_pct": metrics.get("annualized_return_pct"),
+                "max_drawdown_pct": metrics.get("max_drawdown_pct"),
+                "sharpe_daily_rf0": metrics.get("sharpe_daily_rf0"),
+                "trade_count": metrics.get("trade_count"),
+                "win_rate_pct": metrics.get("win_rate_pct"),
+                "exposure_pct": metrics.get("exposure_pct"),
+                "final_equity": metrics.get("final_equity"),
+                "data_points": summary.get("data_points"),
+                "open_trade_count": metrics.get("open_trade_count"),
+                "sample_trades": trades[:3],
+            }
+        )
+
+    best = max(cells, key=lambda cell: _rank_sweep_cell(cell, request.objective)) if cells else None
+    unique_warnings = list(dict.fromkeys(warning for warning in warnings if warning))
+    payload = QuantSweepResponseData(
+        symbol=symbol_upper,
+        period=period_upper,
+        adjustment_mode=adjustment_mode,
+        objective=request.objective,
+        computed_at=last_data_timestamp or datetime.utcnow(),
+        last_data_date=last_data_timestamp,
+        best=best,
+        cells=cells,
+        warnings=unique_warnings,
+    )
+    return StandardResponse(
+        data=payload,
+        meta=MetaData(
+            count=len(cells),
+            symbol=symbol_upper,
+            data_points=len(frame.index),
+            last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+        ),
     )
 
 

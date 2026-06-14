@@ -20,6 +20,7 @@ import { StockSplitsWidget } from './StockSplitsWidget';
 import { CompanyFilingsWidget } from './CompanyFilingsWidget';
 import { EventsCalendarWidget } from './EventsCalendarWidget';
 import { AnalystEstimatesWidget } from './AnalystEstimatesWidget';
+import { FundamentalAnalysisWidget } from './FundamentalAnalysisWidget';
 import { MajorShareholdersWidget } from './MajorShareholdersWidget';
 import { OfficersManagementWidget } from './OfficersManagementWidget';
 import { IntradayTradesWidget } from './IntradayTradesWidget';
@@ -85,6 +86,7 @@ import { BigFlowMonitorWidget } from './BigFlowMonitorWidget';
 import { EdgeHalfLifeWidget } from './EdgeHalfLifeWidget';
 import { PairLabWidget } from './PairLabWidget';
 import { MonteCarloLabWidget } from './MonteCarloLabWidget';
+import { BacktestLabWidget } from './BacktestLabWidget';
 import { SectorBreakdownWidget } from './SectorBreakdownWidget';
 import { MarketMoversSectorsWidget } from './MarketMoversSectorsWidget';
 import { NewsFlowWidget } from './NewsFlowWidget';
@@ -342,6 +344,7 @@ export const widgetRegistry: Record<WidgetType, ComponentType<WidgetProps>> = {
     company_filings: CompanyFilingsWidget as ComponentType<WidgetProps>,
     major_shareholders: MajorShareholdersWidget as ComponentType<WidgetProps>,
     analyst_estimates: AnalystEstimatesWidget as ComponentType<WidgetProps>,
+    fundamental_analysis: FundamentalAnalysisWidget as ComponentType<WidgetProps>,
     officers_management: OfficersManagementWidget as ComponentType<WidgetProps>,
     subsidiaries: SubsidiariesWidget as ComponentType<WidgetProps>,
 
@@ -373,6 +376,7 @@ export const widgetRegistry: Record<WidgetType, ComponentType<WidgetProps>> = {
     edge_half_life: EdgeHalfLifeWidget as ComponentType<WidgetProps>,
     pair_lab: PairLabWidget as ComponentType<WidgetProps>,
     monte_carlo_lab: MonteCarloLabWidget as ComponentType<WidgetProps>,
+    backtest_lab: BacktestLabWidget as ComponentType<WidgetProps>,
     news_flow: NewsFlowWidget as ComponentType<WidgetProps>,
     news_corporate_actions: NewsCorporateActionsWidget as ComponentType<WidgetProps>,
     dividend_ladder: DividendLadderWidget as ComponentType<WidgetProps>,
@@ -481,6 +485,7 @@ export const widgetNames: Record<WidgetType, string> = {
     company_filings: 'Company Filings',
     insider_trading: 'Insider Trading',
     analyst_estimates: 'Analyst Estimates',
+    fundamental_analysis: 'Fundamental Analysis',
     news_feed: 'Company News',
     events_calendar: 'Events Calendar',
     major_shareholders: 'Major Shareholders',
@@ -584,6 +589,7 @@ export const widgetNames: Record<WidgetType, string> = {
     edge_half_life: 'Edge Half-Life',
     pair_lab: 'Pair Lab',
     monte_carlo_lab: 'Monte Carlo Lab',
+    backtest_lab: 'Backtest Lab',
     sector_breakdown: 'Sector Breakdown',
     market_movers_sectors: 'Market Movers & Sectors',
     comparison_analysis: 'Comparison Analysis',
@@ -614,6 +620,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     company_filings: 'Direct SEC/HOSE documents',
     insider_trading: 'Recent executive transactions',
     analyst_estimates: 'Forecasts and price targets',
+    fundamental_analysis: 'Company fundamental thesis, strengths, risks, and supporting analysis',
     news_feed: 'Ticker-specific news timeline',
     events_calendar: 'Upcoming corporate events',
     major_shareholders: 'Top 10 institutional owners',
@@ -717,6 +724,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     edge_half_life: 'Rolling Sharpe with peak/decay read across 21/63/126D windows — descriptive edge-decay diagnostics',
     pair_lab: 'Two-symbol rolling correlation, log-spread z-score, and AR(1) mean-reversion half-life',
     monte_carlo_lab: 'IID bootstrap of past daily returns into forward max-drawdown and terminal-return percentile tables',
+    backtest_lab: 'Schema-driven moving-average crossover backtest with fees, trade list, and drawdown metrics',
     sector_breakdown: 'Market cap by industry',
     market_movers_sectors: 'Sector performance with top movers',
     comparison_analysis: 'Side-by-side fundamentals',

@@ -3,9 +3,11 @@ from datetime import date
 
 import pytest
 
+from vnibb.api.v1.schemas import StandardResponse
 from vnibb.api.v1.equity import _normalize_statement_unit_outliers, _ratio_has_metric_value, _to_ratio_data
 from vnibb.api.v1.equity import _enrich_missing_ratio_metrics
 from vnibb.api.v1.equity import _compute_rolling_high_low, _load_mongo_financial_ratio_rows, _load_mongo_financial_statement_rows
+from vnibb.api.v1.equity import get_fundamental_analysis
 from vnibb.models.company import Company
 from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
 from vnibb.models.screener import ScreenerSnapshot
@@ -28,6 +30,74 @@ class FakeMongoMarketDataService:
     async def get_eod_prices(self, symbol, *, lookback_days, limit):
         self.requests.append({"symbol": symbol, "dataset": "market_prices_eod", "lookback_days": lookback_days, "limit": limit})
         return self.rows
+
+
+@pytest.mark.asyncio
+async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch):
+    async def fake_profile(symbol, refresh, db):
+        return StandardResponse(data={"symbol": symbol, "company_name": "FPT Corp"})
+
+    async def fake_ratios(symbol, period, db):
+        return StandardResponse(data=[{"period": "2023", "pe": 10}, {"period": "2024", "pe": 12}])
+
+    async def fake_financials(symbol, statement_type, period, limit, db):
+        return StandardResponse(data=[{"period": "2024", "statement_type": statement_type}])
+
+    async def fake_shareholders(symbol, db):
+        return StandardResponse(data=[{"shareholder_name": "Holder"}])
+
+    async def fake_officers(symbol):
+        return StandardResponse(data=[{"name": "CEO"}])
+
+    async def fake_subsidiaries(symbol):
+        raise RuntimeError("subsidiaries unavailable")
+
+    async def fake_news(symbol, limit):
+        return StandardResponse(data=[{"title": "News"}])
+
+    async def fake_events(symbol, limit, db):
+        return StandardResponse(data=[], error="events unavailable")
+
+    async def fake_snapshot(symbol):
+        return {
+            "symbol": symbol,
+            "snapshotDate": "2026-06-14",
+            "intrinsicValue": 120000,
+            "marginOfSafety": 25.0,
+            "valuationMethod": "dcf",
+            "moat": "wide",
+            "roe": 22.5,
+            "netMargin": 15.0,
+            "fcfPositive": True,
+            "dividendYears": 5,
+        }
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_profile", fake_profile)
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financial_ratios", fake_ratios)
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials", fake_financials)
+    monkeypatch.setattr("vnibb.api.v1.equity.get_shareholders", fake_shareholders)
+    monkeypatch.setattr("vnibb.api.v1.equity.get_officers", fake_officers)
+    monkeypatch.setattr("vnibb.api.v1.equity.get_subsidiaries", fake_subsidiaries)
+    monkeypatch.setattr("vnibb.api.v1.equity.get_company_news", fake_news)
+    monkeypatch.setattr("vnibb.api.v1.equity.get_company_events", fake_events)
+    monkeypatch.setattr("vnibb.api.v1.equity._load_latest_fundamental_snapshot", fake_snapshot)
+
+    response = await get_fundamental_analysis("fpt", db=None)  # type: ignore[arg-type]
+
+    assert response.data["symbol"] == "FPT"
+    assert response.data["profile"]["company_name"] == "FPT Corp"
+    assert response.data["latest_fundamental_snapshot"]["ratio"]["period"] == "2024"
+    assert response.data["latest_fundamental_snapshot"]["financials"]["income"]["period"] == "2024"
+    assert response.data["valuation"]["intrinsic_value"] == 120000
+    assert response.data["valuation"]["valuation_method"] == "dcf"
+    assert response.data["competitive_advantage"]["moat"] == "wide"
+    assert "ROE 22.5%" in response.data["competitive_advantage"]["reasons"]
+    assert response.data["subsidiaries"] == []
+    assert response.data["section_errors"] == {
+        "subsidiaries": "subsidiaries unavailable",
+        "events": "events unavailable",
+    }
+    assert response.error == "Partial data unavailable"
 
 
 def test_normalize_statement_unit_outliers_repairs_single_1000x_row():

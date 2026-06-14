@@ -23,6 +23,7 @@ from vnibb.services.fundamental_valuation import (
     compute_intrinsic_value_rim,
     compute_margin_of_safety,
     compute_moat,
+    _normalize_statement_unit_outliers,
     to_document,
 )
 
@@ -54,6 +55,20 @@ def _cash_row(
         "purchase_of_fixed_assets": capex,
         "dividends_paid": dividends,
     }
+
+
+def test_normalize_statement_unit_outliers_repairs_fundamental_raw_rows() -> None:
+    rows = [
+        {"yearReport": 2022, "revenue": 10_000_000_000, "net_profit_after_tax": 1_000_000_000},
+        {"yearReport": 2023, "revenue": 11_000_000_000, "net_profit_after_tax": 1_100_000_000},
+        {"yearReport": 2024, "revenue": 12_000_000_000_000, "net_profit_after_tax": 1_200_000_000_000},
+    ]
+
+    normalized = _normalize_statement_unit_outliers(rows)
+
+    assert normalized[2]["revenue"] == 12_000_000_000
+    assert normalized[2]["net_profit_after_tax"] == 1_200_000_000
+    assert rows[2]["revenue"] == 12_000_000_000_000
 
 
 # --- DCF ---------------------------------------------------------------------

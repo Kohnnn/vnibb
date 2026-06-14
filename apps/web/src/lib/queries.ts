@@ -39,6 +39,7 @@ export const queryKeys = {
     companyNews: (symbol: string) => ['companyNews', symbol] as const,
     companyEvents: (symbol: string) => ['companyEvents', symbol] as const,
     analystEstimates: (symbol: string) => ['analystEstimates', symbol] as const,
+    fundamentalAnalysis: (symbol: string) => ['fundamentalAnalysis', symbol] as const,
     shareholders: (symbol: string) => ['shareholders', symbol] as const,
     officers: (symbol: string) => ['officers', symbol] as const,
     intraday: (symbol: string) => ['intraday', symbol] as const,
@@ -116,6 +117,8 @@ export const queryKeys = {
     rsGainers: (limit: number, lookbackDays: number) => ['rsGainers', limit, lookbackDays] as const,
     quant: (symbol: string, period: string, metrics: string[], source: string) =>
         ['quant', symbol, period, metrics.join(','), source] as const,
+    quantBacktest: (symbol: string, period: string, fastWindow: number, slowWindow: number, source: string, adjustmentMode: string) =>
+        ['quantBacktest', symbol, period, fastWindow, slowWindow, source, adjustmentMode] as const,
     seasonalityMatrix: (symbol: string, granularity: string, period: string, source: string, adjustmentMode: string) =>
         ['seasonalityMatrix', symbol, granularity, period, source, adjustmentMode] as const,
     gammaExposure: (symbol: string, period: string, source: string, adjustmentMode: string) =>
@@ -227,6 +230,16 @@ export function useAnalystEstimates(symbol: string, enabled = true) {
         queryFn: () => api.getAnalystEstimates(symbol),
         enabled: enabled && !!symbol,
         staleTime: 10 * 60 * 1000,
+    });
+}
+
+export function useFundamentalAnalysis(symbol: string, enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.fundamentalAnalysis(symbol),
+        queryFn: ({ signal }) => api.getFundamentalAnalysis(symbol, signal),
+        enabled: enabled && !!symbol,
+        staleTime: 10 * 60 * 1000,
+        retry: 1,
     });
 }
 
@@ -1343,6 +1356,46 @@ export function useQuantMetrics(
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         retry: 2,
+    });
+}
+
+export function useQuantBacktest(
+    symbol: string,
+    options?: {
+        period?: api.QuantPeriod;
+        fastWindow?: number;
+        slowWindow?: number;
+        initialCapital?: number;
+        feeBps?: number;
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        adjustmentMode?: 'raw' | 'adjusted';
+        enabled?: boolean;
+    }
+) {
+    const preferredSource = useVnstockSource();
+    const period = options?.period || '5Y';
+    const fastWindow = options?.fastWindow ?? 20;
+    const slowWindow = options?.slowWindow ?? 50;
+    const source = options?.source || preferredSource;
+    const adjustmentMode = options?.adjustmentMode || 'adjusted';
+
+    return useQuery({
+        queryKey: queryKeys.quantBacktest(symbol, period, fastWindow, slowWindow, source, adjustmentMode),
+        queryFn: () => api.runQuantBacktest(symbol, {
+            period,
+            initial_capital: options?.initialCapital,
+            fee_bps: options?.feeBps,
+            source,
+            adjustment_mode: adjustmentMode,
+            strategy: {
+                type: 'moving_average_crossover',
+                fast_window: fastWindow,
+                slow_window: slowWindow,
+            },
+        }),
+        enabled: options?.enabled !== false && !!symbol && fastWindow < slowWindow,
+        staleTime: 5 * 60 * 1000,
+        retry: 1,
     });
 }
 

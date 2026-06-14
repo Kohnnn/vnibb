@@ -875,6 +875,16 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['valuation', 'dcf', 'reverse dcf', 'intrinsic value', 'fair value', 'discount rate', 'wacc', 'fcf', 'fundamental']
     },
     {
+        type: 'fundamental_analysis',
+        name: 'Fundamental Analysis',
+        description: 'Defensive company thesis, strengths, risks, and supporting fundamental analysis when the backend endpoint is available',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 7, minW: 5, minH: 5 },
+        recommended: true,
+        searchKeywords: ['fundamental analysis', 'thesis', 'strengths', 'risks', 'company analysis']
+    },
+    {
         type: 'positioning_dashboard',
         name: 'Positioning Dashboard',
         description: 'Foreign / proprietary / domestic net-flow positioning across a VN universe (5D/20D)',
@@ -943,6 +953,16 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 5, h: 7, minW: 4, minH: 5 },
         recommended: true,
         searchKeywords: ['monte carlo', 'bootstrap', 'simulation', 'drawdown cone', 'risk', 'percentile', 'resampling', 'scenario']
+    },
+    {
+        type: 'backtest_lab',
+        name: 'Backtest Lab',
+        description: 'Schema-driven moving-average crossover backtest with fees, trade list, drawdown, and Sharpe metrics',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 8, minW: 4, minH: 6 },
+        recommended: true,
+        searchKeywords: ['backtest', 'moving average', 'crossover', 'strategy', 'trade list', 'fees', 'drawdown', 'sharpe']
     },
     {
         type: 'similar_stocks',
@@ -1275,6 +1295,7 @@ const WIDGET_LIBRARY_SECTION_OVERRIDES: Partial<Record<WidgetType, WidgetLibrary
     ai_analysis: 'ai_research',
     research_browser: 'ai_research',
     analyst_estimates: 'ai_research',
+    fundamental_analysis: 'fundamentals',
     watchlist: 'screeners_tools',
     portfolio_tracker: 'screeners_tools',
     price_alerts: 'screeners_tools',

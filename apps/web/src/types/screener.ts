@@ -29,6 +29,7 @@ export interface ScreenerData {
     quick_ratio?: number;
     ev_ebitda?: number;
     dividend_yield?: number;
+    pass_reason?: string;
     beta?: number;
     rs_rating?: number;
     // Performance
@@ -95,6 +96,13 @@ export const ALL_COLUMNS: ScreenerColumn[] = [
   { id: 'net_margin', label: 'Net Margin', accessor: 'net_margin', category: 'fundamentals', format: 'percent' },
   { id: 'gross_margin', label: 'Gross Margin', accessor: 'gross_margin', category: 'fundamentals', format: 'percent' },
   { id: 'dividend_yield', label: 'Div Yield', accessor: 'dividend_yield', category: 'fundamentals', format: 'percent' },
+  { id: 'debt_to_equity', label: 'Debt/Eq', accessor: 'debt_to_equity', category: 'fundamentals', format: 'number' },
+  { id: 'revenue_growth', label: 'Rev Growth', accessor: 'revenue_growth' as any, category: 'fundamentals', format: 'percent' },
+  { id: 'earnings_growth', label: 'Earn Growth', accessor: 'earnings_growth' as any, category: 'fundamentals', format: 'percent' },
+  { id: 'margin_of_safety', label: 'MoS', accessor: 'margin_of_safety' as any, category: 'valuation', format: 'percent' },
+  { id: 'fcf_positive', label: 'FCF+', accessor: 'fcf_positive' as any, category: 'fundamentals', format: 'text' },
+  { id: 'moat', label: 'Moat', accessor: 'moat' as any, category: 'fundamentals', format: 'text' },
+  { id: 'pass_reason', label: 'Pass Reason', accessor: 'pass_reason', category: 'fundamentals', align: 'left', width: 260, format: 'text' },
   
   // Technical
   { id: 'rs_rating', label: 'RS Rating', accessor: 'rs_rating', category: 'technical', format: 'number' },

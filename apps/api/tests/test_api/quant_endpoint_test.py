@@ -109,6 +109,135 @@ async def test_quant_endpoint_returns_requested_metrics(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_quant_backtest_rejects_invalid_moving_average_windows(client, monkeypatch):
+    async def fake_load_quant_frame_with_warning(**_kwargs):
+        return _build_price_frame(180), None
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.quant._load_quant_frame_with_warning", fake_load_quant_frame_with_warning
+    )
+
+    response = await client.post(
+        "/api/v1/quant/VNM/backtest",
+        json={
+            "strategy": {
+                "type": "moving_average_crossover",
+                "fast_window": 50,
+                "slow_window": 20,
+            }
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert "INVALID_STRATEGY" in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_quant_backtest_returns_metrics_summary_and_trades(client, monkeypatch):
+    async def fake_load_quant_frame_with_warning(**_kwargs):
+        frame = _build_price_frame(220)
+        midpoint = len(frame) // 2
+        frame.loc[:midpoint, "close"] = [120 - (index * 0.25) for index in range(midpoint + 1)]
+        frame.loc[midpoint + 1 :, "close"] = [
+            85 + (index * 0.8) for index in range(len(frame) - midpoint - 1)
+        ]
+        frame["open"] = frame["close"] - 0.2
+        frame["high"] = frame["close"] + 0.8
+        frame["low"] = frame["close"] - 0.8
+        return frame, "test warning"
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.quant._load_quant_frame_with_warning", fake_load_quant_frame_with_warning
+    )
+
+    response = await client.post(
+        "/api/v1/quant/VNM/backtest",
+        json={
+            "period": "1Y",
+            "initial_capital": 1000000,
+            "fee_bps": 10,
+            "strategy": {
+                "type": "moving_average_crossover",
+                "fast_window": 5,
+                "slow_window": 20,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    data = payload["data"]
+    assert data["symbol"] == "VNM"
+    assert data["strategy"]["type"] == "moving_average_crossover"
+    assert data["metrics"]["final_equity"] is not None
+    assert data["metrics"]["trade_count"] >= 0
+    assert data["equity_curve_summary"]["data_points"] == 220
+    assert len(data["equity_curve_summary"]["points"]) == 5
+    assert isinstance(data["trades"], list)
+    assert "test warning" in data["warnings"]
+    assert payload["meta"]["data_points"] == 220
+
+
+@pytest.mark.asyncio
+async def test_quant_sweep_returns_cells_and_best_combo(client, monkeypatch):
+    async def fake_load_quant_frame_with_warning(**_kwargs):
+        frame = _build_price_frame(220)
+        midpoint = len(frame) // 2
+        frame.loc[:midpoint, "close"] = [120 - (index * 0.25) for index in range(midpoint + 1)]
+        frame.loc[midpoint + 1 :, "close"] = [
+            85 + (index * 0.8) for index in range(len(frame) - midpoint - 1)
+        ]
+        frame["open"] = frame["close"] - 0.2
+        frame["high"] = frame["close"] + 0.8
+        frame["low"] = frame["close"] - 0.8
+        return frame, None
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.quant._load_quant_frame_with_warning", fake_load_quant_frame_with_warning
+    )
+
+    response = await client.post(
+        "/api/v1/quant/VNM/sweep",
+        json={
+            "period": "1Y",
+            "initial_capital": 1000000,
+            "fast_windows": [5, 10],
+            "slow_windows": [20, 40],
+            "objective": "total_return_pct",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    data = payload["data"]
+    assert data["symbol"] == "VNM"
+    assert data["objective"] == "total_return_pct"
+    assert len(data["cells"]) == 4
+    assert data["best"]["fast_window"] in {5, 10}
+    assert data["best"]["slow_window"] in {20, 40}
+    assert payload["meta"]["count"] == 4
+
+
+@pytest.mark.asyncio
+async def test_quant_sweep_rejects_invalid_grid(client, monkeypatch):
+    async def fake_load_quant_frame_with_warning(**_kwargs):
+        return _build_price_frame(180), None
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.quant._load_quant_frame_with_warning", fake_load_quant_frame_with_warning
+    )
+
+    response = await client.post(
+        "/api/v1/quant/VNM/sweep",
+        json={"fast_windows": [50], "slow_windows": [20]},
+    )
+
+    assert response.status_code == 400
+    assert "INVALID_SWEEP_GRID" in str(response.json())
+
+
+@pytest.mark.asyncio
 async def test_quant_endpoint_passes_adjustment_mode_to_frame_loader(client, monkeypatch):
     captured: dict[str, object] = {}
 
@@ -184,6 +313,36 @@ async def test_quant_endpoint_returns_benchmark_risk_metric(client, monkeypatch)
     assert "var_95_1d_pct" in metric
     assert "cvar_95_1d_pct" in metric
     assert isinstance(metric["series"], list)
+
+
+@pytest.mark.asyncio
+async def test_quant_benchmark_risk_alias_resolves_dates_before_loading_benchmark(
+    client, monkeypatch
+):
+    captured: dict[str, object] = {}
+
+    async def fake_load_quant_frame_with_warning(**_kwargs):
+        return _build_price_frame(220), None
+
+    async def fake_load_benchmark_frame(**kwargs):
+        captured.update(kwargs)
+        benchmark = _build_price_frame(220)
+        benchmark["close"] = benchmark["close"] * 0.985
+        return benchmark[["time", "close"]]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.quant._load_quant_frame_with_warning", fake_load_quant_frame_with_warning
+    )
+    monkeypatch.setattr("vnibb.api.v1.quant._load_benchmark_frame", fake_load_benchmark_frame)
+
+    response = await client.get(
+        "/api/v1/quant/VNM/benchmark-risk",
+        params={"period": "1Y", "adjustment_mode": "adjusted"},
+    )
+
+    assert response.status_code == 200
+    assert captured["start_date"] < captured["end_date"]
+    assert captured["source"]
 
 
 def test_compute_benchmark_risk_returns_relative_and_tail_metrics():

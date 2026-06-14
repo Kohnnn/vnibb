@@ -44,6 +44,7 @@ export interface EquityProfileData {
   outstanding_shares?: number;
   market_cap?: number;
   listed_date?: string;
+  description?: string | null;
 }
 
 export interface EquityProfileResponse {
@@ -116,6 +117,46 @@ export interface AnalystEstimatesResponse {
   data: AnalystEstimatesPayload;
   meta?: {
     count: number;
+  };
+  error?: string | null;
+}
+
+export interface FundamentalAnalysisItem {
+  label?: string | null;
+  title?: string | null;
+  name?: string | null;
+  metric?: string | null;
+  value?: string | number | null;
+  score?: number | null;
+  verdict?: string | null;
+  status?: string | null;
+  summary?: string | null;
+  description?: string | null;
+}
+
+export interface FundamentalAnalysisData {
+  symbol?: string;
+  source?: string | null;
+  generated_at?: string | null;
+  updated_at?: string | null;
+  summary?: string | null;
+  thesis?: string | null;
+  profile?: Record<string, any> | null;
+  valuation?: Record<string, any> | null;
+  competitive_advantage?: Record<string, any> | null;
+  section_errors?: Record<string, string> | null;
+  strengths?: Array<string | FundamentalAnalysisItem>;
+  risks?: Array<string | FundamentalAnalysisItem>;
+  metrics?: FundamentalAnalysisItem[];
+  sections?: FundamentalAnalysisItem[];
+}
+
+export interface FundamentalAnalysisResponse {
+  symbol?: string;
+  data?: FundamentalAnalysisData | FundamentalAnalysisItem[] | null;
+  meta?: {
+    count?: number;
+    last_data_date?: string | null;
   };
   error?: string | null;
 }

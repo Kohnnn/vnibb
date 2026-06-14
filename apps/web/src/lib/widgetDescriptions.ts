@@ -109,6 +109,23 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
     calculation: 'Combines cached profile metadata, website, listing context, and related corporate actions or dividend details.',
     interpretation: 'Use it to confirm what the company actually does before comparing its valuation or technical setup against peers.',
   },
+  fundamental_analysis: {
+    purpose: 'Shows a compact company fundamental thesis with strengths, risks, and supporting analysis points when the backend endpoint is available.',
+    calculation: 'Reads `/equity/{symbol}/fundamental-analysis` and renders the supplied summary, strengths, risks, metrics, or sections without client-side scoring.',
+    interpretation: 'Use it as a source-preserving starting point before drilling into ratios, statements, valuation, and ownership widgets.',
+    limitations: [
+      'If the endpoint is not deployed yet, the widget intentionally shows an unavailable or empty state.',
+    ],
+  },
+  backtest_lab: {
+    purpose: 'Runs a safe schema-driven moving-average crossover backtest for the selected symbol.',
+    calculation: 'Calls `/quant/{symbol}/backtest` with period, fast MA, slow MA, fees, and adjusted EOD history. The backend returns metrics, a compact equity curve, warnings, and trades.',
+    interpretation: 'Use it to test whether a simple trend-following rule had historical support before trying parameter sweeps or deeper validation.',
+    limitations: [
+      'Backtests are descriptive and can overfit. Results are not trading advice.',
+      'Current implementation uses close-price execution and all-in/all-out sizing only.',
+    ],
+  },
   major_shareholders: {
     purpose: 'Shows who owns the stock and how concentrated that ownership base appears.',
     calculation: 'Organizes shareholder and institutional ownership records into a ranked ownership view.',

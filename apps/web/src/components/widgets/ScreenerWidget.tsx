@@ -52,6 +52,13 @@ interface SerializedFilterGroup {
 const DEFAULT_SORT_FIELD = 'market_cap';
 const DEFAULT_SORT_ORDER: 'asc' | 'desc' = 'desc';
 const DEFAULT_VIEW_MODE: ViewMode = 'table';
+const PASS_REASON_PRESET_IDS = new Set([
+    'cheap_profitable',
+    'dividend_quality',
+    'growth_reasonable_price',
+    'low_debt_compounder',
+    'fcf_margin_expansion',
+]);
 
 function createEmptyFilterGroup(): FilterGroup {
     return { logic: 'AND', conditions: [] };
@@ -114,7 +121,7 @@ function quickFilterConditions(filters: ActiveFilter[]): FilterCondition[] {
             if (Array.isArray(value)) {
                 return value.filter((item): item is number | string => typeof item === 'number' || typeof item === 'string') as number[] | string[];
             }
-            if (typeof value === 'number') {
+            if (typeof value === 'number' || typeof value === 'boolean') {
                 return value;
             }
             if (typeof value === 'string') {
@@ -177,6 +184,38 @@ function safeRandomId(): string {
         return crypto.randomUUID();
     }
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function formatReasonMetric(row: Record<string, unknown>, field: string, label: string, suffix = ''): string | null {
+    const value = row[field];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return `${label} ${value.toFixed(field.includes('growth') || field.includes('margin') || field === 'roe' || field === 'dividend_yield' ? 1 : 2)}${suffix}`;
+    }
+    if (typeof value === 'boolean') {
+        return value ? `${label} yes` : `${label} no`;
+    }
+    if (typeof value === 'string' && value.trim()) {
+        return `${label} ${value}`;
+    }
+    return null;
+}
+
+function buildPassReason(screenId: string, row: Record<string, unknown>): string | undefined {
+    if (!PASS_REASON_PRESET_IDS.has(screenId)) return undefined;
+
+    const fieldsByPreset: Record<string, Array<[string, string, string?]>> = {
+        cheap_profitable: [['pe', 'P/E'], ['pb', 'P/B'], ['roe', 'ROE', '%']],
+        dividend_quality: [['dividend_yield', 'Yield', '%'], ['roe', 'ROE', '%'], ['debt_to_equity', 'Debt/Eq']],
+        growth_reasonable_price: [['revenue_growth', 'Rev growth', '%'], ['earnings_growth', 'Earn growth', '%'], ['pe', 'P/E']],
+        low_debt_compounder: [['roe', 'ROE', '%'], ['debt_to_equity', 'Debt/Eq'], ['revenue_growth', 'Rev growth', '%']],
+        fcf_margin_expansion: [['fcf_positive', 'FCF+'], ['net_margin', 'Net margin', '%'], ['revenue_growth', 'Rev growth', '%']],
+    };
+
+    const reasons = (fieldsByPreset[screenId] || [])
+        .map(([field, label, suffix]) => formatReasonMetric(row, field, label, suffix))
+        .filter((reason): reason is string => Boolean(reason));
+
+    return reasons.length ? reasons.join(' | ') : undefined;
 }
 
 export function ScreenerWidget({
@@ -324,13 +363,21 @@ export function ScreenerWidget({
         sort,
     });
 
-    const filteredData = useMemo(() => {
+    const dataWithPassReasons = useMemo(() => {
         if (!screenerData?.data) return [];
+        return screenerData.data.map((stock) => ({
+            ...stock,
+            pass_reason: buildPassReason(activeScreenId, stock as Record<string, unknown>) ?? stock.pass_reason,
+        }));
+    }, [activeScreenId, screenerData?.data]);
 
-        if (!search.trim()) return screenerData.data;
+    const filteredData = useMemo(() => {
+        if (!dataWithPassReasons.length) return [];
+
+        if (!search.trim()) return dataWithPassReasons;
 
         const normalizedQuery = search.trim().toLowerCase();
-        return screenerData.data.filter((stock: Record<string, unknown>) => {
+        return dataWithPassReasons.filter((stock: Record<string, unknown>) => {
             const symbolValue = String(stock.ticker ?? stock.symbol ?? '').toLowerCase();
             const nameValue = String(stock.organ_name ?? stock.company_name ?? '').toLowerCase();
             const industryValue = String(stock.industry_name ?? stock.industry ?? '').toLowerCase();
@@ -338,7 +385,7 @@ export function ScreenerWidget({
                 || nameValue.includes(normalizedQuery)
                 || industryValue.includes(normalizedQuery);
         });
-    }, [screenerData?.data, search]);
+    }, [dataWithPassReasons, search]);
 
     const hasData = filteredData.length > 0;
     const isFallback = Boolean(error && hasData);

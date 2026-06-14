@@ -18,7 +18,7 @@ export interface FilterCondition {
     id: string;
     field: string;
     operator: 'gt' | 'lt' | 'eq' | 'gte' | 'lte' | 'between' | 'in';
-    value: number | number[] | string[];
+    value: number | number[] | string[] | boolean;
     enabled: boolean;
 }
 

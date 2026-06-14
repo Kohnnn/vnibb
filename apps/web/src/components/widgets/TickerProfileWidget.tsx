@@ -166,6 +166,7 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
             : null);
     const companyName = cleanText(profileData.company_name) || symbol
     const shortName = cleanText(profileData.short_name)
+    const description = cleanText(profileData.description)
     // Fall back to the screener's ICB industry if the profile's industry is
     // missing (older/cached profiles), so the Industry field never shows a
     // legal entity type. (DEF-05)
@@ -261,9 +262,9 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
 
             <div className="pt-2 border-t border-[var(--border-color)] space-y-2.5">
                 <p className="text-sm text-[var(--text-muted)] leading-relaxed">
-                    {industry
+                    {description || (industry
                         ? `${companyType} operating in ${industry}.`
-                        : 'No company description available.'}
+                        : 'No company description available.')}
                     {listedDate && ` Listed since ${formatDateOnly(listedDate)}.`}
                 </p>
 

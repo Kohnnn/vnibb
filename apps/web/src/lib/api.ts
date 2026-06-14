@@ -298,7 +298,7 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
 
 // ============ Equity API ============
 
-import type { EquityHistoricalResponse, EquityProfileResponse, CompanyNewsResponse, CompanyEventsResponse, AnalystEstimatesResponse, ShareholdersResponse, OfficersResponse, IntradayResponse, FinancialRatiosResponse, RatioHistoryResponse, ForeignTradingResponse, TransactionFlowResponse, CorrelationMatrixResponse, SubsidiariesResponse, BalanceSheetResponse, IncomeStatementResponse, CashFlowResponse, MarketOverviewResponse } from '@/types/equity';
+import type { EquityHistoricalResponse, EquityProfileResponse, CompanyNewsResponse, CompanyEventsResponse, AnalystEstimatesResponse, FundamentalAnalysisResponse, ShareholdersResponse, OfficersResponse, IntradayResponse, FinancialRatiosResponse, RatioHistoryResponse, ForeignTradingResponse, TransactionFlowResponse, CorrelationMatrixResponse, SubsidiariesResponse, BalanceSheetResponse, IncomeStatementResponse, CashFlowResponse, MarketOverviewResponse } from '@/types/equity';
 import type { ScreenerResponse } from '@/types/screener';
 import type {
     Dashboard,
@@ -495,6 +495,13 @@ export async function getCompanyNews(
         params: {
             limit: options?.limit,
         },
+    });
+}
+
+export async function getFundamentalAnalysis(symbol: string, signal?: AbortSignal): Promise<FundamentalAnalysisResponse> {
+    return fetchAPI<FundamentalAnalysisResponse>(`/equity/${symbol}/fundamental-analysis`, {
+        timeout: 20000,
+        signal,
     });
 }
 
@@ -2119,6 +2126,58 @@ export interface SeasonalityMatrixResponse {
     error?: string | null
 }
 
+export interface QuantBacktestRequest {
+    period?: QuantPeriod
+    initial_capital?: number
+    fee_bps?: number
+    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+    adjustment_mode?: 'raw' | 'adjusted'
+    strategy?: {
+        type: 'moving_average_crossover'
+        fast_window?: number
+        slow_window?: number
+    }
+}
+
+export interface QuantBacktestTrade {
+    entry_date?: string | null
+    exit_date?: string | null
+    entry_price?: number | null
+    exit_price?: number | null
+    pnl?: number | null
+    return_pct?: number | null
+    holding_days?: number | null
+    status?: string | null
+}
+
+export interface QuantBacktestResponse {
+    data: {
+        symbol: string
+        strategy: Record<string, unknown>
+        period: QuantPeriod
+        adjustment_mode?: 'raw' | 'adjusted'
+        computed_at: string
+        last_data_date?: string | null
+        metrics: Record<string, number | null>
+        equity_curve_summary: {
+            points?: Array<{ date: string; equity: number | null; position?: number }>
+            start_date?: string
+            end_date?: string
+            data_points?: number
+            min_equity?: number | null
+            max_equity?: number | null
+        }
+        trades: QuantBacktestTrade[]
+        warnings?: string[]
+    }
+    meta?: {
+        count?: number
+        data_points?: number
+        last_data_date?: string | null
+    }
+    error?: string | null
+}
+
 export async function getQuantMetrics(
     symbol: string,
     options?: {
@@ -2155,6 +2214,29 @@ export async function getSeasonalityMatrix(
             source: options?.source,
             adjustment_mode: options?.adjustmentMode,
         },
+        timeout: 45000,
+    })
+}
+
+export async function runQuantBacktest(
+    symbol: string,
+    request?: QuantBacktestRequest
+): Promise<QuantBacktestResponse> {
+    const body = {
+        period: request?.period ?? '5Y',
+        initial_capital: request?.initial_capital ?? 100_000_000,
+        fee_bps: request?.fee_bps ?? 15,
+        source: request?.source,
+        adjustment_mode: request?.adjustment_mode ?? 'adjusted',
+        strategy: {
+            type: 'moving_average_crossover',
+            fast_window: request?.strategy?.fast_window ?? 20,
+            slow_window: request?.strategy?.slow_window ?? 50,
+        },
+    }
+    return fetchAPI<QuantBacktestResponse>(`/quant/${symbol}/backtest`, {
+        method: 'POST',
+        body: body as unknown as BodyInit,
         timeout: 45000,
     })
 }

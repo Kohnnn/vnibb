@@ -138,6 +138,48 @@ _FINANCIAL_KEYWORDS = (
 
 _YEAR_RE = re.compile(r"(\d{4})")
 
+_STATEMENT_UNIT_FIELDS = {
+    "revenue",
+    "net_sales",
+    "total_operating_revenue",
+    "net_revenue",
+    "total_operating_income",
+    "net_interest_income",
+    "net_profit_after_tax",
+    "post_tax_profit",
+    "share_holder_income",
+    "net_income",
+    "profit_after_tax",
+    "total_assets",
+    "total_asset",
+    "owners_equity",
+    "equity",
+    "shareholders_equity",
+    "owner_equity",
+    "b_owners_equity",
+    "viii_capital_and_funds",
+    "total_liabilities",
+    "liabilities",
+    "liability",
+    "debt",
+    "a_liabilities",
+    "c. nợ phải trả",
+    "net_cash_flows_from_operating_activities",
+    "net_cash_inflows_outflows_from_operating_activities",
+    "operating_cash_flow",
+    "cash_from_operations",
+    "lưu chuyển tiền thuần từ hoạt động kinh doanh",
+    "purchase_of_fixed_assets",
+    "purchases_of_fixed_assets",
+    "capex",
+    "capital_expenditure",
+    "payment_for_fixed_assets_constructions_and_other_long_term_assets",
+    "dividends_paid",
+    "dividend_paid",
+    "payment_of_dividends",
+    "dividends_paid_profits_distributed_to_owners",
+}
+
 
 @dataclass(frozen=True)
 class ValuationConfig:
@@ -243,6 +285,44 @@ def _to_float(value: Any) -> float | None:
     if math.isnan(result) or math.isinf(result):
         return None
     return result
+
+
+def _median_abs(values: Sequence[float]) -> float | None:
+    finite = sorted(abs(value) for value in values if math.isfinite(value) and value != 0)
+    if not finite:
+        return None
+    midpoint = len(finite) // 2
+    if len(finite) % 2:
+        return finite[midpoint]
+    return (finite[midpoint - 1] + finite[midpoint]) / 2
+
+
+def _normalize_statement_unit_outliers(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Repair isolated 1000x raw statement rows before fundamental derivation."""
+
+    normalized_rows = [dict(row) for row in rows]
+    if len(normalized_rows) < 3:
+        return normalized_rows
+
+    for field_name in _STATEMENT_UNIT_FIELDS:
+        values = [
+            value
+            for row in normalized_rows
+            if (value := _to_float(row.get(field_name))) is not None
+        ]
+        baseline = _median_abs(values)
+        if baseline is None or baseline <= 0:
+            continue
+        for row in normalized_rows:
+            value = _to_float(row.get(field_name))
+            if value is None:
+                continue
+            abs_value = abs(value)
+            scaled_abs = abs_value / 1000
+            if abs_value > baseline * 100 and baseline / 5 <= scaled_abs <= baseline * 5:
+                row[field_name] = value / 1000
+
+    return normalized_rows
 
 
 def _pick_float(row: Any, *aliases: str) -> float | None:
@@ -850,9 +930,9 @@ async def load_fundamental_inputs(symbol: str, svc: Any) -> FundamentalInputs:
         symbol_upper, dataset=DATASET_LISTINGS, limit=5
     )
 
-    income_statements = _dedup_annual_rows(income_records)
-    balance_sheets = _dedup_annual_rows(balance_records)
-    cash_flows = _dedup_annual_rows(cash_records)
+    income_statements = _normalize_statement_unit_outliers(_dedup_annual_rows(income_records))
+    balance_sheets = _normalize_statement_unit_outliers(_dedup_annual_rows(balance_records))
+    cash_flows = _normalize_statement_unit_outliers(_dedup_annual_rows(cash_records))
     ratio_rows = _dedup_annual_rows(ratio_records)
     ratios = ratio_rows[-1] if ratio_rows else {}
 

@@ -761,6 +761,12 @@ const MAIN_QUANT_TEMPLATE: TemplateWidget[] = [
         config: {},
         layout: { x: 16, y: 22, w: 8, h: 10, minW: 6, minH: 8 }
     },
+    {
+        type: 'backtest_lab',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 32, w: 8, h: 9, minW: 5, minH: 6 }
+    },
 ];
 
 const QUANT_COMPARISON_TEMPLATE: TemplateWidget[] = [
@@ -1025,6 +1031,12 @@ const MAIN_FUNDAMENTALS_TEMPLATE: TemplateWidget[] = [
         syncGroupId: 1,
         config: { periodSyncGroup: 'fundamental-core', hidePeriodToggle: true },
         layout: { x: 12, y: 10, w: 12, h: 10, minW: 8, minH: 8 }
+    },
+    {
+        type: 'fundamental_analysis',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 20, w: 8, h: 7, minW: 5, minH: 5 }
     },
 ];
 

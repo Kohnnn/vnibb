@@ -50,6 +50,8 @@ export { EarningsReleaseRecapWidget } from './EarningsReleaseRecapWidget';
 export { DerivativesContractsBoardWidget } from './DerivativesContractsBoardWidget';
 export { DerivativesPriceHistoryWidget } from './DerivativesPriceHistoryWidget';
 export { AnalystEstimatesWidget } from './AnalystEstimatesWidget';
+export { FundamentalAnalysisWidget } from './FundamentalAnalysisWidget';
+export { BacktestLabWidget } from './BacktestLabWidget';
 export { DividendPaymentWidget } from './DividendPaymentWidget';
 export { CompanyFilingsWidget } from './CompanyFilingsWidget';
 export { StockSplitsWidget } from './StockSplitsWidget';

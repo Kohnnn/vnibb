@@ -2085,6 +2085,104 @@ def _normalize_symbol_input(symbol: str) -> str:
     return tokens[0] if tokens else raw
 
 
+def _serialize_analysis_section(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if isinstance(value, list):
+        return [_serialize_analysis_section(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _serialize_analysis_section(item) for key, item in value.items()}
+    return value
+
+
+async def _safe_fundamental_section(
+    section_errors: dict[str, str],
+    section: str,
+    loader: Callable[[], Awaitable[Any]],
+    default: Any,
+) -> Any:
+    try:
+        response = await loader()
+        if getattr(response, "error", None):
+            section_errors[section] = str(response.error)
+        return _serialize_analysis_section(getattr(response, "data", response))
+    except BaseException as exc:
+        if _is_control_flow_exception(exc):
+            raise
+        logger.warning("Fundamental analysis section failed (section=%s): %s", section, exc)
+        section_errors[section] = str(exc)
+        return default
+
+
+async def _load_latest_fundamental_snapshot(symbol: str) -> dict[str, Any] | None:
+    service = get_mongo_market_data_service()
+    if not service.enabled:
+        return None
+    snapshots = await service.get_latest_fundamental_snapshots([symbol.upper()])
+    return snapshots.get(symbol.upper())
+
+
+def _build_fundamental_valuation_section(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not snapshot:
+        return None
+    return {
+        "intrinsic_value": snapshot.get("intrinsicValue"),
+        "margin_of_safety": snapshot.get("marginOfSafety"),
+        "valuation_method": snapshot.get("valuationMethod"),
+        "price": snapshot.get("price"),
+        "market_cap": snapshot.get("marketCap"),
+        "pe": snapshot.get("pe"),
+        "pb": snapshot.get("pb"),
+        "ps": snapshot.get("ps"),
+        "ev_ebitda": snapshot.get("evEbitda"),
+        "as_of": snapshot.get("snapshotDate"),
+        "inputs": snapshot.get("inputs") or {},
+        "source": snapshot.get("source") or "vnibb-fundamental-engine",
+        "note": "Model-derived reference estimate, not investment advice.",
+    }
+
+
+def _build_competitive_advantage_section(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not snapshot:
+        return None
+    moat = snapshot.get("moat")
+    reasons: list[str] = []
+    roe = snapshot.get("roe")
+    net_margin = snapshot.get("netMargin")
+    revenue_cagr = snapshot.get("revenueCagr5y")
+    profit_cagr = snapshot.get("profitCagr5y")
+    fcf_positive = snapshot.get("fcfPositive")
+    dividend_years = snapshot.get("dividendYears")
+    for label, value, suffix in (
+        ("ROE", roe, "%"),
+        ("Net margin", net_margin, "%"),
+        ("5Y revenue CAGR", revenue_cagr, "%"),
+        ("5Y profit CAGR", profit_cagr, "%"),
+    ):
+        if isinstance(value, (int, float)):
+            reasons.append(f"{label} {float(value):.1f}{suffix}")
+    if isinstance(fcf_positive, bool):
+        reasons.append("Positive FCF" if fcf_positive else "FCF not positive")
+    if isinstance(dividend_years, (int, float)):
+        reasons.append(f"Dividend streak {int(dividend_years)}y")
+    return {
+        "moat": moat,
+        "quality_metrics": {
+            "roe": roe,
+            "roa": snapshot.get("roa"),
+            "net_margin": net_margin,
+            "debt_to_equity": snapshot.get("debtToEquity"),
+            "revenue_cagr_5y": revenue_cagr,
+            "profit_cagr_5y": profit_cagr,
+            "fcf_positive": fcf_positive,
+            "dividend_years": dividend_years,
+        },
+        "reasons": reasons,
+        "as_of": snapshot.get("snapshotDate"),
+        "note": "Moat is a rules-based VNIBB quality label derived from historical profitability and margin behavior.",
+    }
+
+
 def _coerce_optional_float(value: Any) -> Optional[float]:
     if value is None:
         return None
@@ -5215,6 +5313,112 @@ async def get_profile(
                 )
 
         return StandardResponse(data=None, error=str(e))
+
+
+@router.get("/{symbol}/fundamental-analysis", response_model=StandardResponse[dict[str, Any]])
+async def get_fundamental_analysis(
+    symbol: str = Path(..., min_length=1, max_length=10, pattern=r"^[A-Za-z0-9._-]+$"),
+    db: AsyncSession = Depends(get_db),
+):
+    symbol_upper = symbol.upper()
+    section_errors: dict[str, str] = {}
+
+    profile = await _safe_fundamental_section(
+        section_errors,
+        "profile",
+        lambda: get_profile(symbol=symbol_upper, refresh=False, db=db),
+        None,
+    )
+    ratios = await _safe_fundamental_section(
+        section_errors,
+        "ratios",
+        lambda: get_financial_ratios(symbol=symbol_upper, period="year", db=db),
+        [],
+    )
+    financials = {
+        statement_type: await _safe_fundamental_section(
+            section_errors,
+            f"financials.{statement_type}",
+            lambda statement_type=statement_type: get_financials(
+                symbol=symbol_upper,
+                statement_type=statement_type,
+                period="year",
+                limit=5,
+                db=db,
+            ),
+            [],
+        )
+        for statement_type in ("income", "balance", "cashflow")
+    }
+    shareholders = await _safe_fundamental_section(
+        section_errors,
+        "shareholders",
+        lambda: get_shareholders(symbol=symbol_upper, db=db),
+        [],
+    )
+    officers = await _safe_fundamental_section(
+        section_errors,
+        "officers",
+        lambda: get_officers(symbol=symbol_upper),
+        [],
+    )
+    subsidiaries = await _safe_fundamental_section(
+        section_errors,
+        "subsidiaries",
+        lambda: get_subsidiaries(symbol=symbol_upper),
+        [],
+    )
+    news = await _safe_fundamental_section(
+        section_errors,
+        "news",
+        lambda: get_company_news(symbol=symbol_upper, limit=10),
+        [],
+    )
+    events = await _safe_fundamental_section(
+        section_errors,
+        "events",
+        lambda: get_company_events(symbol=symbol_upper, limit=10, db=db),
+        [],
+    )
+    fundamental_snapshot = await _safe_fundamental_section(
+        section_errors,
+        "fundamental_snapshot",
+        lambda: _load_latest_fundamental_snapshot(symbol_upper),
+        None,
+    )
+    valuation = _build_fundamental_valuation_section(fundamental_snapshot)
+    competitive_advantage = _build_competitive_advantage_section(fundamental_snapshot)
+
+    latest_ratio = ratios[-1] if isinstance(ratios, list) and ratios else None
+    latest_financials = {
+        key: rows[-1] if isinstance(rows, list) and rows else None
+        for key, rows in financials.items()
+    }
+    payload = {
+        "symbol": symbol_upper,
+        "profile": profile,
+        "valuation": valuation,
+        "competitive_advantage": competitive_advantage,
+        "fundamental_snapshot": fundamental_snapshot,
+        "latest_fundamental_snapshot": {
+            "ratio": latest_ratio,
+            "financials": latest_financials,
+            "derived": fundamental_snapshot,
+        },
+        "financials": financials,
+        "ratios": ratios,
+        "shareholders": shareholders,
+        "officers": officers,
+        "subsidiaries": subsidiaries,
+        "news": news,
+        "events": events,
+        "section_errors": section_errors,
+    }
+    return StandardResponse(
+        data=payload,
+        meta=MetaData(count=1, symbol=symbol_upper),
+        error="Partial data unavailable" if section_errors else None,
+    )
 
 
 @router.get("/{symbol}/financials", response_model=StandardResponse[List[FinancialStatementData]])
