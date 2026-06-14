@@ -119,6 +119,8 @@ export const queryKeys = {
         ['quant', symbol, period, metrics.join(','), source] as const,
     quantBacktest: (symbol: string, period: string, fastWindow: number, slowWindow: number, source: string, adjustmentMode: string) =>
         ['quantBacktest', symbol, period, fastWindow, slowWindow, source, adjustmentMode] as const,
+    quantSweep: (symbol: string, period: string, fastWindows: number[], slowWindows: number[], objective: string, source: string, adjustmentMode: string) =>
+        ['quantSweep', symbol, period, fastWindows.join(','), slowWindows.join(','), objective, source, adjustmentMode] as const,
     seasonalityMatrix: (symbol: string, granularity: string, period: string, source: string, adjustmentMode: string) =>
         ['seasonalityMatrix', symbol, granularity, period, source, adjustmentMode] as const,
     gammaExposure: (symbol: string, period: string, source: string, adjustmentMode: string) =>
@@ -1394,6 +1396,47 @@ export function useQuantBacktest(
             },
         }),
         enabled: options?.enabled !== false && !!symbol && fastWindow < slowWindow,
+        staleTime: 5 * 60 * 1000,
+        retry: 1,
+    });
+}
+
+export function useQuantSweep(
+    symbol: string,
+    options?: {
+        period?: api.QuantPeriod;
+        fastWindows?: number[];
+        slowWindows?: number[];
+        objective?: api.QuantSweepRequest['objective'];
+        initialCapital?: number;
+        feeBps?: number;
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        adjustmentMode?: 'raw' | 'adjusted';
+        enabled?: boolean;
+    }
+) {
+    const preferredSource = useVnstockSource();
+    const period = options?.period || '5Y';
+    const fastWindows = options?.fastWindows ?? [10, 20, 50];
+    const slowWindows = options?.slowWindows ?? [50, 100, 200];
+    const objective = options?.objective || 'sharpe_daily_rf0';
+    const source = options?.source || preferredSource;
+    const adjustmentMode = options?.adjustmentMode || 'adjusted';
+    const hasValidCombo = fastWindows.some((fast) => slowWindows.some((slow) => fast < slow));
+
+    return useQuery({
+        queryKey: queryKeys.quantSweep(symbol, period, fastWindows, slowWindows, objective, source, adjustmentMode),
+        queryFn: () => api.runQuantSweep(symbol, {
+            period,
+            initial_capital: options?.initialCapital,
+            fee_bps: options?.feeBps,
+            source,
+            adjustment_mode: adjustmentMode,
+            fast_windows: fastWindows,
+            slow_windows: slowWindows,
+            objective,
+        }),
+        enabled: options?.enabled !== false && !!symbol && hasValidCombo,
         staleTime: 5 * 60 * 1000,
         retry: 1,
     });

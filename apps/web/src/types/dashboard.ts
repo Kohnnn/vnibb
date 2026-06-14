@@ -108,6 +108,7 @@ export type WidgetType =
     | 'pair_lab'
     | 'monte_carlo_lab'
     | 'backtest_lab'
+    | 'sweep_matrix'
     | 'sector_performance'
     | 'market_movers_sectors'
     | 'sector_rotation_radar'

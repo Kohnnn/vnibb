@@ -965,6 +965,16 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['backtest', 'moving average', 'crossover', 'strategy', 'trade list', 'fees', 'drawdown', 'sharpe']
     },
     {
+        type: 'sweep_matrix',
+        name: 'Sweep Matrix',
+        description: 'Bounded moving-average parameter grid with objective ranking and compact cells',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 7, h: 8, minW: 5, minH: 6 },
+        recommended: true,
+        searchKeywords: ['sweep', 'parameter grid', 'moving average', 'crossover', 'optimization', 'sharpe', 'drawdown']
+    },
+    {
         type: 'similar_stocks',
         name: 'Similar Stocks',
         description: 'Find stocks similar to current symbol',

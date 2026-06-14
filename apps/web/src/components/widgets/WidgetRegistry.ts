@@ -87,6 +87,7 @@ import { EdgeHalfLifeWidget } from './EdgeHalfLifeWidget';
 import { PairLabWidget } from './PairLabWidget';
 import { MonteCarloLabWidget } from './MonteCarloLabWidget';
 import { BacktestLabWidget } from './BacktestLabWidget';
+import { SweepMatrixWidget } from './SweepMatrixWidget';
 import { SectorBreakdownWidget } from './SectorBreakdownWidget';
 import { MarketMoversSectorsWidget } from './MarketMoversSectorsWidget';
 import { NewsFlowWidget } from './NewsFlowWidget';
@@ -377,6 +378,7 @@ export const widgetRegistry: Record<WidgetType, ComponentType<WidgetProps>> = {
     pair_lab: PairLabWidget as ComponentType<WidgetProps>,
     monte_carlo_lab: MonteCarloLabWidget as ComponentType<WidgetProps>,
     backtest_lab: BacktestLabWidget as ComponentType<WidgetProps>,
+    sweep_matrix: SweepMatrixWidget as ComponentType<WidgetProps>,
     news_flow: NewsFlowWidget as ComponentType<WidgetProps>,
     news_corporate_actions: NewsCorporateActionsWidget as ComponentType<WidgetProps>,
     dividend_ladder: DividendLadderWidget as ComponentType<WidgetProps>,
@@ -590,6 +592,7 @@ export const widgetNames: Record<WidgetType, string> = {
     pair_lab: 'Pair Lab',
     monte_carlo_lab: 'Monte Carlo Lab',
     backtest_lab: 'Backtest Lab',
+    sweep_matrix: 'Sweep Matrix',
     sector_breakdown: 'Sector Breakdown',
     market_movers_sectors: 'Market Movers & Sectors',
     comparison_analysis: 'Comparison Analysis',
@@ -725,6 +728,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     pair_lab: 'Two-symbol rolling correlation, log-spread z-score, and AR(1) mean-reversion half-life',
     monte_carlo_lab: 'IID bootstrap of past daily returns into forward max-drawdown and terminal-return percentile tables',
     backtest_lab: 'Schema-driven moving-average crossover backtest with fees, trade list, and drawdown metrics',
+    sweep_matrix: 'Bounded moving-average parameter sweep with best-row ranking and matrix cells',
     sector_breakdown: 'Market cap by industry',
     market_movers_sectors: 'Sector performance with top movers',
     comparison_analysis: 'Side-by-side fundamentals',

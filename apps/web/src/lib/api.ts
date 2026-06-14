@@ -2178,6 +2178,53 @@ export interface QuantBacktestResponse {
     error?: string | null
 }
 
+export interface QuantSweepRequest {
+    period?: QuantPeriod
+    initial_capital?: number
+    fee_bps?: number
+    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+    adjustment_mode?: 'raw' | 'adjusted'
+    fast_windows?: number[]
+    slow_windows?: number[]
+    objective?: 'total_return_pct' | 'sharpe_daily_rf0' | 'max_drawdown_pct' | 'annualized_return_pct'
+}
+
+export interface QuantSweepCell {
+    fast_window: number
+    slow_window: number
+    total_return_pct?: number | null
+    annualized_return_pct?: number | null
+    max_drawdown_pct?: number | null
+    sharpe_daily_rf0?: number | null
+    trade_count?: number | null
+    win_rate_pct?: number | null
+    exposure_pct?: number | null
+    final_equity?: number | null
+    data_points?: number | null
+    open_trade_count?: number | null
+    sample_trades?: QuantBacktestTrade[]
+}
+
+export interface QuantSweepResponse {
+    data: {
+        symbol: string
+        period: QuantPeriod
+        adjustment_mode?: 'raw' | 'adjusted'
+        objective: QuantSweepRequest['objective']
+        computed_at: string
+        last_data_date?: string | null
+        best?: QuantSweepCell | null
+        cells: QuantSweepCell[]
+        warnings?: string[]
+    }
+    meta?: {
+        count?: number
+        data_points?: number
+        last_data_date?: string | null
+    }
+    error?: string | null
+}
+
 export async function getQuantMetrics(
     symbol: string,
     options?: {
@@ -2238,6 +2285,27 @@ export async function runQuantBacktest(
         method: 'POST',
         body: body as unknown as BodyInit,
         timeout: 45000,
+    })
+}
+
+export async function runQuantSweep(
+    symbol: string,
+    request?: QuantSweepRequest
+): Promise<QuantSweepResponse> {
+    const body = {
+        period: request?.period ?? '5Y',
+        initial_capital: request?.initial_capital ?? 100_000_000,
+        fee_bps: request?.fee_bps ?? 15,
+        source: request?.source,
+        adjustment_mode: request?.adjustment_mode ?? 'adjusted',
+        fast_windows: request?.fast_windows ?? [10, 20, 50],
+        slow_windows: request?.slow_windows ?? [50, 100, 200],
+        objective: request?.objective ?? 'sharpe_daily_rf0',
+    }
+    return fetchAPI<QuantSweepResponse>(`/quant/${symbol}/sweep`, {
+        method: 'POST',
+        body: body as unknown as BodyInit,
+        timeout: 60000,
     })
 }
 

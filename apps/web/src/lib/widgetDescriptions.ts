@@ -126,6 +126,15 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
       'Current implementation uses close-price execution and all-in/all-out sizing only.',
     ],
   },
+  sweep_matrix: {
+    purpose: 'Runs a bounded moving-average parameter sweep for the selected symbol.',
+    calculation: 'Calls `/quant/{symbol}/sweep` with a small fast/slow MA grid and objective ranking. The backend returns matrix cells, a best row, warnings, and compact metrics.',
+    interpretation: 'Use it after a simple backtest to see whether results cluster across nearby parameters or depend on one fragile setting.',
+    limitations: [
+      'Parameter sweeps can overfit historical noise. Treat stability across cells as descriptive context only.',
+      'Current implementation is limited to moving-average crossover grids.',
+    ],
+  },
   major_shareholders: {
     purpose: 'Shows who owns the stock and how concentrated that ownership base appears.',
     calculation: 'Organizes shareholder and institutional ownership records into a ranked ownership view.',

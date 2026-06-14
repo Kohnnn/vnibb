@@ -767,6 +767,12 @@ const MAIN_QUANT_TEMPLATE: TemplateWidget[] = [
         config: {},
         layout: { x: 0, y: 32, w: 8, h: 9, minW: 5, minH: 6 }
     },
+    {
+        type: 'sweep_matrix',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 32, w: 8, h: 9, minW: 5, minH: 6 }
+    },
 ];
 
 const QUANT_COMPARISON_TEMPLATE: TemplateWidget[] = [

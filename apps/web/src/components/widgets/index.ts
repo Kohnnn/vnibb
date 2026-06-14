@@ -52,6 +52,7 @@ export { DerivativesPriceHistoryWidget } from './DerivativesPriceHistoryWidget';
 export { AnalystEstimatesWidget } from './AnalystEstimatesWidget';
 export { FundamentalAnalysisWidget } from './FundamentalAnalysisWidget';
 export { BacktestLabWidget } from './BacktestLabWidget';
+export { SweepMatrixWidget } from './SweepMatrixWidget';
 export { DividendPaymentWidget } from './DividendPaymentWidget';
 export { CompanyFilingsWidget } from './CompanyFilingsWidget';
 export { StockSplitsWidget } from './StockSplitsWidget';
