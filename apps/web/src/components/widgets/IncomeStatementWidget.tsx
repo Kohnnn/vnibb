@@ -251,7 +251,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 values: Object.fromEntries(
                     recentItems.map((entry, index) => [
                         tableColumns[index]?.key ?? `period_${index}`,
-                        rowValue(entry, metricKey),
+                        convertFinancialValueForUnit(rowValue(entry, metricKey), unitConfig, entry.period),
                     ])
                 ),
             })),
