@@ -44,7 +44,7 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 21;
+const CURRENT_MIGRATION_VERSION = 22;
 const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';
 const DASHBOARD_RECOVERY_BACKUP_KEY = 'vnibb_dashboards_recovery_backup_v1';
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
@@ -1042,7 +1042,7 @@ const MAIN_FUNDAMENTALS_TEMPLATE: TemplateWidget[] = [
         type: 'fundamental_analysis',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 20, w: 8, h: 7, minW: 5, minH: 5 }
+        layout: { x: 0, y: 20, w: 12, h: 12, minW: 8, minH: 8 }
     },
 ];
 
@@ -1099,28 +1099,34 @@ const MAIN_NEWS_TEMPLATE: TemplateWidget[] = [
 
 const INITIAL_FUNDAMENTAL_TEMPLATE: TemplateWidget[] = [
     {
+        type: 'fundamental_analysis',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 12, h: 12, minW: 8, minH: 8 }
+    },
+    {
         type: 'ticker_info',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 8, h: 8, minW: 7, minH: 6 }
+        layout: { x: 12, y: 0, w: 6, h: 8, minW: 5, minH: 6 }
     },
     {
         type: 'key_metrics',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 0, w: 8, h: 10, minW: 6, minH: 8 }
+        layout: { x: 18, y: 0, w: 6, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'ticker_profile',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 0, w: 8, h: 8, minW: 7, minH: 6 }
+        layout: { x: 12, y: 8, w: 12, h: 4, minW: 7, minH: 4 }
     },
     {
         type: 'unified_financials',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 10, w: 24, h: 18, minW: 16, minH: 12 }
+        layout: { x: 0, y: 12, w: 24, h: 18, minW: 16, minH: 12 }
     },
 ];
 

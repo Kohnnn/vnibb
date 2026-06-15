@@ -66,6 +66,9 @@ NPAT_ALIASES = (
     "net_income",
     "profit_after_tax",
 )
+GROSS_PROFIT_ALIASES = ("gross_profit", "grossProfit")
+EBIT_ALIASES = ("ebit", "operating_profit", "operating_income", "profit_from_operating_activities")
+INTEREST_EXPENSE_ALIASES = ("interest_expense", "interestExpense", "finance_cost", "financial_expenses")
 TOTAL_ASSETS_ALIASES = ("total_assets", "total_asset")  # live-confirmed
 EQUITY_ALIASES = (
     "owners_equity",  # live-confirmed
@@ -124,6 +127,7 @@ PB_ALIASES = ("price_to_book", "pb")  # live-confirmed: "pb"
 PS_ALIASES = ("price_to_sale", "ps", "price_to_sales")  # live-confirmed: "ps"
 EV_EBITDA_ALIASES = ("value_before_ebitda", "ev_ebitda", "ev_to_ebitda")  # live: "ev_ebitda"
 RATIO_DIVIDEND_YIELD_ALIASES = ("dividend_yield", "dividend")  # live-confirmed
+ROIC_ALIASES = ("roic", "return_on_invested_capital")
 
 _FINANCIAL_KEYWORDS = (
     "ngân hàng",
@@ -241,7 +245,10 @@ class FundamentalSnapshot:
     intrinsic_value: float | None = None
     margin_of_safety: float | None = None
     valuation_method: str | None = None
+    valuation_verdict: str | None = None
     moat: str | None = None
+    moat_score: float | None = None
+    moat_factors: dict[str, Any] = field(default_factory=dict)
     inputs: dict[str, Any] = field(default_factory=dict)
     computed_fields: list[str] = field(default_factory=list)
 
@@ -562,6 +569,112 @@ def compute_moat(
     return "none"
 
 
+def compute_valuation_verdict(margin_of_safety: float | None) -> str | None:
+    """Rules-based label for the model margin of safety."""
+
+    if margin_of_safety is None:
+        return None
+    if margin_of_safety >= 30.0:
+        return "undervalued"
+    if margin_of_safety >= 10.0:
+        return "fair_plus"
+    if margin_of_safety > -10.0:
+        return "fair"
+    if margin_of_safety > -30.0:
+        return "expensive"
+    return "stretched"
+
+
+def compute_moat_factors(
+    income_statements: Sequence[dict[str, Any]],
+    balance_sheets: Sequence[dict[str, Any]],
+    ratios: dict[str, Any] | None = None,
+    *,
+    discount_rate: float | None = None,
+) -> tuple[float | None, dict[str, Any]]:
+    """Multi-factor moat evidence from profitability, margins, leverage and ROIC."""
+
+    income_by_year = {
+        year: row
+        for row in income_statements
+        if (year := _report_year(row)) is not None
+    }
+    balance_by_year = {
+        year: row
+        for row in balance_sheets
+        if (year := _report_year(row)) is not None
+    }
+    years = sorted(set(income_by_year) & set(balance_by_year))[-5:]
+    if len(years) < 3:
+        return None, {}
+
+    gross_margins: list[float] = []
+    roes: list[float] = []
+    for index, year in enumerate(years):
+        income = income_by_year[year]
+        balance = balance_by_year[year]
+        revenue = _pick_float(income, *REVENUE_ALIASES)
+        gross_profit = _pick_float(income, *GROSS_PROFIT_ALIASES)
+        if gross_profit is not None and revenue is not None and revenue != 0:
+            gross_margins.append(gross_profit / revenue * 100.0)
+        npat = _pick_float(income, *NPAT_ALIASES)
+        equity = _pick_float(balance, *EQUITY_ALIASES)
+        prior_equity = (
+            _pick_float(balance_by_year[years[index - 1]], *EQUITY_ALIASES) if index > 0 else None
+        )
+        avg_equity = (equity + prior_equity) / 2.0 if equity is not None and prior_equity is not None else equity
+        if npat is not None and avg_equity is not None and avg_equity > 0:
+            roes.append(npat / avg_equity * 100.0)
+
+    gross_margin_avg = sum(gross_margins) / len(gross_margins) if gross_margins else None
+    gross_margin_range = max(gross_margins) - min(gross_margins) if len(gross_margins) >= 2 else None
+    gross_margin_stability = None
+    if gross_margin_avg is not None and gross_margin_range is not None:
+        gross_margin_stability = max(0.0, min(100.0, 100.0 - gross_margin_range * 4.0))
+
+    latest_income = income_by_year[years[-1]]
+    ebit = _pick_float(latest_income, *EBIT_ALIASES)
+    interest_expense = _pick_float(latest_income, *INTEREST_EXPENSE_ALIASES)
+    interest_coverage = None
+    if ebit is not None and interest_expense not in (None, 0):
+        interest_coverage = ebit / abs(float(interest_expense))
+
+    roic = _pick_float(ratios or {}, *ROIC_ALIASES)
+    roic_pct = roic * 100.0 if roic is not None and abs(roic) <= 1.0 else roic
+    roic_spread = None
+    if roic_pct is not None and discount_rate is not None:
+        roic_spread = roic_pct - discount_rate * 100.0
+
+    roe_avg = sum(roes) / len(roes) if roes else None
+    sector_rank_score = None
+    if roe_avg is not None:
+        sector_rank_score = max(0.0, min(100.0, (roe_avg / 20.0) * 100.0))
+
+    scores: list[float] = []
+    if gross_margin_stability is not None:
+        scores.append(gross_margin_stability)
+    if interest_coverage is not None:
+        scores.append(max(0.0, min(100.0, (interest_coverage / 8.0) * 100.0)))
+    if roic_spread is not None:
+        scores.append(max(0.0, min(100.0, 50.0 + roic_spread * 5.0)))
+    if sector_rank_score is not None:
+        scores.append(sector_rank_score)
+
+    score = sum(scores) / len(scores) if scores else None
+    factors = {
+        "gross_margin_avg": gross_margin_avg,
+        "gross_margin_range": gross_margin_range,
+        "gross_margin_stability": gross_margin_stability,
+        "interest_coverage": interest_coverage,
+        "roic": roic_pct,
+        "roic_spread": roic_spread,
+        "roe_avg": roe_avg,
+        "sector_rank_score": sector_rank_score,
+        "periods_used": years,
+    }
+    return score, {key: value for key, value in factors.items() if value is not None}
+
+
 def compute_intrinsic_value_dcf(
     base_fcf: float | None,
     growth_rate: float | None,
@@ -722,10 +835,17 @@ def compute_fundamental_snapshot(
 
     dividend_years = _safe(compute_dividend_years, cash)
     fcf_positive = _safe(compute_fcf_positive, cash)
-    moat = _safe(compute_moat, income, balance)
-
     financial = _is_financial(inputs.sector, inputs.industry)
     discount_rate = _resolve_discount_rate(cfg, inputs.sector, inputs.industry, financial)
+    moat = _safe(compute_moat, income, balance)
+    moat_score, moat_factors = _safe(
+        compute_moat_factors,
+        income,
+        balance,
+        ratios,
+        discount_rate=discount_rate,
+        default=(None, {}),
+    )
 
     base_fcf: float | None = None
     growth_rate: float | None = None
@@ -775,6 +895,7 @@ def compute_fundamental_snapshot(
             valuation_method = "dcf"
 
     margin_of_safety = _safe(compute_margin_of_safety, intrinsic_value, inputs.price)
+    valuation_verdict = compute_valuation_verdict(margin_of_safety)
 
     periods_used = sorted(
         {year for row in recent_income if (year := _report_year(row)) is not None}
@@ -814,7 +935,10 @@ def compute_fundamental_snapshot(
         intrinsic_value=intrinsic_value,
         margin_of_safety=margin_of_safety,
         valuation_method=valuation_method,
+        valuation_verdict=valuation_verdict,
         moat=moat,
+        moat_score=moat_score,
+        moat_factors=moat_factors or {},
         inputs=provenance,
     )
     snapshot.computed_fields = [
@@ -831,7 +955,9 @@ def compute_fundamental_snapshot(
             "fcf_positive",
             "intrinsic_value",
             "margin_of_safety",
+            "valuation_verdict",
             "moat",
+            "moat_score",
         )
         if getattr(snapshot, name) is not None
     ]
@@ -873,7 +999,10 @@ def to_document(snapshot: FundamentalSnapshot, snapshot_date: date) -> dict[str,
         "intrinsicValue": snapshot.intrinsic_value,
         "marginOfSafety": snapshot.margin_of_safety,
         "valuationMethod": snapshot.valuation_method,
+        "valuationVerdict": snapshot.valuation_verdict,
         "moat": snapshot.moat,
+        "moatScore": snapshot.moat_score,
+        "moatFactors": dict(snapshot.moat_factors),
         "inputs": {
             "periodsUsed": snapshot.inputs.get("periods_used", []),
             "discountRate": snapshot.inputs.get("discount_rate"),

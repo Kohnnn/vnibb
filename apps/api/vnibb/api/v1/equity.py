@@ -2129,6 +2129,7 @@ def _build_fundamental_valuation_section(snapshot: dict[str, Any] | None) -> dic
         "intrinsic_value": snapshot.get("intrinsicValue"),
         "margin_of_safety": snapshot.get("marginOfSafety"),
         "valuation_method": snapshot.get("valuationMethod"),
+        "valuation_verdict": snapshot.get("valuationVerdict"),
         "price": snapshot.get("price"),
         "market_cap": snapshot.get("marketCap"),
         "pe": snapshot.get("pe"),
@@ -2146,6 +2147,8 @@ def _build_competitive_advantage_section(snapshot: dict[str, Any] | None) -> dic
     if not snapshot:
         return None
     moat = snapshot.get("moat")
+    moat_score = snapshot.get("moatScore")
+    moat_factors = snapshot.get("moatFactors") or {}
     reasons: list[str] = []
     roe = snapshot.get("roe")
     net_margin = snapshot.get("netMargin")
@@ -2165,8 +2168,22 @@ def _build_competitive_advantage_section(snapshot: dict[str, Any] | None) -> dic
         reasons.append("Positive FCF" if fcf_positive else "FCF not positive")
     if isinstance(dividend_years, (int, float)):
         reasons.append(f"Dividend streak {int(dividend_years)}y")
+    if isinstance(moat_score, (int, float)):
+        reasons.append(f"Moat score {float(moat_score):.0f}/100")
+    if isinstance(moat_factors, dict):
+        factor_labels = (
+            ("Gross margin stability", moat_factors.get("gross_margin_stability"), "/100"),
+            ("Interest coverage", moat_factors.get("interest_coverage"), "x"),
+            ("ROIC spread", moat_factors.get("roic_spread"), "pp"),
+            ("Sector rank score", moat_factors.get("sector_rank_score"), "/100"),
+        )
+        for label, value, suffix in factor_labels:
+            if isinstance(value, (int, float)):
+                reasons.append(f"{label} {float(value):.1f}{suffix}")
     return {
         "moat": moat,
+        "moat_score": moat_score,
+        "moat_factors": moat_factors,
         "quality_metrics": {
             "roe": roe,
             "roa": snapshot.get("roa"),

@@ -83,7 +83,7 @@ export const WIDGET_LAYOUT_BEHAVIORS: Record<WidgetType, LayoutBehavior> = {
   financial_snapshot: { preferredW: 24, preferredH: 16, minW: 12, minH: 10, orientation: 'horizontal', expandPriority: 6 },
   quick_stats: { preferredW: 6, preferredH: 6, minW: 4, minH: 4, orientation: 'vertical', expandPriority: 2 },
   financial_ratios: { preferredW: 12, preferredH: 10, minW: 8, minH: 8, orientation: 'horizontal', expandPriority: 4 },
-  fundamental_analysis: { preferredW: 8, preferredH: 7, minW: 5, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  fundamental_analysis: { preferredW: 12, preferredH: 12, minW: 8, minH: 8, orientation: 'balanced', expandPriority: 4 },
   income_statement: { preferredW: 12, preferredH: 10, minW: 8, minH: 8, orientation: 'horizontal', expandPriority: 4 },
   income_sankey: { preferredW: 14, preferredH: 10, minW: 10, minH: 7, orientation: 'horizontal', expandPriority: 4 },
   balance_sheet: { preferredW: 12, preferredH: 10, minW: 8, minH: 8, orientation: 'horizontal', expandPriority: 4 },

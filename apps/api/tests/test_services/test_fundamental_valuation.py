@@ -15,6 +15,7 @@ import pytest
 from vnibb.services.fundamental_valuation import (
     FundamentalInputs,
     ValuationConfig,
+    _normalize_statement_unit_outliers,
     compute_cagr,
     compute_dividend_years,
     compute_fcf_positive,
@@ -23,7 +24,8 @@ from vnibb.services.fundamental_valuation import (
     compute_intrinsic_value_rim,
     compute_margin_of_safety,
     compute_moat,
-    _normalize_statement_unit_outliers,
+    compute_moat_factors,
+    compute_valuation_verdict,
     to_document,
 )
 
@@ -284,6 +286,29 @@ class TestMoat:
         )
         assert compute_moat(income, balance) is None
 
+    def test_multi_factor_score_uses_margin_coverage_roic_and_rank(self) -> None:
+        income, balance = self._statements(
+            npats=[180.0] * 5, revenues=[1000.0] * 5, equities=[1000.0] * 5
+        )
+        for row in income:
+            row["gross_profit"] = 420.0
+            row["ebit"] = 160.0
+            row["interest_expense"] = -20.0
+
+        score, factors = compute_moat_factors(
+            income,
+            balance,
+            {"roic": 0.18},
+            discount_rate=0.12,
+        )
+
+        assert score is not None and score > 75.0
+        assert factors["gross_margin_stability"] == pytest.approx(100.0)
+        assert factors["interest_coverage"] == pytest.approx(8.0)
+        assert factors["roic"] == pytest.approx(18.0)
+        assert factors["roic_spread"] == pytest.approx(6.0)
+        assert factors["sector_rank_score"] == pytest.approx(90.0)
+
 
 # --- margin of safety --------------------------------------------------------------
 
@@ -311,6 +336,13 @@ class TestMarginOfSafety:
     def test_none_when_iv_non_positive(self) -> None:
         assert compute_margin_of_safety(0.0, 80.0) is None
         assert compute_margin_of_safety(-10.0, 80.0) is None
+
+    @pytest.mark.parametrize(
+        ("mos", "verdict"),
+        [(35.0, "undervalued"), (12.0, "fair_plus"), (0.0, "fair"), (-20.0, "expensive"), (-35.0, "stretched")],
+    )
+    def test_valuation_verdict(self, mos: float, verdict: str) -> None:
+        assert compute_valuation_verdict(mos) == verdict
 
 
 # --- full snapshot -------------------------------------------------------------------
@@ -347,6 +379,7 @@ class TestComputeFundamentalSnapshot:
         assert snapshot.valuation_method == "dcf"
         assert snapshot.intrinsic_value is not None and snapshot.intrinsic_value > 0
         assert snapshot.margin_of_safety is not None
+        assert snapshot.valuation_verdict is not None
         assert snapshot.roe is not None and snapshot.roe > 0
         assert snapshot.roa is not None
         assert snapshot.net_margin == pytest.approx(292.82 / 1464.1 * 100.0)
@@ -357,6 +390,8 @@ class TestComputeFundamentalSnapshot:
         assert snapshot.dividend_years == 5
         assert snapshot.fcf_positive is True
         assert snapshot.moat == "wide"
+        assert snapshot.moat_score is not None
+        assert snapshot.moat_factors["sector_rank_score"] is not None
         assert snapshot.pe == 15.0
         assert snapshot.pb == 3.0
         assert snapshot.ps == 2.5
@@ -397,6 +432,7 @@ class TestComputeFundamentalSnapshot:
         assert snapshot.intrinsic_value is None
         assert snapshot.margin_of_safety is None
         assert snapshot.valuation_method is None
+        assert snapshot.valuation_verdict is None
         assert snapshot.moat is None
         assert snapshot.computed_fields == []
 
@@ -449,7 +485,10 @@ class TestToDocument:
             "intrinsicValue",
             "marginOfSafety",
             "valuationMethod",
+            "valuationVerdict",
             "moat",
+            "moatScore",
+            "moatFactors",
             "computedFields",
         ):
             assert key in doc, f"missing {key}"

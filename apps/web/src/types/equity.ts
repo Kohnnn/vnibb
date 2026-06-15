@@ -134,6 +134,33 @@ export interface FundamentalAnalysisItem {
   description?: string | null;
 }
 
+export interface FundamentalValuation {
+  intrinsic_value?: number | null;
+  margin_of_safety?: number | null;
+  valuation_method?: string | null;
+  valuation_verdict?: string | null;
+  price?: number | null;
+  market_cap?: number | null;
+  pe?: number | null;
+  pb?: number | null;
+  ps?: number | null;
+  ev_ebitda?: number | null;
+  as_of?: string | null;
+  inputs?: Record<string, number | string | string[] | null | undefined> | null;
+  source?: string | null;
+  note?: string | null;
+}
+
+export interface CompetitiveAdvantage {
+  moat?: string | null;
+  moat_score?: number | null;
+  moat_factors?: Record<string, number | string | string[] | null | undefined> | null;
+  quality_metrics?: Record<string, number | boolean | null | undefined> | null;
+  reasons?: string[];
+  as_of?: string | null;
+  note?: string | null;
+}
+
 export interface FundamentalAnalysisData {
   symbol?: string;
   source?: string | null;
@@ -142,8 +169,8 @@ export interface FundamentalAnalysisData {
   summary?: string | null;
   thesis?: string | null;
   profile?: Record<string, any> | null;
-  valuation?: Record<string, any> | null;
-  competitive_advantage?: Record<string, any> | null;
+  valuation?: FundamentalValuation | null;
+  competitive_advantage?: CompetitiveAdvantage | null;
   section_errors?: Record<string, string> | null;
   strengths?: Array<string | FundamentalAnalysisItem>;
   risks?: Array<string | FundamentalAnalysisItem>;
