@@ -44,7 +44,7 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 20;
+const CURRENT_MIGRATION_VERSION = 21;
 const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';
 const DASHBOARD_RECOVERY_BACKUP_KEY = 'vnibb_dashboards_recovery_backup_v1';
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
@@ -1814,7 +1814,7 @@ const createSystemDashboard = (
     };
 };
 
-const createMainSystemDashboard = (): Dashboard => {
+export const createMainSystemDashboard = (): Dashboard => {
     return createSystemDashboard(
         MAIN_DASHBOARD_ID,
         MAIN_DASHBOARD_NAME,
@@ -1832,7 +1832,7 @@ const createMainSystemDashboard = (): Dashboard => {
     );
 };
 
-const createTechnicalSystemDashboard = (): Dashboard => {
+export const createTechnicalSystemDashboard = (): Dashboard => {
     return createSystemDashboard(
         TECHNICAL_DASHBOARD_ID,
         'Technical',
@@ -1847,7 +1847,7 @@ const createTechnicalSystemDashboard = (): Dashboard => {
     );
 };
 
-const createQuantSystemDashboard = (): Dashboard => {
+export const createQuantSystemDashboard = (): Dashboard => {
     return createSystemDashboard(
         QUANT_DASHBOARD_ID,
         'Quant',
@@ -1862,7 +1862,7 @@ const createQuantSystemDashboard = (): Dashboard => {
     );
 };
 
-const createGlobalMarketsDashboard = (): Dashboard => {
+export const createGlobalMarketsDashboard = (): Dashboard => {
     const timestamp = new Date().toISOString();
     const tabSpecs: SystemDashboardTabSpec[] = [
         {
@@ -3058,6 +3058,13 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 }
 
                 if (migrationVersion < 20) {
+                    dashboards = refreshSystemDashboardTemplates(dashboards);
+                }
+
+                if (migrationVersion < 21) {
+                    // Refresh locked system dashboards so existing users pick up the
+                    // balanced Quant "Backtest" widgets (backtest_lab, sweep_matrix)
+                    // that were added to the templates after migration v20.
                     dashboards = refreshSystemDashboardTemplates(dashboards);
                 }
 

@@ -154,3 +154,22 @@ For `backtest_lab`, registration was added in:
 1. Add frontend Sweep Matrix widget for `POST /quant/{symbol}/sweep`.
 2. Add data coverage/debug drawer for backtest runs.
 3. Add Donchian breakout as the next safe schema-driven strategy.
+
+## Balanced Initial Workspace Rollout
+
+Status: shipped.
+
+Goal: make the four Initial system dashboards a balanced default and surface the new `backtest_lab` / `sweep_matrix` quant widgets to existing and global users.
+
+Built-in fallback (code):
+
+- `createMainSystemDashboard` (`default-fundamental`): balanced 7 tabs - `Discovery`, `Fundamentals`, `Overview`, `Company`, `Ownership`, `Comparison`, `News & Events`.
+- `createQuantSystemDashboard` (`default-quant`): `Quant` tab now ends with `backtest_lab` + `sweep_matrix`.
+- `createTechnicalSystemDashboard` / `createGlobalMarketsDashboard`: structure preserved.
+- `CURRENT_MIGRATION_VERSION` bumped `20 -> 21` with a `refreshSystemDashboardTemplates` step so users already at v20 pick up the new quant widgets.
+
+Database publish (global):
+
+- The four templates were re-published through `PUT /api/v1/admin/system-layouts/{dashboard_key}` because published DB templates override the code fallback on load.
+- Payloads were generated from the real factories via `src/contexts/__generators__/systemLayoutPayloads.gen.test.ts` (`GENERATE_SYSTEM_LAYOUTS=1`) to avoid transcription drift.
+- See `docs/WIDGET_SYSTEM_REFERENCE.md` -> "Dual-source publish" for the full flow.

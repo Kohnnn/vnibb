@@ -80,6 +80,29 @@ Browser-only storage should stay limited to device-local behavior such as notifi
 - After editing a system dashboard widget, admins still need to use the floating system dashboard controls to `Save Draft` or `Publish Global`.
 - System dashboard template refreshes are migration-driven; shipped layout improvements are applied to the admin-managed system dashboards through the dashboard migration flow.
 
+### Dual-source publish (code fallback + database)
+
+System dashboard layouts have two sources, and both must be updated together when shipping a layout change for existing/global users:
+
+1. Built-in fallback factories in `apps/web/src/contexts/DashboardContext.tsx` (`createMainSystemDashboard`, `createTechnicalSystemDashboard`, `createQuantSystemDashboard`, `createGlobalMarketsDashboard`). These are applied locally via `refreshSystemDashboardTemplates` during a `CURRENT_MIGRATION_VERSION` bump.
+2. Database-published templates served by `GET /api/v1/dashboard/system-layouts/published`. On load the frontend applies these via the `APPLY_SYSTEM_TEMPLATES` action **after** local migration, so a published template overrides the code fallback for that dashboard.
+
+Implications:
+
+- A code-only change does not reach users who already have a published template for that key until the database template is re-published (or removed).
+- Bump `CURRENT_MIGRATION_VERSION` and add a `refreshSystemDashboardTemplates` migration step whenever the built-in factories change, so local fallback users (and offline/no-DB-template cases) pick up the new layout.
+- Re-publish the four templates (`default-fundamental`, `default-technical`, `default-quant`, `default-global-markets`) through `PUT /api/v1/admin/system-layouts/{dashboard_key}` (requires `X-Admin-Key`) so global users get the same layout.
+
+To avoid hand-transcription drift between the code factories and the published payloads, generate the publish JSON directly from the factories:
+
+```
+# from vnibb/apps/web
+GENERATE_SYSTEM_LAYOUTS=1 OUT_DIR=../../.tmp/system-layouts \
+  pnpm jest --runTestsByPath src/contexts/__generators__/systemLayoutPayloads.gen.test.ts
+```
+
+The generator (`src/contexts/__generators__/systemLayoutPayloads.gen.test.ts`) mirrors `DashboardClient.serializeSystemDashboardForPublish`, emits deterministic widget IDs, and is a no-op (guard-only) during the normal `ci:gate` Jest run. Publish each emitted `{dashboard_key}.json` body with the admin endpoint, then confirm version increments via `GET /api/v1/dashboard/system-layouts/published`.
+
 ## Resize Rules
 
 - Base widget sizes are for autofit and initial placement.
