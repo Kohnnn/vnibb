@@ -1397,13 +1397,38 @@ class DataPipeline:
                                         return None
                                     latest_year = year_cols[0]
                                     ratio_row: Dict[str, Any] = {"year_report": int(latest_year)}
+                                    # vnstock item_id naming changed across versions:
+                                    # legacy emitted `p_e`/`p_b`/`p_s`, current 4.x emits
+                                    # `pe`/`pb`/`ps`. Accept BOTH so valuation multiples
+                                    # don't silently land as NULL (regression that left
+                                    # screener_snapshots.pe/pb/ps empty for every symbol).
                                     metric_map = {
+                                        # P/E
                                         "p_e": "pe",
+                                        "pe": "pe",
+                                        "price_to_earning": "pe",
+                                        # P/B
                                         "p_b": "pb",
+                                        "pb": "pb",
+                                        "price_to_book": "pb",
+                                        # P/S
                                         "p_s": "ps",
+                                        "ps": "ps",
+                                        "price_to_sales": "ps",
+                                        # EV/EBITDA
+                                        "ev_ebitda": "ev_ebitda",
+                                        "ev_per_ebitda": "ev_ebitda",
+                                        # Returns
                                         "roe": "roe",
                                         "roa": "roa",
+                                        "roic": "roic",
+                                        # Per-share / yield
                                         "trailing_eps": "eps",
+                                        "eps": "eps",
+                                        "book_value_per_share": "bvps",
+                                        "bvps": "bvps",
+                                        "dividend_yield": "dividend_yield",
+                                        "beta": "beta",
                                     }
                                     liabilities = None
                                     owners_equity = None
@@ -1411,14 +1436,17 @@ class DataPipeline:
                                         item_id = record.get("item_id")
                                         if not item_id:
                                             continue
+                                        # Normalize provider item_id (casing/whitespace
+                                        # drift across vnstock versions) before mapping.
+                                        item_key = str(item_id).strip().lower()
                                         value = record.get(latest_year)
                                         if value is None:
                                             continue
-                                        if item_id in metric_map:
-                                            ratio_row[metric_map[item_id]] = value
-                                        elif item_id == "liabilities":
+                                        if item_key in metric_map:
+                                            ratio_row[metric_map[item_key]] = value
+                                        elif item_key == "liabilities":
                                             liabilities = value
-                                        elif item_id == "owners_equity":
+                                        elif item_key == "owners_equity":
                                             owners_equity = value
                                     if liabilities is not None and owners_equity not in (None, 0):
                                         ratio_row["de"] = liabilities / owners_equity

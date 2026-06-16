@@ -414,8 +414,32 @@ class RSRatingService:
         """
         Update screener snapshots with RS rating data.
 
-        Creates new snapshots if they don't exist, updates existing ones.
+        Updates the same-day snapshot when one already exists. When it does
+        not (e.g. the screener sync has not run yet or failed for the day),
+        a new row is created but seeded from the most recent prior snapshot
+        so RS-only rows never overwrite the visible "latest" snapshot with
+        NULL valuation/market_cap fields.
         """
+        symbols = [stock["symbol"] for stock in ranked_stocks]
+
+        # Most recent prior snapshot per symbol (carry-forward seed). Only used
+        # when no same-day row exists yet.
+        carry_forward: Dict[str, ScreenerSnapshot] = {}
+        if symbols:
+            prior_rows = await db.execute(
+                select(ScreenerSnapshot)
+                .where(
+                    and_(
+                        ScreenerSnapshot.symbol.in_(symbols),
+                        ScreenerSnapshot.snapshot_date < snapshot_date,
+                    )
+                )
+                .order_by(ScreenerSnapshot.symbol, desc(ScreenerSnapshot.snapshot_date))
+            )
+            for row in prior_rows.scalars():
+                # First row per symbol wins (newest, due to ordering above).
+                carry_forward.setdefault(row.symbol, row)
+
         for stock in ranked_stocks:
             try:
                 # Check if snapshot exists
@@ -435,15 +459,42 @@ class RSRatingService:
                     snapshot.rs_rating = stock["rs_rating"]
                     snapshot.rs_rank = stock["rs_rank"]
                 else:
-                    # Create new snapshot with RS data only
+                    # Create new snapshot seeded from the latest prior snapshot
+                    # so we don't replace a rich snapshot with an RS-only NULL row.
+                    seed = carry_forward.get(stock["symbol"])
                     snapshot = ScreenerSnapshot(
                         symbol=stock["symbol"],
                         snapshot_date=snapshot_date,
-                        industry=stock.get("industry"),
+                        industry=stock.get("industry") or (seed.industry if seed else None),
                         rs_rating=stock["rs_rating"],
                         rs_rank=stock["rs_rank"],
                         source="rs_rating_service",
                     )
+                    if seed is not None:
+                        snapshot.company_name = seed.company_name
+                        snapshot.exchange = seed.exchange
+                        snapshot.price = seed.price
+                        snapshot.volume = seed.volume
+                        snapshot.market_cap = seed.market_cap
+                        snapshot.pe = seed.pe
+                        snapshot.pb = seed.pb
+                        snapshot.ps = seed.ps
+                        snapshot.ev_ebitda = seed.ev_ebitda
+                        snapshot.roe = seed.roe
+                        snapshot.roa = seed.roa
+                        snapshot.roic = seed.roic
+                        snapshot.gross_margin = seed.gross_margin
+                        snapshot.net_margin = seed.net_margin
+                        snapshot.operating_margin = seed.operating_margin
+                        snapshot.revenue_growth = seed.revenue_growth
+                        snapshot.earnings_growth = seed.earnings_growth
+                        snapshot.dividend_yield = seed.dividend_yield
+                        snapshot.debt_to_equity = seed.debt_to_equity
+                        snapshot.current_ratio = seed.current_ratio
+                        snapshot.quick_ratio = seed.quick_ratio
+                        snapshot.eps = seed.eps
+                        snapshot.bvps = seed.bvps
+                        snapshot.foreign_ownership = seed.foreign_ownership
                     db.add(snapshot)
 
             except Exception as e:
