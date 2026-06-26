@@ -15,6 +15,13 @@
 
 Reusable React widget components for building financial applications focused on the Vietnamese stock market.
 
+> **Status: Intentional future-extraction stub.**
+> This package is kept in the workspace as a placeholder for a future
+> widget-library extraction. All production widgets currently live in
+> `apps/web/src/components/widgets`. This package is not imported by
+> `apps/web` today. Do not add production dependencies on it until real
+> widgets are extracted here.
+
 ---
 
 ## 🚀 Features

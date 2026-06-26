@@ -20,6 +20,7 @@ Current source of truth:
 
 - `DEPLOYMENT_AND_OPERATIONS.md`: deployment profile, Oracle runtime guidance, and ops notes
 - `DATABASE_SCHEMA.md`: database stack schema and collection model
+- `APPWRITE_PRIMARY_SUPABASE_WRITE_BRIDGE.md`: canonical durable-store, Appwrite-write-freeze, and write-bridge contract
 - `AUTO_UPDATE_STRATEGY.md`: automatic update plan, rate-budget strategy, and scheduler model
 - `VN100_EOD_BACKFILL_PLAN.md`: VN100 2008-to-now EOD bootstrap plan for quant/backtesting widgets
 - `daily_trading_updater.md`: trading-flow updater behavior and reinforced scheduler notes
@@ -33,6 +34,7 @@ Current source of truth:
 - `DEVELOPMENT_JOURNAL.md`: maintainer journal and decision history
 - `WIDGET_CATALOG.md`: legacy widget snapshot, useful as historical context only
 - `NEXT_PHASES_EXECUTION_PLAN.md`: execution-ready plan for the next selected product phases
+- `WAVE_5_5_STRATEGY_EDITOR_SANDBOX_DESIGN.md`: design-only strategy editor sandbox threat model, gates, and hard rules
 - `reverse-engineering/turtle-hub-crawl-2026-06-09/`: public Turtle Hub feature crawl, Quant deep dive, and VNIBB widget/news improvement ideas
 - `reverse-engineering/fincept-quantcept-terminal-crawl-2026-06-09/`: public Quantcept and FinceptTerminal feature/tech-stack crawl mapped to VNIBB widget, agent, analytics, and platform ideas
 

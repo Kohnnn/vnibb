@@ -15,7 +15,12 @@
 
 Shared provider package for VNIBB's Python data integrations.
 
-Right now this package is only a thin placeholder around vnstock credentials/dependency wiring. The production-grade vnstock integration still lives in `vnibb/apps/api`, where the fallback, caching, and normalization logic is implemented.
+> **Status: Intentional future-extraction stub.**
+> This package is kept in the workspace as a placeholder for a future
+> provider extraction. The production-grade vnstock integration still
+> lives in `vnibb/apps/api`. This package is not imported by the API
+> server at runtime. Do not add production dependencies on it until real
+> provider logic is extracted here.
 
 Upstream alignment:
 - Official `vnstocks.com` docs currently document stable releases through `v3.4.2`.
