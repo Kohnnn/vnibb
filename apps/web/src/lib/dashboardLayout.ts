@@ -142,6 +142,7 @@ export const WIDGET_LAYOUT_BEHAVIORS: Record<WidgetType, LayoutBehavior> = {
   gap_fill_stats: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   hurst_market_structure: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   parkinson_volatility: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  garch_volatility: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   amihud_illiquidity: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   risk_dashboard: { preferredW: 12, preferredH: 10, minW: 8, minH: 8, orientation: 'horizontal', expandPriority: 4 },
   quant_summary: { preferredW: 24, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },

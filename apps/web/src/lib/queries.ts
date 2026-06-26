@@ -117,6 +117,8 @@ export const queryKeys = {
     rsGainers: (limit: number, lookbackDays: number) => ['rsGainers', limit, lookbackDays] as const,
     quant: (symbol: string, period: string, metrics: string[], source: string) =>
         ['quant', symbol, period, metrics.join(','), source] as const,
+    garchVolatility: (symbol: string, period: string, source: string, adjustmentMode: string) =>
+        ['garchVolatility', symbol, period, source, adjustmentMode] as const,
     quantBacktest: (symbol: string, period: string, fastWindow: number, slowWindow: number, source: string, adjustmentMode: string) =>
         ['quantBacktest', symbol, period, fastWindow, slowWindow, source, adjustmentMode] as const,
     quantSweep: (symbol: string, period: string, fastWindows: number[], slowWindows: number[], objective: string, source: string, adjustmentMode: string) =>
@@ -1358,6 +1360,71 @@ export function useQuantMetrics(
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         retry: 2,
+    });
+}
+
+export type GarchVolatilityState =
+    | { status: 'ok'; response: api.QuantResponse; metric: api.GarchVolatilityMetric | null; error?: string | null }
+    | { status: 'not_deployed' };
+
+/**
+ * Check if an error indicates the GARCH volatility endpoint/metric is not deployed.
+ *
+ * Older backends with the `/quant/{symbol}` route deployed but without GARCH
+ * support return a 400 with a detail message like "Unsupported metric:
+ * garch_volatility".  Treat that the same as a 404/405 (endpoint entirely
+ * absent) so the widget shows the graceful "not deployed" state instead of
+ * an opaque error banner.
+ */
+export function isGarchNotDeployedError(error: unknown): boolean {
+    if (!(error instanceof api.APIError)) return false;
+    if (error.status === 404 || error.status === 405) return true;
+    return (
+        error.status === 400 &&
+        typeof error.message === 'string' &&
+        error.message.toLowerCase().includes('garch_volatility')
+    );
+}
+
+export function useGarchVolatility(
+    symbol: string,
+    options?: {
+        period?: api.QuantPeriod;
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        adjustmentMode?: 'raw' | 'adjusted';
+        enabled?: boolean;
+    }
+) {
+    const preferredSource = useVnstockSource();
+    const period = options?.period || '5Y';
+    const source = options?.source || preferredSource;
+    const adjustmentMode = options?.adjustmentMode || 'adjusted';
+    return useQuery<GarchVolatilityState>({
+        queryKey: queryKeys.garchVolatility(symbol, period, source, adjustmentMode),
+        queryFn: async () => {
+            try {
+                const response = await api.getQuantMetrics(symbol, {
+                    period,
+                    metrics: ['garch_volatility'],
+                    source,
+                    adjustmentMode,
+                });
+                return {
+                    status: 'ok',
+                    response,
+                    metric: response.data.metrics.garch_volatility ?? null,
+                    error: response.error,
+                };
+            } catch (error) {
+                if (isGarchNotDeployedError(error)) {
+                    return { status: 'not_deployed' };
+                }
+                throw error;
+            }
+        },
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: 5 * 60 * 1000,
+        retry: 1,
     });
 }
 

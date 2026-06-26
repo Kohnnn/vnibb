@@ -2074,9 +2074,25 @@ export type QuantMetric =
     | 'calmar'
     | 'macd_crossovers'
     | 'parkinson_volatility'
+    | 'garch_volatility'
     | 'ema_respect'
     | 'drawdown_recovery'
     | 'benchmark_risk'
+
+export interface GarchVolatilityMetric {
+    omega?: number | null
+    alpha?: number | null
+    beta?: number | null
+    persistence?: number | null
+    current_conditional_vol_pct?: number | null
+    long_run_vol_pct?: number | null
+    note?: string | null
+    series?: Array<{
+        date?: string | null
+        conditional_vol_pct?: number | null
+        long_run_vol_pct?: number | null
+    }>
+}
 
 export interface QuantResponse {
     data: {
@@ -2085,7 +2101,7 @@ export interface QuantResponse {
         adjustment_mode?: 'raw' | 'adjusted'
         computed_at: string
         last_data_date?: string | null
-        metrics: Record<string, any>
+        metrics: Record<string, unknown> & { garch_volatility?: GarchVolatilityMetric }
         warning?: string | null
     }
     meta?: {

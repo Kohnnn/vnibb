@@ -345,6 +345,50 @@ async def test_quant_benchmark_risk_alias_resolves_dates_before_loading_benchmar
     assert captured["source"]
 
 
+@pytest.mark.asyncio
+async def test_benchmark_risk_alias_metric_name_resolves_without_name_error(test_db, monkeypatch):
+    """Characterization: benchmark-risk alias through _get_quant_metric_alias_response
+    resolves dates before loading benchmark data and does not raise NameError.
+
+    The alias name "benchmark-risk" → canonical "benchmark_risk" via METRIC_ALIASES.
+    _get_quant_metric_alias_response assigns end_date/start_date unconditionally
+    before the benchmark_risk branch, so no use-before-assignment bug exists.
+    This test locks that behavior with the real function path (only deep deps mocked).
+    """
+    captured: dict[str, object] = {}
+
+    async def fake_load_quant_frame_with_warning(**_kwargs):
+        return _build_price_frame(220), None
+
+    async def fake_load_benchmark_frame(**kwargs):
+        captured.update(kwargs)
+        benchmark = _build_price_frame(220)
+        benchmark["close"] = benchmark["close"] * 0.985
+        return benchmark[["time", "close"]]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.quant._load_quant_frame_with_warning", fake_load_quant_frame_with_warning
+    )
+    monkeypatch.setattr("vnibb.api.v1.quant._load_benchmark_frame", fake_load_benchmark_frame)
+
+    # Call the real function directly (not via router) with the alias metric name.
+    response = await quant._get_quant_metric_alias_response(
+        symbol="VNM",
+        metric_name="benchmark-risk",
+        period="1Y",
+        source="KBS",
+        adjustment_mode="raw",
+        db=test_db,
+    )
+
+    # The function must complete without NameError or any exception.
+    assert response.error is None
+    assert response.data["metric"] == "benchmark_risk"
+    # Dates must be resolved before benchmark frame loading.
+    assert captured["start_date"] < captured["end_date"]
+    assert captured["source"] == "KBS"
+
+
 def test_compute_benchmark_risk_returns_relative_and_tail_metrics():
     frame = _build_price_frame(260)
     benchmark = _build_price_frame(260)
@@ -828,6 +872,73 @@ def _frame_from_returns(returns: list[float]) -> pd.DataFrame:
             "volume": [1_000_000] * len(closes),
         }
     )
+
+
+def _build_garch_like_price_frame(rows: int = 620) -> pd.DataFrame:
+    rng = _rng(51)
+    variance = 0.00008
+    previous_shock = 0.0
+    returns: list[float] = []
+    for _ in range(rows - 1):
+        variance = 0.000005 + (0.12 * previous_shock * previous_shock) + (0.82 * variance)
+        shock = (variance**0.5) * _gauss(rng)
+        returns.append(shock)
+        previous_shock = shock
+    return _frame_from_returns(returns)
+
+
+def test_garch_volatility_insufficient_data_returns_null_payload():
+    payload = quant._compute_garch_volatility(_build_price_frame(rows=249))
+
+    assert payload["omega"] is None
+    assert payload["alpha"] is None
+    assert payload["beta"] is None
+    assert payload["persistence"] is None
+    assert payload["current_conditional_vol_pct"] is None
+    assert payload["long_run_vol_pct"] is None
+    assert payload["series"] == []
+
+
+def test_garch_volatility_estimates_stationary_synthetic_series():
+    payload = quant._compute_garch_volatility(_build_garch_like_price_frame())
+
+    assert np.isfinite(payload["alpha"])
+    assert np.isfinite(payload["beta"])
+    assert np.isfinite(payload["persistence"])
+    assert payload["persistence"] < 1
+    assert np.isfinite(payload["current_conditional_vol_pct"])
+    assert np.isfinite(payload["long_run_vol_pct"])
+    assert len(payload["series"]) <= 400
+    assert "in-sample estimate" in payload["note"]
+
+
+@pytest.mark.asyncio
+async def test_garch_volatility_alias_canonicalizes_and_returns_payload(test_db, monkeypatch):
+    async def fake_load_quant_frame_with_warning(**_kwargs):
+        return _build_garch_like_price_frame(), None
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.quant._load_quant_frame_with_warning", fake_load_quant_frame_with_warning
+    )
+
+    response = await quant._get_quant_metric_alias_response(
+        symbol="VNM",
+        metric_name="garch-volatility",
+        period="3Y",
+        source="KBS",
+        adjustment_mode="raw",
+        db=test_db,
+    )
+
+    assert response.error is None
+    assert response.data["metric"] == "garch_volatility"
+    assert "omega" in response.data
+    assert "alpha" in response.data
+    assert "beta" in response.data
+    assert "persistence" in response.data
+    assert "current_conditional_vol_pct" in response.data
+    assert "long_run_vol_pct" in response.data
+    assert "series" in response.data
 
 
 def test_market_structure_insufficient_data_returns_nulls():

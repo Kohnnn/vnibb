@@ -689,6 +689,15 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
     },
     {
+        type: 'garch_volatility',
+        name: 'GARCH Volatility',
+        description: 'GARCH(1,1) conditional volatility parameters and in-sample estimate from backend metrics',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 },
+        searchKeywords: ['garch', 'volatility', 'conditional volatility', 'risk']
+    },
+    {
         type: 'ema_respect',
         name: 'EMA Respect',
         description: 'EMA20/50/200 interaction counts with support and breakdown rates',

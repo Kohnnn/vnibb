@@ -91,6 +91,7 @@ export { BollingerSqueezeWidget } from './BollingerSqueezeWidget';
 export { SortinoMonthlyWidget } from './SortinoMonthlyWidget';
 export { GapAnalysisWidget } from './GapAnalysisWidget';
 export { MACDCrossoverWidget } from './MACDCrossoverWidget';
+export { GarchVolatilityWidget } from './GarchVolatilityWidget';
 export { GammaExposureWidget } from './GammaExposureWidget';
 export { MomentumWidget } from './MomentumWidget';
 export { EarningsQualityWidget } from './EarningsQualityWidget';

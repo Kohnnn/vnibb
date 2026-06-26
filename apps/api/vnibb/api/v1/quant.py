@@ -52,6 +52,7 @@ SUPPORTED_METRICS = (
     "calmar",
     "macd_crossovers",
     "parkinson_volatility",
+    "garch_volatility",
     "ema_respect",
     "drawdown_recovery",
     "benchmark_risk",
@@ -88,6 +89,8 @@ METRIC_ALIASES = {
     "macd_crossover": "macd_crossovers",
     "parkinson_volatility": "parkinson_volatility",
     "parkinson-volatility": "parkinson_volatility",
+    "garch_volatility": "garch_volatility",
+    "garch-volatility": "garch_volatility",
     "ema_respect": "ema_respect",
     "ema-respect": "ema_respect",
     "drawdown_recovery": "drawdown_recovery",
@@ -296,6 +299,7 @@ def _get_quant_calculators() -> Dict[str, Callable[[pd.DataFrame], Dict[str, Any
         "calmar": _compute_calmar,
         "macd_crossovers": _compute_macd_crossovers,
         "parkinson_volatility": _compute_parkinson_volatility,
+        "garch_volatility": _compute_garch_volatility,
         "ema_respect": _compute_ema_respect,
         "drawdown_recovery": _compute_drawdown_recovery,
         "market_structure_tests": _compute_market_structure_tests,
@@ -2037,6 +2041,161 @@ def _compute_parkinson_volatility(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
+def _empty_garch_payload() -> Dict[str, Any]:
+    return {
+        "omega": None,
+        "alpha": None,
+        "beta": None,
+        "persistence": None,
+        "current_conditional_vol_pct": None,
+        "long_run_vol_pct": None,
+        "series": [],
+        "note": "GARCH(1,1) requires at least 250 valid positive close sessions.",
+    }
+
+
+def _compute_garch_path(eps: np.ndarray, omega: float, alpha: float, beta: float) -> np.ndarray | None:
+    persistence = alpha + beta
+    if omega <= 0 or alpha < 0 or beta < 0 or persistence >= 1:
+        return None
+
+    sample_var = float(np.var(eps, ddof=0))
+    if not np.isfinite(sample_var) or sample_var <= 1e-12:
+        return None
+
+    unconditional_var = omega / (1 - persistence)
+    h = np.empty(eps.size, dtype=float)
+    h[0] = max(unconditional_var, sample_var, 1e-12)
+    for idx in range(1, eps.size):
+        h[idx] = omega + alpha * eps[idx - 1] ** 2 + beta * h[idx - 1]
+        if not np.isfinite(h[idx]) or h[idx] <= 1e-12:
+            return None
+    return h
+
+
+def _score_garch_params(eps: np.ndarray, omega: float, alpha: float, beta: float) -> tuple[float, np.ndarray | None]:
+    h = _compute_garch_path(eps, omega, alpha, beta)
+    if h is None:
+        return float("inf"), None
+    score = 0.5 * float(np.sum(np.log(h) + (eps**2 / h)))
+    if not np.isfinite(score):
+        return float("inf"), None
+    return score, h
+
+
+def _fit_garch_params(eps: np.ndarray) -> tuple[float, float, float, np.ndarray] | None:
+    sample_var = float(np.var(eps, ddof=0))
+    if not np.isfinite(sample_var) or sample_var <= 1e-12:
+        return None
+
+    best: tuple[float, float, float, float, np.ndarray] | None = None
+    persistence_grid = [0.20, 0.50, 0.70, 0.85, 0.93, 0.97]
+    alpha_grid = [0.01, 0.03, 0.05, 0.08, 0.12, 0.18]
+    scale_grid = [0.5, 1.0, 1.5]
+
+    def consider(omega: float, alpha: float, beta: float) -> None:
+        nonlocal best
+        persistence = alpha + beta
+        score, h = _score_garch_params(eps, omega, alpha, beta)
+        if h is None:
+            return
+        if best is None or score < best[0] - 1e-9:
+            best = (score, omega, alpha, beta, h)
+            return
+        if best is not None and abs(score - best[0]) <= 1e-9:
+            current_rank = (persistence, alpha, omega)
+            best_rank = (best[2] + best[3], best[2], best[1])
+            if current_rank < best_rank:
+                best = (score, omega, alpha, beta, h)
+
+    for persistence in persistence_grid:
+        for alpha in alpha_grid:
+            if alpha >= persistence:
+                continue
+            beta = persistence - alpha
+            base_omega = sample_var * (1 - persistence)
+            for scale in scale_grid:
+                consider(base_omega * scale, alpha, beta)
+
+    step_persistence = 0.08
+    step_alpha = 0.03
+    step_scale = 0.40
+    for _ in range(4):
+        if best is None:
+            return None
+        _, best_omega, best_alpha, best_beta, _ = best
+        best_persistence = best_alpha + best_beta
+        best_scale = best_omega / max(sample_var * (1 - best_persistence), 1e-12)
+        for persistence in [best_persistence - step_persistence, best_persistence, best_persistence + step_persistence]:
+            if persistence <= 0.02 or persistence >= 0.995:
+                continue
+            for alpha in [best_alpha - step_alpha, best_alpha, best_alpha + step_alpha]:
+                if alpha < 0.001 or alpha >= persistence:
+                    continue
+                beta = persistence - alpha
+                base_omega = sample_var * (1 - persistence)
+                for scale in [best_scale - step_scale, best_scale, best_scale + step_scale]:
+                    if scale <= 0:
+                        continue
+                    consider(base_omega * scale, alpha, beta)
+        step_persistence *= 0.5
+        step_alpha *= 0.5
+        step_scale *= 0.5
+
+    if best is None:
+        return None
+    _, omega, alpha, beta, h = best
+    return omega, alpha, beta, h
+
+
+def _compute_garch_volatility(frame: pd.DataFrame) -> Dict[str, Any]:
+    enriched = frame[["time", "close"]].copy()
+    enriched["time"] = pd.to_datetime(enriched["time"], errors="coerce")
+    enriched["close"] = pd.to_numeric(enriched["close"], errors="coerce")
+    enriched = enriched.dropna(subset=["time", "close"]).sort_values("time")
+    enriched = enriched.loc[enriched["close"] > 0].drop_duplicates(subset=["time"], keep="last")
+    enriched = enriched.reset_index(drop=True)
+    if len(enriched) < 250:
+        return _empty_garch_payload()
+
+    enriched["return_pct"] = enriched["close"].pct_change() * 100
+    enriched = enriched.dropna(subset=["return_pct"]).reset_index(drop=True)
+    returns = enriched["return_pct"].to_numpy(dtype=float)
+    returns = returns[np.isfinite(returns)]
+    if returns.size < 249:
+        return _empty_garch_payload()
+
+    eps = returns - float(np.mean(returns))
+    fitted = _fit_garch_params(eps)
+    if fitted is None:
+        return _empty_garch_payload()
+
+    omega, alpha, beta, conditional_var = fitted
+    persistence = alpha + beta
+    annualizer = float(np.sqrt(252))
+    conditional_vol = np.sqrt(conditional_var) * annualizer
+    long_run_vol = np.sqrt(omega / (1 - persistence)) * annualizer
+    series_frame = enriched.tail(len(conditional_vol)).assign(garch_vol_pct=conditional_vol)
+
+    return {
+        "omega": _safe_float(omega, 8),
+        "alpha": _safe_float(alpha, 6),
+        "beta": _safe_float(beta, 6),
+        "persistence": _safe_float(persistence, 6),
+        "current_conditional_vol_pct": _safe_float(conditional_vol[-1], 2),
+        "long_run_vol_pct": _safe_float(long_run_vol, 2),
+        "series": [
+            {
+                "date": row.time.strftime("%Y-%m-%d"),
+                "conditional_vol_pct": _safe_float(row.garch_vol_pct, 3),
+                "return_pct": _safe_float(row.return_pct, 4),
+            }
+            for row in series_frame.tail(400).itertuples(index=False)
+        ],
+        "note": "GARCH(1,1) Gaussian QMLE in-sample estimate of conditional volatility; this is not a one-step-ahead forecast.",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Market-structure tests (variance ratio, squared-return ACF, R/S Hurst).
 # Descriptive diagnostics, numpy/pandas only. scipy is NOT a dependency.
@@ -3443,6 +3602,24 @@ async def get_parkinson_volatility_metric(
     return await _get_quant_metric_alias_response(
         symbol=symbol,
         metric_name="parkinson-volatility",
+        period=period,
+        source=source,
+        adjustment_mode=adjustment_mode,
+        db=db,
+    )
+
+
+@router.get("/{symbol}/garch-volatility", response_model=StandardResponse[Dict[str, Any]])
+async def get_garch_volatility_metric(
+    symbol: str,
+    period: str = Query(default="5Y"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="garch-volatility",
         period=period,
         source=source,
         adjustment_mode=adjustment_mode,

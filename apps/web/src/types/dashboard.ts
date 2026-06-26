@@ -140,6 +140,7 @@ export type WidgetType =
     | 'gap_analysis'
     | 'macd_crossovers'
     | 'parkinson_volatility'
+    | 'garch_volatility'
     | 'ema_respect'
     | 'drawdown_recovery'
     | 'gamma_exposure'

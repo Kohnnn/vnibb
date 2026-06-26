@@ -109,6 +109,7 @@ import { SortinoMonthlyWidget } from './SortinoMonthlyWidget';
 import { GapAnalysisWidget } from './GapAnalysisWidget';
 import { MACDCrossoverWidget } from './MACDCrossoverWidget';
 import { ParkinsonVolatilityWidget } from './ParkinsonVolatilityWidget';
+import { GarchVolatilityWidget } from './GarchVolatilityWidget';
 import { EMARespectWidget } from './EMARespectWidget';
 import { DrawdownRecoveryWidget } from './DrawdownRecoveryWidget';
 import { GammaExposureWidget } from './GammaExposureWidget';
@@ -427,6 +428,7 @@ export const widgetRegistry: Record<WidgetType, ComponentType<WidgetProps>> = {
     gap_analysis: GapAnalysisWidget as ComponentType<WidgetProps>,
     macd_crossovers: MACDCrossoverWidget as ComponentType<WidgetProps>,
     parkinson_volatility: ParkinsonVolatilityWidget as ComponentType<WidgetProps>,
+    garch_volatility: GarchVolatilityWidget as ComponentType<WidgetProps>,
     ema_respect: EMARespectWidget as ComponentType<WidgetProps>,
     drawdown_recovery: DrawdownRecoveryWidget as ComponentType<WidgetProps>,
     gamma_exposure: GammaExposureWidget as ComponentType<WidgetProps>,
@@ -543,6 +545,7 @@ export const widgetNames: Record<WidgetType, string> = {
     gap_analysis: 'Gap Analysis',
     macd_crossovers: 'MACD Crossovers',
     parkinson_volatility: 'Parkinson Volatility',
+    garch_volatility: 'GARCH Volatility',
     ema_respect: 'EMA Respect',
     drawdown_recovery: 'Drawdown Recovery',
     gamma_exposure: 'Gamma Exposure',
@@ -679,6 +682,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     gap_analysis: 'Gap-up/down frequencies, fill rate, and largest gap events',
     macd_crossovers: 'Bullish and bearish MACD crossover history with forward returns',
     parkinson_volatility: 'High-low volatility estimator with rolling regime classification',
+    garch_volatility: 'GARCH(1,1) conditional volatility parameters and in-sample estimate from backend metrics',
     ema_respect: 'EMA20/50/200 support and breakdown behavior scoring',
     drawdown_recovery: 'Rolling underwater curve and recovery-time statistics',
     gamma_exposure: 'Gamma regime proxy derived from volatility structure while options OI feed is pending',
