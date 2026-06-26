@@ -1123,10 +1123,10 @@ const INITIAL_FUNDAMENTAL_TEMPLATE: TemplateWidget[] = [
         layout: { x: 12, y: 8, w: 12, h: 4, minW: 7, minH: 4 }
     },
     {
-        type: 'unified_financials',
+        type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 12, w: 24, h: 18, minW: 16, minH: 12 }
+        layout: { x: 0, y: 35, w: 24, h: 8, minW: 12, minH: 6 }
     },
 ];
 
@@ -1201,10 +1201,16 @@ const INITIAL_QUANT_TEMPLATE: TemplateWidget[] = [
         layout: { x: 16, y: 23, w: 8, h: 12, minW: 7, minH: 9 }
     },
     {
+        type: 'garch_volatility',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 35, w: 8, h: 8, minW: 5, minH: 5 }
+    },
+    {
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 35, w: 24, h: 8, minW: 12, minH: 6 }
+        layout: { x: 8, y: 35, w: 16, h: 8, minW: 12, minH: 6 }
     },
 ];
 

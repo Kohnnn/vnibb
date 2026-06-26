@@ -96,6 +96,7 @@ describe('system layout publish payload generator', () => {
         const quantWidgetTypes = quant.tabs.flatMap((tab) => tab.widgets.map((w) => w.type));
         expect(quantWidgetTypes).toContain('backtest_lab');
         expect(quantWidgetTypes).toContain('sweep_matrix');
+        expect(quantWidgetTypes).toContain('garch_volatility');
 
         if (process.env.GENERATE_SYSTEM_LAYOUTS !== '1') {
             return;
