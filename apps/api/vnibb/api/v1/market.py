@@ -49,6 +49,19 @@ from vnibb.services.cache_manager import CacheManager
 from vnibb.services.sector_service import SectorService
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.providers.vnstock import get_vnstock
+from vnibb.api.v1.market_heatmap import (
+    HeatmapGroupBuilder,
+    HeatmapGroupConfig,
+    HeatmapRowTools,
+    HeatmapSectorBuilder,
+    build_heatmap_groups,
+    build_heatmap_sectors,
+    enrich_heatmap_rows,
+    filter_heatmap_rows_by_exchange,
+    heatmap_symbols as collect_heatmap_symbols,
+    normalize_heatmap_rows,
+    resolve_hnx30_symbols,
+)
 
 try:
     from vnstock.explorer.misc import vcb_exchange_rate, btmc_goldprice, sjc_gold_price
@@ -1095,6 +1108,7 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
         "change_pct": _to_float(
             _first_non_none(
                 payload.get("price_change_1d_pct"),
+                payload.get("change_1d"),
                 payload.get("change_pct"),
                 payload.get("changePct"),
                 payload.get("price_change_pct"),
@@ -2319,50 +2333,6 @@ async def _build_snapshot_top_movers(
     return payload[:limit]
 
 
-def _resolve_hnx30_symbols(rows: List[dict[str, Any]]) -> set[str]:
-    hnx_rows = [
-        row
-        for row in rows
-        if (row.get("exchange") or "").strip().upper() == "HNX" and (row.get("symbol") or "")
-    ]
-    hnx_rows.sort(key=lambda row: row.get("market_cap") or 0.0, reverse=True)
-    return {_normalize_symbol(row.get("symbol")) for row in hnx_rows[:30]}
-
-
-def _resolve_color_value(row: dict[str, Any], metric: str) -> float:
-    preferred = _to_float(row.get(metric))
-    if preferred is not None:
-        return preferred
-
-    fallback = _to_float(row.get("change_pct"))
-    return fallback if fallback is not None else 0.0
-
-
-def _resolve_size_value(row: dict[str, Any], metric: str) -> Optional[float]:
-    preferred = _to_float(row.get(metric))
-    if preferred is not None and preferred > 0:
-        return preferred
-
-    market_cap = _to_float(row.get("market_cap"))
-    if market_cap is not None and market_cap > 0:
-        return market_cap
-
-    price = _to_float(row.get("price"))
-    shares_outstanding = _to_float(row.get("shares_outstanding"))
-    if price not in (None, 0) and shares_outstanding not in (None, 0):
-        derived_market_cap = price * shares_outstanding
-        if derived_market_cap > 0:
-            return derived_market_cap
-
-    volume = _to_float(row.get("volume"))
-    if price not in (None, 0) and volume not in (None, 0):
-        traded_value = price * volume
-        if traded_value > 0:
-            return traded_value
-
-    return None
-
-
 def _clean_rss_description(raw_description: Optional[str]) -> Optional[str]:
     if not raw_description:
         return None
@@ -2503,22 +2473,27 @@ async def get_heatmap_data(
                         len(cache_result.data),
                     )
                     # Convert ORM to Pydantic
-                    screener_data = [
-                        ScreenerData(
-                            symbol=s.symbol,
-                            organ_name=s.company_name,
-                            exchange=s.exchange,
-                            industry_name=s.industry,
-                            price=s.price,
-                            volume=s.volume,
-                            market_cap=s.market_cap,
-                            pe=s.pe,
-                            pb=s.pb,
-                            updated_at=getattr(s, "updated_at", None)
-                            or getattr(s, "snapshot_date", None),
+                    screener_data = []
+                    for s in cache_result.data:
+                        extended_metrics = (
+                            s.extended_metrics if isinstance(s.extended_metrics, dict) else {}
                         )
-                        for s in cache_result.data
-                    ]
+                        screener_data.append(
+                            ScreenerData(
+                                symbol=s.symbol,
+                                organ_name=s.company_name,
+                                exchange=s.exchange,
+                                industry_name=s.industry,
+                                price=s.price,
+                                volume=s.volume,
+                                market_cap=s.market_cap,
+                                pe=s.pe,
+                                pb=s.pb,
+                                change_1d=_extract_snapshot_change_pct(extended_metrics),
+                                updated_at=getattr(s, "updated_at", None)
+                                or getattr(s, "snapshot_date", None),
+                            )
+                        )
                     cached = True
             except Exception as e:
                 logger.warning(f"Cache lookup failed for heatmap: {e}")
@@ -2548,97 +2523,43 @@ async def get_heatmap_data(
             logger.info(f"Fetched {len(screener_data)} stocks from API for heatmap")
 
         # Step 2: Normalize input rows and enrich missing metadata/returns from DB snapshots.
-        normalized_rows = [
-            row if isinstance(row, dict) else _normalize_screener_row(row)
-            for row in screener_data
-        ]
-        normalized_rows = [row for row in normalized_rows if row.get("symbol")]
-
-        if exchange != "ALL":
-            exchange_upper = exchange.upper()
-            normalized_rows = [
-                row
-                for row in normalized_rows
-                if not row.get("exchange") or (row.get("exchange") or "").upper() == exchange_upper
-            ]
-
-        symbols = [row["symbol"] for row in normalized_rows]
-        metadata_map = await _load_stock_metadata(symbols)
-        change_map = await _load_change_pct_map(symbols)
-
-        for row in normalized_rows:
-            symbol = row["symbol"]
-            metadata = metadata_map.get(symbol) or {}
-            if not row.get("exchange") and metadata.get("exchange"):
-                row["exchange"] = metadata.get("exchange")
-            if not row.get("industry") and metadata.get("industry"):
-                row["industry"] = metadata.get("industry")
-            if not row.get("sector") and metadata.get("sector"):
-                row["sector"] = metadata.get("sector")
-            if row.get("change_pct") is None and symbol in change_map:
-                row["change_pct"] = change_map[symbol]
-
-        hnx30_symbols = _resolve_hnx30_symbols(normalized_rows) if group_by == "hnx30" else set()
-        vn30_symbols = {
+        heatmap_tools = HeatmapRowTools(
+            normalize_symbol=_normalize_symbol,
+            normalize_text=_normalize_text,
+            to_float=_to_float,
+            resolve_sector_name=_resolve_sector_name,
+        )
+        vn30_symbols = frozenset(
             symbol.upper()
             for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
-        }
+        )
 
-        def _build_groups(rows: List[dict[str, Any]]) -> Dict[str, List[HeatmapStock]]:
-            groups: Dict[str, List[HeatmapStock]] = defaultdict(list)
+        normalized_rows = normalize_heatmap_rows(screener_data, _normalize_screener_row)
+        symbols = collect_heatmap_symbols(normalized_rows)
+        metadata_map = await _load_stock_metadata(symbols)
+        change_map = await _load_change_pct_map(symbols)
+        normalized_rows = enrich_heatmap_rows(normalized_rows, metadata_map, change_map)
+        normalized_rows = filter_heatmap_rows_by_exchange(normalized_rows, exchange)
 
-            for row in rows:
-                symbol = _normalize_symbol(row.get("symbol"))
-                if not symbol:
-                    continue
-
-                price = _to_float(row.get("price"))
-                if price is None or price <= 0:
-                    continue
-
-                if group_by == "vn30" and symbol not in vn30_symbols:
-                    continue
-                if group_by == "hnx30" and symbol not in hnx30_symbols:
-                    continue
-
-                size_value = _resolve_size_value(row, size_metric)
-                if size_value is None or size_value <= 0:
-                    continue
-
-                industry = _normalize_text(row.get("industry"))
-                sector_hint = _normalize_text(row.get("sector"))
-
-                if group_by == "sector":
-                    group_key = _resolve_sector_name(symbol, industry, sector_hint)
-                elif group_by == "industry":
-                    group_key = industry or _resolve_sector_name(symbol, industry, sector_hint)
-                elif group_by == "vn30":
-                    group_key = "VN30"
-                elif group_by == "hnx30":
-                    group_key = "HNX30"
-                else:
-                    group_key = "Other"
-
-                change_pct = _resolve_color_value(row, color_metric)
-                change = price * (change_pct / 100.0)
-
-                heatmap_stock = HeatmapStock(
-                    symbol=symbol,
-                    name=_normalize_text(row.get("name")) or symbol,
-                    sector=group_key,
-                    industry=industry,
-                    market_cap=size_value,
-                    price=price,
-                    change=change,
-                    change_pct=change_pct,
-                    volume=_to_float(row.get("volume")),
-                )
-                groups[group_key].append(heatmap_stock)
-
-            return groups
+        hnx30_symbols = (
+            frozenset(resolve_hnx30_symbols(normalized_rows, heatmap_tools))
+            if group_by == "hnx30"
+            else frozenset()
+        )
+        group_builder = HeatmapGroupBuilder(
+            config=HeatmapGroupConfig(
+                group_by=group_by,
+                color_metric=color_metric,
+                size_metric=size_metric,
+                hnx30_symbols=hnx30_symbols,
+                vn30_symbols=vn30_symbols,
+            ),
+            tools=heatmap_tools,
+            stock_factory=HeatmapStock,
+        )
 
         # Step 3: Group stocks by selected view
-        groups = _build_groups(normalized_rows)
+        groups = build_heatmap_groups(normalized_rows, group_builder)
 
         # If cached payload is stale/sparse enough to produce an empty heatmap,
         # fall back to a fresh provider fetch once before returning empty data.
@@ -2652,61 +2573,43 @@ async def get_heatmap_data(
             except asyncio.TimeoutError as exc:
                 raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
 
-            refreshed_rows = [_normalize_screener_row(item) for item in screener_data]
-            refreshed_rows = [row for row in refreshed_rows if row.get("symbol")]
-            if exchange != "ALL":
-                exchange_upper = exchange.upper()
-                refreshed_rows = [
-                    row
-                    for row in refreshed_rows
-                    if not row.get("exchange")
-                    or (row.get("exchange") or "").upper() == exchange_upper
-                ]
-
-            refreshed_symbols = [row["symbol"] for row in refreshed_rows]
+            refreshed_rows = normalize_heatmap_rows(
+                screener_data,
+                _normalize_screener_row,
+                normalize_dict_rows=True,
+            )
+            refreshed_symbols = collect_heatmap_symbols(refreshed_rows)
             refreshed_metadata = await _load_stock_metadata(refreshed_symbols)
             refreshed_change_map = await _load_change_pct_map(refreshed_symbols)
-            for row in refreshed_rows:
-                symbol = row["symbol"]
-                metadata = refreshed_metadata.get(symbol) or {}
-                if not row.get("exchange") and metadata.get("exchange"):
-                    row["exchange"] = metadata.get("exchange")
-                if not row.get("industry") and metadata.get("industry"):
-                    row["industry"] = metadata.get("industry")
-                if not row.get("sector") and metadata.get("sector"):
-                    row["sector"] = metadata.get("sector")
-                if row.get("change_pct") is None and symbol in refreshed_change_map:
-                    row["change_pct"] = refreshed_change_map[symbol]
+            refreshed_rows = enrich_heatmap_rows(
+                refreshed_rows,
+                refreshed_metadata,
+                refreshed_change_map,
+            )
+            refreshed_rows = filter_heatmap_rows_by_exchange(refreshed_rows, exchange)
 
             if group_by == "hnx30":
-                hnx30_symbols = _resolve_hnx30_symbols(refreshed_rows)
+                hnx30_symbols = frozenset(resolve_hnx30_symbols(refreshed_rows, heatmap_tools))
+                group_builder = HeatmapGroupBuilder(
+                    config=HeatmapGroupConfig(
+                        group_by=group_by,
+                        color_metric=color_metric,
+                        size_metric=size_metric,
+                        hnx30_symbols=hnx30_symbols,
+                        vn30_symbols=vn30_symbols,
+                    ),
+                    tools=heatmap_tools,
+                    stock_factory=HeatmapStock,
+                )
 
-            groups = _build_groups(refreshed_rows)
+            groups = build_heatmap_groups(refreshed_rows, group_builder)
             cached = False
 
         # Step 5: Create sector aggregations
-        sectors: List[SectorGroup] = []
-        for sector_name, stocks in groups.items():
-            total_market_cap = sum(s.market_cap for s in stocks)
-            # Weighted average change by market cap
-            if total_market_cap > 0:
-                avg_change_pct = sum(s.change_pct * s.market_cap for s in stocks) / total_market_cap
-            else:
-                avg_change_pct = 0
-
-            sectors.append(
-                SectorGroup(
-                    sector=sector_name,
-                    stocks=stocks,
-                    total_market_cap=total_market_cap,
-                    avg_change_pct=avg_change_pct,
-                    stock_count=len(stocks),
-                )
-            )
-
-        # Sort sectors by total market cap (largest first)
-        sectors.sort(key=lambda s: s.total_market_cap, reverse=True)
-
+        sectors = build_heatmap_sectors(
+            groups,
+            HeatmapSectorBuilder(sector_factory=SectorGroup),
+        )
         total_stocks = sum(len(s.stocks) for s in sectors)
 
         # QA-v4 D.1: Prefer the freshest StockPrice.time across the heatmap

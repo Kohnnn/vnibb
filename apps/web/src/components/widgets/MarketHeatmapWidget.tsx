@@ -26,6 +26,21 @@ interface MarketHeatmapWidgetProps {
     onDataChange?: (data: WidgetDataPayload) => void;
 }
 
+type HeatmapGroupBy = 'sector' | 'industry' | 'vn30' | 'hnx30';
+type HeatmapExchange = 'HOSE' | 'HNX' | 'UPCOM' | 'ALL';
+
+const EXCHANGES = ['HOSE', 'HNX', 'UPCOM', 'ALL'] as const;
+const INDEX_PRESETS = [
+    { label: 'VN30', groupBy: 'vn30' },
+    { label: 'HNX30', groupBy: 'hnx30' },
+] as const;
+const HEATMAP_GROUP_LABELS: Record<HeatmapGroupBy, string> = {
+    sector: 'Sector',
+    industry: 'Industry',
+    vn30: 'VN30',
+    hnx30: 'HNX30',
+};
+
 function clampLabelSize(width: number, height: number): number {
     return Math.max(10, Math.min(18, Math.min(width / 7.5, height / 2.4)));
 }
@@ -61,8 +76,8 @@ function buildTreemapLayout(data: unknown, width: number, height: number) {
 }
 
 function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }: MarketHeatmapWidgetProps) {
-    const [groupBy, setGroupBy] = useState<'sector' | 'industry'>('sector');
-    const [exchange, setExchange] = useState<'HOSE' | 'HNX' | 'UPCOM' | 'ALL'>('HOSE');
+    const [groupBy, setGroupBy] = useState<HeatmapGroupBy>('sector');
+    const [exchange, setExchange] = useState<HeatmapExchange>('HOSE');
     const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
     const heatmapRef = useRef<HTMLDivElement>(null);
     const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'market_heatmap' });
@@ -132,9 +147,9 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
     const headerActions = (
         <div className="flex items-center gap-2 mr-2">
             <select
-                value={groupBy}
+                value={groupBy === 'sector' || groupBy === 'industry' ? groupBy : 'sector'}
                 onChange={(e) => {
-                    setGroupBy(e.target.value as any)
+                    setGroupBy(e.target.value === 'industry' ? 'industry' : 'sector')
                     setSelectedGroup(null)
                 }}
                 aria-label="Heatmap grouping"
@@ -145,11 +160,32 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
             </select>
 
             <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-default)]">
-                {['HOSE', 'HNX', 'UPCOM', 'ALL'].map(m => (
+                {INDEX_PRESETS.map(({ label, groupBy: presetGroupBy }) => (
+                    <button
+                        key={presetGroupBy}
+                        type="button"
+                        onClick={() => {
+                            setGroupBy(presetGroupBy)
+                            setExchange('ALL')
+                            setSelectedGroup(null)
+                        }}
+                        className={cn(
+                            "px-2 py-0.5 text-[9px] font-bold rounded transition-all",
+                            groupBy === presetGroupBy ? "bg-blue-600 text-white shadow-sm" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                        )}
+                    >
+                        {label}
+                    </button>
+                ))}
+            </div>
+
+            <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-default)]">
+                {EXCHANGES.map(m => (
                     <button
                         key={m}
+                        type="button"
                         onClick={() => {
-                            setExchange(m as any)
+                            setExchange(m)
                             setSelectedGroup(null)
                         }}
                         className={cn(
@@ -174,20 +210,21 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
 
     const hasData = Boolean(treemapData && data?.sectors?.length);
     const isFallback = Boolean(error && hasData);
+    const heatmapEndpoint = `/market/heatmap?group_by=${groupBy}&exchange=${exchange}&limit=500`;
 
     useEffect(() => {
         onDataChange?.(
             buildWidgetRuntime({
                 empty: !hasData,
                 apiGroup: '/market',
-                endpoint: `/market/heatmap?group_by=${groupBy}&exchange=${exchange}&limit=500`,
+                endpoint: heatmapEndpoint,
                 sourceLabel: 'Market heatmap',
                 lastDataDate: data?.updated_at || dataUpdatedAt,
                 stale: isFallback,
-                extra: hasData ? { groupBy, exchange, groupCount: data?.sectors?.length ?? 0 } : undefined,
+                extra: hasData ? { groupBy, exchange, groupCount: data?.sectors?.length ?? 0, endpoint: heatmapEndpoint } : undefined,
             }),
         );
-    }, [hasData, data?.updated_at, dataUpdatedAt, isFallback, groupBy, exchange, data?.sectors?.length, onDataChange]);
+    }, [hasData, data?.updated_at, dataUpdatedAt, isFallback, groupBy, exchange, data?.sectors?.length, onDataChange, heatmapEndpoint]);
 
     return (
         <WidgetContainer
@@ -225,7 +262,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                             Back
                                         </button>
                                     ) : null}
-                                    <span>{selectedGroup ? `${selectedGroup} Constituents` : `${groupBy === 'sector' ? 'Sector' : 'Industry'} Heatmap`}</span>
+                                    <span>{selectedGroup ? `${selectedGroup} Constituents` : `${HEATMAP_GROUP_LABELS[groupBy]} Heatmap`}</span>
                                 </div>
                                 <span className="text-[10px] text-[var(--text-muted)]">
                                     {selectedGroup ? 'Click a stock to sync the dashboard symbol' : 'Click a block to drill down'}
