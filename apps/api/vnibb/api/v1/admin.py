@@ -749,7 +749,7 @@ async def _collect_reinforcement_candidates(db: AsyncSession, limit: int) -> lis
     return symbols[:limit]
 
 
-@router.get("/database/tables")
+@router.get("/database/tables", dependencies=[Depends(require_admin_access)])
 async def list_all_tables(db: AsyncSession = Depends(get_db)):
     """List all database tables with row counts and freshness metadata."""
     tables_info = []
@@ -856,7 +856,7 @@ async def get_recent_errors(
     }
 
 
-@router.get("/database/freshness-summary")
+@router.get("/database/freshness-summary", dependencies=[Depends(require_admin_access)])
 async def get_freshness_summary(db: AsyncSession = Depends(get_db)):
     """
     Summarize dataset freshness for key tables with warning buckets.
@@ -924,7 +924,7 @@ async def get_freshness_summary(db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.get("/data-health")
+@router.get("/data-health", dependencies=[Depends(require_admin_access)])
 async def get_data_health(db: AsyncSession = Depends(get_db)):
     """Compact data freshness endpoint for dashboard widgets."""
     freshness = await get_freshness_summary(db)
@@ -1306,7 +1306,7 @@ async def trigger_data_reinforcement(
     )
 
 
-@router.get("/database/table/{table_name}/schema")
+@router.get("/database/table/{table_name}/schema", dependencies=[Depends(require_admin_access)])
 async def get_table_schema(table_name: str, db: AsyncSession = Depends(get_db)):
     """Get column metadata for a table."""
     _quote_identifier(table_name)
@@ -1382,8 +1382,8 @@ async def get_table_schema(table_name: str, db: AsyncSession = Depends(get_db)):
         return {"error": str(e)}
 
 
-@router.get("/database/table/{table_name}/sample")
-@router.get("/database/sample/{table_name}")
+@router.get("/database/table/{table_name}/sample", dependencies=[Depends(require_admin_access)])
+@router.get("/database/sample/{table_name}", dependencies=[Depends(require_admin_access)])
 async def get_table_sample(
     table_name: str,
     limit: int = Query(default=10, ge=1, le=500),
@@ -1463,9 +1463,9 @@ async def execute_query(query: str = Body(..., embed=True), db: AsyncSession = D
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/sync-status")
-@router.get("/database/sync-status")
-@router.get("/sync/status")
+@router.get("/sync-status", dependencies=[Depends(require_admin_access)])
+@router.get("/database/sync-status", dependencies=[Depends(require_admin_access)])
+@router.get("/sync/status", dependencies=[Depends(require_admin_access)])
 async def get_sync_status(db: AsyncSession = Depends(get_db)):
     """Get sync status for all tables."""
     status_data = {
@@ -1570,12 +1570,12 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
     return status_data
 
 
-@router.get("/database/stats")
+@router.get("/database/stats", dependencies=[Depends(require_admin_access)])
 async def get_db_stats(db: AsyncSession = Depends(get_db)):
     return await list_all_tables(db)
 
 
-@router.get("/cache/stats")
+@router.get("/cache/stats", dependencies=[Depends(require_admin_access)])
 async def get_cache_stats():
     if not settings.redis_url:
         return {

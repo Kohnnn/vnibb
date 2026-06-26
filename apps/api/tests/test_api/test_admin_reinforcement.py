@@ -1,4 +1,52 @@
 import pytest
+from httpx import ASGITransport, AsyncClient
+
+from vnibb.api.main import app
+
+
+@pytest.fixture
+def unauth_client():
+    transport = ASGITransport(app=app)
+    return AsyncClient(transport=transport, base_url="http://test")
+
+
+UNAUTH_ROUTES = [
+    ("GET", "/api/v1/admin/database/tables"),
+    ("GET", "/api/v1/admin/database/freshness-summary"),
+    ("GET", "/api/v1/admin/data-health"),
+    ("GET", "/api/v1/admin/database/table/stocks/schema"),
+    ("GET", "/api/v1/admin/database/table/stocks/sample"),
+    ("GET", "/api/v1/admin/sync-status"),
+    ("GET", "/api/v1/admin/database/stats"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,path", UNAUTH_ROUTES)
+async def test_admin_routes_reject_unauthorized(method, path, unauth_client):
+    response = await unauth_client.request(method, path)
+    assert response.status_code == 401, f"{method} {path} should return 401, got {response.status_code}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,path", UNAUTH_ROUTES)
+async def test_admin_routes_accept_authorized(method, path, client):
+    response = await client.request(method, path)
+    assert response.status_code not in (401, 403), f"{method} {path} returned {response.status_code} with valid key"
+
+
+PUBLIC_ROUTES = [
+    ("GET", "/api/v1/admin/ai-runtime/public"),
+    ("GET", "/api/v1/admin/unit-runtime/public"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,path", PUBLIC_ROUTES)
+async def test_public_admin_routes_accessible_without_auth(method, path, unauth_client):
+    response = await unauth_client.request(method, path)
+    assert response.status_code != 401, f"Public route {path} should not require auth"
+    assert response.status_code != 403, f"Public route {path} should not require auth"
 
 
 @pytest.mark.asyncio
