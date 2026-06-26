@@ -38,11 +38,19 @@ DATASET_COMPANY_INFO = "company.info"
 DATASET_LISTINGS = "reference.listings"
 VARIANT_YEAR_SUFFIX = ".year"
 
-# market_prices_eod stores closes in thousand VND (vnstock convention:
-# VNM close 58.4 == 58,400 VND), while statements are in VND. Live-confirmed
-# via BVPS cross-check (equity / issued_share matches the ratio row's
-# book_value_per_share in VND).
-EOD_PRICE_MULTIPLIER = 1000.0
+# market_prices_eod is now stored in raw VND (live-confirmed: FPT recent close
+# 70,800; VCB 61,400; VNM 56,300), so statements (also VND) and price share a
+# unit and need no multiplier. The corpus is partially mixed, however — a
+# fraction of bars survive in thousand VND (e.g. 72.9) — so the selected close
+# is coerced to raw VND by _canonical_eod_price before use rather than blindly
+# scaled. See vnibb.api.v1.quant._normalize_price_unit_rows for the sibling fix.
+EOD_PRICE_MULTIPLIER = 1.0
+
+# A thousand-VND vs raw-VND encoding of the same price differs by exactly 1000x;
+# nothing legitimate (splits ≤5x, ±15% daily limit) lands in this band, so a
+# close whose ratio to the window median falls here is a mis-scaled straggler.
+_EOD_RESCALE_LOW = 200.0
+_EOD_RESCALE_HIGH = 5000.0
 
 ENGINE_SOURCE = "vnibb-fundamental-engine"
 SCHEMA_VERSION = 1
@@ -302,6 +310,27 @@ def _median_abs(values: Sequence[float]) -> float | None:
     if len(finite) % 2:
         return finite[midpoint]
     return (finite[midpoint - 1] + finite[midpoint]) / 2
+
+
+def _canonical_eod_price(selected_close: float, window_closes: Sequence[float]) -> float:
+    """Coerce a selected EOD close to raw VND using the window median as anchor.
+
+    Guards against partially-migrated corpus rows: if the selected close differs
+    from the window's robust median by a clean ~1000x, it is a mis-scaled
+    thousand-VND straggler and is rescaled; otherwise it is returned unchanged.
+    """
+
+    anchor = _median_abs(window_closes)
+    if anchor is None or selected_close <= 0:
+        return selected_close
+
+    ratio = anchor / selected_close
+    if _EOD_RESCALE_LOW <= ratio <= _EOD_RESCALE_HIGH:
+        return selected_close * 1000.0
+    if (1.0 / _EOD_RESCALE_HIGH) <= ratio <= (1.0 / _EOD_RESCALE_LOW):
+        return selected_close / 1000.0
+    return selected_close
+
 
 
 def _normalize_statement_unit_outliers(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1086,10 +1115,15 @@ async def load_fundamental_inputs(symbol: str, svc: Any) -> FundamentalInputs:
     price: float | None = None
     volume: float | None = None
     eod_rows = await svc.get_eod_prices(symbol_upper, lookback_days=45, limit=60)
+    window_closes = [
+        c
+        for c in (_to_float(row.get("close")) for row in (eod_rows or []) if isinstance(row, dict))
+        if c is not None and c > 0
+    ]
     for row in reversed(eod_rows or []):
         close = _to_float(row.get("close")) if isinstance(row, dict) else None
         if close is not None:
-            price = close * EOD_PRICE_MULTIPLIER
+            price = _canonical_eod_price(close, window_closes) * EOD_PRICE_MULTIPLIER
             volume = _to_float(row.get("volume"))
             break
 

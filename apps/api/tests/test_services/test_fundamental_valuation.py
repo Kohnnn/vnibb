@@ -15,6 +15,7 @@ import pytest
 from vnibb.services.fundamental_valuation import (
     FundamentalInputs,
     ValuationConfig,
+    _canonical_eod_price,
     _normalize_statement_unit_outliers,
     compute_cagr,
     compute_dividend_years,
@@ -501,3 +502,38 @@ class TestToDocument:
             "horizonYears": 10,
         }
         assert doc["valuationMethod"] == "dcf"
+
+
+# --- EOD price canonicalization ---------------------------------------------------------
+
+
+class TestCanonicalEodPrice:
+    def test_thousand_vnd_straggler_coerced_up(self) -> None:
+        # Window is raw VND (~70,800); selected close mis-stored as thousand-VND.
+        window = [70_800.0, 71_000.0, 70_500.0, 69_900.0, 70_200.0]
+        assert _canonical_eod_price(70.8, window) == pytest.approx(70_800.0)
+
+    def test_raw_vnd_close_untouched(self) -> None:
+        window = [70_800.0, 71_000.0, 70_500.0, 69_900.0, 70_200.0]
+        assert _canonical_eod_price(70_800.0, window) == pytest.approx(70_800.0)
+
+    def test_raw_straggler_coerced_down(self) -> None:
+        # Window is thousand-VND (~70.8); selected close mis-stored as raw VND.
+        window = [70.8, 71.0, 70.5, 69.9, 70.2]
+        assert _canonical_eod_price(70_800.0, window) == pytest.approx(70.8)
+
+    def test_real_split_magnitude_ignored(self) -> None:
+        # A genuine ~2x gap (e.g. split) is not a unit error; leave untouched.
+        window = [70_000.0, 71_000.0, 69_000.0, 70_500.0, 70_200.0]
+        assert _canonical_eod_price(35_000.0, window) == pytest.approx(35_000.0)
+
+    def test_empty_window_passthrough(self) -> None:
+        assert _canonical_eod_price(70.8, []) == pytest.approx(70.8)
+
+    def test_zero_anchor_passthrough(self) -> None:
+        assert _canonical_eod_price(70.8, [0.0, 0.0]) == pytest.approx(70.8)
+
+    def test_nonpositive_selected_passthrough(self) -> None:
+        window = [70_800.0, 71_000.0, 70_500.0]
+        assert _canonical_eod_price(0.0, window) == pytest.approx(0.0)
+        assert _canonical_eod_price(-5.0, window) == pytest.approx(-5.0)
