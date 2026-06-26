@@ -466,6 +466,119 @@ def _historical_rows_to_frame(rows: list[EquityHistoricalData]) -> pd.DataFrame:
     return frame.reset_index(drop=True)
 
 
+# Order-of-magnitude band that cleanly separates a thousand-VND vs raw-VND
+# encoding of the SAME price (a 1000x gap). Real splits/dividends move price by
+# at most ~5x, and VN daily limits cap a single bar at ±15%, so nothing
+# legitimate ever lands inside [200, 5000]; the dead-zone (50, 200) is left
+# untouched and logged so a bad anchor is visible rather than silently rescaled.
+# Quant metrics are all returns/ratios, so the canonical unit only needs to be
+# internally consistent (whichever the recent-bar anchor implies), not a fixed
+# absolute scale.
+_PRICE_UNIT_RESCALE_LOW = 200.0
+_PRICE_UNIT_RESCALE_HIGH = 5000.0
+_PRICE_UNIT_ANCHOR_WINDOW = 60
+# Above the strictest VN daily price limit (UPCOM ±15%); a daily return whose
+# magnitude exceeds this is a data artifact (unit seam, bad tick, split) and is
+# dropped from return-based estimators rather than clipped (clipping biases vol).
+_MAX_SANE_DAILY_RETURN = 0.20
+
+
+def _normalize_price_unit_rows(
+    rows: list[EquityHistoricalData],
+    *,
+    symbol: str = "",
+) -> list[EquityHistoricalData]:
+    """Coerce mixed thousand-VND/raw-VND bars to one consistent unit per row.
+
+    Anchors on the recent-bar median, rescales only ~1000x discrepancies, and
+    leaves ambiguous dead-zone rows untouched. See the module constants above
+    for the rationale behind the rescale band and dead-zone.
+    """
+
+    if len(rows) < 2:
+        return rows
+
+    closes = np.array(
+        [float(r.close) for r in rows if r.close is not None and float(r.close) > 0],
+        dtype=float,
+    )
+    if closes.size < 2:
+        return rows
+
+    anchor = float(np.median(closes[-_PRICE_UNIT_ANCHOR_WINDOW:]))
+    if not np.isfinite(anchor) or anchor <= 0:
+        return rows
+
+    # If the anchor window itself straddles the migration boundary its own
+    # max/min ratio will blow past ~50; flag it so a bad anchor is visible.
+    anchor_window = closes[-_PRICE_UNIT_ANCHOR_WINDOW:]
+    window_spread = float(np.max(anchor_window) / np.min(anchor_window))
+    if window_spread > 50:
+        logger.warning(
+            "Price-unit anchor window for %s is itself mixed-unit (spread=%.1f); "
+            "normalization may be unreliable.",
+            symbol or "?",
+            window_spread,
+        )
+
+    rescaled = 0
+    ambiguous = 0
+    normalized: list[EquityHistoricalData] = []
+    for row in rows:
+        close = float(row.close) if row.close is not None else None
+        if not close or close <= 0:
+            normalized.append(row)
+            continue
+
+        ratio = anchor / close
+        factor: float | None = None
+        if _PRICE_UNIT_RESCALE_LOW <= ratio <= _PRICE_UNIT_RESCALE_HIGH:
+            factor = 1000.0
+        elif (1.0 / _PRICE_UNIT_RESCALE_HIGH) <= ratio <= (1.0 / _PRICE_UNIT_RESCALE_LOW):
+            factor = 1.0 / 1000.0
+        elif 50.0 < ratio < _PRICE_UNIT_RESCALE_LOW or (
+            (1.0 / _PRICE_UNIT_RESCALE_LOW) < ratio < (1.0 / 50.0)
+        ):
+            ambiguous += 1
+
+        if factor is None:
+            normalized.append(row)
+            continue
+
+        rescaled += 1
+        raw_close = row.raw_close
+        normalized.append(
+            row.model_copy(
+                update={
+                    "open": float(row.open) * factor,
+                    "high": float(row.high) * factor,
+                    "low": float(row.low) * factor,
+                    "close": close * factor,
+                    "raw_close": (float(raw_close) * factor) if raw_close is not None else None,
+                }
+            )
+        )
+
+    if rescaled or ambiguous:
+        logger.info(
+            "Price-unit normalization for %s: rescaled=%d ambiguous=%d total=%d anchor=%.1f",
+            symbol or "?",
+            rescaled,
+            ambiguous,
+            len(rows),
+            anchor,
+        )
+
+    return normalized
+
+
+def _sanitize_daily_returns(returns: pd.Series) -> pd.Series:
+    """NaN-out daily returns above the max sane VN move (see constant above)."""
+
+    sanitized = pd.to_numeric(returns, errors="coerce")
+    return sanitized.where(sanitized.abs() <= _MAX_SANE_DAILY_RETURN)
+
+
 async def _merge_latest_quote_into_frame(
     frame: pd.DataFrame,
     *,
@@ -1584,6 +1697,7 @@ async def _load_price_frame(
     if not rows:
         return _historical_rows_to_frame(rows)
 
+    rows = _normalize_price_unit_rows(rows, symbol=symbol)
     rows = _apply_corporate_action_adjustments(rows, corporate_actions, normalized_mode)
     return _historical_rows_to_frame(rows)
 
@@ -2158,7 +2272,7 @@ def _compute_garch_volatility(frame: pd.DataFrame) -> Dict[str, Any]:
     if len(enriched) < 250:
         return _empty_garch_payload()
 
-    enriched["return_pct"] = enriched["close"].pct_change() * 100
+    enriched["return_pct"] = _sanitize_daily_returns(enriched["close"].pct_change()) * 100
     enriched = enriched.dropna(subset=["return_pct"]).reset_index(drop=True)
     returns = enriched["return_pct"].to_numpy(dtype=float)
     returns = returns[np.isfinite(returns)]

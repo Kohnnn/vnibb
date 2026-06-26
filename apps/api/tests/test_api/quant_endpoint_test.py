@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pandas as pd
@@ -747,6 +747,88 @@ async def test_load_price_frame_applies_adjustments_for_quant_history(test_db, m
     assert frame["open"].tolist() == [90.0]
 
 
+def _mixed_unit_rows() -> list[EquityHistoricalData]:
+    rows: list[EquityHistoricalData] = []
+    for i in range(120):
+        thousand_unit = i < 60
+        base = 73.0 if thousand_unit else 73000.0
+        rows.append(
+            EquityHistoricalData(
+                symbol="FPT",
+                time=date(2025, 1, 1) + timedelta(days=i),
+                open=base,
+                high=base * 1.01,
+                low=base * 0.99,
+                close=base,
+                volume=1_000_000,
+                raw_close=base,
+                adjustment_mode="raw",
+                adjustment_applied=False,
+            )
+        )
+    return rows
+
+
+def test_normalize_price_unit_rows_coerces_thousand_vnd_to_raw():
+    normalized = quant._normalize_price_unit_rows(_mixed_unit_rows(), symbol="FPT")
+    closes = [r.close for r in normalized]
+
+    assert min(closes) > 70_000
+    assert max(closes) / min(closes) < 2
+    assert all(r.open == r.close for r in normalized)
+    assert all(r.high > r.close for r in normalized)
+
+
+def test_normalize_price_unit_rows_eliminates_seam_return():
+    normalized = quant._normalize_price_unit_rows(_mixed_unit_rows(), symbol="FPT")
+    frame = quant._historical_rows_to_frame(normalized)
+    max_abs_return = frame["close"].pct_change().abs().max()
+
+    assert max_abs_return < 0.20
+
+
+def test_normalize_price_unit_rows_leaves_uniform_series_untouched():
+    rows = [
+        EquityHistoricalData(
+            symbol="VCB",
+            time=date(2025, 1, 1) + timedelta(days=i),
+            open=76_000.0,
+            high=76_500.0,
+            low=75_500.0,
+            close=76_000.0,
+            volume=500_000,
+            raw_close=76_000.0,
+            adjustment_mode="raw",
+            adjustment_applied=False,
+        )
+        for i in range(80)
+    ]
+    normalized = quant._normalize_price_unit_rows(rows, symbol="VCB")
+
+    assert [r.close for r in normalized] == [76_000.0] * 80
+
+
+def test_normalize_price_unit_rows_ignores_real_split_magnitude():
+    rows = [
+        EquityHistoricalData(
+            symbol="ABC",
+            time=date(2025, 1, 1) + timedelta(days=i),
+            open=100_000.0 if i < 10 else 25_000.0,
+            high=100_000.0 if i < 10 else 25_000.0,
+            low=100_000.0 if i < 10 else 25_000.0,
+            close=100_000.0 if i < 10 else 25_000.0,
+            volume=500_000,
+            raw_close=100_000.0 if i < 10 else 25_000.0,
+            adjustment_mode="raw",
+            adjustment_applied=False,
+        )
+        for i in range(80)
+    ]
+    normalized = quant._normalize_price_unit_rows(rows, symbol="ABC")
+
+    assert {r.close for r in normalized} == {100_000.0, 25_000.0}
+
+
 @pytest.mark.asyncio
 async def test_load_quant_frame_with_warning_merges_latest_quote_snapshot(test_db, monkeypatch):
     async def fake_load_price_frame(*_args, **_kwargs):
@@ -885,6 +967,39 @@ def _build_garch_like_price_frame(rows: int = 620) -> pd.DataFrame:
         returns.append(shock)
         previous_shock = shock
     return _frame_from_returns(returns)
+
+
+def test_sanitize_daily_returns_drops_unit_seam_spikes():
+    series = pd.Series([0.01, -0.02, 9_870.0, 0.015, -0.05])
+    sanitized = quant._sanitize_daily_returns(series)
+
+    assert sanitized.isna().sum() == 1
+    assert sanitized.dropna().abs().max() <= 0.20
+
+
+def test_garch_volatility_survives_unit_seam_in_close_series():
+    rng = _rng(7)
+    closes = [73_000.0]
+    for _ in range(400):
+        closes.append(closes[-1] * (1.0 + 0.01 * _gauss(rng)))
+    closes.insert(200, closes[200] / 1000.0)
+    dates = pd.date_range(end=pd.Timestamp.now(tz=None).normalize(), periods=len(closes), freq="B")
+    frame = pd.DataFrame(
+        {
+            "time": dates,
+            "open": closes,
+            "high": [c * 1.01 for c in closes],
+            "low": [c * 0.99 for c in closes],
+            "close": closes,
+            "volume": [1_000_000] * len(closes),
+        }
+    )
+
+    payload = quant._compute_garch_volatility(frame)
+
+    assert payload["current_conditional_vol_pct"] is not None
+    assert payload["current_conditional_vol_pct"] < 200
+    assert payload["omega"] < 100
 
 
 def test_garch_volatility_insufficient_data_returns_null_payload():
