@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 import pytest
 
 from vnibb.api.v1 import news
+from vnibb.providers.vnstock.equity_screener import ScreenerData
+from vnibb.services.cache_manager import CacheResult
 from vnibb.services.world_news_service import (
     WorldNewsArticle,
     WorldNewsFeedResponse,
@@ -13,6 +15,169 @@ from vnibb.services.world_news_service import (
     WorldNewsSourceInfo,
     WorldNewsSourcesResponse,
 )
+
+
+class _EmptyHeatmapCache:
+    async def get_screener_data(self, **_kwargs):
+        return None
+
+
+def _heatmap_row(
+    symbol: str,
+    *,
+    exchange: str = "HOSE",
+    industry: str = "Ngân hàng - Dịch vụ tài chính",
+    price: float = 100.0,
+    change_1d: float | None = 1.25,
+    market_cap: float = 1_000_000.0,
+) -> ScreenerData:
+    return ScreenerData(
+        symbol=symbol,
+        organ_name=f"{symbol} Corp",
+        exchange=exchange,
+        industry_name=industry,
+        price=price,
+        change_1d=change_1d,
+        volume=10_000.0,
+        market_cap=market_cap,
+    )
+
+
+@pytest.mark.asyncio
+async def test_news_heatmap_endpoint_uses_real_change_pct_from_screener(client, monkeypatch):
+    async def fake_fetch(_params):
+        return [_heatmap_row("VCB", change_1d=3.2)]
+
+    monkeypatch.setattr(news, "CacheManager", _EmptyHeatmapCache)
+    monkeypatch.setattr(news.VnstockScreenerFetcher, "fetch", fake_fetch)
+
+    response = await client.get(
+        "/api/v1/news/heatmap",
+        params={"group_by": "sector", "exchange": "HOSE", "use_cache": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    stock = payload["sectors"][0]["stocks"][0]
+    assert stock["symbol"] == "VCB"
+    assert stock["change_pct"] == 3.2
+    assert stock["change"] == 3.2
+
+
+@pytest.mark.asyncio
+async def test_news_heatmap_endpoint_filters_vn30_constituents(client, monkeypatch):
+    async def fake_fetch(_params):
+        return [
+            _heatmap_row("VCB", market_cap=2_000_000.0),
+            _heatmap_row("AAA", market_cap=1_000_000.0),
+        ]
+
+    monkeypatch.setattr(news, "CacheManager", _EmptyHeatmapCache)
+    monkeypatch.setattr(news.VnstockScreenerFetcher, "fetch", fake_fetch)
+
+    response = await client.get(
+        "/api/v1/news/heatmap",
+        params={"group_by": "vn30", "exchange": "ALL", "use_cache": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["group_by"] == "vn30"
+    assert payload["count"] == 1
+    assert payload["sectors"][0]["sector"] == "VN30"
+    assert [stock["symbol"] for stock in payload["sectors"][0]["stocks"]] == ["VCB"]
+
+
+@pytest.mark.asyncio
+async def test_news_heatmap_endpoint_filters_hnx30_by_top_hnx_market_cap(client, monkeypatch):
+    async def fake_fetch(_params):
+        hnx_rows = [
+            _heatmap_row(f"HNX{i:02d}", exchange="HNX", market_cap=float(100 - i))
+            for i in range(31)
+        ]
+        return [*hnx_rows, _heatmap_row("VCB", exchange="HOSE", market_cap=1_000_000.0)]
+
+    monkeypatch.setattr(news, "CacheManager", _EmptyHeatmapCache)
+    monkeypatch.setattr(news.VnstockScreenerFetcher, "fetch", fake_fetch)
+
+    response = await client.get(
+        "/api/v1/news/heatmap",
+        params={"group_by": "hnx30", "exchange": "ALL", "use_cache": False, "limit": 100},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    symbols = [stock["symbol"] for stock in payload["sectors"][0]["stocks"]]
+    assert payload["group_by"] == "hnx30"
+    assert payload["count"] == 30
+    assert payload["sectors"][0]["sector"] == "HNX30"
+    assert "HNX00" in symbols
+    assert "HNX29" in symbols
+    assert "HNX30" not in symbols
+    assert "VCB" not in symbols
+
+
+@pytest.mark.asyncio
+async def test_news_heatmap_endpoint_returns_empty_without_real_change_data(client, monkeypatch):
+    async def fake_fetch(_params):
+        return [_heatmap_row("VCB", change_1d=None)]
+
+    monkeypatch.setattr(news, "CacheManager", _EmptyHeatmapCache)
+    monkeypatch.setattr(news.VnstockScreenerFetcher, "fetch", fake_fetch)
+
+    response = await client.get(
+        "/api/v1/news/heatmap",
+        params={"group_by": "sector", "exchange": "HOSE", "use_cache": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 0
+    assert payload["sectors"] == []
+
+
+class _FakeHeatmapCache:
+    def __init__(self):
+        pass
+
+    async def get_screener_data(self, **_kwargs):
+        class _FakeSnapshot:
+            symbol = "VCB"
+            company_name = "VCB Corp"
+            exchange = "HOSE"
+            industry = "Ngân hàng - Dịch vụ tài chính"
+            price = 100.0
+            volume = 10_000.0
+            market_cap = 1_000_000.0
+            pe = 10.0
+            pb = 1.0
+            extended_metrics = {"change_1d": 4.5}
+
+        return CacheResult(
+            data=[_FakeSnapshot()],
+            is_stale=False,
+            cached_at=None,
+            hit=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_news_heatmap_endpoint_uses_cached_change_pct_from_extended_metrics(client, monkeypatch):
+    monkeypatch.setattr(news, "CacheManager", _FakeHeatmapCache)
+
+    response = await client.get(
+        "/api/v1/news/heatmap",
+        params={"group_by": "sector", "exchange": "HOSE"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["cached"] is True
+    assert payload["count"] == 1
+    stock = payload["sectors"][0]["stocks"][0]
+    assert stock["symbol"] == "VCB"
+    assert stock["change_pct"] == 4.5
+    assert stock["change"] == 4.5
 
 
 @pytest.mark.asyncio

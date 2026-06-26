@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from vnibb.core.cache import cached
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.providers.vnstock.equity_screener import (
     ScreenerData,
     StockScreenerParams,
@@ -36,6 +37,20 @@ from vnibb.services.world_news_service import (
     get_world_news_map,
     list_world_news_sources,
 )
+
+
+def _coerce_extended_metric(metrics: dict[str, Any] | None, *keys: str) -> float | None:
+    """Safely coerce a numeric value from extended_metrics."""
+    if not metrics:
+        return None
+    for key in keys:
+        value = metrics.get(key)
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return None
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -689,6 +704,9 @@ async def get_heatmap_data(
                             market_cap=s.market_cap,
                             pe=s.pe,
                             pb=s.pb,
+                            change_1d=_coerce_extended_metric(
+                                s.extended_metrics, "change_1d", "price_change_1d_pct"
+                            ),
                         )
                         for s in cache_result.data
                     ]
@@ -705,21 +723,40 @@ async def get_heatmap_data(
         if exchange != "ALL":
             screener_data = [s for s in screener_data if s.exchange == exchange]
 
-        # Step 3: Calculate change_pct (for now, use mock data since we don't have historical prices)
-        # In production, you'd fetch yesterday's close price and calculate actual change
-        # For now, we'll use a simple heuristic based on volume/market_cap
-        import random
+        vn30_symbols = {
+            symbol.upper()
+            for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
+        }
+        hnx30_symbols = {
+            stock.symbol.upper()
+            for stock in sorted(
+                (
+                    stock
+                    for stock in screener_data
+                    if (stock.exchange or "").upper() == "HNX"
+                    and stock.market_cap is not None
+                    and stock.market_cap > 0
+                ),
+                key=lambda stock: stock.market_cap or 0,
+                reverse=True,
+            )[:30]
+        }
 
-        random.seed(42)  # Deterministic for demo
-
-        # Step 4: Group stocks by sector/industry
         groups: dict[str, list[HeatmapStock]] = defaultdict(list)
 
         for stock in screener_data:
+            symbol = stock.symbol.upper()
+            if group_by == "vn30" and symbol not in vn30_symbols:
+                continue
+            if group_by == "hnx30" and symbol not in hnx30_symbols:
+                continue
+
             # Skip stocks with missing critical data
             if not stock.market_cap or stock.market_cap <= 0:
                 continue
             if not stock.price or stock.price <= 0:
+                continue
+            if stock.change_1d is None:
                 continue
 
             # Determine grouping key
@@ -731,17 +768,13 @@ async def get_heatmap_data(
             elif group_by == "industry":
                 group_key = stock.industry_name or "Other"
             elif group_by == "vn30":
-                # TODO: Filter only VN30 stocks (need VN30 list)
                 group_key = "VN30"
             elif group_by == "hnx30":
-                # TODO: Filter only HNX30 stocks
                 group_key = "HNX30"
             else:
                 group_key = "Other"
 
-            # Mock change_pct calculation (replace with real data in production)
-            # Use a normal distribution centered around 0
-            change_pct = random.gauss(0, 2.5)  # Mean 0%, StdDev 2.5%
+            change_pct = stock.change_1d
             change = stock.price * (change_pct / 100)
 
             heatmap_stock = HeatmapStock(
