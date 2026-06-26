@@ -2186,7 +2186,7 @@ async def test_sector_board_returns_grouped_sector_columns(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_money_flow_trend_returns_rrg_like_points(client, test_db):
-    base_dates = [date(2025, 11, 15) + timedelta(days=offset) for offset in range(50)]
+    base_dates = [date.today() - timedelta(days=49 - offset) for offset in range(50)]
     for index, trade_date in enumerate(base_dates, start=1):
         test_db.add(
             StockIndex(
