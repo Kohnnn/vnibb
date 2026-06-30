@@ -1089,6 +1089,18 @@ body {
   --color-neutral: #475569;
 }
 
+:root[data-color-mode='colorblind'] {
+  --color-positive: #0072b2;
+  --color-positive-muted: #56b4e9;
+  --color-positive-bg: color-mix(in srgb, var(--color-positive) 16%, transparent);
+  --color-negative: #d55e00;
+  --color-negative-muted: #e69f00;
+  --color-negative-bg: color-mix(in srgb, var(--color-negative) 16%, transparent);
+  --color-warning: #a65f00;
+  --chart-green: var(--color-positive);
+  --chart-red: var(--color-negative);
+}
+
 /* Reduce visual effects: drop expensive backdrop blur (perf + the documented
    Header stacking-context bug) and heavy glows for a solid surface. Triggered
    by the user preference OR the OS prefers-reduced-motion / -transparency. */
@@ -1102,6 +1114,14 @@ body {
 
 :root[data-reduce-effects="true"] .widget-card-premium:hover {
   transform: none !important;
+}
+
+:root.light[data-reduce-effects="true"] .widget-card-premium,
+:root[data-theme="light"][data-reduce-effects="true"] .widget-card-premium,
+:root.light[data-reduce-effects="true"] .widget-card,
+:root[data-theme="light"][data-reduce-effects="true"] .widget-card {
+  border-color: var(--color-border-strong) !important;
+  outline: 1px solid color-mix(in srgb, var(--color-border-strong) 70%, transparent);
 }
 
 :root[data-reduce-effects="true"] .skeleton-premium {

@@ -169,7 +169,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setChartStyle,
     reduceEffects,
     setReduceEffects,
+    colorblindMode,
+    setColorblindMode,
   } = useUiPreferences();
+
   const {
     config: unitConfig,
     globalUsdVndDefaultRate,
@@ -1219,7 +1222,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
                     <div className="text-sm font-bold text-blue-300">Theme mode</div>
                     <div className="mt-1 text-xs text-[var(--text-muted)]">
-                      Choose the shell theme for this browser. Light mode uses the existing token set and can still expose widget-specific color gaps during visual QA.
+                      Choose the shell theme for this browser.
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       {(['dark', 'light'] as const).map((option) => (
@@ -1309,6 +1312,19 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         checked={reduceEffects}
                         onCheckedChange={setReduceEffects}
                         aria-label="Toggle reduced visual effects"
+                      />
+                    </div>
+                    <div className="flex items-start justify-between gap-4 border-t border-[var(--border-subtle)] pt-4">
+                      <div>
+                        <div className="text-sm font-bold text-blue-300">Colorblind-safe palette</div>
+                        <div className="mt-1 text-xs text-[var(--text-muted)]">
+                          Remaps positive, negative, and warning market colors to blue, orange, and amber cues for this browser.
+                        </div>
+                      </div>
+                      <Switch
+                        checked={colorblindMode}
+                        onCheckedChange={setColorblindMode}
+                        aria-label="Toggle colorblind-safe palette"
                       />
                     </div>
                   </div>

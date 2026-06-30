@@ -28,6 +28,8 @@ interface UiPreferencesContextType {
   setChartStyle: (value: ChartStyleDefault) => void;
   reduceEffects: boolean;
   setReduceEffects: (value: boolean) => void;
+  colorblindMode: boolean;
+  setColorblindMode: (value: boolean) => void;
 }
 
 const UiPreferencesContext = createContext<UiPreferencesContextType | undefined>(
@@ -37,6 +39,7 @@ const UiPreferencesContext = createContext<UiPreferencesContextType | undefined>
 const DENSITY_KEY = 'vnibb-density';
 const CHART_STYLE_KEY = 'vnibb-chart-style-default';
 const REDUCE_EFFECTS_KEY = 'vnibb-reduce-effects';
+const COLORBLIND_MODE_KEY = 'vnibb-colorblind-mode';
 
 const isDensity = (value: unknown): value is Density =>
   value === 'compact' || value === 'comfortable' || value === 'spacious';
@@ -44,10 +47,20 @@ const isDensity = (value: unknown): value is Density =>
 const isChartStyle = (value: unknown): value is ChartStyleDefault =>
   value === 'candle' || value === 'bar' || value === 'line' || value === 'area';
 
+const handleStorageError = (message: string, error: unknown) => {
+  if (error instanceof DOMException) {
+    console.warn(message, error);
+    return;
+  }
+
+  throw error;
+};
+
 export function UiPreferencesProvider({ children }: { children: ReactNode }) {
   const [density, setDensityState] = useState<Density>('comfortable');
   const [chartStyle, setChartStyleState] = useState<ChartStyleDefault>('candle');
   const [reduceEffects, setReduceEffectsState] = useState<boolean>(false);
+  const [colorblindMode, setColorblindModeState] = useState<boolean>(false);
 
   useEffect(() => {
     try {
@@ -65,10 +78,13 @@ export function UiPreferencesProvider({ children }: { children: ReactNode }) {
       if (storedReduceEffects === 'true' || storedReduceEffects === 'false') {
         setReduceEffectsState(storedReduceEffects === 'true');
       }
+
+      const storedColorblindMode = localStorage.getItem(COLORBLIND_MODE_KEY);
+      if (storedColorblindMode === 'true' || storedColorblindMode === 'false') {
+        setColorblindModeState(storedColorblindMode === 'true');
+      }
     } catch (error) {
-      // localStorage unavailable (e.g. SSR / private mode); silently fall
-      // back to defaults rather than blocking render.
-      console.warn('Failed to read UI preferences from localStorage:', error);
+      handleStorageError('Failed to read UI preferences from localStorage:', error);
     }
   }, []);
 
@@ -90,12 +106,20 @@ export function UiPreferencesProvider({ children }: { children: ReactNode }) {
     );
   }, [reduceEffects]);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.setAttribute(
+      'data-color-mode',
+      colorblindMode ? 'colorblind' : 'default',
+    );
+  }, [colorblindMode]);
+
   const setDensity = (value: Density) => {
     setDensityState(value);
     try {
       localStorage.setItem(DENSITY_KEY, value);
     } catch (error) {
-      console.warn('Failed to persist density preference:', error);
+      handleStorageError('Failed to persist density preference:', error);
     }
   };
 
@@ -104,7 +128,7 @@ export function UiPreferencesProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.setItem(CHART_STYLE_KEY, value);
     } catch (error) {
-      console.warn('Failed to persist chart-style preference:', error);
+      handleStorageError('Failed to persist chart-style preference:', error);
     }
   };
 
@@ -113,7 +137,16 @@ export function UiPreferencesProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.setItem(REDUCE_EFFECTS_KEY, value ? 'true' : 'false');
     } catch (error) {
-      console.warn('Failed to persist reduce-effects preference:', error);
+      handleStorageError('Failed to persist reduce-effects preference:', error);
+    }
+  };
+
+  const setColorblindMode = (value: boolean) => {
+    setColorblindModeState(value);
+    try {
+      localStorage.setItem(COLORBLIND_MODE_KEY, value ? 'true' : 'false');
+    } catch (error) {
+      handleStorageError('Failed to persist colorblind-mode preference:', error);
     }
   };
 
@@ -126,6 +159,8 @@ export function UiPreferencesProvider({ children }: { children: ReactNode }) {
         setChartStyle,
         reduceEffects,
         setReduceEffects,
+        colorblindMode,
+        setColorblindMode,
       }}
     >
       {children}
@@ -146,6 +181,8 @@ export function useUiPreferences(): UiPreferencesContextType {
       setChartStyle: () => undefined,
       reduceEffects: false,
       setReduceEffects: () => undefined,
+      colorblindMode: false,
+      setColorblindMode: () => undefined,
     };
   }
   return context;
@@ -172,6 +209,10 @@ export const UiPreferencesScript = () => {
         var reduceEffects = localStorage.getItem('${REDUCE_EFFECTS_KEY}');
         if (reduceEffects === 'true' || reduceEffects === 'false') {
           document.documentElement.setAttribute('data-reduce-effects', reduceEffects);
+        }
+        var colorblindMode = localStorage.getItem('${COLORBLIND_MODE_KEY}');
+        if (colorblindMode === 'true' || colorblindMode === 'false') {
+          document.documentElement.setAttribute('data-color-mode', colorblindMode === 'true' ? 'colorblind' : 'default');
         }
       } catch (e) {
         // ignore
