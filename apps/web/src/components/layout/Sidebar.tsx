@@ -997,6 +997,7 @@ export function Sidebar({
                                     role="menuitem"
                                     onClick={() => handleMoveDashboardOrder('up')}
                                     disabled={!canMoveDashboardUp}
+                                    aria-disabled={!canMoveDashboardUp}
                                     className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                     <ChevronUp size={12} />
@@ -1006,6 +1007,7 @@ export function Sidebar({
                                     role="menuitem"
                                     onClick={() => handleMoveDashboardOrder('down')}
                                     disabled={!canMoveDashboardDown}
+                                    aria-disabled={!canMoveDashboardDown}
                                     className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                     <ChevronDown size={12} />
