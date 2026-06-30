@@ -202,6 +202,18 @@ describe('GARCH volatility widget registration', () => {
   });
 });
 
+describe('Polymarket widget registration gap', () => {
+  it('has polymarket in the layout contract', () => {
+    expect(WIDGET_LAYOUT_BEHAVIORS).toHaveProperty('polymarket');
+  });
+
+  it('has polymarket registered in widgetDefinitions with category metadata', () => {
+    const def = widgetDefinitions.find((definition) => definition.type === 'polymarket');
+    expect(def).toBeDefined();
+    expect(def?.category).toBeDefined();
+  });
+});
+
 // Regression: older backend with /quant route deployed but without
 // garch_volatility returns 400 unsupported metric.  Use jest.requireActual
 // because @/lib/queries is fully mocked above.

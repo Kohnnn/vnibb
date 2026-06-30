@@ -166,6 +166,7 @@ export const WIDGET_LAYOUT_BEHAVIORS: Record<WidgetType, LayoutBehavior> = {
   world_indices: { preferredW: 10, preferredH: 8, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 2 },
   forex_rates: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
   commodities: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  polymarket: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
   signal_summary: { preferredW: 24, preferredH: 8, minW: 12, minH: 6, orientation: 'horizontal', expandPriority: 6 },
   // Backfilled so every WidgetType resolves an explicit size contract instead of the
   // 6x5 fallback (which previously collapsed uncovered types to a broken 3x3 at insertion).

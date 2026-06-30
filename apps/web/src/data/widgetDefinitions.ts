@@ -814,6 +814,15 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['commodities', 'gold', 'oil', 'macro', 'global']
     },
     {
+        type: 'polymarket',
+        name: 'Polymarket',
+        description: 'Prediction-market odds and event probabilities for macro and market context',
+        category: 'global_markets',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 6 },
+        searchKeywords: ['polymarket', 'prediction market', 'odds', 'probability', 'events', 'macro']
+    },
+    {
         type: 'world_news_monitor',
         name: 'World News Monitor',
         description: 'Live Vietnam and global RSS/Atom news sources with direct article, source, and feed links',

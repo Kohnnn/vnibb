@@ -59,6 +59,7 @@ import { SeasonalitySpiralHeatmapWidget } from './SeasonalitySpiralHeatmapWidget
 import { TechnicalSummaryWidget } from './TechnicalSummaryWidget';
 import { ForexRatesWidget } from './ForexRatesWidget';
 import { CommoditiesWidget } from './CommoditiesWidget';
+import { PolymarketWidget } from './PolymarketWidget';
 import { SimilarStocksWidget } from './SimilarStocksWidget';
 import { ListingBrowserWidget } from './ListingBrowserWidget';
 import { QuickStatsWidget } from './QuickStatsWidget';
@@ -450,6 +451,7 @@ export const widgetRegistry: Record<WidgetType, ComponentType<WidgetProps>> = {
     // Reference widgets
     forex_rates: ForexRatesWidget as ComponentType<WidgetProps>,
     commodities: CommoditiesWidget as ComponentType<WidgetProps>,
+    polymarket: PolymarketWidget as ComponentType<WidgetProps>,
 
     // Additional widgets
     notes: NotesWidget as ComponentType<WidgetProps>,
@@ -562,6 +564,7 @@ export const widgetNames: Record<WidgetType, string> = {
     derivatives_analytics: 'Derivatives Analytics',
     forex_rates: 'Forex Rates',
     commodities: 'Commodities',
+    polymarket: 'Polymarket',
     similar_stocks: 'Similar Stocks',
     listing_browser: 'Listing Browser',
     quick_stats: 'Quick Stats',
@@ -699,6 +702,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     derivatives_analytics: 'Front-contract pulse and short futures curve analytics across the contract ladder',
     forex_rates: 'Currency exchange (VND pairs)',
     commodities: 'Gold, oil, and metals',
+    polymarket: 'Prediction market dashboard placeholder for Polymarket coverage',
     similar_stocks: 'Stocks with high correlation',
     listing_browser: 'Exchange and industry browser for the listed universe',
     quick_stats: 'Market at a glance',

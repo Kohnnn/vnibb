@@ -157,6 +157,7 @@ export type WidgetType =
     | 'derivatives_analytics'
     | 'forex_rates'
     | 'commodities'
+    | 'polymarket'
     | 'similar_stocks'
     | 'quick_stats'
     | 'notes'
