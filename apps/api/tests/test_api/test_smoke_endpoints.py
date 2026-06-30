@@ -7,11 +7,12 @@ import pytest
 from vnibb.models.company import Company, Shareholder
 from vnibb.models.comparison import StockComparison
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+from vnibb.models.market_news import MarketNews
 from vnibb.models.news import Dividend
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
-from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily, OrderbookSnapshot
+from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderbookSnapshot, OrderFlowDaily
 from vnibb.providers.vnstock.equity_historical import EquityHistoricalData
 from vnibb.providers.vnstock.equity_profile import EquityProfileData
 from vnibb.providers.vnstock.equity_screener import ScreenerData
@@ -3152,6 +3153,28 @@ async def test_market_commodities_use_yahoo_fallback_when_available(client, monk
 
 
 @pytest.mark.asyncio
+async def test_health_basic_returns_200(client):
+    """RED: /health/ (basic) returns 200 with status and db fields."""
+    response = await client.get("/health/")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert "db" in payload
+    assert "version" in payload
+
+
+@pytest.mark.asyncio
+async def test_health_detailed_returns_200(client):
+    """RED: /health/detailed returns 200 with components shape."""
+    response = await client.get("/health/detailed")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "components" in payload
+    assert "database" in payload["components"]
+    assert "status" in payload
+
+
+@pytest.mark.asyncio
 async def test_request_timeout_middleware_returns_504(client, monkeypatch):
     monkeypatch.setattr("vnibb.api.v1.market.WORLD_INDEX_POINT_TIMEOUT_SECONDS", 2)
     monkeypatch.setattr("vnibb.core.config.settings.api_request_timeout_seconds", 0.01)
@@ -3178,3 +3201,269 @@ async def test_request_timeout_middleware_returns_504(client, monkeypatch):
     payload = response.json()
     assert payload["error"] is True
     assert payload["code"] == "REQUEST_TIMEOUT"
+
+
+# ── BUG-07: Freshness endpoint tests ──────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_market_freshness_returns_200(client, test_db):
+    """RED: /api/v1/market/freshness returns 200 with proper response shape."""
+    from datetime import date as dt_date
+
+    test_db.add(Stock(id=1, symbol="VNM", exchange="HOSE", company_name="Vinamilk"))
+    test_db.add(
+        StockPrice(
+            id=1,
+            stock_id=1,
+            symbol="VNM",
+            time=dt_date(2026, 6, 27),
+            open=62.0,
+            high=63.0,
+            low=61.5,
+            close=62.5,
+            volume=1_000_000,
+            interval="1D",
+            source="vnstock",
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/freshness")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "timestamp" in payload
+    assert "overall" in payload
+    assert "buckets" in payload
+    assert len(payload["buckets"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_market_freshness_bucket_shapes(client, test_db):
+    """RED: Each bucket has label, status, age_days, last_data_date, detail."""
+    from datetime import date as dt_date
+
+    test_db.add(Stock(id=1, symbol="VNM", exchange="HOSE", company_name="Vinamilk"))
+    test_db.add(
+        StockPrice(
+            id=1,
+            stock_id=1,
+            symbol="VNM",
+            time=dt_date(2026, 6, 27),
+            open=62.0,
+            high=63.0,
+            low=61.5,
+            close=62.5,
+            volume=1_000_000,
+            interval="1D",
+            source="vnstock",
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/freshness")
+    assert response.status_code == 200
+    payload = response.json()
+
+    for bucket in payload["buckets"]:
+        assert "label" in bucket
+        assert "status" in bucket
+        assert "age_days" in bucket or bucket["age_days"] is None
+        assert "last_data_date" in bucket or bucket["last_data_date"] is None
+        assert "detail" in bucket
+
+
+@pytest.mark.asyncio
+async def test_market_freshness_overall_fresh_when_all_recent(client, test_db):
+    """RED: overall is 'fresh' when all buckets are within 1 day."""
+    from datetime import date as dt_date
+    from datetime import datetime
+
+    test_db.add(Stock(id=1, symbol="VNM", exchange="HOSE", company_name="Vinamilk"))
+    test_db.add(
+        StockPrice(
+            id=1,
+            stock_id=1,
+            symbol="VNM",
+            time=dt_date(2026, 6, 29),
+            open=62.0,
+            high=63.0,
+            low=61.5,
+            close=62.5,
+            volume=1_000_000,
+            interval="1D",
+            source="vnstock",
+        )
+    )
+    test_db.add(
+        ForeignTrading(
+            id=1,
+            symbol="VNM",
+            trade_date=dt_date(2026, 6, 29),
+            buy_volume=100_000,
+            sell_volume=80_000,
+            net_volume=20_000,
+        )
+    )
+    test_db.add(
+        MarketNews(
+            id=1,
+            source="test",
+            title="Test news",
+            published_date=datetime(2026, 6, 29, 8, 0, 0),
+            crawled_at=datetime(2026, 6, 29, 8, 0, 0),
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/freshness")
+    assert response.status_code == 200
+    payload = response.json()
+    # News threshold is 1 day; data from yesterday is "stale"
+    assert payload["overall"] in ("fresh", "stale")
+
+
+@pytest.mark.asyncio
+async def test_market_freshness_overall_stale_when_one_old(client, test_db):
+    """RED: overall is 'stale' when one bucket is >2 days old."""
+    from datetime import date as dt_date
+
+    test_db.add(Stock(id=1, symbol="VNM", exchange="HOSE", company_name="Vinamilk"))
+    test_db.add(
+        StockPrice(
+            id=1,
+            stock_id=1,
+            symbol="VNM",
+            time=dt_date(2026, 6, 20),
+            open=62.0,
+            high=63.0,
+            low=61.5,
+            close=62.5,
+            volume=1_000_000,
+            interval="1D",
+            source="vnstock",
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/freshness")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["overall"] in ("stale", "critical")
+
+
+@pytest.mark.asyncio
+async def test_market_freshness_overall_critical_when_very_old(client, test_db):
+    """RED: overall is 'critical' when data is >7 days old."""
+    from datetime import date as dt_date
+
+    test_db.add(Stock(id=1, symbol="VNM", exchange="HOSE", company_name="Vinamilk"))
+    test_db.add(
+        StockPrice(
+            id=1,
+            stock_id=1,
+            symbol="VNM",
+            time=dt_date(2026, 6, 1),
+            open=62.0,
+            high=63.0,
+            low=61.5,
+            close=62.5,
+            volume=1_000_000,
+            interval="1D",
+            source="vnstock",
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/freshness")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["overall"] == "critical"
+
+
+@pytest.mark.asyncio
+async def test_market_freshness_returns_timestamp_field(client, test_db):
+    """RED: response has a valid ISO timestamp."""
+    from datetime import date as dt_date
+
+    test_db.add(Stock(id=1, symbol="VNM", exchange="HOSE", company_name="Vinamilk"))
+    test_db.add(
+        StockPrice(
+            id=1,
+            stock_id=1,
+            symbol="VNM",
+            time=dt_date(2026, 6, 27),
+            open=62.0,
+            high=63.0,
+            low=61.5,
+            close=62.5,
+            volume=1_000_000,
+            interval="1D",
+            source="vnstock",
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/freshness")
+    assert response.status_code == 200
+    payload = response.json()
+    assert isinstance(payload["timestamp"], str)
+    assert "T" in payload["timestamp"]
+
+
+# ── _classify_age unit tests ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "days,stale_threshold,critical_threshold,expected",
+    [
+        (None, 2, 7, "unknown"),
+        (0.5, 2, 7, "fresh"),
+        (2.0, 2, 7, "stale"),
+        (7.0, 2, 7, "critical"),
+        (10.0, 2, 7, "critical"),
+        (1.9, 2, 7, "fresh"),
+        (2.1, 2, 7, "stale"),
+        (7.1, 2, 7, "critical"),
+    ],
+)
+async def test_classify_age(days, stale_threshold, critical_threshold, expected):
+    """RED: _classify_age returns correct status for all branches."""
+    from vnibb.api.v1.market import _classify_age
+
+    result = _classify_age(days, stale_threshold, critical_threshold)
+    assert result == expected
+
+
+# ── _age endpoint test ──────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_market_freshness_age_days_reflects_data_age(client, test_db):
+    """RED: age_days reflects the actual age of data in days."""
+    from datetime import date as dt_date
+
+    test_db.add(Stock(id=1, symbol="VNM", exchange="HOSE", company_name="Vinamilk"))
+    test_db.add(
+        StockPrice(
+            id=1,
+            stock_id=1,
+            symbol="VNM",
+            time=dt_date(2026, 6, 27),
+            open=62.0,
+            high=63.0,
+            low=61.5,
+            close=62.5,
+            volume=1_000_000,
+            interval="1D",
+            source="vnstock",
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/freshness")
+    assert response.status_code == 200
+    payload = response.json()
+    prices_bucket = next(b for b in payload["buckets"] if b["label"] == "Daily prices")
+    assert prices_bucket["age_days"] is not None
+    assert prices_bucket["age_days"] >= 0
