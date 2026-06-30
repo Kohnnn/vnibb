@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useScreenerData, useMetricsHistory, useFinancialRatios, useProfile, useStockQuote, useQuantMetrics } from '@/lib/queries';
 import { formatDividendYield, formatRatio, formatPercent, normalizeDividendYield } from '@/lib/formatters';
 import { formatUnitValue } from '@/lib/units';
@@ -212,22 +212,40 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
         ]),
     }
 
-    const mergedStock: any = {
-        pe: metricMap.pe.value,
-        pb: metricMap.pb.value,
-        ps: metricMap.ps.value,
-        ev_ebitda: metricMap.evEbitda.value,
-        roe: metricMap.roe.value,
-        roa: metricMap.roa.value,
-        roic: metricMap.roic.value,
-        net_margin: metricMap.netMargin.value,
-        gross_margin: metricMap.grossMargin.value,
-        debt_to_equity: metricMap.debtToEquity.value,
-        current_ratio: metricMap.currentRatio.value,
-        market_cap: metricMap.marketCap.value,
-        dividend_yield: metricMap.dividendYield.value,
-        beta: metricMap.beta.value,
-    }
+    const mergedStock = useMemo(
+        () => ({
+            pe: metricMap.pe.value,
+            pb: metricMap.pb.value,
+            ps: metricMap.ps.value,
+            ev_ebitda: metricMap.evEbitda.value,
+            roe: metricMap.roe.value,
+            roa: metricMap.roa.value,
+            roic: metricMap.roic.value,
+            net_margin: metricMap.netMargin.value,
+            gross_margin: metricMap.grossMargin.value,
+            debt_to_equity: metricMap.debtToEquity.value,
+            current_ratio: metricMap.currentRatio.value,
+            market_cap: metricMap.marketCap.value,
+            dividend_yield: metricMap.dividendYield.value,
+            beta: metricMap.beta.value,
+        }),
+        [
+            metricMap.pe.value,
+            metricMap.pb.value,
+            metricMap.ps.value,
+            metricMap.evEbitda.value,
+            metricMap.roe.value,
+            metricMap.roa.value,
+            metricMap.roic.value,
+            metricMap.netMargin.value,
+            metricMap.grossMargin.value,
+            metricMap.debtToEquity.value,
+            metricMap.currentRatio.value,
+            metricMap.marketCap.value,
+            metricMap.dividendYield.value,
+            metricMap.beta.value,
+        ],
+    );
     const hasData = Boolean(mergedStock && Object.values(mergedStock).some((v) => v !== null && v !== undefined));
     const isFallback = Boolean(error && hasData);
     const hasHistory = Boolean(
