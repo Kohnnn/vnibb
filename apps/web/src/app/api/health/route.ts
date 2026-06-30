@@ -7,6 +7,18 @@ import { env } from '@/lib/env'
 
 const BACKEND_API_URL = `${env.apiUrl}/api/v1`
 
+type PublicEndpointHealth = {
+    readonly ok: boolean
+    readonly status: number
+}
+
+function publicEndpointHealth(response: Response): PublicEndpointHealth {
+    return {
+        ok: response.ok,
+        status: response.status,
+    }
+}
+
 export async function GET() {
     const start = Date.now()
 
@@ -22,9 +34,6 @@ export async function GET() {
             }),
         ])
 
-        const basic = basicRes.ok ? await basicRes.json() : null
-        const detailed = detailedRes.ok ? await detailedRes.json() : null
-
         const elapsed = Date.now() - start
 
         return NextResponse.json({
@@ -34,8 +43,8 @@ export async function GET() {
             stale: elapsed > 3000,
             timeout: elapsed > 5000,
             backend: {
-                basic: basic,
-                detailed: detailed,
+                health: publicEndpointHealth(basicRes),
+                health_detailed: publicEndpointHealth(detailedRes),
             },
             elapsed_ms: elapsed,
         })

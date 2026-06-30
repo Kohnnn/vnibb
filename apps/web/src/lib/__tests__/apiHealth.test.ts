@@ -23,26 +23,54 @@ jest.mock('next/server', () => ({
     },
 }))
 
+const INTERNAL_HEALTH_KEYS = [
+    'basic',
+    'detailed',
+    'components',
+    'db',
+    'cache',
+    'appwrite',
+    'providers',
+] as const
+
+function expectNoBackendInternals(value: unknown): void {
+    // Then: public health payload never exposes backend implementation details.
+    for (const key of INTERNAL_HEALTH_KEYS) {
+        expect(value).not.toHaveProperty(key)
+        expect(value).not.toHaveProperty(['backend', key])
+    }
+}
+
 describe('/api/health', () => {
     beforeEach(() => {
         jest.clearAllMocks()
     })
 
-    it('returns healthy when both backend endpoints respond', async () => {
+    it('returns sanitized healthy summary when both backend endpoints respond', async () => {
+        // Given: backend health endpoints include private implementation details.
         mockFetch
             .mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ status: 'ok', db: 'connected' }),
+                status: 200,
+                json: async () => ({ status: 'ok', db: 'connected', cache: { status: 'warm' } }),
             })
             .mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ status: 'healthy', components: { database: { status: 'healthy' } } }),
+                status: 200,
+                json: async () => ({
+                    status: 'healthy',
+                    components: { database: { status: 'healthy' } },
+                    appwrite: { endpoint: 'private' },
+                    providers: { vnstock: 'ready' },
+                }),
             })
 
+        // When: frontend proxy health is requested.
         const { GET } = await import('@/app/api/health/route')
         const response = await GET()
         const body = await response.json()
 
+        // Then: only public health fields and endpoint summaries are returned.
         expect(response.status).toBe(200)
         expect(body).toMatchObject({
             status: 'ok',
@@ -50,10 +78,45 @@ describe('/api/health', () => {
             degraded: false,
             stale: false,
             timeout: false,
+            backend: {
+                health: { ok: true, status: 200 },
+                health_detailed: { ok: true, status: 200 },
+            },
         })
-        expect(body.backend).toBeDefined()
-        expect(body.backend.basic).toBeDefined()
-        expect(body.backend.detailed).toBeDefined()
+        expectNoBackendInternals(body)
+    })
+
+    it('returns degraded public summary when one backend endpoint responds non-ok', async () => {
+        // Given: both backend fetches resolve, but detailed health is unavailable.
+        mockFetch
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ status: 'ok', db: 'connected' }),
+            })
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 503,
+                json: async () => ({ components: { database: { status: 'down' } } }),
+            })
+
+        // When: frontend proxy health is requested.
+        const { GET } = await import('@/app/api/health/route')
+        const response = await GET()
+        const body = await response.json()
+
+        // Then: the proxy degrades without leaking backend internals or failing the route.
+        expect(response.status).toBe(200)
+        expect(body).toMatchObject({
+            status: 'ok',
+            healthy: false,
+            degraded: true,
+            backend: {
+                health: { ok: true, status: 200 },
+                health_detailed: { ok: false, status: 503 },
+            },
+        })
+        expectNoBackendInternals(body)
     })
 
     it('returns degraded when backend is unreachable', async () => {
