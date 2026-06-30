@@ -3,6 +3,7 @@ import {
   getWidgetDefaultLayout,
   getWidgetSizeContract,
   autoFitGridItems,
+  hasLayoutCoordinatesChanged,
   type CompactableLayoutItem,
 } from '@/lib/dashboardLayout';
 import { widgetDefinitions } from '@/data/widgetDefinitions';
@@ -103,5 +104,22 @@ describe('autoFitGridItems responsive derivation', () => {
       expect(item.layout.x).toBeGreaterThanOrEqual(0);
       expect(item.layout.y).toBeGreaterThanOrEqual(0);
     }
+  });
+});
+
+describe('hasLayoutCoordinatesChanged', () => {
+  const stored = { x: 0, y: 2, w: 8, h: 7 };
+
+  it('returns false when React Grid Layout echoes unchanged widget coordinates', () => {
+    expect(hasLayoutCoordinatesChanged(stored, { x: 0, y: 2, w: 8, h: 7 })).toBe(false);
+  });
+
+  it.each([
+    ['x', { x: 1, y: 2, w: 8, h: 7 }],
+    ['y', { x: 0, y: 3, w: 8, h: 7 }],
+    ['w', { x: 0, y: 2, w: 9, h: 7 }],
+    ['h', { x: 0, y: 2, w: 8, h: 8 }],
+  ])('returns true when %s changes', (_field, next) => {
+    expect(hasLayoutCoordinatesChanged(stored, next)).toBe(true);
   });
 });

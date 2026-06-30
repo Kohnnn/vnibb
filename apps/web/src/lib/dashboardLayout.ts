@@ -49,6 +49,17 @@ export interface WidgetDefaultLayout {
   maxH?: number
 }
 
+export interface LayoutCoordinates {
+  readonly x: number
+  readonly y: number
+  readonly w: number
+  readonly h: number
+}
+
+export function hasLayoutCoordinatesChanged(current: LayoutCoordinates, next: LayoutCoordinates): boolean {
+  return current.x !== next.x || current.y !== next.y || current.w !== next.w || current.h !== next.h
+}
+
 interface ResolvedLayoutBehavior extends LayoutBehavior {
   maxW: number
   maxH?: number

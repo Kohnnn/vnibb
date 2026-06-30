@@ -43,7 +43,12 @@ import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
 import { useUrlSync } from '@/hooks/useUrlSync';
-import { autoFitGridItems, findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import {
+    autoFitGridItems,
+    findNextAvailableLayout,
+    getWidgetDefaultLayout,
+    hasLayoutCoordinatesChanged
+} from '@/lib/dashboardLayout';
 import { LEFT_SIDEBAR_HIDE_BELOW, AI_COPILOT_OVERLAY_BELOW_WIDTH, AI_COPILOT_OVERLAY_BELOW_HEIGHT } from '@/lib/responsive';
 import { useResizeNudge } from '@/hooks/useResizeNudge';
 import { CURRENT_RELEASE } from '@/lib/version';
@@ -636,23 +641,29 @@ function DashboardContent() {
     const handleLayoutChange = useCallback((newLayout: LayoutItem[]) => {
         if (!activeDashboard || !activeTab) return;
 
+        let changed = false;
         const updatedWidgets = activeTab.widgets.map(w => {
             const layoutItem = newLayout.find(l => l.i === w.id);
-            if (layoutItem) {
-                return {
-                    ...w,
-                    layout: {
-                        ...w.layout,
-                        x: layoutItem.x,
-                        y: layoutItem.y,
-                        w: layoutItem.w,
-                        h: layoutItem.h
-                    }
-                };
-            }
-            return w;
+            if (!layoutItem) return w;
+
+            const layoutChanged = hasLayoutCoordinatesChanged(w.layout, layoutItem);
+
+            if (!layoutChanged) return w;
+
+            changed = true;
+            return {
+                ...w,
+                layout: {
+                    ...w.layout,
+                    x: layoutItem.x,
+                    y: layoutItem.y,
+                    w: layoutItem.w,
+                    h: layoutItem.h
+                }
+            };
         });
 
+        if (!changed) return;
         updateTabLayout(activeDashboard.id, activeTab.id, updatedWidgets);
     }, [activeDashboard, activeTab, updateTabLayout]);
 
