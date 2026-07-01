@@ -56,6 +56,7 @@ apps/web/playwright-report/
 apps/web/test-results/
 .playwright-cli/
 tmp_local_logs/
+output/playwright/*
 
 # Database
 *.db
