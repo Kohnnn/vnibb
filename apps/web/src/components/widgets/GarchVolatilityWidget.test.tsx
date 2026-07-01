@@ -7,6 +7,8 @@ import { widgetDefinitions } from '@/data/widgetDefinitions';
 import { WIDGET_LAYOUT_BEHAVIORS } from '@/lib/dashboardLayout';
 import { useGarchVolatility, type GarchVolatilityState } from '@/lib/queries';
 import { GarchVolatilityWidget } from './GarchVolatilityWidget';
+import { PolymarketWidget } from './PolymarketWidget';
+
 
 jest.mock('@/lib/queries', () => ({
   useGarchVolatility: jest.fn(),
@@ -29,6 +31,7 @@ jest.mock('@/components/ui/widget-states', () => ({
   WidgetError: ({ error, title }: { readonly error: Error; readonly title?: string }) => (
     <div>{title ? `${title}: ${error.message}` : error.message}</div>
   ),
+  WidgetLoading: ({ message }: { readonly message: string }) => <div>{message}</div>,
 }));
 
 jest.mock('@/components/ui/WidgetMeta', () => ({
@@ -42,6 +45,22 @@ jest.mock('@/components/ui/ChartMountGuard', () => ({
 jest.mock('@/components/ui/QuantWarningBanner', () => ({
   QuantWarningBanner: ({ warning }: { readonly warning?: string | null }) => (warning ? <div>{warning}</div> : null),
 }));
+
+class JsonTestResponse {
+  readonly status: number;
+  readonly ok: boolean;
+
+  constructor(private readonly body: string, init?: ResponseInit) {
+    this.status = init?.status ?? 200;
+    this.ok = this.status >= 200 && this.status < 300;
+  }
+
+  async json(): Promise<unknown> {
+    return JSON.parse(this.body);
+  }
+}
+
+Object.defineProperty(globalThis, 'Response', { value: JsonTestResponse, configurable: true });
 
 jest.mock('recharts', () => ({
   Area: () => null,
@@ -211,6 +230,21 @@ describe('Polymarket widget registration gap', () => {
     const def = widgetDefinitions.find((definition) => definition.type === 'polymarket');
     expect(def).toBeDefined();
     expect(def?.category).toBeDefined();
+  });
+
+  it('renders the polymarket widget empty state from the DB-backed API', async () => {
+    const fetchMock = jest.fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>(() =>
+      Promise.resolve(new Response(JSON.stringify({ count: 0, data: [] }), { status: 200 })),
+    );
+    global.fetch = fetchMock;
+
+    render(<PolymarketWidget />);
+
+    expect(await screen.findByText('No Polymarket markets available')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/prediction-markets?source=polymarket&active=true&limit=20'),
+      { cache: 'no-store' },
+    );
   });
 });
 

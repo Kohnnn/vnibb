@@ -7,11 +7,8 @@ Enhanced with AI sentiment analysis.
 """
 
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import (
-    String, Text, DateTime, Index, Boolean, Float, Integer
-)
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from vnibb.core.database import Base
@@ -20,70 +17,71 @@ from vnibb.core.database import Base
 class MarketNews(Base):
     """
     General market news articles with AI sentiment analysis.
-    
+
     Aggregated from multiple sources:
     - CafeF, VnExpress, VietStock, Tuoi Tre, VnEconomy, etc.
-    
+
     Used for market sentiment analysis and news feed widgets.
     """
     __tablename__ = "market_news"
-    
+
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    
+
     # Content
     title: Mapped[str] = mapped_column(Text, nullable=False)
-    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Source metadata
     source: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    url: Mapped[Optional[str]] = mapped_column(Text, nullable=True, unique=True)
-    author: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    author: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Categorization
-    category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    tags: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Comma-separated tags
-    
+    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    tags: Mapped[str | None] = mapped_column(Text, nullable=True)  # Comma-separated tags
+
     # Related stocks (if mentioned)
-    related_symbols: Mapped[Optional[str]] = mapped_column(
+    related_symbols: Mapped[str | None] = mapped_column(
         String(200), nullable=True, index=True
     )  # Comma-separated symbols
-    sectors: Mapped[Optional[str]] = mapped_column(
+    sectors: Mapped[str | None] = mapped_column(
         String(200), nullable=True
     )  # Comma-separated sectors
-    
+
     # AI Sentiment Analysis
-    sentiment: Mapped[Optional[str]] = mapped_column(
+    sentiment: Mapped[str | None] = mapped_column(
         String(20), nullable=True
     )  # bullish, neutral, bearish
-    sentiment_score: Mapped[Optional[float]] = mapped_column(
+    sentiment_score: Mapped[float | None] = mapped_column(
         Float, nullable=True
     )  # Confidence 0-100
-    ai_summary: Mapped[Optional[str]] = mapped_column(
+    ai_summary: Mapped[str | None] = mapped_column(
         Text, nullable=True
     )  # AI-generated 2-3 sentence summary
-    
+
     # User engagement
     read_count: Mapped[int] = mapped_column(Integer, default=0)
     bookmark_count: Mapped[int] = mapped_column(Integer, default=0)
-    
+
     # Timestamps
-    published_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    published_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     crawled_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    
+
     # Processing status
     is_processed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
-    
+
     __table_args__ = (
+        UniqueConstraint("url", name="uq_market_news_url"),
         Index("ix_market_news_source_date", "source", "published_date"),
         Index("ix_market_news_published", "published_date"),
         Index("ix_market_news_sentiment", "sentiment", "published_date"),
     )
-    
+
     def __repr__(self):
         return f"<MarketNews {self.source}: {self.title[:30]}...>"
-    
+
     def to_dict(self):
         """Convert to dictionary for API response."""
         return {

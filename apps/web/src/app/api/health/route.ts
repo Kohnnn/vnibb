@@ -5,7 +5,7 @@
 import { NextResponse } from 'next/server'
 import { env } from '@/lib/env'
 
-const BACKEND_API_URL = `${env.apiUrl}/api/v1`
+const BACKEND_API_URL = env.apiUrl ? `${env.apiUrl}/api/v1` : ''
 
 type PublicEndpointHealth = {
     readonly ok: boolean
@@ -21,6 +21,21 @@ function publicEndpointHealth(response: Response): PublicEndpointHealth {
 
 export async function GET() {
     const start = Date.now()
+
+    if (!BACKEND_API_URL) {
+        return NextResponse.json(
+            {
+                status: 'unreachable',
+                healthy: false,
+                degraded: true,
+                stale: true,
+                timeout: false,
+                error: 'backend_missing_config',
+                backend: { configured: false },
+            },
+            { status: 502 },
+        )
+    }
 
     try {
         const [basicRes, detailedRes] = await Promise.all([
@@ -60,6 +75,7 @@ export async function GET() {
                 stale: true,
                 timeout: timedOut || elapsed > 5000,
                 error: timedOut ? 'backend_timeout' : 'backend_unreachable',
+                backend: { configured: true },
             },
             { status: 502 },
         )

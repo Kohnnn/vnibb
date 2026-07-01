@@ -138,14 +138,17 @@ export function useUrlSync({
   // One-time deep-link restore on mount.
   useEffect(() => {
     if (!ready || hasRestoredRef.current) return;
-    hasRestoredRef.current = true;
     if (typeof window === 'undefined') return;
 
+    const params = new URLSearchParams(window.location.search);
+    if (params.has(PARAM_DASHBOARD) && dashboardIds.length === 0) return;
+
+    hasRestoredRef.current = true;
     const applied = applyFromSearch(window.location.search);
     if (applied) {
       suppressWriteRef.current = true;
     }
-  }, [ready, applyFromSearch]);
+  }, [ready, dashboardIds.length, applyFromSearch]);
 
   // Browser back/forward.
   useEffect(() => {

@@ -8,7 +8,11 @@ import {
 } from '@/lib/dashboardLayout';
 import { widgetDefinitions } from '@/data/widgetDefinitions';
 import { tradingViewWidgetDefaultLayouts } from '@/lib/tradingViewWidgets';
-import type { WidgetType } from '@/types/dashboard';
+import type { Dashboard, WidgetType } from '@/types/dashboard';
+import {
+  createGlobalMarketsDashboard,
+  shouldRefreshGlobalMarketsLayout,
+} from '@/contexts/DashboardContext';
 
 /**
  * Drift guard for the single-source-of-truth layout contract.
@@ -17,6 +21,50 @@ import type { WidgetType } from '@/types/dashboard';
  * `widgetDefinitions[].defaultLayout` is derived from it at module load. These tests
  * make the "three sources of truth" drift risk a CI failure instead of a silent bug.
  */
+const getDashboardWidgetTypes = (dashboard: Dashboard): WidgetType[] =>
+  dashboard.tabs.flatMap((tab) => tab.widgets.map((widget) => widget.type));
+
+describe('default dashboard layouts', () => {
+  it('includes Polymarket in the Global Markets system dashboard', () => {
+    // Given: the static Global Markets system dashboard template.
+    const dashboard = createGlobalMarketsDashboard();
+
+    // When: its default widgets are flattened across tabs.
+    const widgetTypes = getDashboardWidgetTypes(dashboard);
+
+    // Then: Polymarket is present on first-load/global default layout.
+    expect(widgetTypes).toContain('polymarket');
+  });
+
+  it('does not force a refresh for the up-to-date default Global Markets dashboard', () => {
+    // Given: the current default template (already contains Polymarket + world-news widgets).
+    const dashboard = createGlobalMarketsDashboard();
+
+    // Then: no needless re-layout churn for users already on the latest template.
+    expect(shouldRefreshGlobalMarketsLayout(dashboard)).toBe(false);
+  });
+
+  it('forces a refresh for an existing persisted dashboard that is missing Polymarket', () => {
+    // Given: a persisted Global Markets dashboard from before Polymarket existed -
+    // it has the world-news widgets and no legacy symbols, so it otherwise looks current.
+    const upToDate = createGlobalMarketsDashboard();
+    const legacy: Dashboard = {
+      ...upToDate,
+      tabs: upToDate.tabs.map((tab) => ({
+        ...tab,
+        widgets: tab.widgets.filter((widget) => widget.type !== 'polymarket'),
+      })),
+    };
+
+    // Sanity: the legacy fixture really has no polymarket widget.
+    expect(getDashboardWidgetTypes(legacy)).not.toContain('polymarket');
+
+    // Then: the gate detects the missing widget and triggers a re-layout so
+    // existing users actually receive the Polymarket widget (not just fresh installs).
+    expect(shouldRefreshGlobalMarketsLayout(legacy)).toBe(true);
+  });
+});
+
 describe('widget layout contract', () => {
   const definitionTypes = widgetDefinitions.map((d) => d.type);
   const tvTypes = Object.keys(tradingViewWidgetDefaultLayouts) as WidgetType[];

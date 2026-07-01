@@ -130,4 +130,17 @@ describe('globals.css — accessibility color contracts (BUG-01, BUG-08)', () =>
     expect(source).toMatch(/:root\.light\[data-reduce-effects="true"\] \.widget-card-premium/)
     expect(source).toMatch(/outline:\s*1px solid color-mix\(in srgb, var\(--color-border-strong\) 70%, transparent\)/)
   })
+
+  test('defines stable light-theme surface aliases used by Tailwind utilities', () => {
+    // Given: dashboard components consume both Tailwind v4 tokens and legacy CSS aliases.
+    expect(source).toMatch(/@theme inline \{/)
+
+    // When: card and muted utility colors are generated.
+    // Then: they resolve through theme-aware aliases instead of falling back to unreadable defaults.
+    expect(source).toMatch(/--color-card:\s*var\(--bg-card\);/)
+    expect(source).toMatch(/--color-card-foreground:\s*var\(--text-primary\);/)
+    expect(source).toMatch(/--color-muted:\s*var\(--bg-tertiary\);/)
+    expect(source).toMatch(/--bg-card:\s*var\(--color-bg-elevated\);/)
+    expect(source).toMatch(/--bg-tertiary:\s*var\(--color-bg-tertiary\);/)
+  })
 })

@@ -60,7 +60,14 @@ async def _run_guarded_job(
             )
         except Exception as exc:
             elapsed = (datetime.utcnow() - started_at).total_seconds()
-            logger.warning("%s failed after %.1fs: %s", job_name, elapsed, exc)
+            # ERROR (not WARNING): a swallowed failure once masqueraded as success for ~15 days.
+            logger.error(
+                "%s failed after %.1fs: %s",
+                job_name,
+                elapsed,
+                exc,
+                exc_info=True,
+            )
 
 
 def get_scheduler():

@@ -1,14 +1,17 @@
 // Frontend /api/health route test — validates proxy returns correct shape
 // without leaking backend internals
 
-// Mock the route module's imports before importing
-jest.mock('@/lib/env', () => ({
-    env: { apiUrl: 'http://localhost:8000' },
-}))
-
 // Mock fetch globally
 const mockFetch = jest.fn()
 global.fetch = mockFetch
+
+async function importHealthRoute(apiUrl = 'http://localhost:8000') {
+    jest.resetModules()
+    jest.doMock('@/lib/env', () => ({
+        env: { apiUrl },
+    }))
+    return import('@/app/api/health/route')
+}
 
 // Mock NextResponse to avoid Next.js runtime dependency in test
 jest.mock('next/server', () => ({
@@ -66,7 +69,7 @@ describe('/api/health', () => {
             })
 
         // When: frontend proxy health is requested.
-        const { GET } = await import('@/app/api/health/route')
+        const { GET } = await importHealthRoute()
         const response = await GET()
         const body = await response.json()
 
@@ -101,7 +104,7 @@ describe('/api/health', () => {
             })
 
         // When: frontend proxy health is requested.
-        const { GET } = await import('@/app/api/health/route')
+        const { GET } = await importHealthRoute()
         const response = await GET()
         const body = await response.json()
 
@@ -119,28 +122,59 @@ describe('/api/health', () => {
         expectNoBackendInternals(body)
     })
 
+    it('returns missing backend configuration without fetching or leaking configured URL', async () => {
+        // Given: the frontend route has no backend API URL configured.
+        const secretLikeUrl = ''
+
+        // When: frontend proxy health is requested.
+        const { GET } = await importHealthRoute(secretLikeUrl)
+        const response = await GET()
+        const body = await response.json()
+
+        // Then: the route reports configuration failure before any backend fetch.
+        expect(response.status).toBe(502)
+        expect(mockFetch).not.toHaveBeenCalled()
+        expect(body).toMatchObject({
+            status: 'unreachable',
+            healthy: false,
+            degraded: true,
+            stale: true,
+            timeout: false,
+            error: 'backend_missing_config',
+            backend: { configured: false },
+        })
+        expectNoBackendInternals(body)
+    })
+
     it('returns degraded when backend is unreachable', async () => {
+        // Given: the configured backend refuses both health endpoint requests.
         mockFetch
             .mockRejectedValueOnce(new Error('fetch failed'))
             .mockRejectedValueOnce(new Error('fetch failed'))
 
-        const { GET } = await import('@/app/api/health/route')
+        // When: frontend proxy health is requested.
+        const { GET } = await importHealthRoute()
         const response = await GET()
         const body = await response.json()
 
+        // Then: the route reports sanitized unreachable diagnostics.
         expect(response.status).toBe(502)
         expect(body).toMatchObject({
             status: 'unreachable',
             healthy: false,
             degraded: true,
             stale: true,
+            timeout: false,
+            error: 'backend_unreachable',
+            backend: { configured: true },
         })
+        expectNoBackendInternals(body)
     })
 
     it('returns timeout status when backend request times out', async () => {
         mockFetch.mockRejectedValueOnce(new DOMException('Timed out', 'TimeoutError'))
 
-        const { GET } = await import('@/app/api/health/route')
+        const { GET } = await importHealthRoute()
         const response = await GET()
         const body = await response.json()
 
@@ -163,7 +197,7 @@ describe('/api/health', () => {
             })
             .mockRejectedValueOnce(new Error('timeout'))
 
-        const { GET } = await import('@/app/api/health/route')
+        const { GET } = await importHealthRoute()
         const body = await (await GET()).json()
 
         expect(body.healthy).toBe(false)

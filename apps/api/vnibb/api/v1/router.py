@@ -8,26 +8,34 @@ under a common prefix.
 from fastapi import APIRouter, Depends
 
 from vnibb.api.v1.admin import require_admin_access
-from vnibb.api.v1.equity import router as equity_router
-from vnibb.api.v1.screener import router as screener_router
-from vnibb.api.v1.financials import router as financials_router
+from vnibb.api.v1.admin import router as admin_router
+from vnibb.api.v1.analysis import router as analysis_router
+from vnibb.api.v1.chart import router as chart_router
+from vnibb.api.v1.comparison import router as comparison_router
+from vnibb.api.v1.copilot import router as copilot_router
 from vnibb.api.v1.dashboard import router as dashboard_router
 from vnibb.api.v1.data_sync import router as data_sync_router
-from vnibb.api.v1.realtime import router as realtime_router
-from vnibb.api.v1.technical import router as technical_router
-from vnibb.api.v1.news import router as news_router
-from vnibb.api.v1.listing import router as listing_router
-from vnibb.api.v1.search import router as search_router
-from vnibb.api.v1.trading import router as trading_router
 from vnibb.api.v1.derivatives import router as derivatives_router
-from vnibb.api.v1.user import router as user_router
+from vnibb.api.v1.equity import router as equity_router
+from vnibb.api.v1.export import router as export_router
+from vnibb.api.v1.financials import router as financials_router
 from vnibb.api.v1.health import router as health_router
-from vnibb.api.v1.rs_rating import router as rs_rating_router
+from vnibb.api.v1.insider import router as insider_router
+from vnibb.api.v1.listing import router as listing_router
 from vnibb.api.v1.market import router as market_router
+from vnibb.api.v1.microstructure import router as microstructure_router
+from vnibb.api.v1.news import router as news_router
+from vnibb.api.v1.prediction_markets import router as prediction_markets_router
 from vnibb.api.v1.quant import router as quant_router
-
-from vnibb.api.v1.comparison import router as comparison_router
+from vnibb.api.v1.realtime import router as realtime_router
+from vnibb.api.v1.rs_rating import router as rs_rating_router
+from vnibb.api.v1.screener import router as screener_router
+from vnibb.api.v1.search import router as search_router
 from vnibb.api.v1.sectors import router as sectors_router
+from vnibb.api.v1.technical import router as technical_router
+from vnibb.api.v1.trading import router as trading_router
+from vnibb.api.v1.user import router as user_router
+from vnibb.api.v1.websocket import router as websocket_router
 
 # Main v1 router
 api_router = APIRouter()
@@ -111,6 +119,12 @@ api_router.include_router(
 )
 
 api_router.include_router(
+    prediction_markets_router,
+    prefix="/prediction-markets",
+    tags=["Prediction Markets"],
+)
+
+api_router.include_router(
     news_router,
     prefix="/market",
     tags=["Market News"],
@@ -148,8 +162,6 @@ api_router.include_router(
 )
 
 # Phase 5 - Comparison Analysis
-from vnibb.api.v1.analysis import router as analysis_router
-
 api_router.include_router(
     analysis_router,
     prefix="/analysis",
@@ -164,8 +176,6 @@ api_router.include_router(
 
 
 # Phase 6 - AI Copilot
-from vnibb.api.v1.copilot import router as copilot_router
-
 api_router.include_router(
     copilot_router,
     prefix="/copilot",
@@ -173,16 +183,12 @@ api_router.include_router(
 )
 
 # Phase 13 - WebSocket Real-time
-from vnibb.api.v1.websocket import router as websocket_router
-
 api_router.include_router(
     websocket_router,
     tags=["WebSocket"],
 )
 
 # Phase 14 - Data Export
-from vnibb.api.v1.export import router as export_router
-
 api_router.include_router(
     export_router,
     tags=["Export"],
@@ -196,16 +202,12 @@ api_router.include_router(
 )
 
 # Phase 2 Task 41 - Insider Trading & Block Trade Alerts
-from vnibb.api.v1.insider import router as insider_router
-
 api_router.include_router(
     insider_router,
     tags=["Insider Trading & Alerts"],
 )
 
 # Admin Dashboard - Database Browser
-from vnibb.api.v1.admin import router as admin_router
-
 api_router.include_router(
     admin_router,
     prefix="/admin",
@@ -213,8 +215,6 @@ api_router.include_router(
 )
 
 # Chart Data - Local Lightweight Charts
-from vnibb.api.v1.chart import router as chart_router
-
 api_router.include_router(
     chart_router,
     prefix="/chart-data",
@@ -229,8 +229,6 @@ api_router.include_router(
 )
 
 # Mongo-backed market microstructure analytics
-from vnibb.api.v1.microstructure import router as microstructure_router
-
 api_router.include_router(
     microstructure_router,
     prefix="/microstructure",

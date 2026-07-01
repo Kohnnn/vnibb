@@ -4,6 +4,28 @@
 @import '../styles/utilities.css';
 @import '../styles/variables.css';
 
+@theme inline {
+  --color-background: var(--bg-primary);
+  --color-foreground: var(--text-primary);
+  --color-card: var(--bg-card);
+  --color-card-foreground: var(--text-primary);
+  --color-popover: var(--bg-elevated);
+  --color-popover-foreground: var(--text-primary);
+  --color-primary: var(--accent-blue);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--bg-secondary);
+  --color-secondary-foreground: var(--text-secondary);
+  --color-muted: var(--bg-tertiary);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: var(--bg-hover);
+  --color-accent-foreground: var(--text-primary);
+  --color-destructive: var(--color-error);
+  --color-destructive-foreground: #ffffff;
+  --color-border: var(--border-default);
+  --color-input: var(--border-default);
+  --color-ring: var(--accent-blue);
+}
+
 /* Base styles using CSS variables */
 body {
   background-color: var(--color-bg-primary);
@@ -15,7 +37,9 @@ body {
 :root {
   --bg-primary: var(--color-bg-primary);
   --bg-secondary: var(--color-bg-secondary);
+  --bg-tertiary: var(--color-bg-tertiary);
   --bg-elevated: var(--color-bg-elevated);
+  --bg-card: var(--color-bg-elevated);
   --bg-surface: var(--color-bg-elevated);
   --bg-widget: var(--color-bg-secondary);
   --bg-widget-header: var(--color-bg-tertiary);
@@ -48,7 +72,7 @@ body {
   --color-bg-tertiary: #f1f5f9;
   --color-bg-elevated: #ffffff;
 
-  --bg-card: #ffffff;
+  --bg-card: var(--color-bg-elevated);
 
   --color-border-default: #e2e8f0;
   --color-border-subtle: #e8edf3;

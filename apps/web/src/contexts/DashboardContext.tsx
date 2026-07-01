@@ -386,6 +386,12 @@ const GLOBAL_MARKETS_TEMPLATE: TemplateWidget[] = [
         layout: { x: 16, y: 29, w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
+        type: 'polymarket',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 55, w: 8, h: 7, minW: 6, minH: 6 }
+    },
+    {
         type: 'world_news_map',
         syncGroupId: 1,
         config: { region: 'all', category: 'all', limit: 120, freshnessHours: 72 },
@@ -1976,7 +1982,7 @@ const migrateDashboardPermissions = (dashboards: Dashboard[]): Dashboard[] => {
     });
 };
 
-const shouldRefreshGlobalMarketsLayout = (dashboard?: Dashboard): boolean => {
+export const shouldRefreshGlobalMarketsLayout = (dashboard?: Dashboard): boolean => {
     if (!dashboard) return false;
     const isTradingViewChartOrTechnical = (type: WidgetInstance['type']) =>
         type === 'tradingview_chart' || type === 'tradingview_technical_analysis';
@@ -2029,6 +2035,9 @@ const shouldRefreshGlobalMarketsLayout = (dashboard?: Dashboard): boolean => {
     const hasWorldNewsSources = dashboard.tabs.some((tab) =>
         tab.widgets.some((widget) => widget.type === 'world_news_sources')
     );
+    const hasPolymarket = dashboard.tabs.some((tab) =>
+        tab.widgets.some((widget) => widget.type === 'polymarket')
+    );
 
     return (
         usesLegacyGlobalMarketsSymbol ||
@@ -2039,7 +2048,8 @@ const shouldRefreshGlobalMarketsLayout = (dashboard?: Dashboard): boolean => {
         usesLegacyMarketNewsMode ||
         !hasWorldNewsMap ||
         !hasWorldNewsLiveStream ||
-        !hasWorldNewsSources
+        !hasWorldNewsSources ||
+        !hasPolymarket
     );
 };
 

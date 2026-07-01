@@ -12,34 +12,34 @@ Complete database schema for Vietnam stock market data:
 - Market news aggregation (new)
 """
 
-from vnibb.models.stock import Stock, StockPrice, StockIndex
-from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
-from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.company import Company, Shareholder, Officer
-from vnibb.models.dashboard import UserDashboard, DashboardWidget
-
-# Existing models
-from vnibb.models.news import CompanyNews, CompanyEvent, Dividend, InsiderDeal
-from vnibb.models.trading import (
-    IntradayTrade,
-    OrderbookSnapshot,
-    ForeignTrading,
-    FinancialRatio,
-    OrderFlowDaily,
-)
-from vnibb.models.derivatives import DerivativePrice
-from vnibb.models.market import MarketSector, SectorPerformance, Subsidiary
+# Alert system models (new)
+from vnibb.models.alerts import AlertSettings, BlockTrade, InsiderAlert
 from vnibb.models.app_kv import AppKeyValue
-
-# New models for vnstock premium integration
-from vnibb.models.technical_indicator import TechnicalIndicator
+from vnibb.models.company import Company, Officer, Shareholder
+from vnibb.models.dashboard import DashboardWidget, UserDashboard
+from vnibb.models.derivatives import DerivativePrice
+from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+from vnibb.models.market import MarketSector, SectorPerformance, Subsidiary
 from vnibb.models.market_news import MarketNews
 
-# Alert system models (new)
-from vnibb.models.alerts import BlockTrade, InsiderAlert, AlertSettings
+# Existing models
+from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
+from vnibb.models.prediction_market import PredictionMarket
+from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock, StockIndex, StockPrice
 
 # Sync tracking model
 from vnibb.models.sync_status import SyncStatus
+
+# New models for vnstock premium integration
+from vnibb.models.technical_indicator import TechnicalIndicator
+from vnibb.models.trading import (
+    FinancialRatio,
+    ForeignTrading,
+    IntradayTrade,
+    OrderbookSnapshot,
+    OrderFlowDaily,
+)
 
 __all__ = [
     # Stock
@@ -78,6 +78,7 @@ __all__ = [
     "TechnicalIndicator",
     # Market News Aggregation (new)
     "MarketNews",
+    "PredictionMarket",
     "DerivativePrice",
     "DerivativePrice",
     # Alert System (new)
