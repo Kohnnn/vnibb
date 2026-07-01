@@ -113,6 +113,15 @@ Market data notes:
 - `GET /derivatives/contracts`
 - `GET /derivatives/{symbol}/history`
 
+### Prediction Markets
+- `GET /prediction-markets`
+
+Prediction markets notes:
+- Returns persisted external prediction-market contracts (Polymarket and similar) from the `prediction_markets` table, shaped as `{ "count": <int>, "data": [...] }`.
+- Filters: `source` (lowercase slug, e.g. `polymarket`), `active` (bool), `limit` (1-200, default 50).
+- Ordered by nearest `end_date` first (open-ended contracts last), then `id`.
+- Returns an empty `{ "count": 0, "data": [] }` (not a 500) when the table is absent, so the endpoint is safe to call before the `9b0f2c6d4e71` migration is applied.
+
 ### Insider / Alerts
 - `GET /insider/{symbol}/deals`
 - `GET /insider/recent`

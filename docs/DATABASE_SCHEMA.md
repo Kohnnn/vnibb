@@ -1,11 +1,12 @@
 # Database Schema
 
 **Persistence:** self-hosted database stack (private network access)
-**Total Collections:** 26 (Appwrite/app model) + Mongo `vnibb-market` market corpus
+**Total Collections:** 28 (PostgreSQL/app model) + Mongo `vnibb-market` market corpus
+**Active Alembic revision:** `9b0f2c6d4e71` (2026-07-01 — adds `prediction_markets` + unique constraints)
 
 > Two physical stores are described here:
-> 1. The **Appwrite/Supabase app model** — the 26 collections below that power the
->    application (dashboards, screener, app-facing financials, etc.).
+> 1. The **PostgreSQL app model (n6v)** — the 27 collections below that power the
+>    application (dashboards, screener, app-facing financials, prediction markets, etc.).
 > 2. The **MongoDB `vnibb-market` market corpus** on n6v — the canonical
 >    analytical/market datastore that runtime market reads (`/equity/historical`,
 >    quant, MCP) prefer. See the dedicated section
@@ -66,7 +67,20 @@ erDiagram
     stock_indices ||--o{ screener_snapshots : "index_code"
     
     user_dashboards ||--o{ dashboard_widgets : "dashboard_id"
-    
+
+    prediction_markets {
+        int id PK "Auto-increment"
+        string source "polymarket, kalshi..."
+        string source_id "Provider contract ID"
+        string question "Market question text"
+        bool active "Contract still tradeable"
+        bool closed "Contract resolved"
+        float volume "Total traded volume"
+        float liquidity "Current liquidity"
+        json outcomes "Outcome labels"
+        json outcome_prices "Current outcome prices"
+    }
+
     companies {
         string symbol PK "Stock ticker (VNM, VCI...)"
         string company_name "Full company name"
@@ -642,6 +656,64 @@ System dashboard templates.
 
 ---
 
+### 27. Prediction Markets (`prediction_markets`)
+External prediction-market contracts sourced from Polymarket and similar providers. Populated by the daily sync pipeline; exposed at `/api/v1/prediction-markets`.
+
+| Attribute | Type | Nullable | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | integer | NO | sequence | Primary key |
+| `source` | varchar(32) | NO | — | Provider identifier (`polymarket`, `kalshi`, ...) |
+| `source_id` | varchar(128) | NO | — | Provider's contract ID |
+| `question` | text | NO | — | Market question text |
+| `slug` | varchar(255) | YES | — | URL-friendly identifier |
+| `description` | text | YES | — | Extended description |
+| `category` | varchar(100) | YES | — | Market category |
+| `url` | text | YES | — | Link to contract page |
+| `end_date` | timestamptz | YES | — | Contract resolution date |
+| `active` | boolean | NO | `true` | Contract still tradeable |
+| `closed` | boolean | NO | `false` | Contract resolved/settled |
+| `volume` | float | YES | — | Total traded volume (USD) |
+| `liquidity` | float | YES | — | Current liquidity (USD) |
+| `outcomes` | json | NO | `[]` | Outcome label array |
+| `outcome_prices` | json | NO | `[]` | Current outcome price array |
+| `created_at` | timestamp | YES | — | Row created at |
+| `updated_at` | timestamp | YES | — | Row last updated at |
+
+**Unique constraint:** `uq_prediction_markets_source_id` on `(source, source_id)`
+
+**Indexes:**
+- `pk_prediction_markets` — primary key on `id`
+- `uq_prediction_markets_source_id` — unique `(source, source_id)`
+- `ix_prediction_markets_source_active` — `(source, active)` for active-contract queries
+- `ix_prediction_markets_end_date` — `end_date` for expiry-window queries
+
+**Migration:** `9b0f2c6d4e71` — `20260701_0900_add_prediction_markets_and_conflict_constraints.py`
+
+---
+
+### 28. Sync Status (`sync_status`)
+Internal scheduler state table tracking data-pipeline job runs (daily trading, foreign trading, news crawls, etc.). Written by `vnibb.core.scheduler` on each job completion or failure.
+
+| Attribute | Type | Nullable | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | integer | NO | serial | Primary key (sequence) |
+| `sync_type` | varchar | NO | — | Job identifier (`daily_trading`, `foreign_trading`, `news_crawl`, etc.) |
+| `started_at` | timestamp | NO | — | Job start time |
+| `completed_at` | timestamp | YES | — | Job end time (NULL if still running) |
+| `success_count` | integer | NO | — | Successful operations count |
+| `error_count` | integer | NO | — | Failed operations count |
+| `status` | varchar | NO | — | `running`, `completed`, `failed` |
+| `errors` | json | YES | — | Error log (array of error messages when `error_count` > 0) |
+| `additional_data` | json | YES | — | Job-specific metadata (symbols processed, date ranges, etc.) |
+
+**Primary key:** `sync_status_pkey` on `id`
+
+**Purpose:** Audit log for data-pipeline health monitoring. The latest row per `sync_type` reflects the last sync run status. Prevents duplicate work via sequence-guarded inserts.
+
+**Critical note:** The sequence `sync_status_id_seq` must stay ahead of the committed max ID. Desync causes primary-key collisions that crash jobs. Fixed 2026-07-01 by `setval` alignment and scheduler hardening (`ERROR`-level logging on exceptions).
+
+---
+
 ## Relationship Summary
 
 ```
@@ -713,6 +785,7 @@ Fact tables contain measurable, transactional data. They are typically:
 | **`company_news`** | symbol + published_date | News articles |
 | **`derivative_prices`** | symbol + trade_date + interval | Futures/derivatives |
 | **`screener_snapshots`** | symbol + snapshot_date | Daily pre-calculated metrics |
+| **`prediction_markets`** | source + source_id | External prediction-market contracts |
 
 ### Bridge Tables
 
@@ -965,3 +1038,29 @@ flowchart LR
     stock_prices -->|powers| Charts[Price Charts]
     financials -->|powers| Ratios[Financial Ratios]
 ```
+
+---
+
+## Alembic Migration History
+
+| Revision | File | Applied | Description |
+|----------|------|---------|-------------|
+| `7f3a8d1e6b22` | (initial schema) | pre-2026-07-01 | Baseline — all 26 original tables |
+| `9b0f2c6d4e71` | `20260701_0900_add_prediction_markets_and_conflict_constraints.py` | 2026-07-01 | Adds `prediction_markets` table + unique constraints on `foreign_trading`, `market_news`, `stock_prices` |
+
+**Running migrations on production:**
+
+```bash
+# On OCI host — runs inside vnibb-api container which holds DB credentials
+ssh -i ~/.ssh/oci-vnibb ubuntu@129.150.58.64 \
+  "docker exec vnibb-api alembic -c /app/alembic.ini upgrade head"
+```
+
+To verify after running:
+
+```bash
+ssh -i ~/.ssh/oci-vnibb ubuntu@129.150.58.64 \
+  "docker exec vnibb-api alembic -c /app/alembic.ini current"
+```
+
+**Note:** The API container runs `alembic upgrade head` automatically on startup (via the entrypoint). Manual execution is only needed if you need to migrate without restarting the API.
