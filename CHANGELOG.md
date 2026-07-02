@@ -11,6 +11,37 @@ Every release passes the standard gate: `pnpm run ci:gate` (frontend lint,
 build, Jest) plus backend `ruff` and `pytest`. Individual verification logs
 live in `docs/`.
 
+## [v1.5.0] - 2026-07-02
+
+The "data flows again" release. End-of-day prices are unstuck, the quant and
+global-markets workspaces gained new widgets, and the palette is now
+colorblind-safe.
+
+### Added
+- Colorblind-safe palette preference in Settings → General. Gains/losses switch
+  to a blue/orange scheme applied app-wide, including TradingView charts.
+- GARCH(1,1) conditional-volatility widget, seeded into the default quant
+  workspace.
+- Polymarket prediction-market widget in the Global Markets dashboard, backed by
+  the new `/prediction-markets` API.
+- Frontend `/api/health` proxy that surfaces the active data backend without
+  leaking backend internals.
+
+### Fixed
+- End-of-day prices were frozen for the whole universe: the premium provider no
+  longer exposes the legacy quote class, so history now routes through the
+  premium `Quote` path with a KBS→VCI fallback. Prices advance daily again.
+- Mixed-unit EOD prices are normalized at the frame boundary, and fundamental
+  market-cap now uses raw-VND close, so valuations stopped drifting by 1000x.
+- Key Metrics widget occasionally rendered an unstable payload on slow backends.
+- Dashboard grid no longer re-persists layout on unchanged drag echoes.
+- Disabled sidebar menu items now expose their state to assistive tech.
+
+### Internal
+- Scheduler hardened against stale-data stalls; added the prediction-markets
+  sync path.
+- Smoke contracts cover the health and freshness endpoints.
+
 ## [v1.4.0] - 2026-05-22
 
 The "stability + paper cuts" release. Templates always work, the Financial

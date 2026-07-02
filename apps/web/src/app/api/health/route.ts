@@ -19,6 +19,14 @@ function publicEndpointHealth(response: Response): PublicEndpointHealth {
     }
 }
 
+function readDataBackend(basicBody: unknown): string | null {
+    if (!basicBody || typeof basicBody !== 'object') return null
+    const providers = (basicBody as { providers?: unknown }).providers
+    if (!providers || typeof providers !== 'object') return null
+    const value = (providers as { data_backend?: unknown }).data_backend
+    return typeof value === 'string' ? value : null
+}
+
 export async function GET() {
     const start = Date.now()
 
@@ -51,12 +59,15 @@ export async function GET() {
 
         const elapsed = Date.now() - start
 
+        const basicBody = basicRes.ok ? await basicRes.json().catch(() => null) : null
+
         return NextResponse.json({
             status: 'ok',
             healthy: basicRes.ok && detailedRes.ok,
             degraded: !basicRes.ok || !detailedRes.ok,
             stale: elapsed > 3000,
             timeout: elapsed > 5000,
+            data_backend: readDataBackend(basicBody),
             backend: {
                 health: publicEndpointHealth(basicRes),
                 health_detailed: publicEndpointHealth(detailedRes),

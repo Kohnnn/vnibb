@@ -89,6 +89,61 @@ describe('/api/health', () => {
         expectNoBackendInternals(body)
     })
 
+    it('surfaces the active data_backend as a top-level field without leaking the providers blob', async () => {
+        // Given: basic health carries the backend topology under `providers`,
+        // alongside feature flags that must stay hidden (db4bc14 sanitization).
+        mockFetch
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    status: 'ok',
+                    db: 'connected',
+                    providers: {
+                        data_backend: 'appwrite',
+                        data_backend_requested: 'appwrite',
+                        appwrite_write_enabled: false,
+                        allow_anonymous_dashboard_writes: false,
+                    },
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ status: 'healthy', components: {} }),
+            })
+
+        // When: frontend proxy health is requested.
+        const { GET } = await importHealthRoute()
+        const body = await (await GET()).json()
+
+        // Then: only the non-secret backend name is exposed, flags stay stripped.
+        expect(body.data_backend).toBe('appwrite')
+        expectNoBackendInternals(body)
+        expect(body).not.toHaveProperty('appwrite_write_enabled')
+        expect(body).not.toHaveProperty('allow_anonymous_dashboard_writes')
+    })
+
+    it('reports data_backend as null when basic health omits providers', async () => {
+        mockFetch
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ status: 'ok', db: 'connected' }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ status: 'healthy' }),
+            })
+
+        const { GET } = await importHealthRoute()
+        const body = await (await GET()).json()
+
+        expect(body.data_backend).toBeNull()
+        expectNoBackendInternals(body)
+    })
+
     it('returns degraded public summary when one backend endpoint responds non-ok', async () => {
         // Given: both backend fetches resolve, but detailed health is unavailable.
         mockFetch

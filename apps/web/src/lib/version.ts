@@ -8,8 +8,8 @@
  *   3. Should be done together with a corresponding entry in
  *      `vnibb/CHANGELOG.md`.
  */
-export const CURRENT_RELEASE = 'v1.4.0';
-export const CURRENT_RELEASE_DATE = '2026-05-22';
+export const CURRENT_RELEASE = 'v1.5.0';
+export const CURRENT_RELEASE_DATE = '2026-07-02';
 
 /**
  * Window event name dispatched when the user wants to manually re-open the
