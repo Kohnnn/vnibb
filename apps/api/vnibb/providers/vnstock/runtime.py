@@ -36,3 +36,7 @@ def get_listing_class():
 
 def get_trading_class():
     return import_vnstock_symbol("Trading")[0]
+
+
+def get_quote_class():
+    return import_vnstock_symbol("Quote")[0]

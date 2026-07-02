@@ -7,6 +7,7 @@ Uses vnstock Trading.price_board() method.
 
 import asyncio
 import logging
+import math
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -136,7 +137,7 @@ class VnstockPriceBoardFetcher:
 
         if not records:
             if last_error is not None:
-                raise ProviderError(f"Failed to fetch price board: {last_error}")
+                raise ProviderError(f"Failed to fetch price board: {last_error}", "vnstock")
             return []
 
         try:
@@ -157,8 +158,11 @@ class VnstockPriceBoardFetcher:
                 def _coalesce(*keys):
                     for key in keys:
                         value = r.get(key)
-                        if value is not None and value != "":
-                            return value
+                        if value is None or value == "":
+                            continue
+                        if isinstance(value, float) and math.isnan(value):
+                            continue
+                        return value
                     return None
 
                 result.append(PriceBoardData(
@@ -188,4 +192,4 @@ class VnstockPriceBoardFetcher:
             
         except Exception as e:
             logger.error(f"Price board fetch failed: {e}")
-            raise ProviderError(f"Failed to fetch price board: {e}")
+            raise ProviderError(f"Failed to fetch price board: {e}", "vnstock")

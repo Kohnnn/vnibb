@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 import vnibb.services.data_pipeline as data_pipeline_module
+from vnibb.core.config import settings
 from vnibb.services.appwrite_price_service import AppwritePriceService
 from vnibb.services.data_pipeline import DataPipeline
 
@@ -40,8 +41,17 @@ class FakeSession:
 
 
 @pytest.mark.asyncio
-async def test_fetch_quote_history_frame_bypasses_vnstock_retry_wrapper(monkeypatch):
+async def test_fetch_quote_history_frame_uses_premium_quote_and_bypasses_retry(monkeypatch):
+    # Premium vnstock_data v3 exposes Quote(symbol=, source=).history() directly
+    # and has NO Vnstock wrapper; the sync must route through Quote, not the
+    # dead free vnstock.Vnstock().stock() path that froze stock_prices.
+    captured = {}
+
     class FakeQuote:
+        def __init__(self, symbol, source):
+            captured["symbol"] = symbol
+            captured["source"] = source
+
         def history(self, **kwargs):
             raise AssertionError("wrapped vnstock retry path should be bypassed")
 
@@ -50,26 +60,8 @@ async def test_fetch_quote_history_frame_bypasses_vnstock_retry_wrapper(monkeypa
 
     FakeQuote.history.__wrapped__ = fake_unwrapped_history
 
-    class FakeStock:
-        def __init__(self):
-            self.quote = FakeQuote()
-
-    class FakeVnstock:
-        def stock(self, symbol, source):
-            assert symbol == "VNM"
-            assert source
-            return FakeStock()
-
-    fake_module = types.ModuleType("vnstock")
-    fake_module.Vnstock = FakeVnstock
-    monkeypatch.setitem(sys.modules, "vnstock", fake_module)
-
-    # Replicate the real deployed runtime: `vnstock_data` is importable but has
-    # no `Vnstock` attribute, so import_vnstock_symbol() falls back to the free
-    # `vnstock` package. The global conftest mock for `vnstock_data` is a bare
-    # MagicMock whose getattr auto-vivifies a `.Vnstock` child, which would
-    # otherwise hide the fallback path this test is asserting.
     fake_vnstock_data = types.ModuleType("vnstock_data")
+    fake_vnstock_data.Quote = FakeQuote
     monkeypatch.setitem(sys.modules, "vnstock_data", fake_vnstock_data)
 
     pipeline = DataPipeline()
@@ -80,6 +72,7 @@ async def test_fetch_quote_history_frame_bypasses_vnstock_retry_wrapper(monkeypa
         bypass_internal_retry=True,
     )
 
+    assert captured == {"symbol": "VNM", "source": (settings.vnstock_source or "KBS").upper()}
     assert result == {
         "path": "unwrapped",
         "kwargs": {

@@ -288,10 +288,10 @@ class DataPipeline:
         last_error: Optional[Exception] = None
         for source in fallback_sources:
             def _fetch_sync(_source: str = source) -> pd.DataFrame:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import get_quote_class
 
-                Vnstock = get_vnstock_class()
-                quote = Vnstock().stock(symbol=symbol, source=_source).quote
+                Quote = get_quote_class()
+                quote = Quote(symbol=symbol, source=_source)
                 history_callable = quote.history
                 if bypass_internal_retry:
                     # vnstock retries every exception here, including ValueError payload failures.
