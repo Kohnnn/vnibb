@@ -27,7 +27,7 @@ function formatEstimate(value: number | null | undefined): string {
   }
 
   return value.toLocaleString('en-US', {
-    minimumFractionDigits: Math.abs(value) < 100 ? 2 : 0,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 }
@@ -78,14 +78,13 @@ export function AnalystEstimatesWidget({ symbol, onDataChange }: AnalystEstimate
           <WidgetSkeleton lines={5} />
         ) : error && !hasRows ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />
-        ) : (
+        ) : hasRows ? (
           <>
             <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
               <div className="text-sm font-semibold text-[var(--text-primary)]">Analyst Estimates</div>
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                {payload?.message ||
-                  'Data sourced from consensus providers. Coming Soon for Vietnam market.'}
-              </p>
+              {payload?.message && (
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">{payload.message}</p>
+              )}
               <div className="mt-2 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
                 Source: {payload?.source || 'unavailable'}
               </div>
@@ -101,51 +100,48 @@ export function AnalystEstimatesWidget({ symbol, onDataChange }: AnalystEstimate
                   </tr>
                 </thead>
                 <tbody>
-                  {hasRows ? (
-                    <>
-                      {rows.map((row, index) => (
-                        <tr
-                          key={`${row.period || 'period'}-${index}`}
-                          className="border-t border-[var(--border-subtle)]"
-                        >
-                          <td className="px-3 py-2 text-[var(--text-secondary)]">EPS Estimate</td>
-                          <td className="px-3 py-2 text-[var(--text-secondary)]">{row.period || '—'}</td>
-                          <td className="px-3 py-2 text-right font-medium text-[var(--text-primary)]">
-                            {formatEstimate(row.eps_estimate)}
-                          </td>
-                        </tr>
-                      ))}
-                      {rows.map((row, index) => (
-                        <tr
-                          key={`revenue-${row.period || 'period'}-${index}`}
-                          className="border-t border-[var(--border-subtle)]"
-                        >
-                          <td className="px-3 py-2 text-[var(--text-secondary)]">Revenue Estimate</td>
-                          <td className="px-3 py-2 text-[var(--text-secondary)]">{row.period || '—'}</td>
-                          <td className="px-3 py-2 text-right font-medium text-[var(--text-primary)]">
-                            {formatEstimate(row.revenue_estimate)}
-                          </td>
-                        </tr>
-                      ))}
-                    </>
-                  ) : (
-                    <>
-                      <tr className="border-t border-[var(--border-subtle)]">
-                        <td className="px-3 py-2 text-[var(--text-secondary)]">EPS Estimate</td>
-                        <td className="px-3 py-2 text-[var(--text-secondary)]">FY+1</td>
-                        <td className="px-3 py-2 text-right text-[var(--text-muted)]">Coming Soon</td>
-                      </tr>
-                      <tr className="border-t border-[var(--border-subtle)]">
-                        <td className="px-3 py-2 text-[var(--text-secondary)]">Revenue Estimate</td>
-                        <td className="px-3 py-2 text-[var(--text-secondary)]">FY+1</td>
-                        <td className="px-3 py-2 text-right text-[var(--text-muted)]">Coming Soon</td>
-                      </tr>
-                    </>
-                  )}
+                  {rows.map((row, index) => (
+                    <tr
+                      key={`eps-${row.period || 'period'}-${index}`}
+                      className="border-t border-[var(--border-subtle)]"
+                    >
+                      <td className="px-3 py-2 text-[var(--text-secondary)]">EPS Estimate</td>
+                      <td className="px-3 py-2 text-[var(--text-secondary)]">{row.period || '—'}</td>
+                      <td className="px-3 py-2 text-right font-medium text-[var(--text-primary)]">
+                        {formatEstimate(row.eps_estimate)}
+                      </td>
+                    </tr>
+                  ))}
+                  {rows.map((row, index) => (
+                    <tr
+                      key={`revenue-${row.period || 'period'}-${index}`}
+                      className="border-t border-[var(--border-subtle)]"
+                    >
+                      <td className="px-3 py-2 text-[var(--text-secondary)]">Revenue Estimate</td>
+                      <td className="px-3 py-2 text-[var(--text-secondary)]">{row.period || '—'}</td>
+                      <td className="px-3 py-2 text-right font-medium text-[var(--text-primary)]">
+                        {formatEstimate(row.revenue_estimate)}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
           </>
+        ) : (
+          <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-2">
+            <div className="text-sm font-semibold text-[var(--text-primary)]">No analyst coverage available</div>
+            <p className="text-xs text-[var(--text-secondary)]">
+              Consensus estimates are not yet published for this symbol in the Vietnam market.
+              The VNIBB team is working with broker sources to add coverage; check back later or
+              open the source endpoint directly.
+            </p>
+            {payload?.source && (
+              <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+                Source: {payload.source}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

@@ -25,10 +25,17 @@ check_status() {
   local label="$1"
   local path="$2"
   local expected="${3:-200}"
-  local code
+  local attempts="${4:-3}"
+  local code=""
 
-  code="$("$CURL_BIN" -ksS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
-  printf '%-10s %s -> %s\n' "$label" "${BASE_URL}${path}" "$code"
+  for ((i=1; i<=attempts; i++)); do
+    code="$("$CURL_BIN" -ksS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
+    if [[ "$code" == "$expected" ]]; then
+      break
+    fi
+    sleep 1
+  done
+  printf '%-10s %s -> %s (after %s attempt(s))\n' "$label" "${BASE_URL}${path}" "$code" "$i"
 
   if [[ "$code" != "$expected" ]]; then
     status=1

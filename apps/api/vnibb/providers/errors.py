@@ -6,10 +6,39 @@ Centralized error definitions with:
 - User-friendly messages
 - Suggested actions
 - Context information
+
+This module re-exports base exceptions from core.exceptions and extends them
+with provider-specific error codes and convenience factory functions.
 """
 
 from typing import Optional, Dict, Any
 from enum import Enum
+
+# Re-export base exceptions from core.exceptions for backward compatibility
+from vnibb.core.exceptions import (
+    VniBBException,
+    ProviderError,
+    ProviderTimeoutError,
+    ProviderRateLimitError,
+    ProviderAuthError,
+    ProviderNotFoundError,
+    DataError,
+    DataNotFoundError,
+    DataValidationError,
+    DataStaleError,
+    DataIncompleteError,
+    SystemError,
+    DatabaseError,
+    CacheError,
+    ConfigurationError,
+    APIError,
+    AuthenticationError,
+    AuthorizationError,
+    ValidationError,
+    RateLimitExceededError,
+    is_retryable,
+    get_retry_delay,
+)
 
 
 class ProviderErrorCode(str, Enum):
@@ -176,12 +205,15 @@ class ProviderErrorMessage:
         return ". ".join(parts)
 
 
-class ProviderError(Exception):
+class ProviderErrorWithCode(Exception):
     """
-    Standard provider error with error code and context.
-    
+    Provider error with standardized error code and context.
+
+    This is distinct from the base ProviderError in core.exceptions.
+    Use this when you need structured error codes and context.
+
     Usage:
-        raise ProviderError(
+        raise ProviderErrorWithCode(
             code=ProviderErrorCode.API_RATE_LIMITED,
             context={"provider": "vnstock", "symbol": "VNM"}
         )
@@ -232,55 +264,55 @@ class ProviderError(Exception):
 
 # Convenience factory functions
 
-def connection_error(provider: str, url: str, original: Optional[Exception] = None) -> ProviderError:
+def connection_error(provider: str, url: str, original: Optional[Exception] = None) -> ProviderErrorWithCode:
     """Create a connection error."""
-    return ProviderError(
+    return ProviderErrorWithCode(
         code=ProviderErrorCode.CONNECTION_ERROR,
         context={"provider": provider, "url": url},
         original_error=original,
     )
 
 
-def timeout_error(provider: str, timeout_seconds: int, original: Optional[Exception] = None) -> ProviderError:
+def timeout_error(provider: str, timeout_seconds: int, original: Optional[Exception] = None) -> ProviderErrorWithCode:
     """Create a timeout error."""
-    return ProviderError(
+    return ProviderErrorWithCode(
         code=ProviderErrorCode.TIMEOUT_ERROR,
         context={"provider": provider, "timeout": timeout_seconds},
         original_error=original,
     )
 
 
-def rate_limit_error(provider: str, retry_after: int = 60) -> ProviderError:
+def rate_limit_error(provider: str, retry_after: int = 60) -> ProviderErrorWithCode:
     """Create a rate limit error."""
-    return ProviderError(
+    return ProviderErrorWithCode(
         code=ProviderErrorCode.API_RATE_LIMITED,
         context={"provider": provider, "retry_after": retry_after},
     )
 
 
-def data_not_found(provider: str, symbol: str, date_range: Optional[str] = None) -> ProviderError:
+def data_not_found(provider: str, symbol: str, date_range: Optional[str] = None) -> ProviderErrorWithCode:
     """Create a data not found error."""
     context = {"provider": provider, "symbol": symbol}
     if date_range:
         context["date_range"] = date_range
     
-    return ProviderError(
+    return ProviderErrorWithCode(
         code=ProviderErrorCode.DATA_NOT_FOUND,
         context=context,
     )
 
 
-def validation_error(provider: str, details: str) -> ProviderError:
+def validation_error(provider: str, details: str) -> ProviderErrorWithCode:
     """Create a validation error."""
-    return ProviderError(
+    return ProviderErrorWithCode(
         code=ProviderErrorCode.DATA_VALIDATION_FAILED,
         context={"provider": provider, "details": details},
     )
 
 
-def invalid_symbol(symbol: str) -> ProviderError:
+def invalid_symbol(symbol: str) -> ProviderErrorWithCode:
     """Create an invalid symbol error."""
-    return ProviderError(
+    return ProviderErrorWithCode(
         code=ProviderErrorCode.INVALID_SYMBOL,
         context={"symbol": symbol},
     )

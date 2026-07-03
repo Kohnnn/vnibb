@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.database import async_session_factory
+from vnibb.core.cache_constants import DB_CACHE_TTLS
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.company import Company
 from vnibb.models.stock import Stock
@@ -55,31 +56,8 @@ class CacheManager:
     - Static data (listing, dividends): 1440 minutes (24 hours)
     """
 
-    # Centralized TTL configuration (in minutes)
-    TTL_CONFIG = {
-        # Real-time data - very short TTL
-        "price_board": 1,  # 1 minute (real-time prices)
-        "price_depth": 0.5,  # 30 seconds (order book)
-        "intraday": 1,  # 1 minute
-        # Market data - short TTL
-        "screener": 60,  # 60 minutes
-        "trading_stats": 60,  # 60 minutes
-        "foreign_trading": 60,  # 60 minutes
-        # Company data - medium TTL
-        "profile": 10080,  # 7 days
-        "financial_ratios": 1440,  # 24 hours
-        "officers": 1440,  # 24 hours
-        "shareholders": 1440,  # 24 hours
-        "insider_deals": 1440,  # 24 hours
-        # Static data - long TTL
-        "listing": 1440,  # 24 hours
-        "industries": 1440,  # 24 hours
-        "dividends": 1440,  # 24 hours
-        "balance_sheet": 1440,  # 24 hours
-        "income_statement": 1440,  # 24 hours
-        "cash_flow": 1440,  # 24 hours
-        "derivatives": 5,  # 5 minutes (market data)
-    }
+    # Centralized TTL configuration (in minutes) - imported from cache_constants
+    TTL_CONFIG = DB_CACHE_TTLS
 
     # Legacy constants (for backward compatibility)
     SCREENER_TTL_MINUTES = 60

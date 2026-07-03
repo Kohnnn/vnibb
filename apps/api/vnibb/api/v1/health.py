@@ -4,12 +4,12 @@ import asyncio
 import time
 from datetime import datetime
 
-import redis.asyncio as redis
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.appwrite_client import check_appwrite_connectivity
+from vnibb.core.cache import redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
 
@@ -23,7 +23,6 @@ _BASIC_HEALTH_TTL_SECONDS = 30
 @router.get("")
 async def basic_health():
     """Basic health check reporting DB status."""
-    from vnibb.core.cache import redis_client
     from vnibb.core.database import check_database_connection
 
     now = time.time()
@@ -42,6 +41,8 @@ async def basic_health():
             "data_backend": settings.resolved_data_backend,
             "cache_backend": settings.resolved_cache_backend,
             "appwrite_write_enabled": settings.appwrite_write_enabled,
+            "appwrite_writes_active": settings.appwrite_writes_active,
+            "appwrite_configured": settings.is_appwrite_configured,
             "allow_anonymous_dashboard_writes": settings.allow_anonymous_dashboard_writes,
         },
         "version": getattr(settings, "app_version", "0.1.0"),
@@ -115,22 +116,31 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
         health["components"]["database"] = {"status": "unhealthy", "error": str(e)}
         health["status"] = "degraded"
 
-    # Redis check (if configured)
+    # Redis check (if configured) — reuse the shared client to avoid per-request
+    # connection churn and ensure async lifecycle is consistent with the rest
+    # of the application.
     if settings.redis_url:
         try:
-            r = redis.from_url(settings.redis_url)
-            await r.ping()
-            # Try to get some info
-            info = await r.info("stats")
-            health["components"]["redis"] = {
-                "status": "healthy",
-                "hits": info.get("keyspace_hits", 0),
-                "misses": info.get("keyspace_misses", 0),
-            }
-            total = info.get("keyspace_hits", 0) + info.get("keyspace_misses", 0)
-            hit_rate = info.get("keyspace_hits", 0) / max(1, total)
-            health["components"]["redis"]["hit_rate"] = f"{hit_rate:.1%}"
-            await r.close()
+            await asyncio.wait_for(redis_client.connect(), timeout=2.0)
+            if redis_client._client is None:
+                health["components"]["redis"] = {"status": "unavailable"}
+            else:
+                await asyncio.wait_for(
+                    redis_client._client.ping(), timeout=2.0
+                )
+                info = await asyncio.wait_for(
+                    redis_client._client.info("stats"), timeout=2.0
+                )
+                hits = info.get("keyspace_hits", 0) or 0
+                misses = info.get("keyspace_misses", 0) or 0
+                total = hits + misses
+                hit_rate = hits / max(1, total)
+                health["components"]["redis"] = {
+                    "status": "healthy",
+                    "hits": hits,
+                    "misses": misses,
+                    "hit_rate": f"{hit_rate:.1%}",
+                }
         except Exception as e:
             health["components"]["redis"] = {"status": "unhealthy", "error": str(e)}
     else:
@@ -140,7 +150,7 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
     appwrite_health = await check_appwrite_connectivity(timeout_seconds=2.5)
     health["components"]["appwrite"] = appwrite_health
 
-    if settings.data_backend == "appwrite" and appwrite_health.get("status") != "connected":
+    if settings.resolved_data_backend == "appwrite" and appwrite_health.get("status") != "connected":
         health["status"] = "degraded"
 
     return health

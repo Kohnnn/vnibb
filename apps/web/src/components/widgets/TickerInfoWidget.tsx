@@ -14,33 +14,7 @@ import { formatCompactValueForUnit, formatNumber, formatPriceValueForUnit } from
 import { cn } from '@/lib/utils';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
-function toPositiveNumber(value: unknown): number | null {
-  const parsed = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return null
-  }
-  return parsed
-}
-
-function firstPositiveNumber(...values: unknown[]): number | null {
-  for (const value of values) {
-    const parsed = toPositiveNumber(value)
-    if (parsed !== null) return parsed
-  }
-  return null
-}
-
-function clampPercent(value: number): number {
-  if (!Number.isFinite(value)) return 0
-  return Math.min(100, Math.max(0, value))
-}
-
-function getChangeDirection(value: number | null | undefined): 'up' | 'down' | 'flat' | 'unknown' {
-  if (value === null || value === undefined || !Number.isFinite(value)) return 'unknown'
-  if (value > 0) return 'up'
-  if (value < 0) return 'down'
-  return 'flat'
-}
+import { toPositiveNumber, firstPositiveNumber, clampPercent, getChangeDirection } from './utils';
 
 interface TickerInfoWidgetProps {
   id: string;

@@ -1,0 +1,180 @@
+/**
+ * Financial/Price Direction Styles
+ * Positive/negative coloring for financial data
+ */
+
+/* Price direction colors */
+.price-positive {
+  color: var(--color-positive);
+}
+
+.price-negative {
+  color: var(--color-negative);
+}
+
+.price-flat,
+.price-neutral {
+  color: var(--color-neutral);
+}
+
+/* Price direction backgrounds */
+.price-positive-bg {
+  background-color: var(--color-positive-bg);
+}
+
+.price-negative-bg {
+  background-color: var(--color-negative-bg);
+}
+
+/* Arrow indicators */
+.price-up::before {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 0.25rem;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 6px solid var(--color-positive);
+}
+
+.price-down::before {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 0.25rem;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid var(--color-negative);
+}
+
+.price-unchanged::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 2px;
+  margin-right: 0.25rem;
+  background: var(--color-neutral);
+}
+
+/* Sparkline mini charts */
+.sparkline-positive {
+  stroke: var(--color-positive);
+}
+
+.sparkline-negative {
+  stroke: var(--color-negative);
+}
+
+/* Colorblind-safe alternative palette */
+[data-color-mode="colorblind"] .price-positive {
+  color: #0077bb;
+}
+
+[data-color-mode="colorblind"] .price-negative {
+  color: #ee7733;
+}
+
+[data-color-mode="colorblind"] .price-up::before {
+  border-bottom-color: #0077bb;
+}
+
+[data-color-mode="colorblind"] .price-down::before {
+  border-top-color: #ee7733;
+}
+
+/* Candlestick colors */
+.candle-bullish {
+  fill: var(--color-positive);
+  stroke: var(--color-positive);
+}
+
+.candle-bearish {
+  fill: var(--color-negative);
+  stroke: var(--color-negative);
+}
+
+/* OHLC price colors */
+.ohlc-open {
+  color: var(--color-accent-primary);
+}
+
+.ohlc-high {
+  color: var(--color-positive);
+}
+
+.ohlc-low {
+  color: var(--color-negative);
+}
+
+.ohlc-close {
+  color: var(--text-primary);
+}
+
+/* Volume bar colors */
+.volume-bar-positive {
+  fill: var(--color-positive-muted);
+}
+
+.volume-bar-negative {
+  fill: var(--color-negative-muted);
+}
+
+/* Percentage change styling */
+.pct-change {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.pct-change-positive::before {
+  content: '+';
+}
+
+.pct-change-zero::before {
+  content: '';
+}
+
+/* Financial ratio colors */
+.ratio-good {
+  color: var(--color-positive);
+}
+
+.ratio-warning {
+  color: var(--color-warning);
+}
+
+.ratio-bad {
+  color: var(--color-negative);
+}
+
+/* Market status indicators */
+.market-open {
+  color: var(--color-positive);
+}
+
+.market-closed {
+  color: var(--color-text-muted);
+}
+
+.market-pre-market,
+.market-after-hours {
+  color: var(--color-warning);
+}
+
+/* Trend line colors */
+.trend-up {
+  stroke: var(--color-positive);
+  fill: none;
+}
+
+.trend-down {
+  stroke: var(--color-negative);
+  fill: none;
+}
+
+.trend-flat {
+  stroke: var(--color-neutral);
+  fill: none;
+}

@@ -17,6 +17,7 @@ import {
 import { formatDividendYield, formatPercent, formatRatio, normalizeDividendYield } from '@/lib/formatters';
 import type { FinancialRatioData } from '@/types/equity';
 import type { ScreenerData } from '@/types/screener';
+import { firstFinite } from './utils';
 
 const TIMEFRAME_OPTIONS: readonly AdvancedChartTimeframe[] = [
   '1D',
@@ -51,15 +52,6 @@ interface SnapshotMetric {
   pb: number | null;
   roe: number | null;
   dividendYield: number | null;
-}
-
-function firstFinite(...values: Array<number | null | undefined>): number | null {
-  for (const value of values) {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-  }
-  return null;
 }
 
 function normalizeChartTimeframe(value: string | undefined): AdvancedChartTimeframe {

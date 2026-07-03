@@ -1,0 +1,148 @@
+/**
+ * Focus & Accessibility Styles
+ * Focus rings, skip links, and accessibility utilities
+ */
+
+/* Custom focus visible ring */
+:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+/* Remove default focus outline when not using keyboard */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Skip link for keyboard navigation */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--color-accent-primary);
+  color: white;
+  padding: 8px 16px;
+  z-index: 9999;
+  transition: top 0.2s ease;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+/* Screen reader only - visually hidden but accessible */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Show on focus for screen readers */
+.sr-only-focusable:focus,
+.sr-only-focusable:active {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: inherit;
+  margin: inherit;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+
+/* High contrast focus for accessibility */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 3px solid CanvasText;
+    outline-offset: 3px;
+  }
+}
+
+/* Focus trap indicator for modals */
+.focus-trap-active {
+  position: relative;
+}
+
+.focus-trap-active::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 2px dashed var(--color-accent-primary);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* Keyboard focus indicator for interactive elements */
+[data-interactive]:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-bg-primary), 0 0 0 4px var(--color-accent-primary);
+}
+
+/* Touch target size minimum (44x44px) */
+.touch-target {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Announce content changes to screen readers */
+[aria-live] {
+  position: relative;
+}
+
+[aria-live]::after {
+  content: '';
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Visible labels for form inputs with placeholder only */
+.label-hidden input::placeholder {
+  color: transparent;
+}
+
+/* Error focus state */
+[data-error]:focus-visible {
+  outline-color: var(--color-error);
+}
+
+/* Success focus state */
+[data-success]:focus-visible {
+  outline-color: var(--color-success);
+}
+
+/* Warning focus state */
+[data-warning]:focus-visible {
+  outline-color: var(--color-warning);
+}
+
+/* Reduced motion - disable complex animations */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Print styles - hide interactive elements */
+@media print {
+  .no-print,
+  .skip-link,
+  [aria-live] {
+    display: none !important;
+  }
+}

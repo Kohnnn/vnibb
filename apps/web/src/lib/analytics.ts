@@ -36,6 +36,7 @@ export const ANALYTICS_EVENTS = {
   copilotResponseFailed: 'copilot_response_failed',
   dataSourceChanged: 'data_source_changed',
   decimalPlacesChanged: 'decimal_places_changed',
+  dashboardSwitched: 'dashboard_switched',
   folderCreated: 'folder_created',
   folderDeleted: 'folder_deleted',
   folderRenamed: 'folder_renamed',

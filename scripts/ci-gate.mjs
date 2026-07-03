@@ -11,8 +11,24 @@ const frontendEnv = {
     process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/api/v1/ws/prices',
 }
 
-function runStep(label, command, args = [], extraEnv = {}) {
+const steps = []
+let currentStep = null
+
+function startStep(label) {
+  currentStep = { label, status: 'running', startedAt: Date.now() }
+  steps.push(currentStep)
   console.log(`=== ${label} ===`)
+}
+
+function finishStep(status) {
+  if (!currentStep) return
+  currentStep.status = status
+  currentStep.durationMs = Date.now() - currentStep.startedAt
+  currentStep = null
+}
+
+function runStep(label, command, args = [], extraEnv = {}) {
+  startStep(label)
 
   const env = {
     ...process.env,
@@ -32,12 +48,33 @@ function runStep(label, command, args = [], extraEnv = {}) {
 
   if (result.error) {
     console.error(result.error)
+    finishStep('error')
+    printSummary()
     process.exit(1)
   }
 
   if (result.status !== 0) {
+    finishStep('failed')
+    printSummary()
     process.exit(result.status ?? 1)
   }
+
+  finishStep('ok')
+}
+
+function printSummary() {
+  console.log('\n=== CI Gate Summary ===')
+  if (steps.length === 0) {
+    console.log('  (no steps ran)')
+    return
+  }
+  const totalMs = steps.reduce((sum, s) => sum + (s.durationMs ?? 0), 0)
+  for (const step of steps) {
+    const dur = step.durationMs != null ? `${(step.durationMs / 1000).toFixed(1)}s` : '-'
+    const statusLabel = step.status.padEnd(7)
+    console.log(`  ${statusLabel} ${dur.padStart(7)}  ${step.label}`)
+  }
+  console.log(`  Total: ${(totalMs / 1000).toFixed(1)}s across ${steps.length} step(s)`)
 }
 
 function resolvePnpmCommand() {
@@ -123,6 +160,19 @@ function resolvePythonCommand() {
 const pnpmCommand = resolvePnpmCommand()
 const pythonCommand = resolvePythonCommand()
 
+process.on('SIGINT', () => {
+  finishStep('interrupted')
+  printSummary()
+  console.error('Interrupted by SIGINT')
+  process.exit(130)
+})
+process.on('SIGTERM', () => {
+  finishStep('terminated')
+  printSummary()
+  console.error('Terminated by SIGTERM')
+  process.exit(143)
+})
+
 runStep('Frontend Lint', pnpmCommand, ['--filter', 'frontend', 'lint'], frontendEnv)
 runStep('Frontend Typecheck', pnpmCommand, ['--filter', 'frontend', 'exec', 'tsc', '--noEmit'], frontendEnv)
 runStep('Frontend Build', pnpmCommand, ['--filter', 'frontend', 'build'], frontendEnv)
@@ -135,4 +185,5 @@ runStep(
 runStep('Backend Compile Check', pythonCommand, ['-m', 'py_compile', 'apps/api/vnibb/api/main.py'])
 runStep('Backend Tests', pythonCommand, ['-m', 'pytest', 'apps/api/tests', '-v'])
 
+printSummary()
 console.log('All gates passed')

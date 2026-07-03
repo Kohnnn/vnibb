@@ -1,19 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { Suspense } from "react";
-import { QueryProvider } from "@/lib/QueryProvider";
-import { AuthProvider } from "@/contexts/AuthContext";
-import { DashboardProvider } from "@/contexts/DashboardContext";
-import { DataSourcesProvider } from "@/contexts/DataSourcesContext";
-import { UnitProvider } from "@/contexts/UnitContext";
-import { WidgetGroupProvider } from "@/contexts/WidgetGroupContext";
-import { SymbolLinkProvider } from "@/contexts/SymbolLinkContext";
-import { GlobalMarketsSymbolProvider } from "@/contexts/GlobalMarketsSymbolContext";
-import { ThemeProvider, ThemeScript } from "@/contexts/ThemeContext";
-import { UiPreferencesProvider, UiPreferencesScript } from "@/contexts/UiPreferencesContext";
-import { CommandPaletteWrapper } from "@/components/CommandPaletteWrapper";
-import { AnalyticsBootstrap } from "@/components/analytics/AnalyticsBootstrap";
-import { AppToaster } from "@/components/ui/Toaster";
+import { AppProviders } from "@/contexts/AppProviders";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -40,6 +28,39 @@ export const metadata: Metadata = {
   },
 };
 
+// Theme and UI preferences pre-hydration scripts
+function ThemeUiScripts() {
+  return (
+    <>
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `
+            (function() {
+              try {
+                var storedTheme = localStorage.getItem('vnibb-theme');
+                var resolved = (storedTheme === 'light' || storedTheme === 'dark') ? storedTheme : 'dark';
+                document.documentElement.classList.remove('light', 'dark');
+                document.documentElement.classList.add(resolved);
+                document.documentElement.setAttribute('data-theme', resolved);
+                
+                var density = localStorage.getItem('vnibb-density');
+                if (density === 'compact' || density === 'comfortable' || density === 'spacious') {
+                  document.documentElement.setAttribute('data-density', density);
+                }
+                var chartStyle = localStorage.getItem('vnibb-chart-style-default');
+                if (chartStyle) {
+                  document.documentElement.setAttribute('data-chart-style', chartStyle);
+                }
+              } catch (e) {}
+            })();
+          `
+        }}
+        suppressHydrationWarning
+      />
+    </>
+  );
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -48,8 +69,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <ThemeScript />
-        <UiPreferencesScript />
+        <ThemeUiScripts />
         <title>VNIBB | Vietnam Stock Market Analytics</title>
         <meta
           name="description"
@@ -72,32 +92,9 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
-        <ThemeProvider>
-          <UiPreferencesProvider>
-            <QueryProvider>
-              <AuthProvider>
-                <DashboardProvider>
-                  <WidgetGroupProvider>
-                    <SymbolLinkProvider>
-                      <GlobalMarketsSymbolProvider>
-                        <DataSourcesProvider>
-                          <UnitProvider>
-                            <Suspense fallback={null}>
-                              <AnalyticsBootstrap />
-                            </Suspense>
-                            <main id="main-content">{children}</main>
-                            <CommandPaletteWrapper />
-                            <AppToaster />
-                          </UnitProvider>
-                        </DataSourcesProvider>
-                      </GlobalMarketsSymbolProvider>
-                    </SymbolLinkProvider>
-                  </WidgetGroupProvider>
-                </DashboardProvider>
-              </AuthProvider>
-            </QueryProvider>
-          </UiPreferencesProvider>
-        </ThemeProvider>
+        <AppProviders>
+          {children}
+        </AppProviders>
       </body>
     </html>
   );

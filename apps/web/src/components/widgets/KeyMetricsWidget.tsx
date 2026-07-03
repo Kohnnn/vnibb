@@ -76,25 +76,7 @@ function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
     );
 }
 
-function toNumber(value: unknown): number | null {
-    const parsed = typeof value === 'number' ? value : Number(value)
-    if (!Number.isFinite(parsed)) {
-        return null
-    }
-    return parsed
-}
-
-function resolveMetric(
-    candidates: Array<{ value: unknown; source: string; positiveOnly?: boolean }>
-): { value: number | null; source: string } {
-    for (const candidate of candidates) {
-        const parsed = toNumber(candidate.value)
-        if (parsed === null) continue
-        if (candidate.positiveOnly && parsed <= 0) continue
-        return { value: parsed, source: candidate.source }
-    }
-    return { value: null, source: 'Unavailable' }
-}
+import { toNumber, resolveMetric } from './utils';
 
 export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChange }: KeyMetricsWidgetProps) {
     const [activeCategory, setActiveCategory] = useState<MetricsCategory>('valuation');

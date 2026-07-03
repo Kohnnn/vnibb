@@ -95,6 +95,16 @@ class Settings(BaseSettings):
     database_ssl_mode: str = "prefer"  # disable, allow, prefer, require, verify-ca, verify-full
 
     # ==========================================================================
+    # Server-side Postgres timeouts (milliseconds)
+    # ==========================================================================
+    # Applied via connect_args on the async + sync engine. Bounds long-running
+    # queries, lock waits, and dangling transactions so a single bad request
+    # can't starve the pool.
+    db_statement_timeout_ms: int = 30000          # Cancel any query over 30s
+    db_lock_timeout_ms: int = 5000                # Bail out of lock waits after 5s
+    db_idle_in_tx_timeout_ms: int = 60000         # Close idle-in-tx connections after 60s
+
+    # ==========================================================================
     # Supabase specific (if using Supabase hosted)
     # ==========================================================================
     supabase_url: Optional[str] = None
@@ -192,6 +202,18 @@ class Settings(BaseSettings):
     intraday_retention_days: int = 7
     orderbook_retention_days: int = 30
     block_trades_retention_days: int = 365
+
+    # ==========================================================================
+    # Timezone & Regional Settings
+    # ==========================================================================
+    vn_timezone: str = "Asia/Ho_Chi_Minh"
+    
+    # ==========================================================================
+    # Data Freshness Thresholds (in hours)
+    # ==========================================================================
+    freshness_threshold_fresh: int = 6
+    freshness_threshold_recent: int = 24
+    freshness_threshold_stale: int = 72
 
     # ==========================================================================
     # LLM Configuration (AI Copilot)
@@ -478,10 +500,16 @@ class Settings(BaseSettings):
 
     @property
     def sync_database_url(self) -> str:
-        """Get sync database URL for Alembic (replaces asyncpg with psycopg2)."""
+        """Get sync database URL for Alembic (replaces asyncpg with psycopg2).
+
+        Uses a regex anchored to the URL scheme prefix so a password containing
+        the literal string ``+asyncpg`` is not corrupted by substring replacement.
+        """
+        import re
+
         if self.database_url_sync:
             return self.database_url_sync
-        return self.database_url.replace("+asyncpg", "")
+        return re.sub(r"^postgresql\+asyncpg://", "postgresql://", self.database_url)
 
     @property
     def is_production(self) -> bool:

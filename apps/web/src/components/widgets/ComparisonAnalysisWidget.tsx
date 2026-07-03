@@ -161,22 +161,26 @@ interface ComparisonAnalysisWidgetProps {
 }
 
 function normalizePerformanceData(payload: unknown): Array<Record<string, string | number>> {
-  const rawRows = Array.isArray(payload)
+  const isDataArray = (v: unknown): v is unknown[] => Array.isArray(v)
+  const rawRows = isDataArray(payload)
     ? payload
-    : payload && typeof payload === 'object' && Array.isArray((payload as any).data)
-      ? (payload as any).data
+    : payload &&
+        typeof payload === 'object' &&
+        isDataArray((payload as { data?: unknown }).data)
+      ? (payload as { data: unknown[] }).data
       : []
 
   return rawRows
-    .map((row: any) => {
+    .map((row: unknown) => {
       if (!row || typeof row !== 'object') return null
-      if (row.values && typeof row.values === 'object') {
+      const obj = row as { values?: unknown; date?: unknown; time?: unknown; period?: unknown }
+      if (obj.values && typeof obj.values === 'object') {
         return {
-          date: row.date || row.time || row.period || '',
-          ...row.values,
-        }
+          ...(obj.values as Record<string, string | number>),
+          date: String(obj.date || obj.time || obj.period || ''),
+        } as Record<string, string | number>
       }
-      return row
+      return row as Record<string, string | number>
     })
     .filter(
       (
@@ -237,7 +241,7 @@ function ComparisonAnalysisWidgetComponent({
   // (e.g. for VCI it returns VIX/VND/HCM rather than FPT).
   useEffect(() => {
     const peerSymbols = (peersQuery.data?.peers || [])
-      .map((peer: any) => String(peer?.symbol || '').toUpperCase())
+      .map((peer: { symbol?: unknown }) => String(peer?.symbol || '').toUpperCase())
       .filter(Boolean)
     if (peerSymbols.length === 0) return
     const primary = symbols[0]
@@ -282,9 +286,10 @@ function ComparisonAnalysisWidgetComponent({
     ratioGridRows.length > 0 && ratioGridRows.some((entry) => Boolean(entry.ratios))
   const isFallback = Boolean(comparisonQuery.error && hasData)
   const stockBySymbol = useMemo(() => {
-    return comparisonStocks.reduce<Record<string, any>>((acc, row: any) => {
-      if (row?.symbol) {
-        acc[String(row.symbol).toUpperCase()] = row
+    return comparisonStocks.reduce<Record<string, Record<string, unknown>>>((acc, row: unknown) => {
+      const obj = row as { symbol?: unknown }
+      if (obj?.symbol) {
+        acc[String(obj.symbol).toUpperCase()] = obj as Record<string, unknown>
       }
       return acc
     }, {})
@@ -344,7 +349,7 @@ function ComparisonAnalysisWidgetComponent({
 
     const selectedMetricIds = new Set<string>(selected.metricIds as readonly string[])
 
-    return comparisonQuery.data.metrics.filter((metric: any) => {
+    return comparisonQuery.data.metrics.filter((metric: { id?: unknown; key?: unknown }) => {
       const metricId = metric?.id ?? metric?.key
       return selectedMetricIds.has(String(metricId))
     })
@@ -375,7 +380,7 @@ function ComparisonAnalysisWidgetComponent({
   const getBestWorst = (metricId: string) => {
     if (!comparisonStocks.length) return { best: null, worst: null }
     const values = comparisonStocks
-      .map((stock: any) => stock.metrics?.[metricId])
+      .map((stock: { metrics?: Record<string, unknown> }) => stock.metrics?.[metricId])
       .filter((value: unknown): value is number => typeof value === 'number' && Number.isFinite(value))
 
     if (values.length === 0) return { best: null, worst: null }
@@ -654,10 +659,10 @@ function ComparisonAnalysisWidgetComponent({
                 </tr>
               </thead>
               <tbody>
-                {filteredMetrics.map((metric: any) => {
-                  const metricId = metric?.id ?? metric?.key
-                  const metricFormat = metric?.format ?? 'number'
-                  const metricName = metric?.name ?? metric?.label ?? metricId
+                {filteredMetrics.map((metric: { id?: unknown; key?: unknown; format?: unknown; name?: unknown; label?: unknown; description?: unknown }) => {
+                  const metricId = String(metric?.id ?? metric?.key ?? '')
+                  const metricFormat = String(metric?.format ?? 'number')
+                  const metricName = String(metric?.name ?? metric?.label ?? metricId)
                   const { best, worst } = getBestWorst(metricId)
 
                   return (
@@ -670,7 +675,8 @@ function ComparisonAnalysisWidgetComponent({
                       </td>
                       {symbols.map((ticker) => {
                         const stock = stockBySymbol[ticker]
-                        const value = stock?.metrics?.[metricId]
+                        const metrics = (stock?.metrics ?? {}) as Record<string, number | null | undefined>
+                        const value = metrics[metricId]
                         const label = formatMetric(value, metricFormat, metricId)
                         const isMissing = label === EMPTY_VALUE
                         const isBest = value !== null && value !== undefined && value === best && symbols.length > 1

@@ -3279,13 +3279,16 @@ async def test_market_freshness_overall_fresh_when_all_recent(client, test_db):
     from datetime import date as dt_date
     from datetime import datetime
 
+    today = dt_date.today()
+    now = datetime.now()
+
     test_db.add(Stock(id=1, symbol="VNM", exchange="HOSE", company_name="Vinamilk"))
     test_db.add(
         StockPrice(
             id=1,
             stock_id=1,
             symbol="VNM",
-            time=dt_date(2026, 6, 29),
+            time=today,
             open=62.0,
             high=63.0,
             low=61.5,
@@ -3299,7 +3302,7 @@ async def test_market_freshness_overall_fresh_when_all_recent(client, test_db):
         ForeignTrading(
             id=1,
             symbol="VNM",
-            trade_date=dt_date(2026, 6, 29),
+            trade_date=today,
             buy_volume=100_000,
             sell_volume=80_000,
             net_volume=20_000,
@@ -3310,8 +3313,8 @@ async def test_market_freshness_overall_fresh_when_all_recent(client, test_db):
             id=1,
             source="test",
             title="Test news",
-            published_date=datetime(2026, 6, 29, 8, 0, 0),
-            crawled_at=datetime(2026, 6, 29, 8, 0, 0),
+            published_date=now,
+            crawled_at=now,
         )
     )
     await test_db.commit()
@@ -3319,8 +3322,7 @@ async def test_market_freshness_overall_fresh_when_all_recent(client, test_db):
     response = await client.get("/api/v1/market/freshness")
     assert response.status_code == 200
     payload = response.json()
-    # News threshold is 1 day; data from yesterday is "stale"
-    assert payload["overall"] in ("fresh", "stale")
+    assert payload["overall"] == "fresh"
 
 
 @pytest.mark.asyncio

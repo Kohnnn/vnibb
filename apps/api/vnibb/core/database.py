@@ -49,16 +49,16 @@ if not _ALEMBIC_RUNNING:
     def _build_connect_args() -> dict:
         """
         Build connection arguments for asyncpg.
-        
+
         Handles SSL configuration for production environments.
         SQLite databases don't need special connect_args.
         """
         # SQLite doesn't need special connect_args - early return
         if settings.database_url.startswith("sqlite"):
             return {}
-        
+
         connect_args = {}
-        
+
         # SSL configuration for production (PostgreSQL only)
         if settings.is_production or settings.database_ssl_mode in ("require", "verify-ca", "verify-full"):
             # asyncpg uses 'ssl' parameter
@@ -68,12 +68,38 @@ if not _ALEMBIC_RUNNING:
                 connect_args["ssl"] = "require"
             elif settings.database_ssl_mode in ("verify-ca", "verify-full"):
                 connect_args["ssl"] = "require"
-        
+
         # PgBouncer compatibility: disable prepared statement cache
         if settings.database_url.startswith("postgresql"):
             connect_args["statement_cache_size"] = 0
-        
+
         return connect_args
+
+
+    def _apply_server_timeouts_on_connect(dbapi_connection, connection_record):
+        """SQLAlbic ``connect`` event: enforce server-side timeouts per session.
+
+        asyncpg ignores server-timeout ``connect_args``; the canonical way is to
+        ``SET`` them once per new DBAPI connection. Bound to the same async +
+        sync engines below.
+        """
+        try:
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute(
+                    f"SET statement_timeout = {int(settings.db_statement_timeout_ms)}"
+                )
+                cursor.execute(
+                    f"SET lock_timeout = {int(settings.db_lock_timeout_ms)}"
+                )
+                cursor.execute(
+                    f"SET idle_in_transaction_session_timeout = "
+                    f"{int(settings.db_idle_in_tx_timeout_ms)}"
+                )
+            finally:
+                cursor.close()
+        except Exception as exc:  # pragma: no cover - driver specific
+            logger.warning("Failed to apply server-side timeouts: %s", exc)
 
 
     async_engine_kwargs = {
@@ -97,6 +123,15 @@ if not _ALEMBIC_RUNNING:
         settings.database_url,
         **async_engine_kwargs,
     )
+
+    # Enforce statement/lock/idle-in-tx timeouts on every new DBAPI connection
+    # made by the async engine too. SQLAlchemy exposes the underlying sync
+    # engine via .sync_engine; the same ``connect`` listener applies there.
+    if not settings.database_url.startswith("sqlite"):
+        event.listen(engine.sync_engine, "connect", _apply_server_timeouts_on_connect)
+
+    # Enforce statement/lock/idle-in-tx timeouts on every new DBAPI connection
+    # via the sync engine defined below. (Applied in the post-sync_engine block.)
 
 
     # Async session factory
@@ -139,6 +174,11 @@ if not _ALEMBIC_RUNNING:
         settings.sync_database_url,
         **sync_engine_kwargs,
     )
+
+    # Enforce statement/lock/idle-in-tx timeouts on every new DBAPI connection
+    # (skipped for SQLite since it has no equivalent settings).
+    if not settings.sync_database_url.startswith("sqlite"):
+        event.listen(sync_engine, "connect", _apply_server_timeouts_on_connect)
 
     # Sync session factory (for migrations and scripts)
     sync_session_factory = sessionmaker(

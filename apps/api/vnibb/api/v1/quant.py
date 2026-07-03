@@ -13,6 +13,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# Historical loaders are owned by ``vnibb.api.v1.equity`` and re-exported here
+# so ``quant`` endpoints reuse the same canonical implementations (DB / Mongo /
+# Appwrite / recent-cache fallbacks + corporate-action adjustments). Keeping
+# the loaders duplicated would let the two files drift and return different
+# price rows for the same symbol.
 from vnibb.api.v1.equity import (
     _apply_corporate_action_adjustments,
     _load_corporate_actions_for_adjustment,
@@ -21,6 +26,7 @@ from vnibb.api.v1.equity import (
     _load_historical_from_mongo,
     _load_historical_from_recent_cache,
 )
+
 from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.core.cache import cached
 from vnibb.core.config import settings

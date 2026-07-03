@@ -37,12 +37,56 @@ expect_ok() {
   local label="$1"
   local path="$2"
   local code
+  local body
 
+  body="$("$CURL_BIN" -ksS --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
   code="$("$CURL_BIN" -ksS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
   printf '%-18s %s -> %s\n' "$label" "${BASE_URL}${path}" "$code"
   if [[ "$code" != "200" ]]; then
     status=1
+    return
   fi
+
+  # Validate the body is JSON and not empty / error-shaped.
+  if [[ -z "$body" ]]; then
+    echo "  - ${label}: empty response body"
+    status=1
+    return
+  fi
+  if ! printf '%s' "$body" | python -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null; then
+    echo "  - ${label}: response is not valid JSON"
+    status=1
+    return
+  fi
+}
+
+expect_json_field() {
+  local label="$1"
+  local path="$2"
+  local field="$3"
+  local body
+
+  body="$("$CURL_BIN" -ksS --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
+  if [[ -z "$body" ]]; then
+    printf '%-18s %s -> empty\n' "$label" "${BASE_URL}${path}"
+    status=1
+    return
+  fi
+  if ! printf '%s' "$body" | python -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+keys = '${field}'.split('.')
+for k in keys:
+    if isinstance(d, dict) and k in d:
+        d = d[k]
+    else:
+        sys.exit(1)
+" 2>/dev/null; then
+    printf '%-18s %s -> field %s missing\n' "$label" "${BASE_URL}${path}" "${field}"
+    status=1
+    return
+  fi
+  printf '%-18s %s -> field %s ok\n' "$label" "${BASE_URL}${path}" "${field}"
 }
 
 echo "Oracle smoke test target: ${BASE_URL}"
@@ -50,6 +94,7 @@ expect_ok "live" "/live"
 expect_ok "ready" "/ready"
 expect_ok "health" "/health/"
 expect_ok "api_health" "/api/v1/health"
+expect_json_field "api_health_providers" "/api/v1/health" "providers.data_backend"
 expect_ok "profile" "/api/v1/equity/VNM/profile"
 expect_ok "quote" "/api/v1/equity/VNM/quote"
 expect_ok "screener" "/api/v1/screener/?limit=5"

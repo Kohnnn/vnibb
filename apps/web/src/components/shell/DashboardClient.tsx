@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, lazy, Suspense, type ComponentType } from 'react';
 import { toast } from 'sonner';
 import { Sidebar, Header, TabBar, RightSidebar, MobileNav, FreshnessBanner, WhatsNewPanel } from '@/components/layout';
 import { OnboardingWalkthrough } from '@/components/onboarding/OnboardingWalkthrough';
@@ -1316,7 +1316,7 @@ function DashboardContent() {
                                 >
                                     {activeTab.widgets.map((widget) => {
                                         const widgetType = widget.type;
-                                        const WidgetComponent = widgetRegistry[widgetType];
+                                        const registryEntry = widgetRegistry.get(widgetType);
                                         const widgetTitle = getWidgetDefinition(widgetType)?.name ?? widgetType.replace(/_/g, ' ');
                                         const widgetSymbol = isTradingViewWidget(widgetType)
                                             ? usesTradingViewWidgetSymbol(widgetType)
@@ -1330,7 +1330,12 @@ function DashboardContent() {
                                         const parameters = getWidgetParameters(widget, (key, value) =>
                                             handleWidgetConfigChange(widget.id, key, value)
                                         );
-                                        
+
+                                        // Create lazy component from registry entry
+                                        const LazyWidgetComponent = registryEntry
+                                            ? lazy(registryEntry.lazyComponent)
+                                            : null;
+
                                         return (
                                             <div
                                                 key={widget.id}
@@ -1369,13 +1374,15 @@ function DashboardContent() {
                                                     onSettingsClick={() => handleOpenWidgetSettings(widget.id)}
                                                     parameters={parameters}
                                                 >
-                                                    {WidgetComponent ? (
-                                                        <WidgetComponent 
-                                                            id={widget.id}
-                                                            symbol={widgetSymbol}
-                                                            config={widget.config}
-                                                            initialSymbols={Array.isArray(widget.config?.initialSymbols) ? widget.config.initialSymbols as string[] : undefined}
-                                                        />
+                                                    {LazyWidgetComponent ? (
+                                                        <Suspense fallback={<div className="p-4 text-[var(--text-muted)]">Loading widget...</div>}>
+                                                            <LazyWidgetComponent
+                                                                id={widget.id}
+                                                                symbol={widgetSymbol}
+                                                                config={widget.config}
+                                                                initialSymbols={Array.isArray(widget.config?.initialSymbols) ? widget.config.initialSymbols as string[] : undefined}
+                                                            />
+                                                        </Suspense>
                                                     ) : (
                                                         <div className="p-4 text-[var(--text-muted)]">Widget not found: {widgetType}</div>
                                                     )}

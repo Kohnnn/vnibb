@@ -24,6 +24,7 @@ export const config = {
   enableAiAnalysis: true,
   enableRealtime: env.enableRealtime,
   enableDashboardBackendSync: env.enableDashboardBackendSync,
+  backendSyncEnabled: env.enableDashboardBackendSync,
   enableAnalytics: env.enableAnalytics,
   isDev: env.isDev,
   isProd: env.isProd,

@@ -20,7 +20,7 @@ from vnibb.core.cache import redis_client, build_cache_key
 from vnibb.core.exceptions import (
     ProviderError,
     DataNotFoundError,
-    StaleDataError,
+    DataStaleError as StaleDataError,
 )
 
 logger = logging.getLogger(__name__)

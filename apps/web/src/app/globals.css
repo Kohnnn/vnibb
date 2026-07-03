@@ -3,6 +3,12 @@
 @import '../styles/design-tokens.css';
 @import '../styles/utilities.css';
 @import '../styles/variables.css';
+@import '../styles/grid-layout.css';
+@import '../styles/tables.css';
+@import '../styles/financial.css';
+@import '../styles/animations.css';
+@import '../styles/scrollbar.css';
+@import '../styles/accessibility.css';
 
 @theme inline {
   --color-background: var(--bg-primary);
@@ -63,6 +69,16 @@ body {
   --table-sticky-cell-hover-bg: color-mix(in srgb, var(--bg-hover) 86%, black 14%);
   --glass-widget-bg: var(--widget-bg-glass, rgba(12, 16, 24, 0.88));
   --sidebar-brand-gradient: linear-gradient(120deg, #60a5fa 0%, #22d3ee 100%);
+
+  /* Dashboard layout constants */
+  --left-sidebar-default-width: 248px;
+  --left-sidebar-collapsed-width: 56px;
+  --left-sidebar-min-width: 180px;
+  --left-sidebar-max-width: 320px;
+  --right-sidebar-default-width: 360px;
+  --right-sidebar-min-width: 300px;
+  --right-sidebar-max-width: 480px;
+  --sidebar-hide-below: 1024px;
 }
 
 :root.light,

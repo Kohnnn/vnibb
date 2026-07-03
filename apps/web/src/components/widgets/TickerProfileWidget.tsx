@@ -113,7 +113,10 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
         .sort((a, b) => Number(b) - Number(a))[0];
     const showDividendsSection = dividendsLoading || Boolean(dividendsError) || dividends.length > 0;
     const showInsiderDealsSection = insiderLoading || Boolean(insiderError) || insiderDeals.length > 0;
-    // TODO V200+: wire in CAFEF/vietstock dividend scraper.
+    // Dividends are pulled from the dedicated /dividends endpoint. A direct
+    // CAFEF/vietstock scraper may be wired later for richer coverage (split
+    // history, AGM resolutions, etc.) but the standard corporate-action view
+    // is already covered.
     const showCorporateActions = showDividendsSection || showInsiderDealsSection;
 
     useEffect(() => {

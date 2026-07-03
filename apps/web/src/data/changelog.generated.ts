@@ -14,6 +14,48 @@ Every release passes the standard gate: \`pnpm run ci:gate\` (frontend lint,
 build, Jest) plus backend \`ruff\` and \`pytest\`. Individual verification logs
 live in \`docs/\`.
 
+## [Unreleased]
+
+### Fixed
+- Quant endpoints no longer serve empty price frames: the six historical
+  loaders (\`_load_historical_from_*\`, \`_load_corporate_actions_for_adjustment\`,
+  \`_apply_corporate_action_adjustments\`) are now re-exported from
+  \`vnibb.api.v1.equity\` instead of being shadowed by no-op stubs in \`quant.py\`.
+- Postgres connection hardening: \`statement_timeout\`, \`lock_timeout\`, and
+  \`idle_in_transaction_session_timeout\` are now applied to every new DBAPI
+  connection on both async and sync engines. Defaults are 30s / 5s / 60s and
+  can be tuned via \`DB_STATEMENT_TIMEOUT_MS\`, \`DB_LOCK_TIMEOUT_MS\`,
+  \`DB_IDLE_IN_TX_TIMEOUT_MS\`.
+- \`sync_database_url\` no longer corrupts passwords containing \`+asyncpg\` —
+  it now uses a regex anchored to the URL scheme prefix.
+- \`/api/v1/health\` now reports the resolved \`appwrite_writes_active\` and
+  \`appwrite_configured\` flags (previously the raw \`appwrite_write_enabled\`
+  could not distinguish "disabled" from "credentials missing").
+- The detailed health endpoint's Redis probe reuses the shared \`redis_client\`
+  instead of opening a new connection per request, which removes a leak under
+  high health-check load.
+- \`AnalystEstimatesWidget\` no longer renders "Coming Soon" placeholder rows
+  for empty payloads; it now shows an honest empty-state explaining the
+  Vietnam-market coverage gap.
+
+### Internal
+- Added \`apps/api/tests/test_core/test_config.py\` covering the new timeout
+  settings and the regex-based \`sync_database_url\` derivation.
+- Added \`apps/api/tests/test_api/test_quant_loader_aliases.py\` asserting that
+  the quant module's helpers resolve to the canonical equity implementations.
+- Added \`apps/web/src/components/widgets/AnalystEstimatesWidget.test.tsx\` and
+  \`apps/web/src/components/widgets/TickerProfileWidget.test.tsx\` covering
+  empty, loading, error, and data states.
+- \`scripts/ci-gate.mjs\` now prints a final CI summary table with per-step
+  duration, fails fast on the first error, and handles SIGINT/SIGTERM cleanly.
+- \`scripts/oracle/healthcheck.sh\` retries each endpoint up to 3 times before
+  reporting failure.
+- \`scripts/oracle/smoke_test.sh\` validates JSON body shape (not just status
+  codes) on critical endpoints and asserts the \`providers.data_backend\`
+  field is present in \`/api/v1/health\`.
+- \`scripts/oracle/runtime_verify.sh\` accepts an optional \`MCP_HEALTH_URL\` and
+  asserts the MCP sidecar responds 200 alongside the API.
+
 ## [v1.5.0] - 2026-07-02
 
 The "data flows again" release. End-of-day prices are unstuck, the quant and

@@ -112,4 +112,14 @@ if ! printf '%s\n' "$cors_headers" | grep -qi "access-control-allow-headers: .*x
   status=1
 fi
 
+if [[ -n "${MCP_HEALTH_URL:-}" ]]; then
+  mcp_code="$($CURL_BIN -ksS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" \
+    "${MCP_HEALTH_URL}" || true)"
+  printf 'mcp health endpoint        -> %s\n' "$mcp_code"
+  if [[ "$mcp_code" != "200" ]]; then
+    echo "Expected MCP health endpoint ${MCP_HEALTH_URL} to return 200"
+    status=1
+  fi
+fi
+
 exit "$status"

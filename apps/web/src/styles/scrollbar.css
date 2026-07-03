@@ -1,0 +1,143 @@
+/**
+ * Custom Scrollbar Styling
+ * Styled scrollbars for webkit browsers
+ */
+
+/* Global scrollbar styling */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-default);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+  background-clip: padding-box;
+}
+
+/* Thin scrollbar variant */
+::-webkit-scrollbar-thin {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: 3px;
+}
+
+/* Scrollbar for code/terminal */
+::-webkit-scrollbar-code {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-code::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-code::-webkit-scrollbar-thumb {
+  background: var(--color-border-default);
+  border-radius: 4px;
+}
+
+/* Dark scrollbar for elevated surfaces */
+::-webkit-scrollbar-elevated::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.3);
+}
+
+::-webkit-scrollbar-elevated::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.5);
+}
+
+/* Light scrollbar for dark surfaces */
+::-webkit-scrollbar-dark::-webkit-scrollbar-thumb {
+  background: rgba(30, 41, 59, 0.8);
+}
+
+::-webkit-scrollbar-dark::-webkit-scrollbar-thumb:hover {
+  background: rgba(30, 41, 59, 1);
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+/* Custom scrollbar for dropdowns */
+.dropdown-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dropdown-scrollbar::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+  border-radius: 3px;
+}
+
+.dropdown-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-border-default);
+  border-radius: 3px;
+}
+
+.dropdown-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
+
+/* Widget scrollbar */
+.widget-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-default) transparent;
+}
+
+.widget-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.widget-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.widget-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: 3px;
+}
+
+/* Data table horizontal scroll */
+.table-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Focus visible scrollbar */
+:focus-visible::-webkit-scrollbar-thumb {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}

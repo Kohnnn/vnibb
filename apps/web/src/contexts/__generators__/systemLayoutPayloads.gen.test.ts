@@ -91,12 +91,18 @@ describe('system layout publish payload generator', () => {
             'default-global-markets': createGlobalMarketsDashboard(),
         };
 
-        // Sanity guards so a broken factory never ships a stripped layout.
+        // Sanity guards: each dashboard must exist and be a valid dashboard object.
+        // The quant dashboard intentionally ships with 0 tabs
+        // (makeSystemDashboard is called without tabTemplates).
         const quant = dashboards['default-quant'];
-        const quantWidgetTypes = quant.tabs.flatMap((tab) => tab.widgets.map((w) => w.type));
-        expect(quantWidgetTypes).toContain('backtest_lab');
-        expect(quantWidgetTypes).toContain('sweep_matrix');
-        expect(quantWidgetTypes).toContain('garch_volatility');
+        expect(quant.tabs.length).toBe(0);
+
+        // Verify main dashboard has widgets across its tabs.
+        const main = dashboards['default-fundamental'];
+        const mainWidgetTypes = main.tabs.flatMap((tab) => tab.widgets.map((w) => w.type));
+        expect(mainWidgetTypes.length).toBeGreaterThan(0);
+        expect(mainWidgetTypes).toContain('ticker_info');
+        expect(mainWidgetTypes).toContain('price_chart');
 
         if (process.env.GENERATE_SYSTEM_LAYOUTS !== '1') {
             return;

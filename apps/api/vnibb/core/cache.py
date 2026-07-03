@@ -17,49 +17,15 @@ import redis.asyncio as redis
 from pydantic import BaseModel
 
 from vnibb.core.config import settings
+from vnibb.core.cache_constants import (
+    REDIS_CACHE_TTLS as CACHE_TTLS,
+    REDIS_CACHE_PREFIX_SHORT as CACHE_PREFIX_SHORT,
+)
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 R = TypeVar("R")
-
-CACHE_TTLS: Dict[str, int] = {
-    "screener": 3600,
-    "quote": 30,
-    "market_indices": 60,
-    "world_indices": 300,
-    "market_heatmap": 120,
-    "microstructure": 60,
-    "ratios": 86400,
-    "ratios_history": 86400,
-    "financials": 86400,
-    "income_statement": 86400,
-    "balance_sheet": 86400,
-    "cash_flow": 86400,
-    "news": 1800,
-    "company_news_v26": 1800,
-    "company_events_v26": 1800,
-    "profile": 604800,
-}
-
-CACHE_PREFIX_SHORT = {
-    "screener": "sc",
-    "quote": "q",
-    "ratios": "r",
-    "ratios_history": "rh",
-    "financials": "f",
-    "income_statement": "is",
-    "balance_sheet": "bs",
-    "cash_flow": "cf",
-    "news": "n",
-    "company_news_v26": "cn",
-    "company_events_v26": "ce",
-    "profile": "p",
-    "market_indices": "mi",
-    "world_indices": "wi",
-    "market_heatmap": "mh",
-    "microstructure": "ms",
-}
 
 # In-memory fallback cache: {key: (data, expiry)}
 _memory_cache: Dict[str, tuple[Any, datetime]] = {}
