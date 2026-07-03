@@ -44,8 +44,8 @@
   
   <rect width="1600" height="1200" fill="#f5f7fa"/>
   
-  <text x="800" y="40" text-anchor="middle" class="title">VNIBB Appwrite Database Schema</text>
-  <text x="800" y="62" text-anchor="middle" class="subtitle">26 Collections with Relationships</text>
+  <text x="800" y="40" text-anchor="middle" class="title">VNIBB Self-Hosted Database Schema (n6v)</text>
+  <text x="800" y="62" text-anchor="middle" class="subtitle">28 app tables (self-hosted Postgres) + MongoDB vnibb-market corpus</text>
   
   <rect x="20" y="78" width="1560" height="42" rx="8" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
   <text x="35" y="100" class="legend-text" font-weight="bold">Categories:</text>
@@ -417,7 +417,7 @@
 
   <!-- Footer -->
   <rect x="20" y="1120" width="1560" height="60" rx="8" fill="#fff" stroke="#ddd"/>
-  <text x="800" y="1145" text-anchor="middle" class="subtitle" font-weight="bold">Appwrite Database: vnibb | 26 Collections | publicRead permission (except user_dashboards)</text>
+  <text x="800" y="1145" text-anchor="middle" class="subtitle" font-weight="bold">Self-hosted Postgres (n6v): db vnibb | 28 app tables | + MongoDB vnibb-market corpus | not publicly exposed</text>
   <text x="800" y="1165" text-anchor="middle" class="subtitle">* = Document ID / Primary Key | Query attributes shown in italic | Indexes marked with (idx)</text>
   <text x="800" y="1180" text-anchor="middle" class="subtitle">Relationships: stocks (central) connects to 14+ collections | companies links to 3 ownership collections</text>
 </svg>

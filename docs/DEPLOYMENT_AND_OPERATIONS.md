@@ -45,7 +45,10 @@ VniAgent server context path
   -> apps/api
   -> VNIBB_MCP_URL
   -> vnibb-mcp
-  -> self-hosted database stack (market corpus + app/runtime state)
+  -> n6v self-hosted stack over Tailscale (100.72.199.91, private):
+     - MongoDB vnibb-market :27017  (market corpus)
+     - self-hosted Supabase Postgres :15433/:16543 (app/runtime state, auth)
+     - Redis :6379 (cache/locks)
 ```
 
 ## Backend Tech Stack
@@ -78,7 +81,7 @@ VniAgent server context path
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| **Persistence** | Self-hosted database stack | System of record: market corpus, app/runtime state, auth, and cache |
+| **Persistence** | Self-hosted on n6v (MongoDB + Supabase Postgres + Redis, Tailscale-private) | System of record: market corpus, app/runtime state, auth, and cache |
 | **Async DB** | SQLAlchemy 2.0+ / asyncpg | Async ORM with connection pooling |
 | **Migrations** | Alembic 1.13+ | Schema migrations |
 

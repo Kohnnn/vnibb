@@ -1,6 +1,7 @@
 # Database Schema
 
-**Persistence:** self-hosted database stack (private network access)
+**Persistence:** fully self-hosted on n6v (Tailscale `100.72.199.91`, private network only — no cloud database)
+**Physical stores:** PostgreSQL app model (28 tables, via self-hosted Supabase) + MongoDB `vnibb-market` corpus + Redis cache
 **Total Collections:** 28 (PostgreSQL/app model) + Mongo `vnibb-market` market corpus
 **Active Alembic revision:** `9b0f2c6d4e71` (2026-07-01 — adds `prediction_markets` + unique constraints)
 
@@ -867,6 +868,35 @@ Many-to-many relationships requiring junction tables:
 
 ---
 
+## Physical Topology (n6v)
+
+All durable stores run self-hosted on the n6v host (`desktop-8o94n6v`, Tailscale
+`100.72.199.91`). **No cloud database is in use.** The OCI backend reaches these
+over Tailscale on the private network; none are publicly exposed.
+
+| Store | Container | Port | Purpose |
+|---|---|---|---|
+| MongoDB `vnibb-market` | `vnibb-mongo` | `27017` | Canonical market/analytical corpus (EOD prices, premium fundamentals) |
+| PostgreSQL (app model) | `supabase-db` + `supabase-pooler` | pooler `15433` (session) / `16543` (txn), Kong `18000` | 28-table app model, auth, runtime state — via self-hosted Supabase |
+| PostgreSQL (aux) | `vnibb-postgres` | `15432` | VNIBB-owned relational (Postgres 16) |
+| Redis | `vnibb-redis` | `6379` | Cache, locks, rate-limit coordination |
+
+**Backend cutover config** (values held only in `deployment/env.oracle` on OCI — never in docs):
+`DATA_BACKEND=hybrid`, `CACHE_BACKEND=redis`, `MONGODB_URL` -> n6v Mongo, `DATABASE_URL` -> n6v Supabase pooler, `REDIS_URL` -> n6v Redis, `APPWRITE_WRITE_ENABLED=false`.
+
+**Redis migration (2026-07-03):** `REDIS_URL` moved from Upstash cloud
+(`rediss://<host>.upstash.io:6379`, credentials omitted) to n6v-local
+(`redis://<host>:6379/0`, credentials omitted). This removed the last cloud
+database dependency. Supabase JWT/API keys on OCI were also re-synced to match
+the n6v self-hosted Supabase instance.
+
+> Auth note: OCI connects to Postgres via password auth on the pooler, and to
+> Supabase Auth/Storage/REST via the n6v-issued `ANON_KEY` / `SERVICE_ROLE_KEY`.
+> These keys must match n6v's `JWT_SECRET`; a mismatch breaks Auth/Storage but not
+> raw DB access. Rotate keys on n6v first, then update OCI `env.oracle`.
+
+---
+
 ## MongoDB Market Corpus (n6v)
 
 Physical store: MongoDB database `vnibb-market` on n6v (`100.72.199.91:27017`).
@@ -1015,28 +1045,38 @@ into the named columns the app collections expect.
 
 ```mermaid
 flowchart LR
-    subgraph External Sources
-        VNStock[VNStock API]
-        Scrapers[Web Scrapers]
+    subgraph Providers["Upstream providers"]
+        Vietcap[Vietcap public API]
+        VNStock[vnstock premium]
+        Scrapers[News scrapers]
     end
-    
-    subgraph Database Collections
-        stocks[stocks]
-        stock_prices[stock_prices]
-        financials[financial_ratios<br/>income_statements<br/>balance_sheets<br/>cash_flows]
-        market[foreign_trading<br/>order_flow_daily]
-        news[company_news<br/>company_events]
+
+    subgraph N6V["n6v self-hosted stack (Tailscale 100.72.199.91, private)"]
+        Mongo[(MongoDB vnibb-market<br/>market_prices_eod<br/>premium records<br/>:27017)]
+        PG[(PostgreSQL app model<br/>self-hosted Supabase<br/>pooler :15433 / :16543)]
+        Redis[(Redis cache/locks<br/>:6379)]
     end
-    
-    VNStock -->|batch sync| stocks
-    VNStock -->|batch sync| stock_prices
-    VNStock -->|batch sync| financials
-    VNStock -->|batch sync| market
-    VNStock -->|batch sync| news
-    
-    stocks -->|powers| Widgets[Dashboard Widgets]
-    stock_prices -->|powers| Charts[Price Charts]
-    financials -->|powers| Ratios[Financial Ratios]
+
+    subgraph OCI["OCI runtime"]
+        API[FastAPI vnibb-api<br/>normalization + fallback]
+        MCP[vnibb-mcp<br/>read-only]
+        Caddy[Caddy TLS]
+    end
+
+    Vietcap -->|EOD + fundamentals| Mongo
+    VNStock -->|fallback fill| Mongo
+    Scrapers -->|news/events| PG
+
+    Mongo -->|market reads| API
+    PG -->|app/runtime state, auth| API
+    Redis -->|cache/locks| API
+    Mongo -->|read-only queries| MCP
+
+    API --> Caddy
+    MCP --> Caddy
+    Caddy -->|HTTPS| Vercel[Vercel frontend]
+
+    Note[Appwrite writes frozen:<br/>APPWRITE_WRITE_ENABLED=false] -.-> PG
 ```
 
 ---
