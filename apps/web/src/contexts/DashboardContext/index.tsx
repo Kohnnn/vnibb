@@ -392,15 +392,47 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
         const loadPublishedTemplates = async () => {
             if (typeof fetch !== 'function') return;
+            // Track whether the loader produced usable templates. If the
+            // backend is unreachable, slow, or returns no data (e.g. the
+            // initial admin hasn't published anything yet), we MUST fall
+            // back to the bundled `createSystemDashboards()` so the user is
+            // never stuck on an empty spinner.
+            let published: unknown[] = [];
             try {
                 const response = await getPublishedSystemDashboardTemplates();
-                if (cancelled || !response.data?.length) return;
-                dispatch({
-                    type: 'APPLY_SYSTEM_TEMPLATES',
-                    payload: response.data.map((record) => ({ ...record.dashboard, adminUnlocked: false })),
-                });
+                published = Array.isArray(response?.data) ? response.data : [];
             } catch (error) {
                 console.warn('Failed to load published system dashboard templates:', error);
+            }
+            if (cancelled) return;
+            if (published.length > 0) {
+                dispatch({
+                    type: 'APPLY_SYSTEM_TEMPLATES',
+                    payload: published.map((record: { dashboard: unknown }) => ({
+                        ...(record as { dashboard: Record<string, unknown> }).dashboard,
+                        adminUnlocked: false,
+                    })),
+                });
+            } else {
+                // Fallback path (DEF-04): bundled system templates always
+                // exist via createSystemDashboards(); seed them so the
+                // dashboard shell renders something.
+                dispatch({
+                    type: 'LOAD_STATE',
+                    payload: {
+                        dashboards: createSystemDashboards(),
+                        folders: [
+                            {
+                                id: INITIAL_FOLDER_ID,
+                                name: INITIAL_FOLDER_NAME,
+                                order: 0,
+                                isExpanded: true,
+                            },
+                        ],
+                        activeDashboardId: createSystemDashboards()[0]?.id ?? null,
+                        activeTabId: null,
+                    },
+                });
             }
         };
 

@@ -56,6 +56,93 @@ Legacy aliases such as `company_profile`, `financials`, `institutional_ownership
 - `world_news_map`: SVG world map for live world-news article density, source/coverage geography, latest headlines, regional view controls, and custom feed input
 - `world_news_live_stream`: polling live headline stream for global and Vietnam market-risk monitoring
 - `world_news_sources`: source registry audit surface with homepage, feed, geography, tier, region, category, and language metadata
+- `polymarket` (expanded): canonical taxonomy now covers `economic | sports | politics | general`, so Pop Culture / Crypto / politics markets render instead of being silently dropped
+- `kalshi`: Kalshi CFTC-regulated public-market ingestion rendered through the shared `PredictionMarketSource` factory
+- `election_odds`: side-by-side Polymarket vs Kalshi politics composite with a consensus readout
+- `prediction_movers`: top markets by absolute |Δ probability| between the latest snapshot and a windowed historical snapshot (24h default)
+- `macro_calibration`: four-tile summary of the `/estimate/{cpi,fed,recession,macro}` outputs
+- `consensus_odds`: multi-source readout aggregating Polymarket and Kalshi rows on the same question
+- **`prediction_market_lifecycle`**: see the section below
+
+## Prediction-Market Family
+
+Phase 7 added a vertical prediction-market surface from ingestion to quant
+dashboards. The data flow:
+
+```
+Polymarket Gamma ─┐
+                  │
+Kalshi Trades v2 ─┴─► prediction_market_service.py / kalshi_service.py
+                              │
+                              ▼
+              prediction_markets (DB table, source-agnostic)
+                              │
+                              ▼
+        /api/v1/prediction-markets (list, movers, calibration)
+                              │
+                              ▼
+        Polymarket / Kalshi / ElectionOdds / PredictionMovers / Consensus widgets
+                              │
+                              ▼
+        nightly snapshot job → prediction_market_snapshots
+                              │
+                              ▼
+        /api/v1/prediction-markets/estimate/{cpi,fed,recession,macro}
+                              │
+                              ▼
+                MacroCalibrationWidget (cached 600s)
+```
+
+Conventions:
+
+- The `category` column carries the canonical taxonomy
+  (`economic | sports | politics | general`). The freeform original is
+  preserved under `extra.raw_category` whenever the ingestion path stores
+  extra metadata; downstream consumers should query by the canonical value.
+- The `source` column is a free lower-case slug (`polymarket`, `kalshi`,
+  `predictit`, `limitless`, …) and the read endpoint filters by exact match.
+- Snapshot retention is 30 days; anything older is removed by the
+  ingestion-time housekeeping pass.
+- Estimator results are cached in-process for 600 s (`vnibb.core.cache`).
+  Coordinated invalidation across workers is out of scope for v1.
+
+The full developer doc lives in
+`apps/api/vnibb/services/prediction_market_estimator.py` (functions
+`estimate_cpi`, `estimate_fed`, `estimate_recession`,
+`estimate_macro_composite`).
+
+## Dashboard Persistence Hardening (Phase 0)
+
+Before Phase 0, dashboard sync was prone to a 422 storm against
+`PATCH /api/v1/dashboard/` whenever the dashboard was still a local
+`dash-…` placeholder. The bug surface is now closed:
+
+- `useDashboardSync.toBackendPayload` strips undefined keys and only
+  serialises fields the backend actually echoes back.
+- The sync loop skips the PATCH when `parseNumericDashboardId` is null so
+  placeholder IDs never reach the wire.
+- An in-flight `useRef` guard prevents overlapping runs from producing
+  duplicate 422s.
+- `api.updateDashboard` refuses non-numeric IDs at the boundary and
+  rethrows with descriptive context.
+- Backend `DashboardUpdate` schema now declares
+  `model_config = ConfigDict(extra="forbid")` so future contract drift
+  surfaces as a 422 instead of silently accepting data.
+
+A regression test lives in
+`apps/api/tests/test_api/test_dashboard_sync.py` and the smoke test in
+Phase 5 of the plan calls for the `polymarket` widget to survive a
+refresh on a fresh dashboard.
+
+## Colorblind Mode (Phase 3 / DEF-03)
+
+A shared `useColorblind()` hook (`apps/web/src/lib/colorblind.ts`) tracks
+`html[data-color-mode="colorblind"]` and `apps/web/src/app/globals.css`
+remaps legacy `text-emerald-*` / `bg-emerald-*` / `border-emerald-*`
+Tailwind classes onto the canonical positive/negative tokens so the
+palette swap propagates to widgets that haven't migrated to the token
+system yet. The helper exposes `colorblindClass(intent, suffix)` for new
+code paths.
 
 ## Persistence Rules
 

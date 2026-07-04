@@ -373,6 +373,37 @@ pnpm run ci:gate
 
 This is the best local confidence check because it runs the real sequence used by the repo's CI gate.
 
+## Post-deploy verification (Phase 7)
+
+After the prediction-market expansion ships, validate the new surfaces
+with these probes before flipping the smoke-test job to "passed":
+
+```bash
+# 1. Liveness/readiness probes return the right status codes.
+curl -fsS https://<api-host>/api/v1/health/live  | jq .
+curl -fsS https://<api-host>/api/v1/health/ready | jq .
+#   → /health/live should be 200 quickly; /health/ready should be 200
+#     once the DB ping succeeds and 503 otherwise.
+
+# 2. Polymarket is reachable and the read endpoint serves active rows.
+curl -fsS https://<api-host>/api/v1/prediction-markets?source=polymarket\&active=true\&limit=5 | jq '.count, .data[0].question'
+
+# 3. Kalshi is reachable and round-trips a separate source value.
+curl -fsS https://<api-host>/api/v1/prediction-markets?source=kalshi\&active=true\&limit=5 | jq '.count, .data[0].question'
+
+# 4. Movers endpoint requires the snapshot job to have run at least once.
+curl -fsS 'https://<api-host>/api/v1/prediction-markets/movers?window=24h&limit=5' | jq '.count, .movers[0]?.absolute_movement'
+
+# 5. Estimators (each returns a composited JSON; macro is the slowest one
+#    and benefits from the 600s in-process cache).
+curl -fsS https://<api-host>/api/v1/prediction-markets/estimate/cpi | jq '.p50, .n_markets'
+curl -fsS https://<api-host>/api/v1/prediction-markets/estimate/macro | jq '.cpi.p50, .recession.p_recession'
+
+# 6. Frontend health proxies (Next.js) match the backend status.
+curl -fsS https://<web-host>/api/live  | jq .
+curl -fsS https://<web-host>/api/ready | jq .
+```
+
 ## Operational health checks
 
 At minimum, verify:

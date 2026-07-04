@@ -43,10 +43,14 @@ function isPendingLocalDashboard(dashboard: Dashboard): boolean {
     return dashboard.id.startsWith(LOCAL_DASHBOARD_ID_PREFIX);
 }
 
-function toBackendPayload(dashboard: Dashboard) {
-    return {
+/**
+ * Strip undefined / null values so backend Pydantic doesn't reject the body
+ * for incidental optional fields. The backend contract is documented in
+ * DashboardUpdate; this projection keeps the payload minimal and stable.
+ */
+function toBackendPayload(dashboard: Dashboard): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
         name: dashboard.name,
-        description: dashboard.description,
         is_default: dashboard.isDefault,
         layout_config: {
             tabs: dashboard.tabs,
@@ -56,6 +60,10 @@ function toBackendPayload(dashboard: Dashboard) {
             order: dashboard.order,
         },
     };
+    if (dashboard.description !== undefined && dashboard.description !== null) {
+        payload.description = dashboard.description;
+    }
+    return payload;
 }
 
 function toFrontendDashboard(record: BackendDashboardRecord): Dashboard {
@@ -98,6 +106,8 @@ export function useDashboardSync(
     const previousDashboards = useRef<Dashboard[]>(state.dashboards);
     const latestDashboards = useRef<Dashboard[]>(state.dashboards);
     const pendingCreateIds = useRef<Set<string>>(new Set());
+    const inFlightSync = useRef<boolean>(false);
+    const loggedFirstFailure = useRef<boolean>(false);
 
     useEffect(() => {
         latestDashboards.current = state.dashboards;
@@ -121,6 +131,15 @@ export function useDashboardSync(
     const syncToBackend = useCallback(async (dashboards: Dashboard[]) => {
         if (!isBackendAvailable.current) return;
 
+        // Guard against overlapping sync runs which were a source of duplicate
+        // 422s on transient placeholder IDs in production. The hook still
+        // detects state changes via the effect below; this only short-circuits
+        // the re-entry.
+        if (inFlightSync.current) {
+            return;
+        }
+        inFlightSync.current = true;
+
         onSyncStart?.();
         try {
             const currentDashboardIds = new Set(dashboards.map((dashboard) => dashboard.id));
@@ -138,35 +157,49 @@ export function useDashboardSync(
             for (const dashboard of dashboards) {
                 const dashboardId = parseNumericDashboardId(dashboard.id);
 
-                if (dashboardId) {
-                    await api.updateDashboard(dashboardId, toBackendPayload(dashboard));
-                    logClientInfo('[DashboardSync] Synced dashboard:', dashboard.name);
-                    continue;
-                }
-
-                if (!isPendingLocalDashboard(dashboard) || pendingCreateIds.current.has(dashboard.id)) {
-                    continue;
-                }
-
-                pendingCreateIds.current.add(dashboard.id);
-                try {
-                    const createdDashboard = await api.createDashboard(
-                        toBackendPayload(dashboard)
-                    ) as unknown as BackendDashboardRecord;
-                    const createdFrontendDashboard = toFrontendDashboard(createdDashboard);
-
-                    if (!latestDashboards.current.some((item) => item.id === dashboard.id)) {
-                        const createdDashboardId = parseNumericDashboardId(createdFrontendDashboard.id);
-                        if (createdDashboardId) {
-                            await api.deleteDashboard(createdDashboardId);
-                        }
+                // Skip PATCH until the create round-trip assigns a numeric ID.
+                // Previously the code PATCH'd `dash-xxx` placeholders which
+                // resolves to PATCH /api/v1/dashboard/ (empty id) and 422s.
+                if (!dashboardId) {
+                    if (!isPendingLocalDashboard(dashboard) || pendingCreateIds.current.has(dashboard.id)) {
                         continue;
                     }
 
-                    onDashboardIdReconciled?.(dashboard.id, createdFrontendDashboard);
-                    logClientInfo('[DashboardSync] Created dashboard in backend:', dashboard.name);
-                } finally {
-                    pendingCreateIds.current.delete(dashboard.id);
+                    pendingCreateIds.current.add(dashboard.id);
+                    try {
+                        const createdDashboard = await api.createDashboard(
+                            toBackendPayload(dashboard)
+                        ) as unknown as BackendDashboardRecord;
+                        const createdFrontendDashboard = toFrontendDashboard(createdDashboard);
+
+                        if (!latestDashboards.current.some((item) => item.id === dashboard.id)) {
+                            const createdDashboardId = parseNumericDashboardId(createdFrontendDashboard.id);
+                            if (createdDashboardId) {
+                                await api.deleteDashboard(createdDashboardId);
+                            }
+                            continue;
+                        }
+
+                        onDashboardIdReconciled?.(dashboard.id, createdFrontendDashboard);
+                        logClientInfo('[DashboardSync] Created dashboard in backend:', dashboard.name);
+                    } finally {
+                        pendingCreateIds.current.delete(dashboard.id);
+                    }
+                    continue;
+                }
+
+                // Has a numeric ID; safe to PATCH.
+                try {
+                    await api.updateDashboard(dashboardId, toBackendPayload(dashboard));
+                    logClientInfo('[DashboardSync] Synced dashboard:', dashboard.name);
+                } catch (patchError) {
+                    if (!loggedFirstFailure.current) {
+                        loggedFirstFailure.current = true;
+                        logClientError('[DashboardSync] First PATCH failure (subsequent errors suppressed):', patchError);
+                    } else {
+                        logClientInfo('[DashboardSync] PATCH failed (suppressed):', String((patchError as Error)?.message ?? patchError));
+                    }
+                    throw patchError;
                 }
             }
 
@@ -175,6 +208,8 @@ export function useDashboardSync(
         } catch (error) {
             logClientError('[DashboardSync] Sync failed:', error);
             onSyncError?.(error as Error);
+        } finally {
+            inFlightSync.current = false;
         }
     }, [onDashboardIdReconciled, onSyncError, onSyncSuccess, onSyncStart]);
 

@@ -148,7 +148,45 @@ describe('PolymarketWidget', () => {
     expect(screen.getByText('Will the Fed cut rates in July?')).toBeInTheDocument();
   });
 
-  it('renders empty state when the API has no markets', async () => {
+  it('renders the empty state when every category is filtered out — but stays useful for non-economic rows', async () => {
+    // Given: only "Pop Culture" markets (which used to be dropped by parseCategory before
+    // Phase 2 widened the taxonomy to include 'politics' and 'general').
+    const popCulturePayload = {
+      count: 1,
+      data: [
+        {
+          source: 'polymarket',
+          source_id: 'pop-culture-1',
+          question: 'Will the next Marvel movie cross $1B opening weekend?',
+          category: 'Pop Culture',
+          outcomes: ['Yes', 'No'],
+          outcome_prices: [0.42, 0.58],
+          volume: 32000,
+          liquidity: 15000,
+          end_date: '2026-08-15T00:00:00Z',
+          url: 'https://polymarket.com/event/pop-culture-1',
+          active: true,
+          updated_at: '2026-07-01T10:30:00Z',
+        },
+      ],
+    };
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>(() =>
+        Promise.resolve(makeResponse(popCulturePayload))
+      );
+    global.fetch = fetchMock;
+
+    // When: the widget loads.
+    render(<PolymarketWidget />);
+
+    // Then: rows render under the new 'General' badge instead of being dropped.
+    expect(await screen.findByText('General')).toBeInTheDocument();
+    expect(
+      screen.getByText('Will the next Marvel movie cross $1B opening weekend?'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders the empty state when the API has no markets', async () => {
     // Given: the API returns an empty DB result.
     global.fetch = jest.fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>(() =>
       Promise.resolve(makeResponse({ count: 0, data: [] }))

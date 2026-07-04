@@ -1084,12 +1084,22 @@ export async function updateDashboard(
     id: number,
     data: DashboardUpdate
 ): Promise<Dashboard> {
-    return fetchAPI(`/dashboard/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify(data),
-        auth: 'optional',
-        headers: withDashboardClientHeader(),
-    });
+    if (!Number.isInteger(id) || id <= 0) {
+        throw new Error(
+            `[dashboard] refusing to PATCH /dashboard/${id} — invalid dashboard id (likely still a local placeholder).`
+        );
+    }
+    try {
+        return await fetchAPI(`/dashboard/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+            auth: 'optional',
+            headers: withDashboardClientHeader(),
+        });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`PATCH /dashboard/${id} failed: ${message}`);
+    }
 }
 
 export async function deleteDashboard(id: number): Promise<void> {

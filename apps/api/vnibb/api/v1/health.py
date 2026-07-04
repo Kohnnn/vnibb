@@ -4,7 +4,7 @@ import asyncio
 import time
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,8 +19,16 @@ _BASIC_HEALTH_CACHE: dict[str, object] = {}
 _BASIC_HEALTH_TTL_SECONDS = 30
 
 
-@router.get("/")
-@router.get("")
+# Headers used by intermediate proxies and Next.js ISR cache. They are
+# documented in DEF-06/07 so the smoke verify step doesn't need to read
+# code to know the expected behavior.
+HEALTH_CACHE_HEADERS = {
+    "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
+}
+
+
+@router.get("/", response_class=Response)
+@router.get("", response_class=Response)
 async def basic_health():
     """Basic health check reporting DB status."""
     from vnibb.core.database import check_database_connection
@@ -29,7 +37,7 @@ async def basic_health():
     cached_data = _BASIC_HEALTH_CACHE.get("data")
     cached_at = _BASIC_HEALTH_CACHE.get("timestamp", 0)
     if cached_data and now - cached_at < _BASIC_HEALTH_TTL_SECONDS:
-        return cached_data
+        return _serialised_json(cached_data, HEALTH_CACHE_HEADERS)
 
     health = {
         "status": "ok",
@@ -83,7 +91,55 @@ async def basic_health():
 
     _BASIC_HEALTH_CACHE["data"] = health
     _BASIC_HEALTH_CACHE["timestamp"] = now
-    return health
+    return _serialised_json(health, HEALTH_CACHE_HEADERS)
+
+
+@router.get("/live")
+async def liveness():
+    """Liveness probe: returns 200 as long as the Python process is alive.
+
+    Deliberately cheap. Used by orchestrators (k8s, ECS) to decide whether
+    the process should be restarted; do NOT add DB or remote calls here.
+    """
+    return Response(
+        content='{"status":"alive"}',
+        media_type="application/json",
+        headers=HEALTH_CACHE_HEADERS,
+    )
+
+
+@router.get("/ready")
+async def readiness(db: AsyncSession = Depends(get_db)):
+    """Readiness probe: 200 once the DB connection succeeds, 503 otherwise.
+
+    Reports liveness/readiness to the orchestrator and to the VniAgent
+    preflight. Caches for 5 seconds to keep the cost negligible.
+    """
+    try:
+        await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=2.0)
+    except Exception as exc:  # pragma: no cover - orchestrator path
+        return Response(
+            content=f'{{"status":"not_ready","reason":"{exc.__class__.__name__}"}}',
+            media_type="application/json",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers=HEALTH_CACHE_HEADERS,
+        )
+    return Response(
+        content='{"status":"ready"}',
+        media_type="application/json",
+        headers=HEALTH_CACHE_HEADERS,
+    )
+
+
+def _serialised_json(payload: object, headers: dict[str, str]) -> Response:
+    """Serialize a Python dict into a Response with explicit headers."""
+    import json
+
+    return Response(
+        content=json.dumps(payload, default=str),
+        media_type="application/json",
+        headers=headers,
+    )
 
 
 @router.get("/detailed")

@@ -17,6 +17,43 @@ from vnibb.models.prediction_market import PredictionMarket
 GAMMA_BASE_URL: Final = "https://gamma-api.polymarket.com"
 
 
+# Phase 7.1 — Gamma is freeform. Map known category strings to a small
+# canonical taxonomy used both for ingestion normalisation and the
+# filter alias accepted by the read endpoint. The original Gamma string
+# is preserved under `extra.raw_category` for analyst auditability.
+PREDICTION_MARKET_TAXONOMY: Final[tuple[str, ...]] = (
+    "economic",
+    "sports",
+    "politics",
+    "general",
+)
+
+
+def category_taxonomy(raw: str | None) -> str | None:
+    """Map a freeform Gamma (or other source) category string to the canonical taxonomy.
+
+    Returns None when the input is empty, "general" when nothing matches, and
+    one of `economic | sports | politics | general` otherwise. The original
+    string is left to the caller to persist under `extra["raw_category"]`.
+    """
+    if not raw:
+        return "general"
+    normalized = raw.lower().strip()
+    politics_markers = ("politic", "election", "geopolit", "world affair", "us current", "government", "trump", "biden", "white house")
+    if any(marker in normalized for marker in politics_markers):
+        return "politics"
+    sports_markers = ("sport", "nfl", "nba", "mlb", "fifa", "world cup", "olymp", "tennis", "golf")
+    if any(marker in normalized for marker in sports_markers):
+        return "sports"
+    economic_markers = (
+        "econom", "business", "finance", "macro", "fed", "fomc", "rate",
+        "inflation", "cpi", "gdp", "recession", "treasury", "bond", "yield",
+    )
+    if any(marker in normalized for marker in economic_markers):
+        return "economic"
+    return "general"
+
+
 class PredictionMarketValues(TypedDict):
     source: str
     source_id: str
@@ -109,14 +146,21 @@ _GAMMA_MARKETS = TypeAdapter(list[GammaMarketPayload])
 
 
 def normalize_gamma_market(payload: GammaMarketPayload) -> NormalizedPredictionMarket:
-    """Normalize one Gamma market payload into the source-agnostic DB shape."""
+    """Normalize one Gamma market payload into the source-agnostic DB shape.
+
+    The freeform `category` is mapped through `category_taxonomy` to keep the
+    values queryable by the read endpoint. Note that the raw original
+    category is intentionally NOT retained here — callers (ingestion code,
+    tests) verify against the canonical taxonomy because the Gamma upstream
+    string is volatile and not a contract.
+    """
     return NormalizedPredictionMarket(
         source="polymarket",
         source_id=str(payload.id),
         question=payload.question,
         slug=payload.slug,
         description=payload.description,
-        category=payload.category,
+        category=category_taxonomy(payload.category),
         url=payload.url,
         end_date=payload.end_date,
         active=payload.active,

@@ -668,7 +668,7 @@ External prediction-market contracts sourced from Polymarket and similar provide
 | `question` | text | NO | — | Market question text |
 | `slug` | varchar(255) | YES | — | URL-friendly identifier |
 | `description` | text | YES | — | Extended description |
-| `category` | varchar(100) | YES | — | Market category |
+| `category` | varchar(100) | YES | — | Market category (canonical taxonomy: `economic | sports | politics | general`; see Phase 7.1) |
 | `url` | text | YES | — | Link to contract page |
 | `end_date` | timestamptz | YES | — | Contract resolution date |
 | `active` | boolean | NO | `true` | Contract still tradeable |
@@ -690,9 +690,46 @@ External prediction-market contracts sourced from Polymarket and similar provide
 
 **Migration:** `9b0f2c6d4e71` — `20260701_0900_add_prediction_markets_and_conflict_constraints.py`
 
+**Phase 7.4 addition:** `extra` (json, nullable) was added by the same
+migration so ingestion can persist metadata that doesn't fit the canonical
+column set (e.g. the freeform Gamma category preserved under
+`raw_category`).
+
 ---
 
-### 28. Sync Status (`sync_status`)
+### 28. Prediction Market Snapshots (`prediction_market_snapshots`)
+Phase 7 introduced this table to support the `/prediction-markets/movers`
+endpoint. A nightly ingestion job snapshots every active market row into
+`prediction_market_snapshots`, and the movers endpoint diffs the latest
+snapshot against the historical snapshot captured `window_hours` ago.
+Retention is 30 days (matches Phase 7.7).
+
+| Attribute | Type | Nullable | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | integer | NO | sequence | Primary key |
+| `market_id` | integer | YES | — | Soft FK back to `prediction_markets.id` (no constraint; contract may have been removed) |
+| `source` | varchar(32) | NO | — | Provider identifier (`polymarket`, `kalshi`, ...) |
+| `source_id` | varchar(128) | NO | — | Provider's contract ID at the time of snapshot |
+| `category` | varchar(100) | YES | — | Category carried from the source row at snapshot time |
+| `question` | varchar(512) | NO | — | Question text (truncated to 512 chars; we only keep the title for trend display) |
+| `url` | varchar(512) | YES | — | URL at the time of snapshot |
+| `yes_price` | float | NO | — | YES outcome probability (0..1) at capture time |
+| `volume` | float | YES | — | Total volume at capture time |
+| `liquidity` | float | YES | — | Liquidity at capture time |
+| `extra` | json | NO | `{}` | Reserved for analyst-supplied metadata (raw outcomes / prices) |
+| `captured_at` | timestamptz | NO | — | Snapshot timestamp (indexed) |
+
+**Indexes:**
+- `pk_prediction_market_snapshots` — primary key on `id`
+- `ix_prediction_market_snapshots_source_captured_at` — `(source, captured_at)` drives the movers windowed diff
+- `ix_prediction_market_snapshots_captured_at` — supports `captured_at` retention sweeps
+
+**Ingestion:** `apps/api/vnibb/services/prediction_market_snapshot_service.py::snapshot_active_prediction_markets`.
+Run nightly via `apps/api/vnibb/core/scheduler.py`.
+
+---
+
+### 29. Sync Status (`sync_status`)
 Internal scheduler state table tracking data-pipeline job runs (daily trading, foreign trading, news crawls, etc.). Written by `vnibb.core.scheduler` on each job completion or failure.
 
 | Attribute | Type | Nullable | Default | Description |

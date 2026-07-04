@@ -16,6 +16,77 @@ live in \`docs/\`.
 
 ## [Unreleased]
 
+### Added
+- Prediction Markets workspace (Phase 7). Six new widgets — Polymarket, Kalshi,
+  Election Odds Composite, Probability Movers, Macro Calibration, and Consensus
+  Odds — backed by a generic `/api/v1/prediction-markets` endpoint that
+  accepts any `source` (polymarket, kalshi, etc.). The Macro Calibration widget
+  renders odds-to-estimate computations for CPI, the next four FOMC meetings,
+  and year-ahead recession probability, weighted across markets.
+- Kalshi ingestion via the public Kalshi REST API at
+  `https://api.elections.kalshi.com/trade/v2/markets`. Ingests active markets
+  every 5 minutes, normalises them into the source-agnostic `PredictionMarket`
+  table, and exposes them through the same read endpoints as Polymarket.
+- `/api/v1/health/live` (process liveness) and `/api/v1/health/ready` (DB
+  readiness) probes plus their Next.js edge proxies at `/api/live` and
+  `/api/ready`. Orchestrators and the workspace boot probe can now decide
+  whether to restart or hold traffic without polling the heavyweight health
+  endpoint.
+- Polymarket category taxonomy: `economic | sports | politics | general`.
+  `PolymarketWidget` previously filtered out every market whose Gamma category
+  was not `sports` / `economic`, producing the "No Polymarket markets
+  available" empty state. Politics, elections, geopolitics, pop culture, and
+  crypto markets now render under their canonical bucket with a General
+  fallback.
+- Colorblind helper hook `useColorblind()` exposed from `lib/colorblind.ts`
+  with a fixed CSS remap for the legacy `text-emerald-*` / `bg-emerald-*` /
+  `border-emerald-*` Tailwind classes (Phase 3 / DEF-03).
+
+### Changed
+- Backend `DashboardUpdate` request schema now declares
+  `model_config=ConfigDict(extra="forbid")`. Future frontend contract drift
+  surfaces as a 422 instead of being silently accepted.
+- Polymarket/Kalshi read endpoint accepts a case-insensitive `?category=`
+  filter alias (separate from the existing `source` filter) so widgets can
+  narrow results without re-iterating the full set client-side.
+
+### Fixed
+- Dashboard-sync 422 storm (Phase 0): `useDashboardSync` now serialises its
+  PATCH body through a stable contract (omitting undefined keys), skips the
+  PATCH round-trip while a placeholder ID is still local (`dash-...`), and
+  guards against overlapping sync runs. `api.updateDashboard` now refuses
+  non-numeric IDs at the boundary with a descriptive error so future
+  regressions surface in the console rather than as silent 422s.
+- "Polymarket widget not found" (and a handful of other recently-added
+  widgets): every `type` declared in `widgetDefinitions.ts` is now
+  registered in `WidgetRegistry`, including the full TradingView widget
+  family which was previously only partially exposed through the
+  `TradingViewWidgets` barrel. A dev-only completeness check warns at module
+  init when the catalogue and registry diverge.
+- `loadPublishedTemplates` no longer leaves the user on an empty spinner when
+  the backend is slow or returns no rows; it now falls back to the bundled
+  `createSystemDashboards()` so the workspace always renders.
+- PolymarketWidget / Gamma ingestion now retains and tags the original
+  freeform category string under `extra.raw_category` so analysts can audit
+  the canonicalisation logic later.
+
+### Internal
+- Added `apps/web/src/components/widgets/WidgetRegistry.test.ts` covering the
+  catalogue-vs-registry contract and the new prediction-market family.
+- Added `apps/web/src/lib/colorblind.test.ts` for the helper hook.
+- Extended `apps/web/src/components/widgets/PolymarketWidget.test.tsx` with
+  the Phase 2 'general' category render path.
+- Added `apps/api/tests/test_api/test_dashboard_sync.py` regression guard for
+  the 422 path and the new strict `DashboardUpdate` schema.
+- New backend files: `vnibb/services/kalshi_service.py`,
+  `vnibb/services/prediction_market_snapshot_service.py`,
+  `vnibb/services/prediction_market_estimator.py`,
+  `vnibb/models/prediction_market_snapshot.py`. New snapshot table and
+  nightly snapshot job.
+- New frontend widgets: `KalshiWidget`, `ElectionOddsWidget`,
+  `PredictionMoversWidget`, `MacroCalibrationWidget`, `ConsensusOddsWidget`,
+  `PredictionMarketSource.tsx` (shared factory).
+
 ### Fixed
 - Quant endpoints no longer serve empty price frames: the six historical
   loaders (\`_load_historical_from_*\`, \`_load_corporate_actions_for_adjustment\`,

@@ -8,7 +8,7 @@ Provides endpoints for:
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
@@ -80,7 +80,15 @@ class DashboardCreate(BaseModel):
 
 
 class DashboardUpdate(BaseModel):
-    """Request body for updating a dashboard."""
+    """Request body for updating a dashboard.
+
+    The frontend is the only writer and always ships a fully-formed body
+    (see toBackendPayload in apps/web/src/lib/useDashboardSync.ts). We
+    explicitly forbid extra fields to surface contract drift early instead
+    of silently accepting the legacy shape.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(None, max_length=100)
     description: str | None = Field(None, max_length=500)

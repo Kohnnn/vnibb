@@ -823,6 +823,51 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['polymarket', 'prediction market', 'odds', 'probability', 'events', 'macro']
     },
     {
+        type: 'kalshi',
+        name: 'Kalshi',
+        description: 'Regulated CFTC prediction-market odds from Kalshi economics, politics, and weather contracts',
+        category: 'global_markets',
+        defaultConfig: { source: 'kalshi', category: 'all', limit: 20 },
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 6 },
+        searchKeywords: ['kalshi', 'prediction market', 'odds', 'cftc', 'regulated']
+    },
+    {
+        type: 'election_odds',
+        name: 'Election Odds Composite',
+        description: 'Polymarket + Kalshi politics contracts side-by-side with consensus read',
+        category: 'global_markets',
+        defaultConfig: { source: 'all', category: 'politics', limit: 12 },
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 },
+        searchKeywords: ['election', 'odds', 'politics', 'composite', 'prediction']
+    },
+    {
+        type: 'prediction_movers',
+        name: 'Probability Movers',
+        description: 'Top prediction-market 24h probability deltas ranked by absolute movement',
+        category: 'global_markets',
+        defaultConfig: { windowHours: 24, limit: 12 },
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 },
+        searchKeywords: ['movers', 'probability', 'delta', 'prediction']
+    },
+    {
+        type: 'macro_calibration',
+        name: 'Macro Calibration',
+        description: 'Polymarket/Kalshi macro contract consensus with CPI, Fed, recession probability estimates',
+        category: 'global_markets',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
+        searchKeywords: ['macro', 'calibration', 'cpi', 'fed', 'recession', 'odds-to-estimate']
+    },
+    {
+        type: 'consensus_odds',
+        name: 'Consensus Odds',
+        description: 'Multi-source consensus signals (polymarket + kalshi + AI sentiment)',
+        category: 'global_markets',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
+        searchKeywords: ['consensus', 'multi-source', 'odds', 'prediction', 'sentiment']
+    },
+    {
         type: 'world_news_monitor',
         name: 'World News Monitor',
         description: 'Live Vietnam and global RSS/Atom news sources with direct article, source, and feed links',

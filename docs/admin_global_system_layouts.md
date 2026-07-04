@@ -215,6 +215,28 @@ If auth remains on the legacy auth provider temporarily, you can keep:
 NEXT_PUBLIC_AUTH_PROVIDER=supabase
 ```
 
+### One-off admin seed scripts
+For dashboards where the bundled fallback is good enough but you want
+the admin-published version to be ahead of time-of-deploy, the repo
+ships canonical scripts that PUT to the system-layouts admin endpoint:
+
+```bash
+# Standard: Global Markets dashboard (one-off seed).
+python apps/api/scripts/publish_global_markets_layout.py \
+    --base-url https://api.example.com \
+    --admin-key "$VNIBB_ADMIN_LAYOUT_KEY"
+
+# Phase 7.7: Prediction Markets dashboard (Polymarket, Kalshi, Election,
+# Macro Calibration, Movers). The --dry-run flag prints the JSON payload
+# without contacting the API.
+python apps/api/scripts/publish_prediction_markets_layout.py \
+    --base-url https://api.example.com \
+    --admin-key "$VNIBB_ADMIN_LAYOUT_KEY" --dry-run
+```
+
+Both scripts are self-contained (no FastAPI imports; only `urllib`) so
+they run from any Python 3.11+ host without project deps.
+
 That does **not** change the recommendation to keep system-layout APIs backend-mediated.
 
 During the current write-freeze mode, the primary template store is the durable `app_kv` store, with database-collection mirroring disabled.

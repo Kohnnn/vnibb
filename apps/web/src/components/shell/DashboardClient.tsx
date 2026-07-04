@@ -745,6 +745,21 @@ function DashboardContent() {
     // affordance is the header Lock/Unlock toggle, which users miss. Surface a
     // single dismissible toast the first time someone lands on an editable,
     // populated dashboard while not editing.
+    // DEF-05: edit-hint toast.
+    //
+    // Shown exactly once per browser after a dashboard renders its first set
+    // of widgets, and only when:
+    //   * the dashboard is editable by the current user
+    //   * the user is NOT already in edit mode
+    //   * the active tab has at least one widget (no point hinting on an empty tab)
+    //   * the dashboard walkthrough is not currently open
+    //
+    // The hint surfaces a Toast that names the header "Layout Locked" / "Layout Unlocked"
+    // toggle; the exact label is rendered as "Click "Layout Locked" in the header to drag,
+    // resize, and rearrange widgets." and the action button immediately enables edit mode
+    // by calling handleEditToggle(). The flag persists in localStorage so the hint never
+    // reappears after the first dismissal; failures to read/write localStorage are
+    // deliberately swallowed so the hint may show again rather than blocking.
     useEffect(() => {
         if (!mounted || typeof window === 'undefined') return;
         if (isWalkthroughOpen || shouldShowDashboardWalkthrough()) return;

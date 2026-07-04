@@ -115,12 +115,28 @@ Market data notes:
 
 ### Prediction Markets
 - `GET /prediction-markets`
+- `GET /prediction-markets/movers?window=24h&limit=20`
+- `GET /prediction-markets/calibration?topic=cpi|fed|recession`
+- `GET /prediction-markets/estimate/cpi`
+- `GET /prediction-markets/estimate/fed`
+- `GET /prediction-markets/estimate/recession`
+- `GET /prediction-markets/estimate/macro`
 
 Prediction markets notes:
-- Returns persisted external prediction-market contracts (Polymarket and similar) from the `prediction_markets` table, shaped as `{ "count": <int>, "data": [...] }`.
-- Filters: `source` (lowercase slug, e.g. `polymarket`), `active` (bool), `limit` (1-200, default 50).
+- Returns persisted external prediction-market contracts (Polymarket, Kalshi, etc.) from the `prediction_markets` table, shaped as `{ "count": <int>, "data": [...] }`.
+- Filters: `source` (lowercase slug, e.g. `polymarket` or `kalshi`), `active` (bool), `category` (case-insensitive alias such as `economic`, `sports`, `politics`, `general`), `limit` (1-200, default 50).
 - Ordered by nearest `end_date` first (open-ended contracts last), then `id`.
-- Returns an empty `{ "count": 0, "data": [] }` (not a 500) when the table is absent, so the endpoint is safe to call before the `9b0f2c6d4e71` migration is applied.
+- Returns an empty `{ "count": 0, "data": [] }` (not a 500) when the table is absent, so the endpoint is safe to call before the migration is applied.
+- `/movers` returns markets ranked by absolute movement in the YES probability between the latest snapshot and the snapshot `window` hours earlier. Requires the nightly snapshot job to have run at least once.
+- `/calibration?topic=...` returns the markets tagged to a maintained topic→tags mapping together with their latest consensus probability and 7-day trail.
+- `/estimate/{cpi,fed,recession,macro}` returns the odds-to-estimate quant output. Each endpoint caches its result for 600 seconds; the `macro` endpoint is a composite of the other three plus Polymarket S&P-500 closes.
+
+### Health Probes (Phase 3 / DEF-06/07)
+- `GET /health` — the existing detailed readiness heartbeat. Returns the active data backend, Redis status, and Appwrite connectivity.
+- `GET /health/live` — process liveness. Returns 200 as long as the Python worker is alive; deliberately cheap (no DB or remote calls). Suitable for orchestrator liveness probes.
+- `GET /health/ready` — readiness. Returns 200 once a `SELECT 1` succeeds against the configured database; otherwise 503. Suitable for orchestrator readiness probes and the workspace boot preflight.
+- `/health`, `/health/live`, and `/health/ready` all set `Cache-Control: public, s-maxage=15, stale-while-revalidate=60` so the Next.js edge proxies can serve repeat checks without round-tripping the backend.
+- Next.js edge proxies at `/api/live` and `/api/ready` mirror the backend routes and are safe to surface to public health-check services without leaking backend internals.
 
 ### Insider / Alerts
 - `GET /insider/{symbol}/deals`

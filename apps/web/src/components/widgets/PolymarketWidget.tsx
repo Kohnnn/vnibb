@@ -7,7 +7,7 @@ import { API_BASE_URL } from '@/lib/api';
 
 const POLYMARKET_MARKETS_ENDPOINT = `${API_BASE_URL}/prediction-markets?source=polymarket&active=true&limit=20`;
 
-type PolymarketCategory = 'economic' | 'sports';
+type PolymarketCategory = 'economic' | 'sports' | 'politics' | 'general';
 type FreshnessStatus = 'synced' | 'stale';
 
 type PolymarketMarket = {
@@ -51,13 +51,37 @@ function parseCategory(value: unknown): PolymarketCategory | null {
     }
 
     const normalized = value.toLowerCase();
+    // Politics, elections, geopolitics, world-affairs all collapse to 'politics'.
+    if (
+        normalized.includes('politic') ||
+        normalized.includes('election') ||
+        normalized.includes('geopolit') ||
+        normalized.includes('world affair') ||
+        normalized.includes('us current') ||
+        normalized.includes('government')
+    ) {
+        return 'politics';
+    }
     if (normalized.includes('sport')) {
         return 'sports';
     }
-    if (normalized.includes('econom') || normalized.includes('business') || normalized.includes('finance')) {
+    if (
+        normalized.includes('econom') ||
+        normalized.includes('business') ||
+        normalized.includes('finance') ||
+        normalized.includes('macro') ||
+        normalized.includes('fed') ||
+        normalized.includes('inflation') ||
+        normalized.includes('cpi') ||
+        normalized.includes('rate')
+    ) {
         return 'economic';
     }
-    return null;
+    // Catch-all so non-economic / non-sports / non-politics markets still
+    // render. Without this the widget used to silently drop every
+    // "Pop Culture", "Crypto", "AI", etc. row, producing the
+    // "No Polymarket markets available" empty state even when data existed.
+    return 'general';
 }
 
 function isFreshnessStatus(value: unknown): value is FreshnessStatus {
@@ -179,6 +203,10 @@ function categoryLabel(category: PolymarketCategory): string {
             return 'Economic';
         case 'sports':
             return 'Sports';
+        case 'politics':
+            return 'Politics';
+        case 'general':
+            return 'General';
     }
 }
 
