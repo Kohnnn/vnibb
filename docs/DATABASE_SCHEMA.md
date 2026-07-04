@@ -2,8 +2,8 @@
 
 **Persistence:** fully self-hosted on n6v (Tailscale `100.72.199.91`, private network only — no cloud database)
 **Physical stores:** PostgreSQL app model (28 tables, via self-hosted Supabase) + MongoDB `vnibb-market` corpus + Redis cache
-**Total Collections:** 28 (PostgreSQL/app model) + Mongo `vnibb-market` market corpus
-**Active Alembic revision:** `9b0f2c6d4e71` (2026-07-01 — adds `prediction_markets` + unique constraints)
+**Total Collections:** 29 (PostgreSQL/app model) + Mongo `vnibb-market` market corpus
+**Active Alembic revision:** `a5d6e7f8c901` (2026-07-05 — adds `prediction_market_snapshots`)
 
 > Two physical stores are described here:
 > 1. The **PostgreSQL app model (n6v)** — the 27 collections below that power the
@@ -1124,6 +1124,7 @@ flowchart LR
 |----------|------|---------|-------------|
 | `7f3a8d1e6b22` | (initial schema) | pre-2026-07-01 | Baseline — all 26 original tables |
 | `9b0f2c6d4e71` | `20260701_0900_add_prediction_markets_and_conflict_constraints.py` | 2026-07-01 | Adds `prediction_markets` table + unique constraints on `foreign_trading`, `market_news`, `stock_prices` |
+| `a5d6e7f8c901` | `20260705_0500_add_prediction_market_snapshots.py` | 2026-07-05 | Adds `prediction_market_snapshots` table (Phase 7.4 movers snapshot job) |
 
 **Running migrations on production:**
 

@@ -29,6 +29,8 @@ RS_RATING_TIMEOUT_SECONDS = 15 * 60
 HOURLY_NEWS_TIMEOUT_SECONDS = 20 * 60
 INTRADAY_TIMEOUT_SECONDS = 30 * 60
 MONGO_EOD_SYNC_TIMEOUT_SECONDS = 90 * 60
+PREDICTION_MARKET_INGEST_TIMEOUT_SECONDS = 5 * 60
+PREDICTION_MARKET_SNAPSHOT_TIMEOUT_SECONDS = 20 * 60
 
 
 async def _run_guarded_job(
@@ -231,6 +233,90 @@ def configure_scheduler():
         misfire_grace_time=300,
     )
     logger.info("Scheduled: mongo_eod_sync at 10:15 UTC (5:15 PM VNT)")
+
+    # =========================================================================
+    # Prediction Market Ingestion - Every 5 minutes during market hours
+    # Phase 7.1 / 7.2: refreshes Polymarket Gamma and Kalshi public markets
+    # so the read endpoints stay fresh throughout the trading day. Both
+    # ingest paths are idempotent (upsert keyed on (source, source_id)) and
+    # are cheap enough to run on a 5-minute cadence.
+    # =========================================================================
+    async def guarded_prediction_market_ingest():
+        from vnibb.core.database import async_session_maker
+        from vnibb.services.kalshi_service import (
+            ingest_kalshi_markets_with_default_client,
+        )
+        from vnibb.services.prediction_market_service import (
+            ingest_polymarket_gamma_markets_with_default_client,
+        )
+
+        async def _run():
+            async with async_session_maker() as session:
+                poly_count = await ingest_polymarket_gamma_markets_with_default_client(
+                    session
+                )
+                kalshi_count = await ingest_kalshi_markets_with_default_client(session)
+            logger.info(
+                "prediction_market_ingest complete: polymarket=%d kalshi=%d",
+                poly_count,
+                kalshi_count,
+            )
+
+        await _run_guarded_job(
+            "prediction_market_ingest",
+            _run,
+            PREDICTION_MARKET_INGEST_TIMEOUT_SECONDS,
+        )
+
+    scheduler.add_job(
+        guarded_prediction_market_ingest,
+        trigger=CronTrigger(
+            minute="*/5",
+            timezone="UTC",
+        ),
+        id="prediction_market_ingest",
+        name="Prediction Market Ingest (Polymarket + Kalshi)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    logger.info("Scheduled: prediction_market_ingest every 5 min")
+
+    # =========================================================================
+    # Prediction Market Snapshot - Nightly at 10:30 UTC (5:30 PM VNT)
+    # Phase 7.4: snapshots every active prediction market into
+    # `prediction_market_snapshots` so the /movers endpoint can diff against
+    # historical rows. The snapshot service also enforces 30-day retention.
+    # =========================================================================
+    async def guarded_prediction_market_snapshot():
+        from vnibb.core.database import async_session_maker
+        from vnibb.services.prediction_market_snapshot_service import (
+            snapshot_active_prediction_markets,
+        )
+
+        async def _run():
+            async with async_session_maker() as session:
+                count = await snapshot_active_prediction_markets(session)
+            logger.info("prediction_market_snapshot complete: %d rows", count)
+
+        await _run_guarded_job(
+            "prediction_market_snapshot",
+            _run,
+            PREDICTION_MARKET_SNAPSHOT_TIMEOUT_SECONDS,
+        )
+
+    scheduler.add_job(
+        guarded_prediction_market_snapshot,
+        trigger=CronTrigger(hour=10, minute=30, timezone="UTC"),
+        id="prediction_market_snapshot",
+        name="Prediction Market Nightly Snapshot",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+    logger.info("Scheduled: prediction_market_snapshot at 10:30 UTC (5:30 PM VNT)")
 
     # =========================================================================
     # RS Rating Calculation - 4:10 PM VNT (9:10 AM UTC)
