@@ -341,7 +341,7 @@ def configure_scheduler():
         )
 
         async def _run():
-            nonlocal _last_nightly_count, _last_nightly_at
+            global _last_nightly_count, _last_nightly_at
             async with async_session_maker() as session:
                 count = await snapshot_active_prediction_markets(session)
             _last_nightly_count = count
@@ -380,7 +380,7 @@ def configure_scheduler():
         )
 
         async def _run():
-            nonlocal _last_intraday_result
+            global _last_intraday_result
             async with async_session_maker() as session:
                 result = await snapshot_active_prediction_markets_intraday(session)
             _last_intraday_result = result.as_log_dict() | {"ran_at": datetime.utcnow().isoformat()}
