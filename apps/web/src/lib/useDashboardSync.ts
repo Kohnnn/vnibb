@@ -4,7 +4,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { probeBackendReadiness } from '@/lib/backendHealth'
 import * as api from '@/lib/api';
 import { logClientError, logClientInfo } from '@/lib/clientLogger';
-import type { Dashboard, DashboardState } from '@/types/dashboard';
+import type { Dashboard, DashboardCreate, DashboardState } from '@/types/dashboard';
 
 // Debounce delay for auto-save (ms)
 const SYNC_DEBOUNCE_MS = 2000;
@@ -168,7 +168,7 @@ export function useDashboardSync(
                     pendingCreateIds.current.add(dashboard.id);
                     try {
                         const createdDashboard = await api.createDashboard(
-                            toBackendPayload(dashboard)
+                            toBackendPayload(dashboard) as unknown as DashboardCreate
                         ) as unknown as BackendDashboardRecord;
                         const createdFrontendDashboard = toFrontendDashboard(createdDashboard);
 

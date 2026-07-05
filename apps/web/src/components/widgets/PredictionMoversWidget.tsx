@@ -8,10 +8,10 @@ import { API_BASE_URL } from '@/lib/api';
 /**
  * Probability Movers widget.
  *
- * Hits `/api/v1/prediction-markets/movers?window=24h&limit=12` and renders
- * the rows with their absolute movement coloured up/down. The endpoint
- * requires the nightly snapshot job (added in Phase 7.4); the widget shows
- * a clear empty state when the snapshot table is empty.
+ * Hits `/api/v1/prediction-markets/movers` and renders the rows with their
+ * absolute movement coloured up/down. The endpoint requires the nightly
+ * snapshot job plus the new intraday micro-snapshot job (Phase 8); the
+ * widget shows a clear empty state when the snapshot tables are empty.
  */
 
 type MoverRow = {
@@ -30,13 +30,20 @@ type LoadState =
     | { readonly kind: 'error'; readonly error: Error }
     | { readonly kind: 'ready'; readonly movers: readonly MoverRow[]; readonly windowHours: number };
 
+export interface PredictionMoversWidgetProps {
+    readonly windowHours?: number;
+    readonly limit?: number;
+    readonly direction?: 'up' | 'down' | 'both';
+    readonly excludeCategories?: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function parseMovers(value: unknown): { movers: MoverRow[]; windowHours: number } {
     if (!isRecord(value)) throw new Error('Invalid /movers response');
-    const list: unknown = Array.isArray(value.movers)
+    const list: unknown[] = Array.isArray(value.movers)
         ? value.movers
         : Array.isArray(value.data)
             ? value.data
@@ -76,20 +83,28 @@ function parseMovers(value: unknown): { movers: MoverRow[]; windowHours: number 
     };
 }
 
-export function PredictionMoversWidget() {
+export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) {
+    const windowHours = props.windowHours ?? 24;
+    const limit = props.limit ?? 12;
+    const direction = props.direction ?? 'both';
+    const excludeCategories = props.excludeCategories;
     const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
     const refresh = useCallback(() => {
         setState({ kind: 'loading' });
         const url = new URL(`${API_BASE_URL}/prediction-markets/movers`);
-        url.searchParams.set('window', '24h');
-        url.searchParams.set('limit', '12');
+        url.searchParams.set('window', String(windowHours));
+        url.searchParams.set('limit', String(limit));
+        url.searchParams.set('direction', direction);
+        if (excludeCategories) {
+            url.searchParams.set('exclude_categories', excludeCategories);
+        }
         fetch(url.toString(), { cache: 'no-store' })
             .then(async (response) => {
                 if (!response.ok) throw new Error(`movers API returned ${response.status}`);
                 const body = await response.json();
-                const { movers, windowHours } = parseMovers(body);
-                setState({ kind: 'ready', movers, windowHours });
+                const { movers, windowHours: hours } = parseMovers(body);
+                setState({ kind: 'ready', movers, windowHours: hours });
             })
             .catch((error: unknown) => {
                 setState({
@@ -97,7 +112,7 @@ export function PredictionMoversWidget() {
                     error: error instanceof Error ? error : new Error('movers request failed'),
                 });
             });
-    }, []);
+    }, [windowHours, limit, direction, excludeCategories]);
 
     useEffect(() => {
         refresh();

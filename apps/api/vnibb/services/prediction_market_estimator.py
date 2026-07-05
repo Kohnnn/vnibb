@@ -33,8 +33,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vnibb.core.cache import estimation_cache
+from vnibb.core.cache import coerce_estimator_payload, estimation_cache
 from vnibb.models.prediction_market import PredictionMarket
+from vnibb.services.prediction_market_service import category_taxonomy  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -111,10 +112,17 @@ def _extract_threshold(question: str) -> float | None:
     look numeric. Tries a few regex sweeps so titles like "Core CPI > 3.0%"
     and "headline cpi above 2.5%" both resolve.
     """
-    match = re.search(r"(\d+(?:\.\d+)?)\s*%\s*(?:or more|or above|>|≥|over)", question.lower())
+    lowered = question.lower()
+    match = re.search(
+        r"(?:>|≥|<|≤|over|under|above|below|more than|less than|at least|at most)\s*(\d+(?:\.\d+)?)\s*%?",
+        lowered,
+    )
     if match:
         return float(match.group(1))
-    match = re.search(r"(\d+(?:\.\d+)?)\s*%\s*(?:or less|or below|<|≤|under)", question.lower())
+    match = re.search(
+        r"(\d+(?:\.\d+)?)\s*%\s*(?:or more|or above|or less|or below|>|≥|<|≤|over|under)",
+        lowered,
+    )
     if match:
         return float(match.group(1))
     return None
@@ -133,15 +141,23 @@ def _weighted_percentile(samples: list[float], weights: list[float], percentile:
     if not samples:
         return 0.0
     pairs = sorted(zip(samples, weights))
-    total_weight = sum(weights)
+    total_weight = sum(weight for _, weight in pairs)
     if total_weight <= 0:
-        return pairs[len(pairs) // 2][0]
-    cumulative = 0.0
+        return float(pairs[len(pairs) // 2][0])
     target = percentile * total_weight
+    cumulative = 0.0
+    prev_value = pairs[0][0]
+    prev_center = 0.0
     for value, weight in pairs:
         cumulative += weight
-        if cumulative >= target:
-            return float(value)
+        center = cumulative - weight / 2.0
+        if center >= target:
+            if center == prev_center:
+                return float(value)
+            frac = (target - prev_center) / (center - prev_center)
+            return float(prev_value + frac * (value - prev_value))
+        prev_value = value
+        prev_center = center
     return float(pairs[-1][0])
 
 
@@ -156,7 +172,14 @@ async def _load_active_markets(db: AsyncSession) -> list[PredictionMarket]:
 
 
 async def estimate_cpi(db: AsyncSession) -> dict[str, Any]:
-    """Aggregate weighted CPI bucket probabilities into p10/25/50/75/90."""
+    """Aggregate weighted CPI bucket probabilities into p10/25/50/75/90.
+
+    Phase 8: each contract's YES probability becomes a weight on its
+    threshold bin (e.g. "CPI > 3.0% at 22%" contributes 0.22 mass at 3.0).
+    The previous implementation treated the threshold itself as a sample
+    which produced a distribution centred on the contract wording, not on
+    the implied CPI estimate.
+    """
     cache_key = "prediction-markets:estimate:cpi"
 
     async def loader() -> dict[str, Any]:
@@ -168,16 +191,23 @@ async def estimate_cpi(db: AsyncSession) -> dict[str, Any]:
         ]
         if not matching:
             return _empty_cpi()
-        samples: list[float] = []
-        weights: list[float] = []
+
+        bins: list[tuple[float, float]] = []  # (threshold, probability_mass)
+        total_liquidity = 0.0
         for market in matching:
             threshold = _extract_threshold(market.question)
             if threshold is None:
                 continue
-            samples.append(threshold)
-            weights.append(max(_safe_value(market), 0.05))
-        if not samples:
+            mass = max(_safe_value(market), 0.01)
+            bins.append((threshold, mass))
+            if isinstance(market.liquidity, (int, float)):
+                total_liquidity += float(market.liquidity)
+        if not bins:
             return _empty_cpi()
+
+        samples = [threshold for threshold, _ in bins]
+        weights = [mass for _, mass in bins]
+        confidence = _confidence_score(len(bins), total_liquidity)
         return {
             "date": datetime.utcnow().date().isoformat(),
             "n_markets": len(matching),
@@ -186,13 +216,13 @@ async def estimate_cpi(db: AsyncSession) -> dict[str, Any]:
             "p50": round(_weighted_percentile(samples, weights, 0.50), 3),
             "p75": round(_weighted_percentile(samples, weights, 0.75), 3),
             "p90": round(_weighted_percentile(samples, weights, 0.90), 3),
+            "confidence": round(confidence, 3),
+            "schema_version": 8,
             "last_updated": datetime.utcnow().isoformat(),
         }
 
     result = await estimation_cache.get_or_set(cache_key, loader)
-    if "last_updated" not in result:
-        result = {**result, "last_updated": datetime.utcnow().isoformat()}
-    return result
+    return coerce_estimator_payload(result)
 
 
 def _empty_cpi() -> dict[str, Any]:
@@ -204,8 +234,21 @@ def _empty_cpi() -> dict[str, Any]:
         "p50": 0.0,
         "p75": 0.0,
         "p90": 0.0,
+        "confidence": 0.0,
+        "schema_version": 8,
         "last_updated": datetime.utcnow().isoformat(),
     }
+
+
+def _confidence_score(n_markets: int, total_liquidity: float) -> float:
+    """Map (n_markets, total_liquidity) onto a 0-1 confidence score.
+
+    Saturates at 8 markets / $250k liquidity so a single mega-market
+    contract doesn't push the score to 1.0 on its own.
+    """
+    market_term = min(n_markets / 8.0, 1.0)
+    liquidity_term = min(total_liquidity / 250_000.0, 1.0)
+    return 0.5 * market_term + 0.5 * liquidity_term
 
 
 async def estimate_fed(db: AsyncSession) -> dict[str, Any]:
@@ -239,6 +282,7 @@ async def estimate_fed(db: AsyncSession) -> dict[str, Any]:
                 buckets[label]["hold"] += yes_price
             buckets[label]["weight"] += 1.0
         meetings: list[dict[str, Any]] = []
+        total_liquidity = 0.0
         for label, aggregates in sorted(buckets.items()):
             total = aggregates["cut"] + aggregates["hold"] + aggregates["hike"]
             if total <= 0:
@@ -252,12 +296,18 @@ async def estimate_fed(db: AsyncSession) -> dict[str, Any]:
                     "implied_terminal_rate": _infer_terminal_rate(aggregates),
                 }
             )
+        for market in matching:
+            if isinstance(market.liquidity, (int, float)):
+                total_liquidity += float(market.liquidity)
         return {
             "meetings": meetings[:4],
+            "n_markets": len(matching),
+            "confidence": round(_confidence_score(len(matching), total_liquidity), 3),
+            "schema_version": 8,
             "last_updated": datetime.utcnow().isoformat(),
         }
 
-    return await estimation_cache.get_or_set(cache_key, loader)
+    return coerce_estimator_payload(await estimation_cache.get_or_set(cache_key, loader))
 
 
 def _infer_fomc_label(market: PredictionMarket) -> str | None:
@@ -311,9 +361,14 @@ async def estimate_recession(db: AsyncSession) -> dict[str, Any]:
             matching.append(market)
         sources: list[dict[str, Any]] = []
         total_probability = 0.0
+        total_liquidity = 0.0
+        per_source_count: dict[str, int] = {}
         for market in matching:
             yes_price = _safe_value(market)
             total_probability += yes_price
+            if isinstance(market.liquidity, (int, float)):
+                total_liquidity += float(market.liquidity)
+            per_source_count[market.source] = per_source_count.get(market.source, 0) + 1
             sources.append(
                 {
                     "source": market.source,
@@ -322,14 +377,24 @@ async def estimate_recession(db: AsyncSession) -> dict[str, Any]:
                 }
             )
         consensus = total_probability / len(matching) if matching else None
+        variance = (
+            sum((s["probability"] - (consensus or 0)) ** 2 for s in sources) / len(sources)
+            if sources
+            else 0.0
+        )
         return {
             "year": target_year,
             "p_recession": round(consensus, 4) if consensus is not None else 0.0,
+            "variance": round(variance, 6),
+            "n_contracts_per_source": per_source_count,
             "sources": sources[:25],
+            "n_markets": len(matching),
+            "confidence": round(_confidence_score(len(matching), total_liquidity), 3),
+            "schema_version": 8,
             "last_updated": datetime.utcnow().isoformat(),
         }
 
-    return await estimation_cache.get_or_set(cache_key, loader)
+    return coerce_estimator_payload(await estimation_cache.get_or_set(cache_key, loader))
 
 
 async def estimate_macro_composite(db: AsyncSession) -> dict[str, Any]:
@@ -356,4 +421,4 @@ async def estimate_macro_composite(db: AsyncSession) -> dict[str, Any]:
             "last_updated": datetime.utcnow().isoformat(),
         }
 
-    return await estimation_cache.get_or_set(cache_key, loader)
+    return coerce_estimator_payload(await estimation_cache.get_or_set(cache_key, loader))

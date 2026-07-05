@@ -3,7 +3,7 @@
 **Persistence:** fully self-hosted on n6v (Tailscale `100.72.199.91`, private network only — no cloud database)
 **Physical stores:** PostgreSQL app model (28 tables, via self-hosted Supabase) + MongoDB `vnibb-market` corpus + Redis cache
 **Total Collections:** 29 (PostgreSQL/app model) + Mongo `vnibb-market` market corpus
-**Active Alembic revision:** `a5d6e7f8c901` (2026-07-05 — adds `prediction_market_snapshots`)
+**Active Alembic revision:** `b6c7d8e9f012` (2026-07-05 — adds `prediction_market_intraday_snapshots` for Phase 8 alerts/history endpoints)
 
 > Two physical stores are described here:
 > 1. The **PostgreSQL app model (n6v)** — the 27 collections below that power the
@@ -729,6 +729,39 @@ Run nightly via `apps/api/vnibb/core/scheduler.py`.
 
 ---
 
+### 28b. Prediction Market Intraday Snapshots (`prediction_market_intraday_snapshots`)
+Phase 8 added this table to power 1h / 4h / 24h prediction-market alerts and
+history endpoints. A micro-snapshot ingestion job runs every 15 minutes and
+appends one row per active market; retention is 7 days (much shorter than
+the nightly snapshot's 30 days).
+
+| Attribute | Type | Nullable | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | integer | NO | sequence | Primary key |
+| `market_id` | integer | YES | — | Soft FK back to `prediction_markets.id` |
+| `source` | varchar(32) | NO | — | Provider identifier |
+| `source_id` | varchar(128) | NO | — | Provider's contract ID at the time of snapshot |
+| `category` | varchar(100) | YES | — | Category carried from the source row |
+| `question` | varchar(512) | NO | — | Question text (truncated to 512 chars) |
+| `url` | varchar(512) | YES | — | URL at the time of snapshot |
+| `yes_price` | float | NO | — | YES outcome probability (0..1) at capture time |
+| `volume` | float | YES | — | Total volume at capture time |
+| `liquidity` | float | YES | — | Liquidity at capture time |
+| `extra` | json | NO | `{}` | Reserved for analyst-supplied metadata |
+| `captured_at` | timestamptz | NO | — | Snapshot timestamp (indexed) |
+
+**Indexes:**
+- `pk_prediction_market_intraday_snapshots` — primary key on `id`
+- `ix_prediction_market_intraday_snapshots_source_captured_at` — `(source, captured_at)` supports the per-source latest-row subquery used by `/alerts`
+- `ix_prediction_market_intraday_snapshots_source_pair_captured` — `(source, source_id, captured_at)` supports the diff query in `/alerts`, `/history`
+- `ix_prediction_market_intraday_snapshots_captured_at` — supports `captured_at` retention sweeps
+- `ix_prediction_market_intraday_snapshots_market_id` — supports market-scoped cleanup
+
+**Ingestion:** `apps/api/vnibb/services/prediction_market_intraday_snapshot_service.py::snapshot_active_prediction_markets_intraday`.
+Runs every 15 minutes via `apps/api/vnibb/core/scheduler.py::guarded_intraday_prediction_market_snapshot`.
+
+---
+
 ### 29. Sync Status (`sync_status`)
 Internal scheduler state table tracking data-pipeline job runs (daily trading, foreign trading, news crawls, etc.). Written by `vnibb.core.scheduler` on each job completion or failure.
 
@@ -1125,6 +1158,7 @@ flowchart LR
 | `7f3a8d1e6b22` | (initial schema) | pre-2026-07-01 | Baseline — all 26 original tables |
 | `9b0f2c6d4e71` | `20260701_0900_add_prediction_markets_and_conflict_constraints.py` | 2026-07-01 | Adds `prediction_markets` table + unique constraints on `foreign_trading`, `market_news`, `stock_prices` |
 | `a5d6e7f8c901` | `20260705_0500_add_prediction_market_snapshots.py` | 2026-07-05 | Adds `prediction_market_snapshots` table (Phase 7.4 movers snapshot job) |
+| `b6c7d8e9f012` | `20260705_1830_add_prediction_market_intraday_snapshots.py` | 2026-07-05 | Adds `prediction_market_intraday_snapshots` table (Phase 8 alerts/history) |
 
 **Running migrations on production:**
 

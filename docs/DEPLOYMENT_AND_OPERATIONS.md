@@ -396,10 +396,18 @@ curl -fsS 'https://<api-host>/api/v1/prediction-markets/movers?window=24h&limit=
 
 # 5. Estimators (each returns a composited JSON; macro is the slowest one
 #    and benefits from the 600s in-process cache).
-curl -fsS https://<api-host>/api/v1/prediction-markets/estimate/cpi | jq '.p50, .n_markets'
-curl -fsS https://<api-host>/api/v1/prediction-markets/estimate/macro | jq '.cpi.p50, .recession.p_recession'
+curl -fsS https://<api-host>/api/v1/prediction-markets/estimate/cpi | jq '.p50, .n_markets, .confidence'
+curl -fsS https://<api-host>/api/v1/prediction-markets/estimate/macro | jq '.cpi.p50, .recession.p_recession, .cpi.confidence'
 
-# 6. Frontend health proxies (Next.js) match the backend status.
+# 6. Phase 8 endpoints. Each tolerates the snapshot tables being empty; an
+#    empty response is acceptable and means the snapshot jobs haven't
+#    accumulated enough history yet (the intraday job needs ~75 minutes).
+curl -fsS https://<api-host>/api/v1/prediction-markets/spread | jq '.topics[] | {topic, polymarket_consensus, kalshi_consensus, gap}'
+curl -fsS https://<api-host>/api/v1/prediction-markets/alerts | jq '.count, .alerts[0]?.direction'
+curl -fsS 'https://<api-host>/api/v1/prediction-markets/consensus?query=Fed' | jq '.n_markets, .consensus_yes_price'
+curl -fsS https://<api-host>/api/v1/prediction-markets/cross-calibration | jq '.topics[].sources_agree'
+
+# 7. Frontend health proxies (Next.js) match the backend status.
 curl -fsS https://<web-host>/api/live  | jq .
 curl -fsS https://<web-host>/api/ready | jq .
 ```

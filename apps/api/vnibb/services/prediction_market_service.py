@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Final, TypedDict
@@ -39,17 +40,28 @@ def category_taxonomy(raw: str | None) -> str | None:
     if not raw:
         return "general"
     normalized = raw.lower().strip()
+    tokens = set(re.findall(r"[a-z]+", normalized))
+
+    def _has(markers: tuple[str, ...]) -> bool:
+        for marker in markers:
+            if " " in marker:
+                if marker in normalized:
+                    return True
+            elif any(token.startswith(marker) for token in tokens):
+                return True
+        return False
+
     politics_markers = ("politic", "election", "geopolit", "world affair", "us current", "government", "trump", "biden", "white house")
-    if any(marker in normalized for marker in politics_markers):
+    if _has(politics_markers):
         return "politics"
     sports_markers = ("sport", "nfl", "nba", "mlb", "fifa", "world cup", "olymp", "tennis", "golf")
-    if any(marker in normalized for marker in sports_markers):
+    if _has(sports_markers):
         return "sports"
     economic_markers = (
         "econom", "business", "finance", "macro", "fed", "fomc", "rate",
         "inflation", "cpi", "gdp", "recession", "treasury", "bond", "yield",
     )
-    if any(marker in normalized for marker in economic_markers):
+    if _has(economic_markers):
         return "economic"
     return "general"
 

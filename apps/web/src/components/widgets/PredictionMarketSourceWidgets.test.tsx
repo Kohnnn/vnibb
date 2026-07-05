@@ -157,7 +157,7 @@ describe('MacroCalibrationWidget', () => {
         render(<MacroCalibrationWidget />);
 
         expect(await screen.findByText('CPI')).toBeInTheDocument();
-        expect(screen.getByText(/3\.1%/)).toBeInTheDocument();
+        expect(screen.getByText('3.1%')).toBeInTheDocument();
         expect(screen.getByText('Recession 2026')).toBeInTheDocument();
     });
 });

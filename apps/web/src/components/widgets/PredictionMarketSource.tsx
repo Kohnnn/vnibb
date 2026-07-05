@@ -12,7 +12,7 @@ import { BarChart3, ExternalLink } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { API_BASE_URL } from '@/lib/api';
 
-export type PredictionMarketSource = 'polymarket' | 'kalshi';
+export type PredictionMarketSource = 'polymarket' | 'kalshi' | 'predictit' | 'limitless';
 
 export type PredictionMarketCategory =
     | 'all'
@@ -184,6 +184,7 @@ export interface PredictionMarketSourceWidgetProps {
     readonly category?: PredictionMarketCategory;
     readonly emptyIcon?: React.ReactNode;
     readonly emptyMessage?: string;
+    readonly onSelect?: (row: PredictionMarketRow) => void;
 }
 
 export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidgetProps) {
@@ -257,40 +258,63 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
                 </span>
             </div>
             <div className="flex flex-col gap-2">
-                {state.payload.markets.map((market) => (
-                    <article
-                        key={`${market.source}:${market.sourceId}`}
-                        className="rounded-lg border border-default bg-[var(--bg-tertiary)] p-3 transition-colors hover:bg-[var(--bg-hover)]"
-                    >
-                        <div className="mb-2 flex items-start justify-between gap-3">
-                            <div>
-                                <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-blue-300">
-                                    {String(market.category)}
+                {state.payload.markets.map((market) => {
+                    const handleClick = props.onSelect
+                        ? () => props.onSelect?.(market)
+                        : undefined;
+                    return (
+                        <article
+                            key={`${market.source}:${market.sourceId}`}
+                            className={
+                                props.onSelect
+                                    ? 'cursor-pointer rounded-lg border border-default bg-[var(--bg-tertiary)] p-3 transition-colors hover:bg-[var(--bg-hover)]'
+                                    : 'rounded-lg border border-default bg-[var(--bg-tertiary)] p-3 transition-colors hover:bg-[var(--bg-hover)]'
+                            }
+                            onClick={handleClick}
+                            role={props.onSelect ? 'button' : undefined}
+                            tabIndex={props.onSelect ? 0 : undefined}
+                            onKeyDown={
+                                props.onSelect
+                                    ? (event) => {
+                                          if (event.key === 'Enter' || event.key === ' ') {
+                                              event.preventDefault();
+                                              props.onSelect?.(market);
+                                          }
+                                      }
+                                    : undefined
+                            }
+                        >
+                            <div className="mb-2 flex items-start justify-between gap-3">
+                                <div>
+                                    <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-blue-300">
+                                        {String(market.category)}
+                                    </div>
+                                    <h3 className="text-sm font-semibold leading-snug text-[var(--text-primary)]">
+                                        {market.question}
+                                    </h3>
                                 </div>
-                                <h3 className="text-sm font-semibold leading-snug text-[var(--text-primary)]">
-                                    {market.question}
-                                </h3>
+                                {market.url && (
+                                    <a
+                                        href={market.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="rounded-md p-1 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300"
+                                        aria-label={`Open ${market.question}`}
+                                        onClick={(event) => event.stopPropagation()}
+                                    >
+                                        <ExternalLink size={13} />
+                                    </a>
+                                )}
                             </div>
-                            {market.url && (
-                                <a
-                                    href={market.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="rounded-md p-1 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300"
-                                    aria-label={`Open ${market.question}`}
-                                >
-                                    <ExternalLink size={13} />
-                                </a>
-                            )}
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-4">
-                            <span>Yes {formatProb(market.prices[0])}</span>
-                            <span>No {formatProb(market.prices[1])}</span>
-                            <span>Vol {formatMoney(market.volume)}</span>
-                            <span>Liq {formatMoney(market.liquidity)}</span>
-                        </div>
-                    </article>
-                ))}
+                            <div className="grid grid-cols-2 gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-4">
+                                <span>Yes {formatProb(market.prices[0])}</span>
+                                <span>No {formatProb(market.prices[1])}</span>
+                                <span>Vol {formatMoney(market.volume)}</span>
+                                <span>Liq {formatMoney(market.liquidity)}</span>
+                            </div>
+                        </article>
+                    );
+                })}
             </div>
         </div>
     );

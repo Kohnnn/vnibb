@@ -9,7 +9,7 @@
  */
 
 import { widgetRegistry } from './WidgetRegistry';
-import widgetDefinitions from '@/data/widgetDefinitions';
+import { widgetDefinitions } from '@/data/widgetDefinitions';
 
 describe('WidgetRegistry completeness', () => {
     const declaredTypes = widgetDefinitions.map((entry: { type: string }) => entry.type);
@@ -20,18 +20,24 @@ describe('WidgetRegistry completeness', () => {
         expect(missing).toEqual([]);
     });
 
+    const isRenderableComponent = (value: unknown): boolean => {
+        if (typeof value === 'function') return true;
+        // React.memo / forwardRef components are objects carrying a $$typeof tag.
+        return typeof value === 'object' && value !== null && '$$typeof' in value;
+    };
+
     it('registers a loader that resolves to a component', async () => {
         for (const type of registeredTypes) {
             const entry = widgetRegistry.get(type as never);
-            expect(entry, `Registry entry missing for ${type}`).toBeDefined();
+            expect(entry).toBeDefined();
             const resolved = await entry!.lazyComponent();
-            expect(typeof resolved.default, `Loader for ${type} did not yield a component`).toBe('function');
+            expect(isRenderableComponent(resolved.default)).toBe(true);
         }
     });
 
     it('covers the prediction-market family introduced in Phase 7', () => {
         for (const id of ['polymarket', 'kalshi', 'election_odds', 'prediction_movers', 'macro_calibration', 'consensus_odds']) {
-            expect(widgetRegistry.has(id as never), `Missing registry entry for ${id}`).toBe(true);
+            expect(widgetRegistry.has(id as never)).toBe(true);
         }
     });
 });

@@ -408,10 +408,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             if (published.length > 0) {
                 dispatch({
                     type: 'APPLY_SYSTEM_TEMPLATES',
-                    payload: published.map((record: { dashboard: unknown }) => ({
+                    payload: published.map((record) => ({
                         ...(record as { dashboard: Record<string, unknown> }).dashboard,
                         adminUnlocked: false,
-                    })),
+                    })) as unknown as Dashboard[],
                 });
             } else {
                 // Fallback path (DEF-04): bundled system templates always

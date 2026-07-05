@@ -67,7 +67,11 @@ Legacy aliases such as `company_profile`, `financials`, `institutional_ownership
 ## Prediction-Market Family
 
 Phase 7 added a vertical prediction-market surface from ingestion to quant
-dashboards. The data flow:
+dashboards. Phase 8 (this doc's update) hardens the family, adds an
+intraday micro-snapshot job, and ships four new widgets (Alerts, Drift,
+Pulse, Deep-Dive drawer) plus three new read endpoints.
+
+The data flow:
 
 ```
 Polymarket Gamma ─┐
@@ -78,20 +82,22 @@ Kalshi Trades v2 ─┴─► prediction_market_service.py / kalshi_service.py
               prediction_markets (DB table, source-agnostic)
                               │
                               ▼
-        /api/v1/prediction-markets (list, movers, calibration)
+        /api/v1/prediction-markets (list, movers, calibration, consensus,
+                                    spread, alerts, history, cross-calibration)
                               │
                               ▼
-        Polymarket / Kalshi / ElectionOdds / PredictionMovers / Consensus widgets
+        Polymarket / Kalshi / ElectionOdds / PredictionMovers / Consensus /
+        TopMoversPulse / SourceDrift / PredictionAlerts / PredictionMarketDrawer
                               │
                               ▼
-        nightly snapshot job → prediction_market_snapshots
+        nightly snapshot job → prediction_market_snapshots (30-day retention)
+        intraday micro-snapshot job (15-min cadence, 7-day retention)
                               │
                               ▼
         /api/v1/prediction-markets/estimate/{cpi,fed,recession,macro}
                               │
                               ▼
-                MacroCalibrationWidget (cached 600s)
-```
+                MacroCalibrationWidget (cached 600s) with confidence pills
 
 Conventions:
 
@@ -100,7 +106,32 @@ Conventions:
   preserved under `extra.raw_category` whenever the ingestion path stores
   extra metadata; downstream consumers should query by the canonical value.
 - The `source` column is a free lower-case slug (`polymarket`, `kalshi`,
-  `predictit`, `limitless`, …) and the read endpoint filters by exact match.
+  `predictit`, `limitless`, `manifold`, …) and the read endpoint filters by exact match.
+
+### Sources
+
+| Source | API | Auth | Rate limit | Cadence | Taxonomy mapping |
+|--------|-----|------|------------|---------|------------------|
+| Polymarket Gamma | `https://gamma-api.polymarket.com/markets` | none | generous | every 5 min | `economic | sports | politics | general` |
+| Kalshi Trades | `https://api.elections.kalshi.com/trade-api/v2/markets` | none | 60 req/min | every 5 min | `economic | sports | politics | general` |
+| PredictIt | `https://www.predictit.org/api/markets` | none | ~30 req/min | every 5 min | `politics | general` |
+| Limitless | `https://api.limitless.exchange/markets` | none | generous | every 5 min | `crypto | general` |
+| Manifold | `https://api.manifold.markets/v0` | none | generous | every 5 min | freeform under `extra.raw_category` |
+
+Each source shares the `_upsert_prediction_market` upsert from `prediction_market_service`,
+so the schema is source-agnostic and the read endpoint can blend across all of them.
+
+Phase 9 adds PredictIt and Limitless. Phase 10 adds Manifold. Each phase's ingest is
+wrapped in a `try / except` at the scheduler layer so one source going down does not
+poison the others (only the affected source's count is missing from the log line).
+
+### Cross-Source Calibration widget (Phase 10)
+
+`/prediction-markets/cross-calibration` aggregates per-topic consensus across all five
+sources (Polymarket, Kalshi, PredictIt, Limitless, Manifold where tagged). The widget
+shows three tiles (CPI / Fed / Recession) with one row per source and a
+`sources_agree` indicator (green when the spread between min and max consensus is
+below a per-topic threshold — 5pp CPI / 8pp Fed / 12pp Recession — otherwise amber).
 - Snapshot retention is 30 days; anything older is removed by the
   ingestion-time housekeeping pass.
 - Estimator results are cached in-process for 600 s (`vnibb.core.cache`).

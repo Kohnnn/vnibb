@@ -167,6 +167,17 @@ export const WIDGET_LAYOUT_BEHAVIORS: Record<WidgetType, LayoutBehavior> = {
   forex_rates: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
   commodities: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
   polymarket: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  kalshi: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  election_odds: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  prediction_movers: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  macro_calibration: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  consensus_odds: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  top_movers_pulse: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  source_drift: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  prediction_alerts: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  predictit: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  limitless: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  cross_source_calibration: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
   signal_summary: { preferredW: 24, preferredH: 8, minW: 12, minH: 6, orientation: 'horizontal', expandPriority: 6 },
   // Backfilled so every WidgetType resolves an explicit size contract instead of the
   // 6x5 fallback (which previously collapsed uncovered types to a broken 3x3 at insertion).

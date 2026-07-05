@@ -71,14 +71,17 @@ export function isWidgetRegistered(type: WidgetType): boolean {
 /**
  * Lazy helper that adapts the named-export convention some widgets use.
  */
-function lazyNamed<T extends ComponentType<any>>(
-  importer: () => Promise<Record<string, T>>,
+function lazyNamed(
+  importer: () => Promise<Record<string, unknown>>,
   exportName: string
 ): () => Promise<{ default: ComponentType<any> }> {
   return async () => {
     const mod = await importer();
     const named = mod[exportName];
-    if (typeof named !== 'function') {
+    const isComponent =
+      typeof named === 'function' ||
+      (typeof named === 'object' && named !== null && '$$typeof' in named);
+    if (!isComponent) {
       throw new Error(`WidgetRegistry: '${exportName}' missing from dynamic import`);
     }
     return { default: named as ComponentType<any> };
@@ -660,6 +663,45 @@ registerWidget(
   lazyNamed(() => import('./ConsensusOddsWidget'), 'ConsensusOddsWidget'),
   'prediction_markets',
   ['consensus', 'odds', 'multi-source']
+);
+registerWidget(
+  'top_movers_pulse',
+  lazyNamed(() => import('./TopMoversPulseWidget'), 'TopMoversPulseWidget'),
+  'prediction_markets',
+  ['pulse', 'top movers', 'sparkline', 'probability']
+);
+registerWidget(
+  'source_drift',
+  lazyNamed(() => import('./SourceDriftWidget'), 'SourceDriftWidget'),
+  'prediction_markets',
+  ['drift', 'spread', 'consensus', 'polymarket vs kalshi']
+);
+registerWidget(
+  'prediction_alerts',
+  lazyNamed(() => import('./PredictionAlertsWidget'), 'PredictionAlertsWidget'),
+  'prediction_markets',
+  ['alerts', 'movement', 'probability', 'intraday']
+);
+registerWidget(
+  'predictit',
+  lazyNamed(() => import('./PredictItWidget'), 'PredictItWidget'),
+  'prediction_markets',
+  ['predictit', 'election', 'politics', 'odds']
+);
+registerWidget(
+  'limitless',
+  lazyNamed(() => import('./LimitlessWidget'), 'LimitlessWidget'),
+  'prediction_markets',
+  ['limitless', 'crypto', 'odds', 'probability']
+);
+registerWidget(
+  'cross_source_calibration',
+  lazyNamed(
+    () => import('./CrossSourceCalibrationWidget'),
+    'CrossSourceCalibrationWidget',
+  ),
+  'prediction_markets',
+  ['cross-source', 'calibration', 'consensus', 'agreement']
 );
 
 // Run dev-only completeness check after every widget is registered.

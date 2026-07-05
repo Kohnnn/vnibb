@@ -31,6 +31,15 @@ INTRADAY_TIMEOUT_SECONDS = 30 * 60
 MONGO_EOD_SYNC_TIMEOUT_SECONDS = 90 * 60
 PREDICTION_MARKET_INGEST_TIMEOUT_SECONDS = 5 * 60
 PREDICTION_MARKET_SNAPSHOT_TIMEOUT_SECONDS = 20 * 60
+PREDICTION_MARKET_INTRADAY_SNAPSHOT_TIMEOUT_SECONDS = 5 * 60
+PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES = 15
+
+# Last-run counters for the ``predictions_status`` health contribution. Reset
+# at the start of each guarded run; read by the ``/health/predictions``
+# endpoint via :func:`get_predictions_status`.
+_last_intraday_result: dict[str, object] | None = None
+_last_nightly_count: int | None = None
+_last_nightly_at: datetime | None = None
 
 
 async def _run_guarded_job(
@@ -246,6 +255,15 @@ def configure_scheduler():
         from vnibb.services.kalshi_service import (
             ingest_kalshi_markets_with_default_client,
         )
+        from vnibb.services.limitless_service import (
+            ingest_limitless_markets_with_default_client,
+        )
+        from vnibb.services.manifold_service import (
+            ingest_manifold_markets_with_default_client,
+        )
+        from vnibb.services.predictit_service import (
+            ingest_predictit_markets_with_default_client,
+        )
         from vnibb.services.prediction_market_service import (
             ingest_polymarket_gamma_markets_with_default_client,
         )
@@ -256,10 +274,37 @@ def configure_scheduler():
                     session
                 )
                 kalshi_count = await ingest_kalshi_markets_with_default_client(session)
+                predictit_count = 0
+                limitless_count = 0
+                manifold_count = 0
+                # Per-source try/except so one failing source does not
+                # poison the others (Phase 9 + 10).
+                try:
+                    predictit_count = await ingest_predictit_markets_with_default_client(
+                        session
+                    )
+                except Exception as exc:
+                    logger.warning("predictit ingest failed: %s", exc)
+                try:
+                    limitless_count = await ingest_limitless_markets_with_default_client(
+                        session
+                    )
+                except Exception as exc:
+                    logger.warning("limitless ingest failed: %s", exc)
+                try:
+                    manifold_count = await ingest_manifold_markets_with_default_client(
+                        session
+                    )
+                except Exception as exc:
+                    logger.warning("manifold ingest failed: %s", exc)
             logger.info(
-                "prediction_market_ingest complete: polymarket=%d kalshi=%d",
+                "prediction_market_ingest complete: polymarket=%d kalshi=%d "
+                "predictit=%d limitless=%d manifold=%d",
                 poly_count,
                 kalshi_count,
+                predictit_count,
+                limitless_count,
+                manifold_count,
             )
 
         await _run_guarded_job(
@@ -275,7 +320,7 @@ def configure_scheduler():
             timezone="UTC",
         ),
         id="prediction_market_ingest",
-        name="Prediction Market Ingest (Polymarket + Kalshi)",
+        name="Prediction Market Ingest (Polymarket + Kalshi + PredictIt + Limitless + Manifold)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -296,8 +341,11 @@ def configure_scheduler():
         )
 
         async def _run():
+            nonlocal _last_nightly_count, _last_nightly_at
             async with async_session_maker() as session:
                 count = await snapshot_active_prediction_markets(session)
+            _last_nightly_count = count
+            _last_nightly_at = datetime.utcnow()
             logger.info("prediction_market_snapshot complete: %d rows", count)
 
         await _run_guarded_job(
@@ -317,6 +365,53 @@ def configure_scheduler():
         misfire_grace_time=600,
     )
     logger.info("Scheduled: prediction_market_snapshot at 10:30 UTC (5:30 PM VNT)")
+
+    # =========================================================================
+    # Prediction Market Intraday Snapshot - every 15 minutes
+    # Phase 8: writes a micro-snapshot of every active market into
+    # ``prediction_market_intraday_snapshots`` so the /movers, /alerts and
+    # /history endpoints can answer 1h / 4h / 24h diffs without forcing a
+    # full-nightly-batch reload.
+    # =========================================================================
+    async def guarded_intraday_prediction_market_snapshot():
+        from vnibb.core.database import async_session_maker
+        from vnibb.services.prediction_market_intraday_snapshot_service import (
+            snapshot_active_prediction_markets_intraday,
+        )
+
+        async def _run():
+            nonlocal _last_intraday_result
+            async with async_session_maker() as session:
+                result = await snapshot_active_prediction_markets_intraday(session)
+            _last_intraday_result = result.as_log_dict() | {"ran_at": datetime.utcnow().isoformat()}
+            logger.info(
+                "prediction_market_intraday_snapshot complete: %s",
+                _last_intraday_result,
+            )
+
+        await _run_guarded_job(
+            "prediction_market_intraday_snapshot",
+            _run,
+            PREDICTION_MARKET_INTRADAY_SNAPSHOT_TIMEOUT_SECONDS,
+        )
+
+    scheduler.add_job(
+        guarded_intraday_prediction_market_snapshot,
+        trigger=CronTrigger(
+            minute=f"*/{PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES}",
+            timezone="UTC",
+        ),
+        id="prediction_market_intraday_snapshot",
+        name="Prediction Market Intraday Snapshot (15 min)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    logger.info(
+        "Scheduled: prediction_market_intraday_snapshot every %s min",
+        PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES,
+    )
 
     # =========================================================================
     # RS Rating Calculation - 4:10 PM VNT (9:10 AM UTC)
@@ -486,3 +581,20 @@ def trigger_job_now(job_id: str) -> bool:
         return True
 
     return False
+
+
+def get_predictions_status() -> dict:
+    """Snapshot of the prediction-market ingestion/snapshot health.
+
+    Returns the last intraday micro-snapshot outcome + the last nightly
+    snapshot count + timestamp. Consumed by ``/health/predictions`` so the
+    platform can flag a stale or zero-row cycle without scraping logs.
+    """
+    return {
+        "intraday": _last_intraday_result,
+        "nightly": {
+            "rows_written": _last_nightly_count,
+            "ran_at": _last_nightly_at.isoformat() if _last_nightly_at else None,
+        },
+        "cadence_minutes": PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES,
+    }

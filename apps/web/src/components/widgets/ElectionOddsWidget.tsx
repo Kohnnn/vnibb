@@ -9,8 +9,12 @@ import { API_BASE_URL } from '@/lib/api';
  * Election Odds Composite widget.
  *
  * Combines Polymarket and Kalshi politics markets on a single tile with a
- * small consensus read. Raw fetch (no shared factory) because the response
- * shape has to merge two sources before rendering.
+ * small consensus read. Phase 8:
+ *  * Uses the canonical ``?category=politics`` filter (the read endpoint
+ *    maps friendly names to canonical buckets) instead of the substring
+ *    substring-search client-side filter.
+ *  * Dedupes by a normalised question fingerprint so the same market
+ *    listed under slightly different wording doesn't render twice.
  */
 
 type PoliticsMarket = {
@@ -60,14 +64,18 @@ function parseMarkets(value: unknown): PoliticsMarket[] {
     return out;
 }
 
+function fingerprint(question: string): string {
+    return question.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 80);
+}
+
 export function ElectionOddsWidget() {
     const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
     const refresh = useCallback(() => {
         setState({ kind: 'loading' });
         const urls = [
-            `${API_BASE_URL}/prediction-markets?source=polymarket&category=politics&active=true&limit=10`,
-            `${API_BASE_URL}/prediction-markets?source=kalshi&category=politics&active=true&limit=10`,
+            `${API_BASE_URL}/prediction-markets?source=polymarket&category=politics&active=true&limit=15`,
+            `${API_BASE_URL}/prediction-markets?source=kalshi&category=politics&active=true&limit=15`,
         ];
         Promise.all(
             urls.map((url) =>
@@ -79,7 +87,7 @@ export function ElectionOddsWidget() {
         )
             .then(([poly, kalshi]) => {
                 const dedup = new Map<string, PoliticsMarket>();
-                for (const row of [...poly, ...kalshi]) dedup.set(`${row.source}:${row.question}`, row);
+                for (const row of [...poly, ...kalshi]) dedup.set(`${row.source}:${fingerprint(row.question)}`, row);
                 setState({ kind: 'ready', markets: Array.from(dedup.values()) });
             })
             .catch((error: unknown) => {

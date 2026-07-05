@@ -16,6 +16,9 @@ const config = {
     moduleNameMapper: {
         // Handle module aliases (if you have them in tsconfig.json)
         '^@/(.*)$': '<rootDir>/src/$1',
+        '^d3-hierarchy$': '<rootDir>/src/test-utils/d3HierarchyMock.ts',
+        '^react-markdown$': '<rootDir>/src/test-utils/reactMarkdownMock.tsx',
+        '^remark-gfm$': '<rootDir>/src/test-utils/remarkGfmMock.ts',
     },
 }
 

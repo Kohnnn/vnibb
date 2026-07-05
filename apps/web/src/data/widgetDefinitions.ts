@@ -868,6 +868,60 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['consensus', 'multi-source', 'odds', 'prediction', 'sentiment']
     },
     {
+        type: 'top_movers_pulse',
+        name: 'Top Movers Pulse',
+        description: 'Compact top-of-dashboard strip showing the top three 1h prediction-market movers with sparklines',
+        category: 'global_markets',
+        defaultConfig: { windowHours: 1, limit: 3 },
+        defaultLayout: { w: 12, h: 2, minW: 8, minH: 2 },
+        searchKeywords: ['pulse', 'top movers', 'sparkline', 'intraday', 'probability']
+    },
+    {
+        type: 'source_drift',
+        name: 'Source Drift',
+        description: 'Side-by-side Polymarket vs Kalshi consensus on CPI, Fed, and recession with the spread gap',
+        category: 'global_markets',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 4, minW: 8, minH: 4 },
+        searchKeywords: ['drift', 'spread', 'polymarket vs kalshi', 'consensus', 'macro']
+    },
+    {
+        type: 'prediction_alerts',
+        name: 'Prediction Alerts',
+        description: 'Intraday alerts when a prediction-market probability moves more than the threshold',
+        category: 'global_markets',
+        defaultConfig: { windowHours: 1, minMovementBps: 200, limit: 12 },
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 },
+        searchKeywords: ['alerts', 'movement', 'probability', 'intraday', 'notify']
+    },
+    {
+        type: 'predictit',
+        name: 'PredictIt',
+        description: 'Public PredictIt election and general markets with normalised category',
+        category: 'global_markets',
+        defaultConfig: { source: 'predictit', category: 'all', limit: 20 },
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 6 },
+        searchKeywords: ['predictit', 'election', 'politics', 'public markets', 'odds']
+    },
+    {
+        type: 'limitless',
+        name: 'Limitless',
+        description: 'Crypto-meta prediction markets from Limitless exchange',
+        category: 'global_markets',
+        defaultConfig: { source: 'limitless', category: 'all', limit: 20 },
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 6 },
+        searchKeywords: ['limitless', 'crypto', 'btc', 'eth', 'odds', 'probability']
+    },
+    {
+        type: 'cross_source_calibration',
+        name: 'Cross-Source Calibration',
+        description: 'Per-topic consensus across all five prediction-market sources with a sources-agree indicator',
+        category: 'global_markets',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 6, minW: 8, minH: 4 },
+        searchKeywords: ['cross-source', 'calibration', 'consensus', 'agreement', 'macro']
+    },
+    {
         type: 'world_news_monitor',
         name: 'World News Monitor',
         description: 'Live Vietnam and global RSS/Atom news sources with direct article, source, and feed links',
