@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     api_request_timeout_seconds: int = 30
     admin_api_key: Optional[str] = None
+    apps_script_api_key: Optional[str] = None  # env: VNIBB_APPS_SCRIPT_KEY
     vnibb_mcp_host: str = "0.0.0.0"
     vnibb_mcp_port: int = 8001
     vnibb_mcp_transport: str = "stdio"
@@ -74,11 +75,16 @@ class Settings(BaseSettings):
         "http://127.0.0.1:4000",
         "https://vnibb-web.vercel.app",
         "https://vnibb.vercel.app",
+        "https://script.google.com",
+        "https://googleusercontent.com",
+        "https://accounts.google.com",
+        "https://sheets.googleapis.com",
     ]
     cors_origin_regex: str = (
         # Localhost dev + this project's own Vercel deployments only.
         # Any *.vercel.app would let third-party Vercel apps send credentialed requests.
         r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^https://vnibb[a-z0-9-]*\.vercel\.app$"
+        r"|^https://script\.google\.com$|^https://[a-z0-9-]*\.googleapis\.com$"
     )
 
     # ==========================================================================

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from vnibb.api.v1.admin import require_admin_access
 from vnibb.api.v1.admin import router as admin_router
 from vnibb.api.v1.analysis import router as analysis_router
+from vnibb.api.v1.apps_script import router as apps_script_router
 from vnibb.api.v1.chart import router as chart_router
 from vnibb.api.v1.comparison import router as comparison_router
 from vnibb.api.v1.copilot import router as copilot_router
@@ -233,4 +234,10 @@ api_router.include_router(
     microstructure_router,
     prefix="/microstructure",
     tags=["Market Microstructure"],
+)
+
+# Google Apps Script read-only endpoints (router self-prefixes /apps-script)
+api_router.include_router(
+    apps_script_router,
+    tags=["Apps Script"],
 )
