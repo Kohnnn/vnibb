@@ -4,14 +4,17 @@ import { useCallback, useEffect, useState } from 'react';
 import { TrendingUp } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { API_BASE_URL } from '@/lib/api';
+import { Sparkline, usePersistedWidgetConfig } from './prediction-market-ui';
+import { PredictionMarketContextMenu } from './PredictionMarketContextMenu';
+import { PredictionMarketDrawer } from './PredictionMarketDrawer';
 
-/**
- * Top Movers Pulse.
- *
- * Compact 3-row strip for the top-of-dashboard. Pulls `/movers?limit=3`
- * and renders inline SVG sparklines based on the latest 6 intraday
- * snapshot rows. Designed to live above the Macro Calibration tile.
- */
+type WindowKey = '1h' | '24h' | '7d';
+
+const WINDOW_PARAMS: Record<WindowKey, { window: string; minutes: string }> = {
+    '1h': { window: '1', minutes: '60' },
+    '24h': { window: '24', minutes: '1440' },
+    '7d': { window: '168', minutes: '10080' },
+};
 
 type PulseRow = {
     readonly source: string;
@@ -62,12 +65,10 @@ function parseRows(value: unknown): PulseRow[] {
                 : typeof row.absoluteMovement === 'number'
                     ? row.absoluteMovement
                     : 0;
-        const sparklineRaw = Array.isArray(row.sparkline)
-            ? row.sparkline
-            : [];
+        const sparklineRaw = Array.isArray(row.sparkline) ? row.sparkline : [];
         const sparkline = sparklineRaw
             .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
-            .slice(-6);
+            .slice(-12);
         out.push({
             source: typeof row.source === 'string' ? row.source : 'unknown',
             sourceId:
@@ -88,38 +89,21 @@ function parseRows(value: unknown): PulseRow[] {
     return out;
 }
 
-function Sparkline({ values, direction }: { readonly values: readonly number[]; readonly direction: 'up' | 'down' }) {
-    if (values.length < 2) {
-        return <svg width={60} height={20} aria-hidden />;
-    }
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const span = max - min || 0.01;
-    const width = 60;
-    const height = 20;
-    const points = values
-        .map((value, index) => {
-            const x = (index / (values.length - 1)) * width;
-            const y = height - ((value - min) / span) * height;
-            return `${x.toFixed(1)},${y.toFixed(1)}`;
-        })
-        .join(' ');
-    const stroke = direction === 'up' ? '#34d399' : '#f87171';
-    return (
-        <svg width={width} height={height} aria-hidden>
-            <polyline points={points} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-    );
-}
-
 export function TopMoversPulseWidget() {
     const [state, setState] = useState<LoadState>({ kind: 'loading' });
+    const [config, setConfig] = usePersistedWidgetConfig<{ window: WindowKey; limit: number }>(
+        'vnibb.top-movers-pulse.config',
+        { window: '24h', limit: 3 },
+    );
+    const [selection, setSelection] = useState<{ source: string; sourceId: string; question: string } | null>(
+        null,
+    );
 
     const refresh = useCallback(() => {
         setState({ kind: 'loading' });
         const url = new URL(`${API_BASE_URL}/prediction-markets/movers`);
-        url.searchParams.set('limit', '3');
-        url.searchParams.set('window', '1');
+        url.searchParams.set('limit', String(config.limit));
+        url.searchParams.set('window_hours', String(WINDOW_PARAMS[config.window].minutes));
         fetch(url.toString(), { cache: 'no-store' })
             .then(async (response) => {
                 if (!response.ok) throw new Error(`movers API returned ${response.status}`);
@@ -132,7 +116,7 @@ export function TopMoversPulseWidget() {
                     error: error instanceof Error ? error : new Error('movers request failed'),
                 });
             });
-    }, []);
+    }, [config.limit, config.window]);
 
     useEffect(() => {
         refresh();
@@ -142,54 +126,113 @@ export function TopMoversPulseWidget() {
         return <WidgetLoading message="Loading top movers..." />;
     }
     if (state.kind === 'error') {
-        return <WidgetError title="Top movers unavailable" error={state.error} onRetry={refresh} />;
-    }
-    if (state.rows.length === 0) {
         return (
-            <WidgetEmpty
-                message="No probability movers in the last hour"
-                detail="The intraday snapshot job hasn't accumulated enough rows yet."
-                icon={<TrendingUp size={18} />}
-            />
+            <WidgetError title="Top movers unavailable" error={state.error} onRetry={refresh} />
         );
     }
 
     return (
-        <div className="flex h-full items-stretch gap-2 overflow-x-auto p-1">
-            {state.rows.map((row) => {
-                const direction: 'up' | 'down' = row.absoluteMovement >= 0 ? 'up' : 'down';
-                return (
-                    <a
-                        key={`${row.source}:${row.sourceId}`}
-                        href={row.url ?? '#'}
-                        target={row.url ? '_blank' : undefined}
-                        rel="noreferrer"
-                        className="flex min-w-[220px] flex-1 flex-col justify-between rounded-lg border border-default bg-[var(--bg-tertiary)] p-2 text-xs transition-colors hover:bg-[var(--bg-hover)]"
-                    >
-                        <div className="flex items-start justify-between gap-2">
-                            <span className="line-clamp-2 text-[11px] font-semibold text-[var(--text-primary)]">
-                                {row.question}
-                            </span>
-                            <span
-                                className={
-                                    direction === 'up'
-                                        ? 'rounded-md px-1.5 py-0.5 text-[10px] text-emerald-400'
-                                        : 'rounded-md px-1.5 py-0.5 text-[10px] text-red-400'
+        <div className="flex h-full flex-col gap-2">
+            <header className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
+                <div className="flex items-center gap-2">
+                    {(Object.entries(WINDOW_PARAMS) as [WindowKey, { window: string; minutes: string }][]).map(
+                        ([key, _value]) => (
+                            <button
+                                key={key}
+                                type="button"
+                                onClick={() => setConfig({ window: key })}
+                                className={`rounded-full border px-2 py-0.5 text-[10px] ${
+                                    config.window === key
+                                        ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
+                                        : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                                }`}
+                            >
+                                {key}
+                            </button>
+                        ),
+                    )}
+                </div>
+                {state.rows.length === 0 && (
+                    <span>No movers in window</span>
+                )}
+            </header>
+            {state.rows.length === 0 ? (
+                <WidgetEmpty
+                    message="No probability movers in this window"
+                    detail="The intraday snapshot job hasn't accumulated enough rows yet."
+                    icon={<TrendingUp size={18} />}
+                />
+            ) : (
+                <div className="flex flex-1 items-stretch gap-2 overflow-x-auto">
+                    {state.rows.map((row) => {
+                        const direction: 'up' | 'down' = row.absoluteMovement >= 0 ? 'up' : 'down';
+                        return (
+                            <PredictionMarketContextMenu
+                                key={`${row.source}:${row.sourceId}`}
+                                market={{
+                                    source: row.source,
+                                    sourceId: row.sourceId,
+                                    question: row.question,
+                                    url: row.url,
+                                }}
+                                onOpenDrawer={() =>
+                                    setSelection({
+                                        source: row.source,
+                                        sourceId: row.sourceId,
+                                        question: row.question,
+                                    })
                                 }
                             >
-                                {direction === 'up' ? '+' : ''}
-                                {(row.absoluteMovement * 100).toFixed(1)}pp
-                            </span>
-                        </div>
-                        <div className="mt-1 flex items-center justify-between">
-                            <span className="text-[10px] text-[var(--text-muted)]">
-                                {row.source} · {row.category ?? 'general'}
-                            </span>
-                            <Sparkline values={row.sparkline} direction={direction} />
-                        </div>
-                    </a>
-                );
-            })}
+                                <button
+                                    type="button"
+                                    onClick={() =>
+                                        setSelection({
+                                            source: row.source,
+                                            sourceId: row.sourceId,
+                                            question: row.question,
+                                        })
+                                    }
+                                    className="flex min-w-[220px] flex-1 flex-col justify-between rounded-lg border border-default bg-[var(--bg-tertiary)] p-2 text-left text-xs transition-colors hover:bg-[var(--bg-hover)]"
+                                >
+                                    <div className="flex items-start justify-between gap-2">
+                                        <span className="line-clamp-2 text-[11px] font-semibold text-[var(--text-primary)]">
+                                            {row.question}
+                                        </span>
+                                        <span
+                                            className={
+                                                direction === 'up'
+                                                    ? 'rounded-md px-1.5 py-0.5 text-[10px] text-emerald-400'
+                                                    : 'rounded-md px-1.5 py-0.5 text-[10px] text-red-400'
+                                            }
+                                        >
+                                            {direction === 'up' ? '+' : ''}
+                                            {(row.absoluteMovement * 100).toFixed(1)}pp
+                                        </span>
+                                    </div>
+                                    <div className="mt-1 flex items-center justify-between">
+                                        <span className="text-[10px] text-[var(--text-muted)]">
+                                            {row.source} · {row.category ?? 'general'}
+                                        </span>
+                                        <Sparkline
+                                            values={row.sparkline}
+                                            width={60}
+                                            height={20}
+                                            ariaLabel={`${row.source} sparkline`}
+                                        />
+                                    </div>
+                                </button>
+                            </PredictionMarketContextMenu>
+                        );
+                    })}
+                </div>
+            )}
+            <PredictionMarketDrawer
+                source={selection?.source ?? null}
+                sourceId={selection?.sourceId ?? null}
+                question={selection?.question ?? null}
+                open={selection !== null}
+                onClose={() => setSelection(null)}
+            />
         </div>
     );
 }

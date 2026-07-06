@@ -4,14 +4,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { Layers } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { API_BASE_URL } from '@/lib/api';
+import { ProbabilityBar, colorblindClass } from './prediction-market-ui';
 
 /**
  * Cross-Source Calibration.
  *
- * Phase 10. Pulls ``/prediction-markets/cross-calibration`` and renders
- * one tile per macro topic (CPI, Fed, Recession). Each tile shows every
- * source's consensus plus a ``sources_agree`` indicator. Empty-tile when
- * only one source has a price.
+ * Phase 10 (rebuilt): one row per topic with three source columns. Each
+ * source column has a probability bar and a label; above the row a
+ * colourblind-safe pill renders "Sources agree" or "Sources diverge".
  */
 
 type Topic = 'cpi' | 'fed' | 'recession';
@@ -75,10 +75,6 @@ function topicLabel(topic: Topic): string {
     return topic === 'cpi' ? 'CPI' : topic === 'fed' ? 'Fed' : 'Recession';
 }
 
-function pct(value: number | null): string {
-    return value === null ? '—' : `${Math.round(value * 100)}%`;
-}
-
 export function CrossSourceCalibrationWidget() {
     const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
@@ -107,7 +103,13 @@ export function CrossSourceCalibrationWidget() {
         return <WidgetLoading message="Computing cross-source calibration..." />;
     }
     if (state.kind === 'error') {
-        return <WidgetError title="Cross-source calibration unavailable" error={state.error} onRetry={refresh} />;
+        return (
+            <WidgetError
+                title="Cross-source calibration unavailable"
+                error={state.error}
+                onRetry={refresh}
+            />
+        );
     }
     if (state.topics.length === 0) {
         return (
@@ -119,42 +121,47 @@ export function CrossSourceCalibrationWidget() {
         );
     }
     return (
-        <div className="grid h-full grid-cols-1 gap-2 p-1 sm:grid-cols-3">
+        <div className="flex h-full flex-col gap-3 p-1">
             {state.topics.map((topic) => (
                 <div
                     key={topic.topic}
                     className="flex flex-col gap-2 rounded-lg border border-default bg-[var(--bg-tertiary)] p-3"
                 >
-                    <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.16em]">
+                    <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.16em]">
                         <span className="text-blue-300">{topicLabel(topic.topic)}</span>
                         <span
-                            className={
+                            className={`rounded-full border px-2 py-0.5 ${
                                 topic.sources_agree
-                                    ? 'rounded-full border border-emerald-500/40 px-2 py-0.5 text-emerald-400'
-                                    : 'rounded-full border border-amber-500/40 px-2 py-0.5 text-amber-300'
-                            }
+                                    ? `border-emerald-500/40 ${colorblindClass('positive')}`
+                                    : `border-amber-500/40 ${colorblindClass('warning')}`
+                            }`}
                         >
                             {topic.sources_agree ? 'Sources agree' : 'Sources diverge'}
                         </span>
                     </div>
-                    <ul className="flex flex-col gap-1 text-xs">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                         {topic.sources.map((row) => (
-                            <li
+                            <div
                                 key={row.source}
-                                className="flex items-center justify-between rounded-md border border-default bg-[var(--bg-secondary)] px-2 py-1"
+                                className="flex flex-col gap-1 rounded-md border border-default bg-[var(--bg-secondary)] p-2"
                             >
-                                <span>{row.source}</span>
-                                <span className="font-semibold text-[var(--text-primary)]">
-                                    {pct(row.consensus_yes_price)} · {row.n_markets} markets
-                                </span>
-                            </li>
+                                <div className="flex items-center justify-between text-[10px] uppercase text-[var(--text-muted)]">
+                                    <span>{row.source}</span>
+                                    <span>{row.n_markets} mkts</span>
+                                </div>
+                                <ProbabilityBar
+                                    value={row.consensus_yes_price ?? 0}
+                                    showLabels
+                                    height={6}
+                                />
+                            </div>
                         ))}
                         {topic.n_sources < 2 && (
-                            <li className="text-[10px] text-[var(--text-muted)]">
+                            <div className="col-span-full text-[10px] text-[var(--text-muted)]">
                                 Only {topic.n_sources} source tagged this topic.
-                            </li>
+                            </div>
                         )}
-                    </ul>
+                    </div>
                 </div>
             ))}
         </div>

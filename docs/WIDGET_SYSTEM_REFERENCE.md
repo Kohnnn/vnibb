@@ -69,35 +69,50 @@ Legacy aliases such as `company_profile`, `financials`, `institutional_ownership
 Phase 7 added a vertical prediction-market surface from ingestion to quant
 dashboards. Phase 8 (this doc's update) hardens the family, adds an
 intraday micro-snapshot job, and ships four new widgets (Alerts, Drift,
-Pulse, Deep-Dive drawer) plus three new read endpoints.
+Pulse, Deep-Dive drawer) plus three new read endpoints. Phase v2.x
+populates the snapshot tables on every cold boot via the one-shot
+`populate_prediction_markets_now` scheduler job, broadens the election
+filter into a topic-driven regex, ships resilient retries + offline seed
+fixtures for PredictIt / Limitless / Manifold, and adds a full UX
+overhaul (shared primitives in
+`apps/web/src/components/widgets/prediction-market-ui/`).
 
 The data flow:
 
 ```
 Polymarket Gamma ─┐
                   │
-Kalshi Trades v2 ─┴─► prediction_market_service.py / kalshi_service.py
+Kalshi Trades v2 ─┤
+                  ├─► prediction_market_service.py / kalshi_service.py
+PredictIt         │            │
+                  │            │   ↑ populates extra.canonical_topics
+Limitless         │            │
+                  │            ▼
+Manifold        ──┘   prediction_markets (DB table, source-agnostic)
                               │
                               ▼
-              prediction_markets (DB table, source-agnostic)
-                              │
-                              ▼
-        /api/v1/prediction-markets (list, movers, calibration, consensus,
-                                    spread, alerts, history, cross-calibration)
+        /api/v1/prediction-markets  (?category ?topic ?search)
+        /api/v1/prediction-markets/movers?window_hours
+        /api/v1/prediction-markets/alerts?window_hours
+        /api/v1/prediction-markets/consensus?query
+        /api/v1/prediction-markets/spread
+        /api/v1/prediction-markets/{source}/{source_id}/history?days
+        /api/v1/prediction-markets/cross-calibration
+        /api/v1/prediction-markets/estimate/{cpi,fed,recession,macro}
                               │
                               ▼
         Polymarket / Kalshi / ElectionOdds / PredictionMovers / Consensus /
         TopMoversPulse / SourceDrift / PredictionAlerts / PredictionMarketDrawer
+        PredictIt / Limitless / Manifold (all share PredictionMarketSourceWidget)
                               │
                               ▼
         nightly snapshot job → prediction_market_snapshots (30-day retention)
         intraday micro-snapshot job (15-min cadence, 7-day retention)
+        one-shot backfill on first boot → 7d × 2 snapshots/day if table < 100 rows
                               │
                               ▼
-        /api/v1/prediction-markets/estimate/{cpi,fed,recession,macro}
-                              │
-                              ▼
-                MacroCalibrationWidget (cached 600s) with confidence pills
+        MacroCalibrationWidget (cached 600s) with confidence pills
+        CrossSourceCalibrationWidget (per-source probability bars)
 
 Conventions:
 
@@ -105,6 +120,10 @@ Conventions:
   (`economic | sports | politics | general`). The freeform original is
   preserved under `extra.raw_category` whenever the ingestion path stores
   extra metadata; downstream consumers should query by the canonical value.
+- `extra.canonical_topics` derives a semantic list (`election`, `macro`,
+  `sports`, `crypto`) from question text + raw category; the read
+  endpoint exposes it via `?topic=election` to broaden the ElectionOdds
+  widget past the upstream's mis-tagged market list.
 - The `source` column is a free lower-case slug (`polymarket`, `kalshi`,
   `predictit`, `limitless`, `manifold`, …) and the read endpoint filters by exact match.
 
@@ -124,6 +143,10 @@ so the schema is source-agnostic and the read endpoint can blend across all of t
 Phase 9 adds PredictIt and Limitless. Phase 10 adds Manifold. Each phase's ingest is
 wrapped in a `try / except` at the scheduler layer so one source going down does not
 poison the others (only the affected source's count is missing from the log line).
+Phase v2.x layers in `prediction_market_http.fetch_json_with_retry` for retries +
+content-type validation and a fallback `prediction_market_seed` path that reads
+checked-in JSON fixtures (`apps/api/vnibb/services/seed_fixtures/*`) when the live
+APIs return 429 / non-JSON.
 
 ### Cross-Source Calibration widget (Phase 10)
 
@@ -141,6 +164,43 @@ The full developer doc lives in
 `apps/api/vnibb/services/prediction_market_estimator.py` (functions
 `estimate_cpi`, `estimate_fed`, `estimate_recession`,
 `estimate_macro_composite`).
+
+### Prediction-market UX primitives
+
+All prediction-market widgets share a folder of visual primitives under
+`apps/web/src/components/widgets/prediction-market-ui/`:
+
+- `ProbabilityBar` — full-width horizontal progress bar with optional
+  now-vs-open delta marker (green→amber→red gradient).
+- `ProbabilityGauge` — semi-circle gauge for KPI tiles
+  (`MacroCalibrationWidget`, `ElectionOddsWidget`).
+- `Sparkline` — small inline SVG line chart (extracted from
+  `TopMoversPulseWidget` and `PredictionMarketDrawer`).
+- `ConsensusStrip` — per-source comparator for any per-row sidebar.
+- `SearchBar` — debounced search input with clear button.
+- `SortButton` / `CategoryPills` — light toggle pills used for sort /
+  category filtering.
+- `PredictionMarketWatchlistProvider` — localStorage-backed favorites
+  store used by the context menu.
+- `PredictionMarketContextMenu` — right-click menu exposing "Open in
+  drawer", "Copy market link", "Open on {source}", "Add to watchlist".
+
+The shared `PredictionMarketSourceWidget` (rendered via `SourceWidget`)
+applies these primitives per-row and adds click-through to the
+`PredictionMarketDrawer`. Each of the source-specific wrappers
+(PolymarketWidget, KalshiWidget, PredictItWidget, LimitlessWidget,
+ManifoldWidget) is now a one-liner.
+
+### One-shot populate (Phase v2.x)
+
+`apps/api/vnibb/services/populate_prediction_markets.py`
+runs a sequenced pass over every source, falls back to offline seed
+fixtures when a live API is unreachable, fires the nightly + intraday
+snapshot jobs, and backfills the snapshot table when fewer than 100 rows
+exist. It's scheduled by the scheduler boot guard as a one-shot job,
+and exposed via `populate_prediction_markets_now()` so deployments can
+invoke it from a CLI script (see
+`apps/api/vnibb/scripts/populate_prediction_markets.py`).
 
 ## Dashboard Persistence Hardening (Phase 0)
 

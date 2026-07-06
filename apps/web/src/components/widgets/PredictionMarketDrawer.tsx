@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Copy, X } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { API_BASE_URL } from '@/lib/api';
+import { ConsensusStrip, Sparkline, ProbabilityBar } from './prediction-market-ui';
 
 /**
  * Prediction Market Deep-Dive drawer.
@@ -78,37 +79,6 @@ function parseConsensus(value: unknown): {
     return { sources, consensus };
 }
 
-function Sparkline({ points }: { readonly points: readonly HistoryPoint[] }) {
-    if (points.length < 2) {
-        return <div className="text-[11px] text-[var(--text-muted)]">Not enough history yet.</div>;
-    }
-    const prices = points.map((p) => p.yes_price);
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
-    const span = max - min || 0.01;
-    const width = 320;
-    const height = 80;
-    const polyline = points
-        .map((point, index) => {
-            const x = (index / (points.length - 1)) * width;
-            const y = height - ((point.yes_price - min) / span) * height;
-            return `${x.toFixed(1)},${y.toFixed(1)}`;
-        })
-        .join(' ');
-    return (
-        <svg width={width} height={height} className="rounded border border-default bg-[var(--bg-tertiary)]">
-            <polyline
-                points={polyline}
-                fill="none"
-                stroke="#60a5fa"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-            />
-        </svg>
-    );
-}
-
 export function PredictionMarketDrawer(props: PredictionMarketDrawerProps) {
     const { source, sourceId, question, open, onClose } = props;
     const [state, setState] = useState<DrawerState>({ kind: 'idle' });
@@ -171,6 +141,12 @@ export function PredictionMarketDrawer(props: PredictionMarketDrawerProps) {
 
     if (!open) return null;
 
+    const prices = state.kind === 'ready' ? state.history.map((point) => point.yes_price) : [];
+    const trend =
+        prices.length >= 2
+            ? prices[prices.length - 1] - prices[0]
+            : 0;
+
     return (
         <div
             role="dialog"
@@ -212,10 +188,24 @@ export function PredictionMarketDrawer(props: PredictionMarketDrawerProps) {
                 {state.kind === 'ready' && (
                     <>
                         <div className="flex flex-col gap-2">
-                            <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                                30-day price history
+                            <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                                <span>30-day price history</span>
+                                <span>{trend >= 0 ? '↑' : '↓'} {Math.abs(trend * 100).toFixed(1)}pp</span>
                             </div>
-                            <Sparkline points={state.history} />
+                            {prices.length < 2 ? (
+                                <div className="text-[11px] text-[var(--text-muted)]">
+                                    Not enough history yet — backfill on first boot will populate soon.
+                                </div>
+                            ) : (
+                                <Sparkline values={prices} width={320} height={80} />
+                            )}
+                            {prices.length > 0 && (
+                                <ProbabilityBar
+                                    value={prices[prices.length - 1]}
+                                    delta={prices.length > 1 ? trend : null}
+                                    showLabels
+                                />
+                            )}
                         </div>
 
                         {state.sources.length > 0 && (
@@ -228,21 +218,43 @@ export function PredictionMarketDrawer(props: PredictionMarketDrawerProps) {
                                         Consensus {Math.round(state.consensus * 100)}%
                                     </div>
                                 )}
-                                <ul className="flex flex-col gap-1 text-xs">
-                                    {state.sources.map((row) => (
-                                        <li
-                                            key={row.source}
-                                            className="flex items-center justify-between rounded-md border border-default bg-[var(--bg-tertiary)] px-2 py-1"
-                                        >
-                                            <span>{row.source}</span>
-                                            <span>
-                                                {row.yes_price === null
-                                                    ? '—'
-                                                    : `${Math.round(row.yes_price * 100)}%`}
-                                            </span>
-                                        </li>
-                                    ))}
-                                </ul>
+                                <ConsensusStrip
+                                    rows={state.sources.map((row) => ({
+                                        source: row.source,
+                                        yesPrice: row.yes_price,
+                                        url: row.url,
+                                    }))}
+                                    caption="Per-source"
+                                />
+                                <div className="mt-2 flex flex-col gap-1">
+                                    <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                                        Related on other sources
+                                    </div>
+                                    <ul className="flex flex-col gap-1 text-xs">
+                                        {state.sources
+                                            .filter((row) => row.source !== (source ?? ''))
+                                            .map((row) => (
+                                                <li
+                                                    key={row.source}
+                                                    className="flex items-center justify-between rounded-md border border-default bg-[var(--bg-tertiary)] px-2 py-1"
+                                                >
+                                                    <a
+                                                        href={row.url ?? '#'}
+                                                        target={row.url ? '_blank' : undefined}
+                                                        rel="noreferrer"
+                                                        className="text-[var(--text-primary)] hover:text-blue-300"
+                                                    >
+                                                        {row.source}
+                                                    </a>
+                                                    <span>
+                                                        {row.yes_price === null
+                                                            ? '—'
+                                                            : `${Math.round(row.yes_price * 100)}%`}
+                                                    </span>
+                                                </li>
+                                            ))}
+                                    </ul>
+                                </div>
                             </div>
                         )}
 

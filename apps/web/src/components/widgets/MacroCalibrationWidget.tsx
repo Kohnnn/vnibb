@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { BarChart3 } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { API_BASE_URL } from '@/lib/api';
+import { ProbabilityGauge, colorblindClass } from './prediction-market-ui';
 
 /**
  * Macro Calibration widget.
@@ -12,6 +13,10 @@ import { API_BASE_URL } from '@/lib/api';
  * macro}` endpoints and lays them out side-by-side. Each estimator caches
  * its result for 10 minutes server-side, so this widget stays cheap even
  * with multiple instances on the same dashboard.
+ *
+ * Phase v2.x: CPI and Recession tiles render a ProbabilityGauge sized to
+ * fit a 2×2 grid; Fed tile keeps the textual H/C/U read; composite keeps
+ * the categorical text.
  */
 
 type CpiEstimateResponse = {
@@ -67,6 +72,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function bucket(value: number): 'high' | 'mid' | 'low' {
+    if (value >= 0.66) return 'high';
+    if (value >= 0.33) return 'mid';
+    return 'low';
+}
+
+function intentFor(value: number): 'positive' | 'warning' | 'negative' {
+    const b = bucket(value);
+    if (b === 'high') return 'positive';
+    if (b === 'mid') return 'warning';
+    return 'negative';
+}
+
+function colorblindBorderClass(value: number): string {
+    return colorblindClass(intentFor(value)).replace('text-', 'border-');
+}
+
 export function MacroCalibrationWidget() {
     const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
@@ -117,39 +139,97 @@ export function MacroCalibrationWidget() {
     const nextMeeting = payload.fed.meetings?.[0];
     return (
         <div className="flex h-full flex-col gap-2 p-1">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 <CalibrationTile
                     title="CPI"
-                    value={`${payload.cpi.p50.toFixed(1)}%`}
                     range={`p25 ${payload.cpi.p25.toFixed(1)}% · p75 ${payload.cpi.p75.toFixed(1)}%`}
                     hint={`${payload.cpi.n_markets} markets`}
                     confidence={payload.cpi.confidence}
-                />
+                >
+                    <ProbabilityGauge
+                        value={(payload.cpi.p50 - 2) / 5}
+                        label={`${payload.cpi.p50.toFixed(1)}%`}
+                        size={120}
+                    />
+                </CalibrationTile>
                 <CalibrationTile
                     title={nextMeeting ? `FOMC ${nextMeeting.meeting_date}` : 'Next FOMC'}
-                    value={
-                        nextMeeting
-                            ? `${Math.round(nextMeeting.p_hold * 100)}% / ${Math.round(nextMeeting.p_cut * 100)}% / ${Math.round(nextMeeting.p_hike * 100)}%`
-                            : '—'
-                    }
                     range="Hold / Cut / Hike"
-                    hint={nextMeeting ? `Implied terminal ${nextMeeting.implied_terminal_rate.toFixed(2)}%` : ''}
+                    hint={
+                        nextMeeting
+                            ? `Implied terminal ${nextMeeting.implied_terminal_rate.toFixed(2)}%`
+                            : ''
+                    }
                     confidence={payload.fed.confidence}
-                />
+                >
+                    <div className="flex w-full flex-col items-center gap-1">
+                        <FedHoldGauge nextMeeting={nextMeeting} />
+                        <div className="text-[11px] text-[var(--text-muted)]">
+                            {nextMeeting
+                                ? `${Math.round(nextMeeting.p_hold * 100)}% hold · ${Math.round(nextMeeting.p_cut * 100)}% cut · ${Math.round(nextMeeting.p_hike * 100)}% hike`
+                                : 'No upcoming meeting'}
+                        </div>
+                    </div>
+                </CalibrationTile>
                 <CalibrationTile
                     title={`Recession ${payload.recession.year}`}
-                    value={`${Math.round(payload.recession.p_recession * 100)}%`}
-                    range={payload.recession.sources.length > 0 ? `${payload.recession.sources[0].source} spot` : ''}
                     hint={`${payload.recession.sources.length} contracts`}
                     confidence={payload.recession.confidence}
-                />
-                <CalibrationTile
-                    title="Macro composite"
-                    value={payload.composite?.read ?? '—'}
-                    range=""
-                    hint={payload.composite?.last_updated ?? ''}
-                />
+                >
+                    <ProbabilityGauge
+                        value={payload.recession.p_recession}
+                        label="Recession"
+                        size={120}
+                    />
+                </CalibrationTile>
             </div>
+        </div>
+    );
+}
+
+function FedHoldGauge({ nextMeeting }: { readonly nextMeeting: FedEstimateRow | undefined }) {
+    if (!nextMeeting) {
+        return (
+            <div className="text-xs text-[var(--text-muted)]">No upcoming meeting</div>
+        );
+    }
+    return (
+        <div className="flex w-full items-center gap-3">
+            <ProbabilityGauge value={nextMeeting.p_hold} size={84} label="Hold" />
+            <div className="flex flex-1 flex-col gap-1 text-[10px]">
+                <div className="flex items-center justify-between">
+                    <span className="text-[var(--text-muted)]">Cut</span>
+                    <span className={colorblindClass('positive')}>
+                        {Math.round(nextMeeting.p_cut * 100)}%
+                    </span>
+                </div>
+                <div className="flex items-center justify-between">
+                    <span className="text-[var(--text-muted)]">Hike</span>
+                    <span className={colorblindClass('negative')}>
+                        {Math.round(nextMeeting.p_hike * 100)}%
+                    </span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function CalibrationTile(props: {
+    title: string;
+    range?: string;
+    hint: string;
+    confidence?: number;
+    children: React.ReactNode;
+}) {
+    return (
+        <div className="rounded-lg border border-default bg-[var(--bg-tertiary)] p-3">
+            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.14em] text-blue-300">
+                <span>{props.title}</span>
+                <ConfidencePill value={props.confidence} />
+            </div>
+            {props.children}
+            {props.range && <div className="mt-1 text-[11px] text-[var(--text-muted)]">{props.range}</div>}
+            {props.hint && <div className="text-[11px] text-[var(--text-secondary)]">{props.hint}</div>}
         </div>
     );
 }
@@ -162,36 +242,13 @@ function ConfidencePill({ value }: { readonly value: number | undefined }) {
             </span>
         );
     }
-    const bucket = value >= 0.66 ? 'emerald' : value >= 0.33 ? 'amber' : 'red';
-    const colour =
-        bucket === 'emerald'
-            ? 'text-emerald-400 border-emerald-500/30'
-            : bucket === 'amber'
-                ? 'text-amber-300 border-amber-500/30'
-                : 'text-red-400 border-red-500/30';
     return (
-        <span className={`rounded-full border px-2 py-0.5 text-[10px] ${colour}`}>
+        <span
+            className={`rounded-full border px-2 py-0.5 text-[10px] ${colorblindClass(
+                intentFor(value),
+            )} ${colorblindBorderClass(value)}`}
+        >
             conf {Math.round(value * 100)}
         </span>
-    );
-}
-
-function CalibrationTile(props: {
-    title: string;
-    value: string;
-    range: string;
-    hint: string;
-    confidence?: number;
-}) {
-    return (
-        <div className="rounded-lg border border-default bg-[var(--bg-tertiary)] p-3">
-            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.14em] text-blue-300">
-                <span>{props.title}</span>
-                <ConfidencePill value={props.confidence} />
-            </div>
-            <div className="text-xl font-bold leading-tight text-[var(--text-primary)]">{props.value}</div>
-            <div className="mt-1 text-[11px] text-[var(--text-muted)]">{props.range}</div>
-            <div className="text-[11px] text-[var(--text-secondary)]">{props.hint}</div>
-        </div>
     );
 }

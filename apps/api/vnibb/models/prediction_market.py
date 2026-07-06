@@ -38,6 +38,7 @@ class PredictionMarket(Base):
     liquidity: Mapped[float | None] = mapped_column(Float, nullable=True)
     outcomes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     outcome_prices: Mapped[list[float]] = mapped_column(JSON, nullable=False, default=list)
+    extra: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,

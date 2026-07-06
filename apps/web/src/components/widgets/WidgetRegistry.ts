@@ -703,6 +703,12 @@ registerWidget(
   'prediction_markets',
   ['cross-source', 'calibration', 'consensus', 'agreement']
 );
+registerWidget(
+  'manifold',
+  lazyNamed(() => import('./ManifoldWidget'), 'ManifoldWidget'),
+  'prediction_markets',
+  ['manifold', 'ai', 'politics', 'recession', 'odds']
+);
 
 // Run dev-only completeness check after every widget is registered.
 runDevCompletenessCheck();

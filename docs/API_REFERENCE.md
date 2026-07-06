@@ -114,8 +114,8 @@ Market data notes:
 - `GET /derivatives/{symbol}/history`
 
 ### Prediction Markets
-- `GET /prediction-markets`
-- `GET /prediction-markets/movers?window=24h&limit=20&direction=up|down|both&exclude_categories=politics,economic`
+- `GET /prediction-markets?source=&category=&topic=&search=&limit=50&active=true` — the union over Polymarket / Kalshi / PredictIt / Limitless / Manifold. Phase v2.x adds `search` (substring match on question text) and `topic` (`election`, `macro`, `sports`, `crypto`) for the canonical `extra.canonical_topics` JSON column.
+- `GET /prediction-markets/movers?window_hours=24&limit=20&direction=up|down|both&exclude_categories=politics,economic`
 - `GET /prediction-markets/alerts?window=1&min_movement_bps=200&limit=20`
 - `GET /prediction-markets/consensus?query=...`
 - `GET /prediction-markets/spread?window=24`

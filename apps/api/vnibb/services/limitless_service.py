@@ -15,6 +15,7 @@ from typing import Final
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from vnibb.services.prediction_market_http import fetch_json_with_retry
 from vnibb.services.prediction_market_service import (
     NormalizedPredictionMarket,
     PredictionMarketValues,
@@ -95,13 +96,19 @@ async def fetch_limitless_markets(
     client: httpx.AsyncClient,
     limit: int,
 ) -> list[LimitlessMarketPayload]:
-    """Fetch active Limitless markets."""
-    response = await client.get(
-        "/markets",
+    """Fetch active Limitless markets via the resilient JSON fetcher."""
+    body = await fetch_json_with_retry(
+        client, source="limitless", url="/markets",
         params={"limit": limit, "active": "true"},
     )
-    response.raise_for_status()
-    return _LIMITLESS_MARKETS.validate_json(response.content)
+    rows: list[LimitlessMarketPayload]
+    if isinstance(body, dict) and isinstance(body.get("markets"), list):
+        rows = _LIMITLESS_MARKETS.validate_python(body["markets"])
+    elif isinstance(body, list):
+        rows = _LIMITLESS_MARKETS.validate_python(body)
+    else:
+        rows = []
+    return rows
 
 
 async def ingest_limitless_markets(

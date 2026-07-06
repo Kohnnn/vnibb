@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { GitCompare } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { API_BASE_URL } from '@/lib/api';
+import { ConsensusStrip } from './prediction-market-ui';
 
 /**
  * Source Drift.
@@ -115,27 +116,31 @@ export function SourceDriftWidget() {
     }
 
     return (
-        <div className="grid h-full grid-cols-1 gap-2 p-1 sm:grid-cols-3">
+        <div className="flex h-full flex-col gap-2 overflow-auto p-1">
             {state.topics.map((row) => {
                 const missing = row.polymarket_consensus === null || row.kalshi_consensus === null;
+                const rows = [
+                    {
+                        source: 'Polymarket',
+                        yesPrice: row.polymarket_consensus,
+                        url: null,
+                    },
+                    {
+                        source: 'Kalshi',
+                        yesPrice: row.kalshi_consensus,
+                        url: null,
+                    },
+                ];
                 return (
                     <div
                         key={row.topic}
-                        className="flex flex-col justify-between rounded-lg border border-default bg-[var(--bg-tertiary)] p-3"
+                        className="flex flex-col gap-2 rounded-lg border border-default bg-[var(--bg-tertiary)] p-3"
                     >
-                        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-300">
-                            {topicLabel(row.topic)}
+                        <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.16em]">
+                            <span className="text-blue-300">{topicLabel(row.topic)}</span>
+                            <span className="text-[var(--text-muted)]">{gapText(row.gap)}</span>
                         </div>
-                        <div className="mt-1 flex items-baseline gap-2 text-sm">
-                            <span className="font-semibold text-[var(--text-primary)]">
-                                Poly {pct(row.polymarket_consensus)}
-                            </span>
-                            <span className="text-[var(--text-muted)]">vs</span>
-                            <span className="font-semibold text-[var(--text-primary)]">
-                                Kalshi {pct(row.kalshi_consensus)}
-                            </span>
-                        </div>
-                        <div className="mt-1 text-[11px] text-[var(--text-secondary)]">{gapText(row.gap)}</div>
+                        <ConsensusStrip rows={rows} />
                         {missing && (
                             <div className="mt-1 text-[10px] text-amber-300">
                                 Missing source data

@@ -242,7 +242,7 @@ describe('Polymarket widget registration gap', () => {
 
     expect(await screen.findByText('No Polymarket markets available')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/prediction-markets?source=polymarket&active=true&limit=20'),
+      expect.stringContaining('/prediction-markets?source=polymarket&active=true&limit=25'),
       { cache: 'no-store' },
     );
   });

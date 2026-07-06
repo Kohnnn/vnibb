@@ -1,24 +1,30 @@
 /**
- * Shared PredictionMarketSource factory component.
+ * PredictionMarketSourceWidget — shared body for source-specific lists.
  *
- * PolymarketWidget and KalshiWidget both render essentially the same row
- * layout with a different `?source=...` filter. Phase 7.3 extracts the
- * shared body so adding a new source (e.g. PredictIt, Limitless, etc.)
- * becomes a one-line declarative change.
+ * PolymarketWidget, KalshiWidget, PredictItWidget and LimitlessWidget all
+ * render through this component. The container passes a `source` and an
+ * optional `category`; the body does the fetch + filter + sort + render.
+ *
+ * Phase v2.x adds: a debounced search bar, category pills, a sort toggle,
+ * per-row probability bars, an onSelect callback that opens the
+ * PredictionMarketDrawer, and per-row context menus.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart3, ExternalLink } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { API_BASE_URL } from '@/lib/api';
+import { CategoryPills, ProbabilityBar, SearchBar, SortButton, type SortDirection } from './prediction-market-ui';
+import { PredictionMarketContextMenu } from './PredictionMarketContextMenu';
 
-export type PredictionMarketSource = 'polymarket' | 'kalshi' | 'predictit' | 'limitless';
+export type PredictionMarketSource = 'polymarket' | 'kalshi' | 'predictit' | 'limitless' | 'manifold';
 
 export type PredictionMarketCategory =
     | 'all'
     | 'economic'
     | 'sports'
     | 'politics'
+    | 'crypto'
     | 'general';
 
 export interface PredictionMarketRow {
@@ -34,6 +40,7 @@ export interface PredictionMarketRow {
     readonly url: string | null;
     readonly active: boolean;
     readonly lastSyncedAt: string | null;
+    readonly deltaSinceOpen?: number | null;
 }
 
 export interface PredictionMarketFreshness {
@@ -83,23 +90,34 @@ function parsePayload(value: unknown): PredictionMarketPayload {
             markets: (value.markets as unknown[])
                 .map((row): PredictionMarketRow | null => {
                     if (!isRecord(row) || typeof row.question !== 'string') return null;
+                    const source =
+                        typeof row.source === 'string' ? row.source : 'unknown';
+                    const sourceId =
+                        typeof row.source_id === 'string'
+                            ? row.source_id
+                            : typeof (row as Record<string, unknown>).sourceId === 'string'
+                                ? String((row as Record<string, unknown>).sourceId)
+                                : row.question;
+                    const lastSyncedAt =
+                        typeof row.updated_at === 'string'
+                            ? row.updated_at
+                            : typeof (row as Record<string, unknown>).lastSyncedAt === 'string'
+                                ? String((row as Record<string, unknown>).lastSyncedAt)
+                                : null;
+                    const outcomes = parseStringArray(row.outcomes);
+                    const prices =
+                        parseNumberArray(row.outcome_prices).length > 0
+                            ? parseNumberArray(row.outcome_prices)
+                            : parseNumberArray(
+                                  (row as Record<string, unknown>).outcomePrices,
+                              );
                     return {
-                        source: typeof row.source === 'string' ? row.source : 'unknown',
-                        sourceId:
-                            typeof row.source_id === 'string'
-                                ? row.source_id
-                                : typeof (row as Record<string, unknown>).sourceId === 'string'
-                                    ? String((row as Record<string, unknown>).sourceId)
-                                    : row.question,
+                        source,
+                        sourceId,
                         question: row.question,
                         category: typeof row.category === 'string' ? row.category : 'general',
-                        outcomes: parseStringArray(row.outcomes),
-                        prices:
-                            parseNumberArray(row.outcome_prices).length > 0
-                                ? parseNumberArray(row.outcome_prices)
-                                : parseNumberArray(
-                                      (row as Record<string, unknown>).outcomePrices,
-                                  ),
+                        outcomes,
+                        prices,
                         volume: parseNumber(row.volume),
                         liquidity: parseNumber(row.liquidity),
                         endDate:
@@ -110,12 +128,7 @@ function parsePayload(value: unknown): PredictionMarketPayload {
                                     : null,
                         url: typeof row.url === 'string' ? row.url : null,
                         active: typeof row.active === 'boolean' ? row.active : true,
-                        lastSyncedAt:
-                            typeof row.updated_at === 'string'
-                                ? row.updated_at
-                                : typeof (row as Record<string, unknown>).lastSyncedAt === 'string'
-                                    ? String((row as Record<string, unknown>).lastSyncedAt)
-                                    : null,
+                        lastSyncedAt,
                     };
                 })
                 .filter((row): row is PredictionMarketRow => row !== null),
@@ -182,40 +195,98 @@ export interface PredictionMarketSourceWidgetProps {
     readonly source: PredictionMarketSource;
     readonly title: string;
     readonly category?: PredictionMarketCategory;
+    readonly topics?: readonly string[];
+    readonly categoryOptions?: readonly { readonly value: string; readonly label: string }[];
     readonly emptyIcon?: React.ReactNode;
     readonly emptyMessage?: string;
     readonly onSelect?: (row: PredictionMarketRow) => void;
+    readonly showFilters?: boolean;
+    readonly showSearch?: boolean;
+    readonly limit?: number;
 }
 
-export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidgetProps) {
-    const { source, title, category = 'all', emptyMessage } = props;
-    const [state, setState] = useState<LoadState>({ kind: 'loading' });
+type SortKey = 'yes' | 'volume' | 'endDate';
 
-    const refresh = useCallback(() => {
+const SORT_OPTIONS: ReadonlyArray<{ readonly key: SortKey; readonly label: string }> = [
+    { key: 'yes', label: 'YES%' },
+    { key: 'volume', label: 'Volume' },
+    { key: 'endDate', label: 'Ending' },
+];
+
+export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidgetProps) {
+    const {
+        source,
+        title,
+        category = 'all',
+        topics,
+        categoryOptions,
+        emptyMessage,
+        showFilters = true,
+        showSearch = true,
+        limit = 25,
+    } = props;
+    const [state, setState] = useState<LoadState>({ kind: 'loading' });
+    const [search, setSearch] = useState('');
+    const [sortKey, setSortKey] = useState<SortKey>('yes');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+    const refresh = useCallback(async () => {
         setState({ kind: 'loading' });
         const url = new URL(`${API_BASE_URL}/prediction-markets`);
         url.searchParams.set('source', source);
         url.searchParams.set('active', 'true');
-        url.searchParams.set('limit', '20');
+        url.searchParams.set('limit', String(limit));
         if (category !== 'all') {
             url.searchParams.set('category', category);
         }
-        void fetch(url.toString(), { cache: 'no-store' })
-            .then(async (response) => {
-                if (!response.ok) throw new Error(`${source} API returned ${response.status}`);
-                setState({ kind: 'ready', payload: parsePayload(await response.json()) });
-            })
-            .catch((error: unknown) => {
-                setState({
-                    kind: 'error',
-                    error: error instanceof Error ? error : new Error(`${source} request failed`),
-                });
+        for (const topic of topics ?? []) {
+            url.searchParams.append('topic', topic);
+        }
+        try {
+            const response = await fetch(url.toString(), { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error(`${source} API returned ${response.status}`);
+            }
+            setState({ kind: 'ready', payload: parsePayload(await response.json()) });
+        } catch (error: unknown) {
+            setState({
+                kind: 'error',
+                error: error instanceof Error ? error : new Error(`${source} request failed`),
             });
-    }, [source, category]);
+        }
+    }, [source, category, topics, limit]);
 
     useEffect(() => {
-        refresh();
+        void refresh();
     }, [refresh]);
+
+    const visible = useMemo(() => {
+        if (state.kind !== 'ready') return [] as readonly PredictionMarketRow[];
+        const searchLower = search.trim().toLowerCase();
+        const filtered = state.payload.markets.filter((market) => {
+            if (!searchLower) return true;
+            return (
+                market.question.toLowerCase().includes(searchLower) ||
+                String(market.category).toLowerCase().includes(searchLower)
+            );
+        });
+        const sorted = [...filtered];
+        sorted.sort((a, b) => {
+            const pick = (row: PredictionMarketRow): number => {
+                if (sortKey === 'yes') return row.prices[0] ?? 0;
+                if (sortKey === 'volume') return row.volume ?? 0;
+                if (row.endDate) {
+                    const parsed = Date.parse(row.endDate);
+                    return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+                }
+                return Number.MAX_SAFE_INTEGER;
+            };
+            const av = pick(a);
+            const bv = pick(b);
+            return sortDirection === 'desc' ? bv - av : av - bv;
+        });
+        return sorted;
+    }, [state, search, sortKey, sortDirection]);
 
     if (state.kind === 'loading') {
         return <WidgetLoading message={`Loading ${title} markets...`} />;
@@ -225,7 +296,7 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
             <WidgetError
                 title={`${title} data unavailable`}
                 error={state.error}
-                onRetry={refresh}
+                onRetry={() => void refresh()}
             />
         );
     }
@@ -240,79 +311,157 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
     }
     return (
         <div className="flex h-full flex-col gap-3 p-1">
-            <div className="flex items-center justify-between border-b border-default px-1 pb-2 text-[11px] text-[var(--text-muted)]">
-                <span
-                    className={
-                        state.payload.freshness.status === 'synced'
-                            ? 'text-emerald-400'
-                            : 'text-amber-300'
-                    }
-                >
-                    {state.payload.freshness.status === 'synced' ? 'Synced' : 'Stale'}
-                </span>
-                <span>
-                    Last sync{' '}
-                    {state.payload.freshness.lastSyncedAt
-                        ? new Date(state.payload.freshness.lastSyncedAt).toLocaleDateString()
-                        : 'Unknown'}
-                </span>
-            </div>
+            <header className="flex flex-col gap-2 border-b border-default pb-2">
+                <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
+                    <span
+                        className={
+                            state.payload.freshness.status === 'synced'
+                                ? 'text-emerald-400'
+                                : 'text-amber-300'
+                        }
+                    >
+                        {state.payload.freshness.status === 'synced'
+                            ? `Synced · ${visible.length} markets`
+                            : `Stale · ${visible.length} markets`}
+                    </span>
+                    <span>
+                        Last sync{' '}
+                        {state.payload.freshness.lastSyncedAt
+                            ? new Date(state.payload.freshness.lastSyncedAt).toLocaleDateString()
+                            : 'Unknown'}
+                    </span>
+                </div>
+                {(showSearch || showFilters) && (
+                    <div className="flex flex-wrap items-center gap-2">
+                        {showSearch && (
+                            <div className="flex-1 min-w-[140px]">
+                                <SearchBar
+                                    placeholder={`Search ${title}`}
+                                    onDebouncedChange={setSearch}
+                                />
+                            </div>
+                        )}
+                        {showFilters && categoryOptions && categoryOptions.length > 0 && (
+                            <CategoryPills
+                                options={categoryOptions}
+                                selected={new Set(category === 'all' ? [] : [category])}
+                                onToggle={() => {
+                                    // Category pills are inert for the
+                                    // single-category widgets; intended use
+                                    // is the new top-level selector that
+                                    // re-renders the widget.
+                                }}
+                            />
+                        )}
+                        <div className="flex items-center gap-1">
+                            {SORT_OPTIONS.map((option) => (
+                                <button
+                                    key={option.key}
+                                    type="button"
+                                    onClick={() => {
+                                        if (sortKey === option.key) {
+                                            setSortDirection(
+                                                sortDirection === 'desc' ? 'asc' : 'desc',
+                                            );
+                                        } else {
+                                            setSortKey(option.key);
+                                            setSortDirection('desc');
+                                        }
+                                    }}
+                                    className={`rounded-md border px-2 py-1 text-[11px] uppercase tracking-wide ${
+                                        sortKey === option.key
+                                            ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
+                                            : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                                    }`}
+                                >
+                                    {option.label} {sortKey === option.key && (sortDirection === 'desc' ? '↓' : '↑')}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </header>
             <div className="flex flex-col gap-2">
-                {state.payload.markets.map((market) => {
+                {visible.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-default p-4 text-center text-xs text-[var(--text-muted)]">
+                        No markets match this filter.
+                    </div>
+                )}
+                {visible.map((market) => {
                     const handleClick = props.onSelect
                         ? () => props.onSelect?.(market)
                         : undefined;
+                    const yesPrice = market.prices[0];
                     return (
-                        <article
+                        <PredictionMarketContextMenu
                             key={`${market.source}:${market.sourceId}`}
-                            className={
-                                props.onSelect
-                                    ? 'cursor-pointer rounded-lg border border-default bg-[var(--bg-tertiary)] p-3 transition-colors hover:bg-[var(--bg-hover)]'
-                                    : 'rounded-lg border border-default bg-[var(--bg-tertiary)] p-3 transition-colors hover:bg-[var(--bg-hover)]'
-                            }
-                            onClick={handleClick}
-                            role={props.onSelect ? 'button' : undefined}
-                            tabIndex={props.onSelect ? 0 : undefined}
-                            onKeyDown={
-                                props.onSelect
-                                    ? (event) => {
-                                          if (event.key === 'Enter' || event.key === ' ') {
-                                              event.preventDefault();
-                                              props.onSelect?.(market);
-                                          }
-                                      }
-                                    : undefined
-                            }
+                            market={market}
                         >
-                            <div className="mb-2 flex items-start justify-between gap-3">
-                                <div>
-                                    <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-blue-300">
-                                        {String(market.category)}
+                            <article
+                                className={`rounded-lg border border-default bg-[var(--bg-tertiary)] p-3 transition-colors hover:bg-[var(--bg-hover)] ${
+                                    props.onSelect ? 'cursor-pointer' : ''
+                                }`}
+                                onClick={handleClick}
+                                role={props.onSelect ? 'button' : undefined}
+                                tabIndex={props.onSelect ? 0 : undefined}
+                                onKeyDown={
+                                    props.onSelect
+                                        ? (event) => {
+                                              if (
+                                                  event.key === 'Enter' ||
+                                                  event.key === ' '
+                                              ) {
+                                                  event.preventDefault();
+                                                  props.onSelect?.(market);
+                                              }
+                                          }
+                                        : undefined
+                                }
+                            >
+                                <div className="mb-2 flex items-start justify-between gap-3">
+                                    <div className="flex flex-col">
+                                        <div className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-blue-300">
+                                            <span>{String(market.category)}</span>
+                                            <span className="text-[var(--text-muted)]">
+                                                ·
+                                            </span>
+                                            <span className="text-[var(--text-muted)]">
+                                                {market.source}
+                                            </span>
+                                        </div>
+                                        <h3 className="text-sm font-semibold leading-snug text-[var(--text-primary)]">
+                                            {market.question}
+                                        </h3>
                                     </div>
-                                    <h3 className="text-sm font-semibold leading-snug text-[var(--text-primary)]">
-                                        {market.question}
-                                    </h3>
+                                    {market.url && (
+                                        <a
+                                            href={market.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="rounded-md p-1 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300"
+                                            aria-label={`Open ${market.question}`}
+                                            onClick={(event) => event.stopPropagation()}
+                                        >
+                                            <ExternalLink size={13} />
+                                        </a>
+                                    )}
                                 </div>
-                                {market.url && (
-                                    <a
-                                        href={market.url}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="rounded-md p-1 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300"
-                                        aria-label={`Open ${market.question}`}
-                                        onClick={(event) => event.stopPropagation()}
-                                    >
-                                        <ExternalLink size={13} />
-                                    </a>
+                                {typeof yesPrice === 'number' && (
+                                    <ProbabilityBar
+                                        value={yesPrice}
+                                        height={6}
+                                        showLabels
+                                        delta={market.deltaSinceOpen ?? null}
+                                    />
                                 )}
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-4">
-                                <span>Yes {formatProb(market.prices[0])}</span>
-                                <span>No {formatProb(market.prices[1])}</span>
-                                <span>Vol {formatMoney(market.volume)}</span>
-                                <span>Liq {formatMoney(market.liquidity)}</span>
-                            </div>
-                        </article>
+                                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-4">
+                                    <span>Yes {formatProb(yesPrice)}</span>
+                                    <span>No {formatProb(market.prices[1])}</span>
+                                    <span>Vol {formatMoney(market.volume)}</span>
+                                    <span>Liq {formatMoney(market.liquidity)}</span>
+                                </div>
+                            </article>
+                        </PredictionMarketContextMenu>
                     );
                 })}
             </div>
@@ -333,3 +482,5 @@ function formatMoney(value: number | null): string {
         currency: 'USD',
     }).format(value);
 }
+
+export { SortButton };

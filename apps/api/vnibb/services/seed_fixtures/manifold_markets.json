@@ -1,0 +1,112 @@
+[
+  {
+    "id": "mani-1",
+    "question": "Will AI cause a recession before 2030?",
+    "slug": "ai-recession-2030",
+    "description": "Resolves YES if a recession beginning in 2024-2029 is widely attributed to AI labour displacement in mainstream financial press.",
+    "category": "Economics",
+    "url": "https://manifold.markets/market/ai-recession-2030",
+    "probability": 0.18,
+    "volume": 80000,
+    "liquidity": 22000
+  },
+  {
+    "id": "mani-2",
+    "question": "Will OpenAI release GPT-6 by Dec 31 2026?",
+    "slug": "openai-gpt6-2026",
+    "description": "Resolves YES on OpenAI blog post announcing GPT-6.",
+    "category": "AI",
+    "url": "https://manifold.markets/market/openai-gpt6-2026",
+    "probability": 0.42,
+    "volume": 145000,
+    "liquidity": 38000
+  },
+  {
+    "id": "mani-3",
+    "question": "Will a lunar landing happen before 2030?",
+    "slug": "moon-2030",
+    "description": "Resolves YES if any human returns to the lunar surface before Jan 1 2030.",
+    "category": "Space",
+    "url": "https://manifold.markets/market/moon-2030",
+    "probability": 0.61,
+    "volume": 92000,
+    "liquidity": 18000
+  },
+  {
+    "id": "mani-4",
+    "question": "Will the WHO declare a new pandemic before 2027?",
+    "slug": "pandemic-2027",
+    "description": "Resolves YES on a public WHO pandemic declaration.",
+    "category": "Health",
+    "url": "https://manifold.markets/market/pandemic-2027",
+    "probability": 0.12,
+    "volume": 41000,
+    "liquidity": 9000
+  },
+  {
+    "id": "mani-5",
+    "question": "Will Anthropic release Claude 5 in 2026?",
+    "slug": "claude-5-2026",
+    "description": "Resolves YES if Anthropic ships Claude 5 in 2026.",
+    "category": "AI",
+    "url": "https://manifold.markets/market/claude-5-2026",
+    "probability": 0.55,
+    "volume": 76000,
+    "liquidity": 14000
+  },
+  {
+    "id": "mani-6",
+    "question": "Will the Fed cut rates at least twice in 2026?",
+    "slug": "fed-cut-2x-2026",
+    "description": "Resolves YES if the FOMC cuts the federal funds rate at least twice in calendar 2026.",
+    "category": "Economics",
+    "url": "https://manifold.markets/market/fed-cut-2x-2026",
+    "probability": 0.33,
+    "volume": 54000,
+    "liquidity": 11000
+  },
+  {
+    "id": "mani-7",
+    "question": "Will Nvidia announce a $5T market cap before 2027?",
+    "slug": "nvda-5t-2027",
+    "description": "Resolves YES if NVDA closes at a market cap > $5 trillion on any trading day before Jan 1 2027.",
+    "category": "Markets",
+    "url": "https://manifold.markets/market/nvda-5t-2027",
+    "probability": 0.27,
+    "volume": 118000,
+    "liquidity": 25000
+  },
+  {
+    "id": "mani-8",
+    "question": "Will the S&P 500 close above 7000 in 2026?",
+    "slug": "spx-7000-2026",
+    "description": "Resolves YES if SPX closes above 7000 on any trading day in calendar 2026.",
+    "category": "Markets",
+    "url": "https://manifold.markets/market/spx-7000-2026",
+    "probability": 0.31,
+    "volume": 67000,
+    "liquidity": 13000
+  },
+  {
+    "id": "mani-9",
+    "question": "Will a new infectious disease X outbreak be declared by WHO in 2026?",
+    "slug": "disease-x-2026",
+    "description": "Resolves YES if WHO declares Disease X a public health emergency.",
+    "category": "Health",
+    "url": "https://manifold.markets/market/disease-x-2026",
+    "probability": 0.08,
+    "volume": 29000,
+    "liquidity": 6000
+  },
+  {
+    "id": "mani-10",
+    "question": "Will humans land on Mars before 2032?",
+    "slug": "mars-2032",
+    "description": "Resolves YES if any human sets foot on Mars before Jan 1 2032.",
+    "category": "Space",
+    "url": "https://manifold.markets/market/mars-2032",
+    "probability": 0.04,
+    "volume": 84000,
+    "liquidity": 16000
+  }
+]

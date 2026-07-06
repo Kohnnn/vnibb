@@ -168,6 +168,7 @@ export type WidgetType =
     | 'prediction_alerts'
     | 'predictit'
     | 'limitless'
+    | 'manifold'
     | 'cross_source_calibration'
     | 'similar_stocks'
     | 'quick_stats'

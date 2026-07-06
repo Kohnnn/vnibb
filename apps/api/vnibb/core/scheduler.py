@@ -14,7 +14,7 @@ Jobs:
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,7 @@ PREDICTION_MARKET_INGEST_TIMEOUT_SECONDS = 5 * 60
 PREDICTION_MARKET_SNAPSHOT_TIMEOUT_SECONDS = 20 * 60
 PREDICTION_MARKET_INTRADAY_SNAPSHOT_TIMEOUT_SECONDS = 5 * 60
 PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES = 15
+PREDICTION_MARKET_POPULATE_TIMEOUT_SECONDS = 5 * 60
 
 # Last-run counters for the ``predictions_status`` health contribution. Reset
 # at the start of each guarded run; read by the ``/health/predictions``
@@ -40,6 +41,8 @@ PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES = 15
 _last_intraday_result: dict[str, object] | None = None
 _last_nightly_count: int | None = None
 _last_nightly_at: datetime | None = None
+_last_populate_at: datetime | None = None
+_last_populate_counts: dict[str, int] | None = None
 
 
 async def _run_guarded_job(
@@ -538,6 +541,52 @@ def start_scheduler():
     configure_scheduler()
     scheduler.start()
     logger.info("Scheduler started with all jobs configured")
+    _maybe_populate_prediction_markets_on_startup()
+
+
+def _maybe_populate_prediction_markets_on_startup() -> None:
+    """Run a one-shot prediction-market populate if the scheduler is starting
+    up and the snapshot tables are still empty. Schedules itself via
+    APScheduler so it doesn't block the boot loop.
+    """
+    scheduler = get_scheduler()
+
+    async def _populate_now() -> None:
+        from vnibb.core.database import async_session_maker
+        from vnibb.services.populate_prediction_markets import (
+            populate_prediction_markets_now,
+        )
+
+        global _last_populate_at, _last_populate_counts
+
+        async def _runner() -> None:
+            async with async_session_maker() as session:
+                counts = await populate_prediction_markets_now(session)
+            _last_populate_at = datetime.utcnow()
+            _last_populate_counts = counts
+
+        await _run_guarded_job(
+            "populate_prediction_markets_on_startup",
+            _runner,
+            PREDICTION_MARKET_POPULATE_TIMEOUT_SECONDS,
+        )
+
+    # Always schedule once at startup; the guarded job will no-op if the
+    # scheduler is mid-restart.
+    try:
+        scheduler.add_job(
+            _populate_now,
+            trigger="date",
+            run_date=datetime.utcnow() + timedelta(seconds=15),
+            id="populate_prediction_markets_on_startup",
+            name="One-shot populate prediction markets",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("Scheduled: populate_prediction_markets_on_startup in 15s")
+    except Exception as exc:
+        logger.warning("could not schedule populate_prediction_markets_on_startup: %s", exc)
 
 
 def shutdown_scheduler():
@@ -587,14 +636,19 @@ def get_predictions_status() -> dict:
     """Snapshot of the prediction-market ingestion/snapshot health.
 
     Returns the last intraday micro-snapshot outcome + the last nightly
-    snapshot count + timestamp. Consumed by ``/health/predictions`` so the
-    platform can flag a stale or zero-row cycle without scraping logs.
+    snapshot count + timestamp + the last one-shot populate counts.
+    Consumed by ``/health/predictions`` so the platform can flag a stale
+    or zero-row cycle without scraping logs.
     """
     return {
         "intraday": _last_intraday_result,
         "nightly": {
             "rows_written": _last_nightly_count,
             "ran_at": _last_nightly_at.isoformat() if _last_nightly_at else None,
+        },
+        "populate": {
+            "ran_at": _last_populate_at.isoformat() if _last_populate_at else None,
+            "counts": _last_populate_counts,
         },
         "cadence_minutes": PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES,
     }

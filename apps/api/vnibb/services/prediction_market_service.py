@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Final, TypedDict
+from typing import Any, Final, TypedDict
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, Json, TypeAdapter
@@ -66,7 +66,7 @@ def category_taxonomy(raw: str | None) -> str | None:
     return "general"
 
 
-class PredictionMarketValues(TypedDict):
+class PredictionMarketValues(TypedDict, total=False):
     source: str
     source_id: str
     question: str
@@ -81,6 +81,7 @@ class PredictionMarketValues(TypedDict):
     liquidity: float | None
     outcomes: list[str]
     outcome_prices: list[float]
+    extra: dict
     updated_at: datetime
 
 
@@ -125,9 +126,10 @@ class NormalizedPredictionMarket:
     liquidity: float | None
     outcomes: tuple[str, ...]
     outcome_prices: tuple[float, ...]
+    extra: dict = field(default_factory=dict)
 
     def to_values(self) -> PredictionMarketValues:
-        return {
+        values: PredictionMarketValues = {
             "source": self.source,
             "source_id": self.source_id,
             "question": self.question,
@@ -144,6 +146,9 @@ class NormalizedPredictionMarket:
             "outcome_prices": list(self.outcome_prices),
             "updated_at": datetime.utcnow(),
         }
+        if self.extra:
+            values["extra"] = self.extra
+        return values
 
 
 class UnsupportedPredictionMarketDialectError(RuntimeError):
@@ -157,6 +162,62 @@ class UnsupportedPredictionMarketDialectError(RuntimeError):
 _GAMMA_MARKETS = TypeAdapter(list[GammaMarketPayload])
 
 
+#: Loose keywords that flag a prediction market as politics-shaped regardless
+#: of how the upstream tagged the canonical ``category``. Used by the
+#: ``ElectionOddsWidget`` to surface mis-tagged political markets.
+ELECTION_TEXT_KEYWORDS: tuple[str, ...] = (
+    "trump",
+    "biden",
+    "harris",
+    "newsom",
+    "desantis",
+    "vance",
+    "democrat",
+    "republican",
+    "election",
+    "presidential",
+    "white house",
+    "senate",
+    "congress",
+    "house of representatives",
+    "impeach",
+    "2028",
+    "2026 midterm",
+    "primary",
+    "nominee",
+    "governor",
+    "GOP",
+    "DNC",
+    "RNC",
+    "Pence",
+    "Obama",
+    "Clinton",
+    "DeSantis",
+)
+
+
+def canonical_topics(question: str, category: str | None = None) -> list[str]:
+    """Derive a list of canonical topics from a market's question + category.
+
+    Used by ``extra.canonical_topics`` so widgets can filter on
+    semantics (politics / macro / sports / election) without trusting the
+    upstream's freeform ``category``.
+    """
+    haystack = (question or "").lower()
+    if category:
+        haystack = f"{haystack} {category.lower()}"
+    topics: list[str] = []
+    if any(marker in haystack for marker in ELECTION_TEXT_KEYWORDS):
+        topics.append("election")
+    if any(marker in haystack for marker in ("cpi", "inflation", "fed", "fomc", "recession", "rate", "macro")):
+        topics.append("macro")
+    if any(marker in haystack for marker in ("world cup", "fifa", "nba", "nfl", "mlb", "tennis", "olymp")):
+        topics.append("sports")
+    if any(marker in haystack for marker in ("btc", "bitcoin", "eth", "ethereum", "crypto", "stablecoin")):
+        topics.append("crypto")
+    return topics
+
+
 def normalize_gamma_market(payload: GammaMarketPayload) -> NormalizedPredictionMarket:
     """Normalize one Gamma market payload into the source-agnostic DB shape.
 
@@ -166,13 +227,21 @@ def normalize_gamma_market(payload: GammaMarketPayload) -> NormalizedPredictionM
     tests) verify against the canonical taxonomy because the Gamma upstream
     string is volatile and not a contract.
     """
+    question = payload.question
+    canonical_category = category_taxonomy(payload.category)
+    derived_topics = canonical_topics(question, payload.category)
+    extra: dict[str, Any] = {}
+    if payload.category:
+        extra["raw_category"] = payload.category
+    if derived_topics:
+        extra["canonical_topics"] = derived_topics
     return NormalizedPredictionMarket(
         source="polymarket",
         source_id=str(payload.id),
-        question=payload.question,
+        question=question,
         slug=payload.slug,
         description=payload.description,
-        category=category_taxonomy(payload.category),
+        category=canonical_category,
         url=payload.url,
         end_date=payload.end_date,
         active=payload.active,
@@ -181,6 +250,7 @@ def normalize_gamma_market(payload: GammaMarketPayload) -> NormalizedPredictionM
         liquidity=payload.liquidity,
         outcomes=tuple(payload.outcomes),
         outcome_prices=tuple(payload.outcome_prices),
+        extra=extra or None,
     )
 
 
@@ -251,6 +321,7 @@ def _upsert_prediction_market(values: PredictionMarketValues, dialect_name: str)
             "liquidity": stmt.excluded.liquidity,
             "outcomes": stmt.excluded.outcomes,
             "outcome_prices": stmt.excluded.outcome_prices,
+            "extra": stmt.excluded.extra,
             "updated_at": stmt.excluded.updated_at,
         },
     )

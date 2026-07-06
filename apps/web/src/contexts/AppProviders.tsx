@@ -19,6 +19,7 @@ import { CommandPaletteWrapper } from '@/components/CommandPaletteWrapper';
 import { AnalyticsBootstrap } from '@/components/analytics/AnalyticsBootstrap';
 import { AppToaster } from '@/components/ui/Toaster';
 import { WidgetVisibilityProvider } from '@/hooks/useWidgetVisibility';
+import { PredictionMarketWatchlistProvider } from '@/components/widgets/prediction-market-ui';
 
 export interface AppProvidersProps {
     children: ReactNode;
@@ -48,10 +49,14 @@ export function AppProviders({
                                                 <GlobalMarketsSymbolProvider>
                                                     {enableWidgetVisibilityOptimization ? (
                                                         <WidgetVisibilityProvider>
-                                                            <ProvidersInner>{children}</ProvidersInner>
+                                                            <PredictionMarketWatchlistProvider>
+                                                                <ProvidersInner>{children}</ProvidersInner>
+                                                            </PredictionMarketWatchlistProvider>
                                                         </WidgetVisibilityProvider>
                                                     ) : (
-                                                        <ProvidersInner>{children}</ProvidersInner>
+                                                        <PredictionMarketWatchlistProvider>
+                                                            <ProvidersInner>{children}</ProvidersInner>
+                                                        </PredictionMarketWatchlistProvider>
                                                     )}
                                                 </GlobalMarketsSymbolProvider>
                                             </SymbolLinkProvider>

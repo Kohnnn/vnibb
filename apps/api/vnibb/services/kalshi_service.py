@@ -26,6 +26,8 @@ from vnibb.services.prediction_market_service import (
 )
 
 KALSHI_BASE_URL: Final = "https://api.elections.kalshi.com/trade/v2"
+KALSHI_MAX_PAGES: Final = 10
+KALSHI_PAGE_LIMIT: Final = 200
 
 
 class KalshiMarketPayload(BaseModel):
@@ -75,9 +77,10 @@ class NormalizedKalshiMarket:
     liquidity: float | None
     outcomes: tuple[str, ...]
     outcome_prices: tuple[float, ...]
+    extra: dict | None = None
 
     def to_values(self) -> dict[str, Any]:
-        return {
+        values: dict[str, Any] = {
             "source": self.source,
             "source_id": self.source_id,
             "question": self.question,
@@ -94,15 +97,27 @@ class NormalizedKalshiMarket:
             "outcome_prices": list(self.outcome_prices),
             "updated_at": datetime.utcnow(),
         }
+        if self.extra:
+            values["extra"] = self.extra
+        return values
 
 
 def _decimal_to_prob(decimal_price: float | None) -> float | None:
-    """Convert a Kalshi cent-style price (1-99) into a 0-1 probability."""
+    """Convert a Kalshi cent-style price (1-99) into a 0-1 probability.
+
+    Tolerant: Kalshi returns cents in some sandboxes and decimal
+    probabilities in others. Treat any value in (0, 1] as a probability,
+    any value in (1, 99] as cents, and drop anything > 99 (clearly bogus).
+    """
     if decimal_price is None:
         return None
-    if not (0 <= decimal_price <= 99):
+    if decimal_price < 0:
         return None
-    return round(decimal_price / 100.0, 4)
+    if decimal_price <= 1.0:
+        return round(float(decimal_price), 4)
+    if decimal_price <= 99:
+        return round(float(decimal_price) / 100.0, 4)
+    return None
 
 
 def normalize_kalshi_market(payload: KalshiMarketPayload) -> NormalizedKalshiMarket:
@@ -111,6 +126,17 @@ def normalize_kalshi_market(payload: KalshiMarketPayload) -> NormalizedKalshiMar
     no_price = 1.0 - yes_price if yes_price is not None else None
 
     raw_category = payload.category or (payload.tags[0] if payload.tags else None)
+    from vnibb.services.prediction_market_service import canonical_topics
+
+    derived_topics = canonical_topics(payload.title, raw_category)
+    extra_categories: list[str] = []
+    if raw_category:
+        extra_categories.append(raw_category)
+    extra_categories.extend(derived_topics)
+    extra: dict[str, Any] = {}
+    if extra_categories:
+        extra["raw_category"] = raw_category
+        extra["canonical_topics"] = derived_topics
     return NormalizedKalshiMarket(
         source="kalshi",
         source_id=payload.ticker,
@@ -126,6 +152,7 @@ def normalize_kalshi_market(payload: KalshiMarketPayload) -> NormalizedKalshiMar
         liquidity=float(payload.open_interest) if payload.open_interest is not None else None,
         outcomes=("Yes", "No"),
         outcome_prices=(yes_price if yes_price is not None else 0.0, no_price if no_price is not None else 0.0),
+        extra=extra or None,
     )
 
 
@@ -135,28 +162,53 @@ _KALSHI_MARKETS = TypeAdapter(list[KalshiMarketPayload])
 async def fetch_kalshi_markets(
     client: httpx.AsyncClient,
     limit: int,
+    *,
+    max_pages: int = KALSHI_MAX_PAGES,
 ) -> list[KalshiMarketPayload]:
     """Fetch active Kalshi markets. Returns the parsed market list.
 
-    Kalshi paginates with `cursor`; the lightweight shell here fetches the
-    first page only. Production deployments should iterate via the `cursor`
-    field which is ignored by our boundary model but surfaced by the
-    upstream `meta` envelope.
+    Paginated cursor loop — Kalshi's first page can carry 200 markets but
+    the active corpus is regularly 300+ across all categories. We loop
+    until ``cursor`` is null/empty or ``max_pages`` is reached so a single
+    ingest cycle captures the entire active set.
     """
-    response = await client.get(
-        "/markets",
-        params={"status": "open", "limit": min(limit, 200)},
-    )
-    response.raise_for_status()
-    body = response.json()
-    rows = body.get("markets", []) if isinstance(body, dict) else body
-    return _KALSHI_MARKETS.validate_python(rows)
+    import asyncio as _asyncio
+
+    rows: list[KalshiMarketPayload] = []
+    cursor: str | None = None
+    for page in range(max_pages):
+        params: dict[str, Any] = {"status": "open", "limit": min(limit, KALSHI_PAGE_LIMIT)}
+        if cursor:
+            params["cursor"] = cursor
+        response = await client.get("/markets", params=params)
+        response.raise_for_status()
+        body = response.json()
+        page_rows = body.get("markets", []) if isinstance(body, dict) else body
+        if not page_rows:
+            break
+        rows.extend(_KALSHI_MARKETS.validate_python(page_rows))
+        if not isinstance(body, dict):
+            break
+        cursor = (
+            body.get("cursor")
+            or body.get("next_cursor")
+            or (body.get("meta") or {}).get("cursor")
+            or (body.get("meta") or {}).get("next_cursor")
+        )
+        if not cursor:
+            break
+        # Be polite: tiny sleep between paginated requests so we don't
+        # trip Kalshi's per-second quota. ~250ms.
+        await _asyncio.sleep(0.25)
+    return rows
 
 
 async def ingest_kalshi_markets(
     session: AsyncSession,
     client: httpx.AsyncClient,
-    limit: int = 100,
+    limit: int = 200,
+    *,
+    max_pages: int = KALSHI_MAX_PAGES,
 ) -> int:
     """Fetch, normalize, and upsert Kalshi markets into the DB.
 
@@ -165,7 +217,7 @@ async def ingest_kalshi_markets(
     """
     from vnibb.services.prediction_market_service import _upsert_prediction_market
 
-    payloads = await fetch_kalshi_markets(client, limit)
+    payloads = await fetch_kalshi_markets(client, limit, max_pages=max_pages)
     dialect_name = session.get_bind().dialect.name
     count = 0
     for payload in payloads:
@@ -181,12 +233,14 @@ async def ingest_kalshi_markets(
 
 async def ingest_kalshi_markets_with_default_client(
     session: AsyncSession,
-    limit: int = 100,
+    limit: int = 200,
+    *,
+    max_pages: int = KALSHI_MAX_PAGES,
 ) -> int:
     """Ingest Kalshi markets using the production public API endpoint."""
     async with httpx.AsyncClient(
         base_url=KALSHI_BASE_URL,
         follow_redirects=True,
-        timeout=10.0,
+        timeout=15.0,
     ) as client:
-        return await ingest_kalshi_markets(session, client, limit)
+        return await ingest_kalshi_markets(session, client, limit, max_pages=max_pages)

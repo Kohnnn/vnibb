@@ -922,6 +922,15 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['cross-source', 'calibration', 'consensus', 'agreement', 'macro']
     },
     {
+        type: 'manifold',
+        name: 'Manifold',
+        description: 'Manifold Markets play-money predictions covering AI, macro, space and other long-tail topics',
+        category: 'global_markets',
+        defaultConfig: { source: 'manifold', category: 'all', limit: 20 },
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 6 },
+        searchKeywords: ['manifold', 'ai', 'politics', 'odds', 'long-tail', 'play-money']
+    },
+    {
         type: 'world_news_monitor',
         name: 'World News Monitor',
         description: 'Live Vietnam and global RSS/Atom news sources with direct article, source, and feed links',

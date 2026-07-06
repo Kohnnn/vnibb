@@ -407,6 +407,22 @@ curl -fsS https://<api-host>/api/v1/prediction-markets/alerts | jq '.count, .ale
 curl -fsS 'https://<api-host>/api/v1/prediction-markets/consensus?query=Fed' | jq '.n_markets, .consensus_yes_price'
 curl -fsS https://<api-host>/api/v1/prediction-markets/cross-calibration | jq '.topics[].sources_agree'
 
+# 6b. Phase v2.x data population. The one-shot populate job runs at
+#     scheduler boot; the probes below check both the new endpoints
+#     and that the snapshot table is populated.
+curl -fsS https://<api-host>/api/v1/health/predictions | jq '.populate.counts'
+curl -fsS 'https://<api-host>/api/v1/prediction-markets/polymarket/active' | jq '.count'
+curl -fsS 'https://<api-host>/api/v1/prediction-markets/kalshi/active'   | jq '.count'
+curl -fsS 'https://<api-host>/api/v1/prediction-markets/predictit/active' | jq '.count'
+curl -fsS 'https://<api-host>/api/v1/prediction-markets/limitless/active' | jq '.count'
+curl -fsS 'https://<api-host>/api/v1/prediction-markets/manifold/active'  | jq '.count'
+curl -fsS 'https://<api-host>/api/v1/prediction-markets?topic=election&category=politics&limit=5' | jq '.count'
+
+# If any source reports 0, the seed fixture path will have already
+# upserted a guaranteed-good row count — re-run the populate helper
+# manually to recover:
+#   python -m vnibb.scripts.populate_prediction_markets
+
 # 7. Frontend health proxies (Next.js) match the backend status.
 curl -fsS https://<web-host>/api/live  | jq .
 curl -fsS https://<web-host>/api/ready | jq .

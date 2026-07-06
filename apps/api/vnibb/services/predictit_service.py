@@ -19,6 +19,7 @@ from typing import Final
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, Json, TypeAdapter
 
+from vnibb.services.prediction_market_http import fetch_json_with_retry
 from vnibb.services.prediction_market_service import (
     NormalizedPredictionMarket,
     PredictionMarketValues,
@@ -111,13 +112,19 @@ async def fetch_predictit_markets(
     client: httpx.AsyncClient,
     limit: int,
 ) -> list[PredictItMarketPayload]:
-    """Fetch all active PredictIt markets."""
-    response = await client.get(
-        "/markets",
+    """Fetch all active PredictIt markets via the resilient JSON fetcher."""
+    body = await fetch_json_with_retry(
+        client, source="predictit", url="/markets",
         params={"limit": limit, "active": "true"},
     )
-    response.raise_for_status()
-    return _PREDICTIT_MARKETS.validate_json(response.content)
+    rows: list[PredictItMarketPayload]
+    if isinstance(body, dict) and isinstance(body.get("markets"), list):
+        rows = _PREDICTIT_MARKETS.validate_python(body["markets"])
+    elif isinstance(body, list):
+        rows = _PREDICTIT_MARKETS.validate_python(body)
+    else:
+        rows = []
+    return rows
 
 
 async def ingest_predictit_markets(

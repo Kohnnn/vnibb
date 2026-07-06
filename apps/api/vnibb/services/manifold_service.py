@@ -18,6 +18,7 @@ from typing import Final
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from vnibb.services.prediction_market_http import fetch_json_with_retry
 from vnibb.services.prediction_market_service import (
     NormalizedPredictionMarket,
     PredictionMarketValues,
@@ -92,13 +93,19 @@ async def fetch_manifold_markets(
     client: httpx.AsyncClient,
     limit: int,
 ) -> list[ManifoldMarketPayload]:
-    """Fetch active Manifold markets."""
-    response = await client.get(
-        "/markets",
+    """Fetch active Manifold markets via the resilient JSON fetcher."""
+    body = await fetch_json_with_retry(
+        client, source="manifold", url="/markets",
         params={"limit": limit, "filter": "open"},
     )
-    response.raise_for_status()
-    return _MANIFOLD_MARKETS.validate_json(response.content)
+    rows: list[ManifoldMarketPayload]
+    if isinstance(body, list):
+        rows = _MANIFOLD_MARKETS.validate_python(body)
+    elif isinstance(body, dict) and isinstance(body.get("markets"), list):
+        rows = _MANIFOLD_MARKETS.validate_python(body["markets"])
+    else:
+        rows = []
+    return rows
 
 
 async def ingest_manifold_markets(

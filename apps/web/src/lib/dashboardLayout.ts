@@ -177,6 +177,7 @@ export const WIDGET_LAYOUT_BEHAVIORS: Record<WidgetType, LayoutBehavior> = {
   prediction_alerts: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
   predictit: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
   limitless: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  manifold: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
   cross_source_calibration: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
   signal_summary: { preferredW: 24, preferredH: 8, minW: 12, minH: 6, orientation: 'horizontal', expandPriority: 6 },
   // Backfilled so every WidgetType resolves an explicit size contract instead of the

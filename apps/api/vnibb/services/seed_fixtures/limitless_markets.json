@@ -1,0 +1,112 @@
+[
+  {
+    "id": "lim-1",
+    "title": "BTC > $150k by 2026 year-end?",
+    "slug": "btc-150k-2026",
+    "description": "Will Bitcoin close above $150,000 USD on any major exchange by Dec 31 2026?",
+    "category": "Crypto",
+    "url": "https://limitless.exchange/markets/btc-150k-2026",
+    "prices": {"yes": 0.18, "no": 0.82},
+    "volume": 1240000,
+    "liquidity": 320000
+  },
+  {
+    "id": "lim-2",
+    "title": "ETH > $10k by 2026 year-end?",
+    "slug": "eth-10k-2026",
+    "description": "Will Ethereum close above $10,000 USD on any major exchange by Dec 31 2026?",
+    "category": "Crypto",
+    "url": "https://limitless.exchange/markets/eth-10k-2026",
+    "prices": {"yes": 0.07, "no": 0.93},
+    "volume": 580000,
+    "liquidity": 140000
+  },
+  {
+    "id": "lim-3",
+    "title": "Solana > $500 by year-end 2026?",
+    "slug": "sol-500-2026",
+    "description": "Will Solana close above $500 USD by Dec 31 2026?",
+    "category": "Crypto",
+    "url": "https://limitless.exchange/markets/sol-500-2026",
+    "prices": {"yes": 0.31, "no": 0.69},
+    "volume": 410000,
+    "liquidity": 95000
+  },
+  {
+    "id": "lim-4",
+    "title": "USDC depeg below $0.97 in 2026?",
+    "slug": "usdc-depeg-2026",
+    "description": "Will USDC trade below $0.97 on any major exchange during 2026?",
+    "category": "Crypto",
+    "url": "https://limitless.exchange/markets/usdc-depeg-2026",
+    "prices": {"yes": 0.04, "no": 0.96},
+    "volume": 220000,
+    "liquidity": 50000
+  },
+  {
+    "id": "lim-5",
+    "title": "BTC dominance > 60% by Q3 2026?",
+    "slug": "btc-dom-60-2026",
+    "description": "Bitcoin dominance index above 60% by Sep 30 2026?",
+    "category": "Crypto",
+    "url": "https://limitless.exchange/markets/btc-dom-60-2026",
+    "prices": {"yes": 0.42, "no": 0.58},
+    "volume": 300000,
+    "liquidity": 70000
+  },
+  {
+    "id": "lim-6",
+    "title": "Ethereum L2 TVL > $50B in 2026?",
+    "slug": "eth-l2-50b-2026",
+    "description": "Will the total value locked across Ethereum L2 networks exceed $50B at any point in 2026?",
+    "category": "Crypto",
+    "url": "https://limitless.exchange/markets/eth-l2-50b-2026",
+    "prices": {"yes": 0.55, "no": 0.45},
+    "volume": 195000,
+    "liquidity": 60000
+  },
+  {
+    "id": "lim-7",
+    "title": "Spot Solana ETF approved in 2026?",
+    "slug": "sol-etf-2026",
+    "description": "Will the SEC approve a spot Solana ETF by Dec 31 2026?",
+    "category": "Crypto",
+    "url": "https://limitless.exchange/markets/sol-etf-2026",
+    "prices": {"yes": 0.38, "no": 0.62},
+    "volume": 410000,
+    "liquidity": 110000
+  },
+  {
+    "id": "lim-8",
+    "title": "BTC new ATH in Q4 2026?",
+    "slug": "btc-ath-q4-2026",
+    "description": "Bitcoin reaches a new all-time high in Q4 2026?",
+    "category": "Crypto",
+    "url": "https://limitless.exchange/markets/btc-ath-q4-2026",
+    "prices": {"yes": 0.49, "no": 0.51},
+    "volume": 660000,
+    "liquidity": 175000
+  },
+  {
+    "id": "lim-9",
+    "title": "Spot XRP ETF approved in 2026?",
+    "slug": "xrp-etf-2026",
+    "description": "Will the SEC approve a spot XRP ETF by Dec 31 2026?",
+    "category": "Crypto",
+    "url": "https://limitless.exchange/markets/xrp-etf-2026",
+    "prices": {"yes": 0.42, "no": 0.58},
+    "volume": 275000,
+    "liquidity": 80000
+  },
+  {
+    "id": "lim-10",
+    "title": "Hyperliquid HYPE > $100 by year-end 2026?",
+    "slug": "hype-100-2026",
+    "description": "Hyperliquid HYPE token above $100 USD by Dec 31 2026?",
+    "category": "Crypto",
+    "url": "https://limitless.exchange/markets/hype-100-2026",
+    "prices": {"yes": 0.21, "no": 0.79},
+    "volume": 90000,
+    "liquidity": 22000
+  }
+]

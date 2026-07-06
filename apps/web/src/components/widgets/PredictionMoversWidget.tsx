@@ -4,15 +4,20 @@ import { useCallback, useEffect, useState } from 'react';
 import { TrendingUp } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { API_BASE_URL } from '@/lib/api';
+import { ProbabilityBar } from './prediction-market-ui';
+import { PredictionMarketContextMenu } from './PredictionMarketContextMenu';
+import { PredictionMarketDrawer } from './PredictionMarketDrawer';
 
-/**
- * Probability Movers widget.
- *
- * Hits `/api/v1/prediction-markets/movers` and renders the rows with their
- * absolute movement coloured up/down. The endpoint requires the nightly
- * snapshot job plus the new intraday micro-snapshot job (Phase 8); the
- * widget shows a clear empty state when the snapshot tables are empty.
- */
+type WindowKey = '1h' | '6h' | '24h' | '7d';
+
+const WINDOW_HOURS: Record<WindowKey, number> = {
+    '1h': 1,
+    '6h': 6,
+    '24h': 24,
+    '7d': 168,
+};
+
+const ALL_DIRECTIONS: ReadonlyArray<'up' | 'down' | 'both'> = ['up', 'down', 'both'];
 
 type MoverRow = {
     readonly source: string;
@@ -35,6 +40,7 @@ export interface PredictionMoversWidgetProps {
     readonly limit?: number;
     readonly direction?: 'up' | 'down' | 'both';
     readonly excludeCategories?: string;
+    readonly showFilters?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -84,20 +90,26 @@ function parseMovers(value: unknown): { movers: MoverRow[]; windowHours: number 
 }
 
 export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) {
-    const windowHours = props.windowHours ?? 24;
-    const limit = props.limit ?? 12;
-    const direction = props.direction ?? 'both';
-    const excludeCategories = props.excludeCategories;
+    const { limit = 12, excludeCategories, showFilters = true } = props;
+    const [windowKey, setWindowKey] = useState<WindowKey>(
+        props.windowHours === 168 ? '7d' : props.windowHours === 6 ? '6h' : props.windowHours === 1 ? '1h' : '24h',
+    );
+    const [direction, setDirection] = useState<'up' | 'down' | 'both'>(props.direction ?? 'both');
     const [state, setState] = useState<LoadState>({ kind: 'loading' });
+    const [selection, setSelection] = useState<{ source: string; sourceId: string; question: string } | null>(null);
+    const [excludes, setExcludes] = useState<Set<string>>(
+        new Set((excludeCategories ?? '').split(',').filter(Boolean)),
+    );
 
     const refresh = useCallback(() => {
         setState({ kind: 'loading' });
+        const windowHours = WINDOW_HOURS[windowKey];
         const url = new URL(`${API_BASE_URL}/prediction-markets/movers`);
         url.searchParams.set('window', String(windowHours));
         url.searchParams.set('limit', String(limit));
         url.searchParams.set('direction', direction);
-        if (excludeCategories) {
-            url.searchParams.set('exclude_categories', excludeCategories);
+        if (excludes.size > 0) {
+            url.searchParams.set('exclude_categories', Array.from(excludes).join(','));
         }
         fetch(url.toString(), { cache: 'no-store' })
             .then(async (response) => {
@@ -112,11 +124,13 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
                     error: error instanceof Error ? error : new Error('movers request failed'),
                 });
             });
-    }, [windowHours, limit, direction, excludeCategories]);
+    }, [windowKey, limit, direction, excludes]);
 
     useEffect(() => {
         refresh();
     }, [refresh]);
+
+    const allCategories: ReadonlyArray<string> = ['general', 'politics', 'sports', 'crypto', 'economic'];
 
     if (state.kind === 'loading') {
         return <WidgetLoading message="Loading probability movers..." />;
@@ -130,48 +144,147 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
             />
         );
     }
-    if (state.movers.length === 0) {
-        return (
-            <WidgetEmpty
-                message="No probability movers"
-                detail={`The snapshot history is empty for the last ${state.windowHours}h. The nightly snapshot job may need to run.`}
-                icon={<TrendingUp size={18} />}
-            />
-        );
-    }
     return (
         <div className="flex h-full flex-col gap-3 p-1">
-            <div className="flex items-center justify-between border-b border-default px-1 pb-2 text-[11px] text-[var(--text-muted)]">
-                <span>Top {state.movers.length} markets by |Δ probability| in last {state.windowHours}h</span>
-            </div>
-            <div className="flex flex-col gap-2">
-                {state.movers.map((row) => (
-                    <a
-                        key={`${row.source}:${row.sourceId}`}
-                        href={row.url ?? '#'}
-                        target={row.url ? '_blank' : undefined}
-                        rel="noreferrer"
-                        className="flex items-center justify-between rounded-lg border border-default bg-[var(--bg-tertiary)] p-3 text-sm transition-colors hover:bg-[var(--bg-hover)]"
-                    >
-                        <div className="flex flex-col">
-                            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-blue-300">
-                                {row.source} · {row.category}
-                            </div>
-                            <span className="text-[var(--text-primary)]">{row.question}</span>
-                        </div>
-                        <div
-                            className={
-                                row.absoluteMovement >= 0
-                                    ? 'rounded-md px-2 py-1 text-xs text-emerald-400'
-                                    : 'rounded-md px-2 py-1 text-xs text-red-400'
+            {showFilters && (
+                <header className="flex flex-wrap items-center justify-between gap-2 border-b border-default pb-2 text-[11px] text-[var(--text-muted)]">
+                    <div className="flex items-center gap-1">
+                        {(Object.entries(WINDOW_HOURS) as [WindowKey, number][]).map(([key, _hours]) => (
+                            <button
+                                key={key}
+                                type="button"
+                                onClick={() => setWindowKey(key)}
+                                className={`rounded-full border px-2 py-0.5 text-[10px] ${
+                                    windowKey === key
+                                        ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
+                                        : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                                }`}
+                            >
+                                {key}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="flex items-center gap-1">
+                        {ALL_DIRECTIONS.map((value) => (
+                            <button
+                                key={value}
+                                type="button"
+                                onClick={() => setDirection(value)}
+                                className={`rounded-full border px-2 py-0.5 text-[10px] ${
+                                    direction === value
+                                        ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
+                                        : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                                }`}
+                            >
+                                {value}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="flex items-center gap-1">
+                        {allCategories.map((category) => {
+                            const on = excludes.has(category);
+                            return (
+                                <button
+                                    key={category}
+                                    type="button"
+                                    onClick={() => {
+                                        setExcludes((prev) => {
+                                            const next = new Set(prev);
+                                            if (next.has(category)) {
+                                                next.delete(category);
+                                            } else {
+                                                next.add(category);
+                                            }
+                                            return next;
+                                        });
+                                    }}
+                                    className={`rounded-full border px-2 py-0.5 text-[10px] ${
+                                        on
+                                            ? 'border-red-500/60 bg-red-500/10 text-red-400'
+                                            : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                                    }`}
+                                >
+                                    hide {category}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </header>
+            )}
+            {state.movers.length === 0 ? (
+                <WidgetEmpty
+                    message="No probability movers"
+                    detail={`The snapshot history is empty for the last ${state.windowHours}h. The nightly snapshot job may need to run.`}
+                    icon={<TrendingUp size={18} />}
+                />
+            ) : (
+                <div className="flex flex-col gap-2 overflow-auto">
+                    {state.movers.map((row) => (
+                        <PredictionMarketContextMenu
+                            key={`${row.source}:${row.sourceId}`}
+                            market={{
+                                source: row.source,
+                                sourceId: row.sourceId,
+                                question: row.question,
+                                url: row.url,
+                            }}
+                            onOpenDrawer={() =>
+                                setSelection({
+                                    source: row.source,
+                                    sourceId: row.sourceId,
+                                    question: row.question,
+                                })
                             }
                         >
-                            {row.absoluteMovement >= 0 ? '+' : ''}
-                            {(row.absoluteMovement * 100).toFixed(1)}pp
-                        </div>
-                    </a>
-                ))}
-            </div>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    setSelection({
+                                        source: row.source,
+                                        sourceId: row.sourceId,
+                                        question: row.question,
+                                    })
+                                }
+                                className="flex w-full flex-col gap-2 rounded-lg border border-default bg-[var(--bg-tertiary)] p-3 text-left text-sm transition-colors hover:bg-[var(--bg-hover)]"
+                            >
+                                <div className="flex items-center justify-between">
+                                    <div className="flex flex-col">
+                                        <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-blue-300">
+                                            {row.source} · {row.category}
+                                        </div>
+                                        <span className="text-[var(--text-primary)]">
+                                            {row.question}
+                                        </span>
+                                    </div>
+                                    <div
+                                        className={
+                                            row.absoluteMovement >= 0
+                                                ? 'rounded-md px-2 py-1 text-xs text-emerald-400'
+                                                : 'rounded-md px-2 py-1 text-xs text-red-400'
+                                        }
+                                    >
+                                        {row.absoluteMovement >= 0 ? '+' : ''}
+                                        {(row.absoluteMovement * 100).toFixed(1)}pp
+                                    </div>
+                                </div>
+                                <ProbabilityBar
+                                    value={row.yesPrice}
+                                    delta={row.absoluteMovement}
+                                    showLabels
+                                    height={6}
+                                />
+                            </button>
+                        </PredictionMarketContextMenu>
+                    ))}
+                </div>
+            )}
+            <PredictionMarketDrawer
+                source={selection?.source ?? null}
+                sourceId={selection?.sourceId ?? null}
+                question={selection?.question ?? null}
+                open={selection !== null}
+                onClose={() => setSelection(null)}
+            />
         </div>
     );
 }

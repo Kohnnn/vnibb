@@ -34,7 +34,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, cast, desc, func, or_, select, String as SA_String
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -223,6 +223,13 @@ async def list_prediction_markets(
     # Category alias mapping. Frontend widgets send friendly names; we map
     # Gamma/Kalshi freeform categories into canonical buckets.
     category: str | None = Query(default=None, pattern=r"^[a-z][a-z0-9_-]{1,31}$"),
+    # Substring search over the question text. Powers the ElectionOddsWidget
+    # politics-shaped regex and any free-text search.
+    search: str | None = Query(default=None, max_length=200),
+    # Topic selector that ORs over ``extra.canonical_topics`` via
+    # ``PredictionMarket.extra``. Valid values: ``election``, ``macro``,
+    # ``sports``, ``crypto``.
+    topic: str | None = Query(default=None, pattern=r"^[a-z][a-z0-9_-]{1,31}$"),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> PredictionMarketsResponse:
@@ -240,6 +247,22 @@ async def list_prediction_markets(
         # Friendly alias. The DB stores categories verbatim; comparison is
         # case-insensitive so users can pass "Economic" or "economic".
         stmt = stmt.where(PredictionMarket.category.ilike(category))
+    if search is not None:
+        like_pattern = f"%{search.lower()}%"
+        stmt = stmt.where(
+            or_(
+                func.lower(PredictionMarket.question).like(like_pattern),
+                func.lower(PredictionMarket.description).like(like_pattern),
+            )
+        )
+    if topic is not None:
+        # ``extra`` is a JSON column. We cast to text for portability — the
+        # ``canonical_topics`` list is serialised as JSON inside the column
+        # so a LIKE over ``"<topic>"`` matches either a single-element list
+        # or the topic within a longer list.
+        stmt = stmt.where(
+            cast(PredictionMarket.extra, SA_String).like(f'%"{topic}"%')
+        )
     try:
         result = await db.execute(stmt.limit(limit))
     except (OperationalError, ProgrammingError) as error:

@@ -118,7 +118,8 @@ describe('SourceDriftWidget', () => {
         render(<SourceDriftWidget />);
         await waitFor(() => {
             expect(screen.getAllByText(/Poly/i).length).toBeGreaterThan(0);
-            expect(screen.getByText(/Kalshi 40%/i)).toBeInTheDocument();
+            expect(screen.getAllByText(/Kalshi/i).length).toBeGreaterThan(0);
+            expect(screen.getByText('40%')).toBeInTheDocument();
             expect(screen.getByText(/Missing source data/i)).toBeInTheDocument();
         });
     });

@@ -1,0 +1,182 @@
+[
+  {
+    "id": 1,
+    "name": "Will the Democrats win the 2028 presidential election?",
+    "shortName": "dem-2028",
+    "category": "Politics",
+    "subCategory": "US Presidential",
+    "url": "https://www.predictit.org/predictions/markets/detail/1/dem-2028",
+    "contracts": [{"id": 101, "name": "Yes", "LatestYesPrice": 0.42}]
+  },
+  {
+    "id": 2,
+    "name": "Will the Republicans win the 2028 presidential election?",
+    "shortName": "rep-2028",
+    "category": "Politics",
+    "subCategory": "US Presidential",
+    "url": "https://www.predictit.org/predictions/markets/detail/2/rep-2028",
+    "contracts": [{"id": 102, "name": "Yes", "LatestYesPrice": 0.51}]
+  },
+  {
+    "id": 3,
+    "name": "Will Donald Trump be the Republican nominee for 2028?",
+    "shortName": "trump-2028",
+    "category": "Politics",
+    "subCategory": "US Presidential",
+    "url": "https://www.predictit.org/predictions/markets/detail/3/trump-2028",
+    "contracts": [{"id": 103, "name": "Yes", "LatestYesPrice": 0.78}]
+  },
+  {
+    "id": 4,
+    "name": "Will Ron DeSantis be the Republican nominee for 2028?",
+    "shortName": "desantis-2028",
+    "category": "Politics",
+    "subCategory": "US Presidential",
+    "url": "https://www.predictit.org/predictions/markets/detail/4/desantis-2028",
+    "contracts": [{"id": 104, "name": "Yes", "LatestYesPrice": 0.04}]
+  },
+  {
+    "id": 5,
+    "name": "Will the Democrats control the Senate after 2026 midterms?",
+    "shortName": "d-senate-2026",
+    "category": "Politics",
+    "subCategory": "US Senate",
+    "url": "https://www.predictit.org/predictions/markets/detail/5/d-senate-2026",
+    "contracts": [{"id": 105, "name": "Yes", "LatestYesPrice": 0.18}]
+  },
+  {
+    "id": 6,
+    "name": "Will the Republicans control the Senate after 2026 midterms?",
+    "shortName": "r-senate-2026",
+    "category": "Politics",
+    "subCategory": "US Senate",
+    "url": "https://www.predictit.org/predictions/markets/detail/6/r-senate-2026",
+    "contracts": [{"id": 106, "name": "Yes", "LatestYesPrice": 0.78}]
+  },
+  {
+    "id": 7,
+    "name": "Will Democrats control the House after 2026 midterms?",
+    "shortName": "d-house-2026",
+    "category": "Politics",
+    "subCategory": "US House",
+    "url": "https://www.predictit.org/predictions/markets/detail/7/d-house-2026",
+    "contracts": [{"id": 107, "name": "Yes", "LatestYesPrice": 0.32}]
+  },
+  {
+    "id": 8,
+    "name": "Will Republicans control the House after 2026 midterms?",
+    "shortName": "r-house-2026",
+    "category": "Politics",
+    "subCategory": "US House",
+    "url": "https://www.predictit.org/predictions/markets/detail/8/r-house-2026",
+    "contracts": [{"id": 108, "name": "Yes", "LatestYesPrice": 0.62}]
+  },
+  {
+    "id": 9,
+    "name": "Will Joe Biden run for president in 2028?",
+    "shortName": "biden-2028",
+    "category": "Politics",
+    "subCategory": "US Presidential",
+    "url": "https://www.predictit.org/predictions/markets/detail/9/biden-2028",
+    "contracts": [{"id": 109, "name": "Yes", "LatestYesPrice": 0.03}]
+  },
+  {
+    "id": 10,
+    "name": "Will Kamala Harris be the Democratic nominee for 2028?",
+    "shortName": "harris-2028",
+    "category": "Politics",
+    "subCategory": "US Presidential",
+    "url": "https://www.predictit.org/predictions/markets/detail/10/harris-2028",
+    "contracts": [{"id": 110, "name": "Yes", "LatestYesPrice": 0.31}]
+  },
+  {
+    "id": 11,
+    "name": "Will Gavin Newsom be the Democratic nominee for 2028?",
+    "shortName": "newsom-2028",
+    "category": "Politics",
+    "subCategory": "US Presidential",
+    "url": "https://www.predictit.org/predictions/markets/detail/11/newsom-2028",
+    "contracts": [{"id": 111, "name": "Yes", "LatestYesPrice": 0.22}]
+  },
+  {
+    "id": 12,
+    "name": "Will JD Vance be the Republican nominee for 2028?",
+    "shortName": "vance-2028",
+    "category": "Politics",
+    "subCategory": "US Presidential",
+    "url": "https://www.predictit.org/predictions/markets/detail/12/vance-2028",
+    "contracts": [{"id": 112, "name": "Yes", "LatestYesPrice": 0.35}]
+  },
+  {
+    "id": 13,
+    "name": "Will Russia-Ukraine ceasefire be reached by year-end 2026?",
+    "shortName": "ru-ua-2026",
+    "category": "Geopolitics",
+    "subCategory": "Conflict",
+    "url": "https://www.predictit.org/predictions/markets/detail/13/ru-ua-2026",
+    "contracts": [{"id": 113, "name": "Yes", "LatestYesPrice": 0.21}]
+  },
+  {
+    "id": 14,
+    "name": "Will TikTok be banned in the United States in 2026?",
+    "shortName": "tiktok-2026",
+    "category": "Tech",
+    "subCategory": "Regulation",
+    "url": "https://www.predictit.org/predictions/markets/detail/14/tiktok-2026",
+    "contracts": [{"id": 114, "name": "Yes", "LatestYesPrice": 0.27}]
+  },
+  {
+    "id": 15,
+    "name": "Will the Supreme Court reverse Roe v. Wade protections in 2026?",
+    "shortName": "roe-2026",
+    "category": "Politics",
+    "subCategory": "US Supreme Court",
+    "url": "https://www.predictit.org/predictions/markets/detail/15/roe-2026",
+    "contracts": [{"id": 115, "name": "Yes", "LatestYesPrice": 0.08}]
+  },
+  {
+    "id": 16,
+    "name": "Will Donald Trump be impeached by the House in 2026?",
+    "shortName": "trump-impeach-2026",
+    "category": "Politics",
+    "subCategory": "US House",
+    "url": "https://www.predictit.org/predictions/markets/detail/16/trump-impeach-2026",
+    "contracts": [{"id": 116, "name": "Yes", "LatestYesPrice": 0.04}]
+  },
+  {
+    "id": 17,
+    "name": "Will a recession occur in the United States in 2026?",
+    "shortName": "recession-2026",
+    "category": "Economics",
+    "subCategory": "Macro",
+    "url": "https://www.predictit.org/predictions/markets/detail/17/recession-2026",
+    "contracts": [{"id": 117, "name": "Yes", "LatestYesPrice": 0.32}]
+  },
+  {
+    "id": 18,
+    "name": "Will Joe Manchin run for president in 2028 as independent?",
+    "shortName": "manchin-2028",
+    "category": "Politics",
+    "subCategory": "US Presidential",
+    "url": "https://www.predictit.org/predictions/markets/detail/18/manchin-2028",
+    "contracts": [{"id": 118, "name": "Yes", "LatestYesPrice": 0.06}]
+  },
+  {
+    "id": 19,
+    "name": "Will Israel-Hamas ceasefire hold for 90 days in 2026?",
+    "shortName": "isr-hamas-2026",
+    "category": "Geopolitics",
+    "subCategory": "Conflict",
+    "url": "https://www.predictit.org/predictions/markets/detail/19/isr-hamas-2026",
+    "contracts": [{"id": 119, "name": "Yes", "LatestYesPrice": 0.41}]
+  },
+  {
+    "id": 20,
+    "name": "Will Elon Musk leave the Trump administration in 2026?",
+    "shortName": "musk-leave-2026",
+    "category": "Politics",
+    "subCategory": "US Executive",
+    "url": "https://www.predictit.org/predictions/markets/detail/20/musk-leave-2026",
+    "contracts": [{"id": 120, "name": "Yes", "LatestYesPrice": 0.55}]
+  }
+]
