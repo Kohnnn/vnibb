@@ -13,7 +13,7 @@ import sys
 from functools import lru_cache
 from typing import Annotated, Any, List, Optional
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     api_request_timeout_seconds: int = 30
     admin_api_key: Optional[str] = None
-    apps_script_api_key: Optional[str] = None  # env: VNIBB_APPS_SCRIPT_KEY
+    apps_script_api_key: Optional[str] = Field(default=None, validation_alias="VNIBB_APPS_SCRIPT_KEY")
     vnibb_mcp_host: str = "0.0.0.0"
     vnibb_mcp_port: int = 8001
     vnibb_mcp_transport: str = "stdio"
