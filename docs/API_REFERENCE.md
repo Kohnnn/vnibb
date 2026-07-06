@@ -6,7 +6,7 @@ This document captures the current VNIBB v1 API surface used by the web app and 
 
 Base URL:
 - Local: `http://localhost:8000/api/v1`
-- Production (current OCI deployment): `https://129.150.58.64.sslip.io/api/v1`
+- Production (current OCI deployment): `https://<oci-public-ip>.sslip.io/api/v1`
 
 ## Conventions
 
@@ -23,6 +23,7 @@ The v1 router mounts the following endpoint groups:
 - `/comparison`, `/sectors`, `/equity`, `/screener`, `/financials`, `/dashboard`, `/user`, `/data`
 - `/stream`, `/analysis`, `/market`, `/news`, `/listing`, `/trading`, `/derivatives`
 - `/copilot`, `/rs`, `/admin`, `/chart-data`
+- `/apps-script`: read-only flat-JSON endpoints for Google Apps Script / Sheets consumption; require an `X-API-Key` header matching `VNIBB_APPS_SCRIPT_KEY`.
 - Additional aliases: `/compare` (analysis alias), market-news alias routes under `/market`, websocket and export routes mounted without an extra prefix.
 
 ## Frontend-Consumed Endpoints (Current)

@@ -1,6 +1,6 @@
 # Database Schema
 
-**Persistence:** fully self-hosted on n6v (Tailscale `100.72.199.91`, private network only — no cloud database)
+**Persistence:** fully self-hosted on n6v (Tailscale `<n6v-tailscale-ip>`, private network only — no cloud database)
 **Physical stores:** PostgreSQL app model (28 tables, via self-hosted Supabase) + MongoDB `vnibb-market` corpus + Redis cache
 **Total Collections:** 29 (PostgreSQL/app model) + Mongo `vnibb-market` market corpus
 **Active Alembic revision:** `b6c7d8e9f012` (2026-07-05 — adds `prediction_market_intraday_snapshots` for Phase 8 alerts/history endpoints)
@@ -940,8 +940,8 @@ Many-to-many relationships requiring junction tables:
 
 ## Physical Topology (n6v)
 
-All durable stores run self-hosted on the n6v host (`desktop-8o94n6v`, Tailscale
-`100.72.199.91`). **No cloud database is in use.** The OCI backend reaches these
+All durable stores run self-hosted on the n6v host (`<n6v-host>`, Tailscale
+`<n6v-tailscale-ip>`). **No cloud database is in use.** The OCI backend reaches these
 over Tailscale on the private network; none are publicly exposed.
 
 | Store | Container | Port | Purpose |
@@ -969,7 +969,7 @@ the n6v self-hosted Supabase instance.
 
 ## MongoDB Market Corpus (n6v)
 
-Physical store: MongoDB database `vnibb-market` on n6v (`100.72.199.91:27017`).
+Physical store: MongoDB database `vnibb-market` on n6v (`<n6v-tailscale-ip>:27017`).
 This is the canonical analytical/market corpus, separate from the Appwrite app
 model above. Runtime market reads (`/equity/historical`, quant endpoints, MCP
 `get_eod_price_history`) prefer this store.
@@ -1121,7 +1121,7 @@ flowchart LR
         Scrapers[News scrapers]
     end
 
-    subgraph N6V["n6v self-hosted stack (Tailscale 100.72.199.91, private)"]
+    subgraph N6V["n6v self-hosted stack (Tailscale <n6v-tailscale-ip>, private)"]
         Mongo[(MongoDB vnibb-market<br/>market_prices_eod<br/>premium records<br/>:27017)]
         PG[(PostgreSQL app model<br/>self-hosted Supabase<br/>pooler :15433 / :16543)]
         Redis[(Redis cache/locks<br/>:6379)]
@@ -1164,14 +1164,14 @@ flowchart LR
 
 ```bash
 # On OCI host — runs inside vnibb-api container which holds DB credentials
-ssh -i ~/.ssh/oci-vnibb ubuntu@129.150.58.64 \
+ssh -i ~/.ssh/oci-vnibb ubuntu@<oci-public-ip> \
   "docker exec vnibb-api alembic -c /app/alembic.ini upgrade head"
 ```
 
 To verify after running:
 
 ```bash
-ssh -i ~/.ssh/oci-vnibb ubuntu@129.150.58.64 \
+ssh -i ~/.ssh/oci-vnibb ubuntu@<oci-public-ip> \
   "docker exec vnibb-api alembic -c /app/alembic.ini current"
 ```
 

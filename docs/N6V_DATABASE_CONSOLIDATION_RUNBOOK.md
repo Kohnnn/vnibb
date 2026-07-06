@@ -1,12 +1,12 @@
 # N6V Database Consolidation Runbook
 
-Target host: `desktop-8o94n6v` / `100.72.199.91`.
+Target host: `<n6v-host>` / `<n6v-tailscale-ip>`.
 
 Goal: consolidate VNIBB runtime data onto the n6v Docker stack: MongoDB for vnstock/premium corpus, PostgreSQL for application relational data, Redis for cache/queues. This supersedes the older split plan that kept Supabase as production SQL/auth.
 
 ## Current Facts
 
-- n6v MongoDB is reachable over Tailscale on `100.72.199.91:27017`.
+- n6v MongoDB is reachable over Tailscale on `<n6v-tailscale-ip>:27017`.
 - Mongo corpus is richer and fresher than Supabase for market data: `market_prices_eod` has 4.8M+ rows and dates through `2026-06-15`.
 - `market_vnstock_premium_records` contains clean `finance.ratio` fields including `pe`, `pb`, `ps`, `roe`, `roa`.
 - Docker control on n6v requires an interactive elevated PowerShell session on the n6v host. Do not try to run n6v Docker mutation commands from a remote non-elevated shell.
@@ -37,7 +37,7 @@ python -m uvicorn vnibb.api.main:app --reload --app-dir apps/api
 
 ## On-Host N6V Provisioning
 
-Run these only in an elevated PowerShell session on `desktop-8o94n6v`.
+Run these only in an elevated PowerShell session on `<n6v-host>`.
 
 1. Verify Docker is available:
 
@@ -98,10 +98,10 @@ docker compose --env-file .env -f supabase\docker-compose.yml ps
 Expected endpoints after startup:
 
 ```env
-SUPABASE_URL=http://100.72.199.91:18000
-SUPABASE_STUDIO=http://100.72.199.91:18000
-SUPABASE_DB_POOLER_SESSION=postgres://postgres.vnibb:<password>@100.72.199.91:15433/postgres
-SUPABASE_DB_POOLER_TRANSACTION=postgres://postgres.vnibb:<password>@100.72.199.91:16543/postgres
+SUPABASE_URL=http://<n6v-tailscale-ip>:18000
+SUPABASE_STUDIO=http://<n6v-tailscale-ip>:18000
+SUPABASE_DB_POOLER_SESSION=postgres://postgres.vnibb:<password>@<n6v-tailscale-ip>:15433/postgres
+SUPABASE_DB_POOLER_TRANSACTION=postgres://postgres.vnibb:<password>@<n6v-tailscale-ip>:16543/postgres
 ```
 
 Hosted Supabase public data was copied into self-hosted Supabase using `apps/api/scripts/migrate_supabase_public_to_n6v.py` because hosted Supabase runs Postgres 17 and local/n6v `pg_dump` tooling was unavailable over SSH. The verified migration state is 34/34 `public` tables with matching row counts, including `stock_prices` at `1,731,826` rows and `screener_snapshots` at `169,586` rows.
@@ -111,16 +111,16 @@ Self-hosted REST verification:
 ```powershell
 $anon = '<ANON_KEY from C:\vnibb-stack\.env>'
 Invoke-WebRequest `
-  -Uri 'http://100.72.199.91:18000/rest/v1/stocks?select=symbol&limit=3' `
+  -Uri 'http://<n6v-tailscale-ip>:18000/rest/v1/stocks?select=symbol&limit=3' `
   -Headers @{ apikey = $anon; Authorization = "Bearer $anon" }
 ```
 
 4. Confirm ports from this machine after services are up:
 
 ```powershell
-Test-NetConnection 100.72.199.91 -Port 15432
-Test-NetConnection 100.72.199.91 -Port 6379
-Test-NetConnection 100.72.199.91 -Port 27017
+Test-NetConnection <n6v-tailscale-ip> -Port 15432
+Test-NetConnection <n6v-tailscale-ip> -Port 6379
+Test-NetConnection <n6v-tailscale-ip> -Port 27017
 ```
 
 ## Supabase Postgres Export And Restore
@@ -157,16 +157,16 @@ where sync_type = 'full_market' and status = 'running';
 Set deployment secrets after restore validation:
 
 ```powershell
-DATABASE_URL=postgresql+asyncpg://vnibb:<password>@100.72.199.91:15432/vnibb
-MONGODB_URL=mongodb://<user>:<password>@100.72.199.91:27017/<db>?authSource=admin
-REDIS_URL=redis://100.72.199.91:6379/0
+DATABASE_URL=postgresql+asyncpg://vnibb:<password>@<n6v-tailscale-ip>:15432/vnibb
+MONGODB_URL=mongodb://<user>:<password>@<n6v-tailscale-ip>:27017/<db>?authSource=admin
+REDIS_URL=redis://<n6v-tailscale-ip>:6379/0
 DATA_BACKEND=hybrid
 APPWRITE_WRITE_ENABLED=false
 ENABLE_AI_SENTIMENT_ANALYSIS=0
-SUPABASE_URL=http://100.72.199.91:18000
+SUPABASE_URL=http://<n6v-tailscale-ip>:18000
 SUPABASE_ANON_KEY=<ANON_KEY from C:\vnibb-stack\.env>
 SUPABASE_SERVICE_ROLE_KEY=<SERVICE_ROLE_KEY from C:\vnibb-stack\.env>
-NEXT_PUBLIC_SUPABASE_URL=http://100.72.199.91:18000
+NEXT_PUBLIC_SUPABASE_URL=http://<n6v-tailscale-ip>:18000
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<ANON_KEY from C:\vnibb-stack\.env>
 ```
 

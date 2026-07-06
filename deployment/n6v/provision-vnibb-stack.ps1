@@ -65,5 +65,5 @@ docker compose --env-file $envPath -f $composePath up -d
 docker ps --filter "name=vnibb-"
 
 Write-Host "VNIBB n6v stack provisioned in $WorkDir"
-Write-Host "DATABASE_URL=postgresql+asyncpg://vnibb:<password>@100.72.199.91:$PostgresPort/vnibb"
-Write-Host "REDIS_URL=redis://100.72.199.91:$RedisPort/0"
+Write-Host "DATABASE_URL=postgresql+asyncpg://vnibb:<password>@<n6v-tailscale-ip>:$PostgresPort/vnibb"
+Write-Host "REDIS_URL=redis://<n6v-tailscale-ip>:$RedisPort/0"

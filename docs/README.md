@@ -16,7 +16,7 @@
 
 Current source of truth:
 
-- VNIBB persistence is fully self-hosted on n6v (Tailscale `100.72.199.91`, private network only, no cloud database): MongoDB `vnibb-market` corpus (`:27017`), self-hosted Supabase Postgres app model (`:15433`/`:16543`), and Redis cache (`:6379`). Reachable from the OCI backend over Tailscale; portable to other infrastructure in the future.
+- VNIBB persistence is fully self-hosted on n6v (Tailscale `<n6v-tailscale-ip>`, private network only, no cloud database): MongoDB `vnibb-market` corpus (`:27017`), self-hosted Supabase Postgres app model (`:15433`/`:16543`), and Redis cache (`:6379`). Reachable from the OCI backend over Tailscale; portable to other infrastructure in the future.
 
 - `DEPLOYMENT_AND_OPERATIONS.md`: deployment profile, Oracle runtime guidance, and ops notes
 - `DATABASE_SCHEMA.md`: database stack schema and collection model

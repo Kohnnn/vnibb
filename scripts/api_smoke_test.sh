@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-BASE_URL="${VNIBB_API_BASE_URL:-https://213.35.101.237.sslip.io}"
+BASE_URL="${VNIBB_API_BASE_URL:-https://<oci-public-ip>.sslip.io}"
 API_BASE="${BASE_URL%/}/api/v1"
 
 SYMBOLS=(VNM FPT TCB HPG VCI SHS BSR HUG IPA)

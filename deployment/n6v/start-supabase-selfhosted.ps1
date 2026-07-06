@@ -20,7 +20,7 @@ docker compose --env-file .env -f supabase\docker-compose.yml up -d
 docker compose --env-file .env -f supabase\docker-compose.yml ps
 
 Write-Host ""
-Write-Host "Supabase URL: http://100.72.199.91:18000"
+Write-Host "Supabase URL: http://<n6v-tailscale-ip>:18000"
 Write-Host "Studio login: read DASHBOARD_USERNAME and DASHBOARD_PASSWORD from C:\vnibb-stack\.env"
-Write-Host "Postgres pooler session: 100.72.199.91:15433"
-Write-Host "Postgres pooler transaction: 100.72.199.91:16543"
+Write-Host "Postgres pooler session: <n6v-tailscale-ip>:15433"
+Write-Host "Postgres pooler transaction: <n6v-tailscale-ip>:16543"

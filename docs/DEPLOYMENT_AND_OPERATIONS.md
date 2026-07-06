@@ -45,7 +45,7 @@ VniAgent server context path
   -> apps/api
   -> VNIBB_MCP_URL
   -> vnibb-mcp
-  -> n6v self-hosted stack over Tailscale (100.72.199.91, private):
+  -> n6v self-hosted stack over Tailscale (<n6v-tailscale-ip>, private):
      - MongoDB vnibb-market :27017  (market corpus)
      - self-hosted Supabase Postgres :15433/:16543 (app/runtime state, auth)
      - Redis :6379 (cache/locks)

@@ -75,22 +75,22 @@ network (current model; public TLS via Caddy stays available and can become the
 primary path later):
 
 ```env
-MCP_PUBLIC_BIND=100.107.9.31
+MCP_PUBLIC_BIND=<oci-tailscale-ip>
 MCP_PUBLIC_PORT=8001
-VNIBB_MCP_ALLOWED_HOSTS=100.107.9.31:8001,100.107.9.31
-VNIBB_MCP_ALLOWED_ORIGINS=http://100.107.9.31:8001
+VNIBB_MCP_ALLOWED_HOSTS=<oci-tailscale-ip>:8001,<oci-tailscale-ip>
+VNIBB_MCP_ALLOWED_ORIGINS=http://<oci-tailscale-ip>:8001
 VNIBB_MCP_SHARED_BEARER_TOKEN=replace-with-long-random-value
 ```
 
-- `MCP_PUBLIC_BIND` publishes the raw port on the OCI private-network IP (`100.107.9.31`), not the public internet.
+- `MCP_PUBLIC_BIND` publishes the raw port on the OCI private-network IP (`<oci-tailscale-ip>`), not the public internet.
 - `VNIBB_MCP_ALLOWED_HOSTS` / `VNIBB_MCP_ALLOWED_ORIGINS` extend the MCP transport's DNS-rebinding allowlist so the private-network `Host`/`Origin` headers are accepted. Loopback stays allowed for the Caddy reverse proxy. Both accept a comma-separated list or a JSON array; when both are empty the SDK defaults are preserved.
 - Without the allowlist, direct private-network clients get `Invalid Host header` because the streamable-HTTP transport only accepts `localhost`/`127.0.0.1` by default.
 
 Direct-connect client config from another tailnet machine:
 
-- endpoint: `http://100.107.9.31:8001/mcp`
+- endpoint: `http://<oci-tailscale-ip>:8001/mcp`
 - header: `Authorization: Bearer <VNIBB_MCP_SHARED_BEARER_TOKEN>`
-- health (no auth): `http://100.107.9.31:8001/health`
+- health (no auth): `http://<oci-tailscale-ip>:8001/health`
 
 Keep the database stack private over the private network. Only the MCP read surface is published; the database is never exposed publicly.
 
@@ -147,7 +147,7 @@ What success looks like:
 Quick database-stack-tool checks over the private-network bind (replace token):
 
 ```bash
-TOKEN=...; IP=100.107.9.31
+TOKEN=...; IP=<oci-tailscale-ip>
 curl -s -X POST http://$IP:8001/mcp \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \

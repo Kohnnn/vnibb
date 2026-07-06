@@ -270,13 +270,13 @@ Private-network model (current):
 
 ```env
 # Publish the raw MCP port on the private-network IP (not the public internet)
-MCP_PUBLIC_BIND=100.107.9.31
+MCP_PUBLIC_BIND=<oci-tailscale-ip>
 MCP_PUBLIC_PORT=8001
 
 # Required so the streamable-HTTP transport accepts the private-network Host/Origin
 # headers (loopback is always kept for the Caddy reverse proxy).
-VNIBB_MCP_ALLOWED_HOSTS=100.107.9.31:8001,100.107.9.31
-VNIBB_MCP_ALLOWED_ORIGINS=http://100.107.9.31:8001
+VNIBB_MCP_ALLOWED_HOSTS=<oci-tailscale-ip>:8001,<oci-tailscale-ip>
+VNIBB_MCP_ALLOWED_ORIGINS=http://<oci-tailscale-ip>:8001
 
 # Enforce auth on the privately exposed port
 VNIBB_MCP_SHARED_BEARER_TOKEN=replace-with-long-random-value
@@ -292,9 +292,9 @@ defaults are preserved unchanged.
 
 Direct-connect client config (e.g. another private-network machine or an IDE MCP client):
 
-- endpoint: `http://100.107.9.31:8001/mcp`
+- endpoint: `http://<oci-tailscale-ip>:8001/mcp`
 - header: `Authorization: Bearer <VNIBB_MCP_SHARED_BEARER_TOKEN>`
-- health (no auth): `http://100.107.9.31:8001/health`
+- health (no auth): `http://<oci-tailscale-ip>:8001/health`
 
 Public TLS model (available, can become primary later):
 

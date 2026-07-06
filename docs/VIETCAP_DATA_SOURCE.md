@@ -2,7 +2,7 @@
 
 Status: active (added 2026-06-11)
 Owner: market-data pipeline
-Canonical store: MongoDB `vnibb-market` on n6v (`100.72.199.91:27017`)
+Canonical store: MongoDB `vnibb-market` on n6v (`<n6v-tailscale-ip>:27017`)
 
 ## Why Vietcap
 
