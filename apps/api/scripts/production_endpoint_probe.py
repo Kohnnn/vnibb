@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
-DEFAULT_RAW_BASE = "https://213.35.101.237.sslip.io"
+DEFAULT_RAW_BASE = "https://<oci-public-ip>.sslip.io"
 DEFAULT_SYMBOLS = "VNM,FPT,TCB,HPG,SHS,BSR,HUG,IPA"
 DEFAULT_TIMEOUT = 20.0
 EQUITY_ENDPOINTS = (
