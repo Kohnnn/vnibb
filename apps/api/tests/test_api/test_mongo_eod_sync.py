@@ -270,3 +270,36 @@ def test_freshest_snapshot_date_picks_max():
     ]
     assert _freshest_snapshot_date(rows) == date(2026, 6, 5)
     assert _freshest_snapshot_date([]) is None
+
+
+# ---------------------------------------------------------------------------
+# _dedup_eod_rows source-preference dedup
+# ---------------------------------------------------------------------------
+def test_dedup_eod_rows_prefers_vietcap_and_sorts():
+    from vnibb.services.mongo_market_data_service import _dedup_eod_rows
+
+    rows = [
+        # Duplicate day: vnstock-data first, vietcap second -> vietcap wins
+        {"tradeDate": datetime(2026, 6, 10), "close": 25.5, "source": "vnstock-data"},
+        {"tradeDate": datetime(2026, 6, 10), "close": 25500.0, "source": "vietcap"},
+        # Out-of-order unique day, unknown source kept
+        {"tradeDate": datetime(2026, 6, 9), "close": 25000.0, "source": "other"},
+        # Missing source treated as lowest priority but kept when alone
+        {"tradeDate": datetime(2026, 6, 11), "close": 26000.0},
+    ]
+    deduped = _dedup_eod_rows(rows)
+    assert [r["tradeDate"].day for r in deduped] == [9, 10, 11]
+    assert deduped[1]["close"] == 25500.0  # vietcap bar won the duplicate day
+    assert all("source" not in r for r in deduped)  # source stripped from output
+
+
+def test_dedup_eod_rows_duplicate_same_rank_keeps_first():
+    from vnibb.services.mongo_market_data_service import _dedup_eod_rows
+
+    rows = [
+        {"tradeDate": datetime(2026, 6, 10), "close": 1.0, "source": "vnstock-data"},
+        {"tradeDate": datetime(2026, 6, 10), "close": 2.0, "source": "vnstock-data"},
+    ]
+    deduped = _dedup_eod_rows(rows)
+    assert len(deduped) == 1
+    assert deduped[0]["close"] == 1.0

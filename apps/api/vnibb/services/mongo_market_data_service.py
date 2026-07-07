@@ -13,6 +13,32 @@ from vnibb.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+_EOD_SOURCE_RANK = {"vietcap": 0, "vnstock-data": 1}
+
+
+def _dedup_eod_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse to one bar per trade date, preferring the Vietcap source.
+
+    The corpus holds overlapping bars from ``vietcap`` (raw VND) and the
+    ``vnstock-data`` daily sync for the same (symbol, tradeDate); returning
+    both doubles chart points and mixes price units.
+    """
+
+    best: dict[Any, tuple[int, dict[str, Any]]] = {}
+    for row in rows:
+        trade_date = row.get("tradeDate")
+        key = trade_date.date() if isinstance(trade_date, datetime) else trade_date
+        rank = _EOD_SOURCE_RANK.get(str(row.get("source") or ""), 2)
+        current = best.get(key)
+        if current is None or rank < current[0]:
+            best[key] = (rank, row)
+    deduped = [row for _, row in best.values()]
+    for row in deduped:
+        row.pop("source", None)
+    deduped.sort(key=lambda r: r.get("tradeDate") or datetime.min)
+    return deduped
+
+
 class MongoMarketDataService:
     """Lazy MongoDB accessor for the canonical `vnibb-market` corpus.
 
@@ -293,12 +319,13 @@ class MongoMarketDataService:
                         "close": 1,
                         "volume": 1,
                         "value": 1,
+                        "source": 1,
                     },
                 )
                 .sort("tradeDate", 1)
                 .limit(limit)
             )
-            return list(cursor)
+            return _dedup_eod_rows(list(cursor))
 
         try:
             return await asyncio.to_thread(_read)
@@ -341,12 +368,13 @@ class MongoMarketDataService:
                         "value": 1,
                         "adjClose": 1,
                         "adj_close": 1,
+                        "source": 1,
                     },
                 )
                 .sort("tradeDate", 1)
                 .limit(limit)
             )
-            return list(cursor)
+            return _dedup_eod_rows(list(cursor))
 
         try:
             return await asyncio.to_thread(_read)
@@ -396,6 +424,7 @@ class MongoMarketDataService:
                     "low": 1,
                     "volume": 1,
                     "value": 1,
+                    "source": 1,
                 },
             ).sort("tradeDate", 1)
 
@@ -407,7 +436,8 @@ class MongoMarketDataService:
                 by_symbol.setdefault(sym, []).append(doc)
 
             results: list[dict[str, Any]] = []
-            for sym, bars in by_symbol.items():
+            for sym, raw_bars in by_symbol.items():
+                bars = _dedup_eod_rows(raw_bars)
                 if not bars:
                     continue
                 latest = bars[-1]
