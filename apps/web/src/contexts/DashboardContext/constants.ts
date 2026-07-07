@@ -4,7 +4,7 @@
 export const STORAGE_KEY = 'vnibb_dashboards';
 export const FOLDERS_KEY = 'vnibb_folders';
 export const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
-export const CURRENT_STORAGE_VERSION = 'v73';
+export const CURRENT_STORAGE_VERSION = 'v74';
 export const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
 export const CURRENT_MIGRATION_VERSION = 22;
 export const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';

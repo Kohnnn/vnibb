@@ -423,20 +423,23 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
 
         case 'APPLY_SYSTEM_TEMPLATES': {
             const systemTemplates = action.payload;
+            const existingIds = new Set(state.dashboards.map((d) => d.id));
+            const merged = state.dashboards.map((d) => {
+                const template = systemTemplates.find((t) => t.id === d.id);
+                if (!template) return d;
+
+                return {
+                    ...d,
+                    tabs: template.tabs,
+                    syncGroups: template.syncGroups,
+                    globalMarketsSymbol: template.globalMarketsSymbol,
+                    updatedAt: new Date().toISOString(),
+                };
+            });
+            const appended = systemTemplates.filter((t) => !existingIds.has(t.id));
             return {
                 ...state,
-                dashboards: state.dashboards.map((d) => {
-                    const template = systemTemplates.find((t) => t.id === d.id);
-                    if (!template) return d;
-
-                    return {
-                        ...d,
-                        tabs: template.tabs,
-                        syncGroups: template.syncGroups,
-                        globalMarketsSymbol: template.globalMarketsSymbol,
-                        updatedAt: new Date().toISOString(),
-                    };
-                }),
+                dashboards: appended.length > 0 ? [...merged, ...appended] : merged,
             };
         }
 

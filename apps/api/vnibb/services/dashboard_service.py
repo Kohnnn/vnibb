@@ -54,61 +54,60 @@ class DashboardService:
         expiry = datetime.now() + timedelta(seconds=ttl)
         self._cache[key] = (data, expiry)
 
-    # Static fallback data for instant response
-    _FALLBACK_INDICES = [
-        MarketIndexData(index_name="VN-INDEX", current_value=1250.00, change=0.0, change_pct=0.0),
-        MarketIndexData(index_name="VN30", current_value=1280.00, change=0.0, change_pct=0.0),
-        MarketIndexData(index_name="HNX", current_value=230.00, change=0.0, change_pct=0.0),
-        MarketIndexData(index_name="UPCOM", current_value=92.00, change=0.0, change_pct=0.0),
-    ]
+    def _last_known(self, key: str) -> List[Any]:
+        """Last-cached value (even if expired), else empty; never fabricated."""
+        if key in self._cache:
+            return self._cache[key][0]
+        return []
 
     async def get_market_overview(self) -> List[MarketIndexData]:
         """
         Get current market indices with caching.
-        Returns cached/fallback data immediately, fetches fresh data with timeout.
+
+        Serves fresh cache immediately. Otherwise acquires a short-lived lock (to
+        avoid a fetch stampede) and fetches live data with a 10s budget. On lock
+        contention or fetch failure it degrades to the last-known value, never to
+        fabricated index numbers.
         """
         key = "market_overview"
-        
+
         # Return cached data immediately if available
         cached_data = self._get_cached(key)
         if cached_data:
             return cached_data
-        
-        # Try to acquire lock without blocking
+
+        # Acquire the fetch lock quickly. The short timeout guards ONLY lock
+        # acquisition -- not the fetch below -- so a slow fetch can still complete
+        # and populate the cache. If another request already holds the lock, serve
+        # the last-known value rather than piling up behind it.
+        lock = self._locks["market_overview"]
         try:
-            # Use wait_for with short timeout to prevent blocking
-            async with asyncio.timeout(0.1):
-                async with self._locks["market_overview"]:
-                    # Double-check cache after acquiring lock
-                    cached_data = self._get_cached(key)
-                    if cached_data:
-                        return cached_data
-                    
-                    try:
-                        # Fetch with 10 second timeout
-                        indices = await asyncio.wait_for(
-                            VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
-                            timeout=10.0
-                        )
-                        if indices:
-                            self._set_cached(key, indices, self._market_ttl)
-                            return indices
-                    except asyncio.TimeoutError:
-                        logger.warning("Market overview fetch timed out after 10s")
-                    except Exception as e:
-                        logger.error(f"Failed to fetch market overview: {e}")
-                    
-                    # Return expired cache or fallback
-                    if key in self._cache:
-                        return self._cache[key][0]
-                    return self._FALLBACK_INDICES
+            await asyncio.wait_for(lock.acquire(), timeout=0.1)
         except asyncio.TimeoutError:
-            # Lock acquisition timed out - another request is fetching
-            # Return cached or fallback data instead of blocking
-            logger.info("Market overview lock busy, returning cached/fallback data")
-            if key in self._cache:
-                return self._cache[key][0]
-            return self._FALLBACK_INDICES
+            logger.info("Market overview lock busy, returning last-known data")
+            return self._last_known(key)
+
+        try:
+            cached_data = self._get_cached(key)
+            if cached_data:
+                return cached_data
+
+            try:
+                indices = await asyncio.wait_for(
+                    VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
+                    timeout=10.0,
+                )
+                if indices:
+                    self._set_cached(key, indices, self._market_ttl)
+                    return indices
+            except asyncio.TimeoutError:
+                logger.warning("Market overview fetch timed out after 10s")
+            except Exception as e:
+                logger.error(f"Failed to fetch market overview: {e}")
+
+            return self._last_known(key)
+        finally:
+            lock.release()
 
 
     async def get_top_movers(

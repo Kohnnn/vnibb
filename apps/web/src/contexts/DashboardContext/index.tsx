@@ -40,7 +40,7 @@ export * from './hooks';
 const STORAGE_KEY = 'vnibb_dashboards';
 const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
-const CURRENT_STORAGE_VERSION = 'v73';
+const CURRENT_STORAGE_VERSION = 'v74';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
 const CURRENT_MIGRATION_VERSION = 22;
 const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';
@@ -163,6 +163,8 @@ export {
     shouldRefreshGlobalMarketsLayout,
 } from './systemDashboards';
 
+import { createGlobalMarketsDashboard } from './systemDashboards';
+
 // Import migration functions locally for use in this file
 import {
     migrateEmptyTabs,
@@ -283,6 +285,7 @@ function createSystemDashboards(): Dashboard[] {
             createdAt: now,
             updatedAt: now,
         },
+        { ...createGlobalMarketsDashboard(), folderId: INITIAL_FOLDER_ID, order: 3 },
     ];
 }
 
