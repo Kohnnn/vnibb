@@ -258,6 +258,11 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="Write to MongoDB. Default is dry-run.")
     parser.add_argument("--ensure-indexes", action="store_true")
     parser.add_argument("--limit", type=int, default=0, help="Cap symbol count (0 = no cap)")
+    parser.add_argument(
+        "--skip-fresh-through",
+        default="",
+        help="YYYY-MM-DD: skip symbols whose vietcap EOD already reaches this date, before any HTTP call (resumable trickle)",
+    )
     args = parser.parse_args()
 
     selected = {d.strip().lower() for d in args.datasets.split(",") if d.strip()}
@@ -309,6 +314,21 @@ def main() -> int:
 
     universe = resolve_universe(client, args.symbols)
     symbols = sorted(universe)
+
+    skipped_fresh = 0
+    if args.skip_fresh_through:
+        cutoff = datetime.strptime(args.skip_fresh_through, "%Y-%m-%d")
+        fresh: set[str] = set()
+        if db is not None:
+            for doc in db["market_prices_eod"].aggregate([
+                {"$match": {"source": "vietcap", "tradeDate": {"$gte": cutoff}}},
+                {"$group": {"_id": "$symbol"}},
+            ]):
+                fresh.add(str(doc["_id"]).upper())
+        before = len(symbols)
+        symbols = [s for s in symbols if s.upper() not in fresh]
+        skipped_fresh = before - len(symbols)
+
     if args.limit and args.limit > 0:
         symbols = symbols[: args.limit]
 
@@ -317,6 +337,7 @@ def main() -> int:
         "database": os.getenv("MONGODB_DATABASE", "vnibb-market"),
         "datasets": sorted(selected),
         "symbol_count": len(symbols),
+        "skipped_fresh": skipped_fresh,
         "reconcile": args.reconcile,
     }, indent=2))
 
