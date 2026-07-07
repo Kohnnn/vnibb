@@ -31,7 +31,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[4]  # .../vnibb
+_SELF = Path(__file__).resolve()
+# In-repo this file is .../vnibb/apps/api/scripts/vietcap/backfill_vietcap.py
+# (parents[4] == vnibb); in the container image it lives at /app/scripts/vietcap/
+# with no such depth, so guard the index to avoid IndexError at import time.
+REPO_ROOT = _SELF.parents[4] if len(_SELF.parents) > 4 else _SELF.parent
 API_ROOT = REPO_ROOT / "apps" / "api"
 WORKSPACE_ROOT = REPO_ROOT.parent  # .../VNIBB (holds the canonical .env)
 
