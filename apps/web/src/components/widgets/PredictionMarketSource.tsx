@@ -16,6 +16,7 @@ import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-
 import { API_BASE_URL } from '@/lib/api';
 import { CategoryPills, ProbabilityBar, SearchBar, SortButton, type SortDirection } from './prediction-market-ui';
 import { PredictionMarketContextMenu } from './PredictionMarketContextMenu';
+import { PredictionMarketSourceHealthStrip } from './PredictionMarketSourceHealthStrip';
 
 export type PredictionMarketSource = 'polymarket' | 'kalshi' | 'predictit' | 'limitless' | 'manifold';
 
@@ -302,11 +303,14 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
     }
     if (state.payload.markets.length === 0) {
         return (
-            <WidgetEmpty
-                message={emptyMessage ?? `No ${title} markets available`}
-                detail={`The database has no active ${title.toLowerCase()} markets yet.`}
-                icon={props.emptyIcon ?? <BarChart3 size={18} />}
-            />
+            <div className="flex h-full flex-col gap-3 p-1">
+                <PredictionMarketSourceHealthStrip />
+                <WidgetEmpty
+                    message={emptyMessage ?? `No ${title} markets available`}
+                    detail={`The database has no active ${title.toLowerCase()} markets yet.`}
+                    icon={props.emptyIcon ?? <BarChart3 size={18} />}
+                />
+            </div>
         );
     }
     return (
@@ -331,6 +335,7 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
                             : 'Unknown'}
                     </span>
                 </div>
+                <PredictionMarketSourceHealthStrip />
                 {(showSearch || showFilters) && (
                     <div className="flex flex-wrap items-center gap-2">
                         {showSearch && (

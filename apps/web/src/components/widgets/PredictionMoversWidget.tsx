@@ -25,7 +25,7 @@ type MoverRow = {
     readonly question: string;
     readonly category: string;
     readonly yesPrice: number;
-    readonly previousYesPrice: number;
+    readonly previousYesPrice: number | null;
     readonly absoluteMovement: number;
     readonly url: string | null;
 };
@@ -47,6 +47,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function parseNumber(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
 function parseMovers(value: unknown): { movers: MoverRow[]; windowHours: number } {
     if (!isRecord(value)) throw new Error('Invalid /movers response');
     const list: unknown[] = Array.isArray(value.movers)
@@ -57,6 +61,8 @@ function parseMovers(value: unknown): { movers: MoverRow[]; windowHours: number 
     const movers: MoverRow[] = [];
     for (const row of list) {
         if (!isRecord(row) || typeof row.question !== 'string') continue;
+        const yesPrice = parseNumber(row.yes_price) ?? parseNumber(row.yesPrice) ?? 0;
+        const previousYesPrice = parseNumber(row.previous_yes_price) ?? parseNumber(row.previousYesPrice);
         movers.push({
             source: typeof row.source === 'string' ? row.source : 'unknown',
             sourceId:
@@ -67,25 +73,18 @@ function parseMovers(value: unknown): { movers: MoverRow[]; windowHours: number 
                         : row.question,
             question: row.question,
             category: typeof row.category === 'string' ? row.category : 'general',
-            yesPrice: typeof row.yes_price === 'number' ? row.yes_price : (typeof row.yesPrice === 'number' ? row.yesPrice : 0),
-            previousYesPrice:
-                typeof row.previous_yes_price === 'number'
-                    ? row.previous_yes_price
-                    : typeof row.previousYesPrice === 'number'
-                        ? row.previousYesPrice
-                        : 0,
+            yesPrice,
+            previousYesPrice,
             absoluteMovement:
-                typeof row.absolute_movement === 'number'
-                    ? row.absolute_movement
-                    : typeof row.absoluteMovement === 'number'
-                        ? row.absoluteMovement
-                        : 0,
+                parseNumber(row.absolute_movement) ??
+                parseNumber(row.absoluteMovement) ??
+                (previousYesPrice === null ? 0 : yesPrice - previousYesPrice),
             url: typeof row.url === 'string' ? row.url : null,
         });
     }
     return {
         movers,
-        windowHours: typeof value.window_hours === 'number' ? value.window_hours : 24,
+        windowHours: parseNumber(value.window_hours) ?? parseNumber(value.windowHours) ?? 24,
     };
 }
 
@@ -213,8 +212,8 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
             )}
             {state.movers.length === 0 ? (
                 <WidgetEmpty
-                    message="No probability movers"
-                    detail={`The snapshot history is empty for the last ${state.windowHours}h. The nightly snapshot job may need to run.`}
+                    message="No probability moves in selected window"
+                    detail={`No YES probability moved during the last ${state.windowHours}h.`}
                     icon={<TrendingUp size={18} />}
                 />
             ) : (
@@ -256,15 +255,24 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
                                             {row.question}
                                         </span>
                                     </div>
-                                    <div
-                                        className={
-                                            row.absoluteMovement >= 0
-                                                ? 'rounded-md px-2 py-1 text-xs text-emerald-400'
-                                                : 'rounded-md px-2 py-1 text-xs text-red-400'
-                                        }
-                                    >
-                                        {row.absoluteMovement >= 0 ? '+' : ''}
-                                        {(row.absoluteMovement * 100).toFixed(1)}pp
+                                    <div className="flex flex-col items-end gap-0.5">
+                                        <div
+                                            className={
+                                                row.absoluteMovement >= 0
+                                                    ? 'rounded-md px-2 py-1 text-xs text-emerald-400'
+                                                    : 'rounded-md px-2 py-1 text-xs text-red-400'
+                                            }
+                                        >
+                                            {formatMovement(row.absoluteMovement)}
+                                        </div>
+                                        <div className="text-[10px] text-[var(--text-muted)]">
+                                            YES {formatProbability(row.yesPrice)}
+                                        </div>
+                                        {row.previousYesPrice !== null && (
+                                            <div className="text-[10px] text-[var(--text-muted)]">
+                                                Prev {formatProbability(row.previousYesPrice)}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <ProbabilityBar
@@ -287,4 +295,12 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
             />
         </div>
     );
+}
+
+function formatProbability(value: number): string {
+    return `${Math.round(value * 100)}%`;
+}
+
+function formatMovement(value: number): string {
+    return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}pp`;
 }

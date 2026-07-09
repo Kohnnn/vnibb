@@ -24,6 +24,12 @@ class JsonTestResponse {
 
 Object.defineProperty(globalThis, 'Response', { value: JsonTestResponse, configurable: true });
 
+const makeResponse = (body: unknown, init?: ResponseInit): Response =>
+    new Response(JSON.stringify(body), {
+        status: 200,
+        ...init,
+    });
+
 const originalFetch = global.fetch;
 
 beforeEach(() => {
@@ -36,9 +42,10 @@ afterEach(() => {
 });
 
 describe('KalshiWidget', () => {
-    it('renders rows when the API returns active Kalshi markets', async () => {
-        (global.fetch as jest.Mock).mockResolvedValueOnce(
-            new JsonTestResponse(JSON.stringify({
+    it('renders rows and source health chips from snake_case backend fields', async () => {
+        const fetchMock = jest
+            .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+            .mockResolvedValueOnce(makeResponse({
                 count: 1,
                 data: [
                     {
@@ -56,12 +63,93 @@ describe('KalshiWidget', () => {
                         updated_at: '2026-07-01T10:30:00Z',
                     },
                 ],
-            })),
-        );
+            }))
+            .mockResolvedValueOnce(makeResponse({
+                sources: [
+                    {
+                        source: 'polymarket',
+                        status: 'synced',
+                        market_count: 12,
+                        snapshot_count: 34,
+                        latest_snapshot_at: '2026-07-01T10:30:00Z',
+                        stale_after_seconds: 3600,
+                    },
+                    {
+                        source: 'kalshi',
+                        status: 'empty',
+                        market_count: 0,
+                        snapshot_count: 0,
+                        latest_snapshot_at: null,
+                        stale_after_seconds: 3600,
+                    },
+                    {
+                        source: 'predictit',
+                        status: 'stale',
+                        market_count: 3,
+                        snapshot_count: 7,
+                        latest_snapshot_at: '2026-06-30T10:30:00Z',
+                        stale_after_seconds: 3600,
+                    },
+                    {
+                        source: 'limitless',
+                        status: 'synced',
+                        market_count: 5,
+                        snapshot_count: 9,
+                        latest_snapshot_at: '2026-07-01T10:30:00Z',
+                        stale_after_seconds: 3600,
+                    },
+                    {
+                        source: 'manifold',
+                        status: 'synced',
+                        market_count: 8,
+                        snapshot_count: 11,
+                        latest_snapshot_at: '2026-07-01T10:30:00Z',
+                        stale_after_seconds: 3600,
+                    },
+                ],
+                stale_after_seconds: 3600,
+            }));
+        global.fetch = fetchMock;
 
         render(<KalshiWidget />);
 
         expect(await screen.findByText('Will the US enter recession in 2026?')).toBeInTheDocument();
+        expect(await screen.findByText('Polymarket')).toBeInTheDocument();
+        expect(screen.getByText('Kalshi')).toBeInTheDocument();
+        expect(screen.getByText('PredictIt')).toBeInTheDocument();
+        expect(screen.getByText('Limitless')).toBeInTheDocument();
+        expect(screen.getByText('Manifold')).toBeInTheDocument();
+        expect(screen.getByText('Awaiting data')).toBeInTheDocument();
+        expect(fetchMock).toHaveBeenCalledWith(
+            expect.stringContaining('/prediction-markets/source-health'),
+            { cache: 'no-store' },
+        );
+    });
+
+    it('keeps the source health strip visible when Kalshi has no markets', async () => {
+        const fetchMock = jest
+            .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+            .mockResolvedValueOnce(makeResponse({ count: 0, data: [] }))
+            .mockResolvedValueOnce(makeResponse({
+                sources: [
+                    {
+                        source: 'kalshi',
+                        status: 'empty',
+                        market_count: 0,
+                        snapshot_count: 0,
+                        latest_snapshot_at: null,
+                        stale_after_seconds: 3600,
+                    },
+                ],
+                stale_after_seconds: 3600,
+            }));
+        global.fetch = fetchMock;
+
+        render(<KalshiWidget />);
+
+        expect(await screen.findByText(/No Kalshi markets available/i)).toBeInTheDocument();
+        expect(await screen.findByText('Kalshi')).toBeInTheDocument();
+        expect(screen.getAllByText('Awaiting data').length).toBeGreaterThan(0);
     });
 });
 
@@ -103,14 +191,55 @@ describe('ElectionOddsWidget', () => {
 });
 
 describe('PredictionMoversWidget', () => {
-    it('renders a "No probability movers" message when the snapshot table is empty', async () => {
+    it('renders a probability-window empty state when no movers exist', async () => {
         (global.fetch as jest.Mock).mockResolvedValueOnce(
             new JsonTestResponse(JSON.stringify({ window_hours: 24, count: 0, movers: [] })),
         );
 
         render(<PredictionMoversWidget />);
 
-        expect(await screen.findByText(/no probability movers/i)).toBeInTheDocument();
+        expect(await screen.findByText(/no probability moves in selected window/i)).toBeInTheDocument();
+    });
+
+    it('renders current, previous, and signed probability-point deltas', async () => {
+        (global.fetch as jest.Mock).mockResolvedValueOnce(
+            new JsonTestResponse(JSON.stringify({
+                window_hours: 24,
+                count: 2,
+                movers: [
+                    {
+                        source: 'polymarket',
+                        source_id: 'fed-cut',
+                        question: 'Will the Fed cut rates in July?',
+                        category: 'economic',
+                        yes_price: 0.52,
+                        previous_yes_price: 0.40,
+                        absolute_movement: 0.12,
+                        url: 'https://example.com/fed-cut',
+                    },
+                    {
+                        source: 'kalshi',
+                        source_id: 'cpi-above',
+                        question: 'Will CPI be above 3.0%?',
+                        category: 'economic',
+                        yes_price: 0.31,
+                        previous_yes_price: 0.38,
+                        absolute_movement: -0.07,
+                        url: 'https://example.com/cpi-above',
+                    },
+                ],
+            })),
+        );
+
+        render(<PredictionMoversWidget />);
+
+        expect(await screen.findByText(/Fed cut rates/i)).toBeInTheDocument();
+        expect(screen.getByText('YES 52%')).toBeInTheDocument();
+        expect(screen.getByText('Prev 40%')).toBeInTheDocument();
+        expect(screen.getAllByText('+12.0pp').length).toBeGreaterThan(0);
+        expect(screen.getByText('YES 31%')).toBeInTheDocument();
+        expect(screen.getByText('Prev 38%')).toBeInTheDocument();
+        expect(screen.getAllByText('-7.0pp').length).toBeGreaterThan(0);
     });
 });
 
