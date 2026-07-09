@@ -29,12 +29,13 @@ tables being empty (endpoints return empty lists rather than 500) so
 deployments without the nightly job still render a meaningful empty state.
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Literal
+from datetime import UTC, datetime, timedelta
+from typing import Final, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import and_, cast, desc, func, or_, select, String as SA_String
+from sqlalchemy import String as SA_String
+from sqlalchemy import and_, cast, func, or_, select
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,6 +53,15 @@ from vnibb.services.prediction_market_estimator import (
 )
 
 router = APIRouter()
+
+KNOWN_PREDICTION_MARKET_SOURCES: Final[tuple[str, ...]] = (
+    "polymarket",
+    "kalshi",
+    "predictit",
+    "limitless",
+    "manifold",
+)
+PREDICTION_MARKET_STALE_AFTER_SECONDS: Final = 86_400
 
 
 class PredictionMarketRead(BaseModel):
@@ -104,6 +114,23 @@ class PredictionMarketMoversResponse(BaseModel):
     window_hours: int
     count: int
     movers: list[PredictionMarketMoverRow]
+
+
+class PredictionMarketSourceHealthRow(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    source: str
+    status: Literal["synced", "stale", "empty"]
+    market_count: int
+    snapshot_count: int
+    latest_snapshot_at: datetime | None
+    stale_after_seconds: int
+
+
+class PredictionMarketSourceHealthResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    sources: list[PredictionMarketSourceHealthRow]
 
 
 class PredictionMarketCalibrationResponse(BaseModel):
@@ -277,6 +304,73 @@ async def list_prediction_markets(
     return PredictionMarketsResponse(count=len(data), data=data)
 
 
+@router.get("/source-health", response_model=PredictionMarketSourceHealthResponse)
+async def get_prediction_market_source_health(
+    db: AsyncSession = Depends(get_db),
+) -> PredictionMarketSourceHealthResponse:
+    now = datetime.now(UTC)
+    empty_rows = [
+        PredictionMarketSourceHealthRow(
+            source=source,
+            status="empty",
+            market_count=0,
+            snapshot_count=0,
+            latest_snapshot_at=None,
+            stale_after_seconds=PREDICTION_MARKET_STALE_AFTER_SECONDS,
+        )
+        for source in KNOWN_PREDICTION_MARKET_SOURCES
+    ]
+    try:
+        market_counts = dict(
+            (
+                await db.execute(
+                    select(PredictionMarket.source, func.count(PredictionMarket.id)).group_by(
+                        PredictionMarket.source
+                    )
+                )
+            ).all()
+        )
+        snapshot_stats = {
+            source: (count, latest)
+            for source, count, latest in (
+                await db.execute(
+                    select(
+                        PredictionMarketSnapshot.source,
+                        func.count(PredictionMarketSnapshot.id),
+                        func.max(PredictionMarketSnapshot.captured_at),
+                    ).group_by(PredictionMarketSnapshot.source)
+                )
+            ).all()
+        }
+    except (OperationalError, ProgrammingError):
+        return PredictionMarketSourceHealthResponse(sources=empty_rows)
+
+    sources: list[PredictionMarketSourceHealthRow] = []
+    for source in KNOWN_PREDICTION_MARKET_SOURCES:
+        market_count = int(market_counts.get(source, 0))
+        snapshot_count, latest_snapshot_at = snapshot_stats.get(source, (0, None))
+        status: Literal["synced", "stale", "empty"] = "empty"
+        if market_count > 0 or snapshot_count > 0:
+            status = "stale"
+        if latest_snapshot_at is not None:
+            latest = latest_snapshot_at
+            if latest.tzinfo is None:
+                latest = latest.replace(tzinfo=UTC)
+            if now - latest <= timedelta(seconds=PREDICTION_MARKET_STALE_AFTER_SECONDS):
+                status = "synced"
+        sources.append(
+            PredictionMarketSourceHealthRow(
+                source=source,
+                status=status,
+                market_count=market_count,
+                snapshot_count=int(snapshot_count),
+                latest_snapshot_at=latest_snapshot_at,
+                stale_after_seconds=PREDICTION_MARKET_STALE_AFTER_SECONDS,
+            )
+        )
+    return PredictionMarketSourceHealthResponse(sources=sources)
+
+
 @router.get("/movers", response_model=PredictionMarketMoversResponse)
 async def list_prediction_market_movers(
     window: int = Query(default=24, ge=1, le=720),
@@ -296,7 +390,7 @@ async def list_prediction_market_movers(
     filters. ``relative_volume`` (float) is included so callers can rank
     by "mover with confirmation" (mover sign × log(1 + volume)).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff = now - timedelta(hours=window)
     excluded: list[str] = []
     if exclude_categories:
@@ -344,8 +438,8 @@ async def list_prediction_market_movers(
     for row in latest_rows:
         by_pair[(row.source, row.source_id)] = (row, None)
     for row in baseline_rows:
-        if (row.source, row.source_id) in by_pair:
-            pair = by_pair[(row.source, row.source_id)]
+        pair = by_pair.get((row.source, row.source_id))
+        if pair is not None and pair[1] is None:
             by_pair[(row.source, row.source_id)] = (pair[0], row)
 
     movers: list[PredictionMarketMoverRow] = []
@@ -482,7 +576,7 @@ def _topic_consensus(markets: list[PredictionMarket], topic: str) -> float | Non
         weights.append(max(weight, 1.0))
     if not prices:
         return None
-    return sum(p * w for p, w in zip(prices, weights)) / sum(weights)
+    return sum(p * w for p, w in zip(prices, weights, strict=True)) / sum(weights)
 
 
 @router.get("/spread", response_model=PredictionMarketSpreadResponse)
@@ -613,7 +707,7 @@ async def get_prediction_market_consensus(
         prices.append(yes_price)
         weights.append(max(weight, 1.0))
 
-    consensus = sum(p * w for p, w in zip(prices, weights)) / sum(weights) if prices else None
+    consensus = sum(p * w for p, w in zip(prices, weights, strict=True)) / sum(weights) if prices else None
     return PredictionMarketConsensusResponse(
         query=query,
         consensus_yes_price=consensus,
@@ -635,7 +729,7 @@ async def list_prediction_market_alerts(
     windows return meaningful data instead of always-empty. Tolerates the
     table being absent.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff = now - timedelta(hours=window)
 
     try:
@@ -737,7 +831,7 @@ async def get_prediction_market_history(
     empty ``points`` list so the drawer renders an empty state instead of
     500ing.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff = now - timedelta(days=days)
     try:
         rows = (
@@ -752,7 +846,7 @@ async def get_prediction_market_history(
             )
         ).scalars().all()
     except (OperationalError, ProgrammingError):
-        raise HTTPException(status_code=503, detail="snapshot table unavailable")
+        raise HTTPException(status_code=503, detail="snapshot table unavailable") from None
 
     question = rows[0].question if rows else ""
     points = [
