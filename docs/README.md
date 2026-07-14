@@ -5,6 +5,9 @@
 ## Core References
 
 - `API_REFERENCE.md`: API-level reference material for the backend surface
+- `APPS_SCRIPT_SHEETS.md`: Google Apps Script / Sheets read-only API integration
+- `BQ_CONNECTED_SHEETS_QUERIES.md`: externally managed BigQuery and Connected Sheets access, metadata, IAM, and query guidance
+- `GEMINI_BIGQUERY_SHEETS_SETUP.md`: Gemini-to-BigQuery Apps Script setup and execution guardrails
 - `DATABASE_SCHEMA.md`: database stack schema and collection model
 - `WIDGET_SYSTEM_REFERENCE.md`: canonical non-TradingView widget rules and behavior
 - `WIDGET_IMPROVEMENT_ROADMAP.md`: structured priorities, shipped work, and follow-up work
