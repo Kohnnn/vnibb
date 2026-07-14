@@ -76,6 +76,7 @@ function parseMovers(value: unknown): { movers: MoverRow[]; windowHours: number 
             yesPrice,
             previousYesPrice,
             absoluteMovement:
+                parseNumber(row.movement) ??
                 parseNumber(row.absolute_movement) ??
                 parseNumber(row.absoluteMovement) ??
                 (previousYesPrice === null ? 0 : yesPrice - previousYesPrice),
@@ -104,7 +105,7 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
         setState({ kind: 'loading' });
         const windowHours = WINDOW_HOURS[windowKey];
         const url = new URL(`${API_BASE_URL}/prediction-markets/movers`);
-        url.searchParams.set('window', String(windowHours));
+        url.searchParams.set('window_hours', String(windowHours));
         url.searchParams.set('limit', String(limit));
         url.searchParams.set('direction', direction);
         if (excludes.size > 0) {
@@ -147,12 +148,13 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
         <div className="flex h-full flex-col gap-3 p-1">
             {showFilters && (
                 <header className="flex flex-wrap items-center justify-between gap-2 border-b border-default pb-2 text-[11px] text-[var(--text-muted)]">
-                    <div className="flex items-center gap-1">
+                    <div role="group" aria-label="Movement window" className="flex items-center gap-1">
                         {(Object.entries(WINDOW_HOURS) as [WindowKey, number][]).map(([key, _hours]) => (
                             <button
                                 key={key}
                                 type="button"
                                 onClick={() => setWindowKey(key)}
+                                aria-pressed={windowKey === key}
                                 className={`rounded-full border px-2 py-0.5 text-[10px] ${
                                     windowKey === key
                                         ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
@@ -163,12 +165,13 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
                             </button>
                         ))}
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div role="group" aria-label="Movement direction" className="flex items-center gap-1">
                         {ALL_DIRECTIONS.map((value) => (
                             <button
                                 key={value}
                                 type="button"
                                 onClick={() => setDirection(value)}
+                                aria-pressed={direction === value}
                                 className={`rounded-full border px-2 py-0.5 text-[10px] ${
                                     direction === value
                                         ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
@@ -179,7 +182,7 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
                             </button>
                         ))}
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div role="group" aria-label="Excluded categories" className="flex items-center gap-1">
                         {allCategories.map((category) => {
                             const on = excludes.has(category);
                             return (
@@ -197,6 +200,7 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
                                             return next;
                                         });
                                     }}
+                                    aria-pressed={on}
                                     className={`rounded-full border px-2 py-0.5 text-[10px] ${
                                         on
                                             ? 'border-red-500/60 bg-red-500/10 text-red-400'

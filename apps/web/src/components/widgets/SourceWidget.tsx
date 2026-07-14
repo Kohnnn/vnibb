@@ -23,6 +23,7 @@ import {
 export interface SourceWidgetProps {
     readonly source: PredictionMarketSource;
     readonly title: string;
+    readonly config?: Record<string, unknown>;
 }
 
 type Selection = {
@@ -31,8 +32,16 @@ type Selection = {
     readonly question: string;
 };
 
-export function SourceWidget({ source, title }: SourceWidgetProps) {
+export function SourceWidget({ source, title, config }: SourceWidgetProps) {
     const [selection, setSelection] = useState<Selection | null>(null);
+    const category = config?.category;
+    const limit = config?.limit;
+    const categoryValue = category === 'all' || category === 'economic' || category === 'sports' || category === 'politics' || category === 'crypto' || category === 'general'
+        ? category
+        : undefined;
+    const limitValue = typeof limit === 'number' && Number.isInteger(limit) && limit > 0 && limit <= 100
+        ? limit
+        : undefined;
     const handleSelect = (row: PredictionMarketRow) => {
         setSelection({
             source: row.source,
@@ -45,6 +54,8 @@ export function SourceWidget({ source, title }: SourceWidgetProps) {
             <PredictionMarketSourceWidget
                 source={source}
                 title={title}
+                category={categoryValue}
+                limit={limitValue}
                 onSelect={handleSelect}
             />
             <PredictionMarketDrawer

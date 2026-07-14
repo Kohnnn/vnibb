@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { Copy, X } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
+import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { API_BASE_URL } from '@/lib/api';
 import { ConsensusStrip, Sparkline, ProbabilityBar } from './prediction-market-ui';
 
@@ -83,6 +84,8 @@ export function PredictionMarketDrawer(props: PredictionMarketDrawerProps) {
     const { source, sourceId, question, open, onClose } = props;
     const [state, setState] = useState<DrawerState>({ kind: 'idle' });
     const [copied, setCopied] = useState(false);
+    const panelRef = useDialogFocusTrap<HTMLDivElement>({ enabled: open, onClose });
+    const headingId = useId();
 
     const refresh = useCallback(async () => {
         if (!source || !sourceId) {
@@ -149,12 +152,15 @@ export function PredictionMarketDrawer(props: PredictionMarketDrawerProps) {
 
     return (
         <div
-            role="dialog"
-            aria-modal="true"
             className="fixed inset-0 z-50 flex items-end justify-end bg-black/40 p-3 sm:items-center sm:justify-center"
             onClick={onClose}
         >
             <div
+                ref={panelRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={headingId}
+                tabIndex={-1}
                 className="flex w-full max-w-md flex-col gap-3 rounded-lg border border-default bg-[var(--bg-secondary)] p-4 shadow-xl"
                 onClick={(event) => event.stopPropagation()}
             >
@@ -163,7 +169,7 @@ export function PredictionMarketDrawer(props: PredictionMarketDrawerProps) {
                         <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-300">
                             Deep dive · {source ?? 'unknown'}
                         </div>
-                        <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                        <h3 id={headingId} className="text-sm font-semibold text-[var(--text-primary)]">
                             {question ?? 'Prediction market'}
                         </h3>
                     </div>

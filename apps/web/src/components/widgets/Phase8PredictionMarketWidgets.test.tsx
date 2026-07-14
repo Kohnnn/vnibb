@@ -1,6 +1,6 @@
 /** Smoke tests for the Phase 8 prediction-market widgets. */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { TopMoversPulseWidget } from './TopMoversPulseWidget';
 import { SourceDriftWidget } from './SourceDriftWidget';
@@ -69,6 +69,12 @@ describe('TopMoversPulseWidget', () => {
             expect(screen.getByText(/Fed cut rates/i)).toBeInTheDocument();
             expect(screen.getByText(/CPI be above 3\.0%/i)).toBeInTheDocument();
         });
+        expect(global.fetch).toHaveBeenCalledWith(
+            expect.stringContaining('window_hours=24'),
+            { cache: 'no-store' },
+        );
+        expect(screen.getByRole('group', { name: 'Top movers window' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'true');
     });
 
     it('renders the empty state when /movers returns nothing', async () => {
@@ -78,6 +84,16 @@ describe('TopMoversPulseWidget', () => {
         render(<TopMoversPulseWidget />);
         await waitFor(() => {
             expect(screen.getByText(/no probability movers/i)).toBeInTheDocument();
+        });
+        (global.fetch as jest.Mock).mockResolvedValueOnce(
+            new JsonTestResponse(JSON.stringify({ window_hours: 168, count: 0, movers: [] })),
+        );
+        fireEvent.click(screen.getByRole('button', { name: '7d' }));
+        await waitFor(() => {
+            expect(global.fetch).toHaveBeenLastCalledWith(
+                expect.stringContaining('window_hours=168'),
+                { cache: 'no-store' },
+            );
         });
     });
 });
@@ -152,6 +168,12 @@ describe('PredictionAlertsWidget', () => {
             expect(screen.getByText(/Fed cut rates/i)).toBeInTheDocument();
             expect(screen.getByText(/5\.0pp/i)).toBeInTheDocument();
         });
+        expect(global.fetch).toHaveBeenCalledWith(
+            expect.stringContaining('window_hours=1'),
+            { cache: 'no-store' },
+        );
+        expect(screen.getByRole('group', { name: 'Alert window' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Last 1h' })).toHaveAttribute('aria-pressed', 'true');
     });
 
     it('renders the empty state when no alerts', async () => {

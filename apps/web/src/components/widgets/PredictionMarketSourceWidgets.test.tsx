@@ -1,5 +1,6 @@
 /** Snapshot-only smoke test for the new prediction-market family widgets. */
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 
 import { KalshiWidget } from './KalshiWidget';
@@ -32,6 +33,11 @@ const makeResponse = (body: unknown, init?: ResponseInit): Response =>
 
 const originalFetch = global.fetch;
 
+function renderWithQuery(ui: React.ReactElement) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
+
 beforeEach(() => {
     global.fetch = jest.fn();
 });
@@ -44,74 +50,40 @@ afterEach(() => {
 describe('KalshiWidget', () => {
     it('renders rows and source health chips from snake_case backend fields', async () => {
         const fetchMock = jest
-            .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
-            .mockResolvedValueOnce(makeResponse({
-                count: 1,
-                data: [
-                    {
-                        source: 'kalshi',
-                        source_id: 'KXRECE-26',
-                        question: 'Will the US enter recession in 2026?',
-                        category: 'economic',
-                        outcomes: ['Yes', 'No'],
-                        outcome_prices: [0.18, 0.82],
-                        volume: 15000,
-                        liquidity: 7000,
-                        end_date: '2026-12-31T00:00:00Z',
-                        url: 'https://kalshi.com/markets/KXRECE/KXRECE-26',
-                        active: true,
-                        updated_at: '2026-07-01T10:30:00Z',
-                    },
-                ],
-            }))
-            .mockResolvedValueOnce(makeResponse({
-                sources: [
-                    {
-                        source: 'polymarket',
-                        status: 'synced',
-                        market_count: 12,
-                        snapshot_count: 34,
-                        latest_snapshot_at: '2026-07-01T10:30:00Z',
-                        stale_after_seconds: 3600,
-                    },
-                    {
-                        source: 'kalshi',
-                        status: 'empty',
-                        market_count: 0,
-                        snapshot_count: 0,
-                        latest_snapshot_at: null,
-                        stale_after_seconds: 3600,
-                    },
-                    {
-                        source: 'predictit',
-                        status: 'stale',
-                        market_count: 3,
-                        snapshot_count: 7,
-                        latest_snapshot_at: '2026-06-30T10:30:00Z',
-                        stale_after_seconds: 3600,
-                    },
-                    {
-                        source: 'limitless',
-                        status: 'synced',
-                        market_count: 5,
-                        snapshot_count: 9,
-                        latest_snapshot_at: '2026-07-01T10:30:00Z',
-                        stale_after_seconds: 3600,
-                    },
-                    {
-                        source: 'manifold',
-                        status: 'synced',
-                        market_count: 8,
-                        snapshot_count: 11,
-                        latest_snapshot_at: '2026-07-01T10:30:00Z',
-                        stale_after_seconds: 3600,
-                    },
-                ],
-                stale_after_seconds: 3600,
-            }));
+            .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>((input) =>
+                Promise.resolve(makeResponse(
+                    String(input).includes('/source-health')
+                        ? {
+                              sources: [
+                                  { source: 'polymarket', status: 'synced', market_count: 12, snapshot_count: 34 },
+                                  { source: 'kalshi', status: 'empty', market_count: 0, snapshot_count: 0 },
+                                  { source: 'predictit', status: 'stale', market_count: 3, snapshot_count: 7 },
+                                  { source: 'limitless', status: 'synced', market_count: 5, snapshot_count: 9 },
+                                  { source: 'manifold', status: 'synced', market_count: 8, snapshot_count: 11 },
+                              ],
+                          }
+                        : {
+                              count: 1,
+                              data: [{
+                                  source: 'kalshi',
+                                  source_id: 'KXRECE-26',
+                                  question: 'Will the US enter recession in 2026?',
+                                  category: 'economic',
+                                  outcomes: ['Yes', 'No'],
+                                  outcome_prices: [0.18, 0.82],
+                                  volume: 15000,
+                                  liquidity: 7000,
+                                  end_date: '2026-12-31T00:00:00Z',
+                                  url: 'https://kalshi.com/markets/KXRECE/KXRECE-26',
+                                  active: true,
+                                  updated_at: '2026-07-01T10:30:00Z',
+                              }],
+                          },
+                )),
+            );
         global.fetch = fetchMock;
 
-        render(<KalshiWidget />);
+        renderWithQuery(<KalshiWidget />);
 
         expect(await screen.findByText('Will the US enter recession in 2026?')).toBeInTheDocument();
         expect(await screen.findByText('Polymarket')).toBeInTheDocument();
@@ -128,24 +100,25 @@ describe('KalshiWidget', () => {
 
     it('keeps the source health strip visible when Kalshi has no markets', async () => {
         const fetchMock = jest
-            .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
-            .mockResolvedValueOnce(makeResponse({ count: 0, data: [] }))
-            .mockResolvedValueOnce(makeResponse({
-                sources: [
-                    {
-                        source: 'kalshi',
-                        status: 'empty',
-                        market_count: 0,
-                        snapshot_count: 0,
-                        latest_snapshot_at: null,
-                        stale_after_seconds: 3600,
-                    },
-                ],
-                stale_after_seconds: 3600,
-            }));
+            .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>((input) =>
+                Promise.resolve(makeResponse(
+                    String(input).includes('/source-health')
+                        ? {
+                              sources: [{
+                                  source: 'kalshi',
+                                  status: 'empty',
+                                  market_count: 0,
+                                  snapshot_count: 0,
+                                  latest_snapshot_at: null,
+                                  stale_after_seconds: 3600,
+                              }],
+                          }
+                        : { count: 0, data: [] },
+                )),
+            );
         global.fetch = fetchMock;
 
-        render(<KalshiWidget />);
+        renderWithQuery(<KalshiWidget />);
 
         expect(await screen.findByText(/No Kalshi markets available/i)).toBeInTheDocument();
         expect(await screen.findByText('Kalshi')).toBeInTheDocument();
@@ -199,6 +172,10 @@ describe('PredictionMoversWidget', () => {
         render(<PredictionMoversWidget />);
 
         expect(await screen.findByText(/no probability moves in selected window/i)).toBeInTheDocument();
+        expect(global.fetch).toHaveBeenCalledWith(
+            expect.stringContaining('window_hours=24'),
+            { cache: 'no-store' },
+        );
     });
 
     it('renders current, previous, and signed probability-point deltas', async () => {

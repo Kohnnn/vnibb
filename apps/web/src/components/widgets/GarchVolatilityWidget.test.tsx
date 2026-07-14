@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { UseQueryResult } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, type UseQueryResult } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { APIError, type QuantResponse } from '@/lib/api';
@@ -238,7 +238,8 @@ describe('Polymarket widget registration gap', () => {
     );
     global.fetch = fetchMock;
 
-    render(<PolymarketWidget />);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><PolymarketWidget /></QueryClientProvider>);
 
     expect(await screen.findByText('No Polymarket markets available')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
