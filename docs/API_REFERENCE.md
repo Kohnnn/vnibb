@@ -116,8 +116,9 @@ Market data notes:
 
 ### Prediction Markets
 - `GET /prediction-markets?source=&category=&topic=&search=&limit=50&active=true` — the union over Polymarket / Kalshi / PredictIt / Limitless / Manifold. Phase v2.x adds `search` (substring match on question text) and `topic` (`election`, `macro`, `sports`, `crypto`) for the canonical `extra.canonical_topics` JSON column.
+- `GET /prediction-markets/source-health`
 - `GET /prediction-markets/movers?window_hours=24&limit=20&direction=up|down|both&exclude_categories=politics,economic`
-- `GET /prediction-markets/alerts?window=1&min_movement_bps=200&limit=20`
+- `GET /prediction-markets/alerts?window_hours=1&min_movement_bps=200&limit=20`
 - `GET /prediction-markets/consensus?query=...`
 - `GET /prediction-markets/spread?window=24`
 - `GET /prediction-markets/{source}/{source_id}/history?days=30`
@@ -133,8 +134,9 @@ Prediction markets notes:
 - Filters: `source` (lowercase slug, e.g. `polymarket` or `kalshi`), `active` (bool), `category` (case-insensitive alias such as `economic`, `sports`, `politics`, `general`), `limit` (1-200, default 50).
 - Ordered by nearest `end_date` first (open-ended contracts last), then `id`.
 - Returns an empty `{ "count": 0, "data": [] }` (not a 500) when the table is absent, so the endpoint is safe to call before the migration is applied.
-- `/movers` returns markets ranked by absolute movement in the YES probability between the latest snapshot and the snapshot `window` hours earlier. Requires the nightly snapshot job to have run at least once. Phase 8 adds `?direction=up|down|both` and `?exclude_categories=...` filters.
-- `/alerts` returns intraday alerts above `min_movement_bps`. Backed by the 15-minute micro-snapshot job; tolerant of an empty intraday table.
+- `/source-health` returns market and snapshot counts plus `synced | stale | empty` status for every known source. Missing prediction tables return empty rows during bootstrap; other database failures return 503.
+- `/movers` returns markets ranked by the magnitude of the signed YES-probability delta. Windows below 24 hours use intraday snapshots; longer windows use nightly snapshots. `movement` is the canonical signed delta; `absolute_movement` remains a signed compatibility alias. `window` remains a compatibility alias for `window_hours`; conflicting values return 422.
+- `/alerts` returns intraday alerts above `min_movement_bps`. It uses the same `movement`, `absolute_movement`, `window_hours`, and legacy `window` compatibility contract as `/movers`.
 - `/consensus?query=...` returns per-source YES prices plus a volume-weighted consensus.
 - `/spread` returns Polymarket vs Kalshi consensus on the maintained macro topics with the gap.
 - `/history?days=30` returns the YES-price time series for a single market.

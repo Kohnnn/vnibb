@@ -391,8 +391,9 @@ curl -fsS https://<api-host>/api/v1/prediction-markets?source=polymarket\&active
 # 3. Kalshi is reachable and round-trips a separate source value.
 curl -fsS https://<api-host>/api/v1/prediction-markets?source=kalshi\&active=true\&limit=5 | jq '.count, .data[0].question'
 
-# 4. Movers endpoint requires the snapshot job to have run at least once.
-curl -fsS 'https://<api-host>/api/v1/prediction-markets/movers?window=24h&limit=5' | jq '.count, .movers[0]?.absolute_movement'
+# 4. Source health and movers require snapshot jobs to have accumulated history.
+curl -fsS 'https://<api-host>/api/v1/prediction-markets/source-health' | jq '.sources[] | {source, status, snapshot_count}'
+curl -fsS 'https://<api-host>/api/v1/prediction-markets/movers?window_hours=24&limit=5' | jq '.count, .movers[0]?.movement'
 
 # 5. Estimators (each returns a composited JSON; macro is the slowest one
 #    and benefits from the 600s in-process cache).

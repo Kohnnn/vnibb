@@ -10,11 +10,10 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.api.v1 import prediction_markets as router
 from vnibb.models.prediction_market import PredictionMarket
@@ -48,7 +47,7 @@ def _market(
         liquidity=None,
         outcomes=["Yes", "No"],
         outcome_prices=[yes_price, 1.0 - yes_price],
-        updated_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(UTC),
     )
     return market
 
@@ -129,7 +128,7 @@ async def test_consensus_endpoint_weights_by_volume(monkeypatch):
 @pytest.mark.asyncio
 async def test_alerts_endpoint_filters_by_min_movement():
     """The /alerts endpoint filters by min_movement_bps threshold."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     latest = PredictionMarketIntradaySnapshot(
         source="polymarket",
         source_id="p-1",
@@ -150,7 +149,7 @@ async def test_alerts_endpoint_filters_by_min_movement():
         yes_price=0.45,
         volume=None,
         liquidity=None,
-        captured_at=now.replace(hour=now.hour - 1),
+        captured_at=now - timedelta(hours=1),
     )
 
     class _Result:
@@ -179,12 +178,95 @@ async def test_alerts_endpoint_filters_by_min_movement():
     # 0.5 - 0.45 = 0.05 = 500bps > 200bps -> included
     assert response.count == 1
     assert response.alerts[0].direction == "up"
+    assert response.alerts[0].movement == pytest.approx(0.05)
+    assert response.alerts[0].absolute_movement == pytest.approx(0.05)
+
+
+@pytest.mark.asyncio
+async def test_alerts_endpoint_uses_nearest_eligible_baseline_once():
+    now = datetime.now(UTC)
+    latest = PredictionMarketIntradaySnapshot(
+        source="polymarket",
+        source_id="p-1",
+        question="Will CPI be above 3.0%?",
+        category="economic",
+        url=None,
+        yes_price=0.6,
+        volume=None,
+        liquidity=None,
+        captured_at=now,
+    )
+    nearest = PredictionMarketIntradaySnapshot(
+        source="polymarket",
+        source_id="p-1",
+        question="Will CPI be above 3.0%?",
+        category="economic",
+        url=None,
+        yes_price=0.5,
+        volume=None,
+        liquidity=None,
+        captured_at=now - timedelta(hours=1),
+    )
+    older = PredictionMarketIntradaySnapshot(
+        source="polymarket",
+        source_id="p-1",
+        question="Will CPI be above 3.0%?",
+        category="economic",
+        url=None,
+        yes_price=0.2,
+        volume=None,
+        liquidity=None,
+        captured_at=now - timedelta(hours=2),
+    )
+
+    class _Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return SimpleNamespace(all=lambda: self._rows)
+
+    results = [[latest], [nearest, older]]
+    index = 0
+
+    async def fake_execute(_stmt):
+        nonlocal index
+        result = results[index]
+        index += 1
+        return _Result(result)
+
+    response = await router.list_prediction_market_alerts(
+        window_hours=1,
+        min_movement_bps=10,
+        limit=10,
+        db=SimpleNamespace(execute=fake_execute),
+    )
+
+    assert response.count == 1
+    assert response.alerts[0].previous_yes_price == pytest.approx(0.5)
+    assert response.alerts[0].movement == pytest.approx(0.1)
+
+
+@pytest.mark.asyncio
+async def test_alerts_accepts_window_hours_and_legacy_window_with_conflict_rejected(client):
+    canonical = await client.get("/api/v1/prediction-markets/alerts", params={"window_hours": "1"})
+    legacy = await client.get("/api/v1/prediction-markets/alerts", params={"window": "1"})
+    conflict = await client.get(
+        "/api/v1/prediction-markets/alerts",
+        params={"window_hours": "1", "window": "2"},
+    )
+
+    assert canonical.status_code == 200
+    assert canonical.json()["window_hours"] == 1
+    assert legacy.status_code == 200
+    assert legacy.json()["window_hours"] == 1
+    assert conflict.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_history_endpoint_returns_time_series():
     """The /history endpoint returns one row per snapshot."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     class _Result:
         def __init__(self, rows):

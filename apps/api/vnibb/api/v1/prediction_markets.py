@@ -29,6 +29,7 @@ tables being empty (endpoints return empty lists rather than 500) so
 deployments without the nightly job still render a meaningful empty state.
 """
 
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Final, Literal
 
@@ -105,6 +106,7 @@ class PredictionMarketMoverRow(BaseModel):
     url: str | None
     yes_price: float
     previous_yes_price: float
+    movement: float
     absolute_movement: float
 
 
@@ -170,6 +172,7 @@ class PredictionMarketAlertRow(BaseModel):
     url: str | None
     yes_price: float
     previous_yes_price: float
+    movement: float
     absolute_movement: float
     direction: Literal["up", "down"]
 
@@ -271,9 +274,10 @@ async def list_prediction_markets(
     if active is not None:
         stmt = stmt.where(PredictionMarket.active.is_(active))
     if category is not None:
-        # Friendly alias. The DB stores categories verbatim; comparison is
-        # case-insensitive so users can pass "Economic" or "economic".
-        stmt = stmt.where(PredictionMarket.category.ilike(category))
+        category_values = {
+            "economic": ("economic", "economics"),
+        }.get(category, (category,))
+        stmt = stmt.where(func.lower(PredictionMarket.category).in_(category_values))
     if search is not None:
         like_pattern = f"%{search.lower()}%"
         stmt = stmt.where(
@@ -302,6 +306,34 @@ async def list_prediction_markets(
     rows = result.scalars().all()
     data = [PredictionMarketRead.model_validate(row) for row in rows]
     return PredictionMarketsResponse(count=len(data), data=data)
+
+
+def _is_missing_prediction_market_relation(error: OperationalError | ProgrammingError) -> bool:
+    message = str(error.orig).lower()
+    return (
+        re.search(
+            r"\bprediction_market(?:s|_snapshots)\b",
+            message,
+        ) is not None
+        and (
+            getattr(error.orig, "pgcode", None) == "42P01"
+            or "no such table" in message
+            or "relation" in message and "does not exist" in message
+        )
+    )
+
+
+def _resolve_window_hours(
+    window_hours: int | None, window: int | None, default: int
+) -> int:
+    canonical = window_hours if isinstance(window_hours, int) else None
+    legacy = window if isinstance(window, int) else None
+    if canonical is not None and legacy is not None and canonical != legacy:
+        raise HTTPException(
+            status_code=422,
+            detail="window_hours and window must match when both are supplied",
+        )
+    return canonical if canonical is not None else legacy if legacy is not None else default
 
 
 @router.get("/source-health", response_model=PredictionMarketSourceHealthResponse)
@@ -342,8 +374,13 @@ async def get_prediction_market_source_health(
                 )
             ).all()
         }
-    except (OperationalError, ProgrammingError):
-        return PredictionMarketSourceHealthResponse(sources=empty_rows)
+    except (OperationalError, ProgrammingError) as error:
+        if _is_missing_prediction_market_relation(error):
+            return PredictionMarketSourceHealthResponse(sources=empty_rows)
+        raise HTTPException(
+            status_code=503,
+            detail="prediction market source health unavailable",
+        ) from None
 
     sources: list[PredictionMarketSourceHealthRow] = []
     for source in KNOWN_PREDICTION_MARKET_SOURCES:
@@ -373,7 +410,8 @@ async def get_prediction_market_source_health(
 
 @router.get("/movers", response_model=PredictionMarketMoversResponse)
 async def list_prediction_market_movers(
-    window: int = Query(default=24, ge=1, le=720),
+    window_hours: int | None = Query(default=None, ge=1, le=720),
+    window: int | None = Query(default=None, ge=1, le=720),
     limit: int = Query(default=20, ge=1, le=100),
     direction: Literal["up", "down", "both"] = Query(default="both"),
     exclude_categories: str | None = Query(default=None),
@@ -390,51 +428,57 @@ async def list_prediction_market_movers(
     filters. ``relative_volume`` (float) is included so callers can rank
     by "mover with confirmation" (mover sign × log(1 + volume)).
     """
+    window_hours = _resolve_window_hours(window_hours, window, 24)
+    snapshot_model = (
+        PredictionMarketIntradaySnapshot
+        if window_hours < 24
+        else PredictionMarketSnapshot
+    )
     now = datetime.now(UTC)
-    cutoff = now - timedelta(hours=window)
+    cutoff = now - timedelta(hours=window_hours)
     excluded: list[str] = []
     if exclude_categories:
         excluded = [c.strip().lower() for c in exclude_categories.split(",") if c.strip()]
 
     latest_stmt = (
         select(
-            PredictionMarketSnapshot.source,
-            PredictionMarketSnapshot.source_id,
-            func.max(PredictionMarketSnapshot.captured_at).label("captured_at"),
+            snapshot_model.source,
+            snapshot_model.source_id,
+            func.max(snapshot_model.captured_at).label("captured_at"),
         )
-        .group_by(PredictionMarketSnapshot.source, PredictionMarketSnapshot.source_id)
+        .group_by(snapshot_model.source, snapshot_model.source_id)
         .subquery()
     )
 
     try:
         latest_rows = (
             await db.execute(
-                select(PredictionMarketSnapshot)
+                select(snapshot_model)
                 .join(
                     latest_stmt,
-                    (latest_stmt.c.source == PredictionMarketSnapshot.source)
-                    & (latest_stmt.c.source_id == PredictionMarketSnapshot.source_id)
-                    & (latest_stmt.c.captured_at == PredictionMarketSnapshot.captured_at),
+                    (latest_stmt.c.source == snapshot_model.source)
+                    & (latest_stmt.c.source_id == snapshot_model.source_id)
+                    & (latest_stmt.c.captured_at == snapshot_model.captured_at),
                 )
-                .where(PredictionMarketSnapshot.captured_at >= cutoff)
+                .where(snapshot_model.captured_at >= cutoff)
             )
         ).scalars().all()
         baseline_rows = (
             await db.execute(
-                select(PredictionMarketSnapshot)
+                select(snapshot_model)
                 .join(
                     latest_stmt,
-                    (latest_stmt.c.source == PredictionMarketSnapshot.source)
-                    & (latest_stmt.c.source_id == PredictionMarketSnapshot.source_id),
+                    (latest_stmt.c.source == snapshot_model.source)
+                    & (latest_stmt.c.source_id == snapshot_model.source_id),
                 )
-                .where(PredictionMarketSnapshot.captured_at <= cutoff)
-                .order_by(PredictionMarketSnapshot.captured_at.desc())
+                .where(snapshot_model.captured_at <= cutoff)
+                .order_by(snapshot_model.captured_at.desc())
             )
         ).scalars().all()
     except (OperationalError, ProgrammingError):
-        return PredictionMarketMoversResponse(window_hours=window, count=0, movers=[])
+        return PredictionMarketMoversResponse(window_hours=window_hours, count=0, movers=[])
 
-    by_pair: dict[tuple[str, str], tuple[PredictionMarketSnapshot, PredictionMarketSnapshot | None]] = {}
+    by_pair = {}
     for row in latest_rows:
         by_pair[(row.source, row.source_id)] = (row, None)
     for row in baseline_rows:
@@ -456,6 +500,7 @@ async def list_prediction_market_movers(
                 url=latest.url,
                 yes_price=latest.yes_price,
                 previous_yes_price=baseline.yes_price,
+                movement=delta,
                 absolute_movement=delta,
             )
         )
@@ -473,7 +518,7 @@ async def list_prediction_market_movers(
         ]
     movers = movers[:limit]
     return PredictionMarketMoversResponse(
-        window_hours=window,
+        window_hours=window_hours,
         count=len(movers),
         movers=movers,
     )
@@ -718,7 +763,8 @@ async def get_prediction_market_consensus(
 
 @router.get("/alerts", response_model=PredictionMarketAlertsResponse)
 async def list_prediction_market_alerts(
-    window: int = Query(default=1, ge=1, le=168),
+    window_hours: int | None = Query(default=None, ge=1, le=168),
+    window: int | None = Query(default=None, ge=1, le=168),
     min_movement_bps: int = Query(default=200, ge=10, le=5000),
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -729,8 +775,9 @@ async def list_prediction_market_alerts(
     windows return meaningful data instead of always-empty. Tolerates the
     table being absent.
     """
+    window_hours = _resolve_window_hours(window_hours, window, 1)
     now = datetime.now(UTC)
-    cutoff = now - timedelta(hours=window)
+    cutoff = now - timedelta(hours=window_hours)
 
     try:
         latest_stmt = (
@@ -769,7 +816,7 @@ async def list_prediction_market_alerts(
         ).scalars().all()
     except (OperationalError, ProgrammingError):
         return PredictionMarketAlertsResponse(
-            window_hours=window,
+            window_hours=window_hours,
             min_movement_bps=min_movement_bps,
             count=0,
             alerts=[],
@@ -779,8 +826,8 @@ async def list_prediction_market_alerts(
     for row in latest_rows:
         by_pair[(row.source, row.source_id)] = (row, None)
     for row in baseline_rows:
-        if (row.source, row.source_id) in by_pair:
-            pair = by_pair[(row.source, row.source_id)]
+        pair = by_pair.get((row.source, row.source_id))
+        if pair is not None and pair[1] is None:
             by_pair[(row.source, row.source_id)] = (pair[0], row)
 
     threshold = min_movement_bps / 10_000.0
@@ -800,6 +847,7 @@ async def list_prediction_market_alerts(
                 url=latest.url,
                 yes_price=latest.yes_price,
                 previous_yes_price=baseline.yes_price,
+                movement=delta,
                 absolute_movement=delta,
                 direction="up" if delta > 0 else "down",
             )
@@ -807,7 +855,7 @@ async def list_prediction_market_alerts(
     alerts.sort(key=lambda row: abs(row.absolute_movement), reverse=True)
     alerts = alerts[:limit]
     return PredictionMarketAlertsResponse(
-        window_hours=window,
+        window_hours=window_hours,
         min_movement_bps=min_movement_bps,
         count=len(alerts),
         alerts=alerts,

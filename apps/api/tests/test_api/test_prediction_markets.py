@@ -4,12 +4,19 @@ import importlib.util
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
+from vnibb.api.v1 import prediction_markets as router
 from vnibb.models.prediction_market import PredictionMarket
+from vnibb.models.prediction_market_intraday_snapshot import (
+    PredictionMarketIntradaySnapshot,
+)
 from vnibb.models.prediction_market_snapshot import PredictionMarketSnapshot
 from vnibb.services.prediction_market_service import (
     GammaMarketPayload,
@@ -150,6 +157,13 @@ async def test_prediction_markets_route_when_db_has_polymarket_rows_returns_norm
     assert payload["data"][0]["outcomes"] == ["Yes", "No"]
     assert payload["data"][0]["outcome_prices"] == [0.61, 0.39]
 
+    alias_response = await client.get(
+        "/api/v1/prediction-markets",
+        params={"source": "polymarket", "category": "economic"},
+    )
+    assert alias_response.status_code == 200
+    assert alias_response.json()["count"] == 1
+
 
 @pytest.mark.asyncio
 async def test_prediction_markets_route_when_table_missing_returns_empty_payload(
@@ -233,6 +247,20 @@ async def test_source_health_route_when_rows_exist_returns_all_known_sources(
         "latest_snapshot_at": None,
         "stale_after_seconds": 86400,
     }
+
+
+@pytest.mark.asyncio
+async def test_source_health_route_when_unrelated_table_is_missing_returns_503() -> None:
+    async def execute(_stmt):
+        raise OperationalError("SELECT", {}, Exception("no such table: market_news"))
+
+    with pytest.raises(HTTPException) as error:
+        await router.get_prediction_market_source_health(
+            db=SimpleNamespace(execute=execute)
+        )
+
+    assert error.value.status_code == 503
+    assert error.value.detail == "prediction market source health unavailable"
 
 
 @pytest.mark.asyncio
@@ -337,7 +365,7 @@ async def test_movers_route_when_multiple_baselines_exist_uses_one_nearest_per_m
     # When: movers are requested without filtering.
     response = await client.get(
         "/api/v1/prediction-markets/movers",
-        params={"window": "24", "direction": "both", "limit": "10"},
+        params={"window_hours": "24", "direction": "both", "limit": "10"},
     )
 
     # Then: each market has one mover row and baseline picks the nearest older snapshot.
@@ -346,8 +374,10 @@ async def test_movers_route_when_multiple_baselines_exist_uses_one_nearest_per_m
     assert payload["window_hours"] == 24
     assert payload["count"] == 2
     assert [row["source_id"] for row in payload["movers"]] == ["down-move", "near-baseline"]
+    assert payload["movers"][0]["movement"] == pytest.approx(-0.15)
     assert payload["movers"][0]["absolute_movement"] == pytest.approx(-0.15)
     assert payload["movers"][1]["previous_yes_price"] == pytest.approx(0.55)
+    assert payload["movers"][1]["movement"] == pytest.approx(0.05)
     assert payload["movers"][1]["absolute_movement"] == pytest.approx(0.05)
 
 
@@ -438,7 +468,7 @@ async def test_movers_route_respects_direction_limit_and_excluded_categories(
     response = await client.get(
         "/api/v1/prediction-markets/movers",
         params={
-            "window": "24",
+            "window_hours": "24",
             "direction": "up",
             "exclude_categories": "Economics",
             "limit": "1",
@@ -450,7 +480,67 @@ async def test_movers_route_respects_direction_limit_and_excluded_categories(
     payload = response.json()
     assert payload["count"] == 1
     assert payload["movers"][0]["source_id"] == "sports-up-small"
+    assert payload["movers"][0]["movement"] == pytest.approx(0.08)
     assert payload["movers"][0]["absolute_movement"] == pytest.approx(0.08)
+
+
+@pytest.mark.asyncio
+async def test_movers_accepts_window_hours_and_legacy_window_with_conflict_rejected(client) -> None:
+    canonical = await client.get("/api/v1/prediction-markets/movers", params={"window_hours": "24"})
+    legacy = await client.get("/api/v1/prediction-markets/movers", params={"window": "24"})
+    conflict = await client.get(
+        "/api/v1/prediction-markets/movers",
+        params={"window_hours": "24", "window": "12"},
+    )
+
+    assert canonical.status_code == 200
+    assert canonical.json()["window_hours"] == 24
+    assert legacy.status_code == 200
+    assert legacy.json()["window_hours"] == 24
+    assert conflict.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_movers_route_uses_intraday_snapshots_for_short_windows(client, test_db) -> None:
+    now = datetime.now(UTC)
+    test_db.add_all(
+        [
+            PredictionMarketIntradaySnapshot(
+                source="polymarket",
+                source_id="intraday-mover",
+                question="Will CPI rise?",
+                category="Economics",
+                url=None,
+                yes_price=0.65,
+                volume=None,
+                liquidity=None,
+                captured_at=now,
+            ),
+            PredictionMarketIntradaySnapshot(
+                source="polymarket",
+                source_id="intraday-mover",
+                question="Will CPI rise?",
+                category="Economics",
+                url=None,
+                yes_price=0.50,
+                volume=None,
+                liquidity=None,
+                captured_at=now - timedelta(hours=1, minutes=5),
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get(
+        "/api/v1/prediction-markets/movers", params={"window_hours": "1"}
+    )
+
+    assert response.status_code == 200
+    mover = response.json()["movers"][0]
+    assert mover["source_id"] == "intraday-mover"
+    assert mover["previous_yes_price"] == pytest.approx(0.5)
+    assert mover["movement"] == pytest.approx(0.15)
+    assert mover["absolute_movement"] == pytest.approx(0.15)
 
 
 def test_postgres_conflict_constraint_migration_declares_required_unique_constraints() -> None:
