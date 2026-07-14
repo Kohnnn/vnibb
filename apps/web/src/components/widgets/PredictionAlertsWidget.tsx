@@ -51,11 +51,13 @@ function parseAlerts(value: unknown): { alerts: AlertRow[]; windowHours: number 
         const directionRaw = row.direction;
         const direction: 'up' | 'down' = directionRaw === 'down' ? 'down' : 'up';
         const absoluteMovement =
-            typeof row.absolute_movement === 'number'
-                ? row.absolute_movement
-                : typeof row.absoluteMovement === 'number'
-                    ? row.absoluteMovement
-                    : 0;
+            typeof row.movement === 'number'
+                ? row.movement
+                : typeof row.absolute_movement === 'number'
+                    ? row.absolute_movement
+                    : typeof row.absoluteMovement === 'number'
+                        ? row.absoluteMovement
+                        : 0;
         alerts.push({
             source: typeof row.source === 'string' ? row.source : 'unknown',
             sourceId:
@@ -183,12 +185,13 @@ export function PredictionAlertsWidget() {
     return (
         <div className="flex h-full flex-col gap-2">
             <div className="flex items-center justify-between px-1">
-                <div className="flex items-center gap-1">
+                <div role="group" aria-label="Alert window" className="flex items-center gap-1">
                     {BUCKETS.map((bucket) => (
                         <button
                             key={bucket.key}
                             type="button"
                             onClick={() => setConfig({ bucket: bucket.key })}
+                            aria-pressed={config.bucket === bucket.key}
                             className={`rounded-full border px-2 py-0.5 text-[10px] ${
                                 config.bucket === bucket.key
                                     ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'

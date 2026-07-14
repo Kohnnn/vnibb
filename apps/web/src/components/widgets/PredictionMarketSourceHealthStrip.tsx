@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { API_BASE_URL } from '@/lib/api';
 import type { PredictionMarketSource } from './PredictionMarketSource';
 
@@ -12,7 +12,7 @@ const SOURCE_HEALTH_SOURCES = [
     { source: 'manifold', label: 'Manifold' },
 ] as const satisfies ReadonlyArray<{ readonly source: PredictionMarketSource; readonly label: string }>;
 
-type SourceHealthRow = {
+export type SourceHealthRow = {
     readonly source: PredictionMarketSource;
     readonly label: string;
     readonly status: string;
@@ -21,11 +21,6 @@ type SourceHealthRow = {
     readonly latestSnapshotAt: string | null;
     readonly staleAfterSeconds: number | null;
 };
-
-type HealthState =
-    | { readonly kind: 'loading' }
-    | { readonly kind: 'error' }
-    | { readonly kind: 'ready'; readonly rows: readonly SourceHealthRow[] };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -82,21 +77,20 @@ function parseSourceHealth(value: unknown): readonly SourceHealthRow[] {
     );
 }
 
-function hasSnapshots(row: SourceHealthRow): boolean {
-    return (row.snapshotCount ?? 0) > 0;
-}
-
-function statusLabel(row: SourceHealthRow): string {
-    if (!hasSnapshots(row) || row.status === 'empty' || row.status === 'no_data') return 'Awaiting data';
-    if (row.status === 'synced' || row.status === 'healthy') return 'Healthy';
+export function sourceHealthStatusLabel(row: SourceHealthRow): string {
+    const marketCount = row.marketCount ?? 0;
+    const snapshotCount = row.snapshotCount ?? 0;
+    if (row.status === 'empty' && marketCount === 0) return 'Awaiting data';
+    if (row.status === 'stale' && marketCount > 0 && snapshotCount === 0) return 'Snapshots pending';
     if (row.status === 'stale') return 'Stale';
+    if (row.status === 'synced' || row.status === 'healthy') return 'Healthy';
     return 'Unknown';
 }
 
 function chipClass(row: SourceHealthRow): string {
-    const label = statusLabel(row);
+    const label = sourceHealthStatusLabel(row);
     if (label === 'Healthy') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
-    if (label === 'Stale') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+    if (label === 'Stale' || label === 'Snapshots pending') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
     return 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)]';
 }
 
@@ -107,44 +101,37 @@ function countLabel(row: SourceHealthRow): string {
     return `${marketCount} markets · ${snapshotCount} snapshots`;
 }
 
+async function fetchSourceHealth(): Promise<readonly SourceHealthRow[]> {
+    const response = await fetch(`${API_BASE_URL}/prediction-markets/source-health`, {
+        cache: 'no-store',
+    });
+    if (!response.ok) throw new Error(`source health API returned ${response.status}`);
+    return parseSourceHealth(await response.json());
+}
+
+export function usePredictionMarketSourceHealth() {
+    return useQuery({
+        queryKey: ['prediction-market-source-health'],
+        queryFn: fetchSourceHealth,
+        staleTime: 60000,
+        retry: false,
+    });
+}
+
 export function PredictionMarketSourceHealthStrip() {
-    const [state, setState] = useState<HealthState>({ kind: 'loading' });
+    const { data: rows, isPending, isError } = usePredictionMarketSourceHealth();
 
-    const refresh = useCallback(async () => {
-        setState({ kind: 'loading' });
-        try {
-            const response = await fetch(`${API_BASE_URL}/prediction-markets/source-health`, {
-                cache: 'no-store',
-            });
-            if (!response.ok) {
-                setState({ kind: 'error' });
-                return;
-            }
-            setState({ kind: 'ready', rows: parseSourceHealth(await response.json()) });
-        } catch (error: unknown) {
-            if (error instanceof Error) {
-                setState({ kind: 'error' });
-                return;
-            }
-            setState({ kind: 'error' });
-        }
-    }, []);
-
-    useEffect(() => {
-        void refresh();
-    }, [refresh]);
-
-    if (state.kind === 'loading') {
+    if (isPending) {
         return (
-            <div className="rounded-lg border border-dashed border-default bg-[var(--bg-tertiary)] px-2 py-1.5 text-[11px] text-[var(--text-muted)]">
+            <div role="status" aria-live="polite" className="rounded-lg border border-dashed border-default bg-[var(--bg-tertiary)] px-2 py-1.5 text-[11px] text-[var(--text-muted)]">
                 Checking source health...
             </div>
         );
     }
 
-    if (state.kind === 'error') {
+    if (isError || !rows) {
         return (
-            <div className="rounded-lg border border-dashed border-default bg-[var(--bg-tertiary)] px-2 py-1.5 text-[11px] text-[var(--text-muted)]">
+            <div role="status" aria-live="polite" className="rounded-lg border border-dashed border-default bg-[var(--bg-tertiary)] px-2 py-1.5 text-[11px] text-[var(--text-muted)]">
                 Source health unavailable
             </div>
         );
@@ -158,15 +145,15 @@ export function PredictionMarketSourceHealthStrip() {
             <span className="px-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
                 Source health
             </span>
-            {state.rows.map((row) => (
+            {rows.map((row) => (
                 <div
                     key={row.source}
-                    aria-label={`${row.label} source health: ${statusLabel(row)}`}
+                    aria-label={`${row.label} source health: ${sourceHealthStatusLabel(row)}`}
                     className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] ${chipClass(row)}`}
                     title={countLabel(row)}
                 >
                     <span className="font-semibold text-[var(--text-primary)]">{row.label}</span>
-                    <span>{statusLabel(row)}</span>
+                    <span>{sourceHealthStatusLabel(row)}</span>
                 </div>
             ))}
         </section>

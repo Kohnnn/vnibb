@@ -59,7 +59,7 @@ Legacy aliases such as `company_profile`, `financials`, `institutional_ownership
 - `polymarket` (expanded): canonical taxonomy now covers `economic | sports | politics | general`, so Pop Culture / Crypto / politics markets render instead of being silently dropped
 - `kalshi`: Kalshi CFTC-regulated public-market ingestion rendered through the shared `PredictionMarketSource` factory
 - `election_odds`: side-by-side Polymarket vs Kalshi politics composite with a consensus readout
-- `prediction_movers`: top markets by absolute |Δ probability| between the latest snapshot and a windowed historical snapshot (24h default)
+- `prediction_movers`: top markets by |signed Δ probability| between the latest and windowed baseline snapshots; sub-24h windows use intraday snapshots and longer windows use nightly snapshots (24h default)
 - `macro_calibration`: four-tile summary of the `/estimate/{cpi,fed,recession,macro}` outputs
 - `consensus_odds`: multi-source readout aggregating Polymarket and Kalshi rows on the same question
 - **`prediction_market_lifecycle`**: see the section below

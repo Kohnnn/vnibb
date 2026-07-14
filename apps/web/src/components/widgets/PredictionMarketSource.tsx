@@ -16,7 +16,11 @@ import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-
 import { API_BASE_URL } from '@/lib/api';
 import { CategoryPills, ProbabilityBar, SearchBar, SortButton, type SortDirection } from './prediction-market-ui';
 import { PredictionMarketContextMenu } from './PredictionMarketContextMenu';
-import { PredictionMarketSourceHealthStrip } from './PredictionMarketSourceHealthStrip';
+import {
+    PredictionMarketSourceHealthStrip,
+    sourceHealthStatusLabel,
+    usePredictionMarketSourceHealth,
+} from './PredictionMarketSourceHealthStrip';
 
 export type PredictionMarketSource = 'polymarket' | 'kalshi' | 'predictit' | 'limitless' | 'manifold';
 
@@ -230,6 +234,8 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
     const [search, setSearch] = useState('');
     const [sortKey, setSortKey] = useState<SortKey>('yes');
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+    const sourceHealth = usePredictionMarketSourceHealth();
+    const healthRow = sourceHealth.data?.find((row) => row.source === source);
 
     const refresh = useCallback(async () => {
         setState({ kind: 'loading' });
@@ -319,19 +325,21 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
                 <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
                     <span
                         className={
-                            state.payload.freshness.status === 'synced'
+                            healthRow?.status === 'synced'
                                 ? 'text-emerald-400'
-                                : 'text-amber-300'
+                                : healthRow?.status === 'stale'
+                                    ? 'text-amber-300'
+                                    : undefined
                         }
                     >
-                        {state.payload.freshness.status === 'synced'
-                            ? `Synced · ${visible.length} markets`
-                            : `Stale · ${visible.length} markets`}
+                        {healthRow
+                            ? `${sourceHealthStatusLabel(healthRow)} · ${visible.length} markets`
+                            : `${sourceHealth.isError ? 'Freshness unavailable' : 'Checking freshness'} · ${visible.length} markets`}
                     </span>
                     <span>
-                        Last sync{' '}
-                        {state.payload.freshness.lastSyncedAt
-                            ? new Date(state.payload.freshness.lastSyncedAt).toLocaleDateString()
+                        Latest snapshot{' '}
+                        {healthRow?.latestSnapshotAt
+                            ? new Date(healthRow.latestSnapshotAt).toLocaleDateString()
                             : 'Unknown'}
                     </span>
                 </div>

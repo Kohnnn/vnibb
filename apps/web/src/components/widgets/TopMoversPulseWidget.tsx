@@ -10,10 +10,10 @@ import { PredictionMarketDrawer } from './PredictionMarketDrawer';
 
 type WindowKey = '1h' | '24h' | '7d';
 
-const WINDOW_PARAMS: Record<WindowKey, { window: string; minutes: string }> = {
-    '1h': { window: '1', minutes: '60' },
-    '24h': { window: '24', minutes: '1440' },
-    '7d': { window: '168', minutes: '10080' },
+const WINDOW_HOURS: Record<WindowKey, number> = {
+    '1h': 1,
+    '24h': 24,
+    '7d': 168,
 };
 
 type PulseRow = {
@@ -60,11 +60,13 @@ function parseRows(value: unknown): PulseRow[] {
                     ? row.previousYesPrice
                     : 0;
         const absoluteMovement =
-            typeof row.absolute_movement === 'number'
-                ? row.absolute_movement
-                : typeof row.absoluteMovement === 'number'
-                    ? row.absoluteMovement
-                    : 0;
+            typeof row.movement === 'number'
+                ? row.movement
+                : typeof row.absolute_movement === 'number'
+                    ? row.absolute_movement
+                    : typeof row.absoluteMovement === 'number'
+                        ? row.absoluteMovement
+                        : 0;
         const sparklineRaw = Array.isArray(row.sparkline) ? row.sparkline : [];
         const sparkline = sparklineRaw
             .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
@@ -83,7 +85,7 @@ function parseRows(value: unknown): PulseRow[] {
             previousYesPrice,
             absoluteMovement,
             url: typeof row.url === 'string' ? row.url : null,
-            sparkline: sparkline.length > 0 ? sparkline : [previousYesPrice, yesPrice],
+            sparkline,
         });
     }
     return out;
@@ -103,7 +105,7 @@ export function TopMoversPulseWidget() {
         setState({ kind: 'loading' });
         const url = new URL(`${API_BASE_URL}/prediction-markets/movers`);
         url.searchParams.set('limit', String(config.limit));
-        url.searchParams.set('window_hours', String(WINDOW_PARAMS[config.window].minutes));
+        url.searchParams.set('window_hours', String(WINDOW_HOURS[config.window]));
         fetch(url.toString(), { cache: 'no-store' })
             .then(async (response) => {
                 if (!response.ok) throw new Error(`movers API returned ${response.status}`);
@@ -134,13 +136,14 @@ export function TopMoversPulseWidget() {
     return (
         <div className="flex h-full flex-col gap-2">
             <header className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
-                <div className="flex items-center gap-2">
-                    {(Object.entries(WINDOW_PARAMS) as [WindowKey, { window: string; minutes: string }][]).map(
+                <div role="group" aria-label="Top movers window" className="flex items-center gap-2">
+                    {(Object.entries(WINDOW_HOURS) as [WindowKey, number][]).map(
                         ([key, _value]) => (
                             <button
                                 key={key}
                                 type="button"
                                 onClick={() => setConfig({ window: key })}
+                                aria-pressed={config.window === key}
                                 className={`rounded-full border px-2 py-0.5 text-[10px] ${
                                     config.window === key
                                         ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
@@ -213,12 +216,14 @@ export function TopMoversPulseWidget() {
                                         <span className="text-[10px] text-[var(--text-muted)]">
                                             {row.source} · {row.category ?? 'general'}
                                         </span>
-                                        <Sparkline
-                                            values={row.sparkline}
-                                            width={60}
-                                            height={20}
-                                            ariaLabel={`${row.source} sparkline`}
-                                        />
+                                        {row.sparkline.length >= 2 && (
+                                            <Sparkline
+                                                values={row.sparkline}
+                                                width={60}
+                                                height={20}
+                                                ariaLabel={`${row.source} sparkline`}
+                                            />
+                                        )}
                                     </div>
                                 </button>
                             </PredictionMarketContextMenu>
