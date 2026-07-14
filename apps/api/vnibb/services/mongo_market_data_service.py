@@ -475,6 +475,39 @@ class MongoMarketDataService:
             logger.warning("Mongo latest trade-date read failed: %s", exc)
             return None
 
+    async def get_source_latest_trade_date(self, source: str) -> date | None:
+        """Return the most recent ``tradeDate`` for one ``source`` in the corpus.
+
+        Distinct from :meth:`get_universe_latest_trade_date`, which reports the
+        freshest bar across all sources and therefore hides a frozen primary
+        source when a fallback source keeps writing. The daily quality check
+        uses this to make a silent Vietcap freeze loud.
+        """
+
+        source_value = str(source or "").strip()
+
+        def _read() -> date | None:
+            coll = self._get_collection("market_prices_eod")
+            doc = list(
+                coll.find({"source": source_value}, {"_id": 0, "tradeDate": 1})
+                .sort("tradeDate", -1)
+                .limit(1)
+            )
+            if not doc:
+                return None
+            value = doc[0].get("tradeDate")
+            if isinstance(value, datetime):
+                return value.date()
+            if isinstance(value, date):
+                return value
+            return None
+
+        try:
+            return await asyncio.to_thread(_read)
+        except Exception as exc:
+            logger.warning("Mongo source latest trade-date read failed (%s): %s", source_value, exc)
+            return None
+
     async def get_latest_fundamental_snapshots(
         self,
         symbols: list[str] | None = None,

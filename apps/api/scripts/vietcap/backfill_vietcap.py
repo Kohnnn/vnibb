@@ -35,9 +35,11 @@ REPO_ROOT = Path(__file__).resolve().parents[4]  # .../vnibb
 API_ROOT = REPO_ROOT / "apps" / "api"
 WORKSPACE_ROOT = REPO_ROOT.parent  # .../VNIBB (holds the canonical .env)
 
-# Local import of the sibling client module.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from vietcap_client import VietcapClient  # noqa: E402
+try:
+    from .vietcap_client import VietcapClient
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from vietcap_client import VietcapClient  # noqa: E402
 
 # Instrument type -> EOD collection. STOCK and indices share the canonical corpus.
 PRICE_COLLECTION_BY_TYPE: dict[str, str] = {
@@ -225,6 +227,15 @@ def price_collection_for(instrument_type: str | None) -> str:
     return PRICE_COLLECTION_BY_TYPE.get(str(instrument_type or "STOCK").upper(), "market_prices_eod")
 
 
+def select_symbols_for_fresh_ohlc(
+    symbols: list[str], fresh_symbols: set[str], *, ohlc_only: bool
+) -> tuple[list[str], int]:
+    skipped_fresh = sum(symbol.upper() in fresh_symbols for symbol in symbols)
+    if ohlc_only:
+        return [symbol for symbol in symbols if symbol.upper() not in fresh_symbols], skipped_fresh
+    return symbols, skipped_fresh
+
+
 # ---------------------------------------------------------------------------
 # Index groups worth materializing
 # ---------------------------------------------------------------------------
@@ -236,7 +247,10 @@ INDEX_GROUPS = [
 
 
 def main() -> int:
-    import vietcap_writers as w
+    try:
+        from . import vietcap_writers as w
+    except ImportError:
+        import vietcap_writers as w
 
     load_env_file(WORKSPACE_ROOT / ".env")
     load_env_file(REPO_ROOT / ".env")
@@ -254,6 +268,11 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="Write to MongoDB. Default is dry-run.")
     parser.add_argument("--ensure-indexes", action="store_true")
     parser.add_argument("--limit", type=int, default=0, help="Cap symbol count (0 = no cap)")
+    parser.add_argument(
+        "--skip-fresh-through",
+        default="",
+        help="YYYY-MM-DD: skip symbols whose vietcap EOD already reaches this date, before any HTTP call (resumable trickle)",
+    )
     args = parser.parse_args()
 
     selected = {d.strip().lower() for d in args.datasets.split(",") if d.strip()}
@@ -263,16 +282,16 @@ def main() -> int:
     client = VietcapClient()
 
     db = None
-    if args.apply:
+    if args.apply or args.skip_fresh_through:
         mongo_url = os.getenv("MONGODB_URL")
         if not mongo_url:
-            raise SystemExit("MONGODB_URL is required when --apply is used")
+            raise SystemExit("MONGODB_URL is required when --apply or --skip-fresh-through is used")
         mongo_db = os.getenv("MONGODB_DATABASE", "vnibb-market")
         from pymongo import MongoClient
 
         client_db = MongoClient(mongo_url, serverSelectionTimeoutMS=10000)
         db = client_db[mongo_db]
-        if args.ensure_indexes:
+        if args.apply and args.ensure_indexes:
             _ensure_indexes(db)
 
     # Indices + ICB are universe-level, run once.
@@ -305,14 +324,33 @@ def main() -> int:
 
     universe = resolve_universe(client, args.symbols)
     symbols = sorted(universe)
+
+    fresh_symbols: set[str] = set()
+    skipped_fresh = 0
+    if args.skip_fresh_through:
+        cutoff = datetime.strptime(args.skip_fresh_through, "%Y-%m-%d")
+        for doc in db["market_prices_eod"].aggregate([
+            {"$match": {"source": "vietcap", "tradeDate": {"$gte": cutoff}}},
+            {"$group": {"_id": "$symbol"}},
+        ]):
+            fresh_symbols.add(str(doc["_id"]).upper())
+        if selected == {"ohlc"}:
+            symbols, skipped_fresh = select_symbols_for_fresh_ohlc(
+                symbols, fresh_symbols, ohlc_only=True
+            )
+
     if args.limit and args.limit > 0:
         symbols = symbols[: args.limit]
+
+    if fresh_symbols and selected != {"ohlc"}:
+        _, skipped_fresh = select_symbols_for_fresh_ohlc(symbols, fresh_symbols, ohlc_only=False)
 
     print(json.dumps({
         "mode": "apply" if args.apply else "dry-run",
         "database": os.getenv("MONGODB_DATABASE", "vnibb-market"),
         "datasets": sorted(selected),
         "symbol_count": len(symbols),
+        "skipped_fresh": skipped_fresh,
         "reconcile": args.reconcile,
     }, indent=2))
 
@@ -328,21 +366,24 @@ def main() -> int:
         row_summary: dict[str, Any] = {"symbol": symbol, "i": idx, "type": meta.get("type")}
 
         if "ohlc" in selected:
-            try:
-                raw = client.get_ohlc(symbol, count_back=args.count_back)
-                rows = ohlc_rows_from_gap_chart(symbol, raw) if raw else []
-                coll_name = price_collection_for(meta.get("type"))
-                n = upsert_eod_rows(db, coll_name, symbol, rows, dry_run=not args.apply) if (args.apply or not args.apply) else 0
-                row_summary["ohlc"] = {"collection": coll_name, "rows": n,
-                                       "first": rows[0]["tradeDate"].date().isoformat() if rows else None,
-                                       "last": rows[-1]["tradeDate"].date().isoformat() if rows else None}
-                _add("ohlc_rows", n)
-                if args.reconcile and args.apply and coll_name == "market_prices_eod":
-                    vdates, removed = w.reconcile_eod_source(db, symbol, dry_run=False)
-                    row_summary["reconcile"] = {"vietcapDates": vdates, "removedVnstock": removed}
-                    _add("reconciled_removed", removed)
-            except Exception as exc:  # noqa: BLE001
-                row_summary["ohlc_error"] = str(exc)
+            if symbol.upper() in fresh_symbols:
+                row_summary["ohlc"] = {"skipped_fresh": True}
+            else:
+                try:
+                    raw = client.get_ohlc(symbol, count_back=args.count_back)
+                    rows = ohlc_rows_from_gap_chart(symbol, raw) if raw else []
+                    coll_name = price_collection_for(meta.get("type"))
+                    n = upsert_eod_rows(db, coll_name, symbol, rows, dry_run=not args.apply)
+                    row_summary["ohlc"] = {"collection": coll_name, "rows": n,
+                                           "first": rows[0]["tradeDate"].date().isoformat() if rows else None,
+                                           "last": rows[-1]["tradeDate"].date().isoformat() if rows else None}
+                    _add("ohlc_rows", n)
+                    if args.reconcile and args.apply and coll_name == "market_prices_eod":
+                        vdates, removed = w.reconcile_eod_source(db, symbol, dry_run=False)
+                        row_summary["reconcile"] = {"vietcapDates": vdates, "removedVnstock": removed}
+                        _add("reconciled_removed", removed)
+                except Exception as exc:  # noqa: BLE001
+                    row_summary["ohlc_error"] = str(exc)
 
         if "financials" in selected:
             try:
@@ -408,6 +449,7 @@ def _ensure_indexes(db: Any) -> None:
 
     # Shared corpus already has idx_symbol_tradeDate_desc; do not force a new unique index here.
     _safe("market_prices_eod", [("symbol", 1), ("tradeDate", 1), ("source", 1)])
+    _safe("market_prices_eod", [("source", 1), ("tradeDate", -1)])
     for coll in ("market_prices_cw", "market_prices_derivatives", "market_prices_bond"):
         _safe(coll, [("symbol", 1), ("tradeDate", 1), ("source", 1)], unique=True)
     _safe("market_vnstock_premium_records", [("dataset", 1), ("symbol", 1), ("recordKey", 1)], unique=True)

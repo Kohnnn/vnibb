@@ -65,9 +65,30 @@ async def _get_top_symbols(limit: int) -> list[str]:
         return [row[0] for row in fallback_rows.fetchall() if row[0]]
 
 
+async def _vietcap_corpus_latest_date() -> date | None:
+    from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+
+    service = get_mongo_market_data_service()
+    if not service.enabled:
+        return None
+    return await service.get_source_latest_trade_date("vietcap")
+
+
+def _vietcap_freshness_warning(
+    latest: date | None, max_stale_days: int, *, today: date | None = None
+) -> str | None:
+    if latest is None:
+        return "vietcap_eod corpus empty or unreadable"
+    age = ((today or date.today()) - latest).days
+    if age > max_stale_days:
+        return f"vietcap_eod freshness exceeded {max_stale_days} days (latest {latest.isoformat()})"
+    return None
+
+
 async def run_data_quality_check(
     top_limit: int = 200,
     max_stale_days: int = 7,
+    vietcap_max_stale_days: int = 5,
     output_path: str | None = None,
     thresholds: QualityThresholds | None = None,
 ) -> dict[str, Any]:
@@ -156,6 +177,12 @@ async def run_data_quality_check(
     latest_ratio_dt = latest_ratio_value
     if isinstance(latest_ratio_dt, datetime) and latest_ratio_dt < stale_cutoff:
         warnings.append(f"financial_ratios freshness exceeded {max_stale_days} days")
+
+    vietcap_latest = await _vietcap_corpus_latest_date()
+    freshness["vietcap_eod"] = _to_iso(vietcap_latest)
+    vietcap_warning = _vietcap_freshness_warning(vietcap_latest, vietcap_max_stale_days)
+    if vietcap_warning:
+        warnings.append(vietcap_warning)
 
     report = {
         "generated_at": datetime.utcnow().isoformat(),

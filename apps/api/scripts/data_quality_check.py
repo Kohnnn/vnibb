@@ -20,7 +20,13 @@ def parse_args() -> argparse.Namespace:
         "--max-stale-days",
         type=int,
         default=7,
-        help="Warn when freshness timestamps are older than this",
+        help="Warn when freshness timestamps are older than this many calendar days",
+    )
+    parser.add_argument(
+        "--vietcap-max-stale-days",
+        type=int,
+        default=5,
+        help="Warn when Vietcap EOD is older than this many calendar days",
     )
     parser.add_argument(
         "--output-json",
@@ -36,6 +42,7 @@ async def _main() -> int:
     report = await run_data_quality_check(
         top_limit=args.top_limit,
         max_stale_days=args.max_stale_days,
+        vietcap_max_stale_days=args.vietcap_max_stale_days,
         output_path=args.output_json,
     )
 
