@@ -64,12 +64,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._last_cleanup = now
 
     def _get_client_ip(self, request: Request) -> str:
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip.strip()
         return request.client.host if request.client else "unknown"
 
     def _resolve_bucket(self, path: str) -> tuple[str, int]:

@@ -426,7 +426,7 @@ esac
 echo "Resolved ports: PORT='${PORT:-}' WEB_PORT='${WEB_PORT:-}' APP_PORT='${APP_PORT}'"
 echo "Starting VNIBB API on port ${APP_PORT}..."
 UVICORN_PROXY_HEADERS="${UVICORN_PROXY_HEADERS:-1}"
-FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-*}"
+FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-172.16.0.0/12}"
 
 set -- -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port "$APP_PORT"
 proxy_flag=$(printf "%s" "$UVICORN_PROXY_HEADERS" | tr '[:upper:]' '[:lower:]')

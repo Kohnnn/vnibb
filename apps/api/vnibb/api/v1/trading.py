@@ -164,11 +164,10 @@ async def get_top_movers(
 
         logger.info(f"Top movers fetch returned {len(data)} items")
 
-        # Store in cache with 15 minute TTL for slower market-wide payloads
         if data:
             try:
                 await redis_client.set_json(
-                    cache_key, [d.model_dump(mode="json") for d in data], ttl=900
+                    cache_key, [d.model_dump(mode="json") for d in data], ttl=60
                 )
             except Exception as e:
                 logger.debug(f"Cache write failed: {e}")
@@ -176,10 +175,10 @@ async def get_top_movers(
         return TopMoversResponse(count=len(data), type=type, index=index, data=data)
     except ProviderError as e:
         logger.error(f"Provider error fetching top movers: {e}")
-        return TopMoversResponse(count=0, type=type, index=index, data=[])
+        raise HTTPException(status_code=502, detail="Top movers provider unavailable") from None
     except Exception as e:
         logger.error(f"Unexpected error fetching top movers: {e}", exc_info=True)
-        return TopMoversResponse(count=0, type=type, index=index, data=[])
+        raise HTTPException(status_code=502, detail="Top movers provider unavailable") from None
 
 
 @router.get(
@@ -229,16 +228,16 @@ async def get_sector_top_movers(
         if data:
             try:
                 await redis_client.set_json(
-                    cache_key, [d.model_dump(mode="json") for d in data], ttl=900
+                    cache_key, [d.model_dump(mode="json") for d in data], ttl=60
                 )
             except Exception:
                 pass
 
         return SectorTopMoversResponse(count=len(data), type=type, data=data)
     except ProviderError:
-        return SectorTopMoversResponse(count=0, type=type, data=[])
-    except BaseException:
-        return SectorTopMoversResponse(count=0, type=type, data=[])
+        raise HTTPException(status_code=502, detail="Sector top movers provider unavailable") from None
+    except Exception:
+        raise HTTPException(status_code=502, detail="Sector top movers provider unavailable") from None
 
 
 @router.get(
@@ -252,11 +251,7 @@ async def get_top_gainers(
     limit: int = Query(default=10, ge=1, le=50),
 ) -> TopMoversResponse:
     """Fetch top gaining stocks."""
-    try:
-        data = await VnstockTopMoversFetcher.fetch(type="gainer", index=index, limit=limit)
-        return TopMoversResponse(type="gainer", index=index, count=len(data), data=data)
-    except Exception:
-        return TopMoversResponse(type="gainer", index=index, count=0, data=[])
+    return await get_top_movers(type="gainer", index=index, limit=limit)
 
 
 @router.get(
@@ -270,11 +265,7 @@ async def get_top_losers(
     limit: int = Query(default=10, ge=1, le=50),
 ) -> TopMoversResponse:
     """Fetch top losing stocks."""
-    try:
-        data = await VnstockTopMoversFetcher.fetch(type="loser", index=index, limit=limit)
-        return TopMoversResponse(type="loser", index=index, count=len(data), data=data)
-    except Exception:
-        return TopMoversResponse(type="loser", index=index, count=0, data=[])
+    return await get_top_movers(type="loser", index=index, limit=limit)
 
 
 @router.get(
@@ -288,11 +279,7 @@ async def get_top_volume(
     limit: int = Query(default=10, ge=1, le=50),
 ) -> TopMoversResponse:
     """Fetch top stocks by volume."""
-    try:
-        data = await VnstockTopMoversFetcher.fetch(type="volume", index=index, limit=limit)
-        return TopMoversResponse(type="volume", index=index, count=len(data), data=data)
-    except Exception:
-        return TopMoversResponse(type="volume", index=index, count=0, data=[])
+    return await get_top_movers(type="volume", index=index, limit=limit)
 
 
 @router.get(
@@ -306,11 +293,7 @@ async def get_top_value(
     limit: int = Query(default=10, ge=1, le=50),
 ) -> TopMoversResponse:
     """Fetch top stocks by value."""
-    try:
-        data = await VnstockTopMoversFetcher.fetch(type="value", index=index, limit=limit)
-        return TopMoversResponse(type="value", index=index, count=len(data), data=data)
-    except Exception:
-        return TopMoversResponse(type="value", index=index, count=0, data=[])
+    return await get_top_movers(type="value", index=index, limit=limit)
 
 
 # =============================================================================

@@ -183,7 +183,7 @@ class SectorTopMoversResponse(BaseModel):
 
 
 @router.get("/top-movers", response_model=SectorTopMoversResponse)
-@cached(ttl=120, key_prefix="sector_top_movers")
+@cached(ttl=60, key_prefix="sector_top_movers")
 async def get_sector_top_movers(
     type: Literal["gainers", "losers"] = Query(default="gainers"),
     limit: int = Query(5, ge=1, le=10),
@@ -201,7 +201,7 @@ async def get_sector_top_movers(
             "Sector top movers fetch failed",
             extra={"type": type, "limit": limit, "error": str(error)},
         )
-        data = []
+        raise HTTPException(status_code=502, detail="Sector top movers provider unavailable") from None
 
     return SectorTopMoversResponse(
         count=len(data),

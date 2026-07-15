@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable, Optional, TypeVar, Union, Dict, List
 
 import redis.asyncio as redis
+from fastapi import HTTPException
 from pydantic import BaseModel
 
 from vnibb.core.config import settings
@@ -87,6 +88,11 @@ def _redis_cache_enabled() -> bool:
         return False
 
     return backend == "redis" and bool(settings.redis_url)
+
+
+def _has_error_result(result: Any) -> bool:
+    error = result.get("error") if isinstance(result, dict) else getattr(result, "error", None)
+    return bool(error)
 
 
 def cached(
@@ -216,6 +222,8 @@ def cached(
 
                 logger.info(f"Cache MISS for {func.__name__}: {cache_key}")
                 result = await func(*args, **kwargs)
+                if _has_error_result(result):
+                    return result
 
                 stored_in_redis = False
                 if redis_available:
@@ -231,6 +239,8 @@ def cached(
                     await set_mem_cache(result)
 
                 return result
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.warning(f"Caching logic error for {func.__name__}: {e}")
                 return await func(*args, **kwargs)

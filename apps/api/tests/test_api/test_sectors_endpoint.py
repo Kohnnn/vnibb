@@ -39,7 +39,7 @@ async def test_sector_top_movers_endpoint_uses_expected_path(client, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_sector_top_movers_endpoint_returns_empty_on_provider_error(client, monkeypatch):
+async def test_sector_top_movers_endpoint_returns_502_on_provider_error(client, monkeypatch):
     async def fake_fetch_sector_top_movers(*, type, limit_per_sector):
         raise RuntimeError("provider unavailable")
 
@@ -50,11 +50,7 @@ async def test_sector_top_movers_endpoint_returns_empty_on_provider_error(client
 
     response = await client.get("/api/v1/sectors/top-movers?type=losers&limit=2")
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["count"] == 0
-    assert payload["type"] == "losers"
-    assert payload["sectors"] == []
+    assert response.status_code == 502
 
 
 @pytest.mark.asyncio

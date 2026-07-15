@@ -12,7 +12,6 @@ services:
     environment:
       PORT: ${PORT:-8000}
       UVICORN_PROXY_HEADERS: ${UVICORN_PROXY_HEADERS:-1}
-      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
       INTRADAY_MARKET_TZ: ${INTRADAY_MARKET_TZ:-Asia/Ho_Chi_Minh}
     expose:
