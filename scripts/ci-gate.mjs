@@ -183,7 +183,7 @@ runStep(
   frontendEnv
 )
 runStep('Backend Compile Check', pythonCommand, ['-m', 'py_compile', 'apps/api/vnibb/api/main.py'])
-runStep('Backend Tests', pythonCommand, ['-m', 'pytest', 'apps/api/tests', '-v'])
+runStep('Backend Tests', pythonCommand, ['-m', 'pytest', 'apps/api/tests', '-v'], { PYTHONPATH: 'apps/api' })
 
 printSummary()
 console.log('All gates passed')
