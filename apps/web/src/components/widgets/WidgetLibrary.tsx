@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useCallback, memo } from 'react';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { getWidgetDefinition, getWidgetLibrarySectionId, normalizeWidgetType, widgetDefinitions, widgetLibrarySections } from '@/data/widgetDefinitions';
+import { isWidgetPlaceholder } from './WidgetRegistry';
 import {
     Search, X, ChevronRight,
     Activity, BarChart3, Brain, Box, Globe,
@@ -34,7 +35,12 @@ const CATEGORY_ICONS: Record<string, any> = {
     'screeners_tools': Layers,
 };
 
-const WIDGET_TYPE_SET = new Set<WidgetType>(widgetDefinitions.map((widget) => widget.type));
+export const availableWidgetDefinitions = widgetDefinitions.filter((widget) => !isWidgetPlaceholder(widget.type));
+
+export function filterAvailableWidgetTypes(widgetTypes: WidgetType[]): WidgetType[] {
+    return widgetTypes.filter((type) => !isWidgetPlaceholder(type));
+}
+const WIDGET_TYPE_SET = new Set<WidgetType>(availableWidgetDefinitions.map((widget) => widget.type));
 
 interface WidgetBundle {
     id: string;
@@ -49,7 +55,7 @@ const WIDGET_BUNDLES: WidgetBundle[] = [
     {
         id: 'world-monitor-suite',
         name: 'World Monitor Suite',
-        description: 'Map, live stream, headline list, and source registry for global risk monitoring.',
+        description: 'Map and headline list for global risk monitoring.',
         widgetTypes: ['world_news_map', 'world_news_live_stream', 'world_news_monitor', 'world_news_sources'],
         tags: ['Live RSS', 'No symbol', 'Global'],
         accent: 'from-sky-500/20 via-blue-500/10 to-emerald-500/10',
@@ -190,7 +196,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
 
         return widgetLibrarySections.map(cat => ({
             ...cat,
-            widgets: widgetDefinitions.filter((widget) => getWidgetLibrarySectionId(widget.type) === cat.id && matchesWidget(widget))
+            widgets: availableWidgetDefinitions.filter((widget) => getWidgetLibrarySectionId(widget.type) === cat.id && matchesWidget(widget))
         })).filter(cat => cat.widgets.length > 0);
     }, [searchQuery]);
 
@@ -238,7 +244,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
     }, [handleAddWidgets]);
 
     const handleAddBundle = useCallback((bundle: WidgetBundle) => {
-        const bundleDefinitions = bundle.widgetTypes
+        const bundleDefinitions = filterAvailableWidgetTypes(bundle.widgetTypes)
             .map((type) => getWidgetDefinition(type))
             .filter((widget): widget is NonNullable<typeof widget> => Boolean(widget));
 
@@ -267,14 +273,19 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
 
     const handleAddSelected = useCallback(() => {
         if (!selectedWidgetTypes.length) return;
-        const definitionsByType = new Map(widgetDefinitions.map((widget) => [widget.type, widget]));
+        const definitionsByType = new Map(availableWidgetDefinitions.map((widget) => [widget.type, widget]));
         const selectedDefinitions = selectedWidgetTypes
-            .map((type) => definitionsByType.get(type) || getWidgetDefinition(type))
+            .map((type) => definitionsByType.get(type))
             .filter((widget): widget is NonNullable<typeof widget> => Boolean(widget));
 
         handleAddWidgets(selectedDefinitions);
         setSelectedWidgetTypes([]);
     }, [handleAddWidgets, selectedWidgetTypes]);
+
+    const availableBundles = useMemo(() => WIDGET_BUNDLES.map((bundle) => ({
+        ...bundle,
+        widgetTypes: filterAvailableWidgetTypes(bundle.widgetTypes),
+    })).filter((bundle) => bundle.widgetTypes.length > 0), []);
 
     return (
         <AnimatePresence>
@@ -339,7 +350,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                         Recommended Bundles
                                     </div>
                                     <div className="space-y-2 p-2">
-                                        {WIDGET_BUNDLES.map((bundle) => (
+                                        {availableBundles.map((bundle) => (
                                             <div
                                                 key={bundle.id}
                                                 className={cn(
@@ -390,7 +401,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                     </div>
                                     <div className="p-2 grid grid-cols-2 gap-2">
                                         {recentWidgetTypes.map(type => {
-                                            const widget = widgetDefinitions.find(w => w.type === type);
+                                            const widget = availableWidgetDefinitions.find(w => w.type === type);
                                             if (!widget) return null;
                                             return (
                                                 <button

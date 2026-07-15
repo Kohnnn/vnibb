@@ -2,29 +2,14 @@
 
 'use client';
 
-import { useState, useCallback, useMemo, useEffect, useRef, lazy, Suspense, type ComponentType } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, Suspense } from 'react';
 import { toast } from 'sonner';
 import { Sidebar, Header, TabBar, RightSidebar, MobileNav, FreshnessBanner, WhatsNewPanel } from '@/components/layout';
 import { OnboardingWalkthrough } from '@/components/onboarding/OnboardingWalkthrough';
 import { ResponsiveDashboardGrid, type LayoutItem } from '@/components/layout/DashboardGrid';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import {
-    TickerInfoWidget,
-    PriceChartWidget,
-    KeyMetricsWidget,
-    ScreenerWidget,
-    TickerProfileWidget,
-    ShareStatisticsWidget,
-    EarningsHistoryWidget,
-    DividendPaymentWidget,
-    CompanyFilingsWidget,
-    StockSplitsWidget,
-    MarketOverviewWidget,
-    WidgetLibrary,
-    WidgetWrapper,
-    widgetRegistry
-} from '@/components/widgets';
+import { WidgetLibrary, WidgetWrapper, widgetRegistry } from '@/components/widgets';
 import {
     TIMEFRAME_OPTIONS,
     CHART_TYPE_OPTIONS,
@@ -1111,7 +1096,13 @@ function DashboardContent() {
         }
     }, []);
 
-    if (!mounted) return null;
+    if (!mounted) {
+        return (
+            <div aria-busy="true" aria-label="Loading dashboard" className="flex h-screen items-center justify-center bg-[var(--bg-primary)] text-sm text-[var(--text-muted)]">
+                Loading dashboard...
+            </div>
+        );
+    }
 
     return (
         <div aria-label="Dashboard workspace" className="flex h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] overflow-hidden">
@@ -1346,10 +1337,7 @@ function DashboardContent() {
                                             handleWidgetConfigChange(widget.id, key, value)
                                         );
 
-                                        // Create lazy component from registry entry
-                                        const LazyWidgetComponent = registryEntry
-                                            ? lazy(registryEntry.lazyComponent)
-                                            : null;
+                                        const LazyWidgetComponent = registryEntry?.component;
 
                                         return (
                                             <div

@@ -79,7 +79,7 @@ function ProvidersInner({ children }: { children: ReactNode }) {
             <Suspense fallback={null}>
                 <AnalyticsBootstrap />
             </Suspense>
-            <main id="main-content">{children}</main>
+            <div id="main-content">{children}</div>
             <CommandPaletteWrapper />
             <AppToaster />
         </>

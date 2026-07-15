@@ -23,10 +23,16 @@ export interface WidgetProps {
   [key: string]: unknown;
 }
 
-interface RegistryEntry {
-  lazyComponent: () => Promise<{ default: ComponentType<any> }>;
+type WidgetLoader = (() => Promise<{ default: ComponentType<any> }>) & {
+  isPlaceholder?: boolean;
+};
+
+export interface RegistryEntry {
+  lazyComponent: WidgetLoader;
+  component: React.LazyExoticComponent<ComponentType<any>>;
   category: WidgetCategory;
   keywords?: string[];
+  isPlaceholder: boolean;
 }
 
 export type WidgetCategory =
@@ -49,14 +55,16 @@ const widgetRegistry = new Map<WidgetType, RegistryEntry>();
  */
 function registerWidget(
   type: WidgetType,
-  loader: () => Promise<{ default: ComponentType<any> }>,
+  loader: WidgetLoader,
   category: WidgetCategory,
   keywords: string[] = []
 ) {
   widgetRegistry.set(type, {
     lazyComponent: loader,
+    component: React.lazy(loader),
     category,
     keywords,
+    isPlaceholder: loader.isPlaceholder === true,
   });
 }
 
@@ -68,13 +76,17 @@ export function isWidgetRegistered(type: WidgetType): boolean {
   return widgetRegistry.has(type);
 }
 
+export function isWidgetPlaceholder(type: WidgetType): boolean {
+  return widgetRegistry.get(type)?.isPlaceholder === true;
+}
+
 /**
  * Lazy helper that adapts the named-export convention some widgets use.
  */
 function lazyNamed(
   importer: () => Promise<Record<string, unknown>>,
   exportName: string
-): () => Promise<{ default: ComponentType<any> }> {
+): WidgetLoader {
   return async () => {
     const mod = await importer();
     const named = mod[exportName];
@@ -93,11 +105,9 @@ function lazyNamed(
  * registered. We render a tiny placeholder so dashboards still load even if
  * a specific widget is missing.
  */
-function placeholderLoader(type: WidgetType) {
-  return async () => ({
+function placeholderLoader(type: WidgetType): WidgetLoader {
+  const loader: WidgetLoader = async () => ({
     default: function PlaceholderWidget(_props: WidgetProps) {
-      // Plain DOM element to keep this module ESM-pure and avoid pulling in
-      // JSX runtime at module-evaluation time.
       return createElement(
         'div',
         {
@@ -107,6 +117,8 @@ function placeholderLoader(type: WidgetType) {
       );
     } as ComponentType<any>,
   });
+  loader.isPlaceholder = true;
+  return loader;
 }
 
 /**

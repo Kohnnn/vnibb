@@ -320,7 +320,7 @@ export function Header({
         aria-hidden
         className="pointer-events-none absolute inset-0 -z-10 backdrop-blur supports-[backdrop-filter]:bg-[var(--dashboard-shell-bg)]/85"
       />
-      <div className="px-4 py-2">
+      <div className="px-4 py-2 pl-14 lg:pl-4">
         <div data-tour="header-bar" className="flex min-h-[2.75rem] flex-wrap items-center gap-2">
           <div className="hidden min-w-0 shrink-0 items-center gap-2 xl:flex">
             <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5">

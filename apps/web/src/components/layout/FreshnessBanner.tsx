@@ -56,11 +56,12 @@ export function FreshnessBanner() {
     }
   }, []);
 
-  const critical = useMemo(() => {
+  const affectedBuckets = useMemo(() => {
     if (!data) return null;
-    if (data.overall !== 'critical') return null;
-    return data.buckets.filter((bucket) => bucket.status === 'critical');
+    return data.buckets.filter((bucket) => bucket.status !== 'fresh');
   }, [data]);
+
+  const isCritical = affectedBuckets?.some((bucket) => bucket.status === 'critical') ?? false;
 
   const currentHash = useMemo(
     () => (data ? buildStatusHash(data.overall, data.buckets) : null),
@@ -79,8 +80,8 @@ export function FreshnessBanner() {
 
   if (
     isLoading ||
-    !critical ||
-    critical.length === 0 ||
+    !affectedBuckets ||
+    affectedBuckets.length === 0 ||
     (currentHash !== null && currentHash === dismissedHash)
   ) {
     return null;
@@ -92,21 +93,23 @@ export function FreshnessBanner() {
       aria-live="polite"
       className={cn(
         'flex items-start gap-3 border-b px-4 py-2 text-[12px] leading-5',
-        'border-rose-500/30 bg-rose-500/10 text-rose-100',
+        isCritical
+          ? 'border-rose-500/30 bg-rose-500/10 text-rose-100'
+          : 'border-amber-500/30 bg-amber-500/10 text-amber-100',
       )}
     >
       <AlertTriangle
         size={14}
         className={cn(
           'mt-0.5 shrink-0',
-          'text-rose-300',
+          isCritical ? 'text-rose-300' : 'text-amber-300',
         )}
       />
       <div className="flex flex-1 flex-wrap items-baseline gap-x-4 gap-y-1">
         <span className="font-semibold uppercase tracking-[0.16em]">
-          Data sync degraded
+          {isCritical ? 'Data sync degraded' : 'Data sync delayed'}
         </span>
-        {critical.map((bucket) => (
+        {affectedBuckets.map((bucket) => (
           <span key={bucket.label} className="inline-flex items-center gap-1.5">
             <ChevronRight size={11} className="opacity-60" />
             <span className="font-medium">{bucket.label}:</span>

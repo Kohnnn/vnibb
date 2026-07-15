@@ -8,7 +8,7 @@
  * widgetDefinitions.ts must have a corresponding entry in WidgetRegistry.
  */
 
-import { widgetRegistry } from './WidgetRegistry';
+import { isWidgetPlaceholder, widgetRegistry } from './WidgetRegistry';
 import { widgetDefinitions } from '@/data/widgetDefinitions';
 
 describe('WidgetRegistry completeness', () => {
@@ -26,6 +26,15 @@ describe('WidgetRegistry completeness', () => {
         return typeof value === 'object' && value !== null && '$$typeof' in value;
     };
 
+    it('keeps one stable lazy component for each registry entry', async () => {
+        for (const type of registeredTypes) {
+            const entry = widgetRegistry.get(type as never);
+            const component = entry?.component;
+            await entry?.lazyComponent();
+            expect(widgetRegistry.get(type as never)?.component).toBe(component);
+        }
+    });
+
     it('registers a loader that resolves to a component', async () => {
         for (const type of registeredTypes) {
             const entry = widgetRegistry.get(type as never);
@@ -33,6 +42,12 @@ describe('WidgetRegistry completeness', () => {
             const resolved = await entry!.lazyComponent();
             expect(isRenderableComponent(resolved.default)).toBe(true);
         }
+    });
+
+    it('identifies placeholder entries without unregistering them', () => {
+        expect(isWidgetPlaceholder('valuation_band')).toBe(true);
+        expect(widgetRegistry.has('valuation_band')).toBe(true);
+        expect(isWidgetPlaceholder('price_chart')).toBe(false);
     });
 
     it('covers the prediction-market family introduced in Phase 7', () => {
