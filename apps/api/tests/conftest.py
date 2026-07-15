@@ -81,10 +81,8 @@ def relax_rate_limit_buckets(monkeypatch):
     original_resolve_bucket = RateLimitMiddleware._resolve_bucket
 
     def _resolve_bucket(self, path: str):
-        bucket, requests_per_minute = original_resolve_bucket(self, path)
-        if bucket == 'admin':
-            return bucket, 1000
-        return bucket, requests_per_minute
+        bucket, _ = original_resolve_bucket(self, path)
+        return bucket, 1000
 
     monkeypatch.setattr(RateLimitMiddleware, '_resolve_bucket', _resolve_bucket)
 
