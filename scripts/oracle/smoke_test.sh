@@ -7,6 +7,7 @@ WS_URL="${WS_URL:-${BASE_URL/http/ws}/api/v1/ws/prices}"
 TIMEOUT="${TIMEOUT:-15}"
 CORS_TEST_ORIGIN="${CORS_TEST_ORIGIN:-}"
 CURL_BIN="${CURL_BIN:-}"
+PYTHON_BIN="${PYTHON_BIN:-}"
 NULL_SINK="/dev/null"
 status=0
 
@@ -20,6 +21,20 @@ fi
 
 if [[ "$CURL_BIN" == "curl.exe" ]]; then
   NULL_SINK="NUL"
+fi
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  for candidate in python python3 py; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PYTHON_BIN="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "No python interpreter found on PATH for smoke_test.sh"
+  exit 1
 fi
 
 if [[ -z "$CORS_TEST_ORIGIN" ]]; then
@@ -53,7 +68,7 @@ expect_ok() {
     status=1
     return
   fi
-  if ! printf '%s' "$body" | python -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null; then
+  if ! printf '%s' "$body" | "$PYTHON_BIN" -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null; then
     echo "  - ${label}: response is not valid JSON"
     status=1
     return
@@ -72,7 +87,7 @@ expect_json_field() {
     status=1
     return
   fi
-  if ! printf '%s' "$body" | python -c "
+  if ! printf '%s' "$body" | "$PYTHON_BIN" -c "
 import json, sys
 d = json.loads(sys.stdin.read())
 keys = '${field}'.split('.')
@@ -111,17 +126,8 @@ if ! printf '%s\n' "$cors_headers" | grep -qi "access-control-allow-origin: ${CO
   status=1
 fi
 
-PYTHON_BIN=""
-for candidate in python python3 py; do
-  if command -v "$candidate" >/dev/null 2>&1; then
-    PYTHON_BIN="$candidate"
-    break
-  fi
-done
-
-if [[ -n "$PYTHON_BIN" ]]; then
-  echo "Optional websocket probe: ${WS_URL}"
-  "$PYTHON_BIN" - "${WS_URL}" <<'PY' || status=1
+echo "Optional websocket probe: ${WS_URL}"
+"$PYTHON_BIN" - "${WS_URL}" <<'PY' || status=1
 import asyncio
 import importlib.util
 import sys
@@ -145,8 +151,5 @@ async def main() -> int:
 
 raise SystemExit(asyncio.run(main()))
 PY
-else
-  echo "SKIP websocket probe: no python interpreter is available on PATH for this shell"
-fi
 
 exit "$status"
