@@ -4,6 +4,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import * as api from '../api';
+import type { Timeframe } from '@/types/technical';
 
 // ============ Query Keys ============
 
@@ -20,7 +21,7 @@ export const technicalQueryKeys = {
 
 export function useFullTechnicalAnalysis(
     symbol: string,
-    options?: { timeframe?: string; lookbackDays?: number; enabled?: boolean }
+    options?: { timeframe?: Timeframe; lookbackDays?: number; enabled?: boolean }
 ) {
     const timeframe = options?.timeframe || 'D';
     return useQuery({

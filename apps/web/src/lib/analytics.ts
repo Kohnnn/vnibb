@@ -44,6 +44,7 @@ export const ANALYTICS_EVENTS = {
   layoutAction: 'layout_action',
   mobileMenuClosed: 'mobile_menu_closed',
   mobileMenuOpened: 'mobile_menu_opened',
+  onboardingGoalSelected: 'onboarding_goal_selected',
   onboardingWalkthroughCompleted: 'onboarding_walkthrough_completed',
   onboardingWalkthroughStarted: 'onboarding_walkthrough_started',
   onboardingWalkthroughStepViewed: 'onboarding_walkthrough_step_viewed',

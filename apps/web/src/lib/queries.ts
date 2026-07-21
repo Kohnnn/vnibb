@@ -425,7 +425,11 @@ export function useCommodities(enabled = true) {
 
 export function useScreenerData(options?: {
     symbol?: string;
+    universe?: 'ALL' | 'VN30' | 'VN100' | 'HNX30';
     exchange?: string;
+    as_of_date?: string;
+    min_listing_age_days?: number;
+    target_upside_min?: number;
     industry?: string;
     limit?: number;
     source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
@@ -1312,6 +1316,7 @@ export function useQuantBacktest(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
+        asOfDate?: string;
         fastWindow?: number;
         slowWindow?: number;
         initialCapital?: number;
@@ -1323,15 +1328,17 @@ export function useQuantBacktest(
 ) {
     const preferredSource = useVnstockSource();
     const period = options?.period || '5Y';
+    const asOfDate = options?.asOfDate || new Date().toISOString().slice(0, 10);
     const fastWindow = options?.fastWindow ?? 20;
     const slowWindow = options?.slowWindow ?? 50;
     const source = options?.source || preferredSource;
     const adjustmentMode = options?.adjustmentMode || 'adjusted';
 
     return useQuery({
-        queryKey: queryKeys.quantBacktest(symbol, period, fastWindow, slowWindow, source, adjustmentMode),
+        queryKey: queryKeys.quantBacktest(symbol, period, asOfDate, fastWindow, slowWindow, source, adjustmentMode),
         queryFn: () => api.runQuantBacktest(symbol, {
             period,
+            as_of_date: asOfDate,
             initial_capital: options?.initialCapital,
             fee_bps: options?.feeBps,
             source,

@@ -5,7 +5,11 @@ import type { ScreenerResponse } from '@/types/screener';
 
 export interface ScreenerFilterParams {
     market?: string;
+    universe?: 'ALL' | 'VN30' | 'VN100' | 'HNX30';
     exchange?: string;
+    asOfDate?: string;
+    minListingAgeDays?: number;
+    targetUpsideMin?: number;
     sector?: string;
     industry?: string;
     minPrice?: number;
@@ -36,7 +40,11 @@ export async function getScreenerData(
     return fetchAPI<ScreenerResponse>('/screener', {
         params: {
             market: options?.market,
+            universe: options?.universe,
             exchange: options?.exchange,
+            as_of_date: options?.asOfDate,
+            min_listing_age_days: options?.minListingAgeDays,
+            target_upside_min: options?.targetUpsideMin,
             sector: options?.sector,
             industry: options?.industry,
             min_price: options?.minPrice,

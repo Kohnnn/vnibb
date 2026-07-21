@@ -3,14 +3,19 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useQueries } from '@tanstack/react-query';
 import {
-    Briefcase, Plus, X, Edit2, Check, Download, RefreshCw,
+    Briefcase, Plus, X, Edit2, Check, Download, FileJson, RefreshCw,
     TrendingUp, TrendingDown, PieChart, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { usePortfolio, type Position } from '@/lib/hooks/usePortfolio';
 import { usePortfolioPrices } from '@/lib/hooks/usePortfolioPrices';
+import * as api from '@/lib/api';
+import { equityQueryKeys } from '@/lib/queries/equity';
 import { formatVND, formatPercent } from '@/lib/formatters';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { exportToCSV, exportToJSON } from '@/lib/exportWidget';
+import { calculatePortfolioConcentration, calculatePortfolioValuation } from '@/lib/portfolioAnalytics';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
@@ -30,43 +35,17 @@ interface PortfolioTrackerWidgetProps {
 
 interface PositionWithPL extends Position {
     currentPrice: number | null;
-    marketValue: number;
+    marketValue: number | null;
     costBasis: number;
-    unrealizedPL: number;
-    unrealizedPLPct: number;
+    unrealizedPL: number | null;
+    unrealizedPLPct: number | null;
     dayChange: number | null;
     dayChangePct: number | null;
+    quoteUpdatedAt: string | null;
     isLoading: boolean;
 }
 
 type ViewMode = 'positions' | 'allocation';
-
-// ============================================================================
-// Sector mapping (simplified - in production, fetch from API)
-// ============================================================================
-
-const SECTOR_MAP: Record<string, string> = {
-    VNM: 'Consumer Goods',
-    FPT: 'Technology',
-    VIC: 'Real Estate',
-    VHM: 'Real Estate',
-    HPG: 'Materials',
-    MSN: 'Consumer Goods',
-    TCB: 'Financials',
-    VCB: 'Financials',
-    MBB: 'Financials',
-    ACB: 'Financials',
-    SSI: 'Financials',
-    VND: 'Financials',
-    PNJ: 'Consumer Goods',
-    MWG: 'Consumer Goods',
-    REE: 'Industrials',
-    GAS: 'Energy',
-    PLX: 'Energy',
-    POW: 'Utilities',
-    VRE: 'Real Estate',
-    NVL: 'Real Estate',
-};
 
 const SECTOR_COLORS: Record<string, string> = {
     'Technology': '#3B82F6',
@@ -237,56 +216,77 @@ function EditPositionRow({
 
 function AllocationChart({
     positions,
+    sectors,
 }: {
     positions: PositionWithPL[];
+    sectors: Map<string, string>;
 }) {
-    // Group by sector
-    const sectorData = useMemo(() => {
-        const sectors: Record<string, number> = {};
-        let total = 0;
+    const concentration = useMemo(() => calculatePortfolioConcentration(positions.flatMap((position) => (
+        position.marketValue === null ? [] : [{
+            symbol: position.symbol,
+            marketValue: position.marketValue,
+            sector: sectors.get(position.symbol) ?? null,
+            hasLiveQuote: true,
+        }]
+    ))), [positions, sectors]);
 
-        positions.forEach(p => {
-            if (p.marketValue <= 0) return;
-            const sector = SECTOR_MAP[p.symbol] || 'Other';
-            sectors[sector] = (sectors[sector] || 0) + p.marketValue;
-            total += p.marketValue;
-        });
-
-        return Object.entries(sectors)
-            .map(([name, value]) => ({
-                name,
-                value,
-                percentage: total > 0 ? (value / total) * 100 : 0,
-                color: SECTOR_COLORS[name] || SECTOR_COLORS['Other'],
-            }))
-            .sort((a, b) => b.value - a.value);
-    }, [positions]);
-
-    if (sectorData.length === 0) {
+    if (concentration.sectors.length === 0) {
         return (
-            <div className="flex items-center justify-center h-32 text-zinc-500 text-xs">
-                No positions to display
+            <div className="flex h-32 flex-col items-center justify-center gap-1 text-center text-xs text-zinc-500">
+                <span>{positions.length === 0 ? 'No positions to display' : 'Quoted sector allocation unavailable'}</span>
+                {positions.length > 0 && (
+                    <span>Sector profiles: 0 / {concentration.positionCount} quoted holdings · 0 / {formatVND(concentration.totalValue)} quoted market value.</span>
+                )}
             </div>
         );
     }
 
-    // Simple horizontal bar chart
     return (
-        <div className="space-y-2 p-2">
-            {sectorData.map(sector => (
+        <div className="space-y-3 p-2">
+            <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 p-2">
+                    <div className="text-zinc-500">Largest Holding</div>
+                    <div className="mt-0.5 text-white">
+                        {concentration.largestHolding?.symbol} · {((concentration.largestHolding?.weight || 0) * 100).toFixed(1)}%
+                    </div>
+                </div>
+                <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 p-2">
+                    <div className="text-zinc-500">Top 3 Holdings</div>
+                    <div className="mt-0.5 text-white">{(concentration.topThreeWeight * 100).toFixed(1)}%</div>
+                </div>
+                <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 p-2">
+                    <div className="text-zinc-500">HHI / Effective</div>
+                    <div className="mt-0.5 text-white">
+                        {concentration.hhi.toFixed(3)} / {concentration.effectivePositions.toFixed(1)} positions
+                    </div>
+                </div>
+                <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 p-2">
+                    <div className="text-zinc-500">Largest Sector</div>
+                    <div className="mt-0.5 text-white">
+                        {concentration.largestSector?.name} · {((concentration.largestSector?.weight || 0) * 100).toFixed(1)}%
+                    </div>
+                </div>
+            </div>
+            <div className="text-[10px] text-zinc-500">
+                Quote coverage: {concentration.quotedPositionCount} / {positions.length}; allocation uses quoted market value only.
+            </div>
+            <div className="text-[10px] text-zinc-500">
+                Sector profiles: {concentration.resolvedSectorPositionCount} / {concentration.positionCount} quoted holdings · {formatVND(concentration.resolvedSectorValue)} / {formatVND(concentration.totalValue)} quoted market value; unresolved {concentration.unresolvedSectorPositionCount} / {formatVND(concentration.unresolvedSectorValue)}.
+            </div>
+            {concentration.sectors.map(sector => (
                 <div key={sector.name} className="space-y-1">
                     <div className="flex justify-between text-xs">
                         <span className="text-zinc-300">{sector.name}</span>
                         <span className="text-zinc-400">
-                            {sector.percentage.toFixed(1)}% • {formatVND(sector.value)}
+                            {(sector.weight * 100).toFixed(1)}% • {formatVND(sector.value)}
                         </span>
                     </div>
                     <div className="h-2 bg-zinc-700 rounded-full overflow-hidden">
                         <div
                             className="h-full rounded-full transition-all duration-300"
                             style={{
-                                width: `${sector.percentage}%`,
-                                backgroundColor: sector.color,
+                                width: `${sector.weight * 100}%`,
+                                backgroundColor: SECTOR_COLORS[sector.name] || SECTOR_COLORS['Other'],
                             }}
                         />
                     </div>
@@ -307,7 +307,10 @@ export function PortfolioTrackerWidget({
 }: PortfolioTrackerWidgetProps) {
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'portfolio_tracker' });
     const {
+        portfolio,
         positions,
+        cashBalance,
+        valueHistory,
         symbols,
         addPosition,
         updatePosition,
@@ -316,6 +319,17 @@ export function PortfolioTrackerWidget({
     } = usePortfolio();
 
     const { prices, isLoading: pricesLoading, refetch } = usePortfolioPrices(symbols);
+    const profileQueries = useQueries({
+        queries: symbols.map((symbol) => ({
+            queryKey: equityQueryKeys.profile(symbol),
+            queryFn: () => api.getProfile(symbol),
+            staleTime: 10 * 60 * 1000,
+        })),
+    });
+    const sectors = useMemo(() => new Map(symbols.flatMap((symbol, index) => {
+        const sector = profileQueries[index]?.data?.data?.sector;
+        return typeof sector === 'string' && sector.trim() ? [[symbol, sector]] : [];
+    })), [profileQueries, symbols]);
 
     const [showAddForm, setShowAddForm] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -327,11 +341,11 @@ export function PortfolioTrackerWidget({
     const enrichedPositions: PositionWithPL[] = useMemo(() => {
         return positions.map(pos => {
             const priceData = prices.get(pos.symbol);
-            const currentPrice = priceData?.currentPrice ?? null;
+            const currentPrice = Number.isFinite(priceData?.currentPrice) && (priceData?.currentPrice ?? 0) > 0 ? priceData?.currentPrice ?? null : null;
             const costBasis = pos.quantity * pos.avgCost;
-            const marketValue = currentPrice !== null ? pos.quantity * currentPrice : costBasis;
-            const unrealizedPL = currentPrice !== null ? marketValue - costBasis : 0;
-            const unrealizedPLPct = costBasis > 0 ? (unrealizedPL / costBasis) * 100 : 0;
+            const marketValue = currentPrice === null ? null : pos.quantity * currentPrice;
+            const unrealizedPL = marketValue === null ? null : marketValue - costBasis;
+            const unrealizedPLPct = unrealizedPL !== null && costBasis > 0 ? (unrealizedPL / costBasis) * 100 : null;
 
             return {
                 ...pos,
@@ -342,6 +356,7 @@ export function PortfolioTrackerWidget({
                 unrealizedPLPct,
                 dayChange: priceData?.change ?? null,
                 dayChangePct: priceData?.changePct ?? null,
+                quoteUpdatedAt: priceData?.updatedAt ?? null,
                 isLoading: priceData?.isLoading ?? true,
             };
         });
@@ -357,10 +372,10 @@ export function PortfolioTrackerWidget({
                     cmp = a.symbol.localeCompare(b.symbol);
                     break;
                 case 'value':
-                    cmp = a.marketValue - b.marketValue;
+                    cmp = (a.marketValue ?? Number.NEGATIVE_INFINITY) - (b.marketValue ?? Number.NEGATIVE_INFINITY);
                     break;
                 case 'pl':
-                    cmp = a.unrealizedPLPct - b.unrealizedPLPct;
+                    cmp = (a.unrealizedPLPct ?? Number.NEGATIVE_INFINITY) - (b.unrealizedPLPct ?? Number.NEGATIVE_INFINITY);
                     break;
             }
             return sortAsc ? cmp : -cmp;
@@ -368,19 +383,17 @@ export function PortfolioTrackerWidget({
         return sorted;
     }, [enrichedPositions, sortField, sortAsc]);
 
-    // Portfolio totals
     const totals = useMemo(() => {
-        const totalValue = enrichedPositions.reduce((sum, p) => sum + p.marketValue, 0);
-        const totalCost = enrichedPositions.reduce((sum, p) => sum + p.costBasis, 0);
-        const totalPL = totalValue - totalCost;
-        const totalPLPct = totalCost > 0 ? (totalPL / totalCost) * 100 : 0;
-        const todayChange = enrichedPositions.reduce((sum, p) => {
-            if (p.dayChange === null || p.currentPrice === null) return sum;
-            return sum + (p.dayChange * p.quantity);
+        const valuation = calculatePortfolioValuation(enrichedPositions);
+        const todayChange = enrichedPositions.reduce((sum, position) => {
+            if (position.dayChange === null || position.currentPrice === null) return sum;
+            return sum + (position.dayChange * position.quantity);
         }, 0);
-
-        return { totalValue, totalCost, totalPL, totalPLPct, todayChange };
+        return { ...valuation, todayChange };
     }, [enrichedPositions]);
+    const latestQuoteUpdatedAt = useMemo(() => enrichedPositions.reduce<string | null>((latest, position) => (
+        position.quoteUpdatedAt && (!latest || position.quoteUpdatedAt > latest) ? position.quoteUpdatedAt : latest
+    ), null), [enrichedPositions]);
 
     useEffect(() => {
         onDataChange?.(buildWidgetRuntime({
@@ -388,56 +401,88 @@ export function PortfolioTrackerWidget({
             apiGroup: '/equity',
             endpoint: '/api/v1/market/quotes/batch',
             sourceLabel: 'Local portfolio',
+            lastDataDate: latestQuoteUpdatedAt,
             derived: true,
             extra: {
                 positionCount: positions.length,
                 symbolCount: symbols.length,
-                totalValue: totals.totalValue,
+                resolvedSectorCount: sectors.size,
+                unresolvedSectorCount: Math.max(0, symbols.length - sectors.size),
+                quotedMarketValue: totals.quotedMarketValue,
+                unpricedCostBasis: totals.unpricedCostBasis,
+                quoteCoverage: { quoted: totals.quotedPositionCount, total: totals.positionCount },
+                marketValue: totals.marketValue,
+                unrealizedPL: totals.unrealizedPL,
             },
         }));
-    }, [onDataChange, positions.length, symbols.length, totals.totalValue]);
+    }, [latestQuoteUpdatedAt, onDataChange, positions.length, sectors.size, symbols.length, totals.marketValue, totals.quotedMarketValue, totals.unpricedCostBasis, totals.unrealizedPL, totals.quotedPositionCount, totals.positionCount]);
 
-    // Record value snapshot when prices update
     useEffect(() => {
-        if (!pricesLoading && positions.length > 0 && totals.totalValue > 0) {
-            recordValueSnapshot(totals.totalValue, totals.totalCost);
+        if (!pricesLoading && positions.length > 0 && totals.marketValue !== null) {
+            recordValueSnapshot(totals.marketValue, totals.totalCostBasis);
         }
-    }, [pricesLoading, positions.length, totals.totalValue, totals.totalCost, recordValueSnapshot]);
+    }, [pricesLoading, positions.length, totals.marketValue, totals.totalCostBasis, recordValueSnapshot]);
 
-    // Export to CSV
-    const exportToCSV = useCallback(() => {
+    const exportPayload = useMemo(() => {
+        const quoteCoverage = {
+            quotedPositionCount: totals.quotedPositionCount,
+            positionCount: totals.positionCount,
+            unpricedPositionCount: totals.unpricedPositionCount,
+            unquotedSymbols: enrichedPositions.filter((position) => position.currentPrice === null).map((position) => position.symbol),
+            quoteUpdatedAt: Object.fromEntries(enrichedPositions.map((position) => [position.symbol, position.quoteUpdatedAt])),
+        };
+        const sectorCoverage = {
+            resolvedPositionCount: enrichedPositions.filter((position) => sectors.has(position.symbol)).length,
+            positionCount: enrichedPositions.length,
+            unresolvedSymbols: enrichedPositions.filter((position) => !sectors.has(position.symbol)).map((position) => position.symbol),
+        };
+        return {
+            localOnly: true,
+            generatedAt: new Date().toISOString(),
+            portfolio,
+            positions: enrichedPositions.map(({ isLoading, ...position }) => ({ ...position, sector: sectors.get(position.symbol) ?? null })),
+            totals: {
+                ...totals,
+                cashBalance,
+                portfolioValueIncludingCash: totals.marketValue === null ? null : totals.marketValue + cashBalance,
+                aggregateStatus: totals.marketValue === null ? 'partial_quote_coverage' : 'complete_quote_coverage',
+            },
+            cashBalance,
+            valueHistory,
+            quoteCoverage,
+            sectorResolutionCoverage: sectorCoverage,
+        };
+    }, [cashBalance, enrichedPositions, portfolio, sectors, totals, valueHistory]);
+
+    const handleExportCSV = useCallback(() => {
         if (enrichedPositions.length === 0) return;
+        const rows = [
+            ...exportPayload.positions.map((position) => ({ section: 'position', ...position })),
+            { section: 'totals', ...exportPayload.totals },
+            { section: 'quote_coverage', ...exportPayload.quoteCoverage },
+            { section: 'sector_resolution_coverage', ...exportPayload.sectorResolutionCoverage },
+            ...valueHistory.map((snapshot) => ({ section: 'value_history', ...snapshot })),
+        ];
+        exportToCSV(rows, `portfolio_${new Date().toISOString().split('T')[0]}`, {
+            widgetType: 'portfolio_tracker',
+            widgetTitle: 'Portfolio Tracker',
+            sourceLabel: 'Browser-local portfolio',
+            apiGroup: '/equity',
+            endpoint: '/api/v1/market/quotes/batch',
+            localOnly: true,
+        });
+    }, [enrichedPositions.length, exportPayload, valueHistory]);
 
-        const headers = ['Symbol', 'Quantity', 'Avg Cost', 'Current Price', 'Market Value', 'Cost Basis', 'P/L', 'P/L %', 'Purchase Date', 'Notes'];
-        const rows = enrichedPositions.map(p => [
-            p.symbol,
-            p.quantity,
-            p.avgCost,
-            p.currentPrice ?? 'N/A',
-            p.marketValue,
-            p.costBasis,
-            p.unrealizedPL,
-            p.unrealizedPLPct.toFixed(2) + '%',
-            p.purchaseDate,
-            p.notes || '',
-        ]);
-
-        // Add totals row
-        rows.push([]);
-        rows.push(['TOTAL', '', '', '', totals.totalValue, totals.totalCost, totals.totalPL, totals.totalPLPct.toFixed(2) + '%', '', '']);
-
-        const csvContent = [headers, ...rows]
-            .map(row => row.map(cell => `"${cell}"`).join(','))
-            .join('\n');
-
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `portfolio_${new Date().toISOString().split('T')[0]}.csv`;
-        link.click();
-        URL.revokeObjectURL(url);
-    }, [enrichedPositions, totals]);
+    const handleExportJSON = useCallback(() => {
+        exportToJSON(exportPayload, `portfolio_${new Date().toISOString().split('T')[0]}`, {
+            widgetType: 'portfolio_tracker',
+            widgetTitle: 'Portfolio Tracker',
+            sourceLabel: 'Browser-local portfolio',
+            apiGroup: '/equity',
+            endpoint: '/api/v1/market/quotes/batch',
+            localOnly: true,
+        });
+    }, [exportPayload]);
 
     const handleSort = (field: typeof sortField) => {
         if (sortField === field) {
@@ -453,7 +498,7 @@ export function PortfolioTrackerWidget({
         return sortAsc ? <ChevronUp size={10} /> : <ChevronDown size={10} />;
     };
 
-    const isProfit = totals.totalPL >= 0;
+    const isProfit = totals.unrealizedPL !== null && totals.unrealizedPL >= 0;
 
     return (
         <div className="h-full flex flex-col">
@@ -462,17 +507,20 @@ export function PortfolioTrackerWidget({
                 <div className="flex items-center gap-2">
                     <Briefcase size={14} className="text-cyan-400" />
                     <div className="text-xs">
-                        <span className="text-zinc-400">Value: </span>
+                        <span className="text-zinc-400">{totals.marketValue === null ? 'Market value:' : 'Quoted market value:'} </span>
                         <span className="text-white font-medium">
-                            {formatVND(totals.totalValue)}
+                            {totals.marketValue === null ? 'Unavailable' : formatVND(totals.marketValue)}
                         </span>
-                        <span className={`ml-2 ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
-                            {formatPercent(totals.totalPLPct / 100)}
-                        </span>
+                        {totals.unrealizedPLPct !== null && (
+                            <span className={`ml-2 ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
+                                {formatPercent(totals.unrealizedPLPct / 100)}
+                            </span>
+                        )}
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
                     <WidgetMeta
+                        updatedAt={latestQuoteUpdatedAt}
                         isFetching={pricesLoading}
                         note="Local portfolio"
                         align="right"
@@ -485,12 +533,21 @@ export function PortfolioTrackerWidget({
                         <RefreshCw size={12} className={pricesLoading ? 'animate-spin' : ''} />
                     </button>
                     <button
-                        onClick={exportToCSV}
+                        onClick={handleExportCSV}
                         disabled={positions.length === 0}
                         className="p-1 text-zinc-500 hover:text-white hover:bg-zinc-700 rounded transition-colors disabled:opacity-50"
                         title="Export to CSV"
                     >
                         <Download size={12} />
+                    </button>
+                    <button
+                        onClick={handleExportJSON}
+                        disabled={positions.length === 0}
+                        className="p-1 text-zinc-500 hover:text-white hover:bg-zinc-700 rounded transition-colors disabled:opacity-50"
+                        title="Export to JSON"
+                        aria-label="Export portfolio to JSON"
+                    >
+                        <FileJson size={12} />
                     </button>
                     <button
                         onClick={() => setViewMode(viewMode === 'positions' ? 'allocation' : 'positions')}
@@ -520,25 +577,31 @@ export function PortfolioTrackerWidget({
                 </div>
             </div>
 
-            {/* Summary Stats */}
-            <div className="grid grid-cols-3 gap-2 px-2 py-1.5 border-b border-zinc-800 text-xs">
+            <div className="grid grid-cols-2 gap-2 px-2 py-1.5 border-b border-zinc-800 text-xs sm:grid-cols-4">
                 <div>
-                    <div className="text-zinc-500">Cost Basis</div>
-                    <div className="text-white font-mono">{formatVND(totals.totalCost)}</div>
+                    <div className="text-zinc-500">Quoted market value</div>
+                    <div className="text-white font-mono">{formatVND(totals.quotedMarketValue)}</div>
                 </div>
                 <div>
-                    <div className="text-zinc-500">Total P/L</div>
-                    <div className={`font-mono ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
-                        {isProfit ? '+' : ''}{formatVND(totals.totalPL)}
-                    </div>
+                    <div className="text-zinc-500">Unpriced cost basis</div>
+                    <div className="text-white font-mono">{formatVND(totals.unpricedCostBasis)}</div>
                 </div>
                 <div>
-                    <div className="text-zinc-500">Today</div>
-                    <div className={`font-mono ${totals.todayChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {totals.todayChange >= 0 ? '+' : ''}{formatVND(totals.todayChange)}
+                    <div className="text-zinc-500">Quote coverage</div>
+                    <div className="text-white font-mono">{totals.quotedPositionCount} / {totals.positionCount}</div>
+                </div>
+                <div>
+                    <div className="text-zinc-500">Unrealized P/L</div>
+                    <div className={`font-mono ${totals.unrealizedPL === null ? 'text-zinc-500' : isProfit ? 'text-green-400' : 'text-red-400'}`}>
+                        {totals.unrealizedPL === null ? 'Unavailable' : `${isProfit ? '+' : ''}${formatVND(totals.unrealizedPL)}`}
                     </div>
                 </div>
             </div>
+            {totals.unpricedPositionCount > 0 && (
+                <div className="border-b border-amber-500/20 bg-amber-500/5 px-2 py-1 text-[10px] text-amber-200">
+                    Aggregate market value and unrealized P/L are unavailable: {totals.unpricedPositionCount} holding{totals.unpricedPositionCount === 1 ? '' : 's'} lack a valid quote. Unpriced cost basis is not market value.
+                </div>
+            )}
 
             {/* Add Form */}
             {showAddForm && (
@@ -556,7 +619,7 @@ export function PortfolioTrackerWidget({
             {/* Content */}
             <div className="flex-1 overflow-auto">
                 {viewMode === 'allocation' ? (
-                    <AllocationChart positions={enrichedPositions} />
+                    <AllocationChart positions={enrichedPositions} sectors={sectors} />
                 ) : positions.length === 0 ? (
                     <WidgetEmpty message="Add holdings to track" icon={<Briefcase size={18} />} />
                 ) : (
@@ -607,7 +670,7 @@ export function PortfolioTrackerWidget({
                                     );
                                 }
 
-                                const profit = pos.unrealizedPL >= 0;
+                                const profit = pos.unrealizedPL !== null && pos.unrealizedPL >= 0;
                                 return (
                                     <tr
                                         key={pos.id}
@@ -639,13 +702,15 @@ export function PortfolioTrackerWidget({
                                             {pos.quantity.toLocaleString()}
                                         </td>
                                         <td className="py-1.5 px-1 text-right text-white font-mono">
-                                            {formatVND(pos.marketValue)}
+                                            {pos.marketValue === null ? <span className="text-zinc-500">Unavailable</span> : formatVND(pos.marketValue)}
                                         </td>
-                                        <td className={`py-1.5 px-1 text-right font-mono ${profit ? 'text-green-400' : 'text-red-400'}`}>
-                                            <div className="flex items-center justify-end gap-0.5">
-                                                {profit ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                                {formatPercent(pos.unrealizedPLPct / 100)}
-                                            </div>
+                                        <td className={`py-1.5 px-1 text-right font-mono ${pos.unrealizedPLPct === null ? 'text-zinc-500' : profit ? 'text-green-400' : 'text-red-400'}`}>
+                                            {pos.unrealizedPLPct === null ? 'Unavailable' : (
+                                                <div className="flex items-center justify-end gap-0.5">
+                                                    {profit ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                                                    {formatPercent(pos.unrealizedPLPct / 100)}
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="py-1.5 px-1">
                                             <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">

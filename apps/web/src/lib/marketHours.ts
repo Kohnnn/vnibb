@@ -8,12 +8,13 @@
 // - any other widget that needs market-state awareness.
 
 export type MarketPhase =
-  | 'pre-open'   // before 09:00 ICT on a trading day
-  | 'morning'   // 09:00–11:30 ICT (continuous)
-  | 'lunch'     // 11:30–13:00 ICT (closed for lunch)
-  | 'afternoon' // 13:00–14:45 ICT (continuous + ATC)
-  | 'after-close' // after 14:45 on a trading day
-  | 'weekend';  // Sat/Sun
+  | 'pre-open'
+  | 'morning'
+  | 'lunch'
+  | 'afternoon'
+  | 'post-close-finalization'
+  | 'after-close'
+  | 'weekend';
 
 export interface MarketState {
   phase: MarketPhase;
@@ -78,7 +79,6 @@ export function getMarketState(at: Date = new Date()): MarketState {
     };
   }
 
-  // 09:00 = 540, 11:30 = 690, 13:00 = 780, 14:45 = 885.
   if (minutesSinceMidnight < 540) {
     return {
       phase: 'pre-open',
@@ -111,6 +111,15 @@ export function getMarketState(at: Date = new Date()): MarketState {
       phase: 'afternoon',
       isOpen: true,
       label: 'Afternoon session',
+      scheduleSummary: HOSE_SCHEDULE_SUMMARY,
+      sampledAt,
+    };
+  }
+  if (minutesSinceMidnight < 900) {
+    return {
+      phase: 'post-close-finalization',
+      isOpen: false,
+      label: 'Post-close finalization',
       scheduleSummary: HOSE_SCHEDULE_SUMMARY,
       sampledAt,
     };
@@ -154,6 +163,11 @@ export function describeIntradayUnavailable(state: MarketState | null = null): {
       return {
         primary: 'Lunch break (11:30–13:00 ICT)',
         detail: `Live ticks resume at 13:00 ICT (${HOSE_SCHEDULE_SUMMARY}).`,
+      };
+    case 'post-close-finalization':
+      return {
+        primary: 'Post-close finalization (14:45–15:00 ICT)',
+        detail: `Trading is closed while final prices settle (${HOSE_SCHEDULE_SUMMARY}).`,
       };
     case 'after-close':
       return {

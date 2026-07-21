@@ -31,13 +31,15 @@ export async function getTechnicalIndicators(
 export async function getFullTechnicalAnalysis(
     symbol: string,
     options?: {
-        interval?: string;
+        timeframe?: 'D' | 'W' | 'M';
+        lookbackDays?: number;
         signal?: AbortSignal;
     }
 ): Promise<FullTechnicalAnalysis> {
-    return fetchAPI<FullTechnicalAnalysis>(`/analysis/technical/${symbol}`, {
+    return fetchAPI<FullTechnicalAnalysis>(`/analysis/ta/${symbol}/full`, {
         params: {
-            interval: options?.interval,
+            timeframe: options?.timeframe,
+            lookback_days: options?.lookbackDays,
         },
         signal: options?.signal,
     });

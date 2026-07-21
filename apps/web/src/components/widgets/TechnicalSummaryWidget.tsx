@@ -1,9 +1,7 @@
-// Technical Summary Widget - Key technical indicators
-
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { TrendingUp, TrendingDown, Info } from 'lucide-react';
+import { Info } from 'lucide-react';
 import { useFullTechnicalAnalysis } from '@/lib/queries';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -14,13 +12,24 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import type { Signal, Timeframe } from '@/types/technical';
+import type { Timeframe } from '@/types/technical';
+import { WidgetContainer } from '@/components/ui/WidgetContainer';
 
 interface TechnicalSummaryWidgetProps {
+    id: string;
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
     onDataChange?: (data: WidgetDataPayload) => void;
+}
+
+function finite(value: number | null | undefined): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function formatTechnicalValue(value: number | null | undefined, decimals = 2): string {
+    const safe = finite(value);
+    return safe === null ? '--' : safe.toLocaleString(undefined, { maximumFractionDigits: decimals });
 }
 
 function getSignalColor(signal: string): string {
@@ -81,9 +90,7 @@ function buildSignalGaugeBackground(buyCount: number, neutralCount: number, sell
     return `conic-gradient(from 180deg, ${stops.join(', ')})`;
 }
 
-import { WidgetContainer } from '@/components/ui/WidgetContainer';
-
-export function TechnicalSummaryWidget({ symbol, isEditing, onRemove, onDataChange }: TechnicalSummaryWidgetProps) {
+export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: TechnicalSummaryWidgetProps) {
     const [timeframe, setTimeframe] = useState<Timeframe>('D');
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useFullTechnicalAnalysis(symbol, { timeframe });
 
@@ -100,10 +107,11 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove, onDataChan
     const fibonacciLevels = ta?.levels?.fibonacci?.levels
         ? Object.entries(ta.levels.fibonacci.levels)
         : [];
-    const buyCount = signals?.buy_count || 0;
-    const neutralCount = signals?.neutral_count || 0;
-    const sellCount = signals?.sell_count || 0;
-    const totalSignals = Math.max(signals?.total_indicators || 0, buyCount + neutralCount + sellCount, 1);
+    const buyCount = finite(signals?.buy_count) ?? 0;
+    const neutralCount = finite(signals?.neutral_count) ?? 0;
+    const sellCount = finite(signals?.sell_count) ?? 0;
+    const observedSignalCount = buyCount + neutralCount + sellCount;
+    const totalSignals = Math.max(finite(signals?.total_indicators) ?? 0, observedSignalCount, 1);
     const dataQualityIssues = ta?.data_quality?.issues || [];
     const gaugeBackground = useMemo(
         () => buildSignalGaugeBackground(buyCount, neutralCount, sellCount),
@@ -159,8 +167,9 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove, onDataChan
 
     return (
         <WidgetContainer
-            title="Technical Analysis"
-            symbol={symbol}
+                title="Technical Analysis"
+                symbol={symbol}
+                widgetId={id}
             subtitle={timeframeLabel}
             onRefresh={() => refetch()}
             onClose={onRemove}
@@ -189,7 +198,8 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove, onDataChan
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={ta?.data_quality?.bars ? `${timeframeLabel} · ${ta.data_quality.bars} bars` : timeframeLabel}
+                        note={`${timeframeLabel} · ${finite(ta?.data_quality?.bars) ?? 'unknown'} bars · ${ta?.data_quality?.status ?? 'quality not reported'} · aggregated indicators, not advice`}
+                        sourceLabel="VNIBB technical analysis"
                         align="right"
                     />
 
@@ -261,7 +271,7 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove, onDataChan
                                             <span className="text-[10px] text-[var(--text-secondary)] font-bold">{name.toUpperCase()}</span>
                                             <span className={`text-[9px] font-bold ${getSignalColor(signal)}`}>{signal.toUpperCase()}</span>
                                         </div>
-                                        <div className="text-xs text-[var(--text-primary)] font-mono">{val?.toLocaleString()}</div>
+                                        <div className="text-xs text-[var(--text-primary)] font-mono">{formatTechnicalValue(val)}</div>
                                     </div>
                                 );
                             })}
@@ -277,19 +287,19 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove, onDataChan
                             <div className="flex flex-col p-1 rounded bg-[var(--bg-secondary)] border border-[var(--border-subtle)] items-center">
                                 <span className="text-[9px] text-[var(--text-muted)] font-bold">RSI</span>
                                 <span className={`text-[11px] font-mono ${getSignalColor(ta?.oscillators?.rsi?.signal || '')}`}>
-                                    {ta?.oscillators?.rsi?.value?.toFixed(1) || '--'}
+                                    {formatTechnicalValue(ta?.oscillators?.rsi?.value, 1)}
                                 </span>
                             </div>
                             <div className="flex flex-col p-1 rounded bg-[var(--bg-secondary)] border border-[var(--border-subtle)] items-center">
                                 <span className="text-[9px] text-[var(--text-muted)] font-bold">MACD</span>
                                 <span className={`text-[11px] font-mono ${getSignalColor(ta?.oscillators?.macd?.signal || '')}`}>
-                                    {ta?.oscillators?.macd?.histogram?.toFixed(2) || '--'}
+                                    {formatTechnicalValue(ta?.oscillators?.macd?.histogram)}
                                 </span>
                             </div>
                             <div className="flex flex-col p-1 rounded bg-[var(--bg-secondary)] border border-[var(--border-subtle)] items-center">
                                 <span className="text-[9px] text-[var(--text-muted)] font-bold">STOCH</span>
                                 <span className={`text-[11px] font-mono ${getSignalColor(ta?.oscillators?.stochastic?.signal || '')}`}>
-                                    {ta?.oscillators?.stochastic?.k?.toFixed(1) || '--'}
+                                    {formatTechnicalValue(ta?.oscillators?.stochastic?.k, 1)}
                                 </span>
                             </div>
                         </div>
@@ -304,15 +314,15 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove, onDataChan
                             <div className="flex justify-between items-center p-1.5 rounded bg-red-950/10 border-l-2 border-red-500/50">
                                 <span className="text-[10px] text-[var(--text-secondary)] font-bold uppercase">Resistance</span>
                                 <div className="flex items-center gap-2">
-                                    <span className="text-xs text-[var(--text-primary)] font-mono">{supportResistance?.nearest_resistance?.toLocaleString() || '--'}</span>
-                                    <span className="text-[9px] text-red-400">{supportResistance?.resistance_proximity_pct != null ? `+${supportResistance.resistance_proximity_pct.toFixed(1)}%` : '--'}</span>
+                                    <span className="text-xs text-[var(--text-primary)] font-mono">{formatTechnicalValue(supportResistance?.nearest_resistance)}</span>
+                                    <span className="text-[9px] text-red-400">{finite(supportResistance?.resistance_proximity_pct) !== null ? `+${formatTechnicalValue(supportResistance?.resistance_proximity_pct, 1)}%` : '--'}</span>
                                 </div>
                             </div>
                             <div className="flex justify-between items-center p-1.5 rounded bg-green-950/10 border-l-2 border-green-500/50">
                                 <span className="text-[10px] text-[var(--text-secondary)] font-bold uppercase">Support</span>
                                 <div className="flex items-center gap-2">
-                                    <span className="text-xs text-[var(--text-primary)] font-mono">{supportResistance?.nearest_support?.toLocaleString() || '--'}</span>
-                                    <span className="text-[9px] text-green-400">{supportResistance?.support_proximity_pct != null ? `-${supportResistance.support_proximity_pct.toFixed(1)}%` : '--'}</span>
+                                    <span className="text-xs text-[var(--text-primary)] font-mono">{formatTechnicalValue(supportResistance?.nearest_support)}</span>
+                                    <span className="text-[9px] text-green-400">{finite(supportResistance?.support_proximity_pct) !== null ? `-${formatTechnicalValue(supportResistance?.support_proximity_pct, 1)}%` : '--'}</span>
                                 </div>
                             </div>
                         </div>
@@ -327,7 +337,7 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove, onDataChan
                             {fibonacciLevels.map(([ratio, level]) => (
                                 <div key={ratio} className="flex justify-between">
                                     <span className="text-[var(--text-muted)] font-bold">{ratio}</span>
-                                    <span className="text-[var(--text-secondary)]">{level.toLocaleString()}</span>
+                                    <span className="text-[var(--text-secondary)]">{formatTechnicalValue(level as number)}</span>
                                 </div>
                             ))}
                         </div>

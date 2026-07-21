@@ -1,8 +1,26 @@
 import { DEFAULT_TICKER, normalizeTickerSymbol, writeStoredTicker } from '@/lib/defaultTicker'
 
 export const USER_PREFERENCES_STORAGE_KEY = 'vnibb-user-preferences'
-export const DASHBOARD_WALKTHROUGH_VERSION = 2
+export const DASHBOARD_WALKTHROUGH_VERSION = 3
 export const DASHBOARD_WALKTHROUGH_RESTART_EVENT = 'vnibb:restart-dashboard-walkthrough'
+export const ONBOARDING_MEANINGFUL_ACTION_EVENT = 'vnibb:onboarding-meaningful-action'
+
+export type OnboardingGoalId = 'follow_ticker' | 'evaluate_company' | 'scan_market'
+export type OnboardingMeaningfulActionId = 'view_open' | 'symbol_change' | 'widget_add' | 'prompt_submit'
+
+export const ONBOARDING_GOALS: Array<{ id: OnboardingGoalId; label: string; description: string }> = [
+  { id: 'follow_ticker', label: 'Follow a ticker', description: 'Open a ticker view with a VniAgent starter prompt.' },
+  { id: 'evaluate_company', label: 'Evaluate a company', description: 'Open the financial view with a VniAgent starter prompt.' },
+  { id: 'scan_market', label: 'Scan the market', description: 'Open the existing market overview workspace.' },
+]
+
+const ONBOARDING_MEANINGFUL_ACTION_IDS = new Set<OnboardingMeaningfulActionId>([
+  'view_open',
+  'symbol_change',
+  'widget_add',
+  'prompt_submit',
+])
+
 
 export type DefaultTabPreference =
   | 'overview'
@@ -23,10 +41,12 @@ export interface UserPreferences {
 
 export interface DashboardOnboardingPreference {
   dashboardWalkthroughVersion: number
+  dashboardWalkthroughDismissedVersion: number
+  goalId?: OnboardingGoalId
 }
 
 type UserPreferencesUpdate = Partial<Omit<UserPreferences, 'onboarding'>> & {
-  onboarding?: Partial<DashboardOnboardingPreference>
+  onboarding?: Omit<Partial<DashboardOnboardingPreference>, 'goalId'> & { goalId?: OnboardingGoalId | null }
 }
 
 export const DEFAULT_TAB: DefaultTabPreference = 'fundamentals'
@@ -96,6 +116,12 @@ function normalizeWalkthroughVersion(rawValue: unknown): number {
   return Math.floor(parsed)
 }
 
+function normalizeOnboardingGoalId(rawValue: unknown): OnboardingGoalId | undefined {
+  return typeof rawValue === 'string' && ONBOARDING_GOALS.some((goal) => goal.id === rawValue)
+    ? rawValue as OnboardingGoalId
+    : undefined
+}
+
 function readRawPreferences(): Partial<UserPreferences> {
   if (typeof window === 'undefined') {
     return {}
@@ -125,6 +151,16 @@ export function readStoredUserPreferences(): UserPreferences {
           ? raw.onboarding.dashboardWalkthroughVersion
           : undefined
       ),
+      dashboardWalkthroughDismissedVersion: normalizeWalkthroughVersion(
+        raw.onboarding && typeof raw.onboarding === 'object'
+          ? raw.onboarding.dashboardWalkthroughDismissedVersion
+          : undefined
+      ),
+      goalId: normalizeOnboardingGoalId(
+        raw.onboarding && typeof raw.onboarding === 'object'
+          ? raw.onboarding.goalId
+          : undefined
+      ),
     },
   }
 }
@@ -138,6 +174,12 @@ export function writeStoredUserPreferences(next: UserPreferencesUpdate): UserPre
       dashboardWalkthroughVersion: normalizeWalkthroughVersion(
         next.onboarding?.dashboardWalkthroughVersion ?? current.onboarding.dashboardWalkthroughVersion
       ),
+      dashboardWalkthroughDismissedVersion: normalizeWalkthroughVersion(
+        next.onboarding?.dashboardWalkthroughDismissedVersion ?? current.onboarding.dashboardWalkthroughDismissedVersion
+      ),
+      goalId: next.onboarding && 'goalId' in next.onboarding
+        ? normalizeOnboardingGoalId(next.onboarding.goalId)
+        : current.onboarding.goalId,
     },
   }
 
@@ -150,7 +192,16 @@ export function writeStoredUserPreferences(next: UserPreferencesUpdate): UserPre
 }
 
 export function shouldShowDashboardWalkthrough(version = DASHBOARD_WALKTHROUGH_VERSION): boolean {
-  return readStoredUserPreferences().onboarding.dashboardWalkthroughVersion < version
+  const onboarding = readStoredUserPreferences().onboarding
+  return onboarding.dashboardWalkthroughVersion < version && onboarding.dashboardWalkthroughDismissedVersion < version
+}
+
+export function dismissDashboardWalkthrough(
+  version = DASHBOARD_WALKTHROUGH_VERSION
+): UserPreferences {
+  return writeStoredUserPreferences({
+    onboarding: { dashboardWalkthroughDismissedVersion: version },
+  })
 }
 
 export function markDashboardWalkthroughCompleted(
@@ -167,8 +218,24 @@ export function resetDashboardWalkthroughPreference(): UserPreferences {
   return writeStoredUserPreferences({
     onboarding: {
       dashboardWalkthroughVersion: 0,
+      dashboardWalkthroughDismissedVersion: 0,
+      goalId: null,
     },
   })
+}
+
+export function selectOnboardingGoal(goalId: OnboardingGoalId): UserPreferences {
+  return writeStoredUserPreferences({
+    onboarding: { goalId },
+  })
+}
+
+export function dispatchOnboardingMeaningfulAction(actionId: OnboardingMeaningfulActionId): void {
+  if (typeof window === 'undefined' || !ONBOARDING_MEANINGFUL_ACTION_IDS.has(actionId)) {
+    return
+  }
+
+  window.dispatchEvent(new CustomEvent(ONBOARDING_MEANINGFUL_ACTION_EVENT, { detail: { actionId } }))
 }
 
 export function requestDashboardWalkthroughRestart(): void {

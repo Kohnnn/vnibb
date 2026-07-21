@@ -249,6 +249,7 @@ registerWidget(
   ['snapshot', 'ttm', 'fundamentals']
 );
 registerWidget('watchlist', () => import('./WatchlistWidget'), 'core_data', ['watchlist', 'list']);
+registerWidget('watchlist_limits_monitor', () => import('./WatchlistLimitsMonitorWidget'), 'core_data', ['watchlist', 'ceiling', 'floor', 'limits']);
 registerWidget(
   'peer_comparison',
   lazyNamed(() => import('./PeerComparisonWidget'), 'PeerComparisonWidget'),
@@ -335,6 +336,12 @@ registerWidget(
   ['alerts', 'price']
 );
 registerWidget(
+  'alert_activity_inbox',
+  lazyNamed(() => import('./AlertActivityInboxWidget'), 'AlertActivityInboxWidget'),
+  'core_data',
+  ['alerts', 'activity', 'inbox']
+);
+registerWidget(
   'research_browser',
   lazyNamed(() => import('./ResearchBrowserWidget'), 'ResearchBrowserWidget'),
   'analysis',
@@ -387,17 +394,22 @@ registerWidget('tradingview_top_stories', () => import('./TradingViewWidgets').t
 registerWidget('tradingview_economic_calendar', () => import('./TradingViewWidgets').then((m) => ({ default: (m as Record<string, ComponentType<any>>).TradingViewEconomicCalendar })), 'calendar', ['tradingview', 'economic', 'calendar']);
 registerWidget('tradingview_economic_map', () => import('./TradingViewWidgets').then((m) => ({ default: (m as Record<string, ComponentType<any>>).TradingViewEconomicMap })), 'global_markets', ['tradingview', 'economic', 'map']);
 registerWidget('valuation_multiples_chart', placeholderLoader('valuation_multiples_chart'), 'charting', ['valuation', 'multiples']);
-registerWidget('valuation_band', placeholderLoader('valuation_band'), 'charting', ['valuation', 'band']);
+registerWidget('valuation_band', lazyNamed(() => import('./ValuationBandWidget'), 'ValuationBandWidget'), 'charting', ['valuation', 'band']);
 registerWidget('volume_profile', () => import('./VolumeProfileWidget'), 'charting', ['volume', 'profile']);
 registerWidget('vwap_bands', () => import('./VWAPBandsWidget'), 'charting', ['vwap', 'bands']);
-registerWidget('technical_summary', placeholderLoader('technical_summary'), 'charting', ['technical', 'summary']);
+registerWidget('technical_summary', lazyNamed(() => import('./TechnicalSummaryWidget'), 'TechnicalSummaryWidget'), 'charting', ['technical', 'summary']);
 registerWidget(
   'technical_snapshot',
   lazyNamed(() => import('./TechnicalSnapshotWidget'), 'TechnicalSnapshotWidget'),
   'charting',
   ['technical', 'snapshot']
 );
-registerWidget('signal_summary', placeholderLoader('signal_summary'), 'charting', ['signal', 'summary']);
+registerWidget(
+  'signal_summary',
+  lazyNamed(() => import('./SignalSummaryWidget'), 'SignalSummaryWidget'),
+  'charting',
+  ['signal', 'summary']
+);
 registerWidget('ichimoku', placeholderLoader('ichimoku'), 'charting', ['ichimoku', 'cloud']);
 registerWidget('fibonacci', placeholderLoader('fibonacci'), 'charting', ['fibonacci', 'retracement']);
 registerWidget(
@@ -420,12 +432,23 @@ registerWidget(
   'calendar',
   ['earnings', 'recap', 'release']
 );
-registerWidget('earnings_season_monitor', placeholderLoader('earnings_season_monitor'), 'calendar', ['earnings', 'season']);
+registerWidget(
+  'earnings_season_monitor',
+  lazyNamed(() => import('./EarningsSeasonMonitorWidget'), 'EarningsSeasonMonitorWidget'),
+  'calendar',
+  ['earnings', 'season']
+);
 registerWidget(
   'events_calendar',
   lazyNamed(() => import('./EventsCalendarWidget'), 'EventsCalendarWidget'),
   'calendar',
   ['events', 'calendar']
+);
+registerWidget(
+  'investor_event_calendar',
+  lazyNamed(() => import('./InvestorEventCalendarWidget'), 'InvestorEventCalendarWidget'),
+  'calendar',
+  ['portfolio', 'watchlist', 'events', 'calendar']
 );
 registerWidget(
   'dividend_payment',
@@ -470,6 +493,7 @@ registerWidget(
   'ownership',
   ['foreign', 'trading']
 );
+registerWidget('foreign_flow_leaderboard', () => import('./ForeignFlowLeaderboardWidget'), 'ownership', ['foreign', 'flow', 'leaderboard']);
 registerWidget(
   'subsidiaries',
   lazyNamed(() => import('./SubsidiariesWidget'), 'SubsidiariesWidget'),
@@ -602,7 +626,7 @@ registerWidget(
   ['hurst', 'market', 'structure']
 );
 registerWidget('volume_analysis', placeholderLoader('volume_analysis'), 'quant', ['volume', 'analysis']);
-registerWidget('obv_divergence', placeholderLoader('obv_divergence'), 'quant', ['obv', 'divergence']);
+registerWidget('obv_divergence', lazyNamed(() => import('./OBVDivergenceWidget'), 'OBVDivergenceWidget'), 'quant', ['obv', 'divergence']);
 registerWidget('atr_regime', placeholderLoader('atr_regime'), 'quant', ['atr', 'regime']);
 registerWidget('gap_fill_stats', placeholderLoader('gap_fill_stats'), 'quant', ['gap', 'fill']);
 registerWidget('volume_delta', placeholderLoader('volume_delta'), 'quant', ['volume', 'delta']);
@@ -610,12 +634,12 @@ registerWidget('footprint_proxy', placeholderLoader('footprint_proxy'), 'quant',
 registerWidget('amihud_illiquidity', placeholderLoader('amihud_illiquidity'), 'quant', ['amihud', 'illiquidity']);
 
 // --- Analysis / Screener ---
-registerWidget('bank_metrics', placeholderLoader('bank_metrics'), 'analysis', ['bank', 'metrics']);
-registerWidget('transaction_flow', placeholderLoader('transaction_flow'), 'analysis', ['transaction', 'flow']);
-registerWidget('industry_bubble', placeholderLoader('industry_bubble'), 'analysis', ['industry', 'bubble']);
-registerWidget('sector_board', placeholderLoader('sector_board'), 'analysis', ['sector', 'board']);
-registerWidget('money_flow_trend', placeholderLoader('money_flow_trend'), 'analysis', ['money', 'flow']);
-registerWidget('correlation_matrix', placeholderLoader('correlation_matrix'), 'analysis', ['correlation', 'matrix']);
+registerWidget('bank_metrics', lazyNamed(() => import('./BankMetricsWidget'), 'BankMetricsWidget'), 'analysis', ['bank', 'metrics']);
+registerWidget('transaction_flow', () => import('./TransactionFlowWidget'), 'analysis', ['transaction', 'flow']);
+registerWidget('industry_bubble', () => import('./IndustryBubbleWidget'), 'analysis', ['industry', 'bubble']);
+registerWidget('sector_board', () => import('./SectorBoardWidget'), 'analysis', ['sector', 'board']);
+registerWidget('money_flow_trend', () => import('./MoneyFlowTrendWidget'), 'analysis', ['money', 'flow']);
+registerWidget('correlation_matrix', () => import('./CorrelationMatrixWidget'), 'analysis', ['correlation', 'matrix']);
 registerWidget('ai_copilot', lazyNamed(() => import('./AICopilotWidget'), 'AICopilotWidget'), 'analysis', ['ai', 'copilot']);
 registerWidget('ai_analysis', lazyNamed(() => import('./AIAnalysisWidget'), 'AIAnalysisWidget'), 'analysis', ['ai', 'analysis']);
 registerWidget('rs_ranking', lazyNamed(() => import('./RSRankingWidget'), 'RSRankingWidget'), 'analysis', ['rs', 'ranking']);
@@ -628,13 +652,18 @@ registerWidget('comparison_analysis', lazyNamed(() => import('./ComparisonAnalys
 registerWidget('news_flow', lazyNamed(() => import('./NewsFlowWidget'), 'NewsFlowWidget'), 'news', ['news', 'flow']);
 registerWidget('news_corporate_actions', lazyNamed(() => import('./NewsCorporateActionsWidget'), 'NewsCorporateActionsWidget'), 'news', ['news', 'corporate', 'actions']);
 registerWidget('income_sankey', placeholderLoader('income_sankey'), 'analysis', ['income', 'sankey']);
-registerWidget('cashflow_waterfall', placeholderLoader('cashflow_waterfall'), 'analysis', ['cashflow', 'waterfall']);
+registerWidget('cashflow_waterfall', lazyNamed(() => import('./CashflowWaterfallWidget'), 'CashflowWaterfallWidget'), 'analysis', ['cashflow', 'waterfall']);
 registerWidget('derivatives_contracts_board', lazyNamed(() => import('./DerivativesContractsBoardWidget'), 'DerivativesContractsBoardWidget'), 'global_markets', ['derivatives', 'contracts']);
 registerWidget('derivatives_price_history', lazyNamed(() => import('./DerivativesPriceHistoryWidget'), 'DerivativesPriceHistoryWidget'), 'global_markets', ['derivatives', 'price', 'history']);
 registerWidget('big_flow_monitor', placeholderLoader('big_flow_monitor'), 'ownership', ['big', 'flow', 'monitor']);
-registerWidget('alert_settings', placeholderLoader('alert_settings'), 'analysis', ['alert', 'settings']);
+registerWidget('alert_settings', lazyNamed(() => import('./AlertSettingsPanel'), 'AlertSettingsPanel'), 'analysis', ['alert', 'settings']);
 registerWidget('positioning_dashboard', placeholderLoader('positioning_dashboard'), 'ownership', ['positioning', 'dashboard']);
-registerWidget('source_transparent_research_notebook', placeholderLoader('source_transparent_research_notebook'), 'analysis', ['notebook', 'research']);
+registerWidget(
+  'source_transparent_research_notebook',
+  lazyNamed(() => import('./ResearchNotebookWidget'), 'ResearchNotebookWidget'),
+  'analysis',
+  ['notebook', 'research']
+);
 
 // --- Global Markets ---
 registerWidget('forex_rates', lazyNamed(() => import('./ForexRatesWidget'), 'ForexRatesWidget'), 'global_markets', ['forex', 'rates']);

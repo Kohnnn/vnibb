@@ -119,11 +119,13 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
   },
   backtest_lab: {
     purpose: 'Runs a safe schema-driven moving-average crossover backtest for the selected symbol.',
-    calculation: 'Calls `/quant/{symbol}/backtest` with period, fast MA, slow MA, fees, and adjusted EOD history. The backend returns metrics, a compact equity curve, warnings, and trades.',
+    calculation: 'Calls `/quant/{symbol}/backtest` with an as-of date, period, fast MA, slow MA, fees, and adjusted EOD history. Signals use the as-of-date close and orders execute at the next available session open.',
+
     interpretation: 'Use it to test whether a simple trend-following rule had historical support before trying parameter sweeps or deeper validation.',
     limitations: [
       'Backtests are descriptive and can overfit. Results are not trading advice.',
-      'Current implementation uses close-price execution and all-in/all-out sizing only.',
+      'Current implementation uses next-session-open execution and all-in/all-out sizing only.',
+
     ],
   },
   sweep_matrix: {

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { CompanyLogo } from '@/components/ui/CompanyLogo';
-import { ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface PerformanceData {
@@ -30,9 +30,11 @@ const TIMEFRAME_COLUMNS = [
 
 interface PerformanceTableProps {
   data: PerformanceData[];
+  onSymbolClick?: (symbol: string) => void;
+  onAddToWatchlist?: (symbol: string) => void;
 }
 
-export function PerformanceTable({ data }: PerformanceTableProps) {
+export function PerformanceTable({ data, onSymbolClick, onAddToWatchlist }: PerformanceTableProps) {
   const [sortColumn, setSortColumn] = useState<string>('perf_1d');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
@@ -76,14 +78,21 @@ export function PerformanceTable({ data }: PerformanceTableProps) {
         </thead>
         <tbody className="divide-y divide-[var(--border-subtle)]">
           {sortedData.map((row, index) => (
-            <tr key={`${row.symbol}-${index}`} className="group transition-colors hover:bg-[var(--bg-tertiary)]">
+            <tr
+              key={`${row.symbol}-${index}`}
+              onClick={() => onSymbolClick?.(row.symbol)}
+              className="group transition-colors hover:bg-[var(--bg-tertiary)]"
+            >
               <td className="border-r border-[var(--border-subtle)] px-4 py-2">
                 <div className="flex items-center gap-2">
                   <CompanyLogo symbol={row.symbol} size={20} />
                   <div>
-                    <div className="font-bold tracking-tight text-[var(--text-primary)]">{row.symbol}</div>
-                    <div className="max-w-[110px] truncate text-[9px] font-medium uppercase tracking-tighter text-[var(--text-muted)]">{row.name}</div>
+                    <button type="button" onClick={(event) => { event.stopPropagation(); onSymbolClick?.(row.symbol); }} aria-label={`View ${row.symbol}`} className="rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">
+                      <div className="font-bold tracking-tight text-[var(--text-primary)]">{row.symbol}</div>
+                      <div className="max-w-[110px] truncate text-[9px] font-medium uppercase tracking-tighter text-[var(--text-muted)]">{row.name}</div>
+                    </button>
                   </div>
+                  {onAddToWatchlist && <button type="button" onClick={(event) => { event.stopPropagation(); onAddToWatchlist(row.symbol); }} aria-label={`Add ${row.symbol} to Watchlist`} className="ml-auto min-h-9 min-w-9 rounded p-2 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"><Plus size={13} /></button>}
                 </div>
               </td>
               <td className="px-3 py-2 text-right font-mono text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">

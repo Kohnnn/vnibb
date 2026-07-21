@@ -49,6 +49,12 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
   });
 
   const rows = data?.data || [];
+  const sourceError = data?.error || null;
+  const latestDate = data?.updated_at || null;
+  const yoyCoverage = useMemo(
+    () => rows.filter((row) => row.revenue_yoy != null || row.earnings_yoy != null).length,
+    [rows],
+  );
   const filteredRows = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const nextRows = rows.filter((row) => {
@@ -59,10 +65,14 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
     });
 
     nextRows.sort((left, right) => {
-      if (sortMode === 'score') return (right.score ?? -999) - (left.score ?? -999);
-      if (sortMode === 'revenue') return (right.revenue_yoy ?? -999) - (left.revenue_yoy ?? -999);
-      if (sortMode === 'earnings') return (right.earnings_yoy ?? -999) - (left.earnings_yoy ?? -999);
-      return `${right.updated_at || ''}`.localeCompare(left.updated_at || '');
+      const comparison = sortMode === 'score'
+        ? (right.score ?? -999) - (left.score ?? -999)
+        : sortMode === 'revenue'
+          ? (right.revenue_yoy ?? -999) - (left.revenue_yoy ?? -999)
+          : sortMode === 'earnings'
+            ? (right.earnings_yoy ?? -999) - (left.earnings_yoy ?? -999)
+            : `${right.updated_at || ''}`.localeCompare(left.updated_at || '');
+      return comparison || left.symbol.localeCompare(right.symbol) || left.period.localeCompare(right.period);
     });
 
     return nextRows;
@@ -81,14 +91,20 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
       buildWidgetRuntime({
         empty: !hasData,
         apiGroup: '/market',
-        endpoint: '/market/earnings-season',
-        sourceLabel: 'Earnings season',
-        lastDataDate: data?.updated_at || dataUpdatedAt,
-        stale: Boolean(error && hasData),
-        extra: { count: filteredRows.length },
+        endpoint: `/market/earnings-season?limit=24${exchange === 'ALL' ? '' : `&exchange=${exchange}`}`,
+        sourceLabel: 'VNIBB stored income statements',
+        lastDataDate: latestDate || dataUpdatedAt,
+        stale: Boolean((error || sourceError) && hasData),
+        extra: {
+          count: filteredRows.length,
+          resultCount: data?.count ?? rows.length,
+          latestDate,
+          source: 'VNIBB stored income statements',
+          yoyCoverage: { available: yoyCoverage, total: rows.length },
+        },
       }),
     );
-  }, [onDataChange, hasData, data?.updated_at, dataUpdatedAt, error, filteredRows.length]);
+  }, [onDataChange, hasData, latestDate, dataUpdatedAt, error, sourceError, filteredRows.length, exchange, data?.count, rows.length, yoyCoverage]);
 
   return (
     <WidgetContainer
@@ -112,7 +128,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
             <WidgetMeta
               updatedAt={data?.updated_at || dataUpdatedAt}
               isFetching={isFetching && hasData}
-              note={`${filteredRows.length} releases tracked`}
+              note={`${data?.count ?? rows.length} results · ${latestDate ? `latest ${latestDate}` : 'latest date unavailable'}`}
               align="right"
             />
           </div>
@@ -166,6 +182,9 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
             </label>
           </div>
 
+          {sourceError ? <div className="mt-2 text-[10px] text-amber-300">Source warning: {sourceError}</div> : null}
+          {hasData ? <div className="mt-2 text-[10px] text-[var(--text-muted)]">YoY available for {yoyCoverage} of {rows.length} results. Missing fields are unavailable from stored comparable statements.</div> : null}
+
           <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
             <SummaryCard label="Revenue Up" value={summary.positiveRevenue} tone="text-cyan-300" />
             <SummaryCard label="Earnings Up" value={summary.positiveEarnings} tone="text-emerald-300" />
@@ -176,12 +195,12 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
         <div className="flex-1 overflow-auto p-3">
           {isLoading && !hasData ? (
             <WidgetSkeleton lines={8} />
-          ) : error && !hasData ? (
-            <WidgetError error={error as Error} onRetry={() => refetch()} />
+          ) : (error || sourceError) && !hasData ? (
+            <WidgetError error={(error ?? new Error(sourceError ?? 'Earnings season data unavailable')) as Error} onRetry={() => refetch()} />
           ) : !hasData ? (
             <WidgetEmpty
-              message={rows.length > 0 ? 'No releases match the current filters' : 'No recent earnings releases available'}
-              detail={rows.length > 0 ? 'Try another exchange, signal, or search term.' : 'This widget will populate as fresh quarterly statements land in the database.'}
+              message={rows.length > 0 ? 'No releases match the current filters' : 'No stored quarterly statements are available'}
+              detail={rows.length > 0 ? 'Try another exchange, signal, or search term.' : 'This reflects stored source coverage and does not mean no companies reported.'}
               icon={<Sparkles size={18} />}
             />
           ) : (

@@ -7,6 +7,7 @@ import type { OHLCData } from '@/lib/chartUtils'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
@@ -115,6 +116,7 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
     upperSymbol,
     {
       startDate: getQuantPeriodStartDate(period),
+      adjustmentMode: 'adjusted',
       enabled: Boolean(upperSymbol),
     }
   )
@@ -132,7 +134,9 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
   const lag1 = computeLag1Autocorrelation(returns)
   const structure = classifyHurst(hurst)
   const hasData = closes.length > 120
+  const adjustmentWarning = data?.meta?.adjustment_warning ?? null
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
+
 
   const rollingWindows = useMemo(() => {
     const output: Array<{ label: string; value: number | null }> = []
@@ -157,18 +161,25 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
     onDataChange?.(buildWidgetRuntime({
       empty: !hasData,
       apiGroup: '/equity',
-      endpoint: `/equity/historical?symbol=${upperSymbol}&start_date=${getQuantPeriodStartDate(period)}`,
+      endpoint: `/equity/historical?symbol=${upperSymbol}&start_date=${getQuantPeriodStartDate(period)}&adjustment_mode=adjusted`,
       sourceLabel: 'Historical prices',
       lastDataDate: candles.at(-1)?.time ?? dataUpdatedAt,
+
       adjustmentMode: 'adjusted',
       derived: true,
       extra: {
         candles: candles.length,
         hurst,
         lag1,
+        adjustmentCoveragePct: data?.meta?.adjustment_coverage_pct ?? null,
+        adjustmentRequestedCount: data?.meta?.adjustment_requested_count ?? 0,
+        adjustmentAppliedCount: data?.meta?.adjustment_applied_count ?? 0,
+        adjustmentWarning,
+
       },
     }))
-  }, [candles, candles.length, dataUpdatedAt, hasData, hurst, lag1, onDataChange, period, upperSymbol])
+  }, [adjustmentWarning, candles, candles.length, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, dataUpdatedAt, hasData, hurst, lag1, onDataChange, period, upperSymbol])
+
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to inspect market structure" icon={<Sigma size={18} />} />
@@ -216,6 +227,7 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
           <WidgetEmpty message="Not enough historical data for Hurst estimation" icon={<Sigma size={18} />} size="compact" />
         ) : (
           <div className="space-y-2">
+            <QuantWarningBanner warning={adjustmentWarning} />
             <div className="grid grid-cols-3 gap-2 text-[10px]">
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
                 <div className="uppercase tracking-widest text-[var(--text-muted)]">Hurst</div>

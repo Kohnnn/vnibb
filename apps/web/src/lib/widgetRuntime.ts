@@ -35,9 +35,28 @@ export interface WidgetRuntimeInput {
   stale?: boolean
   /** Extra fields merged into the onDataChange payload (e.g. rows for export). */
   extra?: Record<string, unknown>
+  exportData?: unknown
 }
 
 export type WidgetDataPayload = Record<string, unknown>
+
+export function getWidgetExportData(data: unknown): unknown {
+  if (
+    data
+    && typeof data === 'object'
+    && !Array.isArray(data)
+    && '__widgetRuntime' in data
+  ) {
+    const payload = data as Record<string, unknown> & {
+      __widgetRuntime?: { exportData?: unknown }
+    }
+    const runtimeData = payload.__widgetRuntime?.exportData
+    if (runtimeData !== undefined) return runtimeData
+    const { __widgetRuntime, ...rest } = payload
+    return Object.keys(rest).length > 0 ? rest : undefined
+  }
+  return data
+}
 
 /**
  * Build a `{ __widgetRuntime: { layoutHint, provenance }, ...extra }` payload.
@@ -58,6 +77,7 @@ export function buildWidgetRuntime(input: WidgetRuntimeInput): WidgetDataPayload
     __widgetRuntime: {
       layoutHint: { empty: input.empty, compactHeight: input.compactHeight },
       provenance,
+      exportData: input.exportData,
     },
     ...(input.extra ?? {}),
   }

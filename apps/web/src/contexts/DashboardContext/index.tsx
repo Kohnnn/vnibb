@@ -8,6 +8,7 @@ import {
     useReducer,
     useCallback,
     useEffect,
+    useRef,
     useState,
     type ReactNode,
 } from 'react';
@@ -42,8 +43,9 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v74';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 22;
+const CURRENT_MIGRATION_VERSION = 23;
 const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';
+const DASHBOARD_STORAGE_COMMIT_KEY = 'vnibb-dashboard-storage-commit';
 const DASHBOARD_RECOVERY_BACKUP_KEY = 'vnibb_dashboards_recovery_backup_v1';
 
 interface StoredDashboardViewState {
@@ -76,12 +78,21 @@ function readStoredDashboardViewState(): StoredDashboardViewState {
     }
 
     try {
-        const raw = window.localStorage.getItem(LAST_VIEW_STATE_KEY);
-        if (!raw) {
-            return { activeDashboardId: null, lastActiveTabIdByDashboard: {} };
-        }
+        return parseStoredDashboardViewState(window.localStorage.getItem(LAST_VIEW_STATE_KEY)) || {
+            activeDashboardId: null,
+            lastActiveTabIdByDashboard: {},
+        };
+    } catch {
+        return { activeDashboardId: null, lastActiveTabIdByDashboard: {} };
+    }
+}
 
+function parseStoredDashboardViewState(raw: string | null): StoredDashboardViewState | null {
+    if (!raw) return { activeDashboardId: null, lastActiveTabIdByDashboard: {} };
+
+    try {
         const parsed = JSON.parse(raw) as Partial<StoredDashboardViewState>;
+        if (!parsed || typeof parsed !== 'object') return null;
         return {
             activeDashboardId: typeof parsed.activeDashboardId === 'string' ? parsed.activeDashboardId : null,
             lastActiveTabIdByDashboard:
@@ -94,13 +105,75 @@ function readStoredDashboardViewState(): StoredDashboardViewState {
                     : {},
         };
     } catch {
-        return { activeDashboardId: null, lastActiveTabIdByDashboard: {} };
+        return null;
     }
 }
 
-function writeStoredDashboardViewState(next: StoredDashboardViewState): void {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(LAST_VIEW_STATE_KEY, JSON.stringify(next));
+function serializeDashboardStorage(state: DashboardState): Record<string, string> | null {
+    try {
+        const storedViewState = readStoredDashboardViewState();
+        const lastActiveTabIdByDashboard = { ...storedViewState.lastActiveTabIdByDashboard };
+        const activeDashboard = state.dashboards.find((dashboard) => dashboard.id === state.activeDashboardId);
+        if (activeDashboard?.tabs.some((tab) => tab.id === state.activeTabId) && state.activeTabId) {
+            lastActiveTabIdByDashboard[activeDashboard.id] = state.activeTabId;
+        }
+        return {
+            [STORAGE_KEY]: JSON.stringify(state.dashboards),
+            [FOLDERS_KEY]: JSON.stringify(state.folders),
+            [LAST_VIEW_STATE_KEY]: JSON.stringify({
+                activeDashboardId: state.activeDashboardId,
+                lastActiveTabIdByDashboard,
+            } satisfies StoredDashboardViewState),
+        };
+    } catch {
+        return null;
+    }
+}
+
+function persistDashboardStorage(state: DashboardState): boolean {
+    if (typeof window === 'undefined') return true;
+
+    const serialized = serializeDashboardStorage(state);
+    if (!serialized) return false;
+
+    try {
+        const storage = window.localStorage;
+        const previous = Object.fromEntries(
+            [...Object.keys(serialized), DASHBOARD_STORAGE_COMMIT_KEY].map((key) => [key, storage.getItem(key)])
+        ) as Record<string, string | null>;
+        const restore = (key: string) => {
+            if (previous[key] === null) storage.removeItem(key);
+            else storage.setItem(key, previous[key]);
+        };
+
+        try {
+            storage.setItem(DASHBOARD_STORAGE_COMMIT_KEY, 'pending');
+            for (const [key, value] of Object.entries(serialized)) {
+                storage.setItem(key, value);
+            }
+            storage.setItem(DASHBOARD_STORAGE_COMMIT_KEY, 'committed');
+            return true;
+        } catch {
+            let rollbackComplete = true;
+            for (const key of Object.keys(serialized)) {
+                try {
+                    restore(key);
+                } catch {
+                    rollbackComplete = false;
+                }
+            }
+            if (rollbackComplete) {
+                try {
+                    restore(DASHBOARD_STORAGE_COMMIT_KEY);
+                } catch {
+                    return false;
+                }
+            }
+            return false;
+        }
+    } catch {
+        return false;
+    }
 }
 
 // ============================================================================
@@ -147,6 +220,7 @@ export {
     migrateEmptyTabs,
     migrateLegacyWidgetTypes,
     migrateLegacyWidgetLayoutBounds,
+    migrateLegacyThesisConfig,
     migrateLegacyDashboardNames,
     migrateLegacyChartWidgets,
     migrateLegacySidebarDashboards,
@@ -170,6 +244,7 @@ import {
     migrateEmptyTabs,
     migrateLegacyWidgetTypes,
     migrateLegacyWidgetLayoutBounds,
+    migrateLegacyThesisConfig,
     migrateLegacyDashboardNames,
     migrateLegacyChartWidgets,
     migrateLegacySidebarDashboards,
@@ -183,7 +258,7 @@ import { generateId } from './types';
 import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
 import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
 import { DEFAULT_GLOBAL_MARKETS_SYMBOL, isLegacyGlobalMarketsSymbol } from '@/lib/globalMarketsSymbol';
-import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
+import { dispatchOnboardingMeaningfulAction, findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
 import { useDashboardSync, useLoadFromBackend } from '@/lib/useDashboardSync';
 import { config } from '@/lib/config';
 import { normalizeWidgetType } from '@/data/widgetDefinitions';
@@ -289,6 +364,132 @@ function createSystemDashboards(): Dashboard[] {
     ];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isFiniteLayout(layout: unknown): boolean {
+    if (!isRecord(layout) || typeof layout.i !== 'string') return false;
+    const required = ['x', 'y', 'w', 'h'];
+    const optional = ['minW', 'minH', 'maxW', 'maxH'];
+    return required.every((key) => Number.isFinite(layout[key]))
+        && optional.every((key) => layout[key] === undefined || Number.isFinite(layout[key]));
+}
+
+function hasValidDashboardShape(dashboard: unknown): dashboard is Dashboard {
+    if (!isRecord(dashboard) || typeof dashboard.id !== 'string' || !dashboard.id || typeof dashboard.name !== 'string' || !Array.isArray(dashboard.tabs)) {
+        return false;
+    }
+    if (!Number.isFinite(dashboard.order) || !Array.isArray(dashboard.syncGroups)) return false;
+    const syncGroupIds = new Set<number>();
+    if (!dashboard.syncGroups.every((group) => {
+        if (!isRecord(group) || typeof group.id !== 'number' || !Number.isFinite(group.id) || syncGroupIds.has(group.id) || typeof group.name !== 'string' || !group.name || typeof group.color !== 'string' || !group.color || typeof group.currentSymbol !== 'string' || !group.currentSymbol) {
+            return false;
+        }
+        syncGroupIds.add(group.id);
+        return true;
+    })) {
+        return false;
+    }
+    const tabIds = new Set<string>();
+    return dashboard.tabs.every((tab) => {
+        if (!isRecord(tab) || typeof tab.id !== 'string' || !tab.id || typeof tab.name !== 'string' || !Number.isFinite(tab.order) || !Array.isArray(tab.widgets) || tabIds.has(tab.id)) {
+            return false;
+        }
+        tabIds.add(tab.id);
+        const widgetIds = new Set<string>();
+        return tab.widgets.every((widget) => {
+            if (!isRecord(widget) || typeof widget.id !== 'string' || !widget.id || widget.tabId !== tab.id || typeof widget.type !== 'string' || !normalizeWidgetType(widget.type) || !isRecord(widget.config) || !isFiniteLayout(widget.layout) || widgetIds.has(widget.id)) {
+                return false;
+            }
+            widgetIds.add(widget.id);
+            return true;
+        });
+    });
+}
+
+function hasValidDashboardSnapshot(dashboards: Dashboard[], folders: DashboardFolder[]): boolean {
+    const dashboardIds = new Set<string>();
+    const folderIds = new Set<string>();
+    if (!folders.every((folder) => {
+        if (!isRecord(folder) || typeof folder.id !== 'string' || !folder.id || typeof folder.name !== 'string' || !Number.isFinite(folder.order) || typeof folder.isExpanded !== 'boolean' || (folder.parentId !== undefined && typeof folder.parentId !== 'string') || folderIds.has(folder.id)) {
+            return false;
+        }
+        folderIds.add(folder.id);
+        return true;
+    })) {
+        return false;
+    }
+    return dashboards.every((dashboard) => {
+        if (!hasValidDashboardShape(dashboard) || dashboardIds.has(dashboard.id) || (dashboard.folderId !== undefined && (typeof dashboard.folderId !== 'string' || !folderIds.has(dashboard.folderId)))) {
+            return false;
+        }
+        dashboardIds.add(dashboard.id);
+        return true;
+    });
+}
+
+function readDashboardStorageSnapshot(): { dashboards: Dashboard[]; folders: DashboardFolder[]; activeDashboardId: string | null; activeTabId: string | null } | null {
+    if (typeof window === 'undefined') return null;
+
+    try {
+        const rawDashboards = window.localStorage.getItem(STORAGE_KEY);
+        const rawFolders = window.localStorage.getItem(FOLDERS_KEY);
+        const rawViewState = window.localStorage.getItem(LAST_VIEW_STATE_KEY);
+        const commit = window.localStorage.getItem(DASHBOARD_STORAGE_COMMIT_KEY);
+        if (!rawDashboards || (commit !== null && commit !== 'committed')) return null;
+
+        const dashboards = JSON.parse(rawDashboards);
+        const folders = rawFolders ? JSON.parse(rawFolders) : [];
+        const viewState = parseStoredDashboardViewState(rawViewState);
+        if (
+            !Array.isArray(dashboards)
+            || !Array.isArray(folders)
+            || !viewState
+            || !dashboards.every((dashboard) => isRecord(dashboard) && Array.isArray(dashboard.tabs))
+            || !folders.every(isRecord)
+        ) {
+            return null;
+        }
+
+        let normalizedDashboards = dashboards as Dashboard[];
+        const migrationVersion = Number.parseInt(window.localStorage.getItem(MIGRATION_VERSION_KEY) || '0', 10);
+        const version = Number.isFinite(migrationVersion) ? migrationVersion : 0;
+        if (version < 1) {
+            normalizedDashboards = migrateLegacySidebarDashboards(migrateLegacyDashboardNames(normalizedDashboards));
+        }
+        if (version < 2) normalizedDashboards = migrateManageTabs(normalizedDashboards);
+        if (version < 3) normalizedDashboards = migrateStaleTabs(normalizedDashboards);
+        if (version < 4) normalizedDashboards = migrateLegacyChartWidgets(normalizedDashboards);
+        if (version < 5) normalizedDashboards = migrateEmptyTabs(normalizedDashboards);
+        if (version < 6) normalizedDashboards = migrateLegacyWidgetLayoutBounds(normalizedDashboards);
+        if (version < 7) normalizedDashboards = migrateLegacyWidgetTypes(normalizedDashboards);
+        if (version < 23) normalizedDashboards = migrateLegacyThesisConfig(normalizedDashboards);
+
+        const normalizedFolders = folders.some((folder) => folder.id === INITIAL_FOLDER_ID)
+            ? folders as unknown as DashboardFolder[]
+            : [{ id: INITIAL_FOLDER_ID, name: INITIAL_FOLDER_NAME, order: 0, isExpanded: true }, ...(folders as unknown as DashboardFolder[])];
+        if (!hasValidDashboardSnapshot(normalizedDashboards, normalizedFolders)) return null;
+
+        for (const dashboard of createSystemDashboards()) {
+            if (!normalizedDashboards.some((existing) => existing.id === dashboard.id)) {
+                normalizedDashboards = [...normalizedDashboards, dashboard];
+            }
+        }
+        const activeDashboardId = normalizedDashboards.some((dashboard) => dashboard.id === viewState.activeDashboardId)
+            ? viewState.activeDashboardId
+            : normalizedDashboards.find((dashboard) => dashboard.folderId === INITIAL_FOLDER_ID)?.id || normalizedDashboards[0]?.id || null;
+        const activeDashboard = normalizedDashboards.find((dashboard) => dashboard.id === activeDashboardId);
+        const activeTabId = activeDashboard?.tabs.some((tab) => tab.id === viewState.lastActiveTabIdByDashboard[activeDashboard.id])
+            ? viewState.lastActiveTabIdByDashboard[activeDashboard.id]
+            : findPreferredTabId(activeDashboard?.tabs || []) || activeDashboard?.tabs[0]?.id || null;
+
+        return { dashboards: normalizedDashboards, folders: normalizedFolders, activeDashboardId, activeTabId };
+    } catch {
+        return null;
+    }
+}
+
 // ============================================================================
 // Context
 // ============================================================================
@@ -364,6 +565,14 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const [recentlyClosed, setRecentlyClosed] = useState<
         Array<{ dashboardId: string; tab: DashboardTab; closedAt: number }>
     >([]);
+    const stateRef = useRef(state);
+    const persistedStateRef = useRef<string | null>(null);
+    const malformedStorageRef = useRef<string | null>(null);
+    const skipNextPersistenceRef = useRef(false);
+
+    useEffect(() => {
+        stateRef.current = state;
+    }, [state]);
 
     const getPreferredActiveTabId = useCallback((dashboard: Dashboard | null | undefined) => {
         if (!dashboard) return null;
@@ -419,13 +628,22 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         try {
             const storedStorageVersion = localStorage.getItem(STORAGE_VERSION_KEY);
             if (storedStorageVersion !== CURRENT_STORAGE_VERSION) {
-                localStorage.removeItem('vnibb-tabs');
-                localStorage.removeItem('vnibb-dashboard');
-                localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_STORAGE_VERSION);
+                try {
+                    localStorage.removeItem('vnibb-tabs');
+                    localStorage.removeItem('vnibb-dashboard');
+                    localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_STORAGE_VERSION);
+                } catch {
+                    setMigrationNotice({
+                        tone: 'warning',
+                        message: 'Dashboard changes are not saved in this browser',
+                        detail: 'Your changes remain open in this tab',
+                    });
+                }
             }
 
             const storedDashboards = localStorage.getItem(STORAGE_KEY);
             const storedFolders = localStorage.getItem(FOLDERS_KEY);
+            const storageCommit = localStorage.getItem(DASHBOARD_STORAGE_COMMIT_KEY);
             const storedMigrationVersion = localStorage.getItem(MIGRATION_VERSION_KEY);
             const parsedMigrationVersion = storedMigrationVersion ? parseInt(storedMigrationVersion, 10) : 0;
             const migrationVersion = Number.isFinite(parsedMigrationVersion) ? parsedMigrationVersion : 0;
@@ -443,7 +661,9 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 unreadableStorage = true;
             };
 
-            if (storedDashboards) {
+            if (storageCommit !== null && storageCommit !== 'committed') {
+                markUnreadableStorage();
+            } else if (storedDashboards) {
                 try {
                     const parsedDashboards = JSON.parse(storedDashboards);
                     if (Array.isArray(parsedDashboards)) {
@@ -456,14 +676,16 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 }
             }
 
-            if (storedFolders) {
+            if (!unreadableStorage && storedFolders) {
                 try {
                     const parsedFolders = JSON.parse(storedFolders);
                     if (Array.isArray(parsedFolders)) {
                         folders = parsedFolders;
+                    } else {
+                        markUnreadableStorage();
                     }
                 } catch {
-                    folders = [];
+                    markUnreadableStorage();
                 }
             }
 
@@ -524,18 +746,59 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                     }
                     return { dashboards: d };
                 },
+                (d) => {
+                    if (migrationVersion < 23) {
+                        d = migrateLegacyThesisConfig(d);
+                    }
+                    return { dashboards: d };
+                },
             ];
 
             let migrationChanged = false;
-            for (const migration of migrations) {
-                const result = migration(dashboards);
-                if (result.dashboards !== dashboards) {
-                    migrationChanged = true;
-                    dashboards = result.dashboards;
-                    if (result.notice) {
-                        migrationNotices.push(result.notice);
+            try {
+                for (const migration of migrations) {
+                    const result = migration(dashboards);
+                    if (result.dashboards !== dashboards) {
+                        migrationChanged = true;
+                        dashboards = result.dashboards;
+                        if (result.notice) {
+                            migrationNotices.push(result.notice);
+                        }
                     }
                 }
+            } catch {
+                markUnreadableStorage();
+                dashboards = [];
+                folders = [];
+                migrationNotices.push({
+                    tone: 'warning',
+                    message: 'Dashboard storage was corrupted and has been reset',
+                    detail: unreadableStorageBackedUp
+                        ? 'A backup of your previous dashboards has been created'
+                        : 'Your previous dashboards could not be recovered',
+                });
+            }
+
+            if (!folders.some((folder) => isRecord(folder) && folder.id === INITIAL_FOLDER_ID)) {
+                folders.unshift({
+                    id: INITIAL_FOLDER_ID,
+                    name: INITIAL_FOLDER_NAME,
+                    order: 0,
+                    isExpanded: true,
+                });
+            }
+
+            if (!hasValidDashboardSnapshot(dashboards, folders)) {
+                markUnreadableStorage();
+                dashboards = [];
+                folders = [];
+                migrationNotices.push({
+                    tone: 'warning',
+                    message: 'Dashboard storage was corrupted and has been reset',
+                    detail: unreadableStorageBackedUp
+                        ? 'A backup of your previous dashboards has been created'
+                        : 'Your previous dashboards could not be recovered',
+                });
             }
 
             // Ensure system dashboards exist
@@ -575,7 +838,17 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
             if (migrationNotices.length > 0) {
                 setMigrationNotice(migrationNotices[0]);
-                localStorage.setItem(MIGRATION_VERSION_KEY, String(CURRENT_MIGRATION_VERSION));
+            }
+            if (migrationVersion < CURRENT_MIGRATION_VERSION) {
+                try {
+                    localStorage.setItem(MIGRATION_VERSION_KEY, String(CURRENT_MIGRATION_VERSION));
+                } catch {
+                    setMigrationNotice({
+                        tone: 'warning',
+                        message: 'Dashboard changes are not saved in this browser',
+                        detail: 'Your changes remain open in this tab',
+                    });
+                }
             }
 
             loadPublishedTemplates();
@@ -599,27 +872,90 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         };
     }, [getRestoredActiveTabId]);
 
-    // Persist to localStorage on state changes
     useEffect(() => {
-        if (!localStateReady) return;
-        if (typeof window === 'undefined') return;
+        if (!localStateReady || typeof window === 'undefined') return;
 
-        const storage = {
-            dashboards: state.dashboards,
-            folders: state.folders,
+        const serialized = serializeDashboardStorage(state);
+        if (!serialized) {
+            setMigrationNotice({
+                tone: 'warning',
+                message: 'Dashboard changes are not saved in this browser',
+                detail: 'Your changes remain open in this tab',
+            });
+            return;
+        }
+
+        const fingerprint = JSON.stringify(serialized);
+        if (skipNextPersistenceRef.current) {
+            skipNextPersistenceRef.current = false;
+            persistedStateRef.current = fingerprint;
+            return;
+        }
+        if (persistedStateRef.current === fingerprint) return;
+
+        if (persistDashboardStorage(state)) {
+            persistedStateRef.current = fingerprint;
+            return;
+        }
+
+        setMigrationNotice({
+            tone: 'warning',
+            message: 'Dashboard changes are not saved in this browser',
+            detail: 'Your changes remain open in this tab',
+        });
+    }, [localStateReady, state]);
+
+    useEffect(() => {
+        if (!localStateReady || typeof window === 'undefined') return;
+
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        const handleStorage = (event: StorageEvent) => {
+            if (event.key && ![STORAGE_KEY, FOLDERS_KEY, LAST_VIEW_STATE_KEY].includes(event.key)) return;
+            if (timeout) clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                const snapshot = readDashboardStorageSnapshot();
+                if (!snapshot) {
+                    try {
+                        const rawDashboards = window.localStorage.getItem(STORAGE_KEY);
+                        const rawFolders = window.localStorage.getItem(FOLDERS_KEY);
+                        const fingerprint = `${rawDashboards}\u0000${rawFolders}`;
+                        if (malformedStorageRef.current !== fingerprint) {
+                            malformedStorageRef.current = fingerprint;
+                            backupUnreadableDashboardStorage(rawDashboards, rawFolders);
+                            setMigrationNotice({
+                                tone: 'warning',
+                                message: 'Dashboard storage was corrupted and has been reset',
+                                detail: 'Your previous dashboards could not be recovered',
+                            });
+                        }
+                    } catch {
+                        return;
+                    }
+                    return;
+                }
+
+                malformedStorageRef.current = null;
+                const current = serializeDashboardStorage(stateRef.current);
+                const next = serializeDashboardStorage(snapshot);
+                if (!current || !next || JSON.stringify(current) === JSON.stringify(next)) return;
+
+                skipNextPersistenceRef.current = true;
+                persistedStateRef.current = JSON.stringify(next);
+                dispatch({ type: 'LOAD_STATE', payload: snapshot });
+            }, 100);
         };
 
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(storage.dashboards));
-        localStorage.setItem(FOLDERS_KEY, JSON.stringify(storage.folders));
-        writeStoredDashboardViewState({
-            activeDashboardId: state.activeDashboardId,
-            lastActiveTabIdByDashboard: {},
-        });
-    }, [state, localStateReady]);
+        window.addEventListener('storage', handleStorage);
+        return () => {
+            if (timeout) clearTimeout(timeout);
+            window.removeEventListener('storage', handleStorage);
+        };
+    }, [localStateReady]);
 
     // Backend sync hook
+    const backendSyncReady = localStateReady && config.backendSyncEnabled;
     useDashboardSync(state, {
-        enabled: localStateReady,
+        enabled: backendSyncReady,
         onSyncStart: () => { },
         onSyncError: (error) => { console.error('Dashboard sync error:', error); },
         onSyncSuccess: () => { },
@@ -630,7 +966,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         if (loadedDashboards.length > 0) {
             dispatch({ type: 'LOAD_STATE', payload: { dashboards: loadedDashboards, folders: state.folders, activeDashboardId: state.activeDashboardId, activeTabId: state.activeTabId } });
         }
-    }, localStateReady);
+    }, backendSyncReady);
 
     // Computed values
     const activeDashboard = state.dashboards.find((d) => d.id === state.activeDashboardId) || null;
@@ -779,6 +1115,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             },
         };
         dispatch({ type: 'ADD_WIDGET', payload: { dashboardId, tabId, widget: newWidget } });
+        dispatchOnboardingMeaningfulAction('widget_add');
         return newWidget;
     }, []);
 

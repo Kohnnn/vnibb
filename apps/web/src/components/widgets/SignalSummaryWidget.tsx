@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { ShieldAlert } from 'lucide-react'
+import { ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react'
 import { useFullTechnicalAnalysis } from '@/lib/queries'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
@@ -31,8 +31,44 @@ function signalTone(signal: Signal | string) {
   }
 }
 
+function formatIndicatorValue(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value.toFixed(2)
+  const numericValue = Number(value)
+  if (Number.isFinite(numericValue) && value !== null && value !== undefined && String(value).trim() !== '') {
+    return numericValue.toFixed(2)
+  }
+  return String(value ?? 'No value')
+}
+
+function indicatorEvidence(name: string) {
+  const normalizedName = name.toUpperCase()
+  if (normalizedName.startsWith('SMA') || normalizedName.startsWith('EMA')) {
+    return 'Current price relative to this average provides trend-direction evidence.'
+  }
+  if (normalizedName.startsWith('RSI')) {
+    return 'RSI below 30 is commonly oversold; above 70 is commonly overbought.'
+  }
+  if (normalizedName === 'MACD') {
+    return 'A positive histogram favors upward momentum; a negative histogram favors downward momentum.'
+  }
+  if (normalizedName.includes('BOLLINGER')) {
+    return '%B near 0 tracks the lower band; near 100% tracks the upper band.'
+  }
+  if (normalizedName.includes('STOCHASTIC')) {
+    return 'Values below 20 are commonly oversold; above 80 are commonly overbought.'
+  }
+  if (normalizedName === 'ADX') {
+    return 'ADX describes trend strength; directional indicators determine direction.'
+  }
+  if (normalizedName === 'VOLUME') {
+    return '1x is average volume; higher values indicate stronger participation.'
+  }
+  return 'This observed value contributes evidence to the aggregate signal.'
+}
+
 export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string; onDataChange?: (data: WidgetDataPayload) => void }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('W')
+  const [expandedIndicator, setExpandedIndicator] = useState<string | null>(null)
   const upperSymbol = symbol?.toUpperCase() || ''
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useFullTechnicalAnalysis(upperSymbol, {
     timeframe,
@@ -199,26 +235,36 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
           <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
             <div className="mb-2 text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Indicator Breakdown</div>
             <div className="space-y-1.5">
-              {data.signals.indicators.slice(0, 8).map((indicator) => (
-                <div key={indicator.name} className="grid grid-cols-[minmax(0,1fr)_90px] items-center gap-2 text-xs">
-                  <div className="min-w-0">
-                    <div className="break-words whitespace-normal font-medium text-[var(--text-primary)]">{indicator.name}</div>
-                    <div className="break-words whitespace-normal text-[10px] text-[var(--text-muted)]">{(() => {
-                      // QA-v4 T3: Indicator values are floats with full IEEE-754
-                      // precision (e.g. 25.895722016483697). Format to 2 d.p. for
-                      // readability, falling back to String() for non-numerics.
-                      const v = indicator.value;
-                      if (typeof v === 'number' && Number.isFinite(v)) return v.toFixed(2);
-                      const n = Number(v);
-                      if (Number.isFinite(n) && v !== null && v !== undefined && String(v).trim() !== '') return n.toFixed(2);
-                      return String(v ?? 'No value');
-                    })()}</div>
+              {data.signals.indicators.slice(0, 8).map((indicator) => {
+                const isExpanded = expandedIndicator === indicator.name
+                return (
+                  <div key={indicator.name} className="rounded-md border border-transparent hover:border-[var(--border-subtle)]">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedIndicator(isExpanded ? null : indicator.name)}
+                      aria-expanded={isExpanded}
+                      className="grid w-full grid-cols-[minmax(0,1fr)_90px_14px] items-center gap-2 px-1 py-1 text-left text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="break-words whitespace-normal font-medium text-[var(--text-primary)]">{indicator.name}</div>
+                        <div className="break-words whitespace-normal text-[10px] text-[var(--text-muted)]">{formatIndicatorValue(indicator.value)}</div>
+                      </div>
+                      <div className={`justify-self-end rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${signalTone(indicator.signal)}`}>
+                        {indicator.signal.replace(/_/g, ' ')}
+                      </div>
+                      {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    </button>
+                    {isExpanded && (
+                      <div className="border-t border-[var(--border-subtle)] px-2 py-2 text-[10px] leading-relaxed text-[var(--text-secondary)]">
+                        <div>{indicatorEvidence(indicator.name)}</div>
+                        <div className="mt-1 text-[var(--text-muted)]">
+                          Observed: {formatIndicatorValue(indicator.value)} · Classification: {indicator.signal.replace(/_/g, ' ')}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className={`justify-self-end rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${signalTone(indicator.signal)}`}>
-                    {indicator.signal.replace(/_/g, ' ')}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
 

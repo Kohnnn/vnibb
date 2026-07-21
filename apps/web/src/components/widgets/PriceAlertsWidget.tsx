@@ -16,6 +16,8 @@ import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import { useWebSocket } from '@/lib/hooks/useWebSocket';
+import { recordAlertActivity } from '@/lib/alertActivity';
+import { normalizeTickerSymbol } from '@/lib/defaultTicker';
 
 // ============ Types ============
 
@@ -169,6 +171,11 @@ function formatCondition(condition: PriceAlert['condition']): string {
         case 'change_up': return 'Change +%';
         case 'change_down': return 'Change -%';
     }
+}
+
+export function isValidAlertThreshold(value: string): boolean {
+    const threshold = Number(value);
+    return value.trim() !== '' && Number.isFinite(threshold) && threshold > 0;
 }
 
 function formatThreshold(alert: PriceAlert): string {
@@ -338,10 +345,21 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                     hasChanges = true;
                     // Trigger notification
                     triggerAlertNotification(alert, price);
+                    const triggerTime = new Date().toISOString();
+                    recordAlertActivity({
+                        id: `price:${alert.id}:${triggerTime}`,
+                        source: 'price',
+                        triggerTime,
+                        deliveryClass: wsConnected ? 'browser_local' : 'polled',
+                        serverBacked: false,
+                        title: `${alert.symbol} price alert triggered`,
+                        detail: `${formatCondition(alert.condition)} ${formatThreshold(alert)} at ${price.toLocaleString()}`,
+                        symbol: alert.symbol,
+                    });
                     return {
                         ...alert,
-                        triggeredAt: new Date().toISOString(),
-                        notificationSent: true,
+                        triggeredAt: triggerTime,
+                        notificationSent: notificationServiceRef.current.isGranted(),
                         lastPrice: price,
                     };
                 }
@@ -350,7 +368,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
 
             return hasChanges ? updatedAlerts : currentAlerts;
         });
-    }, [triggerAlertNotification]);
+    }, [triggerAlertNotification, wsConnected]);
 
     // Keep the stable ref pointed at the latest handlePriceUpdate so the
     // useWebSocket onUpdate callback always invokes current alert-checking logic.
@@ -362,15 +380,25 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
         setNotificationPermission(granted ? 'granted' : 'denied');
     };
 
+    const openAddForm = () => {
+        if (showAdd) {
+            setShowAdd(false);
+            return;
+        }
+        setNewAlert((current) => ({ ...current, symbol: normalizeTickerSymbol(initialSymbol) ?? '' }));
+        setShowAdd(true);
+    };
+
     // Add new alert
     const addAlert = () => {
-        if (!newAlert.symbol || !newAlert.threshold) return;
+        const symbol = normalizeTickerSymbol(newAlert.symbol);
+        if (!symbol || !isValidAlertThreshold(newAlert.threshold)) return;
 
         const alert: PriceAlert = {
             id: `alert_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            symbol: newAlert.symbol.toUpperCase().trim(),
+            symbol,
             condition: newAlert.condition,
-            threshold: parseFloat(newAlert.threshold),
+            threshold: Number(newAlert.threshold),
             createdAt: new Date().toISOString(),
             isActive: true,
             notificationSent: false,
@@ -442,8 +470,10 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                         </button>
                     )}
                     <button
-                        onClick={() => setShowAdd(!showAdd)}
-                        className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded"
+                        type="button"
+                        onClick={openAddForm}
+                        aria-label={showAdd ? 'Close price alert form' : 'Add price alert'}
+                        className="min-h-9 min-w-9 rounded p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
                     >
                         <Plus size={12} />
                     </button>
@@ -497,8 +527,9 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                             step={newAlert.condition.includes('change') ? 0.1 : 100}
                         />
                         <button
+                            type="button"
                             onClick={addAlert}
-                            disabled={!newAlert.symbol || !newAlert.threshold}
+                            disabled={!normalizeTickerSymbol(newAlert.symbol) || !isValidAlertThreshold(newAlert.threshold)}
                             className="px-3 bg-yellow-600 hover:bg-yellow-500 disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)] text-white text-xs rounded font-medium transition-colors"
                         >
                             Add
@@ -513,7 +544,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                     <WidgetEmpty
                         message="No price alerts set"
                         icon={<Bell size={18} />}
-                        action={{ label: 'Create alert', onClick: () => setShowAdd(true) }}
+                        action={{ label: 'Create alert', onClick: openAddForm }}
                     />
                 ) : (
                     <div className="p-1 space-y-1">
@@ -615,17 +646,21 @@ function AlertItem({ alert, onRemove, onToggle }: AlertItemProps) {
                     )}
                 </div>
             </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1">
                 <button
+                    type="button"
                     onClick={() => onToggle(alert.id)}
-                    className="p-1 text-[var(--text-muted)] hover:text-blue-400"
+                    aria-label={`${alert.isActive ? 'Pause' : 'Resume'} ${alert.symbol} alert`}
+                    className="flex min-h-11 min-w-11 items-center justify-center text-[var(--text-muted)] hover:text-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
                     title={alert.isActive ? 'Pause alert' : 'Resume alert'}
                 >
                     {alert.isActive ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
                 </button>
                 <button
+                    type="button"
                     onClick={() => onRemove(alert.id)}
-                    className="p-1 text-[var(--text-muted)] hover:text-red-400"
+                    aria-label={`Delete ${alert.symbol} alert`}
+                    className="flex min-h-11 min-w-11 items-center justify-center text-[var(--text-muted)] hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
                     title="Delete alert"
                 >
                     <X size={12} />
@@ -661,8 +696,10 @@ function TriggeredAlertItem({ alert, onRemove }: TriggeredAlertItemProps) {
                 </div>
             </div>
             <button
+                type="button"
                 onClick={() => onRemove(alert.id)}
-                className="p-1 text-[var(--text-muted)] hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label={`Delete triggered ${alert.symbol} alert`}
+                className="flex min-h-11 min-w-11 items-center justify-center text-[var(--text-muted)] hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
             >
                 <X size={12} />
             </button>

@@ -48,6 +48,7 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
   }, [data])
 
   const stats = useMemo(() => (bars.length ? computeMarketLabStats(upperSymbol, bars) : null), [bars, upperSymbol])
+  const adjustmentWarning = data?.meta?.adjustment_warning ?? null
   const hasData = Boolean(stats)
 
   useEffect(() => {
@@ -58,13 +59,17 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
           sourceLabel: 'Market Lab (derived)',
           apiGroup: '/equity',
           endpoint: `/equity/historical?symbol=${upperSymbol}`,
-          adjustmentMode: 'adjusted',
+          adjustmentMode: data?.meta?.adjustment_mode ?? 'adjusted',
           updatedAt: data?.meta?.last_data_date ?? (dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined),
         },
       },
       ...(stats ? { stats, rows: marketLabStatsToRows(stats) } : {}),
+      adjustmentCoveragePct: data?.meta?.adjustment_coverage_pct ?? null,
+      adjustmentRequestedCount: data?.meta?.adjustment_requested_count ?? null,
+      adjustmentAppliedCount: data?.meta?.adjustment_applied_count ?? null,
+      adjustmentWarning,
     })
-  }, [hasData, onDataChange, upperSymbol, stats, data?.meta?.last_data_date, dataUpdatedAt])
+  }, [adjustmentWarning, hasData, onDataChange, upperSymbol, stats, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_mode, data?.meta?.adjustment_requested_count, data?.meta?.last_data_date, dataUpdatedAt])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to run the market lab" icon={<FlaskConical size={18} />} />
@@ -112,6 +117,8 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
           ))}
         </div>
       </div>
+
+      {adjustmentWarning && <div className="mx-1 mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">{adjustmentWarning}</div>}
 
       <div className="flex-1 overflow-y-auto px-1">
         {/* Headline risk/return cards */}

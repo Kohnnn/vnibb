@@ -60,6 +60,7 @@ const METRIC_GROUPS: { name: string; metrics: MetricDefinition[] }[] = [
             { id: 'rs_rank', name: 'RS Rank', type: 'number' },
             { id: 'market_cap', name: 'Market Cap (VND bn)', type: 'currency', multiplier: 1e9 },
             { id: 'shares_outstanding', name: 'Shares Outstanding (mn)', type: 'number', multiplier: 1e6 },
+            { id: 'listing_age_days', name: 'Listing Age (days)', type: 'number' },
         ]
     },
     {
@@ -71,6 +72,7 @@ const METRIC_GROUPS: { name: string; metrics: MetricDefinition[] }[] = [
             { id: 'ev_ebitda', name: 'EV/EBITDA', type: 'number' },
             { id: 'ebitda_on_stock', name: 'EBITDA per Share', type: 'number' },
             { id: 'price_to_cash_flow', name: 'P/CF Ratio', type: 'number' },
+            { id: 'target_upside_pct', name: 'Provider Target Upside (%)', type: 'percent' },
         ]
     },
     {

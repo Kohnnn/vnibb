@@ -71,9 +71,10 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }
       .map((ticker) => ({
         ticker,
         value: matrixMap.get(`${upperSymbol}:${ticker}`) ?? matrixMap.get(`${ticker}:${upperSymbol}`) ?? null,
+        overlap: payload?.overlap_counts?.[`${upperSymbol}:${ticker}`] ?? payload?.overlap_counts?.[`${ticker}:${upperSymbol}`] ?? null,
       }))
       .sort((left, right) => (right.value ?? -999) - (left.value ?? -999))
-  }, [matrixMap, tickers, upperSymbol])
+  }, [matrixMap, payload?.overlap_counts, tickers, upperSymbol])
 
   const orderedTickers = useMemo(() => [upperSymbol, ...peerPairs.map((pair) => pair.ticker)].filter(Boolean), [upperSymbol, peerPairs])
 
@@ -110,17 +111,17 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }
   })()
   const isStaleData = staleAgeDays !== null && staleAgeDays >= 7
   const coverageDetail = payload?.returns_count
-    ? `Only ${payload.returns_count} aligned return rows passed validation. Need at least ${minOverlapDays} overlapping daily returns for ${upperSymbol} and peers. Try a longer window or expand the peer set; daily price history may be incomplete.`
+    ? `${upperSymbol} has ${payload.returns_count} anchor return observations. Pair overlap is shown per peer; each correlation needs at least ${minOverlapDays} overlapping daily returns.`
     : `No overlapping daily price history found for ${upperSymbol} and its peer universe. Try another symbol or wait for the next EOD sync.`
+
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
       empty: !hasData,
-      apiGroup: '/comparison',
-      endpoint: `/api/v1/comparison/correlation/${upperSymbol || ':symbol'}`,
+      apiGroup: '/equity',
+      endpoint: `/api/v1/equity/${upperSymbol || ':symbol'}/correlation-matrix`,
       sourceLabel: 'VNIBB correlation matrix',
       lastDataDate: lastDataDateStr,
-      derived: true,
       stale: isStaleData,
       extra: { symbol: upperSymbol, days, topN, rows: returnsCount },
     }))
@@ -178,7 +179,7 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }
             <WidgetMeta
               updatedAt={data?.meta?.last_data_date || dataUpdatedAt}
               isFetching={isFetching && hasData}
-              note={`${payload?.sector || 'Sector'} · ${payload?.returns_count || 0} return rows`}
+              note={`${payload?.sector || 'Sector'} · ${returnsCount} anchor observations`}
               align="right"
             />
           </div>
@@ -203,12 +204,12 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }
             <div className="space-y-3">
               {isStaleData ? (
                 <div className="rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-[11px] leading-5 text-rose-200">
-                  Stale data: latest aligned return row is {Math.floor(staleAgeDays!)} days old. Operator should trigger a price-sync backfill.
+                  Stale data: {upperSymbol} latest return row is {Math.floor(staleAgeDays!)} days old. Operator should trigger a price-sync backfill.
                 </div>
               ) : null}
               {isPartialCoverage ? (
                 <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-200">
-                  Partial window: {returnsCount} aligned return rows (need {minOverlapDays} for the strict threshold). Correlations below are still computed but expect wider variance. Switch to a longer window or expand the peer set for full coverage.
+                  Partial window: {upperSymbol} has {returnsCount} return observations. Each peer shows its own overlap; correlations need {minOverlapDays} overlapping rows.
                 </div>
               ) : null}
               <div className="grid grid-cols-1 gap-2 xl:grid-cols-4">
@@ -239,7 +240,8 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
                   <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Coverage</div>
                   <div className="text-sm font-semibold text-[var(--text-primary)]">{orderedTickers.length} symbols</div>
-                  <div className="mt-1 text-xs text-[var(--text-secondary)]">Window {days} trading days</div>
+                  <div className="mt-1 text-xs text-[var(--text-secondary)]">Anchor latest date: {lastDataDateStr || '--'}</div>
+                  <div className="mt-1 text-xs text-[var(--text-secondary)]">Anchor observations: {returnsCount} · Window {days} trading days</div>
                 </div>
               </div>
 
@@ -270,6 +272,7 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }
                               {formatCorrelation(pair.value)}
                             </span>
                           </div>
+                          <div className="mb-1 text-[10px] text-[var(--text-muted)]">{pair.overlap ?? '—'} overlapping returns</div>
                           <div className="h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
                             <div
                               className={cn('h-full rounded-full', pair.value != null && pair.value >= 0 ? 'bg-emerald-400/80' : 'bg-rose-400/80')}

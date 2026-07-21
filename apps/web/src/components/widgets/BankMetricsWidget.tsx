@@ -9,7 +9,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { useFinancialRatios } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
+import { formatFinancialPeriodLabel, normalizeFinancialPeriod, periodSortKey } from '@/lib/financialPeriods';
 import { formatNumber, formatPercent } from '@/lib/units';
 
 interface BankMetricsWidgetProps {
@@ -34,6 +34,7 @@ const BANK_METRIC_LABELS: Record<string, string> = {
 };
 
 const RATIO_KEYS = new Set(['loan_to_deposit']);
+const BANK_SPECIFIC_KEYS = new Set(['loan_to_deposit', 'casa_ratio', 'deposit_growth', 'nim', 'equity_to_assets', 'asset_yield', 'credit_cost', 'provision_coverage']);
 const PERCENT_KEYS = new Set([
   'casa_ratio',
   'deposit_growth',
@@ -78,7 +79,9 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: Bank
 
   const ratios = useMemo(() => {
     const items = data?.data || [];
-    return [...items].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period));
+    return [...items]
+      .filter((row) => /^20\d{2}$/.test(normalizeFinancialPeriod(row.period) || ''))
+      .sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period));
   }, [data?.data]);
 
   const latest = ratios[ratios.length - 1];
@@ -87,7 +90,7 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: Bank
       METRIC_GROUPS.some((group) =>
         group.metrics.some((metricKey) => {
           const value = row?.[metricKey as keyof typeof row];
-          return typeof value === 'number' && Number.isFinite(value);
+          return BANK_SPECIFIC_KEYS.has(metricKey) && typeof value === 'number' && Number.isFinite(value);
         })
       )
     );
@@ -151,9 +154,9 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: Bank
     });
   }, [ratios, tableColumns]);
 
-  const note = latest?.casa_ratio == null
-    ? 'Annual bank analytics | CASA pending provider split'
-    : 'Annual bank analytics';
+  const note = latest
+    ? `Annual reported ratios · ${formatFinancialPeriodLabel(latest.period, { mode: 'year' })} latest · unavailable fields shown as N/A`
+    : 'Annual reported ratios';
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -187,6 +190,7 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: Bank
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasBankData}
             note={note}
+            sourceLabel="VNIBB ratio feed"
             align="right"
           />
         </div>
@@ -199,7 +203,7 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: Bank
           ) : !hasBankData ? (
             <WidgetEmpty
               icon={<Building2 size={18} />}
-              message={`Bank analytics are available for bank issuers. ${symbol} does not currently expose bank metrics.`}
+              message={`No reported bank-specific metrics are available for ${symbol}.`}
             />
           ) : (
             <div className="space-y-3">

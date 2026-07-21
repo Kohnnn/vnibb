@@ -55,6 +55,7 @@ import { cn } from '@/lib/utils';
 import { exportToCSV, exportToJSON, exportToPNG, type ExportProvenance } from '@/lib/exportWidget';
 import { WidgetHealthChip } from '@/components/ui/WidgetHealthChip';
 import { deriveWidgetHealth } from '@/lib/widgetHealth';
+import { getWidgetExportData } from '@/lib/widgetRuntime';
 interface WidgetRuntimeLayoutHint {
     compactHeight?: number;
     empty?: boolean;
@@ -64,6 +65,7 @@ interface WidgetRuntimePayload {
     __widgetRuntime?: {
         layoutHint?: WidgetRuntimeLayoutHint;
         provenance?: Partial<ExportProvenance>;
+        exportData?: unknown;
     };
 }
 
@@ -369,19 +371,10 @@ export function WidgetWrapper({
         rawExchangeBadge && rawExchangeBadge !== 'VN' && rawExchangeBadge !== 'UNKNOWN'
             ? rawExchangeBadge
             : null;
-    const exportableInternalData = useMemo(() => {
-        if (
-            internalData &&
-            typeof internalData === 'object' &&
-            !Array.isArray(internalData) &&
-            '__widgetRuntime' in (internalData as Record<string, unknown>)
-        ) {
-            const { __widgetRuntime, ...rest } = internalData as Record<string, unknown>;
-            return Object.keys(rest).length > 0 ? rest : undefined;
-        }
-
-        return internalData;
-    }, [internalData]);
+    const exportableInternalData = useMemo(
+        () => getWidgetExportData(internalData),
+        [internalData],
+    );
     const layoutInsight = useMemo(
         () => (currentWidget ? getWidgetLayoutInsight(currentWidget) : null),
         [currentWidget]

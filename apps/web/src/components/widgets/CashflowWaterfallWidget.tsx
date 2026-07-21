@@ -46,18 +46,30 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove, onDataChange }
     [orderedItems, periodMode],
   );
   const hasData = displayItems.length > 0;
+  const latest = displayItems.at(-1);
+  const hasReportedBridge = Boolean(
+    latest && [
+      latest.operating_cash_flow,
+      latest.investing_cash_flow,
+      latest.financing_cash_flow,
+      latest.net_change_in_cash ?? latest.net_cash_flow,
+    ].every((value) => typeof value === 'number' && Number.isFinite(value)),
+  );
 
   const scale = useMemo(
     () => resolveUnitScale(displayItems.flatMap((item) => [item.operating_cash_flow, item.investing_cash_flow, item.financing_cash_flow, item.net_change_in_cash, item.free_cash_flow]), unitConfig),
     [displayItems, unitConfig],
   );
-  const model = useMemo(() => buildCashFlowWaterfallModel(displayItems), [displayItems]);
+  const model = useMemo(
+    () => hasReportedBridge ? buildCashFlowWaterfallModel(displayItems) : null,
+    [displayItems, hasReportedBridge],
+  );
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 10000 });
 
   useEffect(() => {
     onDataChange?.(
       buildWidgetRuntime({
-        empty: !hasData,
+        empty: !model,
         apiGroup: '/equity',
         endpoint: `/equity/${symbol}/cash-flow?period=${apiPeriod}`,
         sourceLabel: 'Cash bridge',
@@ -66,7 +78,7 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove, onDataChange }
         extra: hasData ? { periods: displayItems.length } : undefined,
       }),
     );
-  }, [onDataChange, hasData, error, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
+  }, [onDataChange, model, error, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
   const latestLabel = model
     ? formatFinancialPeriodLabel(model.period, { mode: periodMode, index: displayItems.length - 1, total: displayItems.length })
     : period === 'FY'
@@ -94,7 +106,7 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove, onDataChange }
             isFetching={isFetching && hasData}
             isCached={Boolean(error && hasData)}
             note={`${latestLabel} • ${getUnitLegend(scale, unitConfig)}`}
-            sourceLabel="Cash bridge"
+            sourceLabel="VNIBB cash-flow statements"
             align="right"
           />
         </div>
@@ -116,7 +128,7 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove, onDataChange }
           ) : !model ? (
             <WidgetEmpty
               message={`No cash bridge available for ${symbol}`}
-              detail="Operating, investing, financing, and net cash fields are required."
+              detail="A waterfall requires reported operating, investing, financing, and net cash-change fields for one period; missing lines are not inferred."
               icon={<ChartNoAxesColumnIncreasing size={18} />}
             />
           ) : (

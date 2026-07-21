@@ -29,7 +29,15 @@ export interface ScreenerData {
     quick_ratio?: number;
     ev_ebitda?: number;
     dividend_yield?: number;
+    listing_date?: string | null;
+    listing_age_days?: number | null;
+    target_price?: number | null;
+    target_upside_pct?: number | null;
+    recommendation?: string | null;
+    target_source?: string | null;
+    profile_refreshed_at?: string | null;
     pass_reason?: string;
+
     beta?: number;
     rs_rating?: number;
     // Performance
@@ -52,6 +60,23 @@ export interface ScreenerResponse {
     meta?: {
         count?: number;
         last_data_date?: string | null;
+        source?: 'live' | 'cache' | 'stale_cache' | 'fallback_cache';
+        cached?: boolean;
+        stale?: boolean;
+        fallback?: boolean;
+        cache_age_seconds?: number | null;
+        visible_field_coverage?: Record<string, number>;
+        visible_field_values?: number;
+        visible_field_possible_values?: number;
+        universe?: 'ALL' | 'VN30' | 'VN100' | 'HNX30';
+        membership_current?: boolean;
+        membership_source?: string | null;
+        membership_synced_at?: string | null;
+        membership_coverage?: number;
+        membership_available?: boolean;
+        membership_stale?: boolean;
+        discovery_coverage?: Record<string, number>;
+        target_reference_note?: string;
     };
     error?: string | null;
 }
@@ -81,14 +106,21 @@ export const ALL_COLUMNS: ScreenerColumn[] = [
   { id: 'organ_name', label: 'Company', accessor: 'organ_name' as any, category: 'basic', align: 'left', width: 200 },
   { id: 'exchange', label: 'Exchange', accessor: 'exchange', category: 'basic' },
   { id: 'industry_name', label: 'Industry', accessor: 'industry_name' as any, category: 'basic' },
-  
+  { id: 'listing_date', label: 'Listing Date', accessor: 'listing_date', category: 'basic', format: 'text' },
+  { id: 'listing_age_days', label: 'Listed Days', accessor: 'listing_age_days', category: 'basic', format: 'number' },
+
+
   // Valuation
   { id: 'market_cap', label: 'Market Cap', accessor: 'market_cap', category: 'valuation', format: 'currency' },
   { id: 'pe', label: 'P/E', accessor: 'pe', category: 'valuation', format: 'number' },
   { id: 'pb', label: 'P/B', accessor: 'pb', category: 'valuation', format: 'number' },
   { id: 'ps', label: 'P/S', accessor: 'ps', category: 'valuation', format: 'number' },
   { id: 'ev_ebitda', label: 'EV/EBITDA', accessor: 'ev_ebitda', category: 'valuation', format: 'number' },
-  
+  { id: 'target_price', label: 'Target Price', accessor: 'target_price', category: 'valuation', format: 'currency' },
+  { id: 'target_upside_pct', label: 'Target Upside', accessor: 'target_upside_pct', category: 'valuation', format: 'percent' },
+  { id: 'recommendation', label: 'Provider Rating', accessor: 'recommendation', category: 'valuation', format: 'text' },
+
+
   // Fundamentals
   { id: 'eps', label: 'EPS', accessor: 'eps' as any, category: 'fundamentals', format: 'number' },
   { id: 'roe', label: 'ROE', accessor: 'roe', category: 'fundamentals', format: 'percent' },
@@ -103,11 +135,11 @@ export const ALL_COLUMNS: ScreenerColumn[] = [
   { id: 'fcf_positive', label: 'FCF+', accessor: 'fcf_positive' as any, category: 'fundamentals', format: 'text' },
   { id: 'moat', label: 'Moat', accessor: 'moat' as any, category: 'fundamentals', format: 'text' },
   { id: 'pass_reason', label: 'Pass Reason', accessor: 'pass_reason', category: 'fundamentals', align: 'left', width: 260, format: 'text' },
-  
+
   // Technical
   { id: 'rs_rating', label: 'RS Rating', accessor: 'rs_rating', category: 'technical', format: 'number' },
   { id: 'volume', label: 'Volume', accessor: 'volume', category: 'technical', format: 'number' },
-  
+
   // Performance
   { id: 'price', label: 'Price', accessor: 'price', category: 'performance', format: 'currency' },
   { id: 'change_1d', label: 'Change %', accessor: 'change_1d', category: 'performance', format: 'change' },

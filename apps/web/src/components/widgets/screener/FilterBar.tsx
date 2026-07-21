@@ -70,6 +70,22 @@ const AVAILABLE_FILTERS = [
       { label: 'Below 2%', value: { lt: 2 } },
     ],
   },
+  {
+    id: 'target_upside_pct',
+    label: 'Target Upside',
+    presets: [
+      { label: 'Above 10%', value: { gte: 10 } },
+      { label: 'Above 20%', value: { gte: 20 } },
+    ],
+  },
+  {
+    id: 'listing_age_days',
+    label: 'Listing Age',
+    presets: [
+      { label: 'At least 1 year', value: { gte: 365 } },
+      { label: 'At least 3 years', value: { gte: 1095 } },
+    ],
+  },
 ];
 
 export interface ActiveFilter {

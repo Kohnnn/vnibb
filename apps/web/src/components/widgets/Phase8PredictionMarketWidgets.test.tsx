@@ -1,6 +1,7 @@
 /** Smoke tests for the Phase 8 prediction-market widgets. */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { TopMoversPulseWidget } from './TopMoversPulseWidget';
 import { SourceDriftWidget } from './SourceDriftWidget';
@@ -25,6 +26,7 @@ Object.defineProperty(globalThis, 'Response', { value: JsonTestResponse, configu
 const originalFetch = global.fetch;
 
 beforeEach(() => {
+    localStorage.removeItem('vnibb.prediction-alerts.config');
     global.fetch = jest.fn();
 });
 
@@ -163,7 +165,11 @@ describe('PredictionAlertsWidget', () => {
                 ],
             })),
         );
-        render(<PredictionAlertsWidget />);
+        (global.fetch as jest.Mock).mockResolvedValue(
+            new JsonTestResponse(JSON.stringify({ sources: [] })),
+        );
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        render(<QueryClientProvider client={client}><PredictionAlertsWidget /></QueryClientProvider>);
         await waitFor(() => {
             expect(screen.getByText(/Fed cut rates/i)).toBeInTheDocument();
             expect(screen.getByText(/5\.0pp/i)).toBeInTheDocument();
@@ -176,11 +182,99 @@ describe('PredictionAlertsWidget', () => {
         expect(screen.getByRole('button', { name: 'Last 1h' })).toHaveAttribute('aria-pressed', 'true');
     });
 
+    it('keeps the last successful alerts visible and marks the feed stale after a refresh error', async () => {
+        (global.fetch as jest.Mock).mockResolvedValueOnce(
+            new JsonTestResponse(JSON.stringify({
+                window_hours: 1,
+                min_movement_bps: 200,
+                count: 1,
+                alerts: [{
+                    source: 'polymarket',
+                    source_id: 'p-1',
+                    question: 'Will the Fed cut rates?',
+                    category: 'economic',
+                    url: 'https://example.com/p-1',
+                    yes_price: 0.45,
+                    previous_yes_price: 0.4,
+                    absolute_movement: 0.05,
+                    direction: 'up',
+                }],
+            })),
+        );
+        (global.fetch as jest.Mock).mockResolvedValue(new JsonTestResponse(JSON.stringify({ sources: [] })));
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        render(<QueryClientProvider client={client}><PredictionAlertsWidget /></QueryClientProvider>);
+        await waitFor(() => expect(screen.getByText(/Fed cut rates/i)).toBeInTheDocument());
+
+        (global.fetch as jest.Mock).mockImplementation((url: string) => {
+            if (url.includes('/prediction-markets/alerts')) return Promise.reject(new Error('offline'));
+            return Promise.resolve(new JsonTestResponse(JSON.stringify({ sources: [] })));
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Last 4h' }));
+
+        await waitFor(() => {
+            expect(screen.getByText(/Fed cut rates/i)).toBeInTheDocument();
+            expect(screen.getByText(/Feed stale/i)).toBeInTheDocument();
+        });
+    });
+
+    it('ignores an older bucket response after the selected bucket changes', async () => {
+        let resolveFourHours: ((response: JsonTestResponse) => void) | undefined;
+        let resolveTwentyFourHours: ((response: JsonTestResponse) => void) | undefined;
+        (global.fetch as jest.Mock).mockImplementation((url: string) => {
+            if (!url.includes('/prediction-markets/alerts')) {
+                return Promise.resolve(new JsonTestResponse(JSON.stringify({ sources: [] })));
+            }
+            if (url.includes('window_hours=1')) {
+                return Promise.resolve(new JsonTestResponse(JSON.stringify({
+                    window_hours: 1,
+                    alerts: [{ source: 'polymarket', source_id: 'initial', question: 'Initial alert', yes_price: 0.5, previous_yes_price: 0.4, absolute_movement: 0.1, direction: 'up' }],
+                })));
+            }
+            if (url.includes('window_hours=4')) {
+                return new Promise((resolve) => {
+                    resolveFourHours = resolve;
+                });
+            }
+            return new Promise((resolve) => {
+                resolveTwentyFourHours = resolve;
+            });
+        });
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        render(<QueryClientProvider client={client}><PredictionAlertsWidget /></QueryClientProvider>);
+        await waitFor(() => expect(screen.getByText('Initial alert')).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('button', { name: 'Last 4h' }));
+        await waitFor(() => expect(resolveFourHours).toBeDefined());
+        fireEvent.click(screen.getByRole('button', { name: 'Last 24h' }));
+        await waitFor(() => expect(resolveTwentyFourHours).toBeDefined());
+
+        await act(async () => {
+            resolveTwentyFourHours!(new JsonTestResponse(JSON.stringify({
+                window_hours: 24,
+                alerts: [{ source: 'kalshi', source_id: 'new', question: 'New bucket alert', yes_price: 0.5, previous_yes_price: 0.4, absolute_movement: 0.1, direction: 'up' }],
+            })));
+        });
+        await waitFor(() => expect(screen.getByText('New bucket alert')).toBeInTheDocument());
+        await act(async () => {
+            resolveFourHours!(new JsonTestResponse(JSON.stringify({
+                window_hours: 4,
+                alerts: [{ source: 'polymarket', source_id: 'old', question: 'Old bucket alert', yes_price: 0.5, previous_yes_price: 0.4, absolute_movement: 0.1, direction: 'up' }],
+            })));
+        });
+
+        expect(screen.getByText('New bucket alert')).toBeInTheDocument();
+        expect(screen.queryByText('Old bucket alert')).not.toBeInTheDocument();
+    });
+
     it('renders the empty state when no alerts', async () => {
         (global.fetch as jest.Mock).mockResolvedValueOnce(
             new JsonTestResponse(JSON.stringify({ window_hours: 1, min_movement_bps: 200, count: 0, alerts: [] })),
         );
-        render(<PredictionAlertsWidget />);
+        (global.fetch as jest.Mock).mockResolvedValue(
+            new JsonTestResponse(JSON.stringify({ sources: [] })),
+        );
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        render(<QueryClientProvider client={client}><PredictionAlertsWidget /></QueryClientProvider>);
         await waitFor(() => {
             expect(screen.getByText(/No alerts/i)).toBeInTheDocument();
         });

@@ -4,6 +4,7 @@ import type { Dashboard, DashboardTab, WidgetInstance } from '@/types/dashboard'
 import { normalizeWidgetType } from '@/data/widgetDefinitions';
 import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { autoFitGridItems } from '@/lib/dashboardLayout';
+import { normalizeThesisConfig } from '@/lib/investorWorkflow';
 
 import {
     LEGACY_DASHBOARD_NAME_RE,
@@ -163,6 +164,23 @@ export const migrateLegacyWidgetLayoutBounds = (dashboards: Dashboard[]): Dashbo
         };
     });
 };
+
+export const migrateLegacyThesisConfig = (dashboards: Dashboard[]): Dashboard[] => dashboards.map((dashboard) => {
+    let changed = false;
+    const tabs = dashboard.tabs.map((tab) => ({
+        ...tab,
+        widgets: tab.widgets.map((widget) => {
+            if (widget.type !== 'notes') return widget;
+            const normalized = normalizeThesisConfig(widget.config);
+            const currentNotes = widget.config?.notesBySymbol;
+            const currentTheses = widget.config?.thesesBySymbol;
+            if (JSON.stringify(currentNotes ?? {}) === JSON.stringify(normalized.notesBySymbol) && JSON.stringify(currentTheses ?? {}) === JSON.stringify(normalized.thesesBySymbol)) return widget;
+            changed = true;
+            return { ...widget, config: { ...widget.config, ...normalized } };
+        }),
+    }));
+    return changed ? { ...dashboard, tabs, updatedAt: new Date().toISOString() } : dashboard;
+});
 
 // ============================================================================
 // Migrate Legacy Dashboard Names

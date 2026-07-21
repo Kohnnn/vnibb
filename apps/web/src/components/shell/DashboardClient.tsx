@@ -50,8 +50,13 @@ import { saveAdminSystemDashboardTemplate } from '@/lib/api';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import {
     DASHBOARD_WALKTHROUGH_RESTART_EVENT,
+    dismissDashboardWalkthrough,
+    dispatchOnboardingMeaningfulAction,
     markDashboardWalkthroughCompleted,
+    selectOnboardingGoal,
     shouldShowDashboardWalkthrough,
+    type OnboardingGoalId,
+    type OnboardingMeaningfulActionId,
 } from '@/lib/userPreferences';
 import type { WidgetInstance, WidgetType, WidgetConfig } from '@/types/dashboard';
 import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '@/types/dashboard-templates';
@@ -125,6 +130,8 @@ function DashboardContent() {
     const [copilotWidgetContext, setCopilotWidgetContext] = useState<string | undefined>(undefined);
     const [copilotWidgetData, setCopilotWidgetData] = useState<Record<string, unknown> | undefined>(undefined);
     const [copilotPromptLibraryRequestId, setCopilotPromptLibraryRequestId] = useState(0);
+    const [copilotStarterPrompt, setCopilotStarterPrompt] = useState<'analyze' | 'technical' | undefined>(undefined);
+    const [copilotStarterPromptRequestId, setCopilotStarterPromptRequestId] = useState(0);
     const [sidebarWidth, setSidebarWidth] = useState(LEFT_SIDEBAR_DEFAULT_WIDTH);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [rightSidebarWidth, setRightSidebarWidth] = useState(RIGHT_SIDEBAR_DEFAULT_WIDTH);
@@ -292,7 +299,7 @@ function DashboardContent() {
     }, [activeDashboard, adminLayoutControlsVisible, isEditing, setDashboardAdminUnlocked]);
 
     const openWalkthrough = useCallback((force = false) => {
-        if (!mounted || effectiveLeftSidebarWidth === 0) {
+        if (!mounted) {
             return;
         }
 
@@ -311,12 +318,18 @@ function DashboardContent() {
             dashboard_id: activeDashboard?.id,
             tab_id: activeTab?.id,
         });
-    }, [activeDashboard?.id, activeTab?.id, effectiveLeftSidebarWidth, mounted]);
+    }, [activeDashboard?.id, activeTab?.id, mounted]);
 
-    const closeWalkthrough = useCallback(() => {
+    const skipWalkthrough = useCallback(() => {
+        dismissDashboardWalkthrough();
+        setIsWalkthroughOpen(false);
+    }, []);
+
+    const completeWalkthrough = useCallback((actionId: OnboardingMeaningfulActionId) => {
         markDashboardWalkthroughCompleted();
         setIsWalkthroughOpen(false);
         captureAnalyticsEvent(ANALYTICS_EVENTS.onboardingWalkthroughCompleted, {
+            action_id: actionId,
             dashboard_id: activeDashboard?.id,
             tab_id: activeTab?.id,
         });
@@ -349,7 +362,6 @@ function DashboardContent() {
     useEffect(() => {
         if (
             !mounted ||
-            effectiveLeftSidebarWidth === 0 ||
             !activeDashboard ||
             !activeTab ||
             autoWalkthroughQueuedRef.current ||
@@ -367,11 +379,11 @@ function DashboardContent() {
         }, 240);
 
         return () => window.clearTimeout(timeoutId);
-    }, [activeDashboard, activeTab, effectiveLeftSidebarWidth, mounted, openWalkthrough]);
+    }, [activeDashboard, activeTab, mounted, openWalkthrough]);
 
     useEffect(() => {
         const handleRestartWalkthrough = () => {
-            if (!mounted || effectiveLeftSidebarWidth === 0 || !activeDashboard || !activeTab) {
+            if (!mounted || !activeDashboard || !activeTab) {
                 return;
             }
 
@@ -384,7 +396,7 @@ function DashboardContent() {
         return () => {
             window.removeEventListener(DASHBOARD_WALKTHROUGH_RESTART_EVENT, handleRestartWalkthrough);
         };
-    }, [activeDashboard, activeTab, effectiveLeftSidebarWidth, mounted, openWalkthrough]);
+    }, [activeDashboard, activeTab, mounted, openWalkthrough]);
 
     const applySelectedSymbol = useCallback((rawSymbol: string, options?: { domain?: 'vn' | 'tv' }) => {
         const normalizedSymbol = rawSymbol.trim().toUpperCase();
@@ -400,6 +412,7 @@ function DashboardContent() {
         const domain = options?.domain || inferredDomain;
 
         if (normalizedSymbol !== stockGlobalSymbol) {
+            dispatchOnboardingMeaningfulAction('symbol_change');
             captureAnalyticsEvent(ANALYTICS_EVENTS.symbolChanged, {
                 from_symbol: stockGlobalSymbol,
                 to_symbol: normalizedSymbol,
@@ -937,6 +950,31 @@ function DashboardContent() {
         }
     }, [applyTemplateToDashboard, createDashboard, setActiveDashboard, setActiveTab]);
 
+    const handleOnboardingGoalSelect = useCallback((goalId: OnboardingGoalId) => {
+        selectOnboardingGoal(goalId);
+
+        if (goalId === 'scan_market') {
+            const template = DASHBOARD_TEMPLATES.find((item) => item.id === 'market-overview');
+            if (template) {
+                handleApplyTemplate(template);
+            }
+            dispatchOnboardingMeaningfulAction('view_open');
+            return;
+        }
+
+        const dashboard = state.dashboards.find((item) => item.id === MAIN_FUNDAMENTAL_DASHBOARD_ID);
+        const tabName = goalId === 'follow_ticker' ? 'Overview' : 'Financials';
+        const tab = dashboard?.tabs.find((item) => item.name === tabName);
+        if (dashboard && tab) {
+            setActiveDashboard(dashboard.id);
+            setActiveTab(tab.id);
+        }
+        setCopilotStarterPrompt(goalId === 'follow_ticker' ? 'technical' : 'analyze');
+        setCopilotStarterPromptRequestId((current) => current + 1);
+        openCopilot('onboarding');
+        dispatchOnboardingMeaningfulAction('view_open');
+    }, [handleApplyTemplate, openCopilot, setActiveDashboard, setActiveTab, state.dashboards]);
+
     const handleSeedEmptyTab = useCallback((template: DashboardTemplate) => {
         if (!activeDashboard || !activeTab) return;
         if (template.widgets.length === 0) {
@@ -1468,20 +1506,22 @@ function DashboardContent() {
                                 className={`hidden lg:block h-full shrink-0 ${draggingPane === 'right' ? 'transition-none' : 'transition-[width] duration-150 ease-out'}`}
                                 style={{ width: effectiveRightSidebarWidth }}
                             >
-                                <RightSidebar 
-                                    isOpen={showAICopilot} 
+                                <RightSidebar
+                                    isOpen={showAICopilot}
                                     onToggle={() => setShowAICopilot(false)}
                                     width={effectiveRightSidebarWidth}
                                     overlay={false}
                                 >
-                                    <AICopilot 
-                                        isOpen={showAICopilot} 
-                                        onClose={() => setShowAICopilot(false)} 
+                                    <AICopilot
+                                        isOpen={showAICopilot}
+                                        onClose={() => setShowAICopilot(false)}
                                         currentSymbol={stockGlobalSymbol}
                                         widgetContext={copilotWidgetContext}
                                         widgetContextData={copilotWidgetData}
                                         activeTabName={activeTab?.name}
                                         promptLibraryRequestId={copilotPromptLibraryRequestId}
+                                        starterPrompt={copilotStarterPrompt}
+                                        starterPromptRequestId={copilotStarterPromptRequestId}
                                     />
                                 </RightSidebar>
                             </div>
@@ -1490,20 +1530,22 @@ function DashboardContent() {
                     </div>
 
                     {overlayAICopilot && showAICopilot ? (
-                        <RightSidebar 
-                            isOpen={showAICopilot} 
+                        <RightSidebar
+                            isOpen={showAICopilot}
                             onToggle={() => setShowAICopilot(false)}
                             width={effectiveRightSidebarWidth}
                             overlay={true}
                         >
-                            <AICopilot 
-                                isOpen={showAICopilot} 
-                                onClose={() => setShowAICopilot(false)} 
+                            <AICopilot
+                                isOpen={showAICopilot}
+                                onClose={() => setShowAICopilot(false)}
                                 currentSymbol={stockGlobalSymbol}
                                 widgetContext={copilotWidgetContext}
                                 widgetContextData={copilotWidgetData}
                                 activeTabName={activeTab?.name}
                                 promptLibraryRequestId={copilotPromptLibraryRequestId}
+                                starterPrompt={copilotStarterPrompt}
+                                starterPromptRequestId={copilotStarterPromptRequestId}
                             />
                         </RightSidebar>
                     ) : null}
@@ -1514,7 +1556,7 @@ function DashboardContent() {
                 isOpen={isWidgetLibraryOpen}
                 onClose={() => setIsWidgetLibraryOpen(false)}
             />
-            
+
             <AppsLibrary
                 isOpen={isAppsLibraryOpen}
                 onClose={() => setIsAppsLibraryOpen(false)}
@@ -1539,7 +1581,9 @@ function DashboardContent() {
 
             <OnboardingWalkthrough
                 open={isWalkthroughOpen}
-                onComplete={closeWalkthrough}
+                onSkip={skipWalkthrough}
+                onGoalSelect={handleOnboardingGoalSelect}
+                onMeaningfulAction={completeWalkthrough}
             />
         </div>
     );

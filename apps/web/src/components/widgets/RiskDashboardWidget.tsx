@@ -235,6 +235,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
   const isLoading = (quantQuery.isLoading || historyQuery.isLoading) && !hasData;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading, { timeoutMs: 10_000 });
   const quantWarning = extractQuantWarning(quantQuery.data);
+  const adjustmentWarning = historyQuery.data?.meta?.adjustment_warning ?? null;
   const latestDataDate = quantQuery.data?.data?.last_data_date ?? historyQuery.data?.data?.at(-1)?.time ?? null;
 
   useEffect(() => {
@@ -250,9 +251,13 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
         riskScore,
         riskLabel: scoreLabel.label,
         pricePoints: priceSeries.length,
+        adjustmentCoveragePct: historyQuery.data?.meta?.adjustment_coverage_pct ?? null,
+        adjustmentRequestedCount: historyQuery.data?.meta?.adjustment_requested_count ?? null,
+        adjustmentAppliedCount: historyQuery.data?.meta?.adjustment_applied_count ?? null,
+        adjustmentWarning,
       },
     }));
-  }, [hasData, historyQuery.dataUpdatedAt, latestDataDate, onDataChange, period, priceSeries.length, quantQuery.data?.data?.adjustment_mode, quantQuery.data?.data?.computed_at, riskScore, scoreLabel.label, upperSymbol]);
+  }, [adjustmentWarning, hasData, historyQuery.data?.meta?.adjustment_applied_count, historyQuery.data?.meta?.adjustment_coverage_pct, historyQuery.data?.meta?.adjustment_requested_count, historyQuery.dataUpdatedAt, latestDataDate, onDataChange, period, priceSeries.length, quantQuery.data?.data?.adjustment_mode, quantQuery.data?.data?.computed_at, riskScore, scoreLabel.label, upperSymbol]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to inspect risk" icon={<ShieldAlert size={18} />} />;
@@ -339,7 +344,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
           <WidgetEmpty message="Risk metrics not available yet" icon={<ShieldAlert size={18} />} />
         ) : (
           <div className="flex h-full flex-col gap-3">
-            <QuantWarningBanner warning={quantWarning} className="mb-2" />
+            <QuantWarningBanner warning={quantWarning || adjustmentWarning} className="mb-2" />
             <div className="grid grid-cols-2 gap-2 xl:grid-cols-6">
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 xl:col-span-2">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Composite Risk Score</div>

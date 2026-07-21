@@ -14,12 +14,16 @@ import {
 } from '@/lib/researchNotebook';
 import { exportToMarkdown } from '@/lib/exportWidget';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { normalizeTickerSymbol } from '@/lib/defaultTicker';
+import type { WidgetGroupId } from '@/types/widget';
 
 interface ResearchNotebookWidgetProps {
   id?: string;
   widgetId?: string;
   onRemove?: () => void;
   onDataChange?: (data: WidgetDataPayload) => void;
+  widgetGroup?: WidgetGroupId;
 }
 
 const KIND_LABEL: Record<NotebookItem['kind'], string> = {
@@ -29,8 +33,9 @@ const KIND_LABEL: Record<NotebookItem['kind'], string> = {
   note: 'Note',
 };
 
-function ResearchNotebookWidgetComponent({ id, widgetId, onRemove, onDataChange }: ResearchNotebookWidgetProps) {
+function ResearchNotebookWidgetComponent({ id, widgetId, onRemove, onDataChange, widgetGroup }: ResearchNotebookWidgetProps) {
   const [items, setItems] = useState<NotebookItem[]>([]);
+  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetId: widgetId || id, widgetType: 'source_transparent_research_notebook' });
 
   const refresh = useCallback(() => {
     setItems(readNotebookItems());
@@ -111,11 +116,13 @@ function ResearchNotebookWidgetComponent({ id, widgetId, onRemove, onDataChange 
                   <FileText size={9} />
                   {KIND_LABEL[item.kind]}
                 </span>
-                {item.symbol && (
-                  <span className="rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)]">
-                    {item.symbol}
-                  </span>
-                )}
+                {item.symbol && (normalizeTickerSymbol(item.symbol) ? (
+                  <button type="button" onClick={() => setLinkedSymbol(normalizeTickerSymbol(item.symbol) as string)} aria-label={`View ${normalizeTickerSymbol(item.symbol)}`} className="min-h-7 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)] hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">
+                    {normalizeTickerSymbol(item.symbol)}
+                  </button>
+                ) : (
+                  <span className="rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-muted)]">Unavailable symbol</span>
+                ))}
                 <span className="ml-auto text-[9px] text-[var(--text-muted)]" suppressHydrationWarning>
                   {new Date(item.createdAt).toLocaleString()}
                 </span>

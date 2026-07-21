@@ -11,7 +11,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useRatioHistory } from '@/lib/queries';
-import { formatFinancialPeriodLabel } from '@/lib/financialPeriods';
+import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
 import type { RatioHistoryResponse } from '@/types/equity';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
@@ -62,7 +62,10 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
 
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !(historyResponse?.data?.length ?? 0), { timeoutMs: 10_000 });
   const seriesConfig = METRIC_OPTIONS.find((option) => option.key === metric) || METRIC_OPTIONS[0];
-  const rows = historyResponse?.data || [];
+  const rows = useMemo(
+    () => [...(historyResponse?.data || [])].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
+    [historyResponse?.data],
+  );
   const seriesValues = rows
     .map((row) => Number(row[metric]))
     .filter((value) => Number.isFinite(value) && value > 0);
@@ -152,7 +155,8 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
-            note="Annual · oldest to newest"
+            note={`Annual · ${seriesValues.length} positive observations · descriptive only`}
+            sourceLabel="VNIBB ratio history"
             align="right"
           />
         </div>
@@ -176,7 +180,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
           <div className="flex h-full flex-col gap-3">
             <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Current {seriesConfig.label}</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Latest observed {seriesConfig.label}</div>
                 <div className="mt-1 text-lg font-semibold" style={{ color: seriesConfig.color }}>{formatMetric(current)}</div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
@@ -200,7 +204,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
 
             <div className="flex min-h-[220px] flex-1 flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
               <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                Historical {seriesConfig.label} vs statistical band
+                Historical {seriesConfig.label} vs descriptive statistical band
               </div>
               <ChartMountGuard className="flex-1 min-h-[180px]" minHeight={180}>
                 <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
@@ -225,6 +229,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
                   </AreaChart>
                 </ResponsiveContainer>
               </ChartMountGuard>
+              <p className="mt-2 text-[10px] text-[var(--text-muted)]">Descriptive historical statistics, not fair value or an investment recommendation.</p>
             </div>
           </div>
         )}

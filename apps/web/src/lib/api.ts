@@ -996,7 +996,11 @@ export async function getCommodities(options?: { limit?: number }): Promise<Comm
 
 export interface ScreenerFilterParams {
     symbol?: string;
+    universe?: 'ALL' | 'VN30' | 'VN100' | 'HNX30';
     exchange?: string;
+    as_of_date?: string;
+    min_listing_age_days?: number;
+    target_upside_min?: number;
     industry?: string;
     limit?: number;
     source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
@@ -1254,19 +1258,64 @@ export interface PriceBoardResponse {
     count: number;
     data: Array<{
         symbol: string;
-        price: number;
-        change: number;
-        change_pct: number;
-        volume: number;
-        ref_price: number;
-        ceiling: number;
-        floor: number;
+        price?: number | null;
+        ceiling?: number | null;
+        floor?: number | null;
+        bestBidVol?: number | null;
+        bestAskVol?: number | null;
+        source?: string | null;
+        refreshedAt?: string | null;
     }>;
+}
+
+export type ForeignFlowMetric = 'net_volume' | 'net_value';
+export type ForeignFlowWindow = '1D' | '5D' | '20D';
+
+export interface ForeignFlowLeaderboardRow {
+    symbol: string;
+    net_volume: number | null;
+    net_value: number | null;
+    observations: number;
+    settlement_dates: string[];
+}
+
+export interface ForeignFlowLeaderboardResponse {
+    trade_date: string | null;
+    requested_metric: ForeignFlowMetric;
+    requested_window: ForeignFlowWindow;
+    metric_unit: 'shares' | 'provider_native_value';
+    available_settlement_dates: number;
+    window_coverage: string;
+    settlement_dates: string[];
+    source: string;
+    source_precedence: string[];
+    freshness: string;
+    fallback_used: boolean;
+    universe_symbols: number;
+    symbols_covered: number;
+    symbols_unavailable: number;
+    available_fields: ForeignFlowMetric[];
+    breadth: { positive: number; negative: number; flat: number };
+    top_net_buy: ForeignFlowLeaderboardRow[];
+    top_net_sell: ForeignFlowLeaderboardRow[];
 }
 
 export async function getPriceBoard(symbols: string[]): Promise<PriceBoardResponse> {
     return fetchAPI<PriceBoardResponse>('/trading/price-board', {
-        params: { symbols: symbols.join(',') },
+        params: { symbols: symbols.slice(0, 50).join(',') },
+    });
+}
+
+export async function getForeignFlowLeaderboard(
+    limit = 10,
+    options: { metric?: ForeignFlowMetric; window?: ForeignFlowWindow } = {},
+): Promise<ForeignFlowLeaderboardResponse> {
+    return fetchAPI<ForeignFlowLeaderboardResponse>('/market/foreign-flow-leaderboard', {
+        params: {
+            limit: Math.min(Math.max(limit, 1), 50),
+            metric: options.metric ?? 'net_volume',
+            window: options.window ?? '1D',
+        },
     });
 }
 
@@ -1351,6 +1400,9 @@ export interface InsiderDealsResponse {
 
 export interface DividendRecord {
     symbol?: string;
+    source?: string | null;
+    source_url?: string | null;
+    url?: string | null;
     ex_date?: string | null;
     record_date?: string | null;
     payment_date?: string | null;
@@ -2154,6 +2206,7 @@ export interface SeasonalityMatrixResponse {
 
 export interface QuantBacktestRequest {
     period?: QuantPeriod
+    as_of_date?: string
     initial_capital?: number
     fee_bps?: number
     source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
@@ -2166,7 +2219,9 @@ export interface QuantBacktestRequest {
 }
 
 export interface QuantBacktestTrade {
+    signal_date?: string | null
     entry_date?: string | null
+    exit_signal_date?: string | null
     exit_date?: string | null
     entry_price?: number | null
     exit_price?: number | null
@@ -2181,6 +2236,7 @@ export interface QuantBacktestResponse {
         symbol: string
         strategy: Record<string, unknown>
         period: QuantPeriod
+        as_of_date: string
         adjustment_mode?: 'raw' | 'adjusted'
         computed_at: string
         last_data_date?: string | null
@@ -2297,6 +2353,7 @@ export async function runQuantBacktest(
 ): Promise<QuantBacktestResponse> {
     const body = {
         period: request?.period ?? '5Y',
+        as_of_date: request?.as_of_date,
         initial_capital: request?.initial_capital ?? 100_000_000,
         fee_bps: request?.fee_bps ?? 15,
         source: request?.source,
@@ -2734,6 +2791,7 @@ export interface CopilotSourceRef {
     source?: string;
     symbol?: string;
     asOf?: string;
+    url?: string;
     priority?: number;
     widgetTarget?: CopilotWidgetTarget;
 }
@@ -2948,6 +3006,8 @@ interface RawCopilotSourceRef {
     source?: string;
     symbol?: string;
     as_of?: string;
+    url?: string;
+    source_url?: string;
     priority?: number;
     widget_target?: CopilotWidgetTarget;
 }
@@ -3075,6 +3135,7 @@ function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
             source: typeof source.source === 'string' ? source.source : undefined,
             symbol: typeof source.symbol === 'string' ? source.symbol : undefined,
             asOf: typeof source.as_of === 'string' ? source.as_of : undefined,
+            url: typeof source.url === 'string' ? source.url : typeof source.source_url === 'string' ? source.source_url : undefined,
             priority: typeof source.priority === 'number' ? source.priority : undefined,
             widgetTarget: normalizeWidgetTarget(source.widget_target),
         })).filter((source) => Boolean(source.id)),

@@ -45,9 +45,36 @@ describe('WidgetRegistry completeness', () => {
     });
 
     it('identifies placeholder entries without unregistering them', () => {
-        expect(isWidgetPlaceholder('valuation_band')).toBe(true);
+        expect(isWidgetPlaceholder('valuation_multiples_chart')).toBe(true);
         expect(widgetRegistry.has('valuation_band')).toBe(true);
         expect(isWidgetPlaceholder('price_chart')).toBe(false);
+        expect(isWidgetPlaceholder('signal_summary')).toBe(false);
+        expect(isWidgetPlaceholder('obv_divergence')).toBe(false);
+        expect(isWidgetPlaceholder('source_transparent_research_notebook')).toBe(false);
+        expect(isWidgetPlaceholder('earnings_season_monitor')).toBe(false);
+    });
+
+    it('activates only the Wave 12 placeholders with resolvable loaders', async () => {
+        for (const id of ['bank_metrics', 'valuation_band', 'cashflow_waterfall', 'technical_summary']) {
+            expect(isWidgetPlaceholder(id as never)).toBe(false);
+            const resolved = await widgetRegistry.get(id as never)?.lazyComponent();
+            expect(isRenderableComponent(resolved?.default)).toBe(true);
+        }
+        expect(isWidgetPlaceholder('valuation_multiples_chart')).toBe(true);
+    });
+
+    it('loads the source-transparent research notebook component', async () => {
+        const entry = widgetRegistry.get('source_transparent_research_notebook' as never);
+        const resolved = await entry?.lazyComponent();
+        expect(resolved?.default).toBeDefined();
+    });
+
+    it('activates the Wave 9.6 market-analysis widgets with resolvable lazy loaders', async () => {
+        for (const id of ['transaction_flow', 'industry_bubble', 'sector_board', 'money_flow_trend', 'correlation_matrix']) {
+            expect(isWidgetPlaceholder(id as never)).toBe(false);
+            const resolved = await widgetRegistry.get(id as never)?.lazyComponent();
+            expect(isRenderableComponent(resolved?.default)).toBe(true);
+        }
     });
 
     it('covers the prediction-market family introduced in Phase 7', () => {

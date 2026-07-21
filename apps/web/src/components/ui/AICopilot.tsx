@@ -22,6 +22,7 @@ import {
     Database,
     Clock3,
     AlertTriangle,
+    BookMarked,
     type LucideIcon,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -49,8 +50,10 @@ import {
     type AISettings,
 } from '@/lib/aiSettings';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
+import { dispatchOnboardingMeaningfulAction } from '@/lib/userPreferences';
 import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
 import { logClientError } from '@/lib/clientLogger';
+import { addNotebookItem } from '@/lib/researchNotebook';
 import {
     archiveVniAgentSession,
     readRecentVniAgentSessions,
@@ -102,6 +105,8 @@ interface AICopilotProps {
     widgetContextData?: Record<string, unknown>;
     activeTabName?: string;
     promptLibraryRequestId?: number;
+    starterPrompt?: 'analyze' | 'technical';
+    starterPromptRequestId?: number;
 }
 
 interface ConnectedWidgetSummary {
@@ -351,7 +356,7 @@ function appendSourcesForExport(message: Message): string {
         const meta = [source.source === 'appwrite' ? 'VNIBB database' : source.source, source.asOf ? `as of ${source.asOf}` : null]
             .filter(Boolean)
             .join(', ');
-        return `- [${source.id}] ${source.label || source.kind || 'Source'}${meta ? ` (${meta})` : ''}`;
+        return `- [${source.id}] ${source.label || source.kind || 'Source'}${meta ? ` (${meta})` : ''}${source.url ? ` — ${source.url}` : ''}`;
     });
 
     return `${cleanContent}\n\n## Sources\n${sourceLines.join('\n')}`;
@@ -448,6 +453,8 @@ export function AICopilot({
     widgetContextData,
     activeTabName,
     promptLibraryRequestId = 0,
+    starterPrompt,
+    starterPromptRequestId = 0,
 }: AICopilotProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
@@ -455,6 +462,8 @@ export function AICopilot({
     const [showDetails, setShowDetails] = useState<DetailsState>({});
     const [aiSettings, setAISettings] = useState<AISettings>(() => readStoredAISettings());
     const [currentStatus, setCurrentStatus] = useState<string | null>(null);
+    const [responseStatus, setResponseStatus] = useState('');
+    const [savedNotebookMessageIds, setSavedNotebookMessageIds] = useState<Record<string, boolean>>({});
     const [isPromptLibraryOpen, setIsPromptLibraryOpen] = useState(false);
     const [attachedDocuments, setAttachedDocuments] = useState<CopilotDocumentContext[]>([]);
     const [runtimeConfig, setRuntimeConfig] = useState<{ provider: string; model: string } | null>(null);
@@ -467,6 +476,7 @@ export function AICopilot({
     const fileInputRef = useRef<HTMLInputElement>(null);
     const contextualStarterKeyRef = useRef<string | null>(null);
     const lastPromptLibraryRequestIdRef = useRef(0);
+    const lastStarterPromptRequestIdRef = useRef(0);
 
     // Data fetching for context
     const { data: profile } = useProfile(currentSymbol);
@@ -564,6 +574,18 @@ export function AICopilot({
     }, [isOpen, promptLibraryRequestId]);
 
     useEffect(() => {
+        if (!isOpen || !starterPrompt || starterPromptRequestId <= 0 || lastStarterPromptRequestIdRef.current === starterPromptRequestId) {
+            return;
+        }
+
+        lastStarterPromptRequestIdRef.current = starterPromptRequestId;
+        const prompt = DEFAULT_PROMPTS.find((item) => item.label.toLowerCase() === starterPrompt)?.prompt;
+        if (prompt) {
+            setInput(prompt);
+        }
+    }, [isOpen, starterPrompt, starterPromptRequestId]);
+
+    useEffect(() => {
         if (!isPromptLibraryOpen) {
             return;
         }
@@ -638,6 +660,7 @@ export function AICopilot({
         if (!messageText) return;
         if (isLoading) return;
 
+        dispatchOnboardingMeaningfulAction('prompt_submit');
         captureAnalyticsEvent(ANALYTICS_EVENTS.copilotPromptSubmitted, {
             source: promptSource,
             symbol: currentSymbol,
@@ -660,6 +683,7 @@ export function AICopilot({
         setMessages((prev) => [...prev, userMessage]);
         setInput('');
         setIsLoading(true);
+        setResponseStatus('VniAgent is responding.');
 
         const assistantMsgId = (Date.now() + 1).toString();
         // Add placeholder message
@@ -773,6 +797,7 @@ export function AICopilot({
                 },
                 onDone: (event) => {
                     setCurrentStatus(null);
+                    setResponseStatus('VniAgent response ready.');
                     captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseCompleted, {
                         symbol: currentSymbol,
                         tab_name: activeTabName,
@@ -809,6 +834,7 @@ export function AICopilot({
                             source: source.source,
                             symbol: source.symbol,
                             asOf: source.asOf,
+                            url: source.url,
                         }));
                         const toolsUsed = Array.from(
                             new Set(
@@ -843,6 +869,7 @@ export function AICopilot({
         } catch (error) {
             logClientError('VniAgent Error:', error);
             setCurrentStatus(null);
+            setResponseStatus('VniAgent response failed.');
             captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseFailed, {
                 symbol: currentSymbol,
                 tab_name: activeTabName,
@@ -878,6 +905,36 @@ export function AICopilot({
             clearSseInactivityTimer();
             setIsLoading(false);
         }
+    };
+
+    const handleSaveToResearchNotebook = (message: Message) => {
+        if (message.role !== 'assistant' || !message.responseMeta || !message.content.trim()) return;
+        addNotebookItem({
+            kind: 'agent_answer',
+            title: `VniAgent answer — ${currentSymbol || 'UNKNOWN'}`,
+            body: sanitizeCopilotContent(message.content),
+            symbol: currentSymbol || undefined,
+            agent: {
+                provider: message.responseMeta?.provider || runtimeConfig?.provider || aiSettings.provider,
+                model: message.responseMeta?.model || runtimeConfig?.model || aiSettings.model,
+            },
+            sources: (message.sources || []).map((source) => ({
+                id: source.id,
+                label: source.label || source.kind,
+                url: source.url,
+                sourceSystem: source.source,
+                asOf: source.asOf,
+            })),
+            dedupeKey: `vniagent:${message.id}`,
+            provenance: {
+                sourceLabel: 'VniAgent response',
+                apiGroup: '/copilot',
+                endpoint: '/api/v1/copilot/chat/stream',
+                localOnly: true,
+                capturedAt: new Date().toISOString(),
+            },
+        });
+        setSavedNotebookMessageIds((previous) => ({ ...previous, [message.id]: true }));
     };
 
     const handleExport = () => {
@@ -1049,6 +1106,7 @@ export function AICopilot({
                 </div>
             </div>
 
+            <div aria-live="polite" aria-atomic="true" className="sr-only">{responseStatus}</div>
             <div className="px-4 py-3 border-b border-[var(--border-color)] bg-blue-600/10 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
@@ -1308,6 +1366,8 @@ export function AICopilot({
                         return (
                         <div key={message.id} className="space-y-2">
                             <div
+                                aria-busy={isAssistantPending || undefined}
+                                aria-label={message.role === 'assistant' && !isAssistantPending ? 'VniAgent response ready' : undefined}
                                 className={`rounded-lg p-3 ${message.role === 'user'
                                     ? 'bg-blue-600/20 ml-8 border border-blue-500/20'
                                     : 'bg-[var(--bg-secondary)] mr-4 border border-[var(--border-color)]'
@@ -1333,10 +1393,26 @@ export function AICopilot({
                                 </div>
                             </div>
 
+                            {message.role === 'assistant' && !isAssistantPending && message.responseMeta && message.content.trim() && (
+                                <div className="mr-4 flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleSaveToResearchNotebook(message)}
+                                        className="inline-flex min-h-9 items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20"
+                                    >
+                                        <BookMarked size={12} />
+                                        {savedNotebookMessageIds[message.id] ? 'Saved to Research Notebook' : 'Save to Research Notebook'}
+                                    </button>
+                                    <span className="text-[10px] text-[var(--text-muted)]">Saved browser-local; may include selected document-derived content.</span>
+                                </div>
+                            )}
                             {message.role === 'assistant' && hasMessageDetails(message) && (
                                 <button
+                                    type="button"
                                     onClick={() => toggleDetails(message.id)}
-                                    className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                                    aria-expanded={Boolean(showDetails[message.id])}
+                                    aria-controls={`vniagent-details-${message.id}`}
+                                    className="flex min-h-9 items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                 >
                                     {showDetails[message.id] ? (
                                         <ChevronDown size={12} />
@@ -1347,7 +1423,7 @@ export function AICopilot({
                                 </button>
                             )}
                             {message.role === 'assistant' && showDetails[message.id] && (
-                                <div className="mr-4 space-y-3">
+                                <div id={`vniagent-details-${message.id}`} className="mr-4 space-y-3">
                                     {message.reasoning && (
                                         <div className="p-2 text-xs text-[var(--text-secondary)] bg-[var(--bg-tertiary)]/70 rounded border-l-2 border-blue-500">
                                             {message.reasoning}

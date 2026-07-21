@@ -3,55 +3,28 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Bell, X, TrendingUp, TrendingDown, Users, AlertCircle } from 'lucide-react';
+import { Bell, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getInsiderAlerts, markAlertRead } from '@/lib/api';
-import type { InsiderAlert, AlertType, AlertSeverity } from '@/types/insider';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { formatTimestamp } from '@/lib/format';
+import { markAlertActivityRead, readAlertActivity, recordAlertActivity, subscribeAlertActivity, type AlertActivity } from '@/lib/alertActivity';
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { normalizeTickerSymbol } from '@/lib/defaultTicker';
 
 interface AlertNotificationPanelProps {
   userId?: number;
   onDataChange?: (data: WidgetDataPayload) => void;
 }
 
-function getAlertIcon(type: AlertType) {
-  switch (type) {
-    case 'INSIDER_BUY':
-      return TrendingUp;
-    case 'INSIDER_SELL':
-      return TrendingDown;
-    case 'OWNERSHIP_CHANGE':
-      return Users;
-    case 'BLOCK_TRADE':
-      return AlertCircle;
-    default:
-      return Bell;
-  }
-}
-
-function getAlertColor(severity: AlertSeverity): string {
-  switch (severity) {
-    case 'high':
-      return 'text-red-400 bg-red-500/10 border-red-500/30';
-    case 'medium':
-      return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30';
-    case 'low':
-      return 'text-blue-400 bg-blue-500/10 border-blue-500/30';
-    default:
-      return 'text-[var(--text-muted)] bg-[var(--bg-hover)] border-[var(--border-color)]';
-  }
-}
-
-function formatTime(dateStr: string): string {
-  return formatTimestamp(dateStr);
-}
 
 export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotificationPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showUnreadOnly, setShowUnreadOnly] = useState(true);
+  const [activity, setActivity] = useState<AlertActivity[]>([]);
   const queryClient = useQueryClient();
+  const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'alert_notification_panel' });
 
   const { data: alerts = [], isLoading } = useQuery({
     queryKey: ['insider-alerts', userId, showUnreadOnly],
@@ -68,20 +41,44 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
     },
   });
 
-  const unreadCount = alerts.filter((a) => !a.read).length;
+  const unreadCount = activity.filter((item) => !item.read).length;
+  const visibleActivity = showUnreadOnly ? activity.filter((item) => !item.read) : activity;
+
+  useEffect(() => {
+    const refresh = () => setActivity(readAlertActivity());
+    refresh();
+    return subscribeAlertActivity(refresh);
+  }, []);
+
+  useEffect(() => {
+    for (const alert of alerts) {
+      recordAlertActivity({
+        id: `insider:${alert.id}`,
+        source: 'insider',
+        triggerTime: alert.timestamp,
+        deliveryClass: 'server_backed',
+        serverBacked: true,
+        title: alert.title,
+        detail: alert.description,
+        symbol: alert.symbol,
+        read: alert.read,
+      });
+    }
+  }, [alerts]);
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
-      empty: alerts.length === 0,
+      empty: activity.length === 0,
       apiGroup: '/alerts',
       endpoint: '/api/v1/alerts/insider',
-      sourceLabel: 'Insider alerts',
+      sourceLabel: 'Browser activity + insider API',
       extra: {
-        alertCount: alerts.length,
+        alertCount: activity.length,
         unreadCount,
+        serverBackedCount: activity.filter((item) => item.serverBacked).length,
       },
     }));
-  }, [alerts.length, onDataChange, unreadCount]);
+  }, [activity, onDataChange, unreadCount]);
 
   // Request browser notification permission
   useEffect(() => {
@@ -109,23 +106,29 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
     }
   }, [alerts]);
 
-  const handleMarkAsRead = (alertId: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    markReadMutation.mutate(alertId);
+  const openActivity = (item: AlertActivity) => {
+    markAlertActivityRead(item.id);
+    if (item.source === 'insider' && item.serverBacked) {
+      const alertId = Number(item.id.replace('insider:', ''));
+      if (Number.isInteger(alertId)) markReadMutation.mutate(alertId);
+    }
+    const symbol = normalizeTickerSymbol(item.symbol);
+    if (symbol) setLinkedSymbol(symbol);
   };
 
   const handleMarkAllAsRead = () => {
-    alerts.filter((a) => !a.read).forEach((alert) => {
-      markReadMutation.mutate(alert.id);
-    });
+    activity.filter((item) => !item.read).forEach((item) => markAlertActivityRead(item.id));
+    alerts.filter((alert) => !alert.read).forEach((alert) => markReadMutation.mutate(alert.id));
   };
 
   return (
     <div className="relative">
       {/* Bell Icon Button */}
       <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="relative rounded-lg border border-transparent p-2 text-[var(--text-secondary)] transition-colors hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+        aria-label={`Alert activity${unreadCount ? `, ${unreadCount} unread` : ''}`}
+        className="relative min-h-11 min-w-11 rounded-lg border border-transparent p-2 text-[var(--text-secondary)] transition-colors hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
       >
         <Bell size={20} />
         {unreadCount > 0 && (
@@ -158,8 +161,10 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
                 )}
               </div>
               <button
+                type="button"
                 onClick={() => setIsOpen(false)}
-                className="rounded p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                aria-label="Close alert activity"
+                className="min-h-9 min-w-9 rounded p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
               >
                 <X size={16} />
               </button>
@@ -185,7 +190,7 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
 
             {/* Alerts List */}
             <div className="flex-1 overflow-y-auto">
-              {isLoading ? (
+              {isLoading && activity.length === 0 ? (
                 <div className="p-4 space-y-3">
                   {[...Array(3)].map((_, i) => (
                     <div key={i} className="animate-pulse">
@@ -194,59 +199,33 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
                     </div>
                   ))}
                 </div>
-              ) : alerts.length === 0 ? (
+              ) : visibleActivity.length === 0 ? (
                 <div className="flex h-40 flex-col items-center justify-center text-[var(--text-muted)]">
                   <Bell size={32} className="mb-2 opacity-30" />
-                  <p className="text-sm">No alerts</p>
-                  <p className="text-xs mt-1">You're all caught up!</p>
+                  <p className="text-sm">No alert activity</p>
+                  <p className="text-xs mt-1">No observed {showUnreadOnly ? 'unread ' : ''}triggers.</p>
                 </div>
               ) : (
                 <div className="divide-y divide-[var(--border-subtle)]">
-                  {alerts.map((alert) => {
-                    const Icon = getAlertIcon(alert.alert_type);
-                    const colorClass = getAlertColor(alert.severity);
-
-                    return (
-                      <div
-                        key={alert.id}
-                        className={`p-3 transition-colors hover:bg-[var(--bg-hover)] ${
-                          !alert.read ? 'bg-blue-500/5' : ''
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className={`p-2 rounded-lg border ${colorClass}`}>
-                            <Icon size={16} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-2 mb-1">
-                              <h4 className="truncate text-sm font-medium text-[var(--text-primary)]">
-                                {alert.title}
-                              </h4>
-                              {!alert.read && (
-                                <button
-                                  onClick={(e) => handleMarkAsRead(alert.id, e)}
-                                  className="shrink-0 text-xs text-blue-400 hover:text-blue-300"
-                                >
-                                  Mark read
-                                </button>
-                              )}
-                            </div>
-                            <p className="mb-1 line-clamp-2 text-xs text-[var(--text-secondary)]">
-                              {alert.description}
-                            </p>
-                            <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
-                              <span className="font-medium text-blue-400">{alert.symbol}</span>
-                              <span>•</span>
-                              <span>{formatTime(alert.timestamp)}</span>
-                              <span>•</span>
-                              <span className={getAlertColor(alert.severity).split(' ')[0]}>
-                                {alert.severity.toUpperCase()}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
+                  {visibleActivity.map((item) => {
+                    const symbol = normalizeTickerSymbol(item.symbol);
+                    return <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => openActivity(item)}
+                      aria-label={symbol ? `Open ${symbol} from ${item.title}` : `Mark ${item.title} read`}
+                      className={`min-h-11 w-full p-3 text-left transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${!item.read ? 'bg-blue-500/5' : ''}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-sm font-medium text-[var(--text-primary)]">{item.title}</span>
+                        {!item.read && <span className="shrink-0 text-[10px] text-blue-300">Unread</span>}
                       </div>
-                    );
+                      {item.detail && <p className="mt-1 line-clamp-2 text-xs text-[var(--text-secondary)]">{item.detail}</p>}
+                      <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-[var(--text-muted)]">
+                        {symbol && <span className="font-medium text-blue-400">{symbol} ·</span>}
+                        <span>{item.source.replace('_', ' ')} · {item.serverBacked ? 'server-backed record; delivery unverified' : `${item.deliveryClass.replace('_', ' ')} browser observation`} · {formatTimestamp(item.triggerTime)}</span>
+                      </div>
+                    </button>;
                   })}
                 </div>
               )}

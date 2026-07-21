@@ -17,6 +17,13 @@ interface AlertSettingsPanelProps {
   onDataChange?: (data: WidgetDataPayload) => void;
 }
 
+export function hasEffectiveBrowserNotifications(
+  preference: boolean,
+  permission: NotificationPermission | 'unsupported',
+): boolean {
+  return preference && permission === 'granted';
+}
+
 export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPanelProps) {
   const queryClient = useQueryClient();
 
@@ -32,6 +39,7 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
     queryFn: () => getAlertSettings(userId),
   });
 
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>('unsupported');
   const [formData, setFormData] = useState<Partial<AlertSettings>>({
     block_trade_threshold: 10,
     enable_insider_buy_alerts: true,
@@ -45,19 +53,22 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
   });
 
   useEffect(() => {
-    if (settings) {
-      setFormData({
-        block_trade_threshold: settings.block_trade_threshold,
-        enable_insider_buy_alerts: settings.enable_insider_buy_alerts,
-        enable_insider_sell_alerts: settings.enable_insider_sell_alerts,
-        enable_ownership_change_alerts: settings.enable_ownership_change_alerts,
-        ownership_change_threshold: settings.ownership_change_threshold,
-        enable_browser_notifications: settings.enable_browser_notifications,
-        enable_email_notifications: settings.enable_email_notifications,
-        enable_sound_alerts: settings.enable_sound_alerts,
-        notification_email: settings.notification_email || '',
-      });
-    }
+    setNotificationPermission(typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported');
+  }, []);
+
+  useEffect(() => {
+    if (!settings) return;
+    setFormData({
+      block_trade_threshold: settings.block_trade_threshold,
+      enable_insider_buy_alerts: settings.enable_insider_buy_alerts,
+      enable_insider_sell_alerts: settings.enable_insider_sell_alerts,
+      enable_ownership_change_alerts: settings.enable_ownership_change_alerts,
+      ownership_change_threshold: settings.ownership_change_threshold,
+      enable_browser_notifications: settings.enable_browser_notifications,
+      enable_email_notifications: settings.enable_email_notifications,
+      enable_sound_alerts: settings.enable_sound_alerts,
+      notification_email: settings.notification_email || '',
+    });
   }, [settings]);
 
   const updateMutation = useMutation({
@@ -72,12 +83,9 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
   };
 
   const handleRequestNotificationPermission = async () => {
-    if ('Notification' in window) {
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        setFormData({ ...formData, enable_browser_notifications: true });
-      }
-    }
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
   };
 
   useEffect(() => {
@@ -86,13 +94,17 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
       apiGroup: '/alerts',
       endpoint: `/api/v1/alerts/settings/${userId}`,
       sourceLabel: 'Alert preferences',
-      stale: Boolean(error && settings),
-      extra: {
-        browserNotifications: Boolean(settings?.enable_browser_notifications),
-        emailNotifications: Boolean(settings?.enable_email_notifications),
-      },
+        stale: Boolean(error && settings),
+        extra: {
+          feedState: error ? (settings ? 'stale' : 'unavailable') : settings ? 'loaded' : 'loading',
+          browserPermission: notificationPermission,
+          browserPreferenceEnabled: Boolean(formData.enable_browser_notifications),
+          browserDeliveryAvailable: hasEffectiveBrowserNotifications(Boolean(formData.enable_browser_notifications), notificationPermission),
+          emailPreferenceOnly: Boolean(settings?.enable_email_notifications),
+          emailVerified: false,
+        },
     }));
-  }, [error, onDataChange, settings, userId]);
+  }, [error, formData.enable_browser_notifications, notificationPermission, onDataChange, settings, userId]);
 
   if (isLoading && !settings) {
     return <WidgetSkeleton lines={6} />;
@@ -102,19 +114,19 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
     return <WidgetError error={error as Error} onRetry={() => refetch()} />;
   }
 
-  const notificationPermission = typeof window !== 'undefined' && 'Notification' in window
-    ? Notification.permission
-    : 'default';
+  const feedState = error ? (settings ? 'stale' : 'unavailable') : 'loaded';
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
       <div className="flex items-center justify-between px-1 py-1 mb-3">
         <div className="flex items-center gap-2">
           <Settings size={14} className="text-[var(--text-secondary)]" />
           <h3 className="text-sm font-medium text-[var(--text-primary)]">Alert Settings</h3>
         </div>
         <div className="flex items-center gap-2">
+          <span className={`rounded-full border px-2 py-0.5 text-[10px] ${feedState === 'loaded' ? 'border-emerald-500/30 text-emerald-400' : 'border-amber-500/30 text-amber-400'}`}>
+            Feed {feedState}
+          </span>
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching}
@@ -221,11 +233,15 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
               </div>
               <input
                 type="checkbox"
-                checked={formData.enable_browser_notifications}
+                checked={Boolean(formData.enable_browser_notifications)}
+                disabled={notificationPermission !== 'granted'}
                 onChange={(e) => setFormData({ ...formData, enable_browser_notifications: e.target.checked })}
-                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500"
+                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </label>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              Preference: {formData.enable_browser_notifications ? 'on' : 'off'} · Delivery: {hasEffectiveBrowserNotifications(Boolean(formData.enable_browser_notifications), notificationPermission) ? 'available' : 'unavailable'} · Permission: {notificationPermission === 'unsupported' ? 'not supported' : notificationPermission}
+            </p>
             {notificationPermission === 'denied' && (
               <p className="text-xs text-red-400 mt-1">
                 Browser notifications are blocked. Enable in browser settings.
@@ -270,13 +286,16 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
               />
             </label>
             {formData.enable_email_notifications && (
-              <input
-                type="email"
-                value={formData.notification_email || ''}
-                onChange={(e) => setFormData({ ...formData, notification_email: e.target.value })}
-                placeholder="your@email.com"
-                className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-blue-500 focus:outline-none"
-              />
+              <>
+                <input
+                  type="email"
+                  value={formData.notification_email || ''}
+                  onChange={(e) => setFormData({ ...formData, notification_email: e.target.value })}
+                  placeholder="your@email.com"
+                  className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-blue-500 focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-amber-400">Preference only · email delivery is unverified.</p>
+              </>
             )}
           </div>
         </div>

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
-import { Newspaper, BadgeDollarSign } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Newspaper, BadgeDollarSign, BookMarked } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -11,6 +11,7 @@ import { formatTimestamp } from '@/lib/format';
 import { formatNumber, formatPercent, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+import { addNotebookItem } from '@/lib/researchNotebook';
 
 interface NewsCorporateActionsWidgetProps {
   id: string;
@@ -55,6 +56,7 @@ function formatDividendValue(row: DividendRecord): string {
 }
 
 export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange }: NewsCorporateActionsWidgetProps) {
+  const [pinned, setPinned] = useState<Record<string, boolean>>({});
   const {
     data: newsData,
     isLoading: newsLoading,
@@ -88,6 +90,36 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
 
   const hasNews = news.length > 0;
   const hasActions = dividends.length > 0 || insiderDeals.length > 0;
+
+  const pinNews = (item: typeof news[number], key: string) => {
+    if (!item.url || !item.source) return;
+    addNotebookItem({
+      kind: 'news',
+      title: item.title,
+      body: item.summary || item.ai_summary || undefined,
+      symbol,
+      sources: [{ label: item.source, sourceName: item.source, url: item.url, publishedAt: item.published_at || item.published_date }],
+      dedupeKey: `company-news:${symbol}:${item.url}`,
+      provenance: { sourceLabel: item.source, apiGroup: '/equity', endpoint: `/api/v1/equity/${symbol}/news` },
+    });
+    setPinned((previous) => ({ ...previous, [key]: true }));
+  };
+
+  const pinDividend = (dividend: DividendRecord, key: string) => {
+    const url = dividend.url || dividend.source_url;
+    if (!url || !dividend.source) return;
+    const eventDate = dividend.ex_date || dividend.record_date || dividend.payment_date || undefined;
+    addNotebookItem({
+      kind: 'news',
+      title: `Dividend ${symbol} — ${formatDividendValue(dividend)}`,
+      body: [formatDividendType(dividend.dividend_type || dividend.type), eventDate ? `Event date: ${eventDate}` : null, dividend.description].filter(Boolean).join('\n'),
+      symbol,
+      sources: [{ label: dividend.source, sourceName: dividend.source, url, publishedAt: eventDate }],
+      dedupeKey: `company-dividend:${symbol}:${url}:${eventDate || ''}`,
+      provenance: { sourceLabel: dividend.source, apiGroup: '/equity', endpoint: `/api/v1/equity/${symbol}/dividends` },
+    });
+    setPinned((previous) => ({ ...previous, [key]: true }));
+  };
   const hasData = hasNews || hasActions;
 
   const isLoading = newsLoading || dividendsLoading || insiderLoading;
@@ -186,15 +218,22 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                 <div className="text-xs text-[var(--text-muted)]">No news available yet.</div>
               ) : (
                 <div className="space-y-2">
-                  {news.map((item, idx) => (
-                    <a
+                  {news.map((item, idx) => {
+                    const key = `news-${idx}`;
+                    const canPin = Boolean(item.url && item.source);
+                    return (
+                    <div
                       key={`${item.title}-${idx}`}
-                      href={item.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 hover:bg-[var(--bg-hover)] transition-colors"
+                      className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 transition-colors hover:bg-[var(--bg-hover)]"
                     >
-                      <div className="text-xs font-semibold text-[var(--text-primary)] line-clamp-2">{item.title}</div>
+                      <div className="flex items-start gap-2">
+                        <a href={item.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 text-xs font-semibold text-[var(--text-primary)] line-clamp-2 hover:text-blue-300">{item.title}</a>
+                        {canPin && (
+                          <button type="button" onClick={() => pinNews(item, key)} className="inline-flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded text-[var(--text-muted)] hover:bg-emerald-500/10 hover:text-emerald-300" aria-label="Save news to Research Notebook" title="Save to Research Notebook">
+                            <BookMarked size={13} fill={pinned[key] ? 'currentColor' : 'none'} />
+                          </button>
+                        )}
+                      </div>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
                         <span className={`rounded border px-1.5 py-0.5 font-semibold uppercase ${getSentimentClasses(item.sentiment)}`}>
                           {item.sentiment || 'neutral'}
@@ -210,8 +249,9 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                         {item.source && <span>{item.source}</span>}
                         {item.published_at && <span>• {formatTimestamp(item.published_at)}</span>}
                       </div>
-                    </a>
-                  ))}
+                    </div>
+                    );
+                  })}
                 </div>
               )}
             </section>
@@ -237,7 +277,10 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                       <div className="text-xs text-[var(--text-muted)]">No dividends available yet.</div>
                     ) : (
                       <div className="space-y-2">
-                        {dividends.slice(0, 4).map((dividend, idx) => (
+                        {dividends.slice(0, 4).map((dividend, idx) => {
+                          const key = `dividend-${idx}`;
+                          const canPin = Boolean((dividend.url || dividend.source_url) && dividend.source);
+                          return (
                           <div
                             key={`${dividend.ex_date}-${idx}`}
                             className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
@@ -254,11 +297,19 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                                 {dividend.ex_date ? ` • Ex ${formatTimestamp(dividend.ex_date)}` : ''}
                               </div>
                             </div>
-                            {dividend.payment_date && (
-                              <div className="text-[10px] text-[var(--text-muted)]">Pay {formatTimestamp(dividend.payment_date)}</div>
-                            )}
+                            <div className="flex items-center gap-1">
+                              {dividend.payment_date && (
+                                <div className="text-[10px] text-[var(--text-muted)]">Pay {formatTimestamp(dividend.payment_date)}</div>
+                              )}
+                              {canPin && (
+                                <button type="button" onClick={() => pinDividend(dividend, key)} className="inline-flex min-h-9 min-w-9 items-center justify-center rounded text-[var(--text-muted)] hover:bg-emerald-500/10 hover:text-emerald-300" aria-label="Save corporate action to Research Notebook" title="Save to Research Notebook">
+                                  <BookMarked size={13} fill={pinned[key] ? 'currentColor' : 'none'} />
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>

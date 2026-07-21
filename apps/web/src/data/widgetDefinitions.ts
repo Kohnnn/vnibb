@@ -134,7 +134,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'valuation_band',
         name: 'Valuation Band',
-        description: 'Historical P/E and P/B bands against current valuation',
+        description: 'Historical valuation-multiple distribution and descriptive bands',
         category: 'charting',
         defaultConfig: {},
         defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 }
@@ -176,6 +176,15 @@ export const widgetDefinitions: WidgetDefinition[] = [
         category: 'calendar',
         defaultConfig: {},
         defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
+    },
+    {
+        type: 'investor_event_calendar',
+        name: 'Investor Event Calendar',
+        description: 'Upcoming holdings and watchlist corporate events',
+        category: 'calendar',
+        defaultConfig: { manualSymbols: [] },
+        defaultLayout: { w: 6, h: 8, minW: 4, minH: 6 },
+        searchKeywords: ['portfolio', 'watchlist', 'dividend', 'earnings', 'calendar']
     },
     {
         type: 'dividend_payment',
@@ -269,7 +278,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'bank_metrics',
         name: 'Bank Analytics',
-        description: 'Bank-specific funding, profitability, and risk analytics including NIM and credit cost proxies',
+        description: 'Reported bank funding, profitability, and risk ratios when available',
         category: 'analysis',
         defaultConfig: {},
         defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
@@ -442,6 +451,22 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 3, h: 5, minW: 2, minH: 4 }
     },
     {
+        type: 'watchlist_limits_monitor',
+        name: 'Watchlist Ceiling/Floor',
+        description: 'Live price-board ceiling and floor snapshot for up to 50 watchlist symbols',
+        category: 'core_data',
+        defaultConfig: {},
+        defaultLayout: { w: 5, h: 7, minW: 4, minH: 5 }
+    },
+    {
+        type: 'foreign_flow_leaderboard',
+        name: 'Foreign Flow Leaderboard',
+        description: 'Settlement-qualified foreign net-volume or net-value leaders across 1D, 5D, and 20D windows',
+        category: 'ownership',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
         type: 'peer_comparison',
         name: 'Peer Comparison',
         description: 'Compare stocks side-by-side on key metrics',
@@ -507,6 +532,15 @@ export const widgetDefinitions: WidgetDefinition[] = [
         category: 'core_data',
         defaultConfig: {},
         defaultLayout: { w: 4, h: 7, minW: 2, minH: 4 }
+    },
+    {
+        type: 'alert_activity_inbox',
+        name: 'Alert Activity Inbox',
+        description: 'Browser-local timeline of observed price, saved-screen, prediction, and insider alert activity',
+        category: 'core_data',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 },
+        searchKeywords: ['alerts', 'activity', 'inbox', 'trigger history']
     },
     {
         type: 'derivatives_contracts_board',
@@ -756,7 +790,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'technical_summary',
         name: 'Technical Summary',
-        description: 'Technical indicators with buy/sell signals',
+        description: 'Timeframe-specific technical indicator aggregation with data-quality disclosures',
         category: 'core_data',
         defaultConfig: {},
         defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
@@ -1195,6 +1229,15 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
     },
     {
+        type: 'alert_settings',
+        name: 'Alert Settings',
+        description: 'Configure insider alerts and notification delivery preferences',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 4, h: 7, minW: 3, minH: 6 },
+        searchKeywords: ['alert', 'notification', 'browser notification', 'email preference']
+    },
+    {
         type: 'block_trade',
         name: 'Block Trade Alerts',
         description: 'Large negotiated prints with buy/sell and participant context',
@@ -1433,6 +1476,8 @@ const WIDGET_LIBRARY_SECTION_OVERRIDES: Partial<Record<WidgetType, WidgetLibrary
     analyst_estimates: 'ai_research',
     fundamental_analysis: 'fundamentals',
     watchlist: 'screeners_tools',
+    watchlist_limits_monitor: 'screeners_tools',
+    foreign_flow_leaderboard: 'ownership',
     portfolio_tracker: 'screeners_tools',
     price_alerts: 'screeners_tools',
     notes: 'screeners_tools',

@@ -7,6 +7,7 @@ import type { OHLCData } from '@/lib/chartUtils'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
@@ -121,6 +122,7 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
     upperSymbol,
     {
       startDate: getQuantPeriodStartDate(period),
+      adjustmentMode: 'adjusted',
       enabled: Boolean(upperSymbol),
     }
   )
@@ -139,14 +141,17 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
   const activeEpisode = episodes[episodes.length - 1]
   const recent = drawdown.slice(-22)
   const magnitude = Math.abs(Math.min(...recent.map((point) => point.drawdownPct), -1))
+  const adjustmentWarning = data?.meta?.adjustment_warning ?? null
 
   useEffect(() => {
+
     onDataChange?.(buildWidgetRuntime({
       empty: !hasData,
       apiGroup: '/equity',
-      endpoint: `/equity/historical?symbol=${upperSymbol}&start_date=${getQuantPeriodStartDate(period)}`,
+      endpoint: `/equity/historical?symbol=${upperSymbol}&start_date=${getQuantPeriodStartDate(period)}&adjustment_mode=adjusted`,
       sourceLabel: 'Historical prices',
       lastDataDate: candles.at(-1)?.time ?? dataUpdatedAt,
+
       adjustmentMode: 'adjusted',
       derived: true,
       extra: {
@@ -154,9 +159,15 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
         episodes: episodes.length,
         currentDrawdownPct: currentDrawdown,
         maxDrawdownPct: maxDrawdown,
+        adjustmentCoveragePct: data?.meta?.adjustment_coverage_pct ?? null,
+        adjustmentRequestedCount: data?.meta?.adjustment_requested_count ?? 0,
+        adjustmentAppliedCount: data?.meta?.adjustment_applied_count ?? 0,
+        adjustmentWarning,
+
       },
     }))
-  }, [candles, candles.length, currentDrawdown, dataUpdatedAt, drawdown.length, episodes.length, hasData, maxDrawdown, onDataChange, period, upperSymbol])
+  }, [adjustmentWarning, candles, candles.length, currentDrawdown, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, dataUpdatedAt, drawdown.length, episodes.length, hasData, maxDrawdown, onDataChange, period, upperSymbol])
+
 
   if (!upperSymbol) {
     return (
@@ -190,6 +201,8 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
           <WidgetMeta updatedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} underwater`} align="right" />
         </div>
       </div>
+
+      <QuantWarningBanner warning={adjustmentWarning} className="mb-2" />
 
       <div className="mb-2 grid grid-cols-3 gap-2 text-[10px]">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">

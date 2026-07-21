@@ -80,6 +80,22 @@ export function provenanceToMarkdown(provenance?: ExportProvenance): string {
  * Export data to CSV file. When provenance is supplied, a commented header block
  * is prepended so the CSV remains self-describing.
  */
+function serializeCSVCell(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  const serialized = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  const safeValue = typeof value === 'string' && /^\s*[=+\-@]/.test(serialized) ? `'${serialized}` : serialized;
+  if (/[",\r\n]/.test(safeValue)) return `"${safeValue.replace(/"/g, '""')}"`;
+  return safeValue;
+}
+
+export function rowsToCSV(rows: Array<Record<string, unknown>>): string {
+  const headers = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  return [
+    headers.map(serializeCSVCell).join(','),
+    ...rows.map((row) => headers.map((header) => serializeCSVCell(row[header])).join(',')),
+  ].join('\n');
+}
+
 export function exportToCSV(data: any, filename: string, provenance?: ExportProvenance) {
   let rows: any[] = [];
   
@@ -97,20 +113,7 @@ export function exportToCSV(data: any, filename: string, provenance?: ExportProv
 
   if (!rows.length) return;
   
-  const headers = Object.keys(rows[0]);
-  const csvRows = [
-    headers.join(','),
-    ...rows.map(row => 
-      headers.map(h => {
-        const val = row[h];
-        // Escape commas and quotes
-        if (typeof val === 'string' && (val.includes(',') || val.includes('"'))) {
-          return `"${val.replace(/"/g, '""')}"`;
-        }
-        return val ?? '';
-      }).join(',')
-    )
-  ];
+  const csv = rowsToCSV(rows);
 
   const prefixLines: string[] = [];
   if (provenance) {
@@ -133,7 +136,7 @@ export function exportToCSV(data: any, filename: string, provenance?: ExportProv
     }
   }
 
-  const body = prefixLines.length ? `${prefixLines.join('\n')}\n${csvRows.join('\n')}` : csvRows.join('\n');
+  const body = prefixLines.length ? `${prefixLines.join('\n')}\n${csv}` : csv;
   const blob = new Blob([body], { type: 'text/csv' });
   downloadBlob(blob, `${filename}.csv`);
 }

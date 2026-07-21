@@ -307,144 +307,30 @@ export function buildCashFlowWaterfallModel(rows: CashFlowData[]): CashFlowWater
   if (!latest) return null;
 
   const previous = ordered.length > 1 ? ordered.at(-2) ?? null : null;
-  const operating = firstFinite(latest.operating_cash_flow, 0) ?? 0;
-  const investing = firstFinite(latest.investing_cash_flow, 0) ?? 0;
-  const financing = firstFinite(latest.financing_cash_flow, 0) ?? 0;
-  const capex = firstFinite(latest.capex, latest.capital_expenditure, null);
-  const dividends = firstFinite(latest.dividends_paid, null);
-  const debtRepayment = firstFinite(latest.debt_repayment, null);
-  const stockRepurchased = firstFinite(latest.stock_repurchased, null);
-  const freeCashFlow = firstFinite(latest.free_cash_flow, capex !== null ? operating + capex : null);
-  const netChange = firstFinite(latest.net_change_in_cash, latest.net_cash_flow, operating + investing + financing) ?? 0;
-  const otherInvesting = capex !== null ? investing - capex : investing;
-  const financingAdjustments = [dividends, debtRepayment, stockRepurchased].reduce<number>(
-    (total, value) => total + (value ?? 0),
-    0,
-  );
-  const otherFinancing = financing - financingAdjustments;
-  const previousOtherInvesting =
-    (firstFinite(previous?.investing_cash_flow, 0) ?? 0) -
-    (firstFinite(previous?.capex, previous?.capital_expenditure, null) ?? 0);
-  const previousFinancingAdjustments = [
-    previous?.dividends_paid,
-    previous?.debt_repayment,
-    previous?.stock_repurchased,
-  ].reduce<number>((total, value) => total + (value ?? 0), 0);
-  const hasMeaningfulValue = (value: number | null | undefined) =>
-    typeof value === 'number' && Number.isFinite(value) && Math.abs(value) > 0.000001;
+  const operating = firstFinite(latest.operating_cash_flow);
+  const investing = firstFinite(latest.investing_cash_flow);
+  const financing = firstFinite(latest.financing_cash_flow);
+  const netChange = firstFinite(latest.net_change_in_cash, latest.net_cash_flow);
+  if (operating === null || investing === null || financing === null || netChange === null) return null;
 
   let running = 0;
   const steps: WaterfallStep[] = [
-    {
-      id: 'operating_cash_flow',
-      label: 'Operating CF',
-      value: operating,
-      start: running,
-      end: running + operating,
-      tone: operating >= 0 ? 'positive' : 'negative',
-      changePct: calculatePercentChange(latest.operating_cash_flow ?? null, previous?.operating_cash_flow ?? null, { clamp: 'yoy_change' }),
-    },
+    { id: 'operating_cash_flow', label: 'Operating CF', value: operating, start: running, end: running + operating, tone: operating >= 0 ? 'positive' : 'negative', changePct: calculatePercentChange(operating, previous?.operating_cash_flow ?? null, { clamp: 'yoy_change' }) },
+    { id: 'investing_cash_flow', label: 'Investing CF', value: investing, start: running + operating, end: running + operating + investing, tone: investing >= 0 ? 'positive' : 'negative', changePct: calculatePercentChange(investing, previous?.investing_cash_flow ?? null, { clamp: 'yoy_change' }) },
+    { id: 'financing_cash_flow', label: 'Financing CF', value: financing, start: running + operating + investing, end: running + operating + investing + financing, tone: financing >= 0 ? 'positive' : 'negative', changePct: calculatePercentChange(financing, previous?.financing_cash_flow ?? null, { clamp: 'yoy_change' }) },
+    { id: 'net_change_in_cash', label: 'Net Change', value: netChange, start: 0, end: netChange, tone: 'total', changePct: calculatePercentChange(netChange, previous?.net_change_in_cash ?? previous?.net_cash_flow ?? null, { clamp: 'yoy_change' }) },
   ];
-  running += operating;
-  if (capex !== null) {
-    steps.push({
-      id: 'capex',
-      label: 'CapEx',
-      value: capex,
-      start: running,
-      end: running + capex,
-      tone: capex >= 0 ? 'positive' : 'negative',
-      changePct: calculatePercentChange(capex, firstFinite(previous?.capex, previous?.capital_expenditure, null), { clamp: 'yoy_change' }),
-    });
-    running += capex;
-  }
-  if (hasMeaningfulValue(otherInvesting)) {
-    steps.push({
-      id: 'other_investing_cash_flow',
-      label: 'Other Investing',
-      value: otherInvesting,
-      start: running,
-      end: running + otherInvesting,
-      tone: otherInvesting >= 0 ? 'positive' : 'negative',
-      changePct: calculatePercentChange(otherInvesting, previousOtherInvesting, { clamp: 'yoy_change' }),
-    });
-    running += otherInvesting;
-  }
-  if (dividends !== null) {
-    steps.push({
-      id: 'dividends_paid',
-      label: 'Dividends',
-      value: dividends,
-      start: running,
-      end: running + dividends,
-      tone: dividends >= 0 ? 'positive' : 'negative',
-      changePct: calculatePercentChange(dividends, previous?.dividends_paid ?? null, { clamp: 'yoy_change' }),
-    });
-    running += dividends;
-  }
-  if (debtRepayment !== null) {
-    steps.push({
-      id: 'debt_repayment',
-      label: 'Debt Repayment',
-      value: debtRepayment,
-      start: running,
-      end: running + debtRepayment,
-      tone: debtRepayment >= 0 ? 'positive' : 'negative',
-      changePct: calculatePercentChange(debtRepayment, previous?.debt_repayment ?? null, { clamp: 'yoy_change' }),
-    });
-    running += debtRepayment;
-  }
-  if (stockRepurchased !== null) {
-    steps.push({
-      id: 'stock_repurchased',
-      label: 'Buybacks',
-      value: stockRepurchased,
-      start: running,
-      end: running + stockRepurchased,
-      tone: stockRepurchased >= 0 ? 'positive' : 'negative',
-      changePct: calculatePercentChange(stockRepurchased, previous?.stock_repurchased ?? null, { clamp: 'yoy_change' }),
-    });
-    running += stockRepurchased;
-  }
-  if (hasMeaningfulValue(otherFinancing)) {
-    steps.push({
-      id: 'other_financing_cash_flow',
-      label: otherFinancing >= 0 ? 'Financing Inflows' : 'Other Financing',
-      value: otherFinancing,
-      start: running,
-      end: running + otherFinancing,
-      tone: otherFinancing >= 0 ? 'positive' : 'negative',
-      changePct: calculatePercentChange(
-        otherFinancing,
-        (previous?.financing_cash_flow ?? 0) - previousFinancingAdjustments,
-        { clamp: 'yoy_change' },
-      ),
-    });
-    running += otherFinancing;
-  }
-  steps.push({
-    id: 'net_change_in_cash',
-    label: 'Net Change',
-    value: netChange,
-    start: 0,
-    end: netChange,
-    tone: 'total',
-    changePct: calculatePercentChange(netChange, previous?.net_change_in_cash ?? previous?.net_cash_flow ?? null, { clamp: 'yoy_change' }),
-  });
 
   const extents = steps.flatMap((step) => [step.start, step.end, 0]);
-  const minValue = Math.min(...extents);
-  const maxValue = Math.max(...extents);
-
   return {
     period: String(latest.period),
     steps,
-    minValue,
-    maxValue,
+    minValue: Math.min(...extents),
+    maxValue: Math.max(...extents),
     summary: {
-      freeCashFlow,
-      capex,
-      dividends,
+      freeCashFlow: firstFinite(latest.free_cash_flow),
+      capex: firstFinite(latest.capex, latest.capital_expenditure),
+      dividends: firstFinite(latest.dividends_paid),
       netChange,
     },
   };

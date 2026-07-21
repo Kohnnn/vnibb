@@ -12,6 +12,8 @@ import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { EMPTY_VALUE, formatNumber } from '@/lib/units';
+import { normalizeTickerSymbol } from '@/lib/defaultTicker';
 import type { WidgetGroupId } from '@/types/widget';
 
 const STORAGE_KEY = 'vnibb-watchlist-v1';
@@ -20,12 +22,10 @@ const SORT_STORAGE_KEY = 'vnibb-watchlist-sort-v1';
 interface WatchlistItem {
     symbol: string;
     name: string;
-    price: number;
-    change: number;
-    changePercent: number;
-    volume?: number;
-    isLoading?: boolean;
-    error?: string;
+    price: number | null;
+    change: number | null;
+    changePercent: number | null;
+    volume: number | null;
 }
 
 type SortField = 'symbol' | 'price' | 'changePercent' | 'volume';
@@ -74,15 +74,16 @@ function parseLegacySortConfig(): SortConfig {
     }
 }
 
-function parseWatchlistSymbols(config: Record<string, unknown> | undefined): string[] {
+export function parseWatchlistSymbols(config: Record<string, unknown> | undefined): string[] {
     const rawValue = config?.watchlistSymbols;
-    if (!Array.isArray(rawValue)) {
-        return hasOwnConfigKey(config, 'watchlistSymbols') ? [] : parseLegacySymbols();
-    }
+    const symbols = Array.isArray(rawValue)
+        ? rawValue
+        : hasOwnConfigKey(config, 'watchlistSymbols') ? [] : parseLegacySymbols();
 
-    return rawValue
-        .filter((value): value is string => typeof value === 'string' && Boolean(value))
-        .map((value) => value.toUpperCase());
+    return [...new Set(symbols
+        .filter((value): value is string => typeof value === 'string')
+        .map(normalizeTickerSymbol)
+        .filter((value): value is string => value !== null))];
 }
 
 function parseWatchlistSort(config: Record<string, unknown> | undefined): SortConfig {
@@ -109,7 +110,6 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
     const [newSymbol, setNewSymbol] = useState('');
     const [showAddInput, setShowAddInput] = useState(false);
     const [showClearConfirm, setShowClearConfirm] = useState(false);
-    const [lastTick, setLastTick] = useState<number | null>(null);
 
     const { data: validSymbolsData } = useQuery({
         queryKey: ['symbols'],
@@ -122,7 +122,7 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
         return new Map(validSymbolsData.data.map(s => [s.symbol.toUpperCase(), s.organ_name]));
     }, [validSymbolsData]);
 
-    const { prices: livePrices, isConnected } = useWebSocket({ symbols });
+    const { prices: livePrices, isConnected, lastUpdate } = useWebSocket({ symbols });
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'watchlist' });
 
     useEffect(() => {
@@ -155,25 +155,18 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
         });
     }, [id, sortConfig, symbols, updateWidget, widgetLocation]);
 
-    useEffect(() => {
-        if (livePrices.size > 0) {
-            setLastTick(Date.now());
-        }
-    }, [livePrices]);
-
     const watchlist = useMemo<WatchlistItem[]>(() => {
         return symbols.map((sym) => {
             const quoteData = livePrices.get(sym);
-            const name = symbolNameMap.get(sym) || 'Unknown';
+            const quoteNumber = (value: number | undefined) => Number.isFinite(value) ? value ?? null : null;
 
             return {
                 symbol: sym,
-                name: name,
-                price: quoteData?.price ?? 0,
-                change: quoteData?.change ?? 0,
-                changePercent: quoteData?.change_pct ?? 0,
-                volume: quoteData?.volume ?? undefined,
-                isLoading: !quoteData && symbols.length > 0,
+                name: symbolNameMap.get(sym) || 'Unknown',
+                price: quoteNumber(quoteData?.price),
+                change: quoteNumber(quoteData?.change),
+                changePercent: quoteNumber(quoteData?.change_pct),
+                volume: quoteNumber(quoteData?.volume),
             };
         });
     }, [symbols, livePrices, symbolNameMap]);
@@ -181,29 +174,30 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
     const sortedWatchlist = useMemo(() => {
         const sorted = [...watchlist];
         sorted.sort((a, b) => {
-            let comparison = 0;
-            switch (sortConfig.field) {
-                case 'symbol':
-                    comparison = a.symbol.localeCompare(b.symbol);
-                    break;
-                case 'price':
-                    comparison = a.price - b.price;
-                    break;
-                case 'changePercent':
-                    comparison = a.changePercent - b.changePercent;
-                    break;
-                case 'volume':
-                    comparison = (a.volume ?? 0) - (b.volume ?? 0);
-                    break;
+            if (sortConfig.field === 'symbol') {
+                const comparison = a.symbol.localeCompare(b.symbol);
+                return sortConfig.order === 'asc' ? comparison : -comparison;
             }
+
+            const field = sortConfig.field === 'price' ? 'price' : sortConfig.field === 'changePercent' ? 'changePercent' : 'volume';
+            const aValue = a[field];
+            const bValue = b[field];
+            if (aValue === null) return bValue === null ? 0 : 1;
+            if (bValue === null) return -1;
+            const comparison = aValue - bValue;
             return sortConfig.order === 'asc' ? comparison : -comparison;
         });
         return sorted;
     }, [watchlist, sortConfig]);
 
     const hasSymbols = symbols.length > 0;
-    const connectionNote = hasSymbols ? (isConnected ? 'Live feed' : 'Disconnected') : 'Add symbols to begin';
-    const showCached = hasSymbols && !isConnected;
+    const hasObservedQuote = lastUpdate !== null;
+    const connectionNote = !hasSymbols
+        ? 'Add symbols to begin'
+        : isConnected
+            ? hasObservedQuote ? 'Live feed · Last quote received' : 'Live feed · Awaiting quote'
+            : hasObservedQuote ? 'Disconnected · Cached quote receipt' : 'Disconnected · Unavailable';
+    const showCached = hasSymbols && !isConnected && hasObservedQuote;
 
     useEffect(() => {
         onDataChange?.(
@@ -212,12 +206,12 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                 apiGroup: '/ws',
                 endpoint: '/api/v1/ws/prices',
                 sourceLabel: 'WebSocket',
-                lastDataDate: lastTick,
+                lastDataDate: lastUpdate,
                 stale: showCached,
                 extra: hasSymbols ? { symbolCount: symbols.length } : undefined,
             }),
         );
-    }, [hasSymbols, lastTick, showCached, symbols.length, onDataChange]);
+    }, [hasSymbols, lastUpdate, showCached, symbols.length, onDataChange]);
 
     const handleAddSymbol = useCallback(() => {
         if (!newSymbol.trim()) return;
@@ -252,17 +246,19 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
         setLinkedSymbol(symbol);
     }, [setLinkedSymbol]);
 
-    const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price);
-    const formatChange = (change: number, percent: number) => {
-        const sign = change >= 0 ? '+' : '';
-        return `${sign}${percent.toFixed(2)}%`;
+    const formatPrice = (price: number | null) => formatNumber(price, { decimals: 0, locale: 'vi-VN' });
+    const formatChange = (change: number | null, percent: number | null) => {
+        if (change === null || percent === null) return EMPTY_VALUE;
+        return `${change > 0 ? '+' : ''}${percent.toFixed(2)}%`;
     };
-    const getChangeColor = (change: number) => {
+    const getChangeColor = (change: number | null) => {
+        if (change === null) return 'text-[var(--text-muted)]';
         if (change > 0) return 'text-green-400';
         if (change < 0) return 'text-red-400';
         return 'text-yellow-400';
     };
-    const getChangeIcon = (change: number) => {
+    const getChangeIcon = (change: number | null) => {
+        if (change === null) return <Minus size={14} className="text-[var(--text-muted)]" />;
         if (change > 0) return <TrendingUp size={14} className="text-green-400" />;
         if (change < 0) return <TrendingDown size={14} className="text-red-400" />;
         return <Minus size={14} className="text-yellow-400" />;
@@ -299,7 +295,7 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
 
                 <div className="px-3 py-1.5 border-b border-[var(--border-color)]/70 bg-[var(--bg-primary)]">
                     <WidgetMeta
-                        updatedAt={lastTick}
+                        updatedAt={lastUpdate}
                         isCached={showCached}
                         note={connectionNote}
                         sourceLabel="WebSocket"
@@ -380,7 +376,8 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                                             </div>
                                         </td>
                                         <td className="text-right px-2 py-2 font-mono text-[var(--text-primary)]">
-                                            {formatPrice(item.price)}
+                                            <div>{formatPrice(item.price)}</div>
+                                            {item.price === null && <div className="text-[9px] text-[var(--text-muted)]">{isConnected ? 'Awaiting quote' : 'Unavailable'}</div>}
                                         </td>
                                         <td className={`text-right px-3 py-2 font-mono ${getChangeColor(item.change)}`}>
                                             {formatChange(item.change, item.changePercent)}

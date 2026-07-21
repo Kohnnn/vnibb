@@ -21,6 +21,11 @@ export interface EquityHistoricalResponse {
   meta?: {
     count: number;
     last_data_date?: string | null;
+    adjustment_mode?: 'raw' | 'adjusted';
+    adjustment_requested_count?: number;
+    adjustment_applied_count?: number;
+    adjustment_coverage_pct?: number | null;
+    adjustment_warning?: string | null;
   };
   error?: string | null;
 }
@@ -384,6 +389,9 @@ export interface CorrelationMatrixPayload {
   symbols: string[];
   matrix: CorrelationMatrixCell[];
   returns_count: number;
+  as_of_date?: string | null;
+  symbol_last_data_dates?: Record<string, string>;
+  overlap_counts?: Record<string, number>;
 }
 
 export interface CorrelationMatrixResponse {

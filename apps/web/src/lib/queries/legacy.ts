@@ -137,8 +137,8 @@ export const queryKeys = {
         ['quant', symbol, period, metrics.join(','), source] as const,
     garchVolatility: (symbol: string, period: string, source: string, adjustmentMode: string) =>
         ['garchVolatility', symbol, period, source, adjustmentMode] as const,
-    quantBacktest: (symbol: string, period: string, fastWindow: number, slowWindow: number, source: string, adjustmentMode: string) =>
-        ['quantBacktest', symbol, period, fastWindow, slowWindow, source, adjustmentMode] as const,
+    quantBacktest: (symbol: string, period: string, asOfDate: string, fastWindow: number, slowWindow: number, source: string, adjustmentMode: string) =>
+        ['quantBacktest', symbol, period, asOfDate, fastWindow, slowWindow, source, adjustmentMode] as const,
     quantSweep: (symbol: string, period: string, fastWindows: number[], slowWindows: number[], objective: string, source: string, adjustmentMode: string) =>
         ['quantSweep', symbol, period, fastWindows.join(','), slowWindows.join(','), objective, source, adjustmentMode] as const,
     seasonalityMatrix: (symbol: string, granularity: string, period: string, source: string, adjustmentMode: string) =>

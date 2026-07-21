@@ -14,7 +14,7 @@ export default defineConfig({
     /* Opt out of parallel tests on CI. */
     workers: process.env.CI ? 1 : undefined,
     /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-    reporter: 'html',
+    reporter: process.env.CI ? 'line' : 'html',
     /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
     use: {
         /* Base URL to use in actions like `await page.goto('/')`. */
@@ -33,23 +33,20 @@ export default defineConfig({
             name: 'chromium',
             use: { ...devices['Desktop Chrome'] },
         },
-
-        {
-            name: 'firefox',
-            use: { ...devices['Desktop Firefox'] },
-        },
-
-        {
-            name: 'webkit',
-            use: { ...devices['Desktop Safari'] },
-        },
     ],
 
-    /* Run your local dev server before starting the tests */
-    webServer: {
-        command: 'npm run dev',
-        url: 'http://localhost:3000',
-        reuseExistingServer: !process.env.CI,
-        timeout: 120000,
-    },
+    webServer: [
+        {
+            command: 'python ../api/scripts/release_smoke_api.py',
+            url: 'http://127.0.0.1:8000/ready',
+            reuseExistingServer: false,
+            timeout: 120000,
+        },
+        {
+            command: process.env.CI ? 'pnpm start -p 3000' : 'pnpm dev:3000',
+            url: 'http://localhost:3000',
+            reuseExistingServer: !process.env.CI,
+            timeout: 120000,
+        },
+    ],
 });

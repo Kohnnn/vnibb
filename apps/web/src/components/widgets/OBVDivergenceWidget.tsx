@@ -7,6 +7,7 @@ import { calculateOBV, type OHLCData } from '@/lib/chartUtils';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
@@ -86,12 +87,14 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
     startDate: new Date(Date.now() - 150 * 24 * 60 * 60 * 1000)
       .toISOString()
       .split('T')[0],
+    adjustmentMode: 'adjusted',
     enabled: Boolean(upperSymbol),
   });
 
   const candles = (data?.data || []) as OHLCData[];
   const hasData = candles.length > 30;
   const isFallback = Boolean(error && hasData);
+  const adjustmentWarning = data?.meta?.adjustment_warning ?? null;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
   const lookback = 20;
@@ -102,15 +105,23 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
       buildWidgetRuntime({
         empty: !hasData,
         apiGroup: '/equity',
-        endpoint: `/equity/historical?symbol=${upperSymbol}`,
+        endpoint: `/equity/historical?symbol=${upperSymbol}&adjustment_mode=adjusted`,
         sourceLabel: 'OBV divergence (derived)',
         lastDataDate: dataUpdatedAt,
+        adjustmentMode: 'adjusted',
         stale: isFallback,
         derived: true,
-        extra: hasData ? { signal, confidence } : undefined,
+        extra: {
+          signal,
+          confidence,
+          adjustmentCoveragePct: data?.meta?.adjustment_coverage_pct ?? null,
+          adjustmentRequestedCount: data?.meta?.adjustment_requested_count ?? 0,
+          adjustmentAppliedCount: data?.meta?.adjustment_applied_count ?? 0,
+          adjustmentWarning,
+        },
       }),
     );
-  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, signal, confidence]);
+  }, [adjustmentWarning, confidence, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, dataUpdatedAt, hasData, isFallback, onDataChange, signal, upperSymbol]);
 
   const recent = candles.slice(-lookback);
   const recentObv = calculateOBV(recent);
@@ -167,6 +178,7 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
           <WidgetEmpty message="Not enough historical candles" icon={<Activity size={18} />} size="compact" />
         ) : (
           <>
+            <QuantWarningBanner warning={adjustmentWarning} className="mb-2" />
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
               <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Signal</div>
               <div className={`text-sm font-semibold ${signalClass}`}>{signalLabel}</div>

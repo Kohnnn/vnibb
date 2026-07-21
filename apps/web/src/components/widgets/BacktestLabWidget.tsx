@@ -22,12 +22,14 @@ function formatNumber(value: unknown, suffix = ''): string {
 
 export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetProps) {
   const [period, setPeriod] = useState<QuantPeriod>('5Y');
+  const [asOfDate, setAsOfDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [fastWindow, setFastWindow] = useState(20);
   const [slowWindow, setSlowWindow] = useState(50);
   const upperSymbol = symbol?.toUpperCase() || '';
   const invalidWindows = fastWindow >= slowWindow;
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantBacktest(upperSymbol, {
     period,
+    asOfDate,
     fastWindow,
     slowWindow,
     enabled: Boolean(upperSymbol) && !invalidWindows,
@@ -36,7 +38,11 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
   const metrics = payload?.metrics ?? {};
   const trades = payload?.trades ?? [];
   const warnings = payload?.warnings ?? [];
-  const warning = useMemo(() => extractQuantWarning(data) || warnings[0] || null, [data, warnings]);
+  const displayWarnings = useMemo(
+    () => Array.from(new Set([extractQuantWarning(data), ...warnings].filter(Boolean))) as string[],
+    [data, warnings],
+  );
+  const warning = displayWarnings[0] ?? null;
   const hasData = Boolean(payload);
 
   useEffect(() => {
@@ -48,13 +54,15 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
       response: data,
       extra: {
         period,
+        as_of_date: payload?.as_of_date ?? asOfDate,
+        execution: 'next_session_open',
         fast_window: fastWindow,
         slow_window: slowWindow,
         trade_count: metrics.trade_count ?? null,
         warning,
       },
     }));
-  }, [data?.meta?.last_data_date, dataUpdatedAt, fastWindow, hasData, metrics.trade_count, onDataChange, payload?.last_data_date, period, slowWindow, upperSymbol, warning]);
+  }, [asOfDate, data, dataUpdatedAt, fastWindow, hasData, metrics.trade_count, onDataChange, payload?.as_of_date, payload?.last_data_date, period, slowWindow, upperSymbol, warning]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to run a backtest" icon={<Activity size={18} />} />;
@@ -78,17 +86,22 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <WidgetMeta updatedAt={payload?.last_data_date || dataUpdatedAt} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note="MA crossover backtest" align="right" />
+      <WidgetMeta updatedAt={payload?.last_data_date || dataUpdatedAt} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note={`MA crossover backtest · ${payload?.adjustment_mode || 'adjusted'} history requested`} align="right" />
 
-      <div className="mb-2 grid grid-cols-3 gap-2 text-[11px]">
+      <div className="mb-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
         <Select label="Period" value={period} onChange={(value) => setPeriod(value as QuantPeriod)} options={['1Y', '3Y', '5Y', 'ALL']} />
+        <DateInput label="As of" value={asOfDate} max={new Date().toISOString().slice(0, 10)} onChange={setAsOfDate} />
         <NumberInput label="Fast MA" value={fastWindow} min={2} max={250} onChange={setFastWindow} />
         <NumberInput label="Slow MA" value={slowWindow} min={3} max={500} onChange={setSlowWindow} />
       </div>
 
-      {warning && (
-        <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
-          {warning}
+      {displayWarnings.length > 0 && (
+        <div className="mb-2 space-y-1">
+          {displayWarnings.map((message) => (
+            <div key={message} className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+              {message}
+            </div>
+          ))}
         </div>
       )}
 
@@ -115,7 +128,7 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
       </div>
 
       <p className="mt-2 text-[9px] leading-3 text-[var(--text-muted)]">
-        Educational schema-based backtest. Close-price execution, all-in/all-out, fees included. Not trading advice.
+        Educational schema-based backtest. Signals use each session close; orders execute at the next available session open. All-in/all-out, fees included. Not trading advice.
       </p>
     </div>
   );
@@ -138,6 +151,15 @@ function Select({ label, value, options, onChange }: { label: string; value: str
       <select value={value} onChange={(event) => onChange(event.target.value)} className="w-full rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-xs text-[var(--text-primary)]">
         {options.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
+    </label>
+  );
+}
+
+function DateInput({ label, value, max, onChange }: { label: string; value: string; max: string; onChange: (value: string) => void }) {
+  return (
+    <label className="space-y-1">
+      <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">{label}</span>
+      <input type="date" value={value} max={max} onChange={(event) => onChange(event.target.value)} className="w-full rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-xs text-[var(--text-primary)]" />
     </label>
   );
 }

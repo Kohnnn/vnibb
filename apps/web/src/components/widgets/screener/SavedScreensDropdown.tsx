@@ -17,6 +17,8 @@ export interface SavedScreen {
   sortOrder?: 'asc' | 'desc';
   market?: string;
   viewMode?: 'table' | 'chart' | 'performance';
+  alertEnabled?: boolean;
+  alertMatchSymbols?: string[];
   isBuiltIn?: boolean;
 }
 

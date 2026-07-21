@@ -4,7 +4,7 @@ import { memo } from 'react';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 
-export type Market = 'ALL' | 'HOSE' | 'HNX' | 'UPCOM';
+export type Market = 'ALL' | 'HOSE' | 'HNX' | 'UPCOM' | 'VN30' | 'VN100' | 'HNX30';
 
 interface MarketToggleProps {
   value: Market;
@@ -16,11 +16,14 @@ const MARKETS: { id: Market; label: string }[] = [
   { id: 'HOSE', label: 'HOSE' },
   { id: 'HNX', label: 'HNX' },
   { id: 'UPCOM', label: 'UPCOM' },
+  { id: 'VN30', label: 'VN30' },
+  { id: 'VN100', label: 'VN100' },
+  { id: 'HNX30', label: 'HNX30' },
 ];
 
 function MarketToggleComponent({ value, onChange }: MarketToggleProps) {
   return (
-    <div className="flex rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
+    <div className="flex max-w-full overflow-x-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
       {MARKETS.map(market => (
         <button
           key={market.id}

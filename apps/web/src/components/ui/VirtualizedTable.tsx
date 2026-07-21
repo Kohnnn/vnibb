@@ -20,6 +20,7 @@ interface VirtualizedTableProps<T> {
   rowHeight?: number;
   headerHeight?: number;
   onRowClick?: (row: T, index: number) => void;
+  interactiveCells?: boolean;
   className?: string;
   emptyMessage?: string;
   sortField?: string;
@@ -33,6 +34,7 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
   rowHeight = 40,
   headerHeight = 40,
   onRowClick,
+  interactiveCells = false,
   className = '',
   emptyMessage = 'No data available',
   sortField,
@@ -135,19 +137,20 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
                 key={virtualItem.key}
                 className={cn(
                     "absolute left-0 top-0 flex w-full items-center border-b border-[var(--border-subtle)] transition-colors",
-                    isClickable ? 'cursor-pointer hover:bg-[var(--bg-tertiary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30' : '',
+                    isClickable ? 'cursor-pointer hover:bg-[var(--bg-tertiary)]' : '',
+                    isClickable && !interactiveCells ? 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30' : '',
                     virtualItem.index % 2 ? 'bg-[var(--bg-secondary)]/40' : 'bg-transparent'
                 )}
                 style={{
                   height: `${virtualItem.size}px`,
                   transform: `translateY(${virtualItem.start}px)`,
                 }}
-                role={isClickable ? 'button' : undefined}
-                tabIndex={isClickable ? 0 : undefined}
-                aria-label={isClickable ? `View ${rowLabel || 'row'}` : undefined}
+                role={isClickable && !interactiveCells ? 'button' : undefined}
+                tabIndex={isClickable && !interactiveCells ? 0 : undefined}
+                aria-label={isClickable && !interactiveCells ? `View ${rowLabel || 'row'}` : undefined}
                 onClick={() => onRowClick?.(row, virtualItem.index)}
                 onKeyDown={(event) => {
-                  if (!isClickable) return;
+                  if (!isClickable || interactiveCells) return;
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
                     onRowClick?.(row, virtualItem.index);

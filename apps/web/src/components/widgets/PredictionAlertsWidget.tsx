@@ -1,12 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BellRing } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { API_BASE_URL } from '@/lib/api';
 import { Sparkline, usePersistedWidgetConfig } from './prediction-market-ui';
 import { PredictionMarketContextMenu } from './PredictionMarketContextMenu';
 import { PredictionMarketDrawer } from './PredictionMarketDrawer';
+import { PredictionMarketSourceHealthStrip } from './PredictionMarketSourceHealthStrip';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { recordAlertActivity } from '@/lib/alertActivity';
 
 /**
  * Prediction-market Alerts.
@@ -32,7 +35,7 @@ type AlertRow = {
 type LoadState =
     | { readonly kind: 'loading' }
     | { readonly kind: 'error'; readonly error: Error }
-    | { readonly kind: 'ready'; readonly alerts: readonly AlertRow[]; readonly windowHours: number };
+    | { readonly kind: 'ready'; readonly alerts: readonly AlertRow[]; readonly windowHours: number; readonly stale: boolean; readonly error?: Error };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -94,8 +97,9 @@ const BUCKETS: ReadonlyArray<{ readonly key: '1h' | '4h' | '24h'; readonly hours
     { key: '24h', hours: 24, label: 'Last 24h' },
 ];
 
-export function PredictionAlertsWidget() {
+export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data: WidgetDataPayload) => void }) {
     const [state, setState] = useState<LoadState>({ kind: 'loading' });
+    const requestIdRef = useRef(0);
     const [config, setConfig] = usePersistedWidgetConfig<{ bucket: '1h' | '4h' | '24h' }>(
         'vnibb.prediction-alerts.config',
         { bucket: '1h' },
@@ -104,7 +108,8 @@ export function PredictionAlertsWidget() {
     const [historyMap, setHistoryMap] = useState<Record<string, readonly number[]>>({});
 
     const refresh = useCallback(() => {
-        setState({ kind: 'loading' });
+        const requestId = ++requestIdRef.current;
+        setState((current) => current.kind === 'ready' ? current : { kind: 'loading' });
         const url = new URL(`${API_BASE_URL}/prediction-markets/alerts`);
         const hours = BUCKETS.find((bucket) => bucket.key === config.bucket)?.hours ?? 1;
         url.searchParams.set('window_hours', String(hours));
@@ -115,19 +120,47 @@ export function PredictionAlertsWidget() {
                 if (!response.ok) throw new Error(`alerts API returned ${response.status}`);
                 const body = await response.json();
                 const { alerts, windowHours } = parseAlerts(body);
-                setState({ kind: 'ready', alerts, windowHours });
+                if (requestId !== requestIdRef.current) return;
+                setState({ kind: 'ready', alerts, windowHours, stale: false });
             })
             .catch((error: unknown) => {
-                setState({
-                    kind: 'error',
-                    error: error instanceof Error ? error : new Error('alerts request failed'),
-                });
+                const resolvedError = error instanceof Error ? error : new Error('alerts request failed');
+                if (requestId !== requestIdRef.current) return;
+                setState((current) => current.kind === 'ready'
+                    ? { ...current, stale: true, error: resolvedError }
+                    : { kind: 'error', error: resolvedError });
             });
     }, [config.bucket]);
 
     useEffect(() => {
         refresh();
     }, [refresh]);
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: state.kind === 'ready' && state.alerts.length === 0,
+            apiGroup: '/prediction-markets',
+            endpoint: '/api/v1/prediction-markets/alerts',
+            sourceLabel: 'Prediction market alerts',
+            stale: state.kind === 'error' || (state.kind === 'ready' && state.stale),
+            extra: { feedState: state.kind === 'error' ? 'unavailable' : state.kind === 'loading' ? 'loading' : state.stale ? 'stale' : 'loaded', alertCount: state.kind === 'ready' ? state.alerts.length : 0 },
+        }));
+    }, [onDataChange, state]);
+
+    useEffect(() => {
+        if (state.kind !== 'ready') return;
+        for (const alert of state.alerts) {
+            recordAlertActivity({
+                id: `prediction:${alert.source}:${alert.sourceId}:${alert.capturedAt || state.windowHours}:${alert.absoluteMovement}`,
+                source: 'prediction_market',
+                triggerTime: alert.capturedAt || new Date().toISOString(),
+                deliveryClass: 'polled',
+                serverBacked: true,
+                title: `${alert.source} probability movement`,
+                detail: `${alert.question} · ${(Math.abs(alert.absoluteMovement) * 100).toFixed(1)}pp`,
+            });
+        }
+    }, [state]);
 
     useEffect(() => {
         if (state.kind !== 'ready') return;
@@ -206,6 +239,8 @@ export function PredictionAlertsWidget() {
                     {state.alerts.length} alerts
                 </span>
             </div>
+            <PredictionMarketSourceHealthStrip />
+            <div className="px-1 text-[10px] text-[var(--text-muted)]">Feed {state.stale ? 'stale' : 'loaded'} · {state.windowHours}h window</div>
             {state.alerts.length === 0 ? (
                 <WidgetEmpty
                     message="No alerts"

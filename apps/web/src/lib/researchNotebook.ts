@@ -20,12 +20,20 @@ export const RESEARCH_NOTEBOOK_EVENT = 'vnibb:research-notebook:changed'
 export type NotebookItemKind = 'news' | 'widget_snapshot' | 'agent_answer' | 'note'
 
 export interface NotebookSource {
+  id?: string
   label?: string
   url?: string
   sourceUrl?: string
   feedUrl?: string
   sourceName?: string
+  sourceSystem?: string
+  asOf?: string
   publishedAt?: string
+}
+
+export interface NotebookAgentMeta {
+  provider?: string
+  model?: string
 }
 
 export interface NotebookItem {
@@ -36,19 +44,60 @@ export interface NotebookItem {
   symbol?: string
   tags?: string[]
   sources?: NotebookSource[]
+  agent?: NotebookAgentMeta
+  dedupeKey?: string
   provenance?: Partial<ExportProvenance>
   createdAt: string
 }
 
 const MAX_ITEMS = 200
+const NOTEBOOK_KINDS: NotebookItemKind[] = ['news', 'widget_snapshot', 'agent_answer', 'note']
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+function normalizeItem(value: unknown): NotebookItem | null {
+  if (!isRecord(value)) return null
+  const id = text(value.id)
+  const kind = text(value.kind) as NotebookItemKind | undefined
+  const title = text(value.title)
+  const createdAt = text(value.createdAt)
+  if (!id || !NOTEBOOK_KINDS.includes(kind as NotebookItemKind) || !title || !createdAt || Number.isNaN(new Date(createdAt).getTime())) return null
+  const sources = Array.isArray(value.sources)
+    ? value.sources.filter(isRecord).map((source) => ({
+      id: text(source.id), label: text(source.label), url: text(source.url), sourceUrl: text(source.sourceUrl),
+      feedUrl: text(source.feedUrl), sourceName: text(source.sourceName), sourceSystem: text(source.sourceSystem),
+      asOf: text(source.asOf), publishedAt: text(source.publishedAt),
+    }))
+    : undefined
+  const agent = isRecord(value.agent) ? { provider: text(value.agent.provider), model: text(value.agent.model) } : undefined
+  return {
+    id,
+    kind: kind as NotebookItemKind,
+    title,
+    body: text(value.body),
+    symbol: text(value.symbol),
+    tags: Array.isArray(value.tags) ? value.tags.filter((tag): tag is string => typeof tag === 'string') : undefined,
+    sources,
+    agent,
+    dedupeKey: text(value.dedupeKey),
+    provenance: isRecord(value.provenance) ? value.provenance : undefined,
+    createdAt,
+  }
+}
 
 function readRaw(): NotebookItem[] {
   if (typeof window === 'undefined') return []
   try {
     const raw = window.localStorage.getItem(RESEARCH_NOTEBOOK_KEY)
     if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? (parsed as NotebookItem[]) : []
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.map(normalizeItem).filter((item): item is NotebookItem => item !== null) : []
   } catch {
     return []
   }
@@ -76,6 +125,11 @@ export function readNotebookItems(): NotebookItem[] {
 }
 
 export function addNotebookItem(input: Omit<NotebookItem, 'id' | 'createdAt'>): NotebookItem[] {
+  const existing = input.dedupeKey
+    ? readNotebookItems().find((item) => item.dedupeKey === input.dedupeKey)
+    : undefined
+  if (existing) return readNotebookItems()
+
   const item: NotebookItem = {
     ...input,
     id: `nb:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
@@ -132,10 +186,14 @@ export function notebookToMarkdown(items: NotebookItem[], title = 'VNIBB Researc
       lines.push(`Tags: ${item.tags.join(', ')}`)
       lines.push('')
     }
+    if (item.agent?.provider || item.agent?.model) {
+      lines.push(`Model: ${[item.agent.provider, item.agent.model].filter(Boolean).join(' / ')}`)
+      lines.push('')
+    }
     if (item.sources?.length) {
       lines.push('Sources:')
       item.sources.forEach((source) => {
-        const label = source.label || source.sourceName || 'Source'
+        const label = source.label || source.sourceName || source.id || 'Source'
         const links = [
           source.url ? `article: ${source.url}` : null,
           source.sourceUrl ? `source: ${source.sourceUrl}` : null,
@@ -143,8 +201,13 @@ export function notebookToMarkdown(items: NotebookItem[], title = 'VNIBB Researc
         ]
           .filter(Boolean)
           .join(' · ')
-        const published = source.publishedAt ? ` (published ${source.publishedAt})` : ''
-        lines.push(`- ${label}${published}${links ? ` — ${links}` : ''}`)
+        const details = [
+          source.id ? `id ${source.id}` : null,
+          source.sourceSystem ? `system ${source.sourceSystem}` : null,
+          source.asOf ? `as of ${source.asOf}` : null,
+          source.publishedAt ? `published ${source.publishedAt}` : null,
+        ].filter(Boolean).join(', ')
+        lines.push(`- ${label}${details ? ` (${details})` : ''}${links ? ` — ${links}` : ''}`)
       })
       lines.push('')
     }

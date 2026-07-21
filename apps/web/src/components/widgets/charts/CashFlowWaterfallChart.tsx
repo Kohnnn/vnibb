@@ -75,7 +75,7 @@ export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfall
   return (
     <div className="flex h-full flex-col gap-3">
       <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-        <SummaryCard label="Free Cash Flow" value={summary.freeCashFlow !== null ? formatValue(summary.freeCashFlow) : EMPTY_VALUE} tone="text-emerald-300" />
+        <SummaryCard label="Reported Free Cash Flow" value={summary.freeCashFlow !== null ? formatValue(summary.freeCashFlow) : EMPTY_VALUE} tone="text-emerald-300" />
         <SummaryCard label="CapEx" value={summary.capex !== null ? formatValue(summary.capex) : EMPTY_VALUE} tone="text-amber-300" />
         <SummaryCard label="Dividends" value={summary.dividends !== null ? formatValue(summary.dividends) : EMPTY_VALUE} tone="text-cyan-300" />
         <SummaryCard label="Net Change" value={formatValue(summary.netChange)} tone="text-blue-300" />

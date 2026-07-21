@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Database, ExternalLink, Plus } from 'lucide-react';
 
 import type { CopilotSourceRef } from '@/lib/api';
@@ -52,6 +52,7 @@ export function CopilotEvidencePanel({
     [sources],
   );
   const [isOpen, setIsOpen] = useState(false);
+  const panelId = useId();
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(orderedSources[0]?.id ?? null);
 
   useEffect(() => {
@@ -133,7 +134,9 @@ export function CopilotEvidencePanel({
       <button
         type="button"
         onClick={() => setIsOpen((current) => !current)}
-        className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+        aria-expanded={isOpen}
+        aria-controls={panelId}
+        className="flex min-h-11 w-full items-center justify-between px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
       >
         <span className="flex items-center gap-2">
           <Database size={12} className="text-blue-400" />
@@ -144,7 +147,7 @@ export function CopilotEvidencePanel({
       </button>
 
       {isOpen && (
-        <div className="border-t border-[var(--border-subtle)] px-3 py-3">
+        <div id={panelId} className="border-t border-[var(--border-subtle)] px-3 py-3">
           <div className="mb-3 flex flex-wrap gap-2">
             {orderedSources.map((source) => (
               <button
@@ -152,7 +155,7 @@ export function CopilotEvidencePanel({
                 type="button"
                 onClick={() => setSelectedSourceId(source.id)}
                 className={cn(
-                  'rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors',
+                  'min-h-9 rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors',
                   source.id === selectedSource.id
                     ? 'border-blue-500 bg-blue-600/15 text-blue-300'
                     : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -178,7 +181,7 @@ export function CopilotEvidencePanel({
                   <button
                     type="button"
                     onClick={() => { void handleJumpToWidget() }}
-                    className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-500/20"
+                    className="inline-flex min-h-9 items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-500/20"
                   >
                     <ExternalLink size={11} />
                     Jump to widget
@@ -188,7 +191,7 @@ export function CopilotEvidencePanel({
                   <button
                     type="button"
                     onClick={() => { void handleAddWidget() }}
-                    className="inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold text-blue-200 hover:bg-blue-500/20"
+                    className="inline-flex min-h-9 items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold text-blue-200 hover:bg-blue-500/20"
                   >
                     <Plus size={11} />
                     Add widget

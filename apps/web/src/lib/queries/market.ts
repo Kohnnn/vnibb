@@ -29,6 +29,7 @@ export const marketQueryKeys = {
     topVolume: (index: string) => ['topVolume', index] as const,
     topValue: (index: string) => ['topValue', index] as const,
     priceBoard: (symbols: string[]) => ['priceBoard', symbols] as const,
+    foreignFlowLeaderboard: (metric: api.ForeignFlowMetric = 'net_volume', window: api.ForeignFlowWindow = '1D') => ['foreignFlowLeaderboard', metric, window] as const,
     marketHeatmap: (options?: Record<string, unknown>) => ['marketHeatmap', options] as const,
     marketFreshness: () => ['marketFreshness'] as const,
     dataSourcesFreshness: () => ['dataSourcesFreshness'] as const,
@@ -215,6 +216,21 @@ export function useTopValue(
         enabled: options?.enabled !== false,
         staleTime: 60 * 1000,
         refetchInterval: options?.refetchInterval,
+        retry: 2,
+    });
+}
+
+export function useForeignFlowLeaderboard(
+    options: { enabled?: boolean; metric?: api.ForeignFlowMetric; window?: api.ForeignFlowWindow } | boolean = {},
+) {
+    const normalizedOptions = typeof options === 'boolean' ? { enabled: options } : options;
+    const metric = normalizedOptions.metric ?? 'net_volume';
+    const window = normalizedOptions.window ?? '1D';
+    return useQuery({
+        queryKey: marketQueryKeys.foreignFlowLeaderboard(metric, window),
+        queryFn: () => api.getForeignFlowLeaderboard(10, { metric, window }),
+        enabled: normalizedOptions.enabled !== false,
+        staleTime: 60 * 1000,
         retry: 2,
     });
 }

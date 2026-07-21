@@ -1,8 +1,8 @@
 // Screener Widget - backend-wired screening workspace
 'use client';
 
-import { useState, useMemo, useCallback, useEffect, memo } from 'react';
-import { Search, Table, LayoutGrid, ListFilter, LineChart } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect, memo, useRef } from 'react';
+import { Search, Table, LayoutGrid, ListFilter, LineChart, Bell, BellRing, Plus } from 'lucide-react';
 
 import { useScreenerData, useVnstockSource } from '@/lib/queries';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -16,6 +16,7 @@ import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import type { WidgetGroupId } from '@/types/widget';
+import type { Dashboard } from '@/types/dashboard';
 import { ALL_COLUMNS } from '@/types/screener';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { formatScreenerValue } from '@/utils/formatters';
@@ -29,6 +30,14 @@ import { PerformanceTable } from './screener/PerformanceTable';
 import { ChartGridCard } from './screener/ChartGridCard';
 import { getLatestTimestampValue } from '@/lib/dataFreshness';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
+import { logClientError } from '@/lib/clientLogger';
+import { recordAlertActivity } from '@/lib/alertActivity';
+import { parseWatchlistSymbols } from './WatchlistWidget';
+import { findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import { normalizeTickerSymbol } from '@/lib/defaultTicker';
+import { canEditDashboard } from '@/contexts/DashboardContext/helpers';
+
 
 interface ScreenerWidgetProps {
     id: string;
@@ -47,6 +56,14 @@ type ViewMode = 'table' | 'chart' | 'performance';
 interface SerializedFilterGroup {
     logic: 'AND' | 'OR';
     conditions: Array<FilterCondition | SerializedFilterGroup>;
+}
+
+interface WatchlistTarget {
+    dashboardId: string;
+    tabId: string;
+    widgetId: string;
+    label: string;
+    config: Record<string, unknown>;
 }
 
 const DEFAULT_SORT_FIELD = 'market_cap';
@@ -102,7 +119,7 @@ function parseColumnIds(value: unknown): string[] | null {
 }
 
 function parseMarket(value: unknown, fallback: Market): Market {
-    return value === 'HOSE' || value === 'HNX' || value === 'UPCOM' || value === 'ALL'
+    return value === 'HOSE' || value === 'HNX' || value === 'UPCOM' || value === 'ALL' || value === 'VN30' || value === 'VN100' || value === 'HNX30'
         ? value
         : fallback;
 }
@@ -200,7 +217,80 @@ function formatReasonMetric(row: Record<string, unknown>, field: string, label: 
     return null;
 }
 
+export function buildSavedScreenAlertId(screenId: string, symbols: string[], triggerTime: string): string {
+    return `saved-screen:${screenId}:${symbols.join(',')}:${triggerTime}`;
+}
+
+export function getScreenerMatchSymbols(rows: Array<Record<string, unknown>>): string[] {
+    return Array.from(new Set(rows
+        .map((row) => String(row.ticker ?? row.symbol ?? '').trim().toUpperCase())
+        .filter(Boolean)))
+        .sort();
+}
+
+export function resolveScreenerWatchlistAction(targetCount: number): 'create' | 'direct' | 'choose' {
+    if (targetCount <= 0) return 'create';
+    if (targetCount === 1) return 'direct';
+    return 'choose';
+}
+
+export function getScreenerWatchlistTargets(dashboards: Dashboard[]): WatchlistTarget[] {
+    return dashboards.flatMap((dashboard) => {
+        if (!canEditDashboard(dashboard)) return [];
+        return dashboard.tabs.flatMap((tab) => tab.widgets
+            .filter((widget) => widget.type === 'watchlist')
+            .map((widget, index) => ({
+                dashboardId: dashboard.id,
+                tabId: tab.id,
+                widgetId: widget.id,
+                label: `${dashboard.name} / ${tab.name} / ${typeof widget.config.title === 'string' && widget.config.title.trim() ? widget.config.title.trim() : `Watchlist ${index + 1}`}`,
+                config: widget.config,
+            })));
+    });
+}
+
+export function getNewScreenerMatchSymbols(previousSymbols: string[], rows: Array<Record<string, unknown>>): string[] {
+    const previous = new Set(previousSymbols.map((symbol) => symbol.toUpperCase()));
+    return getScreenerMatchSymbols(rows).filter((symbol) => !previous.has(symbol));
+}
+
+export function canProcessScreenerAlert(isHidden: boolean, isOnline: boolean): boolean {
+    return !isHidden && isOnline;
+}
+
+export function shouldRescheduleScreenerAlertPoll(cancelled: boolean, isHidden: boolean, isOnline: boolean): boolean {
+    return !cancelled && canProcessScreenerAlert(isHidden, isOnline);
+}
+
+export function shouldResumeScreenerAlertPoll(
+    cancelled: boolean,
+    isHidden: boolean,
+    isOnline: boolean,
+    alertEnabled: boolean,
+    savedScanIsCurrent: boolean,
+    hasTimer = false,
+    isInFlight = false,
+): boolean {
+    return !hasTimer && !isInFlight && alertEnabled && savedScanIsCurrent && shouldRescheduleScreenerAlertPoll(cancelled, isHidden, isOnline);
+}
+
+export function isSavedScreenScanCurrent(
+    screen: SavedScreen,
+    quickFilters: ActiveFilter[],
+    advancedFilters: FilterGroup,
+    sortField: string,
+    sortOrder: 'asc' | 'desc',
+    market: Market,
+): boolean {
+    return JSON.stringify(screen.quickFilters || []) === JSON.stringify(quickFilters)
+        && JSON.stringify(screen.advancedFilters || createEmptyFilterGroup()) === JSON.stringify(advancedFilters)
+        && (screen.sortField || DEFAULT_SORT_FIELD) === sortField
+        && (screen.sortOrder || DEFAULT_SORT_ORDER) === sortOrder
+        && parseMarket(screen.market, 'ALL') === market;
+}
+
 function buildPassReason(screenId: string, row: Record<string, unknown>): string | undefined {
+
     if (!PASS_REASON_PRESET_IDS.has(screenId)) return undefined;
 
     const fieldsByPreset: Record<string, Array<[string, string, string?]>> = {
@@ -229,7 +319,7 @@ export function ScreenerWidget({
     config,
     onDataChange,
 }: ScreenerWidgetProps) {
-    const { updateWidget } = useDashboard();
+    const { state, activeDashboard, activeTab, addWidget, createDashboard, createTab, updateWidget } = useDashboard();
     const widgetLocation = useDashboardWidget(id);
 
     const persistedQuickFilters = useMemo(() => parseActiveFilters(config?.quickFilters), [config]);
@@ -253,6 +343,10 @@ export function ScreenerWidget({
     const [customScreens, setCustomScreens] = useState<SavedScreen[]>(persistedCustomScreens);
     const [sortField, setSortField] = useState<string>(persistedSortField);
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(persistedSortOrder);
+    const [pendingWatchlistSymbol, setPendingWatchlistSymbol] = useState<string | null>(null);
+    const [watchlistStatus, setWatchlistStatus] = useState('');
+    const alertPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const alertPollInFlightRef = useRef(false);
 
     const { getActiveColumns, setColumns } = useColumnPresets();
 
@@ -300,6 +394,10 @@ export function ScreenerWidget({
 
     const activeColumnIds = getActiveColumns();
     const visibleColumns = useMemo(() => ALL_COLUMNS.filter((column) => activeColumnIds.includes(column.id)), [activeColumnIds]);
+    const watchlistTargets = useMemo(
+        () => getScreenerWatchlistTargets(state.dashboards),
+        [state.dashboards],
+    );
 
     const source = useVnstockSource();
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetId: id, widgetType: 'screener' });
@@ -358,7 +456,8 @@ export function ScreenerWidget({
         refetch,
     } = useScreenerData({
         limit,
-        exchange: market === 'ALL' ? undefined : market,
+        universe: market === 'VN30' || market === 'VN100' || market === 'HNX30' ? market : undefined,
+        exchange: market === 'HOSE' || market === 'HNX' || market === 'UPCOM' ? market : undefined,
         filters: serializedFilters,
         sort,
     });
@@ -387,7 +486,18 @@ export function ScreenerWidget({
         });
     }, [dataWithPassReasons, search]);
 
+    const activeSavedScreen = customScreens.find((screen) => screen.id === activeScreenId) || null;
+    const activeSavedScreenIsCurrent = Boolean(activeSavedScreen && isSavedScreenScanCurrent(
+        activeSavedScreen,
+        activeFilters,
+        advancedFilterGroup,
+        sortField,
+        sortOrder,
+        market,
+    ));
+    const activeScreenAlertEnabled = Boolean(activeSavedScreen?.alertEnabled);
     const hasData = filteredData.length > 0;
+
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
     const sourceUpdatedAt =
@@ -397,16 +507,126 @@ export function ScreenerWidget({
         ]) ?? dataUpdatedAt;
 
     useEffect(() => {
+        const clearAlertPoll = () => {
+            if (!alertPollRef.current) return;
+            clearTimeout(alertPollRef.current);
+            alertPollRef.current = null;
+        };
+
+        if (!activeScreenAlertEnabled || !activeSavedScreenIsCurrent) {
+            clearAlertPoll();
+            return;
+        }
+
+        let cancelled = false;
+        const scheduleNextPoll = () => {
+            const isHidden = typeof document !== 'undefined' && document.hidden;
+            const isOnline = typeof navigator === 'undefined' || navigator.onLine;
+            if (!shouldResumeScreenerAlertPoll(cancelled, isHidden, isOnline, activeScreenAlertEnabled, activeSavedScreenIsCurrent) || alertPollRef.current || alertPollInFlightRef.current) return;
+            const interval = getAdaptiveRefetchInterval(POLLING_PRESETS.alerts);
+            if (interval === false) return;
+            alertPollRef.current = setTimeout(async () => {
+                alertPollRef.current = null;
+                const hiddenAtStart = typeof document !== 'undefined' && document.hidden;
+                const onlineAtStart = typeof navigator === 'undefined' || navigator.onLine;
+                if (canProcessScreenerAlert(hiddenAtStart, onlineAtStart)) {
+                    alertPollInFlightRef.current = true;
+                    try {
+                        await refetch();
+                    } finally {
+                        alertPollInFlightRef.current = false;
+                    }
+                }
+                scheduleNextPoll();
+            }, interval);
+        };
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                clearAlertPoll();
+                return;
+            }
+            scheduleNextPoll();
+        };
+        const handleOffline = clearAlertPoll;
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('online', scheduleNextPoll);
+        window.addEventListener('offline', handleOffline);
+        scheduleNextPoll();
+        return () => {
+            cancelled = true;
+            clearAlertPoll();
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('online', scheduleNextPoll);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, [activeSavedScreen?.id, activeSavedScreenIsCurrent, activeScreenAlertEnabled, refetch]);
+
+    useEffect(() => {
+        if (!activeSavedScreen || !activeScreenAlertEnabled || !activeSavedScreenIsCurrent || !screenerData?.data) return;
+        const isHidden = typeof document !== 'undefined' && document.hidden;
+        const isOnline = typeof navigator === 'undefined' || navigator.onLine;
+        if (!canProcessScreenerAlert(isHidden, isOnline)) return;
+
+        const currentSymbols = getScreenerMatchSymbols(dataWithPassReasons);
+        const previousSymbols = activeSavedScreen.alertMatchSymbols;
+        if (previousSymbols) {
+            const newMatches = getNewScreenerMatchSymbols(previousSymbols, dataWithPassReasons);
+            if (newMatches.length > 0) {
+                const triggerTime = new Date().toISOString();
+                recordAlertActivity({
+                    id: buildSavedScreenAlertId(activeSavedScreen.id, newMatches, triggerTime),
+                    source: 'saved_screen',
+                    triggerTime,
+                    deliveryClass: 'polled',
+                    serverBacked: false,
+                    title: `${activeSavedScreen.name}: ${newMatches.length} new match${newMatches.length === 1 ? '' : 'es'}`,
+                    detail: newMatches.slice(0, 8).join(', '),
+                });
+            }
+            if (newMatches.length > 0 && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+                try {
+                    const notification = new Notification(`${activeSavedScreen.name}: ${newMatches.length} new match${newMatches.length === 1 ? '' : 'es'}`, {
+                        body: newMatches.slice(0, 8).join(', '),
+                        icon: '/favicon.ico',
+                        badge: '/favicon.ico',
+                        tag: `screener-${id}-${activeSavedScreen.id}`,
+                    });
+                    setTimeout(() => notification.close(), 10_000);
+                } catch (notificationError) {
+                    logClientError('Failed to show screener alert notification:', notificationError);
+                }
+            }
+        }
+
+        if (JSON.stringify(previousSymbols ?? []) === JSON.stringify(currentSymbols)) return;
+        setCustomScreens((screens) => screens.map((screen) => screen.id === activeSavedScreen.id
+            ? { ...screen, alertMatchSymbols: currentSymbols }
+            : screen));
+    }, [activeSavedScreen, activeSavedScreenIsCurrent, activeScreenAlertEnabled, dataWithPassReasons, id, screenerData?.data]);
+
+    useEffect(() => {
+
         onDataChange?.(buildWidgetRuntime({
             empty: !hasData,
             apiGroup: '/screener',
-            endpoint: '/api/v1/screener/stocks',
-            sourceLabel: 'VNIBB screener',
+            endpoint: '/api/v1/screener',
+            sourceLabel: screenerData?.meta?.source ?? 'live',
             lastDataDate: typeof sourceUpdatedAt === 'string' ? sourceUpdatedAt : undefined,
+            stale: Boolean(screenerData?.meta?.stale),
             derived: Boolean(search.trim() || serializedFilters),
-            extra: { count: filteredData.length, market, sort },
+            extra: {
+                count: filteredData.length,
+                market,
+                sort,
+                cached: Boolean(screenerData?.meta?.cached),
+                fallback: Boolean(screenerData?.meta?.fallback),
+                coreFieldCoverage: screenerData?.meta?.visible_field_coverage ?? {},
+                coreFieldValues: screenerData?.meta?.visible_field_values ?? 0,
+                coreFieldPossibleValues: screenerData?.meta?.visible_field_possible_values ?? 0,
+            },
         }))
-    }, [filteredData.length, hasData, market, onDataChange, search, serializedFilters, sort, sourceUpdatedAt]);
+    }, [filteredData.length, hasData, market, onDataChange, screenerData?.meta, search, serializedFilters, sort, sourceUpdatedAt]);
 
     const handleSort = useCallback((field: string) => {
         captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
@@ -423,6 +643,57 @@ export function ScreenerWidget({
         setSortField(field);
         setSortOrder('desc');
     }, [id, sortField, sortOrder]);
+
+    const addSymbolToTarget = useCallback((symbol: string, target: WatchlistTarget) => {
+        const normalized = normalizeTickerSymbol(symbol);
+        if (!normalized) return;
+        const symbols = parseWatchlistSymbols(target.config);
+        if (symbols.includes(normalized)) {
+            setWatchlistStatus(`${normalized} is already in ${target.label}.`);
+            setPendingWatchlistSymbol(null);
+            return;
+        }
+        updateWidget(target.dashboardId, target.tabId, target.widgetId, {
+            config: { ...target.config, watchlistSymbols: [...symbols, normalized] },
+        });
+        setWatchlistStatus(`Added ${normalized} to ${target.label}.`);
+        setPendingWatchlistSymbol(null);
+    }, [updateWidget]);
+
+    const createWatchlistWithSymbol = useCallback((symbol: string) => {
+        const normalized = normalizeTickerSymbol(symbol);
+        if (!normalized) return;
+        let dashboard = activeDashboard && canEditDashboard(activeDashboard) ? activeDashboard : state.dashboards.find(canEditDashboard) ?? null;
+        if (!dashboard) dashboard = createDashboard({ name: 'Investor Workflow' });
+        let tab = dashboard.id === activeDashboard?.id && activeTab ? activeTab : dashboard.tabs[0] ?? null;
+        if (!tab) tab = createTab(dashboard.id, 'Watchlist');
+        const defaults = getWidgetDefaultLayout('watchlist');
+        const placement = findNextAvailableLayout(tab.widgets, 'watchlist');
+        addWidget(dashboard.id, tab.id, {
+            type: 'watchlist',
+            tabId: tab.id,
+            config: { watchlistSymbols: [normalized] },
+            layout: { x: placement.x, y: placement.y, w: defaults.w, h: defaults.h, minW: defaults.minW, minH: defaults.minH },
+        });
+        setWatchlistStatus(`Created a watchlist with ${normalized}.`);
+        setPendingWatchlistSymbol(null);
+    }, [activeDashboard, activeTab, addWidget, createDashboard, createTab, state.dashboards]);
+
+    const handleAddToWatchlist = useCallback((symbol: string) => {
+        const normalized = normalizeTickerSymbol(symbol);
+        if (!normalized) return;
+        const action = resolveScreenerWatchlistAction(watchlistTargets.length);
+        if (action === 'create') {
+            createWatchlistWithSymbol(normalized);
+            return;
+        }
+        if (action === 'direct') {
+            addSymbolToTarget(normalized, watchlistTargets[0]);
+            return;
+        }
+        setPendingWatchlistSymbol(normalized);
+        setWatchlistStatus('');
+    }, [addSymbolToTarget, createWatchlistWithSymbol, watchlistTargets]);
 
     const handleSymbolSelect = useCallback((symbol: string) => {
         if (!symbol) return;
@@ -473,6 +744,22 @@ export function ScreenerWidget({
         }
     }, [activeScreenId]);
 
+    const handleToggleScreenAlert = useCallback(async () => {
+        if (!activeSavedScreen || !activeSavedScreenIsCurrent) return;
+        const nextEnabled = !activeSavedScreen.alertEnabled;
+        if (nextEnabled && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+            await Notification.requestPermission();
+        }
+        const currentSymbols = getScreenerMatchSymbols(dataWithPassReasons);
+        setCustomScreens((screens) => screens.map((screen) => screen.id === activeSavedScreen.id
+            ? {
+                ...screen,
+                alertEnabled: nextEnabled,
+                alertMatchSymbols: nextEnabled ? currentSymbols : screen.alertMatchSymbols,
+            }
+            : screen));
+    }, [activeSavedScreen, activeSavedScreenIsCurrent, dataWithPassReasons]);
+
     const handleResetFilters = useCallback(() => {
         captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
             action: 'reset_filters',
@@ -488,15 +775,25 @@ export function ScreenerWidget({
         setSortOrder(DEFAULT_SORT_ORDER);
     }, [activeFilters.length, id]);
 
-    const tableColumns = useMemo(() => {
-        return visibleColumns.map((column) => ({
+    const tableColumns = useMemo(() => [
+        ...visibleColumns.map((column) => ({
             id: column.id,
             header: column.label,
             width: column.width || 100,
             accessor: (row: Record<string, unknown>) => formatScreenerValue(row[column.id], column.format),
             sortable: true,
-        }));
-    }, [visibleColumns]);
+        })),
+        {
+            id: 'row_actions',
+            header: 'Actions',
+            width: 88,
+            sortable: false,
+            accessor: (row: Record<string, unknown>) => {
+                const symbol = String(row.ticker ?? row.symbol ?? '');
+                return <div className="flex items-center gap-1"><button type="button" onClick={(event) => { event.stopPropagation(); handleSymbolSelect(symbol); }} aria-label={`View ${symbol}`} className="min-h-9 min-w-9 rounded p-2 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"><Search size={13} /></button><button type="button" onClick={(event) => { event.stopPropagation(); handleAddToWatchlist(symbol); }} aria-label={`Add ${symbol} to Watchlist`} className="min-h-9 min-w-9 rounded p-2 text-blue-300 hover:bg-blue-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"><Plus size={13} /></button></div>;
+            },
+        },
+    ], [handleAddToWatchlist, handleSymbolSelect, visibleColumns]);
 
     return (
         <WidgetContainer
@@ -520,6 +817,26 @@ export function ScreenerWidget({
                         analyticsContext={analyticsContext}
                     />
 
+                    {activeSavedScreen && (
+                        <button
+                            type="button"
+                            onClick={handleToggleScreenAlert}
+                            disabled={!activeSavedScreenIsCurrent}
+                            aria-label={activeScreenAlertEnabled ? `Disable alerts for ${activeSavedScreen.name}` : `Enable alerts for ${activeSavedScreen.name}`}
+                            title={activeSavedScreenIsCurrent ? 'Notify when new stocks enter this saved screen' : 'Re-select the saved screen before enabling alerts'}
+                            className={cn(
+                                'flex h-8 items-center gap-1.5 rounded-lg border px-2 text-[10px] font-bold uppercase transition-all',
+                                activeScreenAlertEnabled
+                                    ? 'border-amber-500/50 bg-amber-500/10 text-amber-300'
+                                    : 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
+                                !activeSavedScreenIsCurrent && 'cursor-not-allowed opacity-40',
+                            )}
+                        >
+                            {activeScreenAlertEnabled ? <BellRing size={12} /> : <Bell size={12} />}
+                            Alert
+                        </button>
+                    )}
+
                     <div className="mx-1 h-4 w-[1px] bg-[var(--border-color)]" />
 
                     <div className="relative flex-1 max-w-[220px]">
@@ -528,6 +845,7 @@ export function ScreenerWidget({
                             value={search}
                             onChange={(event) => setSearch(event.target.value)}
                             placeholder="Quick search..."
+                            aria-label="Filter screener results"
                             className="h-8 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] pl-8 pr-3 text-[11px] text-[var(--text-primary)] outline-none transition-all placeholder:text-[var(--text-muted)] focus:border-blue-500/50"
                         />
                     </div>
@@ -630,6 +948,15 @@ export function ScreenerWidget({
                     </div>
                 </div>
 
+                {pendingWatchlistSymbol && (
+                    <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border-color)] bg-blue-500/5 px-3 py-2 text-xs" role="group" aria-label={`Choose watchlist for ${pendingWatchlistSymbol}`}>
+                        <span className="font-semibold text-[var(--text-primary)]">Add {pendingWatchlistSymbol} to:</span>
+                        {watchlistTargets.map((target) => <button key={`${target.dashboardId}:${target.tabId}:${target.widgetId}`} type="button" onClick={() => addSymbolToTarget(pendingWatchlistSymbol, target)} className="min-h-9 rounded border border-[var(--border-color)] px-3 py-1 text-[var(--text-secondary)] hover:border-blue-500/40 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">{target.label}</button>)}
+                        <button type="button" onClick={() => setPendingWatchlistSymbol(null)} className="min-h-9 rounded px-3 py-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Cancel</button>
+                    </div>
+                )}
+                {watchlistStatus && <div className="border-b border-[var(--border-color)] px-3 py-1 text-[10px] text-emerald-300" role="status">{watchlistStatus}</div>}
+
                 <FilterBar filters={activeFilters} onChange={setActiveFilters} analyticsContext={analyticsContext} />
 
                 {showAdvancedFilters && (
@@ -667,12 +994,13 @@ export function ScreenerWidget({
                             columns={tableColumns}
                             rowHeight={38}
                             onRowClick={(row) => handleSymbolSelect((row.ticker ?? row.symbol) as string)}
+                            interactiveCells
                             sortField={sortField}
                             sortOrder={sortOrder}
                             onSort={handleSort}
                         />
                     ) : viewMode === 'performance' ? (
-                        <PerformanceTable data={filteredData as never[]} />
+                        <PerformanceTable data={filteredData.map((stock) => ({ ...stock, symbol: String(stock.ticker ?? stock.symbol ?? '') })) as never[]} onSymbolClick={handleSymbolSelect} onAddToWatchlist={handleAddToWatchlist} />
                     ) : (
                         <div className="h-full overflow-y-auto p-4 scrollbar-hide">
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
@@ -686,6 +1014,7 @@ export function ScreenerWidget({
                                         change={typeof stock.change_1d === 'number' ? stock.change_1d : 0}
                                         changePercent={typeof stock.change_1d === 'number' ? stock.change_1d : 0}
                                         onClick={() => handleSymbolSelect(String(stock.ticker ?? stock.symbol ?? ''))}
+                                        onAddToWatchlist={() => handleAddToWatchlist(String(stock.ticker ?? stock.symbol ?? ''))}
                                     />
                                 ))}
                             </div>
@@ -705,13 +1034,23 @@ export function ScreenerWidget({
                                 <span className="text-[var(--text-muted)]">{market}</span>
                             </div>
                         )}
+                        {screenerData?.meta?.membership_current && (
+                            <div className="hidden items-center gap-2 sm:flex" title="Current constituent membership only; not historical point-in-time membership.">
+                                <span className={cn('h-1 w-1 rounded-full', screenerData.meta.membership_available ? 'bg-emerald-400' : 'bg-amber-400')} />
+                                <span>{screenerData.meta.membership_available ? `Current ${screenerData.meta.membership_source ?? 'provider'} members` : 'Current membership unavailable'}</span>
+                            </div>
+                        )}
+                        {screenerData?.meta?.discovery_coverage?.target_price ? (
+                            <span className="hidden sm:inline" title={screenerData.meta.target_reference_note}>Provider references, not advice</span>
+                        ) : null}
                     </div>
                     <WidgetMeta
                         updatedAt={sourceUpdatedAt}
                         isFetching={isFetching && hasData}
-                        isCached={isFallback}
-                        sourceLabel={source}
-                        note="Backend screening"
+                        isCached={Boolean(screenerData?.meta?.cached) || isFallback}
+                        isStale={Boolean(screenerData?.meta?.stale)}
+                        sourceLabel={screenerData?.meta?.source ?? source}
+                        note={`${screenerData?.meta?.visible_field_values ?? 0}/${screenerData?.meta?.visible_field_possible_values ?? 0} core fields · ${screenerData?.meta?.discovery_coverage?.target_price ?? 0} provider targets${screenerData?.meta?.fallback ? ' · fallback' : ''}`}
                         align="right"
                         className="text-[9px]"
                     />

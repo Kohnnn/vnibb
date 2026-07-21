@@ -28,7 +28,11 @@ export const screenerQueryKeys = {
 
 export function useScreenerData(options?: {
     symbol?: string;
+    universe?: 'ALL' | 'VN30' | 'VN100' | 'HNX30';
     exchange?: string;
+    as_of_date?: string;
+    min_listing_age_days?: number;
+    target_upside_min?: number;
     industry?: string;
     limit?: number;
     source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
