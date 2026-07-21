@@ -513,6 +513,10 @@ def _ensure_indexes(db: Any) -> None:
         [("symbol", 1), ("tradeDate", -1)],
         name="idx_symbol_tradeDate_desc",
     )
+    db.market_prices_eod.create_index(
+        [("tradeDate", -1)],
+        name="idx_tradeDate_desc",
+    )
     db.market_vnstock_premium_records.create_index(
         [("dataset", 1), ("symbol", 1), ("recordKey", 1)],
         unique=True,

@@ -8,6 +8,7 @@ Uses vnstock Trading.price_board() method.
 import asyncio
 import logging
 import math
+from datetime import UTC, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -45,11 +46,15 @@ class PriceBoardData(BaseModel):
     # Foreign trading
     foreign_buy_vol: Optional[int] = Field(None, alias="foreignBuyVol")
     foreign_sell_vol: Optional[int] = Field(None, alias="foreignSellVol")
+    foreign_buy_value: Optional[float] = Field(None, alias="foreignBuyValue")
+    foreign_sell_value: Optional[float] = Field(None, alias="foreignSellValue")
     # Reference prices
     ceiling: Optional[float] = None
     floor: Optional[float] = None
     reference: Optional[float] = None
-    
+    source: Optional[str] = None
+    refreshed_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="refreshedAt")
+
     model_config = {"populate_by_name": True}
 
 
@@ -83,8 +88,7 @@ class VnstockPriceBoardFetcher:
 
         Args:
             symbols: List of stock symbols (e.g., ['VNM', 'FPT', 'VIC'])
-            source: Data source (KBS or VCI). KBS is the recommended primary
-                because vnstock 3.5.x ships consistent snake_case columns;
+            source: Data source (KBS or VCI). KBS is the recommended primary;
                 VCI is used as fallback when KBS is degraded.
 
         Returns:
@@ -141,13 +145,7 @@ class VnstockPriceBoardFetcher:
             return []
 
         try:
-            # Normalize column names and build response. vnstock 3.5.x ships
-            # snake_case columns when `flatten_columns=True, drop_levels=[0]`
-            # for both KBS (foreign_buy_volume / foreign_sell_volume) and VCI
-            # (same names plus foreign_buy_value / foreign_sell_value). The
-            # earlier camelCase guesses (foreignBuyVol / fBuyVol) never match
-            # any 3.5.x output, so the fetcher silently shipped NULL foreign
-            # volumes for thousands of rows.
+            # Normalize the deployed snake_case provider fields and retained aliases.
             result = []
             for r in records:
                 # Extract symbol from record
@@ -183,9 +181,12 @@ class VnstockPriceBoardFetcher:
                     best_ask_vol=_coalesce("bestAskVol", "offerVol1", "ask_vol_1", "ask_1_volume"),
                     foreign_buy_vol=_coalesce("foreign_buy_volume", "foreignBuyVol", "fBuyVol"),
                     foreign_sell_vol=_coalesce("foreign_sell_volume", "foreignSellVol", "fSellVol"),
+                    foreign_buy_value=_coalesce("foreign_buy_value", "foreignBuyValue", "fBuyValue"),
+                    foreign_sell_value=_coalesce("foreign_sell_value", "foreignSellValue", "fSellValue"),
                     ceiling=_coalesce("ceiling", "ceilingPrice", "ceiling_price"),
                     floor=_coalesce("floor", "floorPrice", "floor_price"),
                     reference=_coalesce("reference", "refPrice", "ref_price", "reference_price"),
+                    source=src,
                 ))
 
             return result

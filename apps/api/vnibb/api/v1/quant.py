@@ -166,6 +166,7 @@ class MovingAverageCrossoverStrategy(BaseModel):
 class QuantBacktestRequest(BaseModel):
     strategy: MovingAverageCrossoverStrategy = Field(default_factory=MovingAverageCrossoverStrategy)
     period: str = "5Y"
+    as_of_date: date | None = None
     initial_capital: float = Field(default=100_000_000, gt=0, le=1_000_000_000_000)
     fee_bps: float = Field(default=15.0, ge=0, le=100)
     source: str = Field(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$")
@@ -192,6 +193,7 @@ class QuantBacktestResponseData(BaseModel):
     symbol: str
     strategy: Dict[str, Any]
     period: str
+    as_of_date: date
     adjustment_mode: str
     computed_at: datetime
     last_data_date: datetime | None = None
@@ -655,6 +657,7 @@ async def _load_quant_frame_with_warning(
     source: str,
     period: str,
     adjustment_mode: str,
+    include_latest_quote: bool = True,
 ) -> tuple[pd.DataFrame, str | None]:
     frame = await _load_price_frame(
         db=db,
@@ -664,11 +667,13 @@ async def _load_quant_frame_with_warning(
         source=source,
         adjustment_mode=adjustment_mode,
     )
-    frame, latest_quote_warning = await _merge_latest_quote_into_frame(
-        frame,
-        symbol=symbol,
-        source=source,
-    )
+    latest_quote_warning = None
+    if include_latest_quote:
+        frame, latest_quote_warning = await _merge_latest_quote_into_frame(
+            frame,
+            symbol=symbol,
+            source=source,
+        )
     return frame, _merge_warnings(
         _build_period_warning(frame, start_date, period),
         _build_staleness_warning(frame, end_date),
@@ -921,10 +926,11 @@ def _build_moving_average_backtest(
     initial_capital: float,
     fee_bps: float,
 ) -> tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[str]]:
-    data = frame[["time", "close"]].copy()
+    data = frame[["time", "open", "close"]].copy()
     data["time"] = pd.to_datetime(data["time"], errors="coerce")
+    data["open"] = pd.to_numeric(data["open"], errors="coerce")
     data["close"] = pd.to_numeric(data["close"], errors="coerce")
-    data = data.dropna(subset=["time", "close"]).sort_values("time").reset_index(drop=True)
+    data = data.dropna(subset=["time", "open", "close"]).sort_values("time").reset_index(drop=True)
 
     warnings: list[str] = []
     if strategy.fast_window >= strategy.slow_window:
@@ -958,42 +964,46 @@ def _build_moving_average_backtest(
     open_trade: dict[str, Any] | None = None
     trades: list[dict[str, Any]] = []
     curve: list[dict[str, Any]] = []
+    pending_order = 0
+    pending_signal_date: str | None = None
 
     for idx, row in data.iterrows():
-        price = float(row["close"])
+        open_price = float(row["open"])
+        close_price = float(row["close"])
         timestamp = pd.to_datetime(row["time"]).to_pydatetime()
-        signal = int(row["signal"])
-        previous_signal = int(data.loc[idx - 1, "signal"]) if idx > 0 else 0
 
-        if signal == 1 and previous_signal == 0 and cash > 0:
+        if pending_order == 1 and cash > 0:
             gross_cash = cash
-            shares = (cash * (1 - fee_rate)) / price
+            shares = (cash * (1 - fee_rate)) / open_price
             fee = gross_cash * fee_rate
             cash = 0.0
             open_trade = {
+                "signal_date": pending_signal_date,
                 "entry_date": timestamp.date().isoformat(),
-                "entry_price": _safe_float(price),
+                "entry_price": _safe_float(open_price),
                 "shares": _safe_float(shares, 6),
                 "entry_fee": _safe_float(fee),
             }
-        elif signal == 0 and previous_signal == 1 and shares > 0:
-            gross_value = shares * price
+        elif pending_order == -1 and shares > 0:
+            gross_value = shares * open_price
             fee = gross_value * fee_rate
             cash = gross_value - fee
             if open_trade is not None:
                 entry_price = float(open_trade["entry_price"] or 0)
                 entry_fee = float(open_trade["entry_fee"] or 0)
+                entry_cost = (shares * entry_price) + entry_fee
                 total_fee = entry_fee + fee
-                pnl = cash - (shares * entry_price) - entry_fee
+                pnl = cash - entry_cost
                 trades.append(
                     {
                         **open_trade,
+                        "exit_signal_date": pending_signal_date,
                         "exit_date": timestamp.date().isoformat(),
-                        "exit_price": _safe_float(price),
+                        "exit_price": _safe_float(open_price),
                         "exit_fee": _safe_float(fee),
                         "total_fee": _safe_float(total_fee),
                         "pnl": _safe_float(pnl),
-                        "return_pct": _safe_float(((price / entry_price) - 1) * 100 if entry_price else None),
+                        "return_pct": _safe_float((pnl / entry_cost) * 100 if entry_cost else None),
                         "holding_days": int(
                             (timestamp.date() - date.fromisoformat(open_trade["entry_date"])).days
                         ),
@@ -1002,21 +1012,39 @@ def _build_moving_average_backtest(
             shares = 0.0
             open_trade = None
 
-        equity = cash + shares * price
+        pending_order = 0
+        pending_signal_date = None
+        equity = cash + shares * close_price
         curve.append(
             {
                 "date": timestamp.date().isoformat(),
                 "equity": equity,
-                "close": price,
+                "close": close_price,
                 "position": 1 if shares > 0 else 0,
             }
+        )
+
+        signal = int(row["signal"])
+        previous_signal = int(data.loc[idx - 1, "signal"]) if idx > 0 else 0
+        if signal != previous_signal:
+            pending_order = 1 if signal > previous_signal else -1
+            pending_signal_date = timestamp.date().isoformat()
+
+    if pending_order:
+        action = "entry" if pending_order == 1 else "exit"
+        warnings.append(
+            f"{action.title()} signal generated on {pending_signal_date} close was not executed "
+            "because no next session open is available."
         )
 
     if shares > 0 and open_trade is not None:
         last = data.iloc[-1]
         last_price = float(last["close"])
         last_date = pd.to_datetime(last["time"]).date()
-        unrealized_pnl = (shares * last_price) - (shares * float(open_trade["entry_price"] or 0))
+        entry_price = float(open_trade["entry_price"] or 0)
+        entry_fee = float(open_trade["entry_fee"] or 0)
+        entry_cost = (shares * entry_price) + entry_fee
+        unrealized_pnl = (shares * last_price) - entry_cost
         trades.append(
             {
                 **open_trade,
@@ -1026,7 +1054,7 @@ def _build_moving_average_backtest(
                 "total_fee": open_trade["entry_fee"],
                 "pnl": _safe_float(unrealized_pnl),
                 "return_pct": _safe_float(
-                    ((last_price / float(open_trade["entry_price"] or last_price)) - 1) * 100
+                    (unrealized_pnl / entry_cost) * 100 if entry_cost else None
                 ),
                 "holding_days": int((last_date - date.fromisoformat(open_trade["entry_date"])).days),
                 "status": "open",
@@ -3923,7 +3951,12 @@ async def run_quant_backtest(
         raise HTTPException(status_code=400, detail="Symbol is required")
 
     period_upper = _normalize_quant_period(request.period)
-    end_date = date.today()
+    end_date = request.as_of_date or date.today()
+    if end_date > date.today():
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_AS_OF_DATE", "message": "as_of_date cannot be in the future."},
+        )
     start_date = _resolve_start_date(period_upper, end_date)
     adjustment_mode = _normalize_adjustment_mode(request.adjustment_mode)
 
@@ -3935,6 +3968,7 @@ async def run_quant_backtest(
         source=request.source,
         period=period_upper,
         adjustment_mode=adjustment_mode,
+        include_latest_quote=False,
     )
     last_data_timestamp = _resolve_frame_last_timestamp(frame)
 
@@ -3950,6 +3984,7 @@ async def run_quant_backtest(
         symbol=symbol_upper,
         strategy=request.strategy.model_dump(),
         period=period_upper,
+        as_of_date=end_date,
         adjustment_mode=adjustment_mode,
         computed_at=last_data_timestamp or datetime.utcnow(),
         last_data_date=last_data_timestamp,

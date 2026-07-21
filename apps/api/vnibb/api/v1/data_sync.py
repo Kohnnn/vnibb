@@ -1140,5 +1140,10 @@ async def sync_full_market(
 async def get_sync_status():
     """Get scheduler job status."""
     from vnibb.core.scheduler import get_job_status
+    from vnibb.core.scheduler_lock import get_scheduler_lock_status
 
-    return get_job_status()
+    return {
+        **get_job_status(),
+        "role": settings.scheduler_role,
+        "lock": get_scheduler_lock_status(),
+    }

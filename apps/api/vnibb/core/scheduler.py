@@ -16,11 +16,15 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 
+from vnibb.core.config import settings
+from vnibb.core.scheduler_lock import DistributedJobLock
+
 logger = logging.getLogger(__name__)
 
 # Global scheduler instance
 _scheduler = None
 _job_guards: dict[str, asyncio.Lock] = {}
+_scheduler_missed_runs = 0
 
 DAILY_SYNC_TIMEOUT_SECONDS = 2 * 60 * 60
 DAILY_TRADING_TIMEOUT_SECONDS = 2 * 60 * 60
@@ -34,6 +38,8 @@ PREDICTION_MARKET_SNAPSHOT_TIMEOUT_SECONDS = 20 * 60
 PREDICTION_MARKET_INTRADAY_SNAPSHOT_TIMEOUT_SECONDS = 5 * 60
 PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES = 15
 PREDICTION_MARKET_POPULATE_TIMEOUT_SECONDS = 5 * 60
+DATA_QUALITY_TIMEOUT_SECONDS = 15 * 60
+REALTIME_CONTROL_TIMEOUT_SECONDS = 5 * 60
 
 # Last-run counters for the ``predictions_status`` health contribution. Reset
 # at the start of each guarded run; read by the ``/health/predictions``
@@ -56,6 +62,16 @@ async def _run_guarded_job(
         return
 
     async with lock:
+        distributed_lock = DistributedJobLock(job_name, timeout_seconds)
+        lock_state = await distributed_lock.acquire()
+        if lock_state == "contended":
+            logger.warning("Skipping %s because another scheduler owns its lock", job_name)
+            return
+        if lock_state == "unavailable" and settings.scheduler_lock_mode == "required":
+            logger.error("Skipping %s because required scheduler coordination is unavailable", job_name)
+            return
+        if lock_state == "unavailable":
+            logger.warning("Running %s without distributed coordination", job_name)
         started_at = datetime.utcnow()
         try:
             if timeout_seconds > 0:
@@ -74,7 +90,6 @@ async def _run_guarded_job(
             )
         except Exception as exc:
             elapsed = (datetime.utcnow() - started_at).total_seconds()
-            # ERROR (not WARNING): a swallowed failure once masqueraded as success for ~15 days.
             logger.error(
                 "%s failed after %.1fs: %s",
                 job_name,
@@ -82,6 +97,15 @@ async def _run_guarded_job(
                 exc,
                 exc_info=True,
             )
+        finally:
+            if lock_state == "acquired":
+                await distributed_lock.release()
+
+
+def _record_scheduler_miss(event: object) -> None:
+    global _scheduler_missed_runs
+    _scheduler_missed_runs += 1
+    logger.error("Scheduler missed run: %s", getattr(event, "job_id", "unknown"))
 
 
 def get_scheduler():
@@ -98,6 +122,7 @@ def get_scheduler():
 
 def configure_scheduler():
     """Configure all scheduled jobs."""
+    from apscheduler.events import EVENT_JOB_MISSED
     from apscheduler.triggers.cron import CronTrigger
 
     from vnibb.services.data_pipeline import (
@@ -110,6 +135,7 @@ def configure_scheduler():
     from vnibb.services.sync_all_data import run_daily_market_sync, run_supplemental_company_sync
 
     scheduler = get_scheduler()
+    scheduler.add_listener(_record_scheduler_miss, EVENT_JOB_MISSED)
 
     async def guarded_daily_market_sync():
         await _run_guarded_job(
@@ -144,6 +170,13 @@ def configure_scheduler():
             "intraday_sync",
             run_intraday_sync,
             INTRADAY_TIMEOUT_SECONDS,
+        )
+
+    async def guarded_data_quality_check():
+        await _run_guarded_job(
+            "daily_data_quality_check",
+            run_scheduled_data_quality_check,
+            DATA_QUALITY_TIMEOUT_SECONDS,
         )
 
     # =========================================================================
@@ -183,7 +216,7 @@ def configure_scheduler():
     # Coverage + freshness SLA checks with warning logs
     # =========================================================================
     scheduler.add_job(
-        run_scheduled_data_quality_check,
+        guarded_data_quality_check,
         trigger=CronTrigger(hour=9, minute=40, timezone="UTC"),
         id="daily_data_quality_check",
         name="Daily Data Quality Check",
@@ -264,11 +297,11 @@ def configure_scheduler():
         from vnibb.services.manifold_service import (
             ingest_manifold_markets_with_default_client,
         )
-        from vnibb.services.predictit_service import (
-            ingest_predictit_markets_with_default_client,
-        )
         from vnibb.services.prediction_market_service import (
             ingest_polymarket_gamma_markets_with_default_client,
+        )
+        from vnibb.services.predictit_service import (
+            ingest_predictit_markets_with_default_client,
         )
 
         async def _run():
@@ -494,45 +527,45 @@ def configure_scheduler():
     )
     logger.info("Scheduled: intraday_sync every 5 min during market hours")
 
-    # =========================================================================
-    # Real-time Streaming - Market hours only
-    # Start at 9:00 AM VNT, Stop at 3:00 PM VNT
-    # =========================================================================
     async def start_realtime():
-        await get_realtime_pipeline().start_streaming()
+        await get_realtime_pipeline().reconcile_streaming()
 
     async def stop_realtime():
         await get_realtime_pipeline().stop_streaming()
 
     scheduler.add_job(
         start_realtime,
-        trigger=CronTrigger(
-            hour=2,
-            minute=0,
-            day_of_week="mon-fri",
-            timezone="UTC",
-        ),
+        trigger=CronTrigger(hour=2, minute=0, day_of_week="mon-fri", timezone="UTC"),
         id="realtime_start",
         name="Start Real-time Streaming",
         replace_existing=True,
         max_instances=1,
     )
-    logger.info("Scheduled: realtime_start at 2:00 UTC (9:00 AM VNT)")
-
     scheduler.add_job(
         stop_realtime,
-        trigger=CronTrigger(
-            hour=8,
-            minute=0,
-            day_of_week="mon-fri",
-            timezone="UTC",
-        ),
+        trigger=CronTrigger(hour=4, minute=30, day_of_week="mon-fri", timezone="UTC"),
+        id="realtime_lunch_stop",
+        name="Stop Real-time Streaming for Lunch",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        start_realtime,
+        trigger=CronTrigger(hour=6, minute=0, day_of_week="mon-fri", timezone="UTC"),
+        id="realtime_afternoon_start",
+        name="Restart Real-time Streaming",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        stop_realtime,
+        trigger=CronTrigger(hour=7, minute=45, day_of_week="mon-fri", timezone="UTC"),
         id="realtime_stop",
         name="Stop Real-time Streaming",
         replace_existing=True,
         max_instances=1,
     )
-    logger.info("Scheduled: realtime_stop at 8:00 UTC (3:00 PM VNT)")
+    logger.info("Scheduled: realtime streaming for 9:00-11:30 and 13:00-14:45 VNT")
 
 
 def start_scheduler():
@@ -589,12 +622,17 @@ def _maybe_populate_prediction_markets_on_startup() -> None:
         logger.warning("could not schedule populate_prediction_markets_on_startup: %s", exc)
 
 
-def shutdown_scheduler():
-    """Shutdown the scheduler gracefully."""
+async def shutdown_scheduler() -> bool:
+    from vnibb.services.realtime_pipeline import get_realtime_pipeline
+
+    realtime_stopped = await get_realtime_pipeline().stop_streaming()
+    if not realtime_stopped:
+        logger.error("Real-time streaming cleanup failed; stopping scheduler without waiting")
     scheduler = get_scheduler()
     if scheduler.running:
-        scheduler.shutdown(wait=True)
+        scheduler.shutdown(wait=realtime_stopped)
         logger.info("Scheduler shutdown complete")
+    return realtime_stopped
 
 
 def get_job_status() -> dict:
@@ -615,6 +653,7 @@ def get_job_status() -> dict:
     return {
         "running": scheduler.running,
         "jobs": jobs,
+        "missed_runs": _scheduler_missed_runs,
     }
 
 

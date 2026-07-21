@@ -10,7 +10,7 @@ import asyncio
 import logging
 import math
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -360,6 +360,13 @@ class ScreenerData(BaseModel):
         alias="fundamentalAsOf",
         description="Snapshot date (YYYY-MM-DD) of the fundamental valuation data",
     )
+    listing_date: Optional[date] = Field(None, alias="listingDate")
+    listing_age_days: Optional[int] = Field(None, alias="listingAgeDays")
+    target_price: Optional[float] = Field(None, alias="targetPrice")
+    target_upside_pct: Optional[float] = Field(None, alias="targetUpsidePct")
+    recommendation: Optional[str] = None
+    target_source: Optional[str] = Field(None, alias="targetSource")
+    profile_refreshed_at: Optional[datetime] = Field(None, alias="profileRefreshedAt")
 
     # ==========================================================================
     # TIMESTAMP

@@ -26,6 +26,11 @@ from vnibb.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def sentry_release() -> str:
+    return f"{settings.app_name}@{settings.release_revision}"
+
+
 # Global flag to track if Sentry is initialized
 _sentry_initialized = False
 
@@ -62,7 +67,7 @@ def init_monitoring(app: FastAPI) -> None:
             sentry_sdk.init(
                 dsn=settings.sentry_dsn,
                 environment=settings.environment,
-                release=f"{settings.app_name}@{settings.app_version}",
+                release=sentry_release(),
                 integrations=[
                     FastApiIntegration(
                         transaction_style="endpoint",  # Group by endpoint
@@ -90,7 +95,7 @@ def init_monitoring(app: FastAPI) -> None:
             _sentry_initialized = True
             logger.info(
                 f"Sentry initialized: environment={settings.environment}, "
-                f"traces_sample_rate={settings.sentry_traces_sample_rate}"
+                f"traces_sample_rate={settings.sentry_traces_sample_rate}, revision={settings.release_revision}"
             )
         except ImportError:
             logger.warning(

@@ -22,6 +22,7 @@ from vnibb.core.appwrite_client import (
     list_appwrite_documents_paginated,
 )
 from vnibb.core.config import settings
+from vnibb.core.logging_config import setup_logging
 from vnibb.services.ai_context_service import AIContextService, sanitize_context_value
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
@@ -1237,6 +1238,7 @@ def create_http_app() -> FastAPI:
                 "server": "VNIBB Read-Only MCP",
                 "read_only": True,
                 "mcp_endpoint": "/mcp",
+                "revision": settings.release_revision,
                 "appwrite": appwrite_runtime_summary(),
             }
         )
@@ -1266,6 +1268,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    setup_logging()
     args = parse_args()
     if args.transport == "stdio":
         mcp.run(transport="stdio")

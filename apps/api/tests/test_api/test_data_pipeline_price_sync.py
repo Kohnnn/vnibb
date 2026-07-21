@@ -7,6 +7,7 @@ import pytest
 
 import vnibb.services.data_pipeline as data_pipeline_module
 from vnibb.core.config import settings
+from vnibb.providers.vnstock.price_board import PriceBoardData
 from vnibb.services.appwrite_price_service import AppwritePriceService
 from vnibb.services.data_pipeline import DataPipeline
 
@@ -146,6 +147,61 @@ async def test_sync_daily_prices_uses_fast_fail_history_fetch(monkeypatch):
 
     assert total == 1
     assert fetch_calls == [("VNM", "2026-03-16", "2026-03-17", "1D", True)]
+
+
+@pytest.mark.asyncio
+async def test_sync_foreign_trading_persists_derived_values(monkeypatch):
+    pipeline = DataPipeline()
+    statements = []
+
+    class CapturingSession(FakeSession):
+        async def execute(self, stmt, params=None):
+            statements.append(stmt)
+            return FakeResult()
+
+    async def fake_fetch(symbols, source):
+        assert symbols == ["VNM", "FPT"]
+        return [
+            PriceBoardData(
+                symbol="VNM",
+                foreign_buy_vol=100,
+                foreign_sell_vol=40,
+                foreign_buy_value=1_500.0,
+                foreign_sell_value=600.0,
+            ),
+            PriceBoardData(
+                symbol="FPT",
+                foreign_buy_vol=80,
+                foreign_sell_vol=20,
+                foreign_buy_value=900.0,
+            ),
+        ]
+
+    async def fake_wait_for_rate_limit(bucket):
+        assert bucket == "price_board"
+
+    monkeypatch.setattr(
+        "vnibb.providers.vnstock.price_board.VnstockPriceBoardFetcher.fetch",
+        fake_fetch,
+    )
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", fake_wait_for_rate_limit)
+    monkeypatch.setattr(data_pipeline_module, "async_session_maker", lambda: CapturingSession())
+    monkeypatch.setattr(settings, "cache_foreign_trading_chunked", False)
+
+    count = await pipeline.sync_foreign_trading(
+        trade_date=date(2026, 3, 17),
+        symbols=["VNM", "FPT"],
+    )
+
+    compiled = [statement.compile().params for statement in statements]
+    vnm = next(values for values in compiled if values.get("symbol") == "VNM")
+    fpt = next(values for values in compiled if values.get("symbol") == "FPT")
+    assert count == 2
+    assert vnm["buy_value"] == 1_500.0
+    assert vnm["sell_value"] == 600.0
+    assert vnm["net_value"] == 900.0
+    assert vnm["net_volume"] == 60
+    assert fpt["net_value"] is None
 
 
 @pytest.mark.asyncio

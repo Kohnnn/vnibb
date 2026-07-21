@@ -3,7 +3,7 @@ WebSocket API for Real-time Price Updates
 
 Provides WebSocket endpoint for streaming live stock prices.
 Supports multiple symbol subscriptions per connection.
-Auto start/stop during market hours (9 AM - 3 PM VNT).
+Streams active sessions and idles outside them.
 """
 
 import asyncio
@@ -11,7 +11,7 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -59,34 +59,58 @@ def _is_allowed_ws_origin(origin: str) -> bool:
     return False
 
 
-def is_market_open() -> bool:
-    """Check if Vietnam stock market is currently open.
+def _market_time(at: datetime | None = None) -> datetime:
+    if at is None:
+        return datetime.now(VN_TZ)
+    return VN_TZ.localize(at) if at.tzinfo is None else at.astimezone(VN_TZ)
 
-    Market hours: 9:00 AM - 3:00 PM VNT, Monday-Friday
-    """
-    now = datetime.now(VN_TZ)
 
-    # Weekday check (Mon=0, Sun=6)
+def get_market_phase(
+    at: datetime | None = None,
+) -> Literal["pre-open", "morning", "lunch", "afternoon", "post-close", "after-close", "weekend"]:
+    now = _market_time(at)
     if now.weekday() >= 5:
-        return False
+        return "weekend"
 
-    # Time check (9:00 - 15:00)
-    market_open = now.replace(hour=9, minute=0, second=0, microsecond=0)
-    market_close = now.replace(hour=15, minute=0, second=0, microsecond=0)
+    current_time = now.time()
+    if current_time < now.replace(hour=9, minute=0, second=0, microsecond=0).time():
+        return "pre-open"
+    if current_time < now.replace(hour=11, minute=30, second=0, microsecond=0).time():
+        return "morning"
+    if current_time < now.replace(hour=13, minute=0, second=0, microsecond=0).time():
+        return "lunch"
+    if current_time < now.replace(hour=14, minute=45, second=0, microsecond=0).time():
+        return "afternoon"
+    if current_time < now.replace(hour=15, minute=0, second=0, microsecond=0).time():
+        return "post-close"
+    return "after-close"
 
-    return market_open <= now <= market_close
+
+def is_market_open(at: datetime | None = None) -> bool:
+    return get_market_phase(at) in {"morning", "afternoon"}
 
 
-def get_market_status() -> dict:
-    """Get detailed market status information."""
-    now = datetime.now(VN_TZ)
-    is_open = is_market_open()
+def get_market_status(at: datetime | None = None) -> dict:
+    now = _market_time(at)
+    phase = get_market_phase(now)
+    is_open = phase in {"morning", "afternoon"}
+    messages = {
+        "pre-open": "Market opens at 09:00 ICT",
+        "morning": "Morning session is open",
+        "lunch": "Lunch break; market resumes at 13:00 ICT",
+        "afternoon": "Afternoon session is open",
+        "post-close": "Trading is closed; final prices are settling until 15:00 ICT",
+        "after-close": "Market is closed",
+        "weekend": "Market is closed for the weekend",
+    }
 
     return {
         "is_open": is_open,
+        "phase": phase,
         "current_time": now.isoformat(),
         "timezone": "Asia/Ho_Chi_Minh",
-        "message": "Market is open" if is_open else "Market is closed",
+        "schedule": "09:00–11:30 + 13:00–14:45 ICT, Mon–Fri",
+        "message": messages[phase],
     }
 
 

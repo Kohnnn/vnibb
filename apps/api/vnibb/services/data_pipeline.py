@@ -62,6 +62,7 @@ from vnibb.models.market_news import MarketNews
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.sync_status import SyncStatus
 from vnibb.core.retry import with_retry
+from vnibb.services.realtime_pipeline import is_vietnam_market_open
 from vnibb.providers.vnstock.financial_ratios import (
     FinancialRatiosQueryParams,
     VnstockFinancialRatiosFetcher,
@@ -601,36 +602,7 @@ class DataPipeline:
             return time(hour=9, minute=0)
 
     def _is_market_hours(self, check_time: Optional[datetime] = None) -> bool:
-        try:
-            tz = ZoneInfo(settings.intraday_market_tz)
-        except Exception:
-            tz = ZoneInfo("Asia/Ho_Chi_Minh")
-
-        now = check_time.astimezone(tz) if check_time else datetime.now(tz)
-        if now.weekday() >= 5:
-            return False
-
-        market_open = self._parse_time_value(settings.intraday_market_open, "09:00")
-        market_close = self._parse_time_value(settings.intraday_market_close, "15:00")
-        break_start = (
-            self._parse_time_value(settings.intraday_break_start, "11:30")
-            if settings.intraday_break_start
-            else None
-        )
-        break_end = (
-            self._parse_time_value(settings.intraday_break_end, "13:00")
-            if settings.intraday_break_end
-            else None
-        )
-
-        current_time = now.time()
-        if current_time < market_open or current_time > market_close:
-            return False
-
-        if break_start and break_end and break_start <= current_time <= break_end:
-            return False
-
-        return True
+        return is_vietnam_market_open(check_time)
 
     def _is_after_market_close(self, check_time: Optional[datetime] = None) -> bool:
         try:
@@ -2382,6 +2354,12 @@ class DataPipeline:
             except (TypeError, ValueError):
                 return None
 
+        def _normalize_share_count(value: Any) -> Optional[float]:
+            parsed = _parse_float(value)
+            if parsed in (None, 0):
+                return None
+            return parsed * 1_000_000.0 if abs(parsed) < 1_000_000 else parsed
+
         def _parse_date(value: Any) -> Optional[date]:
             if value is None:
                 return None
@@ -3249,6 +3227,14 @@ class DataPipeline:
                 if parsed is not None:
                     return parsed
             return None
+
+        def _normalize_dividend_yield(value: Any) -> Optional[float]:
+            parsed = _coerce_float(value)
+            if parsed is None:
+                return None
+            while abs(parsed) > 100:
+                parsed /= 100
+            return parsed
 
         def _resolve_lookup(
             keyed: Dict[Tuple[int, int], Dict[str, Optional[float]]],
@@ -4884,6 +4870,8 @@ class DataPipeline:
                         continue
                     buy_vol = payload.get("foreign_buy_vol")
                     sell_vol = payload.get("foreign_sell_vol")
+                    buy_value = payload.get("foreign_buy_value")
+                    sell_value = payload.get("foreign_sell_value")
                     values = {
                         "symbol": symbol,
                         "trade_date": trade_date,
@@ -4892,9 +4880,11 @@ class DataPipeline:
                         "net_volume": (buy_vol - sell_vol)
                         if buy_vol is not None and sell_vol is not None
                         else None,
-                        "buy_value": None,
-                        "sell_value": None,
-                        "net_value": None,
+                        "buy_value": buy_value,
+                        "sell_value": sell_value,
+                        "net_value": (buy_value - sell_value)
+                        if buy_value is not None and sell_value is not None
+                        else None,
                         "created_at": datetime.utcnow(),
                         "updated_at": datetime.utcnow(),
                     }
@@ -5640,6 +5630,14 @@ class DataPipeline:
 
         if not symbols:
             return 0
+
+        symbol_exchange: Dict[str, str] = {}
+        symbol_chunk_index: Dict[str, int] = {}
+        if settings.cache_order_flow_chunked:
+            symbol_exchange, symbol_chunk_index = await self._get_exchange_and_chunk_index(
+                symbols,
+                settings.cache_chunk_size,
+            )
 
         start_index = 0
         if progress and progress.get("stage") == "block_trades":
@@ -6422,20 +6420,22 @@ async def run_hourly_news_sync():
 
 async def run_intraday_sync():
     """Wrapper for scheduler to run limited market-hours vnstock updates."""
+    if not is_vietnam_market_open():
+        logger.info("Intraday scheduler sync skipped outside active market sessions")
+        return
     symbols = await _get_scheduler_priority_symbols(settings.scheduler_live_symbols_per_run)
     if not symbols:
         logger.info("Intraday sync skipped: no priority symbols available")
         return
 
     results: Dict[str, int] = {}
-    results["foreign_trading"] = await data_pipeline.sync_foreign_trading(symbols=symbols)
     results["intraday_trades"] = await data_pipeline.sync_intraday_trades(symbols=symbols)
     results["orderbook_snapshots"] = await data_pipeline.sync_orderbook_snapshots(symbols=symbols)
     results["derivative_prices"] = await data_pipeline.sync_derivatives_prices()
 
     from vnibb.services.appwrite_population import populate_appwrite_tables
 
-    tables = ["foreign_trading", "order_flow_daily", "derivative_prices"]
+    tables = ["order_flow_daily", "derivative_prices"]
     if settings.store_intraday_trades:
         tables.append("intraday_trades")
     if not settings.orderbook_at_close_only:

@@ -266,7 +266,11 @@ class RedisClient:
 
     async def connect(self) -> None:
         """Initialize Redis connection pool."""
-        if not _redis_cache_enabled():
+        if (
+            not _redis_cache_enabled()
+            and settings.rate_limit_mode == "off"
+            and not settings.scheduler_lock_enabled
+        ):
             return
 
         if not self.url:

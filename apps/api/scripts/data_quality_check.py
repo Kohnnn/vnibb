@@ -20,13 +20,13 @@ def parse_args() -> argparse.Namespace:
         "--max-stale-days",
         type=int,
         default=7,
-        help="Warn when freshness timestamps are older than this many calendar days",
+        help="Warn when freshness timestamps are older than this many market business days",
     )
     parser.add_argument(
         "--vietcap-max-stale-days",
         type=int,
         default=5,
-        help="Warn when Vietcap EOD is older than this many calendar days",
+        help="Warn when Vietcap EOD is older than this many market business days",
     )
     parser.add_argument(
         "--output-json",

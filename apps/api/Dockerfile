@@ -1,112 +1,64 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
 
 WORKDIR /app
 
 ARG DEBIAN_FRONTEND=noninteractive
+ARG IMAGE_RELEASE_REVISION=unknown
+ARG VNSTOCK_INSTALLER_SHA256
+ARG VNSTOCK_PREMIUM_REQUIRED_MODULES=vnstock_data,vnstock_ta,vnstock_pipeline,vnstock_news,vnii
 
-# Install system dependencies
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    wget \
-    curl \
-    ca-certificates \
-    git \
-    tzdata \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Fix: Ensure installed packages are importable by scripts
-ENV PYTHONPATH=/usr/local/lib/python3.12/site-packages
-ENV TZ=Asia/Ho_Chi_Minh
-
-# Environment for non-interactive vnstock installation
-ENV VNSTOCK_LANGUAGE=2 \
+ENV PATH=/opt/venv/bin:$PATH \
+    PYTHONPATH=/opt/venv/lib/python3.12/site-packages \
+    TZ=Asia/Ho_Chi_Minh \
     VNSTOCK_INTERACTIVE=0 \
-    VNSTOCK_RUNTIME_INSTALL=0 \
+    VNSTOCK_LANGUAGE=2 \
     PYTHONUNBUFFERED=1
 
-# Create directories
-RUN mkdir -p /root/.vnstock /app/data /app/logs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    git \
+    libpq-dev \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m venv /opt/venv
 
-# Download vnstock CLI installer
-RUN wget -q https://vnstocks.com/files/vnstock-cli-installer.run \
-    -O /app/vnstock-cli-installer.run && \
-    chmod +x /app/vnstock-cli-installer.run
-
-# Copy application source first (pyproject build needs README/package files)
 COPY . .
 
-# Install Python dependencies
+RUN printf '%s\n' "$IMAGE_RELEASE_REVISION" > /app/.release-revision
+
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && pip install --no-cache-dir . \
-    && pip install --no-cache-dir --upgrade "vnstock>=4.0.4,<4.1" "vnai>=2.4.0,<2.5" \
-    && python3 -c "from importlib.metadata import version; print(f'vnstock {version(\"vnstock\")} | vnai {version(\"vnai\")}')"
+    && python -c "from importlib.metadata import version; print(f'vnstock {version(\"vnstock\")} | vnai {version(\"vnai\")}')"
 
-# Optional: install vnii from VNStock index for premium checks.
-# Do not fail the image build if index/package is unavailable.
-ARG VNSTOCK_EXTRA_INDEX_URL=https://vnstocks.com/api/simple
-RUN pip install --no-cache-dir --upgrade --extra-index-url "${VNSTOCK_EXTRA_INDEX_URL}" "vnii>=0.2.4,<0.3" || \
-    echo "INFO: vnii unavailable from extra index; continuing in free-compatible mode."
-
-# Explicitly verify vnai remains importable for the installer/runtime path
-RUN python3 -c "import vnai; print(f'vnai installed at {vnai.__file__}')"
-
-# Premium runtime bootstrap. When VNSTOCK_API_KEY is provided as a build
-# arg, install the Golden Sponsor packages (vnstock_news, vnstock_data,
-# vnstock_ta, vnstock_pipeline) so the news crawler and insider providers
-# work out of the box. Falls back gracefully when the key is absent.
-#
-# Previously this was commented out, requiring operators to either build
-# with Dockerfile.premium or run a manual `pip install` inside the
-# container after each redeploy. That manual step kept getting missed
-# and left market_news stale for 35+ days (B1 from the QA evaluation
-# report). Re-enabling the bootstrap closes the gap.
-ARG VNSTOCK_API_KEY
-RUN if [ -n "$VNSTOCK_API_KEY" ]; then \
-    echo "Installing vnstock premium packages with API key..."; \
-    /app/vnstock-cli-installer.run -- --api-key "$VNSTOCK_API_KEY" || \
-    echo "WARNING: vnstock-cli-installer failed; runtime will rely on free-tier sources."; \
-    else \
-    echo "WARNING: VNSTOCK_API_KEY not provided. Premium packages not installed."; \
+RUN --mount=type=secret,id=vnstock_api_key,required=false \
+    set -eu; \
+    if [ -s /run/secrets/vnstock_api_key ]; then \
+        test -n "$VNSTOCK_INSTALLER_SHA256"; \
+        curl --fail --silent --show-error --location https://vnstocks.com/files/vnstock-cli-installer.run --output /tmp/vnstock-cli-installer.run; \
+        printf '%s  %s\n' "$VNSTOCK_INSTALLER_SHA256" /tmp/vnstock-cli-installer.run | sha256sum --check --status -; \
+        chmod +x /tmp/vnstock-cli-installer.run; \
+        /tmp/vnstock-cli-installer.run -- --api-key "$(cat /run/secrets/vnstock_api_key)"; \
+        premium_site_packages="$(find /root/.venv/lib -type d -path '*/site-packages' -print -quit)"; \
+        test -n "$premium_site_packages"; \
+        for module in $(printf '%s' "$VNSTOCK_PREMIUM_REQUIRED_MODULES" | tr ',' ' '); do find "$premium_site_packages" -maxdepth 1 -name "${module}*" -exec cp -a {} /opt/venv/lib/python3.12/site-packages/ \;; done; \
+        pip install --no-cache-dir html2text pta_reload tqdm; \
+        VNSTOCK_MODULES="$VNSTOCK_PREMIUM_REQUIRED_MODULES" python -c "import importlib, os; [importlib.import_module(module.strip()) for module in os.environ['VNSTOCK_MODULES'].split(',') if module.strip()]"; \
+        rm -rf /tmp/vnstock-cli-installer.run /root/.venv; \
     fi
 
-# Premium transitive dependencies. The vnstock Golden Sponsor packages
-# pull these in as runtime imports but the installer above does not
-# always install them, leaving `import vnstock_news` and
-# `import vnstock_ta` failing inside the running container even after a
-# successful premium bootstrap. We pin them explicitly so future rebuilds
-# never regress (QA-v2 oracle rebuild — discovered when re-deploying
-# v1.3.0 left market_news pipeline still producing 0 articles).
-RUN pip install --no-cache-dir html2text pta_reload tqdm
-
-# The premium installer can downgrade `vnstock`/`vnii` while installing sponsor
-# packages into its environment. Re-apply the runtime baseline last so runtime
-# warnings and imports see the intended package versions.
-RUN pip install --no-cache-dir --upgrade \
-    --extra-index-url "${VNSTOCK_EXTRA_INDEX_URL}" \
-    "vnstock>=4.0.4,<4.1" \
-    "vnii>=0.2.4,<0.3" \
-    && python3 -c "from importlib.metadata import version; print(f'final vnstock {version(\"vnstock\")} | vnii {version(\"vnii\")}')"
-
-
-# Copy entrypoint script and set permissions (as root)
 COPY entrypoint.sh .
-RUN chmod +x entrypoint.sh
+RUN chmod +x entrypoint.sh \
+    && useradd -m -u 1000 appuser \
+    && chown -R appuser:appuser /app /opt/venv
 
-# Create non-root user and set ownership
-RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
-
-# Health check (support PORT or WEB_PORT runtime env)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD sh -c 'curl -f "http://localhost:${PORT:-8000}/live" || curl -f "http://localhost:${WEB_PORT:-8000}/live" || exit 1'
+    CMD sh -c 'curl -fsS "http://localhost:${PORT:-8000}/ready" || exit 1'
 
-# Switch to non-root user
-# USER appuser
+USER appuser
 
-# Expose port
 EXPOSE 8000
 
-# Run application via entrypoint
 ENTRYPOINT ["./entrypoint.sh"]

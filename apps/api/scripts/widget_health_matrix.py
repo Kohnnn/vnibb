@@ -136,6 +136,47 @@ def evaluate_widget_state(widget: str, payload: Any) -> tuple[str, str]:
     return ("unknown", "No widget-state rule configured")
 
 
+def evaluate_reliability_contract(
+    report: dict[str, Any],
+    *,
+    max_5xx_rate: float,
+    max_latency_ms: float,
+    max_readiness_failures: int,
+    scheduler_missed_runs: int | None,
+    max_scheduler_missed_runs: int,
+) -> dict[str, Any]:
+    request_attempts = sum(row.get("request_attempts", 0) for row in report["rows"])
+    server_errors = sum(row.get("server_error_attempts", 0) for row in report["rows"])
+    readiness = next((row for row in report["rows"] if row["widget"] == "ready"), None)
+    readiness_failures = 0 if readiness is None else readiness["attempts"] - readiness["ok_attempts"]
+    max_observed_latency_ms = max((row["max_latency_ms"] or 0 for row in report["rows"]), default=0)
+    checks = {
+        "5xx_rate": server_errors / request_attempts if request_attempts else 1.0,
+        "max_latency_ms": max_observed_latency_ms,
+        "readiness_failures": readiness_failures,
+        "scheduler_missed_runs": scheduler_missed_runs,
+    }
+    failures = []
+    if checks["5xx_rate"] > max_5xx_rate:
+        failures.append("5xx_rate")
+    if checks["max_latency_ms"] > max_latency_ms:
+        failures.append("max_latency_ms")
+    if checks["readiness_failures"] > max_readiness_failures:
+        failures.append("readiness_failures")
+    if scheduler_missed_runs is not None and scheduler_missed_runs > max_scheduler_missed_runs:
+        failures.append("scheduler_missed_runs")
+    return {"checks": checks, "failures": failures, "ok": not failures}
+
+
+def fetch_scheduler_missed_runs(url: str, timeout: float) -> int | None:
+    result = fetch_status(url, timeout)
+    payload = _decode_json_sample(result.get("sample"))
+    if not result.get("ok") or not isinstance(payload, dict):
+        return None
+    value = payload.get("missed_runs")
+    return int(value) if isinstance(value, int) and value >= 0 else None
+
+
 def run_matrix(base_url: str, repeats: int, timeout: float) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     normalized_base = base_url.rstrip("/")
@@ -169,6 +210,10 @@ def run_matrix(base_url: str, repeats: int, timeout: float) -> dict[str, Any]:
                 "widget_state": widget_state,
                 "state_reason": state_reason,
                 "last_error": next((a.get("error") for a in reversed(attempts) if a.get("error")), None),
+                "request_attempts": len(attempts),
+                "server_error_attempts": sum(
+                    1 for attempt in attempts if (attempt.get("status") or 0) >= 500
+                ),
             }
         )
 
@@ -224,6 +269,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=8.0)
+    parser.add_argument("--max-5xx-rate", type=float, default=0.0)
+    parser.add_argument("--max-latency-ms", type=float, default=3000.0)
+    parser.add_argument("--max-readiness-failures", type=int, default=0)
+    parser.add_argument("--scheduler-status-url", default=os.getenv("VNIBB_SCHEDULER_STATUS_URL", ""))
+    parser.add_argument("--max-scheduler-missed-runs", type=int, default=0)
     parser.add_argument(
         "--fail-on-error",
         action="store_true",
@@ -241,7 +291,21 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     report = run_matrix(args.base_url, repeats=args.repeats, timeout=args.timeout)
+    scheduler_missed_runs = (
+        fetch_scheduler_missed_runs(args.scheduler_status_url, args.timeout)
+        if args.scheduler_status_url
+        else None
+    )
+    report["reliability_contract"] = evaluate_reliability_contract(
+        report,
+        max_5xx_rate=args.max_5xx_rate,
+        max_latency_ms=args.max_latency_ms,
+        max_readiness_failures=args.max_readiness_failures,
+        scheduler_missed_runs=scheduler_missed_runs,
+        max_scheduler_missed_runs=args.max_scheduler_missed_runs,
+    )
     print_markdown(report)
+    print(f"- Reliability Contract: `{report['reliability_contract']}`")
 
     if args.output_json:
         output = Path(args.output_json)
@@ -249,7 +313,7 @@ def main() -> int:
         print(f"\nSaved JSON report to `{output}`")
 
     if args.fail_on_error:
-        if not report["endpoint_ok"]:
+        if not report["endpoint_ok"] or not report["reliability_contract"]["ok"]:
             return 1
         if args.strict_widget_state:
             if any(row["widget_state"] != "loaded" for row in report["rows"]):

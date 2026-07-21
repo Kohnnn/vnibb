@@ -29,8 +29,7 @@ async def test_rate_limit_ignores_spoofed_forwarded_headers():
             }
         )
         await middleware.dispatch(request, call_next)
-
-    assert list(middleware.clients) == ["172.16.0.2:default"]
+        assert middleware._get_client_ip(request) == "172.16.0.2"
 
 
 @pytest.mark.asyncio

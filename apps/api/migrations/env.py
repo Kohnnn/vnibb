@@ -51,6 +51,7 @@ from vnibb.models import (
     TechnicalIndicator, MarketNews,
     BlockTrade, InsiderAlert, AlertSettings,
     AppKeyValue,
+    DataQualityBreachState, DataQualityRun,
     SyncStatus,
 )
 

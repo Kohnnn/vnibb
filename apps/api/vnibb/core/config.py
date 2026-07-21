@@ -9,7 +9,10 @@ environment variables in production will cause the application to fail fast.
 """
 
 import logging
+import re
 import sys
+from pathlib import Path
+from datetime import date
 from functools import lru_cache
 from typing import Annotated, Any, List, Optional
 
@@ -17,6 +20,7 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
+_IMAGE_RELEASE_REVISION_PATH = Path("/app/.release-revision")
 
 
 class Settings(BaseSettings):
@@ -44,6 +48,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     app_name: str = "VNIBB"
     app_version: str = "0.1.0"
+    release_revision: str = "unknown"
     debug: bool = False
     environment: str = "development"  # development, staging, production
 
@@ -158,6 +163,17 @@ class Settings(BaseSettings):
     redis_cache_ttl: int = 300  # Default TTL in seconds (5 minutes)
     redis_max_connections: int = 10
     redis_ssl: bool = False  # Enable SSL for production Redis
+    rate_limit_mode: str = "off"
+    rate_limit_key_prefix: str = "vnibb:rate-limit"
+    rate_limit_key_version: str = "v1"
+    rate_limit_window_seconds: int = Field(default=60, ge=1, le=3600)
+    scheduler_role: str = "api"
+    scheduler_lock_enabled: bool = True
+    scheduler_lock_mode: str = "best_effort"
+    scheduler_lock_key_prefix: str = "vnibb:scheduler-lock"
+    scheduler_lock_ttl_margin_seconds: int = Field(default=60, ge=1, le=3600)
+    realtime_streaming_lease_seconds: int = Field(default=8 * 60 * 60, ge=60, le=24 * 60 * 60)
+    realtime_streaming_stop_timeout_seconds: int = Field(default=15, ge=1, le=300)
 
     # ==========================================================================
     # VNStock Provider
@@ -213,6 +229,8 @@ class Settings(BaseSettings):
     # Timezone & Regional Settings
     # ==========================================================================
     vn_timezone: str = "Asia/Ho_Chi_Minh"
+    market_holiday_dates: Annotated[List[str], NoDecode] = []
+    data_quality_sustained_breach_runs: int = Field(default=2, ge=2, le=30)
     
     # ==========================================================================
     # Data Freshness Thresholds (in hours)
@@ -270,6 +288,57 @@ class Settings(BaseSettings):
     # Validators
     # ==========================================================================
 
+    @model_validator(mode="before")
+    @classmethod
+    def prefer_image_release_revision(cls, data: Any) -> Any:
+        try:
+            image_revision = _IMAGE_RELEASE_REVISION_PATH.read_text(encoding="utf-8")
+        except OSError:
+            return data
+        return {**data, "release_revision": image_revision}
+
+    @field_validator("release_revision")
+    @classmethod
+    def normalize_release_revision(cls, v: str | None) -> str:
+        value = (v or "").strip()
+        if not value:
+            return "unknown"
+        if len(value) > 128 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@/+\-]*", value):
+            raise ValueError("RELEASE_REVISION must be a non-secret revision identifier")
+        return value.lower() if re.fullmatch(r"[0-9A-Fa-f]{7,64}", value) else value
+
+    @field_validator("rate_limit_mode")
+    @classmethod
+    def validate_rate_limit_mode(cls, v: str) -> str:
+        mode = v.strip().lower()
+        if mode not in {"off", "shadow", "enforce"}:
+            raise ValueError("RATE_LIMIT_MODE must be off, shadow, or enforce")
+        return mode
+
+    @field_validator("scheduler_role")
+    @classmethod
+    def validate_scheduler_role(cls, v: str) -> str:
+        role = v.strip().lower()
+        if role not in {"api", "scheduler"}:
+            raise ValueError("SCHEDULER_ROLE must be api or scheduler")
+        return role
+
+    @field_validator("scheduler_lock_mode")
+    @classmethod
+    def validate_scheduler_lock_mode(cls, v: str) -> str:
+        mode = v.strip().lower()
+        if mode not in {"best_effort", "required"}:
+            raise ValueError("SCHEDULER_LOCK_MODE must be best_effort or required")
+        return mode
+
+    @field_validator("rate_limit_key_prefix", "rate_limit_key_version", "scheduler_lock_key_prefix")
+    @classmethod
+    def validate_rate_limit_key_part(cls, v: str) -> str:
+        value = v.strip()
+        if not value or not re.fullmatch(r"[A-Za-z0-9:_-]+", value):
+            raise ValueError("rate limit key values may only contain letters, digits, :, _, and -")
+        return value
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, v: str) -> str:
@@ -322,6 +391,31 @@ class Settings(BaseSettings):
             # Handle comma-separated string: "http://localhost:3000,http://example.com"
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v or []
+
+    @field_validator("market_holiday_dates", mode="before")
+    @classmethod
+    def parse_market_holiday_dates(cls, v: Any) -> List[str]:
+        if isinstance(v, str):
+            value = v.strip()
+            if not value:
+                return []
+            if value.startswith("[") and value.endswith("]"):
+                import json
+
+                try:
+                    return [str(item).strip() for item in json.loads(value) if str(item).strip()]
+                except json.JSONDecodeError:
+                    value = value[1:-1]
+            return [item.strip().strip("\"'") for item in value.split(",") if item.strip()]
+        return v or []
+
+    @field_validator("market_holiday_dates")
+    @classmethod
+    def validate_market_holiday_dates(cls, v: List[str]) -> List[str]:
+        try:
+            return sorted({date.fromisoformat(value).isoformat() for value in v})
+        except ValueError as exc:
+            raise ValueError("MARKET_HOLIDAY_DATES must contain ISO-8601 dates") from exc
 
     @field_validator("vnibb_mcp_allowed_hosts", "vnibb_mcp_allowed_origins", mode="before")
     @classmethod
@@ -473,6 +567,15 @@ class Settings(BaseSettings):
             if not self.redis_url:
                 logger.warning("REDIS_URL not configured - caching and rate limiting disabled")
 
+            if self.scheduler_role == "scheduler":
+                if not self.redis_url:
+                    errors.append("SCHEDULER_ROLE=scheduler requires REDIS_URL in production")
+                if not self.scheduler_lock_enabled or self.scheduler_lock_mode != "required":
+                    errors.append(
+                        "SCHEDULER_ROLE=scheduler requires SCHEDULER_LOCK_ENABLED=true and "
+                        "SCHEDULER_LOCK_MODE=required in production"
+                    )
+
             if self.cache_backend == "appwrite":
                 required = {
                     "APPWRITE_ENDPOINT": self.appwrite_endpoint,
@@ -495,7 +598,7 @@ class Settings(BaseSettings):
 
             if errors:
                 raise ValueError(
-                    f"Production configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
+                    "Production configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
                 )
 
         return self
@@ -511,8 +614,6 @@ class Settings(BaseSettings):
         Uses a regex anchored to the URL scheme prefix so a password containing
         the literal string ``+asyncpg`` is not corrupted by substring replacement.
         """
-        import re
-
         if self.database_url_sync:
             return self.database_url_sync
         return re.sub(r"^postgresql\+asyncpg://", "postgresql://", self.database_url)

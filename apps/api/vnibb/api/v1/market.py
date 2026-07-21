@@ -12,7 +12,7 @@ import logging
 import re
 import unicodedata
 from datetime import datetime, date, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from collections import defaultdict
 
 import httpx
@@ -43,8 +43,9 @@ from vnibb.models.company import Company
 from vnibb.models.financials import IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
+from vnibb.models.sync_status import SyncStatus
 from vnibb.models.technical_indicator import TechnicalIndicator
-from vnibb.models.trading import FinancialRatio
+from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.sector_service import SectorService
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
@@ -72,6 +73,87 @@ except Exception:  # pragma: no cover - defensive import guard
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+class ForeignFlowRow(BaseModel):
+    symbol: str
+    net_volume: int | None = None
+    net_value: float | None = None
+    observations: int
+    settlement_dates: list[date]
+
+
+class ForeignFlowBreadth(BaseModel):
+    positive: int
+    negative: int
+    flat: int
+
+
+class ForeignFlowLeaderboardResponse(BaseModel):
+    trade_date: date | None = None
+    requested_metric: Literal["net_volume", "net_value"]
+    requested_window: Literal["1D", "5D", "20D"]
+    metric_unit: Literal["shares", "provider_native_value"]
+    available_settlement_dates: int
+    window_coverage: str
+    settlement_dates: list[date]
+    source: str
+    source_precedence: list[str]
+    freshness: str
+    fallback_used: bool
+    universe_symbols: int
+    symbols_covered: int
+    symbols_unavailable: int
+    available_fields: list[Literal["net_volume", "net_value"]]
+    breadth: ForeignFlowBreadth
+    top_net_buy: list[ForeignFlowRow]
+    top_net_sell: list[ForeignFlowRow]
+
+
+async def _load_completed_foreign_settlement_dates(
+    db: AsyncSession,
+    limit: int,
+) -> list[date]:
+    sync_rows = (
+        await db.execute(
+            select(SyncStatus.additional_data, SyncStatus.error_count)
+            .where(
+                SyncStatus.sync_type == "daily_trading",
+                SyncStatus.status == "completed",
+            )
+            .order_by(SyncStatus.completed_at.desc(), SyncStatus.id.desc())
+                .limit(max(100, limit))
+        )
+    ).all()
+    settlement_dates: list[date] = []
+    for payload, error_count in sync_rows:
+        if not isinstance(payload, dict) or error_count != 0:
+            continue
+        stage_stats = payload.get("stage_stats")
+        foreign_stats = stage_stats.get("foreign_trading") if isinstance(stage_stats, dict) else None
+        success = foreign_stats.get("success") if isinstance(foreign_stats, dict) else None
+        errors = foreign_stats.get("errors") if isinstance(foreign_stats, dict) else None
+        total = foreign_stats.get("total") if isinstance(foreign_stats, dict) else None
+        if (
+            not isinstance(success, (int, float))
+            or not isinstance(errors, (int, float))
+            or not isinstance(total, (int, float))
+            or success <= 0
+            or errors != 0
+            or success != total
+        ):
+            continue
+        raw_date = payload.get("trade_date")
+        try:
+            settlement_date = raw_date if isinstance(raw_date, date) else date.fromisoformat(str(raw_date))
+        except (TypeError, ValueError):
+            continue
+        if settlement_date in settlement_dates:
+            continue
+        settlement_dates.append(settlement_date)
+        if len(settlement_dates) >= limit:
+            break
+    return settlement_dates
 
 
 class HeatmapStock(BaseModel):
@@ -137,6 +219,8 @@ class IndustryBubbleResponse(BaseModel):
     size_metric: str
     top_n: int
     sector_average: IndustryBubbleSectorAverage
+    sector_point_count: int
+    displayed_point_count: int
     data: List[IndustryBubblePoint]
     updated_at: Optional[str] = None
 
@@ -153,6 +237,8 @@ class SectorBoardStock(BaseModel):
 class SectorBoardSector(BaseModel):
     name: str
     change_pct: float
+    constituent_count: int
+    displayed_count: int
     stocks: List[SectorBoardStock]
 
 
@@ -888,7 +974,8 @@ def _to_float(value: Any) -> Optional[float]:
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        parsed = float(value)
+        return parsed if np.isfinite(parsed) else None
 
     text = str(value).strip()
     if not text:
@@ -896,7 +983,8 @@ def _to_float(value: Any) -> Optional[float]:
 
     normalized = text.replace(",", "")
     try:
-        return float(normalized)
+        parsed = float(normalized)
+        return parsed if np.isfinite(parsed) else None
     except ValueError:
         return None
 
@@ -2655,6 +2743,159 @@ async def get_heatmap_data(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/foreign-flow-leaderboard", response_model=ForeignFlowLeaderboardResponse)
+async def get_foreign_flow_leaderboard(
+    limit: int = Query(default=10, ge=1, le=50),
+    metric: Literal["net_volume", "net_value"] = Query(default="net_volume"),
+    window: Literal["1D", "5D", "20D"] = Query(default="1D"),
+    db: AsyncSession = Depends(get_db),
+) -> ForeignFlowLeaderboardResponse:
+    window_size = {"1D": 1, "5D": 5, "20D": 20}[window]
+    metric_column = ForeignTrading.net_volume if metric == "net_volume" else ForeignTrading.net_value
+    completed_dates = await _load_completed_foreign_settlement_dates(db, window_size * 20)
+    settlement_dates = (
+        list(
+            (
+                await db.scalars(
+                    select(ForeignTrading.trade_date)
+                    .where(
+                        ForeignTrading.trade_date.in_(completed_dates),
+                        metric_column.is_not(None),
+                    )
+                    .distinct()
+                    .order_by(ForeignTrading.trade_date.desc())
+                    .limit(window_size)
+                )
+            ).all()
+        )
+        if completed_dates
+        else []
+    )
+    source = "VNIBB stored foreign_trading"
+    source_precedence = ["completed daily_trading sync", f"foreign_trading.{metric}"]
+    metric_unit: Literal["shares", "provider_native_value"] = (
+        "shares" if metric == "net_volume" else "provider_native_value"
+    )
+    if not settlement_dates:
+        return ForeignFlowLeaderboardResponse(
+            requested_metric=metric,
+            requested_window=window,
+            metric_unit=metric_unit,
+            available_settlement_dates=0,
+            window_coverage=f"0/{window_size} settlement dates",
+            settlement_dates=[],
+            source=source,
+            source_precedence=source_precedence,
+            freshness="Settlement date unavailable",
+            fallback_used=False,
+            universe_symbols=0,
+            symbols_covered=0,
+            symbols_unavailable=0,
+            available_fields=[],
+            breadth=ForeignFlowBreadth(positive=0, negative=0, flat=0),
+            top_net_buy=[],
+            top_net_sell=[],
+        )
+
+    ending_date = settlement_dates[0]
+    universe_symbols = list(
+        (
+            await db.scalars(
+                select(ForeignTrading.symbol)
+                .where(ForeignTrading.trade_date == ending_date)
+                .distinct()
+                .order_by(ForeignTrading.symbol.asc())
+            )
+        ).all()
+    )
+    stored_rows = (
+        await db.execute(
+            select(
+                ForeignTrading.symbol,
+                ForeignTrading.trade_date,
+                ForeignTrading.net_volume,
+                ForeignTrading.net_value,
+            )
+            .where(
+                ForeignTrading.symbol.in_(universe_symbols),
+                ForeignTrading.trade_date.in_(settlement_dates),
+            )
+            .order_by(ForeignTrading.symbol.asc(), ForeignTrading.trade_date.desc())
+        )
+    ).all()
+    by_symbol: dict[str, dict[date, tuple[Any, Any]]] = defaultdict(dict)
+    for symbol, trade_date, net_volume, net_value in stored_rows:
+        by_symbol[symbol][trade_date] = (net_volume, net_value)
+
+    normalized: list[ForeignFlowRow] = []
+    for symbol in universe_symbols:
+        observations = by_symbol[symbol]
+        parsed_fields: dict[str, list[float] | None] = {}
+        for field_index, field_name in enumerate(("net_volume", "net_value")):
+            raw_values = [
+                observations.get(settlement_date, (None, None))[field_index]
+                for settlement_date in settlement_dates
+            ]
+            values = [
+                int(value) if field_name == "net_volume" and value is not None else _to_float(value)
+                for value in raw_values
+            ]
+            parsed_fields[field_name] = values if all(value is not None for value in values) else None
+        selected_values = parsed_fields[metric]
+        if selected_values is None:
+            continue
+        volume_values = parsed_fields["net_volume"]
+        value_values = parsed_fields["net_value"]
+        normalized.append(
+            ForeignFlowRow(
+                symbol=symbol,
+                net_volume=int(sum(volume_values)) if volume_values is not None else None,
+                net_value=sum(value_values) if value_values is not None else None,
+                observations=len(settlement_dates),
+                settlement_dates=settlement_dates,
+            )
+        )
+
+    def selected_value(row: ForeignFlowRow) -> float:
+        value = row.net_volume if metric == "net_volume" else row.net_value
+        return float(value) if value is not None else 0.0
+
+    return ForeignFlowLeaderboardResponse(
+        trade_date=ending_date,
+        requested_metric=metric,
+        requested_window=window,
+        metric_unit=metric_unit,
+        available_settlement_dates=len(settlement_dates),
+        window_coverage=f"{len(settlement_dates)}/{window_size} settlement dates",
+        settlement_dates=settlement_dates,
+        source=source,
+        source_precedence=source_precedence,
+        freshness=f"Settlement end {ending_date.isoformat()}",
+        fallback_used=False,
+        universe_symbols=len(universe_symbols),
+        symbols_covered=len(normalized),
+        symbols_unavailable=len(universe_symbols) - len(normalized),
+        available_fields=[
+            field_name
+            for field_name in ("net_volume", "net_value")
+            if normalized and all(getattr(row, field_name) is not None for row in normalized)
+        ],
+        breadth=ForeignFlowBreadth(
+            positive=sum(selected_value(row) > 0 for row in normalized),
+            negative=sum(selected_value(row) < 0 for row in normalized),
+            flat=sum(selected_value(row) == 0 for row in normalized),
+        ),
+        top_net_buy=sorted(
+            (row for row in normalized if selected_value(row) > 0),
+            key=lambda row: (-selected_value(row), row.symbol),
+        )[:limit],
+        top_net_sell=sorted(
+            (row for row in normalized if selected_value(row) < 0),
+            key=lambda row: (selected_value(row), row.symbol),
+        )[:limit],
+    )
+
+
 @router.get("/indices", response_model=MarketIndicesResponse)
 @cached(ttl=20, key_prefix="market_indices")
 async def get_market_indices(
@@ -3113,8 +3354,8 @@ async def get_industry_bubble(
             selected = selected[:-1] + [reference_point]
             selected.sort(key=lambda item: item.size, reverse=True)
 
-    x_values = [point.x for point in selected]
-    y_values = [point.y for point in selected]
+    x_values = [point.x for point in points]
+    y_values = [point.y for point in points]
     sector_average = IndustryBubbleSectorAverage(
         x=sum(x_values) / len(x_values) if x_values else None,
         y=sum(y_values) / len(y_values) if y_values else None,
@@ -3129,6 +3370,8 @@ async def get_industry_bubble(
         size_metric=size_metric,
         top_n=top_n,
         sector_average=sector_average,
+        sector_point_count=len(points),
+        displayed_point_count=len(selected),
         data=selected,
         updated_at=updated_at,
     )
@@ -3204,22 +3447,30 @@ async def get_sector_board(
         return value if value is not None else float("-inf")
 
     sector_payloads: List[SectorBoardSector] = []
+    sector_market_caps: Dict[str, float] = {}
     for sector_name, rows in grouped.items():
+        valid_rows = [row for row in rows if _to_float(row.get("change_pct")) is not None]
+        weighted_rows = [
+            row for row in valid_rows if (_to_float(row.get("market_cap")) or 0.0) > 0
+        ]
+        weighted_total = sum(_to_float(row.get("market_cap")) or 0.0 for row in weighted_rows)
+        if weighted_total > 0:
+            change_pct = sum(
+                (_to_float(row.get("change_pct")) or 0.0)
+                * (_to_float(row.get("market_cap")) or 0.0)
+                for row in weighted_rows
+            ) / weighted_total
+        else:
+            change_pct = (
+                sum(_to_float(row.get("change_pct")) or 0.0 for row in valid_rows) / len(valid_rows)
+                if valid_rows
+                else 0.0
+            )
+        sector_market_caps[sector_name] = sum(
+            _to_float(row.get("market_cap")) or 0.0 for row in rows
+        )
         rows.sort(key=_sort_metric, reverse=True)
         selected_rows = rows[:limit_per_sector]
-        weighted_total = sum((_to_float(row.get("market_cap")) or 0.0) for row in selected_rows)
-        if weighted_total > 0:
-            change_pct = (
-                sum(
-                    (_to_float(row.get("change_pct")) or 0.0)
-                    * (_to_float(row.get("market_cap")) or 0.0)
-                    for row in selected_rows
-                )
-                / weighted_total
-            )
-        else:
-            valid_changes = [(_to_float(row.get("change_pct")) or 0.0) for row in selected_rows]
-            change_pct = sum(valid_changes) / len(valid_changes) if valid_changes else 0.0
 
         stocks = [
             SectorBoardStock(
@@ -3233,13 +3484,16 @@ async def get_sector_board(
             for row in selected_rows
         ]
         sector_payloads.append(
-            SectorBoardSector(name=sector_name, change_pct=change_pct, stocks=stocks)
+            SectorBoardSector(
+                name=sector_name,
+                change_pct=change_pct,
+                constituent_count=len(valid_rows),
+                displayed_count=len(stocks),
+                stocks=stocks,
+            )
         )
 
-    sector_payloads.sort(
-        key=lambda item: sum((stock.market_cap or 0.0) for stock in item.stocks),
-        reverse=True,
-    )
+    sector_payloads.sort(key=lambda item: sector_market_caps[item.name], reverse=True)
 
     market_summary_rows = await _load_latest_market_indices_from_db(db)
     market_summary = {
@@ -3351,7 +3605,7 @@ async def get_money_flow_trend(
                 == normalized_sector
             ]
         else:
-            universe_symbols = sorted(VN30_SYMBOLS)
+            universe_symbols = sorted(VN_SECTORS["vn30"].symbols)
 
     if reference_symbol and reference_symbol not in universe_symbols:
         universe_symbols.append(reference_symbol)
@@ -4022,6 +4276,7 @@ class FlowCoverageResponse(BaseModel):
     window_days: int
     last_data_date: Optional[date] = None
     count: int
+    symbols_unavailable: int = 0
     data: List[FlowCoverageEntry]
 
 
@@ -4031,28 +4286,33 @@ async def get_flow_coverage(
     days: int = Query(30, ge=7, le=120),
     db: AsyncSession = Depends(get_db),
 ) -> FlowCoverageResponse:
-    from vnibb.models.trading import OrderFlowDaily
-
     cutoff = date.today() - timedelta(days=days)
-    # Use OR across the bucket-volume columns so a symbol counts as covered if
-    # ANY bucket signal is populated (foreign_net_volume, proprietary_net_volume,
-    # or basic buy/sell volume). The daily_trading sync writes rows for every
-    # symbol but populates buckets only when the upstream provider returns
-    # non-null values; treating "row exists but all nulls" as "no coverage"
-    # keeps the supported list honest.
+    total_net_volume = (
+        OrderFlowDaily.net_volume.is_not(None)
+        | (
+            OrderFlowDaily.buy_volume.is_not(None)
+            & OrderFlowDaily.sell_volume.is_not(None)
+        )
+    )
+    foreign_net_volume = func.coalesce(
+        OrderFlowDaily.foreign_net_volume, ForeignTrading.net_volume
+    )
+    proven_buckets = (
+        foreign_net_volume.is_not(None)
+        & OrderFlowDaily.proprietary_net_volume.is_not(None)
+        & total_net_volume
+    )
+    foreign_join = (
+        (ForeignTrading.symbol == OrderFlowDaily.symbol)
+        & (ForeignTrading.trade_date == OrderFlowDaily.trade_date)
+    )
     stmt = (
         select(
             OrderFlowDaily.symbol,
             func.count(OrderFlowDaily.id).label("rows"),
         )
-        .where(
-            OrderFlowDaily.trade_date >= cutoff,
-            (
-                OrderFlowDaily.foreign_net_volume.is_not(None)
-                | OrderFlowDaily.proprietary_net_volume.is_not(None)
-                | OrderFlowDaily.buy_volume.is_not(None)
-            ),
-        )
+        .outerjoin(ForeignTrading, foreign_join)
+        .where(OrderFlowDaily.trade_date >= cutoff, proven_buckets)
         .group_by(OrderFlowDaily.symbol)
         .order_by(func.count(OrderFlowDaily.id).desc())
     )
@@ -4060,19 +4320,24 @@ async def get_flow_coverage(
     rows = (await db.execute(stmt)).all()
     last_dt = (
         await db.execute(
-            select(func.max(OrderFlowDaily.trade_date)).where(
-                OrderFlowDaily.foreign_net_volume.is_not(None)
-                | OrderFlowDaily.proprietary_net_volume.is_not(None)
-                | OrderFlowDaily.buy_volume.is_not(None)
-            )
+            select(func.max(OrderFlowDaily.trade_date))
+            .outerjoin(ForeignTrading, foreign_join)
+            .where(OrderFlowDaily.trade_date >= cutoff, proven_buckets)
         )
     ).scalar_one_or_none()
+    symbols_available = {row[0] for row in rows}
+    symbols_with_flow = await db.scalar(
+        select(func.count(func.distinct(OrderFlowDaily.symbol))).where(
+            OrderFlowDaily.trade_date >= cutoff
+        )
+    )
 
     entries = [FlowCoverageEntry(symbol=row[0], days_with_buckets=int(row[1])) for row in rows]
     return FlowCoverageResponse(
         window_days=days,
         last_data_date=last_dt,
         count=len(entries),
+        symbols_unavailable=max(0, int(symbols_with_flow or 0) - len(symbols_available)),
         data=entries,
     )
 
@@ -4130,13 +4395,19 @@ async def get_market_freshness(
         )
     ).scalar_one_or_none()
 
+    completed_foreign_dates = await _load_completed_foreign_settlement_dates(db, 100)
     foreign_dt = (
-        await db.execute(
-            select(func.max(ForeignTrading.trade_date)).where(
-                ForeignTrading.buy_volume.is_not(None)
+        (
+            await db.execute(
+                select(func.max(ForeignTrading.trade_date)).where(
+                    ForeignTrading.trade_date.in_(completed_foreign_dates),
+                    ForeignTrading.net_volume.is_not(None) | ForeignTrading.net_value.is_not(None),
+                )
             )
-        )
-    ).scalar_one_or_none()
+        ).scalar_one_or_none()
+        if completed_foreign_dates
+        else None
+    )
 
     news_dt = (
         await db.execute(

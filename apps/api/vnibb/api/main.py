@@ -41,9 +41,6 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException, RequestValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 
 from vnibb.core.config import settings
 from vnibb.core.cache import redis_client
@@ -54,7 +51,6 @@ from vnibb.core.monitoring import init_monitoring
 from vnibb.core.middleware import APIVersionMiddleware, RequestLoggingMiddleware
 from vnibb.models.api_errors import (
     APIError,
-    RateLimitError,
     ValidationErrorResponse,
     ValidationError,
 )
@@ -62,15 +58,6 @@ from vnibb.models.api_errors import (
 # Configure structured logging
 setup_logging()
 logger = logging.getLogger(__name__)
-
-# Initialize rate limiter (using Redis as storage backend)
-limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=["1000/hour"],  # Default: 1000 requests per hour per IP
-    storage_uri=settings.redis_url if settings.redis_url else None,
-    headers_enabled=True,  # Add X-RateLimit-* headers to responses
-)
-
 
 def _env_flag(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
@@ -88,6 +75,10 @@ def _env_int(name: str, default: int, minimum: int = 1) -> int:
     except ValueError:
         logger.warning("Invalid %s=%s. Falling back to %s", name, raw, default)
         return default
+
+
+def should_start_scheduler() -> bool:
+    return not _env_flag("SKIP_SCHEDULER_STARTUP", settings.scheduler_role == "api")
 
 
 def get_cors_headers(request: Request) -> dict[str, str]:
@@ -495,8 +486,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning(f"VNStock registration failed (non-fatal): {e}")
 
     # Start scheduler for background data sync jobs
-    if _env_flag("SKIP_SCHEDULER_STARTUP", False):
-        logger.warning("Scheduler startup skipped (SKIP_SCHEDULER_STARTUP=true)")
+    if not should_start_scheduler():
+        logger.warning("Scheduler startup skipped")
     else:
         try:
             start_scheduler()
@@ -543,7 +534,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Stop scheduler
     try:
-        shutdown_scheduler()
+        await shutdown_scheduler()
         logger.info("Scheduler stopped")
     except Exception as e:
         logger.warning(f"Scheduler shutdown error: {e}")
@@ -627,21 +618,6 @@ def create_app() -> FastAPI:
     )
 
     # Exception Handlers with explicit CORS headers and standardized error format
-
-    @app.exception_handler(RateLimitExceeded)
-    async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-        """Handle rate limit exceeded (429)."""
-        headers = get_cors_headers(request)
-        error = RateLimitError(
-            message="Too many requests. Please try again later.",
-            retry_after=60,  # Default retry after 60 seconds
-        )
-        headers["Retry-After"] = "60"
-        return JSONResponse(
-            status_code=429,
-            content=jsonable_encoder(error.model_dump()),
-            headers=headers,
-        )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
@@ -831,10 +807,6 @@ def create_app() -> FastAPI:
         This should be a lightweight check.
         """
         return {"alive": True}
-
-    # Attach rate limiter to app state
-    app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     # Mount API Router lazily so health endpoints still boot on partial import failures.
     try:

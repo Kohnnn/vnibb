@@ -10,7 +10,7 @@ Provides endpoints for:
 import logging
 import asyncio
 import math
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, List, Optional, Callable, Awaitable
 
 from fastapi import APIRouter, Query, Request, Depends
@@ -72,8 +72,68 @@ def _latest_screener_timestamp(rows: List[ScreenerData]) -> Optional[str]:
     return max(timestamps).isoformat()
 
 
-def _build_screener_meta(rows: List[ScreenerData]) -> MetaData:
-    return MetaData(count=len(rows), last_data_date=_latest_screener_timestamp(rows))
+def _build_screener_meta(
+    rows: List[ScreenerData],
+    *,
+    cached: bool = False,
+    stale: bool = False,
+    fallback: bool = False,
+    cached_at: Optional[datetime] = None,
+    discovery_meta: Optional[dict[str, Any]] = None,
+) -> MetaData:
+    visible_fields = (
+        "symbol",
+        "organ_name",
+        "exchange",
+        "industry_name",
+        "price",
+        "change_1d",
+        "volume",
+        "market_cap",
+        "pe",
+        "pb",
+        "roe",
+        "dividend_yield",
+    )
+    coverage = {
+        field: sum(getattr(row, field, None) is not None for row in rows)
+        for field in visible_fields
+    }
+    source = "fallback_cache" if fallback else "stale_cache" if stale else "cache" if cached else "live"
+    cache_age_seconds = (
+        max(0, int((datetime.utcnow() - cached_at.replace(tzinfo=None)).total_seconds()))
+        if cached_at is not None
+        else None
+    )
+    discovery_coverage = {
+        "listing_date": sum(row.listing_date is not None for row in rows),
+        "listing_age_days": sum(row.listing_age_days is not None for row in rows),
+        "target_price": sum(row.target_price is not None for row in rows),
+        "target_upside_pct": sum(row.target_upside_pct is not None for row in rows),
+    }
+    target_reference_stale = sum(
+        row.target_price is not None
+        and (
+            _coerce_meta_datetime(row.profile_refreshed_at) is None
+            or datetime.utcnow() - _coerce_meta_datetime(row.profile_refreshed_at) > timedelta(days=7)
+        )
+        for row in rows
+    )
+    return MetaData(
+        count=len(rows),
+        last_data_date=_latest_screener_timestamp(rows),
+        source=source,
+        cached=cached,
+        stale=stale,
+        fallback=fallback,
+        cache_age_seconds=cache_age_seconds,
+        visible_field_coverage=coverage,
+        visible_field_values=sum(coverage.values()),
+        visible_field_possible_values=len(rows) * len(visible_fields),
+        discovery_coverage={**discovery_coverage, "target_reference_stale": target_reference_stale},
+        target_reference_note="Provider/broker reference data, not VNIBB valuation or investment advice.",
+        **(discovery_meta or {}),
+    )
 
 
 async def _schedule_refresh(key: str, refresh_fn: Callable[[], Awaitable[None]]) -> None:
@@ -200,8 +260,8 @@ def _to_screener_data_row(row: object) -> ScreenerData:
         updated_at=_pick(
             getattr(row, "updated_at", None),
             extended_metrics.get("updated_at"),
-            getattr(row, "created_at", None),
             getattr(row, "snapshot_date", None),
+            getattr(row, "created_at", None),
         ),
     )
 
@@ -366,6 +426,137 @@ def _pick_float(*values: Any) -> Optional[float]:
         if numeric is not None:
             return numeric
     return None
+
+
+def _parse_date(value: Any) -> Optional[date]:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value.strip()[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def _validated_target_reference(raw: dict[str, Any], price: Any) -> tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
+    target_price = _coerce_float(raw.get("target_price") or raw.get("targetPrice"))
+    target_unit = str(raw.get("target_price_unit") or raw.get("targetPriceUnit") or "").upper()
+    source = raw.get("target_source") or raw.get("targetSource") or raw.get("providerSource")
+    recommendation = raw.get("recommendation") or raw.get("rating") or raw.get("action")
+    price_vnd = _price_to_vnd_units(price)
+    if (
+        target_price is None
+        or not math.isfinite(target_price)
+        or target_price <= 0
+        or target_unit != "VND"
+        or not isinstance(source, str)
+        or not source.strip()
+        or price_vnd is None
+        or not math.isfinite(price_vnd)
+        or price_vnd <= 0
+    ):
+        return None, None, None, recommendation if isinstance(recommendation, str) else None
+    return target_price, ((target_price - price_vnd) / price_vnd) * 100, source.strip(), recommendation if isinstance(recommendation, str) else None
+
+
+async def _enrich_discovery_fields(
+    rows: List[ScreenerData],
+    db: AsyncSession,
+    *,
+    as_of_date: Optional[date],
+) -> List[ScreenerData]:
+    symbols = sorted({row.symbol for row in rows if row.symbol})
+    if not symbols:
+        return rows
+    company_rows = (
+        await db.execute(
+            select(Company.symbol, Company.listing_date, Company.raw_data, Company.updated_at).where(
+                Company.symbol.in_(symbols)
+            )
+        )
+    ).all()
+    stock_rows = (
+        await db.execute(select(Stock.symbol, Stock.listing_date).where(Stock.symbol.in_(symbols)))
+    ).all()
+    companies = {symbol: (listing_date, raw_data, updated_at) for symbol, listing_date, raw_data, updated_at in company_rows}
+    stock_listing_dates = {symbol: listing_date for symbol, listing_date in stock_rows}
+    enriched: List[ScreenerData] = []
+    for row in rows:
+        company_listing_date, raw_data, profile_refreshed_at = companies.get(row.symbol, (None, {}, None))
+        listing_date = _parse_date(company_listing_date) or _parse_date(stock_listing_dates.get(row.symbol))
+        reference_date = as_of_date or _parse_date(row.updated_at) or date.today()
+        listing_age_days = (reference_date - listing_date).days if listing_date and listing_date <= reference_date else None
+        raw = raw_data if isinstance(raw_data, dict) else {}
+        target_price, target_upside_pct, target_source, recommendation = _validated_target_reference(raw, row.price)
+        enriched.append(
+            row.model_copy(
+                update={
+                    "listing_date": listing_date,
+                    "listing_age_days": listing_age_days,
+                    "target_price": target_price,
+                    "target_upside_pct": target_upside_pct,
+                    "target_source": target_source,
+                    "recommendation": recommendation,
+                    "profile_refreshed_at": profile_refreshed_at,
+                }
+            )
+        )
+    return enriched
+
+
+def _apply_discovery_filters(
+    rows: List[ScreenerData],
+    *,
+    min_listing_age_days: Optional[int],
+    target_upside_min: Optional[float],
+) -> List[ScreenerData]:
+    if min_listing_age_days is not None:
+        rows = [row for row in rows if row.listing_age_days is not None and row.listing_age_days >= min_listing_age_days]
+    if target_upside_min is not None and math.isfinite(target_upside_min):
+        rows = [row for row in rows if row.target_upside_pct is not None and row.target_upside_pct >= target_upside_min]
+    return rows
+
+
+def _sort_discovery_rows(rows: List[ScreenerData], sort_by: Optional[str], sort_order: str) -> List[ScreenerData]:
+    if sort_by not in {"listing_age_days", "target_price", "target_upside_pct"}:
+        return rows
+    known = [row for row in rows if getattr(row, sort_by) is not None]
+    missing = [row for row in rows if getattr(row, sort_by) is None]
+    return sorted(known, key=lambda row: getattr(row, sort_by), reverse=sort_order == "desc") + missing
+
+
+async def _resolve_index_universe(universe: str) -> tuple[Optional[set[str]], dict[str, Any]]:
+    normalized = universe.upper()
+    meta: dict[str, Any] = {
+        "universe": normalized,
+        "membership_current": normalized != "ALL",
+        "membership_source": None,
+        "membership_synced_at": None,
+        "membership_coverage": 0,
+        "membership_available": normalized == "ALL",
+        "membership_stale": False,
+    }
+    if normalized == "ALL":
+        return None, meta
+    service = get_mongo_market_data_service()
+    if not service.enabled:
+        return set(), meta
+    record = await service.get_current_index_constituents(normalized)
+    if not record:
+        return set(), meta
+    meta.update(
+        {
+            "membership_source": record["source"],
+            "membership_synced_at": record["synced_at"].isoformat(),
+            "membership_coverage": record["member_count"],
+            "membership_available": not record["stale"],
+            "membership_stale": record["stale"],
+        }
+    )
+    return set(record["members"]) if not record["stale"] else set(), meta
 
 
 def _shares_multiplier(shares: float) -> float:
@@ -1187,6 +1378,7 @@ async def _prepare_cached_screener_rows(
     db: AsyncSession,
     *,
     limit: int,
+    universe: str,
     exchange: str,
     industry: Optional[str],
     filters: Optional[str],
@@ -1205,7 +1397,10 @@ async def _prepare_cached_screener_rows(
     volume_min: Optional[int],
     sort_by: Optional[str],
     sort_order: str,
-) -> List[ScreenerData]:
+    as_of_date: Optional[date],
+    min_listing_age_days: Optional[int],
+    target_upside_min: Optional[float],
+) -> tuple[List[ScreenerData], dict[str, Any]]:
     data = [_to_screener_data_row(snapshot) for snapshot in snapshots]
 
     has_advanced_filters = _has_advanced_screener_filters(
@@ -1228,8 +1423,11 @@ async def _prepare_cached_screener_rows(
 
     can_early_limit = (
         not has_advanced_filters
+        and universe == "ALL"
         and exchange.upper() == "ALL"
         and not industry
+        and min_listing_age_days is None
+        and target_upside_min is None
         and len(data) > limit
     )
     if can_early_limit:
@@ -1238,7 +1436,16 @@ async def _prepare_cached_screener_rows(
     data = await _hydrate_screener_rows(data, db)
     data = fill_market_cap(data)
     data = await _enrich_screener_metrics(data, db)
+    data = await _enrich_discovery_fields(data, db, as_of_date=as_of_date)
+    members, discovery_meta = await _resolve_index_universe(universe)
+    if members is not None:
+        data = [row for row in data if row.symbol in members]
     data = _apply_exchange_and_industry_filters(data, exchange=exchange, industry=industry)
+    data = _apply_discovery_filters(
+        data,
+        min_listing_age_days=min_listing_age_days,
+        target_upside_min=target_upside_min,
+    )
 
     if has_advanced_filters:
         data = apply_advanced_filters(
@@ -1260,8 +1467,9 @@ async def _prepare_cached_screener_rows(
             sort_by=sort_by,
             sort_order=sort_order,
         )
+    data = _sort_discovery_rows(data, sort_by, sort_order)
 
-    return data[:limit]
+    return data[:limit], discovery_meta
 
 
 async def _refresh_screener_cache(params: StockScreenerParams) -> None:
@@ -1306,8 +1514,12 @@ async def _refresh_screener_cache(params: StockScreenerParams) -> None:
 async def get_screener(
     request: Request,
     symbol: Optional[str] = Query(None),
+    universe: str = Query(default="ALL", pattern=r"^(ALL|VN30|VN100|HNX30)$"),
     exchange: str = Query(default="ALL", pattern=r"^(HOSE|HNX|UPCOM|ALL)$"),
     industry: Optional[str] = Query(None),
+    as_of_date: Optional[date] = Query(None),
+    min_listing_age_days: Optional[int] = Query(None, ge=0),
+    target_upside_min: Optional[float] = Query(None, allow_inf_nan=False),
     limit: int = Query(default=100, ge=1, le=2000),
     source: str = Query(default="KBS"),
     use_cache: bool = Query(default=True),
@@ -1343,7 +1555,15 @@ async def get_screener(
 ) -> StandardResponse[List[ScreenerData]]:
     cache_manager = CacheManager(db)
 
-    async def _respond(rows: List[ScreenerData]) -> StandardResponse[List[ScreenerData]]:
+    async def _respond(
+        rows: List[ScreenerData],
+        *,
+        cached: bool = False,
+        stale: bool = False,
+        fallback: bool = False,
+        cached_at: Optional[datetime] = None,
+        discovery_meta: Optional[dict[str, Any]] = None,
+    ) -> StandardResponse[List[ScreenerData]]:
         """Single funnel for every row-emitting return path: merge fundamental
         snapshots, apply fundamental filters, then build the response."""
         rows = await _finalize_fundamental_rows(
@@ -1354,7 +1574,17 @@ async def get_screener(
             dividend_years_min=dividend_years_min,
             fcf_positive=fcf_positive,
         )
-        return StandardResponse(data=rows, meta=_build_screener_meta(rows))
+        return StandardResponse(
+            data=rows,
+            meta=_build_screener_meta(
+                rows,
+                cached=cached,
+                stale=stale,
+                fallback=fallback,
+                cached_at=cached_at,
+                discovery_meta=discovery_meta,
+            ),
+        )
 
     if use_cache and not refresh:
         try:
@@ -1362,10 +1592,11 @@ async def get_screener(
                 symbol=symbol, source=source, allow_stale=True
             )
             if cache_result.hit and cache_result.data:
-                data = await _prepare_cached_screener_rows(
+                data, discovery_meta = await _prepare_cached_screener_rows(
                     cache_result.data,
                     db,
                     limit=limit,
+                    universe=universe,
                     exchange=exchange,
                     industry=industry,
                     filters=filters,
@@ -1384,6 +1615,9 @@ async def get_screener(
                     volume_min=volume_min,
                     sort_by=sort_by,
                     sort_order=sort_order,
+                    as_of_date=as_of_date,
+                    min_listing_age_days=min_listing_age_days,
+                    target_upside_min=target_upside_min,
                 )
                 if cache_result.is_stale and not refresh:
                     refresh_key = f"screener:{source}:full"
@@ -1398,18 +1632,27 @@ async def get_screener(
                         refresh_key,
                         lambda: _refresh_screener_cache(refresh_params),
                     )
-                return await _respond(data)
+                return await _respond(
+                    data,
+                    cached=True,
+                    stale=cache_result.is_stale,
+                    cached_at=cache_result.cached_at,
+                    discovery_meta=discovery_meta,
+                )
 
             if source:
                 fallback_cache = await cache_manager.get_screener_data(
                     symbol=symbol, source=None, allow_stale=True
                 )
                 if fallback_cache.hit and fallback_cache.data:
-                    data = await _prepare_cached_screener_rows(
+                    data, discovery_meta = await _prepare_cached_screener_rows(
                         fallback_cache.data,
                         db,
                         limit=limit,
+                        universe=universe,
                         exchange=exchange,
+
+
                         industry=industry,
                         filters=filters,
                         sort=sort,
@@ -1427,8 +1670,18 @@ async def get_screener(
                         volume_min=volume_min,
                         sort_by=sort_by,
                         sort_order=sort_order,
+                        as_of_date=as_of_date,
+                        min_listing_age_days=min_listing_age_days,
+                        target_upside_min=target_upside_min,
                     )
-                    return await _respond(data)
+                    return await _respond(
+                        data,
+                        cached=True,
+                        stale=fallback_cache.is_stale,
+                        fallback=True,
+                        cached_at=fallback_cache.cached_at,
+                        discovery_meta=discovery_meta,
+                    )
         except Exception as e:
             logger.warning(f"Cache lookup failed: {e}")
 
@@ -1443,6 +1696,18 @@ async def get_screener(
 
         data = fill_market_cap(data)
         data = await _enrich_screener_metrics(data, db)
+        data = await _hydrate_screener_rows(data, db)
+        data = await _enrich_discovery_fields(data, db, as_of_date=as_of_date)
+        cache_data = data
+        members, discovery_meta = await _resolve_index_universe(universe)
+        if members is not None:
+            data = [row for row in data if row.symbol in members]
+        data = _apply_exchange_and_industry_filters(data, exchange=exchange, industry=industry)
+        data = _apply_discovery_filters(
+            data,
+            min_listing_age_days=min_listing_age_days,
+            target_upside_min=target_upside_min,
+        )
         data = apply_advanced_filters(
             data,
             filters=filters,
@@ -1461,12 +1726,11 @@ async def get_screener(
             volume_min=volume_min,
             sort_by=sort_by,
             sort_order=sort_order,
-        )[:limit]
+        )
+        data = _sort_discovery_rows(data, sort_by, sort_order)[:limit]
 
-        data = await _hydrate_screener_rows(data, db)
-
-        await cache_manager.store_screener_data(data=[d.model_dump() for d in data], source=source)
-        return await _respond(data)
+        await cache_manager.store_screener_data(data=[d.model_dump() for d in cache_data], source=source)
+        return await _respond(data, discovery_meta=discovery_meta)
 
     except (ProviderTimeoutError, ProviderError, ProviderRateLimitError) as e:
         if use_cache:
@@ -1474,10 +1738,11 @@ async def get_screener(
                 symbol=symbol, source=source, allow_stale=True
             )
             if cache_result.hit and cache_result.data:
-                data = await _prepare_cached_screener_rows(
+                data, discovery_meta = await _prepare_cached_screener_rows(
                     cache_result.data,
                     db,
                     limit=limit,
+                    universe=universe,
                     exchange=exchange,
                     industry=industry,
                     filters=filters,
@@ -1496,8 +1761,18 @@ async def get_screener(
                     volume_min=volume_min,
                     sort_by=sort_by,
                     sort_order=sort_order,
+                    as_of_date=as_of_date,
+                    min_listing_age_days=min_listing_age_days,
+                    target_upside_min=target_upside_min,
                 )
-                return await _respond(data)
+                return await _respond(
+                    data,
+                    cached=True,
+                    stale=cache_result.is_stale,
+                    fallback=True,
+                    cached_at=cache_result.cached_at,
+                    discovery_meta=discovery_meta,
+                )
 
         # Final fallback: return empty results with user-friendly message
         # This prevents 502 errors and provides better UX

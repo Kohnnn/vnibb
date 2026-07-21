@@ -70,6 +70,29 @@ def fake_mongo(monkeypatch):
     monkeypatch.setitem(sys.modules, "pymongo", module)
 
 
+def test_ensure_indexes_creates_global_latest_date_index_in_key_order() -> None:
+    class Collection:
+        def __init__(self) -> None:
+            self.indexes = []
+
+        def create_index(self, keys, **options) -> None:
+            self.indexes.append((keys, options))
+
+    class Database:
+        def __init__(self) -> None:
+            self.collections = {}
+
+        def __getitem__(self, name):
+            return self.collections.setdefault(name, Collection())
+
+    database = Database()
+    backfill_vietcap._ensure_indexes(database)
+
+    assert ([('tradeDate', -1)], {"name": "idx_tradeDate_desc"}) in database[
+        "market_prices_eod"
+    ].indexes
+
+
 def test_skip_fresh_through_dry_run_requires_mongodb_url(monkeypatch):
     monkeypatch.delenv("MONGODB_URL", raising=False)
     monkeypatch.setattr(backfill_vietcap, "load_env_file", lambda _: None)

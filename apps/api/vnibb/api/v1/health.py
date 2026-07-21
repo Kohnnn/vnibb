@@ -52,8 +52,12 @@ async def basic_health():
             "appwrite_writes_active": settings.appwrite_writes_active,
             "appwrite_configured": settings.is_appwrite_configured,
             "allow_anonymous_dashboard_writes": settings.allow_anonymous_dashboard_writes,
+            "scheduler_role": settings.scheduler_role,
+            "scheduler_lock_enabled": settings.scheduler_lock_enabled,
+            "scheduler_lock_mode": settings.scheduler_lock_mode,
         },
         "version": getattr(settings, "app_version", "0.1.0"),
+        "revision": settings.release_revision,
         "timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -149,6 +153,7 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
     health = {
         "status": "healthy",
         "version": getattr(settings, "app_version", "1.0.0"),
+        "revision": settings.release_revision,
         "environment": settings.environment,
         "timestamp": datetime.utcnow().isoformat(),
         "components": {},

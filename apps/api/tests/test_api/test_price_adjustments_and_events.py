@@ -1,8 +1,10 @@
 from datetime import date
 
 from vnibb.api.v1.equity import (
+    _apply_adjustment_mode_to_historical_row,
     _apply_adjustment_mode_to_ohlc,
     _apply_corporate_action_adjustments,
+    _historical_adjustment_meta,
     _ratio_factor_for_action,
 )
 from vnibb.providers.vnstock.equity_historical import EquityHistoricalData
@@ -50,6 +52,53 @@ def test_apply_adjustment_mode_to_ohlc_falls_back_to_raw_when_adjustment_missing
     assert adjusted_high == 120.0
     assert adjusted_low == 90.0
     assert adjusted_close == 110.0
+
+
+def test_apply_adjustment_mode_to_historical_row_scales_provider_ohlc():
+    row = EquityHistoricalData(
+        symbol="VNM",
+        time=date(2024, 1, 1),
+        open=100,
+        high=120,
+        low=90,
+        close=110,
+        volume=1000,
+        raw_close=110,
+        adjusted_close=55,
+    )
+
+    adjusted = _apply_adjustment_mode_to_historical_row(row, "adjusted")
+    raw = _apply_adjustment_mode_to_historical_row(row, "raw")
+
+    assert (adjusted.open, adjusted.high, adjusted.low, adjusted.close) == (50, 60, 45, 55)
+    assert adjusted.volume == 1000
+    assert adjusted.adjustment_factor == 0.5
+    assert adjusted.adjustment_applied is True
+    assert (raw.open, raw.high, raw.low, raw.close) == (100, 120, 90, 110)
+    assert raw.adjustment_applied is False
+
+
+def test_historical_adjustment_meta_reports_partial_coverage():
+    rows = [
+        EquityHistoricalData(
+            symbol="VNM",
+            time=date(2024, 1, day),
+            open=100,
+            high=110,
+            low=90,
+            close=100,
+            volume=1000,
+            adjustment_applied=applied,
+        )
+        for day, applied in ((1, True), (2, False))
+    ]
+
+    meta = _historical_adjustment_meta(rows, "adjusted")
+
+    assert meta.adjustment_requested_count == 2
+    assert meta.adjustment_applied_count == 1
+    assert meta.adjustment_coverage_pct == 50.0
+    assert "1 raw row" in meta.adjustment_warning
 
 
 def test_normalize_company_action_category_identifies_rights_issue():
@@ -142,12 +191,12 @@ def test_apply_corporate_action_adjustments_applies_cash_dividend_backward():
         EquityHistoricalData(
             symbol="VNM",
             time=date(2024, 1, 1),
-            open=100,
-            high=105,
-            low=95,
-            close=100,
+            open=120,
+            high=125,
+            low=115,
+            close=120,
             volume=1000,
-            raw_close=100,
+            raw_close=120,
         ),
         EquityHistoricalData(
             symbol="VNM",
@@ -183,6 +232,6 @@ def test_apply_corporate_action_adjustments_applies_cash_dividend_backward():
 
     adjusted = _apply_corporate_action_adjustments(rows, actions, "adjusted")
 
-    assert adjusted[0].close == 98.0
+    assert adjusted[0].close == 117.6
     assert adjusted[1].close == 98.0
     assert adjusted[2].close == 98.0

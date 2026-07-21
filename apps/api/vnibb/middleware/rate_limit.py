@@ -1,67 +1,38 @@
-from collections import defaultdict
-from datetime import datetime, timedelta
 import logging
-import os
 import re
+from typing import Any
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from vnibb.core.cache import redis_client
+from vnibb.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, requests_per_minute: int = 120):
+    _SCRIPT = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+local ttl = redis.call('TTL', KEYS[1])
+if ttl < 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+    ttl = ARGV[1]
+end
+return {count, ttl}
+"""
+
+    def __init__(self, app, redis: Any | None = None, requests_per_minute: int = 120):
         super().__init__(app)
         self.default_requests_per_minute = requests_per_minute
-        self.clients: dict[str, list[datetime]] = defaultdict(list)
-        self._cleanup_interval_seconds = 30
-        self._last_cleanup = datetime.utcnow()
-        self._max_buckets = max(1000, int(os.getenv("RATE_LIMIT_MAX_BUCKETS", "8000")))
+        self.redis = redis
 
     def _is_exempt_path(self, path: str) -> bool:
-        exempt_prefixes = [
-            "/health",
-            "/live",
-            "/ready",
-            "/docs",
-            "/redoc",
-            "/openapi.json",
-            "/static",
-        ]
-        return any(path.startswith(prefix) for prefix in exempt_prefixes)
-
-    def _prune_clients(self, now: datetime) -> None:
-        elapsed = (now - self._last_cleanup).total_seconds()
-        if elapsed < self._cleanup_interval_seconds:
-            return
-
-        stale_cutoff = now - timedelta(minutes=2)
-        for rate_key in list(self.clients.keys()):
-            recent_requests = [
-                timestamp for timestamp in self.clients[rate_key] if timestamp > stale_cutoff
-            ]
-            if recent_requests:
-                self.clients[rate_key] = recent_requests
-            else:
-                del self.clients[rate_key]
-
-        if len(self.clients) > self._max_buckets:
-            overflow = len(self.clients) - self._max_buckets
-            oldest_keys = sorted(
-                self.clients.keys(),
-                key=lambda key: self.clients[key][-1] if self.clients[key] else datetime.min,
-            )[:overflow]
-            for stale_key in oldest_keys:
-                self.clients.pop(stale_key, None)
-            logger.warning(
-                "Rate limit buckets exceeded cap (%s). Pruned %s oldest buckets.",
-                self._max_buckets,
-                overflow,
-            )
-
-        self._last_cleanup = now
+        return path.startswith(("/health", "/live", "/ready", "/docs", "/redoc", "/openapi.json", "/static"))
 
     def _get_client_ip(self, request: Request) -> str:
         return request.client.host if request.client else "unknown"
@@ -77,49 +48,58 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return "admin", 60
         return "default", self.default_requests_per_minute
 
+    def _key(self, client_ip: str, bucket: str) -> str:
+        return f"{settings.rate_limit_key_prefix}:{settings.rate_limit_key_version}:{bucket}:{client_ip}"
+
+    async def _consume(self, key: str) -> tuple[int, int]:
+        client = self.redis or redis_client.client
+        result = await client.eval(self._SCRIPT, 1, key, settings.rate_limit_window_seconds)
+        return int(result[0]), max(1, int(result[1]))
+
     async def dispatch(self, request: Request, call_next):
-        path = request.url.path
-        if self._is_exempt_path(path):
+        if settings.rate_limit_mode == "off" or request.method == "OPTIONS" or self._is_exempt_path(request.url.path):
             return await call_next(request)
 
-        client_ip = self._get_client_ip(request)
-        bucket, requests_per_minute = self._resolve_bucket(path)
-        rate_key = f"{client_ip}:{bucket}"
-        now = datetime.now()
-        self._prune_clients(now)
+        bucket, limit = self._resolve_bucket(request.url.path)
+        headers = {
+            "X-RateLimit-Limit": str(limit),
+            "X-RateLimit-Policy": bucket,
+            "X-RateLimit-Window": str(settings.rate_limit_window_seconds),
+        }
+        try:
+            count, retry_after = await self._consume(self._key(self._get_client_ip(request), bucket))
+        except Exception:
+            logger.exception("Redis rate limit check failed; allowing request")
+            response = await call_next(request)
+            response.headers.update(headers)
+            response.headers["X-RateLimit-Status"] = "unavailable"
+            return response
 
-        # Clean old requests (older than 1 minute)
-        cutoff = now - timedelta(minutes=1)
-        self.clients[rate_key] = [t for t in self.clients[rate_key] if t > cutoff]
+        exceeded = count > limit
+        if settings.rate_limit_mode == "shadow":
+            response = await call_next(request)
+            response.headers.update(headers)
+            response.headers["X-RateLimit-Status"] = "shadow-exceeded" if exceeded else "shadow"
+            if exceeded:
+                logger.warning("Rate limit shadow threshold exceeded: bucket=%s limit=%s", bucket, limit)
+            return response
 
-        # Check rate limit
-        if len(self.clients[rate_key]) >= requests_per_minute:
-            logger.warning(
-                "Rate limit exceeded for IP %s on bucket %s (%s/min)",
-                client_ip,
-                bucket,
-                requests_per_minute,
-            )
+        if exceeded:
+            logger.warning("Rate limit exceeded: bucket=%s limit=%s", bucket, limit)
+            headers["Retry-After"] = str(retry_after)
             return JSONResponse(
                 status_code=429,
                 content={
                     "error": "rate_limited",
                     "message": "Rate limit exceeded. Please slow down.",
                     "bucket": bucket,
-                    "limit": requests_per_minute,
-                    "window_seconds": 60,
+                    "limit": limit,
+                    "window_seconds": settings.rate_limit_window_seconds,
                 },
-                headers={
-                    "Retry-After": "60",
-                    "X-RateLimit-Limit": str(requests_per_minute),
-                    "X-RateLimit-Policy": bucket,
-                },
+                headers=headers,
             )
 
-        # Record request
-        self.clients[rate_key].append(now)
-
         response = await call_next(request)
-        response.headers["X-RateLimit-Limit"] = str(requests_per_minute)
-        response.headers["X-RateLimit-Policy"] = bucket
+        response.headers.update(headers)
+        response.headers["X-RateLimit-Status"] = "enforced"
         return response

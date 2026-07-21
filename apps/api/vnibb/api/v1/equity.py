@@ -9,12 +9,12 @@ import math
 import re
 import unicodedata
 from datetime import date, timedelta, datetime
-from typing import List, Optional, Literal, Any, Callable, Awaitable
+from typing import List, Optional, Literal, Any, Callable, Awaitable, Dict
 
 from fastapi import APIRouter, Query, Depends, Path
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
 
@@ -146,6 +146,9 @@ class CorrelationMatrixPayload(BaseModel):
     symbols: List[str]
     matrix: List[CorrelationMatrixCell]
     returns_count: int
+    as_of_date: Optional[date] = None
+    symbol_last_data_dates: Dict[str, date] = Field(default_factory=dict)
+    overlap_counts: Dict[str, int] = Field(default_factory=dict)
 
 
 async def _schedule_refresh(key: str, refresh_fn: Callable[[], Awaitable[None]]) -> None:
@@ -1239,7 +1242,36 @@ def _apply_adjustment_mode_to_ohlc(
     )
 
 
+def _apply_adjustment_mode_to_historical_row(
+    row: EquityHistoricalData, adjustment_mode: str
+) -> EquityHistoricalData:
+    raw_close = row.raw_close if row.raw_close is not None else row.close
+    adjusted_open, adjusted_high, adjusted_low, resolved_close, factor, applied = (
+        _apply_adjustment_mode_to_ohlc(
+            open_value=row.open,
+            high_value=row.high,
+            low_value=row.low,
+            close_value=raw_close,
+            adjusted_close=row.adjusted_close,
+            adjustment_mode=adjustment_mode,
+        )
+    )
+    return row.model_copy(
+        update={
+            "open": adjusted_open,
+            "high": adjusted_high,
+            "low": adjusted_low,
+            "close": resolved_close,
+            "raw_close": raw_close,
+            "adjustment_factor": factor,
+            "adjustment_mode": str(adjustment_mode or "raw").strip().lower() or "raw",
+            "adjustment_applied": applied,
+        }
+    )
+
+
 def _to_historical_data(row: StockPrice, *, adjustment_mode: str = "raw") -> EquityHistoricalData:
+
     adjusted_open, adjusted_high, adjusted_low, adjusted_close_value, factor, applied = (
         _apply_adjustment_mode_to_ohlc(
             open_value=row.open,
@@ -1674,11 +1706,12 @@ def _apply_corporate_action_adjustments(
         ]
 
     adjusted_rows = [row.model_copy() for row in rows]
+    rows_by_date = sorted(adjusted_rows, key=lambda item: item.time)
     actions_sorted = sorted(actions, key=lambda item: item["effective_date"])
     action_index = len(actions_sorted) - 1
     cumulative_factor = 1.0
 
-    for row in reversed(adjusted_rows):
+    for row in reversed(rows_by_date):
         row_date = (
             row.time if isinstance(row.time, date) else date.fromisoformat(str(row.time)[:10])
         )
@@ -1688,20 +1721,16 @@ def _apply_corporate_action_adjustments(
             factor: Optional[float] = None
 
             if action.get("action_subtype") == "cash_dividend":
-                reference_row = next(
-                    (
-                        candidate
-                        for candidate in adjusted_rows
-                        if candidate.time < action["effective_date"]
-                        and (candidate.raw_close or candidate.close)
-                    ),
-                    None,
-                )
-                reference_close = (
-                    reference_row.raw_close
-                    if reference_row and reference_row.raw_close is not None
-                    else (reference_row.close if reference_row else None)
-                )
+                reference_close = None
+                for candidate in reversed(rows_by_date):
+                    if candidate.time >= action["effective_date"]:
+                        continue
+                    candidate_close = _coerce_optional_float(
+                        candidate.raw_close if candidate.raw_close is not None else candidate.close
+                    )
+                    if candidate_close is not None and math.isfinite(candidate_close) and candidate_close > 0:
+                        reference_close = candidate_close
+                        break
                 factor = _cash_dividend_factor(action.get("cash_amount_per_share"), reference_close)
             else:
                 factor = _ratio_factor_for_action(
@@ -1733,6 +1762,35 @@ def _apply_corporate_action_adjustments(
         row.raw_close = raw_close
 
     return adjusted_rows
+
+
+def _historical_adjustment_meta(
+    rows: List[EquityHistoricalData], adjustment_mode: str
+) -> MetaData:
+    normalized_mode = str(adjustment_mode or "raw").strip().lower() or "raw"
+    requested_count = len(rows) if normalized_mode == "adjusted" else 0
+    applied_count = (
+        sum(1 for row in rows if row.adjustment_applied)
+        if normalized_mode == "adjusted"
+        else 0
+    )
+    coverage_pct = (
+        round((applied_count / requested_count) * 100, 2) if requested_count else None
+    )
+    raw_count = requested_count - applied_count
+    return MetaData(
+        count=len(rows),
+        adjustment_mode=normalized_mode,
+        adjustment_requested_count=requested_count,
+        adjustment_applied_count=applied_count,
+        adjustment_coverage_pct=coverage_pct,
+        adjustment_warning=(
+            f"Adjusted mode contains {raw_count} raw row(s) "
+            f"({applied_count}/{requested_count} adjusted)."
+            if raw_count
+            else None
+        ),
+    )
 
 
 async def _load_historical_from_appwrite(
@@ -4561,7 +4619,7 @@ async def _enrich_missing_ratio_metrics(
 
 
 @router.get("/historical", response_model=StandardResponse[List[EquityHistoricalData]])
-@cached(ttl=300, key_prefix="historical_v2")
+@cached(ttl=300, key_prefix="historical_v3")
 async def get_historical_prices(
     symbol: str = Query(..., min_length=1, max_length=10),
     start_date: date = Query(default_factory=lambda: date.today() - timedelta(days=365)),
@@ -4605,7 +4663,10 @@ async def get_historical_prices(
             interval,
             len(mongo_data),
         )
-        return StandardResponse(data=mongo_data, meta=MetaData(count=len(mongo_data)))
+        return StandardResponse(
+            data=mongo_data,
+            meta=_historical_adjustment_meta(mongo_data, adjustment_mode),
+        )
 
     cache_result = await cache_manager.get_historical_prices(
         symbol=symbol_upper,
@@ -4617,7 +4678,10 @@ async def get_historical_prices(
     if cache_result.hit and cache_result.data:
         data = [_to_historical_data(r, adjustment_mode=adjustment_mode) for r in cache_result.data]
         data = _apply_corporate_action_adjustments(data, corporate_actions, adjustment_mode)
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        return StandardResponse(
+            data=data,
+            meta=_historical_adjustment_meta(data, adjustment_mode),
+        )
 
     recent_cache_data = await _load_historical_from_recent_cache(
         symbol=symbol_upper,
@@ -4630,7 +4694,10 @@ async def get_historical_prices(
         recent_cache_data = _apply_corporate_action_adjustments(
             recent_cache_data, corporate_actions, adjustment_mode
         )
-        return StandardResponse(data=recent_cache_data, meta=MetaData(count=len(recent_cache_data)))
+        return StandardResponse(
+            data=recent_cache_data,
+            meta=_historical_adjustment_meta(recent_cache_data, adjustment_mode),
+        )
 
     if settings.resolved_data_backend == "appwrite" and use_appwrite_data:
         appwrite_data = await _load_historical_from_appwrite(
@@ -4644,7 +4711,10 @@ async def get_historical_prices(
             appwrite_data = _apply_corporate_action_adjustments(
                 appwrite_data, corporate_actions, adjustment_mode
             )
-            return StandardResponse(data=appwrite_data, meta=MetaData(count=len(appwrite_data)))
+            return StandardResponse(
+                data=appwrite_data,
+                meta=_historical_adjustment_meta(appwrite_data, adjustment_mode),
+            )
 
     try:
         params = EquityHistoricalQueryParams(
@@ -4656,23 +4726,16 @@ async def get_historical_prices(
         )
         data = await VnstockEquityHistoricalFetcher.fetch(params)
         if data:
-            normalized_mode = str(adjustment_mode or "raw").strip().lower() or "raw"
             normalized_data = [
-                item.model_copy(
-                    update={
-                        "raw_close": item.raw_close if item.raw_close is not None else item.close,
-                        "adjustment_mode": normalized_mode,
-                        "adjustment_applied": bool(
-                            normalized_mode == "adjusted" and item.adjusted_close not in (None, 0)
-                        ),
-                    }
-                )
-                for item in data
+                _apply_adjustment_mode_to_historical_row(item, adjustment_mode) for item in data
             ]
             normalized_data = _apply_corporate_action_adjustments(
                 normalized_data, corporate_actions, adjustment_mode
             )
-            return StandardResponse(data=normalized_data, meta=MetaData(count=len(normalized_data)))
+            return StandardResponse(
+                data=normalized_data,
+                meta=_historical_adjustment_meta(normalized_data, adjustment_mode),
+            )
 
         if use_appwrite_data:
             appwrite_data = await _load_historical_from_appwrite(
@@ -4691,7 +4754,10 @@ async def get_historical_prices(
                     symbol_upper,
                     interval,
                 )
-                return StandardResponse(data=appwrite_data, meta=MetaData(count=len(appwrite_data)))
+                return StandardResponse(
+                    data=appwrite_data,
+                    meta=_historical_adjustment_meta(appwrite_data, adjustment_mode),
+                )
 
         fallback_data = await _load_historical_from_db(
             db=db,
@@ -4710,14 +4776,20 @@ async def get_historical_prices(
                 symbol_upper,
                 interval,
             )
-            return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+            return StandardResponse(
+                data=fallback_data,
+                meta=_historical_adjustment_meta(fallback_data, adjustment_mode),
+            )
 
         await _schedule_critical_reinforcement(
             symbol=symbol_upper,
             endpoint="equity.historical",
             domains=["prices"],
         )
-        return StandardResponse(data=[], meta=MetaData(count=0))
+        return StandardResponse(
+            data=[],
+            meta=_historical_adjustment_meta([], adjustment_mode),
+        )
     except Exception as e:
         logger.warning(
             "Historical endpoint provider failed (symbol=%s interval=%s): %s",
@@ -4743,7 +4815,10 @@ async def get_historical_prices(
                     symbol_upper,
                     interval,
                 )
-                return StandardResponse(data=appwrite_data, meta=MetaData(count=len(appwrite_data)))
+                return StandardResponse(
+                    data=appwrite_data,
+                    meta=_historical_adjustment_meta(appwrite_data, adjustment_mode),
+                )
 
         fallback_data = await _load_historical_from_db(
             db=db,
@@ -4762,14 +4837,21 @@ async def get_historical_prices(
                 symbol_upper,
                 interval,
             )
-            return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+            return StandardResponse(
+                data=fallback_data,
+                meta=_historical_adjustment_meta(fallback_data, adjustment_mode),
+            )
 
         await _schedule_critical_reinforcement(
             symbol=symbol_upper,
             endpoint="equity.historical",
             domains=["prices"],
         )
-        return StandardResponse(data=[], error=f"Data unavailable: {str(e)}")
+        return StandardResponse(
+            data=[],
+            meta=_historical_adjustment_meta([], adjustment_mode),
+            error=f"Data unavailable: {str(e)}",
+        )
 
 
 @router.get("/{symbol}/quote", response_model=StandardResponse[StockQuoteData])
@@ -5601,6 +5683,7 @@ async def get_correlation_matrix(
     frame["time"] = pd.to_datetime(frame["time"], errors="coerce").dt.date
     frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
     frame = frame.dropna(subset=["time", "close"])
+    frame = frame[np.isfinite(frame["close"])]
     if frame.empty:
         return StandardResponse(
             data=CorrelationMatrixPayload(
@@ -5614,19 +5697,27 @@ async def get_correlation_matrix(
             meta=MetaData(count=0, symbol=symbol_upper),
         )
 
-    pivot = frame.pivot_table(index="time", columns="symbol", values="close", aggfunc="last")
-    pivot = pivot.sort_index().ffill().tail(days + 1)
-    returns = pivot.pct_change().replace([np.inf, -np.inf], np.nan).dropna(how="all")
+    return_series: Dict[str, pd.Series] = {}
+    symbol_last_data_dates: Dict[str, date] = {}
+    for ticker, prices in frame.groupby("symbol"):
+        observed_prices = prices.groupby("time")["close"].last().sort_index().tail(days + 1)
+        if observed_prices.empty:
+            continue
+        symbol_last_data_dates[ticker] = observed_prices.index.max()
+        observed_returns = observed_prices.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+        if not observed_returns.empty:
+            return_series[ticker] = observed_returns.tail(days)
 
+    min_overlap = max(10, days // 3)
     valid_symbols = [
         ticker
         for ticker in universe_symbols
-        if ticker in returns.columns and returns[ticker].count() >= max(10, days // 3)
+        if ticker in return_series and len(return_series[ticker]) >= min_overlap
     ]
     if (
         symbol_upper not in valid_symbols
-        and symbol_upper in returns.columns
-        and returns[symbol_upper].count() >= 5
+        and symbol_upper in return_series
+        and len(return_series[symbol_upper]) >= 5
     ):
         valid_symbols.insert(0, symbol_upper)
     valid_symbols = list(dict.fromkeys(valid_symbols))
@@ -5640,17 +5731,23 @@ async def get_correlation_matrix(
                 symbols=universe_symbols,
                 matrix=[],
                 returns_count=0,
+                symbol_last_data_dates=symbol_last_data_dates,
             ),
             meta=MetaData(count=0, symbol=symbol_upper),
         )
 
-    corr = returns[valid_symbols].corr(min_periods=max(10, days // 3))
+    overlap_counts: Dict[str, int] = {}
     matrix: List[CorrelationMatrixCell] = []
     for row_symbol in valid_symbols:
         for col_symbol in valid_symbols:
+            overlapping_returns = pd.concat(
+                [return_series[row_symbol], return_series[col_symbol]], axis=1, join="inner"
+            ).dropna()
+            overlap_count = len(overlapping_returns)
+            overlap_counts[f"{row_symbol}:{col_symbol}"] = overlap_count
             value = (
-                corr.loc[row_symbol, col_symbol]
-                if row_symbol in corr.index and col_symbol in corr.columns
+                overlapping_returns.iloc[:, 0].corr(overlapping_returns.iloc[:, 1])
+                if overlap_count >= min_overlap
                 else np.nan
             )
             matrix.append(
@@ -5661,6 +5758,8 @@ async def get_correlation_matrix(
                 )
             )
 
+    anchor_returns = return_series.get(symbol_upper, pd.Series(dtype=float))
+    anchor_last_data_date = symbol_last_data_dates.get(symbol_upper)
     return StandardResponse(
         data=CorrelationMatrixPayload(
             symbol=symbol_upper,
@@ -5668,12 +5767,15 @@ async def get_correlation_matrix(
             days=days,
             symbols=valid_symbols,
             matrix=matrix,
-            returns_count=int(len(returns.index)),
+            returns_count=len(anchor_returns),
+            as_of_date=anchor_last_data_date,
+            symbol_last_data_dates=symbol_last_data_dates,
+            overlap_counts=overlap_counts,
         ),
         meta=MetaData(
             count=len(matrix),
             symbol=symbol_upper,
-            last_data_date=str(returns.index.max()) if len(returns.index) else None,
+            last_data_date=str(anchor_last_data_date) if anchor_last_data_date else None,
         ),
     )
 
@@ -5932,6 +6034,7 @@ async def get_company_events(
         )
         if data:
             return StandardResponse(data=data, meta=MetaData(count=len(data)))
+
         # Provider returned empty (success path) — fall through to the DB
         # fallback so the Events Calendar widget never blanks out when
         # stored corporate-action rows already exist for the symbol.
@@ -6007,7 +6110,10 @@ async def get_shareholders(symbol: str, db: AsyncSession = Depends(get_db)):
         if not data:
             fallback_data = await _load_shareholders_fallback(db=db, symbol=symbol_upper)
             if fallback_data:
-                return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+                return StandardResponse(
+                    data=fallback_data,
+                    meta=MetaData(count=len(fallback_data)),
+                )
             await _schedule_critical_reinforcement(
                 symbol=symbol_upper,
                 endpoint="equity.shareholders",
@@ -6542,58 +6648,82 @@ async def get_transaction_flow(
     )
     price_map = {row.time: row for row in price_result.scalars().all()}
 
-    def _estimate_value(net_volume: Optional[int], price_value: Optional[float]) -> Optional[float]:
-        if net_volume is None or price_value in (None, 0):
-            return None
-        return float(net_volume) * float(price_value)
+    def _finite_float(value: Any) -> Optional[float]:
+        parsed = _coerce_optional_float(value)
+        return parsed if parsed is not None and math.isfinite(parsed) else None
+
+    def _finite_int(value: Any) -> Optional[int]:
+        parsed = _finite_float(value)
+        return int(parsed) if parsed is not None else None
+
+    def _first_finite(*values: Any) -> Optional[float]:
+        for value in values:
+            parsed = _finite_float(value)
+            if parsed is not None:
+                return parsed
+        return None
 
     points: List[TransactionFlowPoint] = []
     for row in flow_rows:
         price_row = price_map.get(row.trade_date)
         foreign_row = foreign_map.get(row.trade_date)
 
-        price_value = _pick_optional_float(None if price_row is None else price_row.close)
-        total_buy_value = _pick_optional_float(row.buy_value)
-        total_sell_value = _pick_optional_float(row.sell_value)
-        total_net_value = _pick_optional_float(row.net_value)
+        price_value = _finite_float(None if price_row is None else price_row.close)
+        total_buy_value = _finite_float(row.buy_value)
+        total_sell_value = _finite_float(row.sell_value)
+        total_net_value = _finite_float(row.net_value)
         if total_net_value is None and total_buy_value is not None and total_sell_value is not None:
-            total_net_value = total_buy_value - total_sell_value
+            total_net_value = _finite_float(total_buy_value - total_sell_value)
 
-        total_buy_volume = _coerce_optional_int(row.buy_volume)
-        total_sell_volume = _coerce_optional_int(row.sell_volume)
-        total_net_volume = _coerce_optional_int(row.net_volume)
+        total_buy_volume = _finite_int(row.buy_volume)
+        total_sell_volume = _finite_int(row.sell_volume)
+        total_net_volume = _finite_int(row.net_volume)
         if (
             total_net_volume is None
             and total_buy_volume is not None
             and total_sell_volume is not None
         ):
-            total_net_volume = total_buy_volume - total_sell_volume
+            total_net_volume = _finite_int(total_buy_volume - total_sell_volume)
 
-        foreign_net_volume = _coerce_optional_int(
+        foreign_net_volume = _finite_int(
             row.foreign_net_volume
             if row.foreign_net_volume is not None
             else (None if foreign_row is None else foreign_row.net_volume)
         )
-        foreign_net_value = _pick_optional_float(
+        foreign_net_value = _first_finite(
             None if foreign_row is None else foreign_row.net_value,
-            _estimate_value(foreign_net_volume, price_value),
+            (
+                None
+                if foreign_net_volume is None or price_value in (None, 0)
+                else foreign_net_volume * price_value
+            ),
         )
 
-        proprietary_net_volume = _coerce_optional_int(row.proprietary_net_volume)
-        proprietary_net_value = _pick_optional_float(
-            _estimate_value(proprietary_net_volume, price_value)
+        proprietary_net_volume = _finite_int(row.proprietary_net_volume)
+        proprietary_net_value = _finite_float(
+            None
+            if proprietary_net_volume is None or price_value in (None, 0)
+            else proprietary_net_volume * price_value
         )
 
         domestic_net_volume = None
-        if total_net_volume is not None:
-            domestic_net_volume = (
-                total_net_volume - (foreign_net_volume or 0) - (proprietary_net_volume or 0)
+        if (
+            total_net_volume is not None
+            and foreign_net_volume is not None
+            and proprietary_net_volume is not None
+        ):
+            domestic_net_volume = _finite_int(
+                total_net_volume - foreign_net_volume - proprietary_net_volume
             )
 
         domestic_net_value = None
-        if total_net_value is not None:
-            domestic_net_value = (
-                total_net_value - (foreign_net_value or 0.0) - (proprietary_net_value or 0.0)
+        if (
+            total_net_value is not None
+            and foreign_net_value is not None
+            and proprietary_net_value is not None
+        ):
+            domestic_net_value = _finite_float(
+                total_net_value - foreign_net_value - proprietary_net_value
             )
 
         points.append(

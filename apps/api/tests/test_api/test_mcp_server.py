@@ -76,6 +76,7 @@ async def test_http_app_requires_shared_bearer_for_remote_mcp(monkeypatch) -> No
 
     assert unauthorized.status_code == 401
     assert health.status_code == 200
+    assert health.json()["revision"] == server.settings.release_revision
 
 
 def test_guardrails_resource_marks_write_tools_dangerous() -> None:

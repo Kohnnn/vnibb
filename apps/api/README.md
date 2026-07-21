@@ -106,6 +106,23 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs)
 
 Follow [docs/oracle_runbook.md](../../docs/oracle_runbook.md) for the Oracle VM deploy, verify, cutover, and rollback sequence.
 
+Build the immutable image outside OCI. Pass the premium key only through a BuildKit secret, publish it, resolve its digest, and set `VNIBB_API_IMAGE=registry.example.com/vnibb/api@sha256:<digest>` in `deployment/env.oracle`. The image stores its build revision in `/app/.release-revision`; stale `RELEASE_REVISION` runtime keys cannot override health, logs, or Sentry. Never pass `VNSTOCK_API_KEY` with `--build-arg` or install packages at container startup.
+
+```bash
+export IMAGE_RELEASE_REVISION="$(git rev-parse --verify HEAD)"
+export VNSTOCK_API_KEY_FILE=/secure/path/vnstock-api-key
+export VNSTOCK_INSTALLER_SHA256=<verified-installer-sha256>
+bash ../../scripts/oracle/build_release_image.sh registry.example.com/vnibb/api:<release-tag>
+docker compose --env-file deployment/env.oracle -f ../../docker-compose.oracle.yml run --rm migrate
+docker compose --env-file deployment/env.oracle -f ../../docker-compose.oracle.yml up -d --no-build api mcp caddy
+```
+
+The API must retain `API_SKIP_SCHEDULER_STARTUP=true`. Start the isolated scheduler only when Redis coordination is available:
+
+```bash
+docker compose --env-file deployment/env.oracle -f ../../docker-compose.oracle.yml --profile scheduler up -d --no-build scheduler
+```
+
 ### Environment Variables
 
 ```env
@@ -118,8 +135,8 @@ APPWRITE_WRITE_ENABLED=false  # keep document-store writes frozen unless running
 APPWRITE_POPULATE_MAX_ROWS=1000
 REDIS_URL=redis://localhost:6379/0  # cache-tier connection
 VNSTOCK_API_KEY=vnstock_xxx
-VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; use Dockerfile.premium for premium builds
-VNSTOCK_EXTRA_INDEX_URL=https://vnstocks.com/api/simple  # Optional premium index for vnii bootstrap
+VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; premium modules belong in the BuildKit-built image
+VNSTOCK_EXTRA_INDEX_URL=https://vnstocks.com/api/simple  # Optional premium index for the immutable image build
 ALEMBIC_STRICT=1  # Recommended for Oracle cutover so failed migrations do not boot a partial runtime
 CORS_ORIGINS=["https://vnibb.vercel.app"]
 CORS_ORIGIN_REGEX=^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$|^https://[a-z0-9-]+\\.vercel\\.app$
@@ -175,8 +192,8 @@ When `VNIBB_MCP_URL` is configured, VniAgent runtime context reads use the MCP c
 Canonical implementation notes live in `../../docs/VNIBB_MCP_READONLY.md`.
 
 Premium package strategy:
-- Default `Dockerfile` keeps runtime installer disabled (`VNSTOCK_RUNTIME_INSTALL=0`) to avoid cold-start CPU spikes.
-- Use `Dockerfile.premium` for prebuilt premium layers when `VNSTOCK_API_KEY` is available at build time.
+- The single `Dockerfile` produces an immutable runtime image; it never installs premium packages at startup.
+- Build a premium image with the BuildKit `vnstock_api_key` secret and a verified installer SHA-256, then deploy the published image digest.
 
 VNStock alignment notes:
 - Stable public docs currently point to `v3.4.2`, while GitHub `main` carries newer runtime changes used by VNIBB.

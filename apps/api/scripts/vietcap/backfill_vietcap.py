@@ -454,6 +454,7 @@ def _ensure_indexes(db: Any) -> None:
     # Shared corpus already has idx_symbol_tradeDate_desc; do not force a new unique index here.
     _safe("market_prices_eod", [("symbol", 1), ("tradeDate", 1), ("source", 1)])
     _safe("market_prices_eod", [("source", 1), ("tradeDate", -1)])
+    _safe("market_prices_eod", [("tradeDate", -1)], name="idx_tradeDate_desc")
     for coll in ("market_prices_cw", "market_prices_derivatives", "market_prices_bond"):
         _safe(coll, [("symbol", 1), ("tradeDate", 1), ("source", 1)], unique=True)
     _safe("market_vnstock_premium_records", [("dataset", 1), ("symbol", 1), ("recordKey", 1)], unique=True)

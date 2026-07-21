@@ -1526,6 +1526,15 @@ async def test_transaction_flow_derives_missing_net_fields_from_buy_sell(client,
             block_trade_count=0,
         )
     )
+    test_db.add(
+        ForeignTrading(
+            id=901,
+            symbol="FPT",
+            trade_date=date(2026, 3, 21),
+            net_volume=50_000,
+            net_value=6_025_000.0,
+        )
+    )
     await test_db.commit()
 
     response = await client.get("/api/v1/equity/FPT/transaction-flow?days=30")
@@ -1534,8 +1543,56 @@ async def test_transaction_flow_derives_missing_net_fields_from_buy_sell(client,
     row = response.json()["data"]["data"][0]
     assert row["total_net_volume"] == 300_000
     assert row["total_net_value"] == pytest.approx(36_150_000.0)
-    assert row["domestic_net_volume"] == 300_000
-    assert row["domestic_net_value"] == pytest.approx(36_150_000.0)
+    assert row["domestic_net_volume"] is None
+    assert row["domestic_net_value"] is None
+
+
+@pytest.mark.asyncio
+async def test_transaction_flow_preserves_zero_bucket_inputs_for_domestic_derivation(client, test_db):
+    trade_date = date(2026, 3, 22)
+    test_db.add_all(
+        [
+            Stock(id=902, symbol="ZERO", exchange="HOSE"),
+            StockPrice(
+                id=902,
+                stock_id=902,
+                symbol="ZERO",
+                time=trade_date,
+                open=10.0,
+                high=10.0,
+                low=10.0,
+                close=10.0,
+                volume=1_000,
+                interval="1D",
+            ),
+            OrderFlowDaily(
+                id=902,
+                symbol="ZERO",
+                trade_date=trade_date,
+                net_volume=100,
+                net_value=1_000.0,
+                foreign_net_volume=0,
+                proprietary_net_volume=0,
+            ),
+            ForeignTrading(
+                id=902,
+                symbol="ZERO",
+                trade_date=trade_date,
+                net_volume=0,
+                net_value=0.0,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/ZERO/transaction-flow?days=30")
+
+    assert response.status_code == 200
+    row = response.json()["data"]["data"][0]
+    assert row["foreign_net_volume"] == 0
+    assert row["proprietary_net_volume"] == 0
+    assert row["domestic_net_volume"] == 100
+    assert row["domestic_net_value"] == pytest.approx(1_000.0)
 
 
 @pytest.mark.asyncio
@@ -2095,6 +2152,99 @@ async def test_industry_bubble_returns_sector_points(client, test_db, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_industry_bubble_average_includes_omitted_sector_peer(client, monkeypatch):
+    rows = [
+        {
+            "symbol": symbol,
+            "organ_name": symbol,
+            "exchange": "HOSE",
+            "industry_name": "Chung khoan",
+            "price": 10.0,
+            "volume": 1000,
+            "market_cap": float(index),
+            "pb": float(index),
+            "pe": float(index * 10),
+        }
+        for index, symbol in enumerate(["P1", "P2", "P3", "P4", "P5", "VCI"], start=1)
+    ]
+
+    async def fake_get_screener_data(*args, **kwargs):
+        return SimpleNamespace(data=rows, is_fresh=True)
+
+    async def fake_metadata(symbols):
+        return {symbol: {"sector": "securities"} for symbol in symbols}
+
+    async def fake_metrics(symbols):
+        return {
+            symbol: {"pb_ratio": float(index), "pe_ratio": float(index * 10)}
+            for index, symbol in enumerate(["P1", "P2", "P3", "P4", "P5", "VCI"], start=1)
+        }
+
+    async def empty_map(*args):
+        return {}
+
+    monkeypatch.setattr("vnibb.api.v1.market.CacheManager.get_screener_data", fake_get_screener_data)
+    monkeypatch.setattr("vnibb.api.v1.market._load_stock_metadata", fake_metadata)
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", empty_map)
+    monkeypatch.setattr("vnibb.api.v1.market._load_latest_ratio_metrics", fake_metrics)
+    monkeypatch.setattr("vnibb.api.v1.market._load_latest_income_revenue", empty_map)
+
+    response = await client.get(
+        "/api/v1/market/industry-bubble?symbol=VCI&x_metric=pb_ratio&y_metric=pe_ratio&top_n=5"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sector_point_count"] == 6
+    assert payload["displayed_point_count"] == 5
+    assert {point["symbol"] for point in payload["data"]} == {"P2", "P3", "P4", "P5", "VCI"}
+    assert payload["sector_average"] == {"x": 3.5, "y": 35.0}
+
+
+@pytest.mark.asyncio
+async def test_industry_bubble_excludes_non_finite_metrics(client, monkeypatch):
+    rows = [
+        {"symbol": "VCI", "industry_name": "Chung khoan", "market_cap": 100.0, "pb": 1.0, "pe": 10.0},
+        {"symbol": "SSI", "industry_name": "Chung khoan", "market_cap": 200.0, "pb": 2.0, "pe": 20.0},
+        {"symbol": "HCM", "industry_name": "Chung khoan", "market_cap": float("inf"), "pb": float("nan"), "pe": float("inf")},
+    ]
+
+    async def fake_get_screener_data(*args, **kwargs):
+        return SimpleNamespace(data=rows, is_fresh=True)
+
+    async def fake_metadata(symbols):
+        return {symbol: {"sector": "securities"} for symbol in symbols}
+
+    async def fake_metrics(symbols):
+        return {
+            "VCI": {"pb_ratio": 1.0, "pe_ratio": 10.0},
+            "SSI": {"pb_ratio": 2.0, "pe_ratio": 20.0},
+            "HCM": {"pb_ratio": float("nan"), "pe_ratio": float("inf")},
+        }
+
+    async def empty_map(*args):
+        return {}
+
+    monkeypatch.setattr("vnibb.api.v1.market.CacheManager.get_screener_data", fake_get_screener_data)
+    monkeypatch.setattr("vnibb.api.v1.market._load_stock_metadata", fake_metadata)
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", empty_map)
+    monkeypatch.setattr("vnibb.api.v1.market._load_latest_ratio_metrics", fake_metrics)
+    monkeypatch.setattr("vnibb.api.v1.market._load_latest_income_revenue", empty_map)
+
+    response = await client.get(
+        "/api/v1/market/industry-bubble?symbol=VCI&x_metric=pb_ratio&y_metric=pe_ratio&top_n=5"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {point["symbol"] for point in payload["data"]} == {"VCI", "SSI"}
+    assert payload["sector_point_count"] == 2
+    assert payload["sector_average"] == {"x": 1.5, "y": 15.0}
+    assert "NaN" not in response.text
+    assert "Infinity" not in response.text
+
+
+@pytest.mark.asyncio
 async def test_sector_board_returns_grouped_sector_columns(client, monkeypatch):
     async def fake_get_screener_data(*args, **kwargs):
         return SimpleNamespace(
@@ -2186,6 +2336,142 @@ async def test_sector_board_returns_grouped_sector_columns(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_sector_board_aggregate_includes_omitted_constituent(client, monkeypatch):
+    rows = [
+        {
+            "symbol": symbol,
+            "exchange": "HOSE",
+            "industry_name": "Chung khoan",
+            "price": 10.0,
+            "volume": float(index),
+            "market_cap": float(index),
+            "price_change_1d_pct": change_pct,
+        }
+        for index, (symbol, change_pct) in enumerate(
+            [("P1", 100.0), ("P2", 0.0), ("P3", 0.0), ("P4", 0.0), ("P5", 0.0), ("P6", 0.0)],
+            start=1,
+        )
+    ]
+
+    async def fake_get_screener_data(*args, **kwargs):
+        return SimpleNamespace(data=rows, is_fresh=True)
+
+    async def fake_metadata(symbols):
+        return {symbol: {"sector": "securities"} for symbol in symbols}
+
+    async def empty_map(*args):
+        return {}
+
+    monkeypatch.setattr("vnibb.api.v1.market.CacheManager.get_screener_data", fake_get_screener_data)
+    monkeypatch.setattr("vnibb.api.v1.market._load_stock_metadata", fake_metadata)
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", empty_map)
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._load_latest_market_indices_from_db", lambda _db: asyncio.sleep(0, result=[])
+    )
+
+    response = await client.get("/api/v1/market/sector-board?limit_per_sector=5&sort_by=market_cap")
+
+    assert response.status_code == 200
+    sector = response.json()["sectors"][0]
+    assert {stock["symbol"] for stock in sector["stocks"]} == {"P2", "P3", "P4", "P5", "P6"}
+    assert sector["constituent_count"] == 6
+    assert sector["displayed_count"] == 5
+    assert sector["change_pct"] == pytest.approx(100 / 21)
+
+
+@pytest.mark.asyncio
+async def test_sector_board_excludes_non_finite_values_from_aggregates(client, monkeypatch):
+    rows = [
+        {"symbol": "VCI", "industry_name": "Chung khoan", "price": 10.0, "volume": 100.0, "market_cap": 100.0, "price_change_1d_pct": 2.0},
+        {"symbol": "SSI", "industry_name": "Chung khoan", "price": float("inf"), "volume": float("nan"), "market_cap": float("inf"), "price_change_1d_pct": float("nan")},
+    ]
+
+    async def fake_get_screener_data(*args, **kwargs):
+        return SimpleNamespace(data=rows, is_fresh=True)
+
+    async def fake_metadata(symbols):
+        return {symbol: {"sector": "securities"} for symbol in symbols}
+
+    async def empty_map(*args):
+        return {}
+
+    monkeypatch.setattr("vnibb.api.v1.market.CacheManager.get_screener_data", fake_get_screener_data)
+    monkeypatch.setattr("vnibb.api.v1.market._load_stock_metadata", fake_metadata)
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", empty_map)
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._load_latest_market_indices_from_db", lambda _db: asyncio.sleep(0, result=[])
+    )
+
+    response = await client.get("/api/v1/market/sector-board?limit_per_sector=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    sector = payload["sectors"][0]
+    stocks = {stock["symbol"]: stock for stock in sector["stocks"]}
+    assert sector["change_pct"] == 2.0
+    assert sector["constituent_count"] == 1
+    assert stocks["SSI"]["price"] is None
+    assert stocks["SSI"]["volume"] is None
+    assert stocks["SSI"]["market_cap"] is None
+    assert "NaN" not in response.text
+    assert "Infinity" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_money_flow_trend_default_universe_returns_available_data(client, test_db, monkeypatch):
+    async def fake_screener_data(*_args, **_kwargs):
+        return SimpleNamespace(data=[])
+
+    async def fake_screener_rows(*_args, **_kwargs):
+        return [{"symbol": "FPT", "name": "FPT", "price": 100.0}]
+
+    async def fake_metadata(*_args, **_kwargs):
+        return {}
+
+    async def fake_change_pct(*_args, **_kwargs):
+        return {}
+
+    monkeypatch.setattr("vnibb.api.v1.market.CacheManager.get_screener_data", fake_screener_data)
+    monkeypatch.setattr("vnibb.api.v1.market._load_latest_screener_rows_from_db", fake_screener_rows)
+    monkeypatch.setattr("vnibb.api.v1.market._load_stock_metadata", fake_metadata)
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", fake_change_pct)
+    base_dates = [date.today() - timedelta(days=149 - offset) for offset in range(150)]
+    for index, trade_date in enumerate(base_dates, start=1):
+        test_db.add(
+            StockIndex(
+                id=2000 + index,
+                index_code="VNINDEX",
+                time=trade_date,
+                open=1000 + index,
+                high=1002 + index,
+                low=998 + index,
+                close=1000 + index,
+                volume=1_000_000,
+            )
+        )
+        test_db.add(
+            StockPrice(
+                id=3000 + index,
+                stock_id=1,
+                symbol="FPT",
+                time=trade_date,
+                open=20 + index * 0.4,
+                high=20.2 + index * 0.4,
+                low=19.8 + index * 0.4,
+                close=20 + index * 0.4,
+                volume=1_000_000,
+                interval="1D",
+            )
+        )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/money-flow-trend")
+
+    assert response.status_code == 200
+    assert response.json()["stocks"][0]["symbol"] == "FPT"
+
+
+@pytest.mark.asyncio
 async def test_money_flow_trend_returns_rrg_like_points(client, test_db):
     base_dates = [date.today() - timedelta(days=49 - offset) for offset in range(50)]
     for index, trade_date in enumerate(base_dates, start=1):
@@ -2256,14 +2542,13 @@ async def test_correlation_matrix_returns_peer_matrix(client, test_db, monkeypat
 
     monkeypatch.setattr("vnibb.api.v1.equity.comparison_service.get_peers", fake_get_peers)
 
-    base_dates = [date(2025, 11, 15) + timedelta(days=offset) for offset in range(50)]
+    base_dates = [date.today() - timedelta(days=49 - offset) for offset in range(50)]
+    closes = {"VCI": 20.0, "SSI": 18.0, "HCM": 22.0}
     for index, trade_date in enumerate(base_dates, start=1):
-        for stock_id, ticker, start_price, slope in [
-            (1, "VCI", 20.0, 0.30),
-            (2, "SSI", 18.0, 0.25),
-            (3, "HCM", 22.0, -0.10),
-        ]:
-            close = start_price + index * slope
+        daily_return = 0.01 if index % 2 else -0.005
+        for stock_id, ticker in [(1, "VCI"), (2, "SSI"), (3, "HCM")]:
+            closes[ticker] *= 1 + (daily_return if ticker != "HCM" else -daily_return)
+            close = closes[ticker]
             test_db.add(
                 StockPrice(
                     id=8000 + stock_id * 100 + index,
@@ -2285,13 +2570,123 @@ async def test_correlation_matrix_returns_peer_matrix(client, test_db, monkeypat
     assert response.status_code == 200
     payload = response.json()
     assert payload["data"]["symbol"] == "VCI"
-    assert payload["data"]["symbols"][0] == "VCI"
-    assert payload["data"]["returns_count"] >= 0
-    if payload["data"]["matrix"]:
-        diagonal = [cell for cell in payload["data"]["matrix"] if cell["x"] == cell["y"]]
-        assert all(
-            cell["value"] == pytest.approx(1.0) for cell in diagonal if cell["value"] is not None
+    assert payload["data"]["symbols"] == ["VCI", "SSI", "HCM"]
+    assert payload["data"]["returns_count"] == 40
+    matrix = payload["data"]["matrix"]
+    assert len(matrix) == 9
+    correlations = {(cell["x"], cell["y"]): cell["value"] for cell in matrix}
+    assert correlations[("VCI", "VCI")] == pytest.approx(1.0)
+    assert correlations[("VCI", "SSI")] == pytest.approx(1.0)
+    assert correlations[("VCI", "HCM")] == pytest.approx(-1.0)
+    assert payload["data"]["as_of_date"] == str(base_dates[-1])
+    assert payload["data"]["symbol_last_data_dates"]["SSI"] == str(base_dates[-1])
+    assert payload["data"]["overlap_counts"]["VCI:SSI"] == 40
+
+
+@pytest.mark.asyncio
+async def test_correlation_matrix_excludes_fabricated_stale_peer_returns(client, test_db, monkeypatch):
+    async def fake_get_peers(symbol: str, limit: int = 10):
+        return SimpleNamespace(
+            symbol=symbol,
+            industry="Chung khoan",
+            count=1,
+            peers=[SimpleNamespace(symbol="SSI")],
         )
+
+    monkeypatch.setattr("vnibb.api.v1.equity.comparison_service.get_peers", fake_get_peers)
+    anchor_dates = [date.today() - timedelta(days=20 - offset) for offset in range(21)]
+    stale_dates = [date.today() - timedelta(days=40 - offset) for offset in range(11)]
+    for stock_id, ticker, dates in [(1, "VCI", anchor_dates), (2, "SSI", stale_dates)]:
+        close = 20.0
+        for index, trade_date in enumerate(dates, start=1):
+            close *= 1.01
+            test_db.add(
+                StockPrice(
+                    id=9000 + stock_id * 100 + index,
+                    stock_id=stock_id,
+                    symbol=ticker,
+                    time=trade_date,
+                    open=close,
+                    high=close,
+                    low=close,
+                    close=close,
+                    volume=1_000_000,
+                    interval="1D",
+                )
+            )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/VCI/correlation-matrix?days=20&top_n=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    data = payload["data"]
+    assert data["symbols"] == ["VCI", "SSI"]
+    assert data["returns_count"] == 20
+    assert data["as_of_date"] == str(anchor_dates[-1])
+    assert data["symbol_last_data_dates"] == {
+        "VCI": str(anchor_dates[-1]),
+        "SSI": str(stale_dates[-1]),
+    }
+    assert data["overlap_counts"]["VCI:SSI"] == 0
+    assert {(cell["x"], cell["y"]): cell["value"] for cell in data["matrix"]}[("VCI", "SSI")] is None
+    assert payload["meta"]["last_data_date"] == str(anchor_dates[-1])
+
+
+@pytest.mark.asyncio
+async def test_correlation_matrix_excludes_non_finite_close_before_returns(client, test_db, monkeypatch):
+    async def fake_get_peers(symbol: str, limit: int = 10):
+        return SimpleNamespace(
+            symbol=symbol,
+            industry="Chung khoan",
+            count=1,
+            peers=[SimpleNamespace(symbol="SSI")],
+        )
+
+    monkeypatch.setattr("vnibb.api.v1.equity.comparison_service.get_peers", fake_get_peers)
+    base_dates = [date.today() - timedelta(days=20 - offset) for offset in range(21)]
+    for index, trade_date in enumerate(base_dates, start=1):
+        close = 20.0 + index
+        test_db.add(
+            StockPrice(
+                id=10100 + index,
+                stock_id=1,
+                symbol="VCI",
+                time=trade_date,
+                open=close,
+                high=close,
+                low=close,
+                close=close,
+                volume=1_000_000,
+                interval="1D",
+            )
+        )
+    for index, trade_date in enumerate(base_dates, start=1):
+        close = float("inf") if index % 2 else 30.0 + index
+        test_db.add(
+            StockPrice(
+                id=10200 + index,
+                stock_id=2,
+                symbol="SSI",
+                time=trade_date,
+                open=close,
+                high=close,
+                low=close,
+                close=close,
+                volume=1_000_000,
+                interval="1D",
+            )
+        )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/VCI/correlation-matrix?days=20&top_n=5")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    correlations = {(cell["x"], cell["y"]): cell["value"] for cell in data["matrix"]}
+    assert data["symbols"] == ["VCI"]
+    assert ("VCI", "SSI") not in correlations
+    assert data["overlap_counts"].get("VCI:SSI") is None
 
 
 @pytest.mark.asyncio
@@ -3239,6 +3634,30 @@ async def test_market_freshness_returns_200(client, test_db):
 
 
 @pytest.mark.asyncio
+async def test_market_freshness_uses_latest_fully_settled_foreign_date(client, test_db):
+    settled_date = date.today() - timedelta(days=1)
+    partial_date = date.today()
+    test_db.add_all(
+        [
+            completed_foreign_sync(settled_date),
+            completed_foreign_sync(partial_date, success=1, total=2),
+            ForeignTrading(id=790, symbol="FPT", trade_date=settled_date, net_volume=100),
+            ForeignTrading(id=791, symbol="VNM", trade_date=partial_date, net_volume=200),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/freshness")
+
+    assert response.status_code == 200
+    foreign_bucket = next(
+        bucket for bucket in response.json()["buckets"] if bucket["label"] == "Foreign trading"
+    )
+    assert foreign_bucket["last_data_date"] == settled_date.isoformat()
+    assert foreign_bucket["status"] == "fresh"
+
+
+@pytest.mark.asyncio
 async def test_market_freshness_bucket_shapes(client, test_db):
     """RED: Each bucket has label, status, age_days, last_data_date, detail."""
     from datetime import date as dt_date
@@ -3274,6 +3693,393 @@ async def test_market_freshness_bucket_shapes(client, test_db):
 
 
 @pytest.mark.asyncio
+async def test_price_board_rejects_invalid_or_more_than_fifty_symbols(client):
+    over_limit = ",".join(f"S{index}" for index in range(51))
+
+    assert (await client.get(f"/api/v1/trading/price-board?symbols={over_limit}")).status_code == 400
+    assert (await client.get("/api/v1/trading/price-board?symbols=VNM,NOT-VALID")).status_code == 400
+
+
+def completed_foreign_sync(
+    trade_date: date,
+    success: int = 1,
+    errors: int = 0,
+    total: int | None = None,
+) -> SyncStatus:
+    completed_at = datetime.combine(trade_date, datetime.min.time()) + timedelta(hours=9, minutes=20)
+    return SyncStatus(
+        sync_type="daily_trading",
+        started_at=completed_at - timedelta(minutes=20),
+        completed_at=completed_at,
+        success_count=success,
+        error_count=errors,
+        status="completed",
+        additional_data={
+            "trade_date": trade_date.isoformat(),
+            "stage_stats": {
+                "foreign_trading": {
+                    "success": success,
+                    "errors": errors,
+                    "total": success + errors if total is None else total,
+                }
+            },
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_foreign_flow_leaderboard_empty_response_discloses_requested_contract(client):
+    response = await client.get(
+        "/api/v1/market/foreign-flow-leaderboard?metric=net_value&window=20D"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trade_date"] is None
+    assert payload["requested_metric"] == "net_value"
+    assert payload["requested_window"] == "20D"
+    assert payload["metric_unit"] == "provider_native_value"
+    assert payload["window_coverage"] == "0/20 settlement dates"
+    assert payload["settlement_dates"] == []
+    assert payload["available_fields"] == []
+    assert payload["symbols_covered"] == 0
+    assert payload["symbols_unavailable"] == 0
+    assert payload["top_net_buy"] == []
+    assert payload["top_net_sell"] == []
+
+
+@pytest.mark.asyncio
+async def test_foreign_flow_leaderboard_uses_one_latest_date_and_reports_coverage(client, test_db):
+    test_db.add_all(
+        [
+            completed_foreign_sync(date(2026, 1, 2), success=4),
+            ForeignTrading(id=801, symbol="OLD", trade_date=date(2026, 1, 1), net_volume=9_999),
+            ForeignTrading(id=802, symbol="BUY", trade_date=date(2026, 1, 2), net_volume=300),
+            ForeignTrading(id=803, symbol="SELL", trade_date=date(2026, 1, 2), net_volume=-200),
+            ForeignTrading(id=804, symbol="FLAT", trade_date=date(2026, 1, 2), net_volume=0),
+            ForeignTrading(
+                id=805,
+                symbol="UNKNOWN",
+                trade_date=date(2026, 1, 2),
+                buy_volume=100,
+                net_volume=None,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/foreign-flow-leaderboard?limit=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trade_date"] == "2026-01-02"
+    assert payload["requested_metric"] == "net_volume"
+    assert payload["requested_window"] == "1D"
+    assert payload["metric_unit"] == "shares"
+    assert payload["available_settlement_dates"] == 1
+    assert payload["window_coverage"] == "1/1 settlement dates"
+    assert payload["settlement_dates"] == ["2026-01-02"]
+    assert payload["top_net_buy"] == [
+        {
+            "symbol": "BUY",
+            "net_volume": 300,
+            "net_value": None,
+            "observations": 1,
+            "settlement_dates": ["2026-01-02"],
+        }
+    ]
+    assert payload["top_net_sell"] == [
+        {
+            "symbol": "SELL",
+            "net_volume": -200,
+            "net_value": None,
+            "observations": 1,
+            "settlement_dates": ["2026-01-02"],
+        }
+    ]
+    assert payload["breadth"] == {"positive": 1, "negative": 1, "flat": 1}
+    assert payload["universe_symbols"] == 4
+    assert payload["symbols_covered"] == 3
+    assert payload["symbols_unavailable"] == 1
+    assert payload["available_fields"] == ["net_volume"]
+    assert payload["source"] == "VNIBB stored foreign_trading"
+    assert payload["source_precedence"] == ["completed daily_trading sync", "foreign_trading.net_volume"]
+    assert payload["freshness"] == "Settlement end 2026-01-02"
+    assert payload["fallback_used"] is False
+
+
+@pytest.mark.asyncio
+async def test_foreign_flow_leaderboard_excludes_partial_completed_sync(client, test_db):
+    test_db.add_all(
+        [
+            completed_foreign_sync(date(2026, 1, 1)),
+            completed_foreign_sync(date(2026, 1, 2), success=1, total=2),
+            ForeignTrading(id=810, symbol="FPT", trade_date=date(2026, 1, 1), net_volume=100),
+            ForeignTrading(id=811, symbol="VNM", trade_date=date(2026, 1, 2), net_volume=200),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/foreign-flow-leaderboard")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trade_date"] == "2026-01-01"
+    assert payload["settlement_dates"] == ["2026-01-01"]
+    assert payload["top_net_buy"][0]["symbol"] == "FPT"
+
+
+@pytest.mark.asyncio
+async def test_foreign_flow_leaderboard_ranks_complete_net_value_window(client, test_db):
+    settlement_dates = [date(2026, 1, day) for day in range(1, 7)]
+    rows = [completed_foreign_sync(settlement_date, success=5) for settlement_date in settlement_dates]
+    next_id = 820
+    for settlement_date in settlement_dates:
+        for symbol, net_volume, net_value in (
+            ("BUY", -100, 10.0),
+            ("SELL", 100, -5.0),
+            ("FLAT", 50, 0.0),
+        ):
+            rows.append(
+                ForeignTrading(
+                    id=next_id,
+                    symbol=symbol,
+                    trade_date=settlement_date,
+                    net_volume=net_volume,
+                    net_value=net_value,
+                )
+            )
+            next_id += 1
+    rows.extend(
+        [
+            completed_foreign_sync(date(2026, 1, 7)),
+            ForeignTrading(
+                id=next_id,
+                symbol="INCOMPLETE",
+                trade_date=settlement_dates[-1],
+                net_volume=999,
+                net_value=999.0,
+            ),
+            ForeignTrading(
+                id=next_id + 1,
+                symbol="NO_VALUE",
+                trade_date=settlement_dates[-1],
+                net_volume=999,
+                net_value=None,
+            ),
+            ForeignTrading(
+                id=next_id + 2,
+                symbol="VOLUME_ONLY_DATE",
+                trade_date=date(2026, 1, 7),
+                net_volume=999,
+                net_value=None,
+            ),
+        ]
+    )
+    test_db.add_all(rows)
+    await test_db.commit()
+
+    response = await client.get(
+        "/api/v1/market/foreign-flow-leaderboard?metric=net_value&window=5D&limit=10"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    expected_dates = [f"2026-01-0{day}" for day in range(6, 1, -1)]
+    assert payload["trade_date"] == "2026-01-06"
+    assert payload["requested_metric"] == "net_value"
+    assert payload["requested_window"] == "5D"
+    assert payload["metric_unit"] == "provider_native_value"
+    assert payload["available_settlement_dates"] == 5
+    assert payload["window_coverage"] == "5/5 settlement dates"
+    assert payload["settlement_dates"] == expected_dates
+    assert payload["available_fields"] == ["net_volume", "net_value"]
+    assert payload["universe_symbols"] == 5
+    assert payload["symbols_covered"] == 3
+    assert payload["symbols_unavailable"] == 2
+    assert payload["breadth"] == {"positive": 1, "negative": 1, "flat": 1}
+    assert payload["top_net_buy"] == [
+        {
+            "symbol": "BUY",
+            "net_volume": -500,
+            "net_value": 50.0,
+            "observations": 5,
+            "settlement_dates": expected_dates,
+        }
+    ]
+    assert payload["top_net_sell"] == [
+        {
+            "symbol": "SELL",
+            "net_volume": 500,
+            "net_value": -25.0,
+            "observations": 5,
+            "settlement_dates": expected_dates,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_foreign_flow_leaderboard_discloses_partial_window_and_validates_controls(client, test_db):
+    test_db.add_all(
+        [
+            completed_foreign_sync(date(2026, 1, 1)),
+            completed_foreign_sync(date(2026, 1, 2)),
+            ForeignTrading(id=880, symbol="BUY", trade_date=date(2026, 1, 1), net_volume=10),
+            ForeignTrading(id=881, symbol="BUY", trade_date=date(2026, 1, 2), net_volume=20),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get(
+        "/api/v1/market/foreign-flow-leaderboard?metric=net_volume&window=20D"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["window_coverage"] == "2/20 settlement dates"
+    assert payload["available_settlement_dates"] == 2
+    assert payload["top_net_buy"][0]["net_volume"] == 30
+    assert (
+        await client.get("/api/v1/market/foreign-flow-leaderboard?metric=ownership")
+    ).status_code == 422
+    assert (
+        await client.get("/api/v1/market/foreign-flow-leaderboard?window=3D")
+    ).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_flow_coverage_excludes_buy_volume_only_rows(client, test_db):
+    trade_date = date.today()
+    test_db.add_all(
+        [
+            OrderFlowDaily(
+                id=806,
+                symbol="BUYONLY",
+                trade_date=trade_date,
+                buy_volume=100,
+            ),
+            OrderFlowDaily(
+                id=807,
+                symbol="PROVEN",
+                trade_date=trade_date,
+                buy_volume=100,
+                sell_volume=80,
+                proprietary_net_volume=5,
+            ),
+            ForeignTrading(
+                id=807,
+                symbol="PROVEN",
+                trade_date=trade_date,
+                net_volume=15,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/flow-coverage?days=7")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"] == [{"symbol": "PROVEN", "days_with_buckets": 1}]
+    assert payload["symbols_unavailable"] == 1
+
+
+@pytest.mark.asyncio
+async def test_flow_coverage_accepts_order_flow_foreign_net_volume_without_foreign_trading(client, test_db):
+    trade_date = date.today()
+    test_db.add(
+        OrderFlowDaily(
+            id=808,
+            symbol="DIRECT",
+            trade_date=trade_date,
+            buy_volume=100,
+            sell_volume=80,
+            foreign_net_volume=15,
+            proprietary_net_volume=5,
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/flow-coverage?days=7")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == [{"symbol": "DIRECT", "days_with_buckets": 1}]
+
+
+@pytest.mark.asyncio
+async def test_flow_coverage_accepts_foreign_trading_when_order_flow_has_no_foreign_net_volume(
+    client, test_db
+):
+    trade_date = date.today()
+    test_db.add_all(
+        [
+            OrderFlowDaily(
+                id=809,
+                symbol="FOREIGN",
+                trade_date=trade_date,
+                buy_volume=100,
+                sell_volume=80,
+                proprietary_net_volume=5,
+            ),
+            ForeignTrading(id=809, symbol="FOREIGN", trade_date=trade_date, net_volume=15),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/flow-coverage?days=7")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == [{"symbol": "FOREIGN", "days_with_buckets": 1}]
+
+
+@pytest.mark.asyncio
+async def test_flow_coverage_counts_duplicate_foreign_sources_once(client, test_db):
+    trade_date = date.today()
+    test_db.add_all(
+        [
+            OrderFlowDaily(
+                id=810,
+                symbol="DUPLICATE",
+                trade_date=trade_date,
+                buy_volume=100,
+                sell_volume=80,
+                foreign_net_volume=15,
+                proprietary_net_volume=5,
+            ),
+            ForeignTrading(id=810, symbol="DUPLICATE", trade_date=trade_date, net_volume=999),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/flow-coverage?days=7")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == [{"symbol": "DUPLICATE", "days_with_buckets": 1}]
+
+
+@pytest.mark.asyncio
+async def test_flow_coverage_marks_rows_without_proven_foreign_bucket_unavailable(client, test_db):
+    trade_date = date.today()
+    test_db.add(
+        OrderFlowDaily(
+            id=811,
+            symbol="UNAVAILABLE",
+            trade_date=trade_date,
+            buy_volume=100,
+            sell_volume=80,
+            proprietary_net_volume=5,
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/flow-coverage?days=7")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == []
+    assert response.json()["symbols_unavailable"] == 1
+
+
+@pytest.mark.asyncio
 async def test_market_freshness_overall_fresh_when_all_recent(client, test_db):
     """RED: overall is 'fresh' when all buckets are within 1 day."""
     from datetime import date as dt_date
@@ -3298,15 +4104,18 @@ async def test_market_freshness_overall_fresh_when_all_recent(client, test_db):
             source="vnstock",
         )
     )
-    test_db.add(
-        ForeignTrading(
-            id=1,
-            symbol="VNM",
-            trade_date=today,
-            buy_volume=100_000,
-            sell_volume=80_000,
-            net_volume=20_000,
-        )
+    test_db.add_all(
+        [
+            completed_foreign_sync(today),
+            ForeignTrading(
+                id=1,
+                symbol="VNM",
+                trade_date=today,
+                buy_volume=100_000,
+                sell_volume=80_000,
+                net_volume=20_000,
+            ),
+        ]
     )
     test_db.add(
         MarketNews(

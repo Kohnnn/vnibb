@@ -4,6 +4,7 @@ Trading API Endpoints
 Provides endpoints for real-time trading data.
 """
 
+import re
 from typing import List, Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -78,11 +79,13 @@ async def get_price_board(
     ),
 ) -> PriceBoardResponse:
     """Fetch real-time price board for multiple symbols. Cached for 1 minute."""
-    symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    symbol_list = list(dict.fromkeys(s.strip().upper() for s in symbols.split(",") if s.strip()))
     if not symbol_list:
         raise HTTPException(status_code=400, detail="At least one symbol is required")
     if len(symbol_list) > 50:
         raise HTTPException(status_code=400, detail="Maximum 50 symbols allowed")
+    if any(not re.fullmatch(r"[A-Z0-9]{1,10}", symbol) for symbol in symbol_list):
+        raise HTTPException(status_code=400, detail="Symbols must be 1-10 uppercase letters or digits")
 
     # Create consistent cache key (sort symbols for cache hit on same set)
     sorted_symbols = ",".join(sorted(symbol_list))

@@ -84,8 +84,6 @@ dependencies = [
     # AI/LLM (for AI Copilot)
     "google-genai>=1.0.0",
     
-    # Rate Limiting
-    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]
@@ -117,6 +115,7 @@ Repository = "https://github.com/vnibb/vnibb"
 vnibb = "vnibb.cli:main"
 vnibb-seed-stocks = "scripts.seed_stocks:main"
 vnibb-mcp = "vnibb.mcp.server:main"
+vnibb-scheduler = "vnibb.scheduler_worker:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -132,6 +131,7 @@ filterwarnings = [
 markers = [
     "slow: marks tests as slow",
     "integration: marks tests as integration tests",
+    "postgres_contract: marks PostgreSQL migration and API release contracts",
 ]
 
 [tool.ruff]

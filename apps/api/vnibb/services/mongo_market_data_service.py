@@ -538,6 +538,55 @@ class MongoMarketDataService:
             logger.warning("Mongo source latest trade-date read failed (%s): %s", source_value, exc)
             return None
 
+    async def get_current_index_constituents(
+        self,
+        group: str,
+        *,
+        max_age_days: int = 7,
+    ) -> dict[str, Any] | None:
+        group_upper = str(group or "").strip().upper()
+        if not group_upper:
+            return None
+
+        def _read() -> dict[str, Any] | None:
+            coll = self._get_collection("market_index_constituents")
+            doc = coll.find_one(
+                {"group": group_upper, "source": "vietcap"},
+                {"_id": 0, "group": 1, "source": 1, "members": 1, "memberCount": 1, "syncedAt": 1},
+            )
+            if not isinstance(doc, dict):
+                return None
+            synced_at = doc.get("syncedAt")
+            if isinstance(synced_at, datetime):
+                synced_at = synced_at.replace(tzinfo=None)
+            elif isinstance(synced_at, date):
+                synced_at = datetime.combine(synced_at, time.min)
+            else:
+                return None
+            members = sorted(
+                {
+                    str(symbol).strip().upper()
+                    for symbol in doc.get("members", [])
+                    if isinstance(symbol, str) and symbol.strip()
+                }
+            )
+            if not members:
+                return None
+            return {
+                "group": group_upper,
+                "source": str(doc.get("source") or "vietcap"),
+                "members": members,
+                "member_count": len(members),
+                "synced_at": synced_at,
+                "stale": datetime.utcnow() - synced_at > timedelta(days=max_age_days),
+            }
+
+        try:
+            return await asyncio.to_thread(_read)
+        except Exception as exc:
+            logger.warning("Mongo index constituent read failed for %s: %s", group_upper, exc)
+            return None
+
     async def get_latest_fundamental_snapshots(
         self,
         symbols: list[str] | None = None,

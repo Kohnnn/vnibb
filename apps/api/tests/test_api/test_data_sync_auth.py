@@ -31,6 +31,24 @@ async def test_data_sync_health_rejects_missing_admin_key(client):
 
 
 @pytest.mark.asyncio
+async def test_realtime_start_rejects_missing_admin_key(client):
+    response = await client.post(
+        "/api/v1/stream/realtime/start",
+        headers={"X-Admin-Key": ""},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_realtime_stop_rejects_missing_admin_key(client):
+    response = await client.post(
+        "/api/v1/stream/realtime/stop",
+        headers={"X-Admin-Key": ""},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_admin_database_query_rejects_missing_admin_key(client):
     response = await client.post(
         "/api/v1/admin/database/query",

@@ -68,6 +68,17 @@ class TestSyncDatabaseUrl:
         assert s.sync_database_url == "sqlite+aiosqlite:///./local.db"
 
 
+class TestRateLimitSettings:
+    def test_defaults_to_off(self, settings_factory):
+        settings = settings_factory()
+        assert settings.rate_limit_mode == "off"
+        assert settings.rate_limit_window_seconds == 60
+
+    def test_accepts_shadow_and_enforce(self, settings_factory):
+        assert settings_factory(rate_limit_mode="shadow").rate_limit_mode == "shadow"
+        assert settings_factory(rate_limit_mode="enforce").rate_limit_mode == "enforce"
+
+
 class TestDbTimeoutSettings:
     """The three timeout settings must exist with safe defaults."""
 

@@ -25,6 +25,12 @@ from vnibb.services.ai_model_catalog_service import ai_model_catalog_service
 from vnibb.services.ai_prompt_library_service import ai_prompt_library_service
 from vnibb.services.ai_runtime_config_service import ai_runtime_config_service
 from vnibb.services.ai_telemetry_service import ai_telemetry_service
+from vnibb.services.data_quality import (
+    get_last_successful_quality_run,
+    get_latest_quality_run,
+    get_quality_run_trend,
+    serialize_quality_run,
+)
 from vnibb.services.unit_runtime_config_service import unit_runtime_config_service
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.system_layout_template_service import (
@@ -960,11 +966,23 @@ async def get_data_health(db: AsyncSession = Depends(get_db)):
                 }
             )
 
+    last_successful_run = await get_last_successful_quality_run(db)
+    latest_quality_run = await get_latest_quality_run(db)
+    trend = await get_quality_run_trend(db, market_days=30)
     return {
         "timestamp": datetime.utcnow().isoformat(),
         "tables": tables,
         "staleness_alerts": staleness_alerts,
         "summary": freshness.get("summary", {}),
+        "data_quality": {
+            "last_successful_run": serialize_quality_run(last_successful_run),
+            "source_freshness": serialize_quality_run(latest_quality_run),
+            "calendar": {
+                "holiday_source": "MARKET_HOLIDAY_DATES",
+                "limitation": "Only configured exchange closures are excluded.",
+            },
+            "trend": [serialize_quality_run(run) for run in trend],
+        },
     }
 
 

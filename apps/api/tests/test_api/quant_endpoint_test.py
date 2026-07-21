@@ -33,6 +33,70 @@ def _build_price_frame(rows: int = 120) -> pd.DataFrame:
     return pd.DataFrame(payload)
 
 
+def test_moving_average_backtest_executes_close_signal_at_next_session_open():
+    frame = pd.DataFrame(
+        {
+            "time": pd.date_range("2026-01-05", periods=5, freq="B"),
+            "open": [5, 4, 3, 6, 70],
+            "close": [5, 4, 3, 6, 7],
+        }
+    )
+
+    _metrics, _summary, trades, _warnings = quant._build_moving_average_backtest(
+        frame,
+        strategy=quant.MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        initial_capital=1_000,
+        fee_bps=0,
+    )
+
+    assert trades[0]["signal_date"] == "2026-01-08"
+    assert trades[0]["entry_date"] == "2026-01-09"
+    assert trades[0]["entry_price"] == 70
+
+
+def test_moving_average_backtest_trade_returns_include_entry_and_exit_fees():
+    frame = pd.DataFrame(
+        {
+            "time": pd.date_range("2026-01-05", periods=7, freq="B"),
+            "open": [5, 4, 3, 6, 10, 2, 20],
+            "close": [5, 4, 3, 6, 7, 2, 2],
+        }
+    )
+
+    _metrics, _summary, trades, _warnings = quant._build_moving_average_backtest(
+        frame,
+        strategy=quant.MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        initial_capital=1_000,
+        fee_bps=100,
+    )
+
+    assert trades[0]["entry_fee"] == 10
+    assert trades[0]["exit_fee"] == 19.8
+    assert trades[0]["pnl"] == 960.2
+    assert trades[0]["return_pct"] == 96.02
+
+
+def test_moving_average_backtest_leaves_final_session_signal_unexecuted():
+    frame = pd.DataFrame(
+        {
+            "time": pd.date_range("2026-01-05", periods=5, freq="B"),
+            "open": [5, 4, 3, 2, 7],
+            "close": [5, 4, 3, 2, 7],
+        }
+    )
+
+    metrics, _summary, trades, warnings = quant._build_moving_average_backtest(
+        frame,
+        strategy=quant.MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        initial_capital=1_000,
+        fee_bps=0,
+    )
+
+    assert trades == []
+    assert metrics["trade_count"] == 0
+    assert any("2026-01-09 close was not executed" in warning for warning in warnings)
+
+
 @pytest.mark.asyncio
 async def test_quant_endpoint_rejects_invalid_metrics(client):
     response = await client.get("/api/v1/quant/VNM", params={"metrics": "bad_metric"})
@@ -135,8 +199,12 @@ async def test_quant_backtest_rejects_invalid_moving_average_windows(client, mon
 
 @pytest.mark.asyncio
 async def test_quant_backtest_returns_metrics_summary_and_trades(client, monkeypatch):
-    async def fake_load_quant_frame_with_warning(**_kwargs):
+    load_args = {}
+
+    async def fake_load_quant_frame_with_warning(**kwargs):
+        load_args.update(kwargs)
         frame = _build_price_frame(220)
+
         midpoint = len(frame) // 2
         frame.loc[:midpoint, "close"] = [120 - (index * 0.25) for index in range(midpoint + 1)]
         frame.loc[midpoint + 1 :, "close"] = [
@@ -155,8 +223,10 @@ async def test_quant_backtest_returns_metrics_summary_and_trades(client, monkeyp
         "/api/v1/quant/VNM/backtest",
         json={
             "period": "1Y",
+            "as_of_date": "2026-03-13",
             "initial_capital": 1000000,
             "fee_bps": 10,
+
             "strategy": {
                 "type": "moving_average_crossover",
                 "fast_window": 5,
@@ -170,6 +240,10 @@ async def test_quant_backtest_returns_metrics_summary_and_trades(client, monkeyp
     data = payload["data"]
     assert data["symbol"] == "VNM"
     assert data["strategy"]["type"] == "moving_average_crossover"
+    assert data["as_of_date"] == "2026-03-13"
+    assert load_args["end_date"] == date(2026, 3, 13)
+    assert load_args["include_latest_quote"] is False
+
     assert data["metrics"]["final_equity"] is not None
     assert data["metrics"]["trade_count"] >= 0
     assert data["equity_curve_summary"]["data_points"] == 220

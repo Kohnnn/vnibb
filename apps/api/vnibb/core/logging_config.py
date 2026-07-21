@@ -34,6 +34,7 @@ class JSONFormatter(logging.Formatter):
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
+            "revision": getattr(record, "release_revision", settings.release_revision),
         }
 
         # Add location info
@@ -144,6 +145,8 @@ class RequestContextFilter(logging.Filter):
             record.request_id = None
         if not hasattr(record, "user_id"):
             record.user_id = None
+        if not hasattr(record, "release_revision"):
+            record.release_revision = settings.release_revision
         return True
 
 
@@ -234,7 +237,7 @@ def setup_logging(
     logger = logging.getLogger(__name__)
     logger.info(
         f"Logging configured: level={level}, format={format_type}, "
-        f"environment={settings.environment}"
+        f"environment={settings.environment}, revision={settings.release_revision}"
     )
 
 

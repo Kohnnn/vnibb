@@ -17,6 +17,7 @@ from vnibb.models.alerts import AlertSettings, BlockTrade, InsiderAlert
 from vnibb.models.app_kv import AppKeyValue
 from vnibb.models.company import Company, Officer, Shareholder
 from vnibb.models.dashboard import DashboardWidget, UserDashboard
+from vnibb.models.data_quality import DataQualityBreachState, DataQualityRun
 from vnibb.models.derivatives import DerivativePrice
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.market import MarketSector, SectorPerformance, Subsidiary
@@ -86,6 +87,8 @@ __all__ = [
     "InsiderAlert",
     "AlertSettings",
     "AppKeyValue",
+    "DataQualityRun",
+    "DataQualityBreachState",
     # Sync Tracking
     "SyncStatus",
 ]
