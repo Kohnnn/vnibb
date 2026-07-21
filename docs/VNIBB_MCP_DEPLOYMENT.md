@@ -113,7 +113,9 @@ The direct port is plain HTTP. Use it for on-host testing and operational smoke 
 From `vnibb/`:
 
 ```bash
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --build
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml pull api mcp migrate
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run --rm migrate
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --no-build api mcp caddy
 docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml ps
 docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml logs mcp --tail=200
 docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml logs caddy --tail=200

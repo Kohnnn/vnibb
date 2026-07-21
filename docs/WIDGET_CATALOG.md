@@ -63,7 +63,10 @@ For current TradingView-native coverage, use:
 | Economic Calendar | `economic_calendar` | calendar | `GET /equity/{symbol}/events`, calendar composites |
 | Dividend Ladder | `dividend_ladder` | calendar | `GET /equity/{symbol}/dividends` |
 | Volume Analysis | `volume_analysis` | core_data | `GET /equity/historical`, `GET /equity/{symbol}/intraday` |
-| Technical Summary | `technical_summary` | core_data | `GET /analysis/ta/{symbol}/full` |
+| Technical Summary | `technical_summary` | core_data | `GET /analysis/ta/{symbol}/full?timeframe={D|W|M}` |
+| Bank Analytics | `bank_metrics` | analysis | `GET /equity/{symbol}/ratios?period=FY` |
+| Valuation Band | `valuation_band` | charting | `GET /equity/{symbol}/ratios/history?ratios=...&period=year&limit=60` |
+| Cash Flow Waterfall | `cashflow_waterfall` | core_data | `GET /equity/{symbol}/cash-flow?period={year|quarter|TTM}` |
 | Technical Snapshot | `technical_snapshot` | charting | `GET /analysis/ta/{symbol}/history` |
 | Forex Rates | `forex_rates` | core_data | `GET /market/forex-rates` |
 | Commodities | `commodities` | core_data | `GET /market/commodities` |

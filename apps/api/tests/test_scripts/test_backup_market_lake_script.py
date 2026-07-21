@@ -19,6 +19,7 @@ def test_backup_script_checks_native_exit_codes_and_validates_bronze_run():
     assert '$snapshot.paths -notcontains $expectedPath' in content
     assert '--latest 1' not in content
     assert 'Select-Object -Single' not in content
+    assert 'Remove-Item -LiteralPath $dumpPath -Force' in content
     for command in (
         "& $mongodump.Source",
         "$backupOutput = & $restic.Source backup",

@@ -37,6 +37,8 @@ Current source of truth:
 - `DEVELOPMENT_JOURNAL.md`: maintainer journal and decision history
 - `WIDGET_CATALOG.md`: legacy widget snapshot, useful as historical context only
 - `NEXT_PHASES_EXECUTION_PLAN.md`: execution-ready plan for the next selected product phases
+- `PRODUCT_INFRA_DATA_EXECUTION_PLAN.md`: active product trust, OCI hardening, n6v backup/Parquet, rate-limit, and scheduler rollout plan and progress
+- `VNIBB_PRODUCT_IMPROVEMENT_EXECUTION_PLAN.md`: active research, discovery, investor workflow, activation, and product-enabling platform plan and progress
 - `WAVE_5_5_STRATEGY_EDITOR_SANDBOX_DESIGN.md`: design-only strategy editor sandbox threat model, gates, and hard rules
 - `reverse-engineering/turtle-hub-crawl-2026-06-09/`: public Turtle Hub feature crawl, Quant deep dive, and VNIBB widget/news improvement ideas
 - `reverse-engineering/fincept-quantcept-terminal-crawl-2026-06-09/`: public Quantcept and FinceptTerminal feature/tech-stack crawl mapped to VNIBB widget, agent, analytics, and platform ideas

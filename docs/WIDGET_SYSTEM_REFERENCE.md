@@ -324,10 +324,12 @@ Chart-hosting rule:
 - Quarter identities should be canonicalized before display or filtering.
 - Bare year rows should not be fabricated into fake quarter labels.
 - Quarter views should not mix annual rows into quarterly tables/charts.
+- `bank_metrics` uses annual reported ratio rows only; it shows unavailable fields as `N/A` and does not infer bank coverage or blend periods.
+- `cashflow_waterfall` requires reported operating, investing, financing, and net cash-change lines from one period; it does not infer bridge lines, and reported free cash flow is displayed without calling it a valuation.
 
 ## Technical / Market Visual Rules
 
-- `technical_summary` now includes a visual signal-distribution gauge alongside the buy/neutral/sell counts.
+- `technical_summary` now includes a visual signal-distribution gauge alongside the buy/neutral/sell counts, preserving backend timeframe, source, and data-quality disclosures; its aggregated indicators are not advice.
 - `orderbook` includes both a cumulative depth chart and the existing row-level depth table.
 - `relative_rotation` should prefer rendering the quadrant chart first, then layer metrics and trail details around it.
 - main historical price charts should show corporate-action markers for dividends, splits, and rights/stock-dividend actions when those events are available in-range.
@@ -335,7 +337,8 @@ Chart-hosting rule:
 ## History / Valuation Rules
 
 - Valuation widgets now favor deeper oldest-to-newest history.
-- Valuation bands support richer multiple sets and statistical overlays.
+- Valuation bands support richer multiple sets and statistical overlays from the historical ratio endpoint; non-positive, non-finite, or fewer than three observations produce an explicit sparse state.
+- Valuation bands are descriptive historical statistics, not fair value or investment recommendations.
 - Current adjusted-price groundwork exists, but not every quant/stat endpoint is fully adjustment-aware yet.
 
 ## Template Rules

@@ -106,7 +106,7 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs)
 
 Follow [docs/oracle_runbook.md](../../docs/oracle_runbook.md) for the Oracle VM deploy, verify, cutover, and rollback sequence.
 
-Build the immutable image outside OCI. Pass the premium key only through a BuildKit secret, publish it, resolve its digest, and set `VNIBB_API_IMAGE=registry.example.com/vnibb/api@sha256:<digest>` in `deployment/env.oracle`. The image stores its build revision in `/app/.release-revision`; stale `RELEASE_REVISION` runtime keys cannot override health, logs, or Sentry. Never pass `VNSTOCK_API_KEY` with `--build-arg` or install packages at container startup.
+Build the immutable image outside OCI. Pass the premium key only through a BuildKit secret, publish it, resolve its digest, and set `VNIBB_API_IMAGE_REPOSITORY=registry.example.com/vnibb/api` plus `VNIBB_API_IMAGE_DIGEST=sha256:<digest>` in `deployment/env.oracle`. The image stores its build revision in `/app/.release-revision`; stale `RELEASE_REVISION` runtime keys cannot override health, logs, or Sentry. Never pass `VNSTOCK_API_KEY` with `--build-arg` or install packages at container startup.
 
 ```bash
 export IMAGE_RELEASE_REVISION="$(git rev-parse --verify HEAD)"

@@ -34,6 +34,9 @@ At a high level, production looks like:
 4. the `vnibb-mcp` sidecar exposes the read-only MCP HTTP surface for VniAgent and remote clients
 5. the self-hosted database stack backs persistence, runtime state, auth, and cache
 6. upstream market providers feed the service layer
+7. the API image is built once with BuildKit secrets when premium packages are needed, published, and deployed by immutable digest
+8. migrations run through the one-shot `migrate` service before API/MCP replacement; the API process does not migrate at startup
+9. API scheduling remains disabled and the profiled `scheduler` worker is the only scheduler runtime
 
 ```text
 Vercel frontend
@@ -124,7 +127,7 @@ VniAgent server context path
 |-------|------------|---------|
 | **JSON** | orjson 3.9+ | Fast JSON serialization |
 | **Scheduling** | APScheduler | Scheduled sync jobs |
-| **Rate Limiting** | slowapi | Per-client rate limiting |
+| **Rate Limiting** | Redis Lua middleware | Per-client fixed-window rate limiting with shadow/enforce rollout modes |
 | **Logging** | structlog / logging | Structured JSON logging |
 
 ### Frontend Stack
@@ -519,7 +522,8 @@ ORDERBOOK_AT_CLOSE_ONLY=true
 STORE_INTRADAY_TRADES=false
 INTRADAY_REQUIRE_MARKET_HOURS=true
 INTRADAY_ALLOW_OUT_OF_HOURS_IN_PROD=false
-SKIP_SCHEDULER_STARTUP=false
+RATE_LIMIT_MODE=shadow
+API_SKIP_SCHEDULER_STARTUP=true
 SKIP_WEBSOCKET_STARTUP=false
 ```
 
@@ -531,7 +535,7 @@ SKIP_WEBSOCKET_STARTUP=false
 - `CACHE_BACKEND=auto`
 - `APPWRITE_WRITE_ENABLED=false`
 - `VNSTOCK_CALLS_PER_MINUTE=100`
-- `SKIP_SCHEDULER_STARTUP=false`
+- `API_SKIP_SCHEDULER_STARTUP=true`
 - `SKIP_WEBSOCKET_STARTUP=false`
 
 ### Database stack writes
@@ -548,6 +552,10 @@ Keep durable writes pointed at the self-hosted database stack. Env keys below ar
 In this backend, `auto` resolves to the configured cache tier when a cache URL is set, and falls back to in-process memory only if the cache tier is unavailable.
 
 That makes it a reasonable production default when the goal is graceful degradation instead of hard failure.
+
+### Rate-limit rollout
+
+`RATE_LIMIT_MODE` defaults to `off` in core configuration. Oracle's first rollout sets `shadow`: the Redis Lua middleware counts requests, emits policy headers and logs threshold breaches, but does not return `429`. Review the headers and logs under expected load, then set `RATE_LIMIT_MODE=enforce` only after confirming the bucket limits. Keep `off` for an intentional bypass.
 
 ### Settings worth watching closely
 
@@ -575,7 +583,7 @@ These only matter when the in-process fallback cache is used. The 1MB entry cap 
 - `STARTUP_WS_TIMEOUT_SECONDS=5`
 - `SKIP_WARMUP=false`
 
-These are reasonable defaults. They keep startup bounded while leaving the scheduler and websocket pipeline enabled.
+These keep startup bounded while the API serves HTTP/WebSocket only. Run APScheduler in the profiled `scheduler` worker with Redis locking; do not enable API-owned scheduling unless that worker is stopped and only one API replica exists.
 
 ## OCI current setup
 

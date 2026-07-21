@@ -16,6 +16,12 @@
 
 ---
 
+## Scheduler Coordination
+
+Redis stores ephemeral scheduler lock keys only; no PostgreSQL or MongoDB schema changes are required. Keys use `SCHEDULER_LOCK_KEY_PREFIX:<job-id>`, contain a unique owner token, and expire after the job timeout plus `SCHEDULER_LOCK_TTL_MARGIN_SECONDS`. The scheduler worker requires Redis coordination in production and skips a job when Redis is unavailable or another worker owns its lock. API-only deployments retain best-effort local scheduling only when deliberately enabled.
+
+---
+
 ## Capacity And Limits
 
 VNIBB persistence runs on a self-hosted database stack. Capacity is governed by the host's provisioned resources rather than a managed-plan quota.
@@ -1162,17 +1168,12 @@ flowchart LR
 
 **Running migrations on production:**
 
-```bash
-# On OCI host — runs inside vnibb-api container which holds DB credentials
-ssh -i ~/.ssh/oci-vnibb ubuntu@<oci-public-ip> \
-  "docker exec vnibb-api alembic -c /app/alembic.ini upgrade head"
-```
-
-To verify after running:
+Run the one-shot `migrate` service from the target immutable image before recreating API or MCP. API and MCP startup never runs Alembic.
 
 ```bash
-ssh -i ~/.ssh/oci-vnibb ubuntu@<oci-public-ip> \
-  "docker exec vnibb-api alembic -c /app/alembic.ini current"
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml pull
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run --rm migrate
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run --rm migrate current
 ```
 
-**Note:** The API container runs `alembic upgrade head` automatically on startup (via the entrypoint). Manual execution is only needed if you need to migrate without restarting the API.
+A failed migration leaves the running API untouched. Do not run automatic schema downgrades during rollback.

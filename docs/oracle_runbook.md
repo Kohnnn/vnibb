@@ -90,6 +90,8 @@ Edit `deployment/env.oracle` and set:
 - `ADMIN_API_KEY`
 - `LOG_FORMAT=json`
 - `CORS_ORIGINS`
+- `VNIBB_API_IMAGE_REPOSITORY` as the registry repository and `VNIBB_API_IMAGE_DIGEST` as the published `sha256:<digest>`
+- resource and log limit values from `deployment/env.oracle.example`, adjusted only after a measured baseline
 
 ### Create the system templates collection
 
@@ -115,22 +117,55 @@ Recommended indexes:
 
 After deploy, admins can save the platform admin key in the web UI and manage locked Initial layouts without SSH access or code edits.
 
-### Start the stack
+### Build and publish the release image
+
+Build outside OCI. The release image is free-compatible when no premium secret is supplied. For a premium image, use BuildKit's secret mount and provide the installer SHA-256 out of band; never pass the API key with `--build-arg`.
+
+```bash
+export IMAGE_RELEASE_REVISION="$(git rev-parse --verify HEAD)"
+export VNSTOCK_API_KEY_FILE=/secure/path/vnstock-api-key
+export VNSTOCK_INSTALLER_SHA256=<verified-installer-sha256>
+bash scripts/oracle/build_release_image.sh registry.example.com/vnibb/api:<release-tag>
+```
+
+After publishing, resolve the registry's manifest digest and set `VNIBB_API_IMAGE_REPOSITORY=registry.example.com/vnibb/api` plus `VNIBB_API_IMAGE_DIGEST=sha256:<published-digest>` in `deployment/env.oracle`. Compose joins these fields as `repository@digest`, so a mutable tag cannot enter the release path. The image stores its build revision in `/app/.release-revision`; stale `RELEASE_REVISION` runtime keys cannot override health, logs, or Sentry. The identical image value is used by API, MCP, scheduler, and the one-shot migration service.
+
+### Release the stack
 
 ```bash
 git pull --ff-only
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --build
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml config
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml pull
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run --rm migrate
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run --rm migrate current
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --no-build --force-recreate api mcp caddy
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler up -d --no-build --force-recreate scheduler
 ```
 
-Always include `--env-file deployment/env.oracle`. Compose does not use the service-level `env_file` for `${...}` interpolation, and Caddy requires `SITE_HOSTNAME` plus `ACME_EMAIL` before it can obtain a public TLS certificate.
+### Scheduler cutover and rollback
 
-If health checks still show old runtime behavior after env changes, rebuild without cache and force recreation:
+The API defaults to `API_SKIP_SCHEDULER_STARTUP=true`; it does not execute APScheduler jobs. Enable the isolated worker only after the API is recreated with that default and `REDIS_URL` is reachable.
 
 ```bash
-git pull --ff-only
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml build --no-cache api mcp
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --force-recreate api mcp caddy
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler config
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler up -d --no-build scheduler
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml logs scheduler --tail=200
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler ps
 ```
+
+The scheduler service uses the same pinned repository and digest and requires `SCHEDULER_LOCK_MODE=required`; a Redis failure skips jobs rather than risking duplicates. Verify `/api/v1/data/sync/status` reports API role and `scheduler_lock_*` configuration under `/health/`.
+
+Rollback the worker before restoring API-owned scheduling:
+
+```bash
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler stop scheduler
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler rm -f scheduler
+API_SKIP_SCHEDULER_STARTUP=false docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --no-build --force-recreate api
+```
+
+Use API-owned scheduling only for a single API replica and only after the scheduler container has stopped.
+
+Always include `--env-file deployment/env.oracle`. Compose does not use the service-level `env_file` for `${...}` interpolation, and Caddy requires `SITE_HOSTNAME` plus `ACME_EMAIL` before it can obtain a public TLS certificate. A migration failure stops this release sequence before API or MCP is recreated, leaving the currently running services untouched.
 
 ### Verify container health
 
@@ -248,6 +283,8 @@ docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml res
 docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml restart caddy
 ```
 
+Routine API and MCP restarts do not run migrations, download installers, or install packages. Run `migrate` only as part of a controlled release.
+
 ### When to rollback
 
 - `/ready` or `/api/v1/health` is non-200 after restart attempts
@@ -265,10 +302,12 @@ See [oracle_rollback_plan.md](./oracle_rollback_plan.md) for the exact rollback 
 - Apply OS security updates weekly
 - Rebuild containers for dependency updates on a planned maintenance window
 
-### Log rotation
+### Resource and log ceilings
 
-- Monitor Docker log growth
-- Rotate or cap logs before disk pressure becomes an incident
+- `api`, `mcp`, `caddy`, and optional `local-redis` use Compose CPU, memory, and PID limits from `deployment/env.oracle`.
+- Defaults reserve capacity for the Docker daemon, kernel, Caddy, and operator access on the 4 OCPU / 24 GB A1 allowance; tune only from measured peak CPU, RSS, process count, and log volume.
+- Docker uses the `local` log driver by default with `10m` files and three retained files. Set `DOCKER_LOG_DRIVER=json-file` only when host tooling requires it; the same size and file-count values apply.
+- Check `docker inspect --format '{{.HostConfig.LogConfig.Type}} {{json .HostConfig.LogConfig.Config}}' vnibb-api` and `docker stats --no-stream` after every limit change.
 
 ### Disk checks
 

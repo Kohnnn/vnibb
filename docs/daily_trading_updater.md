@@ -131,7 +131,7 @@ The backend now has two adjacent scheduler behaviors around the daily trading up
    - runs every 5 minutes during market hours
    - no longer acts as a placeholder
    - uses a limited priority symbol slice (`scheduler_live_symbols_per_run`, default `60`)
-   - primarily refreshes `foreign_trading`, `order_flow_daily`, and `derivative_prices`
+   - refreshes live `order_flow_daily` and `derivative_prices`; settled `foreign_trading` remains in the daily updater
    - `intraday_trades` and `orderbook_snapshots` still respect the existing close-only / market-hours config gates
 
 2. `supplemental_company_sync`

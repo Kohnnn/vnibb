@@ -1,8 +1,12 @@
+x-docker-logging: &docker-logging
+  driver: ${DOCKER_LOG_DRIVER:-local}
+  options:
+    max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+    max-file: "${DOCKER_LOG_MAX_FILE:-3}"
+
 services:
   api:
-    build:
-      context: ./apps/api
-      dockerfile: Dockerfile
+    image: ${VNIBB_API_IMAGE_REPOSITORY:?Set VNIBB_API_IMAGE_REPOSITORY in deployment/env.oracle}@${VNIBB_API_IMAGE_DIGEST:?Set VNIBB_API_IMAGE_DIGEST to the published sha256 digest.}
     container_name: vnibb-api
     hostname: vnibb-api
     restart: unless-stopped
@@ -14,23 +18,56 @@ services:
       UVICORN_PROXY_HEADERS: ${UVICORN_PROXY_HEADERS:-1}
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
       INTRADAY_MARKET_TZ: ${INTRADAY_MARKET_TZ:-Asia/Ho_Chi_Minh}
+      SCHEDULER_ROLE: api
+      SKIP_SCHEDULER_STARTUP: ${API_SKIP_SCHEDULER_STARTUP:-true}
     expose:
       - "8000"
     volumes:
-      - vnibb_vnstock:/root/.vnstock
-      - vnibb_python_venv:/root/.venv
       - vnibb_api_logs:/app/logs
+    cpus: ${API_CPUS:-1.50}
+    mem_limit: ${API_MEM_LIMIT:-4g}
+    pids_limit: ${API_PIDS_LIMIT:-256}
+    logging: *docker-logging
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:${PORT:-8000}/live >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${PORT:-8000}/ready >/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 120s
 
+  scheduler:
+    image: ${VNIBB_API_IMAGE_REPOSITORY:?Set VNIBB_API_IMAGE_REPOSITORY in deployment/env.oracle}@${VNIBB_API_IMAGE_DIGEST:?Set VNIBB_API_IMAGE_DIGEST to the published sha256 digest.}
+    container_name: vnibb-scheduler
+    hostname: vnibb-scheduler
+    restart: unless-stopped
+    profiles: ["scheduler"]
+    env_file:
+      - path: ./deployment/env.oracle
+        required: false
+    environment:
+      SCHEDULER_ROLE: scheduler
+      SKIP_SCHEDULER_STARTUP: "false"
+      SKIP_WEBSOCKET_STARTUP: "true"
+      SCHEDULER_LOCK_ENABLED: "true"
+      SCHEDULER_LOCK_MODE: required
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      INTRADAY_MARKET_TZ: ${INTRADAY_MARKET_TZ:-Asia/Ho_Chi_Minh}
+    command: ["python", "-m", "vnibb.scheduler_worker"]
+    volumes:
+      - vnibb_api_logs:/app/logs
+    cpus: ${SCHEDULER_CPUS:-1.00}
+    mem_limit: ${SCHEDULER_MEM_LIMIT:-2g}
+    pids_limit: ${SCHEDULER_PIDS_LIMIT:-256}
+    logging: *docker-logging
+    healthcheck:
+      test: ["CMD", "python", "-m", "vnibb.scheduler_worker", "--check"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
   mcp:
-    build:
-      context: ./apps/api
-      dockerfile: Dockerfile
+    image: ${VNIBB_API_IMAGE_REPOSITORY:?Set VNIBB_API_IMAGE_REPOSITORY in deployment/env.oracle}@${VNIBB_API_IMAGE_DIGEST:?Set VNIBB_API_IMAGE_DIGEST to the published sha256 digest.}
     container_name: vnibb-mcp
     hostname: vnibb-mcp
     restart: unless-stopped
@@ -43,17 +80,30 @@ services:
       VNIBB_MCP_TRANSPORT: ${VNIBB_MCP_TRANSPORT:-streamable-http}
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
       INTRADAY_MARKET_TZ: ${INTRADAY_MARKET_TZ:-Asia/Ho_Chi_Minh}
-    entrypoint: ["python", "-m", "vnibb.mcp.server"]
+    command: ["python", "-m", "vnibb.mcp.server"]
     expose:
       - "8001"
     ports:
       - "${MCP_PUBLIC_BIND:-127.0.0.1}:${MCP_PUBLIC_PORT:-8001}:8001"
+    cpus: ${MCP_CPUS:-0.50}
+    mem_limit: ${MCP_MEM_LIMIT:-1g}
+    pids_limit: ${MCP_PIDS_LIMIT:-128}
+    logging: *docker-logging
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8001/health >/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 30s
+
+  migrate:
+    image: ${VNIBB_API_IMAGE_REPOSITORY:?Set VNIBB_API_IMAGE_REPOSITORY in deployment/env.oracle}@${VNIBB_API_IMAGE_DIGEST:?Set VNIBB_API_IMAGE_DIGEST to the published sha256 digest.}
+    restart: "no"
+    env_file:
+      - path: ./deployment/env.oracle
+        required: false
+    entrypoint: ["alembic"]
+    command: ["-c", "/app/alembic.ini", "upgrade", "head"]
 
   caddy:
     image: caddy:2.8-alpine
@@ -79,6 +129,10 @@ services:
       - ./deployment/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    cpus: ${CADDY_CPUS:-0.50}
+    mem_limit: ${CADDY_MEM_LIMIT:-512m}
+    pids_limit: ${CADDY_PIDS_LIMIT:-128}
+    logging: *docker-logging
 
   redis:
     image: redis:7-alpine
@@ -90,10 +144,12 @@ services:
     profiles: ["local-redis"]
     volumes:
       - vnibb_redis:/data
+    cpus: ${REDIS_CPUS:-0.50}
+    mem_limit: ${REDIS_MEM_LIMIT:-512m}
+    pids_limit: ${REDIS_PIDS_LIMIT:-128}
+    logging: *docker-logging
 
 volumes:
-  vnibb_vnstock:
-  vnibb_python_venv:
   vnibb_api_logs:
   vnibb_redis:
   caddy_data:

@@ -14,6 +14,14 @@ def test_release_build_passes_the_git_revision_without_a_secret() -> None:
     assert '--build-arg "IMAGE_RELEASE_REVISION=$revision"' in script
 
 
+def test_compose_requires_repository_and_digest_separately() -> None:
+    compose = (ROOT / "docker-compose.oracle.yml").read_text(encoding="utf-8")
+
+    assert "VNIBB_API_IMAGE_REPOSITORY" in compose
+    assert "VNIBB_API_IMAGE_DIGEST" in compose
+    assert "VNIBB_API_IMAGE:" not in compose
+
+
 def test_retired_premium_bootstrap_fails_after_guidance() -> None:
     script = (ROOT / "scripts/oracle/bootstrap_vnstock_premium.sh").read_text(
         encoding="utf-8"
