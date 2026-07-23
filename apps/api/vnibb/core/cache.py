@@ -95,6 +95,18 @@ def _has_error_result(result: Any) -> bool:
     return bool(error)
 
 
+def resolve_cache_ttl(ttl: Optional[int], key_prefix: str) -> int:
+    """Resolve the effective cache TTL for a decorated function.
+
+    Precedence: explicit ``ttl`` > centralized ``CACHE_TTLS[key_prefix]`` >
+    ``settings.redis_cache_ttl``. Kept as a pure function so the resolution
+    order can be unit-tested without exercising Redis.
+    """
+    if ttl is not None:
+        return ttl
+    return CACHE_TTLS.get(key_prefix, settings.redis_cache_ttl)
+
+
 def cached(
     ttl: Optional[int] = None,
     key_prefix: str = "cache",
@@ -122,9 +134,7 @@ def cached(
             redis_enabled = _redis_cache_enabled()
             redis_available = redis_enabled and redis_client._client is not None
 
-            effective_ttl = (
-                ttl if ttl is not None else CACHE_TTLS.get(key_prefix, settings.redis_cache_ttl)
-            )
+            effective_ttl = resolve_cache_ttl(ttl, key_prefix)
 
             # Build cache key
             key_parts = [key_prefix]

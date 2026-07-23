@@ -3,13 +3,14 @@
 'use client';
 
 import { useState, useCallback, useMemo, useEffect, useRef, Suspense } from 'react';
+import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
 import { Sidebar, Header, TabBar, RightSidebar, MobileNav, FreshnessBanner, WhatsNewPanel } from '@/components/layout';
-import { OnboardingWalkthrough } from '@/components/onboarding/OnboardingWalkthrough';
 import { ResponsiveDashboardGrid, type LayoutItem } from '@/components/layout/DashboardGrid';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { WidgetLibrary, WidgetWrapper, widgetRegistry } from '@/components/widgets';
+import { WidgetWrapper, widgetRegistry } from '@/components/widgets';
+import { DashboardSkeleton } from '@/components/shell/DashboardSkeleton';
 import {
     TIMEFRAME_OPTIONS,
     CHART_TYPE_OPTIONS,
@@ -20,8 +21,6 @@ import {
     type ParameterOption
 } from '@/components/widgets/WidgetParameterDropdown';
 import { type WidgetMultiSelectParam } from '@/components/widgets/WidgetWrapper';
-import { WidgetSettingsModal, AppsLibrary, TemplateSelector } from '@/components/modals';
-import { AICopilot } from '@/components/ui/AICopilot';
 import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import { isTradingViewWidget, usesTradingViewWidgetSymbol } from '@/lib/tradingViewWidgets';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
@@ -58,9 +57,16 @@ import {
     type OnboardingGoalId,
     type OnboardingMeaningfulActionId,
 } from '@/lib/userPreferences';
-import type { WidgetInstance, WidgetType, WidgetConfig } from '@/types/dashboard';
+import type { WidgetInstance, WidgetType, WidgetConfig, Dashboard } from '@/types/dashboard';
 import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '@/types/dashboard-templates';
 import { AlertCircle, Grid3X3, PlusCircle, RefreshCw, Shield, X } from 'lucide-react';
+
+const WidgetLibrary = dynamic(() => import('@/components/widgets').then((m) => ({ default: m.WidgetLibrary as unknown as React.ComponentType<{ isOpen: boolean; onClose: () => void }> })), { ssr: false });
+const WidgetSettingsModal = dynamic(() => import('@/components/modals').then((m) => ({ default: m.WidgetSettingsModal })), { ssr: false });
+const AppsLibrary = dynamic(() => import('@/components/modals').then((m) => ({ default: m.AppsLibrary })), { ssr: false });
+const TemplateSelector = dynamic(() => import('@/components/modals').then((m) => ({ default: m.TemplateSelector as unknown as React.ComponentType<{ open: boolean; onClose: () => void; onSelectTemplate: (template: DashboardTemplate) => void; currentDashboard: Dashboard | null; currentSymbol: string }> })), { ssr: false });
+const AICopilot = dynamic(() => import('@/components/ui/AICopilot').then((m) => ({ default: m.AICopilot })), { ssr: false });
+const OnboardingWalkthrough = dynamic(() => import('@/components/onboarding/OnboardingWalkthrough').then((m) => ({ default: m.OnboardingWalkthrough as unknown as React.ComponentType<{ open: boolean; onSkip: () => void; onGoalSelect: (goalId: OnboardingGoalId) => void; onMeaningfulAction: (actionId: OnboardingMeaningfulActionId) => void }> })), { ssr: false });
 
 export default function DashboardPage() {
     return (
@@ -1135,11 +1141,7 @@ function DashboardContent() {
     }, []);
 
     if (!mounted) {
-        return (
-            <div aria-busy="true" aria-label="Loading dashboard" className="flex h-screen items-center justify-center bg-[var(--bg-primary)] text-sm text-[var(--text-muted)]">
-                Loading dashboard...
-            </div>
-        );
+        return <DashboardSkeleton />;
     }
 
     return (

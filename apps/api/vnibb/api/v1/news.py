@@ -503,6 +503,16 @@ async def get_market_sentiment() -> MarketSentiment:
 
 
 @router.get(
+    "/trending",
+    response_model=TrendingAnalysis,
+    summary="Get Trending Topics",
+    description="Analyze trending topics from recent news.",
+)
+async def get_trending_alias() -> TrendingAnalysis:
+    return await get_trending()
+
+
+@router.get(
     "/news/trending",
     response_model=TrendingAnalysis,
     summary="Get Trending Topics",

@@ -253,6 +253,7 @@ class ResponseCacheControlMiddleware(BaseHTTPMiddleware):
         re.compile(r"^/api/v1/listings?(/|$)"),
         re.compile(r"^/api/v1/comparison(/|$)"),
         re.compile(r"^/api/v1/compare(/|$)"),
+        re.compile(r"^/api/v1/dashboard/system-layouts/published/?$"),
     )
 
     CACHE_HEADERS = {

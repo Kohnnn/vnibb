@@ -102,3 +102,17 @@ Prereq reading: `AGENTS.md`, `docs/WIDGET_SYSTEM_REFERENCE.md`, `docs/QUANT_REMA
   `onDataChange` callbacks through the shared runtime payload, extended `ChartMountGuard`
   for HTML/ARIA props, and added accessible labels to high-traffic quant charts/tables
   and the market heatmap SVG. ci:gate green.
+- 2026-07-22: **Mount smoke coverage shipped.** Added `WidgetRegistry.smoke.test.tsx`:
+  mounts every non-placeholder registry widget in its initial/loading state inside the
+  composed context providers + Suspense + a `MountErrorBoundary`, with `fetch` stubbed to
+  never settle, asserting no widget throws synchronously on mount (151/151). Added jsdom
+  shims to `jest.setup.tsx` (`IntersectionObserver`/`ResizeObserver`, `matchMedia`,
+  `Element.prototype.scrollIntoView`) so widgets relying on those browser APIs mount under
+  jest. Sibling `WidgetRegistry.test.ts` completeness test still 8/8.
+- 2026-07-22: **AICopilot degraded-mode shipped.** `AICopilotWidget` now probes
+  `getCopilotRuntimeConfig()` once on mount and, when the server reports `available === false`
+  and no browser-local API key is set, renders an amber degraded banner and disables the
+  quick prompts + message input instead of letting the first prompt fail with a raw stream
+  error. A null/failed probe stays optimistic (treated as available). Backed by a new
+  `available` flag on the backend `/copilot/runtime` response and the `CopilotRuntimeConfig`
+  type. Frontend lint + tsc clean; copilot/registry suites 159/159.

@@ -2765,6 +2765,9 @@ export interface ModelOption {
 export interface CopilotRuntimeConfig {
     provider: string;
     model: string;
+    // Backend reports false when no AI key is configured (llm_service.is_available).
+    // Older/fallback endpoints omit it, so treat missing as available.
+    available?: boolean;
 }
 
 export interface CopilotHistoryMessage {

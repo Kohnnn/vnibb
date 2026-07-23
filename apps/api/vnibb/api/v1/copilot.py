@@ -119,6 +119,7 @@ class ModelCatalogResponse(BaseModel):
 class RuntimeConfigResponse(BaseModel):
     provider: str
     model: str
+    available: bool = True
 
 
 class DocumentContextResponse(BaseModel):
@@ -315,6 +316,7 @@ async def get_runtime_config():
     return RuntimeConfigResponse(
         provider=str(config.get("provider") or "openrouter"),
         model=str(config.get("model") or "openrouter/free"),
+        available=llm_service.is_available,
     )
 
 

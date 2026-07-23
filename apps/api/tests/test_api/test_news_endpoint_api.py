@@ -368,6 +368,19 @@ async def test_world_news_map_endpoint_returns_source_geography(client, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_trending_endpoint_resolves_under_news_prefix(client, monkeypatch):
+    async def fake_analyze_trending():
+        return {"topics": [], "period_hours": 24, "total_articles": 0}
+
+    monkeypatch.setattr(news.news_crawler, "analyze_trending", fake_analyze_trending)
+
+    response = await client.get("/api/v1/news/trending")
+
+    assert response.status_code == 200
+    assert response.json()["topics"] == []
+
+
+@pytest.mark.asyncio
 async def test_world_news_sources_endpoint_returns_registry(client, monkeypatch):
     def fake_sources(**kwargs):
         assert kwargs["region"] == "vietnam"

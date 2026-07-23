@@ -2897,7 +2897,7 @@ async def get_foreign_flow_leaderboard(
 
 
 @router.get("/indices", response_model=MarketIndicesResponse)
-@cached(ttl=20, key_prefix="market_indices")
+@cached(key_prefix="market_indices")
 async def get_market_indices(
     limit: int = Query(default=10, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
