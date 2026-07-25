@@ -9,7 +9,7 @@
  */
 
 import { isWidgetPlaceholder, widgetRegistry } from './WidgetRegistry';
-import { widgetDefinitions } from '@/data/widgetDefinitions';
+import { normalizeWidgetType, widgetDefinitions } from '@/data/widgetDefinitions';
 
 describe('WidgetRegistry completeness', () => {
     const declaredTypes = widgetDefinitions.map((entry: { type: string }) => entry.type);
@@ -18,6 +18,18 @@ describe('WidgetRegistry completeness', () => {
     it('exposes every widget ID declared in widgetDefinitions.ts', () => {
         const missing = declaredTypes.filter((type: string) => !widgetRegistry.has(type as never));
         expect(missing).toEqual([]);
+    });
+
+    it('normalizes registered widget IDs that are intentionally absent from the library catalogue', () => {
+        const hiddenRegisteredTypes = registeredTypes.filter((type) => !declaredTypes.includes(type));
+        expect(hiddenRegisteredTypes).toEqual(expect.arrayContaining([
+            'ai_copilot',
+            'dividend_ladder',
+            'market_heatmap',
+            'rs_ranking',
+        ]));
+        expect(hiddenRegisteredTypes.every((type) => normalizeWidgetType(type) === type)).toBe(true);
+        expect(normalizeWidgetType('invalid')).toBeNull();
     });
 
     const isRenderableComponent = (value: unknown): boolean => {

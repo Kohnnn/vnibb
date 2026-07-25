@@ -22,3 +22,31 @@ jest.mock('next/navigation', () => ({
     usePathname: () => '/',
     useSearchParams: () => new URLSearchParams(),
 }))
+
+// jsdom lacks these browser APIs; widgets that observe layout/visibility or
+// probe media queries would otherwise throw on mount.
+class MockObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() { return [] }
+}
+;(globalThis as any).IntersectionObserver ??= MockObserver
+;(globalThis as any).ResizeObserver ??= MockObserver
+
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+    Element.prototype.scrollIntoView = () => {}
+}
+
+if (typeof window !== 'undefined' && !window.matchMedia) {
+    window.matchMedia = ((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia
+}

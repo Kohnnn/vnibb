@@ -63,6 +63,17 @@ async def test_backfill_writes_expected_row_count(monkeypatch):
     """Backfill writes ``days * snapshots_per_day`` rows per active market."""
     now = datetime.now(timezone.utc)
 
+    # Pin the drift sign so the series deterministically contains both an
+    # upward and a downward snapshot. Otherwise the unseeded random.choice
+    # can (1/64) push every sample the same direction and flake the
+    # min < current <= max assertion below.
+    import vnibb.services.prediction_market_snapshot_service as snapshot_service
+
+    signs = iter([-1.0, 1.0] * 32)
+    monkeypatch.setattr(
+        snapshot_service.random, "choice", lambda _seq: next(signs)
+    )
+
     market = SimpleNamespace(
         id=1,
         source="polymarket",

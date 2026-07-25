@@ -268,6 +268,33 @@ describe('DashboardProvider browser persistence', () => {
     expect(window.localStorage.getItem(DASHBOARD_RECOVERY_BACKUP_KEY)).toContain(customDashboard.id);
   });
 
+  it('restores dashboards containing registered widgets hidden from the library catalogue', async () => {
+    const hiddenWidgetDashboard: Dashboard = {
+      ...customDashboard,
+      id: 'hidden-widget-dashboard',
+      tabs: [{
+        id: 'hidden-widget-tab',
+        name: 'Hidden',
+        order: 0,
+        widgets: ['rs_ranking', 'market_heatmap', 'dividend_ladder', 'ai_copilot'].map((type, index) => ({
+          id: `hidden-widget-${type}`,
+          tabId: 'hidden-widget-tab',
+          type,
+          config: {},
+          layout: { i: `hidden-widget-${type}`, x: 0, y: index * 6, w: 8, h: 6 },
+        })),
+      }],
+    } as unknown as Dashboard;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([hiddenWidgetDashboard]));
+    window.localStorage.setItem(LAST_VIEW_STATE_KEY, JSON.stringify({ activeDashboardId: hiddenWidgetDashboard.id, lastActiveTabIdByDashboard: { [hiddenWidgetDashboard.id]: 'hidden-widget-tab' } }));
+
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('dashboards')).toHaveTextContent(hiddenWidgetDashboard.id));
+    expect(screen.getByTestId('storage-notice')).not.toHaveTextContent('Dashboard storage was corrupted and has been reset');
+    expect(screen.getByTestId('widget-types')).toHaveTextContent('rs_ranking,market_heatmap,dividend_ladder,ai_copilot');
+  });
+
   it('loads a valid legacy migration on initial load', async () => {
     const legacyDashboard: Dashboard = {
       ...customDashboard,

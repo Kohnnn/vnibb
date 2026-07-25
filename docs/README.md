@@ -28,6 +28,7 @@ Current source of truth:
 - `VN100_EOD_BACKFILL_PLAN.md`: VN100 2008-to-now EOD bootstrap plan for quant/backtesting widgets
 - `daily_trading_updater.md`: trading-flow updater behavior and reinforced scheduler notes
 - `data_retention_partitioning.md`: retention and partitioning guidance
+- `BACKUP_RESTORE_DRILL.md`: backup artifacts, the no-write restore drill (`scripts/restore-drill.ps1`), and last-verified evidence
 
 ## Product And Architecture
 

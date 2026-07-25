@@ -9,6 +9,7 @@ import remarkGfm from 'remark-gfm';
 import {
     type CopilotActionSuggestion,
     consumeCopilotStream,
+    getCopilotRuntimeConfig,
     openCopilotChatStream,
     type CopilotArtifact,
     type CopilotResponseMeta,
@@ -162,6 +163,8 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [currentStatus, setCurrentStatus] = useState<string | null>(null);
     const [showDetails, setShowDetails] = useState<Record<string, boolean>>({});
+    // null = not yet resolved; treat as available until the runtime probe says otherwise.
+    const [isServerConfigured, setIsServerConfigured] = useState<boolean | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -202,6 +205,23 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    // Probe backend AI availability once so we can surface an explicit degraded
+    // state instead of letting the first prompt fail with a raw stream error.
+    useEffect(() => {
+        let cancelled = false;
+        getCopilotRuntimeConfig()
+            .then((config) => {
+                if (!cancelled) setIsServerConfigured(config.available !== false);
+            })
+            .catch(() => {
+                // Probe failure is inconclusive about key config; stay optimistic.
+                if (!cancelled) setIsServerConfigured(true);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const handleStreamResponse = useCallback(async (userMessage: string) => {
         const messageId = `msg-${Date.now()}`;
@@ -386,6 +406,12 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
         URL.revokeObjectURL(url);
     };
 
+    // Degraded only when the server has no key AND the user has not supplied a
+    // browser-local key (which the stream path forwards as an override). A null
+    // probe result (not yet resolved / endpoint missing) is treated as available.
+    const hasBrowserKey = Boolean(readStoredAISettings().apiKey);
+    const isDegraded = isServerConfigured === false && !hasBrowserKey;
+
     return (
         <div className="flex flex-col h-full p-3 min-h-[300px]">
             {/* Header */}
@@ -415,13 +441,23 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
                 </div>
             </div>
 
+            {/* Degraded-mode banner: server has no AI key and no browser-local key is set. */}
+            {isDegraded && (
+                <div
+                    role="status"
+                    className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200"
+                >
+                    VniAgent is unavailable: no AI model is configured on the server. Add a browser-local API key in AI Settings to chat without server configuration.
+                </div>
+            )}
+
             {/* Quick Prompts */}
             <div className="flex flex-wrap gap-1 mb-3">
                 {QUICK_PROMPTS.map(prompt => (
                     <button
                         key={prompt.id}
                         onClick={() => handleQuickPrompt(prompt)}
-                        disabled={isLoading}
+                        disabled={isLoading || isDegraded}
                         className="px-2 py-1 text-xs bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-md transition-colors disabled:opacity-50"
                     >
                         {prompt.label}
@@ -531,8 +567,8 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
                     aria-label="VniAgent message"
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={context?.symbol ? `Ask about ${context.symbol}...` : 'Ask about stocks...'}
-                    disabled={isLoading}
+                    placeholder={isDegraded ? 'AI unavailable — configure a key in AI Settings' : context?.symbol ? `Ask about ${context.symbol}...` : 'Ask about stocks...'}
+                    disabled={isLoading || isDegraded}
                     className="flex-1 px-3 py-2 text-sm bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg focus:border-cyan-500 focus:outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)] disabled:opacity-50"
                 />
                 {isLoading ? (
@@ -546,7 +582,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
                 ) : (
                     <button
                         onClick={() => sendMessage()}
-                        disabled={!input.trim()}
+                        disabled={!input.trim() || isDegraded}
                         className="p-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-[var(--bg-tertiary)] disabled:cursor-not-allowed text-white rounded-lg transition-colors"
                         aria-label="Send message"
                     >
