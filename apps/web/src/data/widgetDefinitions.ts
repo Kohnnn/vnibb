@@ -1,6 +1,6 @@
 // Widget Definitions - Library of available widgets
 import { tradingViewCatalogEntries } from '@/lib/tradingViewWidgets';
-import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import { getWidgetDefaultLayout, WIDGET_LAYOUT_BEHAVIORS } from '@/lib/dashboardLayout';
 import type { WidgetDefinition, WidgetCategoryInfo, WidgetCategory, WidgetType } from '@/types/dashboard';
 
 // ============================================================================
@@ -1507,9 +1507,9 @@ const LEGACY_WIDGET_TYPE_ALIASES = {
 export function normalizeWidgetType(type: string | null | undefined): WidgetDefinition['type'] | null {
     if (!type) return null;
     const normalized = LEGACY_WIDGET_TYPE_ALIASES[type as keyof typeof LEGACY_WIDGET_TYPE_ALIASES] || type;
-    return widgetDefinitions.some((widget) => widget.type === normalized)
-        ? (normalized as WidgetDefinition['type'])
-        : null;
+    const isKnownType = widgetDefinitions.some((widget) => widget.type === normalized)
+        || Object.prototype.hasOwnProperty.call(WIDGET_LAYOUT_BEHAVIORS, normalized);
+    return isKnownType ? (normalized as WidgetDefinition['type']) : null;
 }
 
 // Helper to get widget definition by type
