@@ -110,6 +110,7 @@ function DashboardContent() {
         activeTab,
         setActiveTab,
         createDashboard,
+        createTab,
         setActiveDashboard,
         updateSyncGroupSymbol,
         deleteWidget,
@@ -927,11 +928,7 @@ function DashboardContent() {
         // currently active dashboard is locked, missing, or read-only.
         try {
             const dashboard = createDashboard({ name: `${template.name} Workspace` });
-            const tab = dashboard.tabs[0];
-            if (!tab) {
-                setTemplateApplyStatus({ message: 'Could not create workspace for template.', tone: 'warning' });
-                return;
-            }
+            const tab = createTab(dashboard.id, template.name);
             applyTemplateToDashboard(template, dashboard.id, tab.id);
             setActiveDashboard(dashboard.id);
             setActiveTab(tab.id);
@@ -954,7 +951,7 @@ function DashboardContent() {
                 tone: 'warning',
             });
         }
-    }, [applyTemplateToDashboard, createDashboard, setActiveDashboard, setActiveTab]);
+    }, [applyTemplateToDashboard, createDashboard, createTab, setActiveDashboard, setActiveTab]);
 
     const handleOnboardingGoalSelect = useCallback((goalId: OnboardingGoalId) => {
         selectOnboardingGoal(goalId);
@@ -992,7 +989,7 @@ function DashboardContent() {
             // fresh workspace instead of warning the user — same UX path as
             // the main template picker.
             const dashboard = createDashboard({ name: `${template.name} Workspace` });
-            const tab = dashboard.tabs[0];
+            const tab = createTab(dashboard.id, template.name);
             applyTemplateToDashboard(template, dashboard.id, tab.id);
             setActiveDashboard(dashboard.id);
             setActiveTab(tab.id);
@@ -1031,7 +1028,7 @@ function DashboardContent() {
             tab_id: activeTab.id,
             widget_count: template.widgets.length,
         });
-    }, [activeDashboard, activeTab, addWidget, applyTemplateToDashboard, canEditCurrentDashboard, createDashboard, setActiveDashboard, setActiveTab]);
+    }, [activeDashboard, activeTab, addWidget, applyTemplateToDashboard, canEditCurrentDashboard, createDashboard, createTab, setActiveDashboard, setActiveTab]);
 
     const handleCreateWorkspace = useCallback(() => {
         const dashboard = createDashboard({ name: 'Workspace 1' });
@@ -1054,7 +1051,7 @@ function DashboardContent() {
             // and adds the widget there. Mirrors the template-apply path so
             // the user is never stuck.
             const dashboard = createDashboard({ name: `${getWidgetDefinition(type)?.name ?? 'Workspace'} Workspace` });
-            const tab = dashboard.tabs[0];
+            const tab = createTab(dashboard.id, 'Workspace');
             const placement = findNextAvailableLayout(tab.widgets, type);
             const defaults = getWidgetDefaultLayout(type);
             addWidget(dashboard.id, tab.id, {
@@ -1091,7 +1088,7 @@ function DashboardContent() {
             },
         });
         setTemplateApplyStatus({ message: `Added ${getWidgetDefinition(type)?.name ?? type.replace(/_/g, ' ')}.`, tone: 'success' });
-    }, [activeDashboard, activeTab, addWidget, canEditCurrentDashboard, createDashboard, setActiveDashboard, setActiveTab]);
+    }, [activeDashboard, activeTab, addWidget, canEditCurrentDashboard, createDashboard, createTab, setActiveDashboard, setActiveTab]);
 
     const memoizedLayouts = useMemo(() => {
         if (!activeTab?.widgets) return [];
