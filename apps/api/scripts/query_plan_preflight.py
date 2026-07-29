@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSIONS_DIR = ROOT / "migrations" / "versions"
 DEFAULT_STANDARD_BUDGET_MS = 3000
 DEFAULT_ADVANCED_BUDGET_MS = 5000
+MONGO_EOD_COLLECTION = "market_prices_eod"
 REQUIRED_POSTGRES_INDEXES = {"ix_stocks_symbol": (("symbol",), True)}
 REQUIRED_MONGO_EOD_INDEXES = {
     "uniq_symbol_tradeDate_source": ((("symbol", 1), ("tradeDate", 1), ("source", 1)), True),
@@ -156,6 +157,396 @@ def skipped(name: str, required: bool, reason: str) -> dict[str, Any]:
     return {"name": name, "status": "skipped", "required": required, "reason": reason}
 
 
+def _mongo_aggregate(
+    database: Any,
+    pipeline: list[dict[str, Any]],
+    max_time_ms: int,
+) -> list[dict[str, Any]]:
+    reply = database.command(
+        {
+            "aggregate": MONGO_EOD_COLLECTION,
+            "pipeline": pipeline,
+            "cursor": {"batchSize": 1000},
+            "maxTimeMS": max_time_ms,
+        }
+    )
+    return list(reply.get("cursor", {}).get("firstBatch", []))
+
+
+def _facet_result(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {"summary": {}, "samples": []}
+    row = rows[0]
+    summary_rows = row.get("summary", [])
+    return {
+        "summary": summary_rows[0] if summary_rows else {},
+        "samples": row.get("samples", []),
+    }
+
+
+def _missing_value(field: str) -> dict[str, Any]:
+    value = f"${field}"
+    return {
+        "$or": [
+            {"$eq": [{"$type": value}, "missing"]},
+            {"$eq": [value, None]},
+            {"$eq": [value, ""]},
+        ]
+    }
+
+
+def _finite_number(field: str, converted_field: str) -> dict[str, Any]:
+    original = f"${field}"
+    converted = f"${converted_field}"
+    return {
+        "$and": [
+            {"$isNumber": original},
+            {"$ne": [converted, None]},
+            {"$eq": [converted, converted]},
+            {"$lt": [{"$abs": converted}, 1e100]},
+        ]
+    }
+
+
+def _duplicate_pipeline(
+    group_id: dict[str, Any],
+    sample_limit: int,
+    *,
+    match: dict[str, Any] | None = None,
+    include_sources: bool = False,
+) -> list[dict[str, Any]]:
+    pipeline: list[dict[str, Any]] = []
+    if match:
+        pipeline.append({"$match": match})
+    group: dict[str, Any] = {
+        "_id": group_id,
+        "documents": {"$sum": 1},
+        "timestamps": {"$addToSet": "$tradeDate"},
+    }
+    if include_sources:
+        group["sources"] = {"$addToSet": "$source"}
+    pipeline.append({"$group": group})
+    if include_sources:
+        pipeline.append({"$match": {"$expr": {"$gt": [{"$size": "$sources"}, 1]}}})
+    else:
+        pipeline.append({"$match": {"documents": {"$gt": 1}}})
+    pipeline.append(
+        {
+            "$set": {
+                "extraDocuments": {"$subtract": ["$documents", 1]},
+                "timestampVariant": {"$gt": [{"$size": "$timestamps"}, 1]},
+            }
+        }
+    )
+    pipeline.append(
+        {
+            "$facet": {
+                "summary": [
+                    {
+                        "$group": {
+                            "_id": None,
+                            "keys": {"$sum": 1},
+                            "documents": {"$sum": "$documents"},
+                            "extraDocuments": {"$sum": "$extraDocuments"},
+                            "timestampVariantKeys": {
+                                "$sum": {"$cond": ["$timestampVariant", 1, 0]}
+                            },
+                        }
+                    },
+                    {"$project": {"_id": 0}},
+                ],
+                "samples": [
+                    {"$sort": {"documents": -1, "_id.symbol": 1}},
+                    {"$limit": sample_limit},
+                    {"$project": {"_id": 1, "documents": 1, "timestamps": 1, "sources": 1}},
+                ],
+            }
+        }
+    )
+    return pipeline
+
+
+def mongo_eod_corpus_audit(
+    database: Any,
+    max_time_ms: int,
+    sample_limit: int,
+) -> dict[str, Any]:
+    sample_limit = max(1, min(sample_limit, 100))
+    valid_identity = {
+        "symbol": {"$type": "string"},
+        "source": {"$type": "string"},
+        "tradeDate": {"$type": "date"},
+    }
+    trade_day = {"$dateToString": {"format": "%Y-%m-%d", "date": "$tradeDate"}}
+    source_rows = _mongo_aggregate(
+        database,
+        [
+            {
+                "$group": {
+                    "_id": {"source": {"$ifNull": ["$source", "unknown"]}, "symbol": "$symbol"},
+                    "documents": {"$sum": 1},
+                    "firstTradeDate": {"$min": "$tradeDate"},
+                    "lastTradeDate": {"$max": "$tradeDate"},
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$_id.source",
+                    "documents": {"$sum": "$documents"},
+                    "symbols": {"$sum": 1},
+                    "firstTradeDate": {"$min": "$firstTradeDate"},
+                    "lastTradeDate": {"$max": "$lastTradeDate"},
+                }
+            },
+            {"$sort": {"documents": -1, "_id": 1}},
+            {
+                "$facet": {
+                    "summary": [{"$count": "sourceCount"}],
+                    "samples": [{"$limit": 100}],
+                }
+            },
+        ],
+        max_time_ms,
+    )
+    source_result = _facet_result(source_rows)
+    unit_rows = _mongo_aggregate(
+        database,
+        [
+            {
+                "$group": {
+                    "_id": {
+                        "source": {"$ifNull": ["$source", "unknown"]},
+                        "priceUnit": {"$ifNull": ["$priceUnit", "unknown"]},
+                    },
+                    "documents": {"$sum": 1},
+                }
+            },
+            {"$sort": {"documents": -1, "_id.source": 1, "_id.priceUnit": 1}},
+            {
+                "$facet": {
+                    "summary": [{"$count": "sourceUnitPairs"}],
+                    "samples": [{"$limit": 200}],
+                }
+            },
+        ],
+        max_time_ms,
+    )
+    unit_result = _facet_result(unit_rows)
+
+    converted_fields = {
+        f"_{field}": {
+            "$convert": {"input": f"${field}", "to": "double", "onError": None, "onNull": None}
+        }
+        for field in ("open", "high", "low", "close", "volume")
+    }
+    finite_prices = [_finite_number(field, f"_{field}") for field in ("open", "high", "low", "close")]
+    valid_volume = {
+        "$and": [
+            _finite_number("volume", "_volume"),
+            {"$gte": ["$_volume", 0]},
+            {"$eq": ["$_volume", {"$trunc": "$_volume"}]},
+        ]
+    }
+    valid_ohlc = {
+        "$and": [
+            *finite_prices,
+            {"$gt": ["$_open", 0]},
+            {"$gt": ["$_high", 0]},
+            {"$gt": ["$_low", 0]},
+            {"$gt": ["$_close", 0]},
+            {"$gte": ["$_high", "$_open"]},
+            {"$gte": ["$_high", "$_low"]},
+            {"$gte": ["$_high", "$_close"]},
+            {"$lte": ["$_low", "$_open"]},
+            {"$lte": ["$_low", "$_high"]},
+            {"$lte": ["$_low", "$_close"]},
+        ]
+    }
+    missing_identity = {
+        "$or": [
+            _missing_value("symbol"),
+            {"$ne": [{"$type": "$tradeDate"}, "date"]},
+            _missing_value("source"),
+        ]
+    }
+    missing_provenance = {
+        "$or": [
+            _missing_value("sourceKey"),
+            _missing_value("updatedAt"),
+            _missing_value("schemaVersion"),
+        ]
+    }
+    quality_rows = _mongo_aggregate(
+        database,
+        [
+            {
+                "$project": {
+                    "symbol": 1,
+                    "tradeDate": 1,
+                    "source": 1,
+                    "priceUnit": 1,
+                    "sourceKey": 1,
+                    "updatedAt": 1,
+                    "schemaVersion": 1,
+                    "open": 1,
+                    "high": 1,
+                    "low": 1,
+                    "close": 1,
+                    "volume": 1,
+                    **converted_fields,
+                    "missingIdentity": missing_identity,
+                    "missingProvenance": missing_provenance,
+                    "invalidUnit": {"$ne": ["$priceUnit", "VND"]},
+                }
+            },
+            {
+                "$set": {
+                    "invalidOhlc": {"$not": [valid_ohlc]},
+                    "invalidVolume": {"$not": [valid_volume]},
+                }
+            },
+            {
+                "$set": {
+                    "offending": {
+                        "$or": [
+                            "$missingIdentity",
+                            "$missingProvenance",
+                            "$invalidUnit",
+                            "$invalidOhlc",
+                            "$invalidVolume",
+                        ]
+                    }
+                }
+            },
+            {
+                "$facet": {
+                    "summary": [
+                        {
+                            "$group": {
+                                "_id": None,
+                                "documents": {"$sum": 1},
+                                "missingIdentity": {"$sum": {"$cond": ["$missingIdentity", 1, 0]}},
+                                "missingProvenance": {
+                                    "$sum": {"$cond": ["$missingProvenance", 1, 0]}
+                                },
+                                "invalidUnit": {"$sum": {"$cond": ["$invalidUnit", 1, 0]}},
+                                "invalidOhlc": {"$sum": {"$cond": ["$invalidOhlc", 1, 0]}},
+                                "invalidVolume": {"$sum": {"$cond": ["$invalidVolume", 1, 0]}},
+                            }
+                        },
+                        {"$project": {"_id": 0}},
+                    ],
+                    "samples": [
+                        {"$match": {"offending": True}},
+                        {"$sort": {"tradeDate": -1, "symbol": 1}},
+                        {"$limit": sample_limit},
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "symbol": 1,
+                                "tradeDate": 1,
+                                "source": 1,
+                                "missingIdentity": 1,
+                                "missingProvenance": 1,
+                                "invalidUnit": 1,
+                                "invalidOhlc": 1,
+                                "invalidVolume": 1,
+                            }
+                        },
+                    ],
+                }
+            },
+        ],
+        max_time_ms,
+    )
+    quality = _facet_result(quality_rows)
+
+    exact_duplicates = _facet_result(
+        _mongo_aggregate(
+            database,
+            _duplicate_pipeline(
+                {"symbol": "$symbol", "tradeDate": "$tradeDate", "source": "$source"},
+                sample_limit,
+            ),
+            max_time_ms,
+        )
+    )
+    logical_duplicates = _facet_result(
+        _mongo_aggregate(
+            database,
+            _duplicate_pipeline(
+                {"symbol": "$symbol", "tradeDay": trade_day, "source": "$source"},
+                sample_limit,
+                match=valid_identity,
+            ),
+            max_time_ms,
+        )
+    )
+    cross_source_overlaps = _facet_result(
+        _mongo_aggregate(
+            database,
+            _duplicate_pipeline(
+                {"symbol": "$symbol", "tradeDay": trade_day},
+                sample_limit,
+                match=valid_identity,
+                include_sources=True,
+            ),
+            max_time_ms,
+        )
+    )
+
+    failures: list[str] = []
+    quality_summary = quality["summary"]
+    exact_summary = exact_duplicates["summary"]
+    logical_summary = logical_duplicates["summary"]
+    document_count = int(quality_summary.get("documents", 0))
+    if document_count == 0:
+        failures.append("EOD corpus is empty or unreadable")
+    for field, label in (
+        ("missingIdentity", "documents missing symbol, date, or source"),
+        ("missingProvenance", "documents missing sourceKey, updatedAt, or schemaVersion"),
+        ("invalidUnit", "documents without priceUnit=VND"),
+        ("invalidOhlc", "documents with invalid OHLC"),
+        ("invalidVolume", "documents with invalid volume"),
+    ):
+        count = int(quality_summary.get(field, 0))
+        if count:
+            failures.append(f"{count} {label}")
+    exact_keys = int(exact_summary.get("keys", 0))
+    if exact_keys:
+        failures.append(f"{exact_keys} duplicate exact symbol/tradeDate/source keys")
+    logical_keys = int(logical_summary.get("keys", 0))
+    if logical_keys:
+        failures.append(f"{logical_keys} duplicate same-source logical trading-day keys")
+
+    overlap_summary = cross_source_overlaps["summary"]
+    warnings: list[str] = []
+    overlap_keys = int(overlap_summary.get("keys", 0))
+    if overlap_keys:
+        warnings.append(f"{overlap_keys} logical trading-day keys overlap across sources")
+    timestamp_variants = int(overlap_summary.get("timestampVariantKeys", 0))
+    if timestamp_variants:
+        warnings.append(f"{timestamp_variants} cross-source overlaps use different timestamps")
+
+    return {
+        "status": "fail" if failures else "pass",
+        "collection": MONGO_EOD_COLLECTION,
+        "read_only": True,
+        "max_time_ms_per_command": max_time_ms,
+        "sample_limit": sample_limit,
+        "source_result_limit": 100,
+        "unit_result_limit": 200,
+        "sources": source_result,
+        "units": unit_result,
+        "quality": quality,
+        "exact_duplicates": exact_duplicates,
+        "same_source_logical_day_duplicates": logical_duplicates,
+        "cross_source_logical_day_overlaps": cross_source_overlaps,
+        "failures": failures,
+        "warnings": warnings,
+    }
+
+
 def postgres_preflight(required: bool, symbol: str) -> dict[str, Any]:
     database_url = configured_postgres_url()
     if not database_url:
@@ -230,7 +621,14 @@ def postgres_preflight(required: bool, symbol: str) -> dict[str, Any]:
         return unavailable("postgres", required, safe_error(exc))
 
 
-def mongo_preflight(required: bool, symbol: str, max_time_ms: int) -> dict[str, Any]:
+def mongo_preflight(
+    required: bool,
+    symbol: str,
+    max_time_ms: int,
+    *,
+    audit_corpus: bool = False,
+    audit_sample_limit: int = 20,
+) -> dict[str, Any]:
     mongo_url = configured_mongo_url()
     if not mongo_url:
         return skipped("mongo", required, "MONGODB_URL is not configured or MongoDB is disabled")
@@ -295,6 +693,15 @@ def mongo_preflight(required: bool, symbol: str, max_time_ms: int) -> dict[str, 
                 failures.append("global latest-date EOD query plan contains COLLSCAN")
             if rolling_collscan:
                 failures.append("rolling window EOD query plan contains COLLSCAN")
+            corpus_audit = (
+                mongo_eod_corpus_audit(database, max_time_ms, audit_sample_limit)
+                if audit_corpus
+                else None
+            )
+            if corpus_audit:
+                failures.extend(
+                    f"corpus: {failure}" for failure in corpus_audit.get("failures", [])
+                )
             return {
                 "name": "mongo",
                 "status": "fail" if failures else "pass",
@@ -309,6 +716,7 @@ def mongo_preflight(required: bool, symbol: str, max_time_ms: int) -> dict[str, 
                     "collscan": global_latest_date_collscan,
                 },
                 "rolling_window": {"plan": rolling_plan, "collscan": rolling_collscan},
+                "corpus_audit": corpus_audit,
                 "failures": failures,
             }
         finally:
@@ -389,12 +797,88 @@ def print_failures(report: dict[str, Any]) -> None:
             print(f"FAIL {check['name']}: {check.get('reason', check.get('error', 'unavailable'))}", file=sys.stderr)
 
 
+def render_mongo_eod_audit_markdown(report: dict[str, Any]) -> str:
+    mongo = next((check for check in report["checks"] if check["name"] == "mongo"), None)
+    audit = mongo.get("corpus_audit") if mongo else None
+    lines = ["# Mongo EOD Corpus Audit", ""]
+    if not audit:
+        lines.extend(["Status: not run", ""])
+        return "\n".join(lines)
+    quality = audit.get("quality", {}).get("summary", {})
+    lines.extend(
+        [
+            f"Status: {audit['status']}",
+            f"Collection: `{audit['collection']}`",
+            f"Read-only: `{audit['read_only']}`",
+            f"Max time per command: `{audit['max_time_ms_per_command']} ms`",
+            "",
+            "## Inventory By Source",
+            "",
+            "| Source | Documents | Symbols | First Date | Last Date |",
+            "|---|---:|---:|---|---|",
+        ]
+    )
+    for source in audit.get("sources", {}).get("samples", []):
+        lines.append(
+            f"| `{source.get('_id', 'unknown')}` | {source.get('documents', 0)} | "
+            f"{source.get('symbols', 0)} | {source.get('firstTradeDate', '')} | "
+            f"{source.get('lastTradeDate', '')} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Units By Source",
+            "",
+            "| Source | Price Unit | Documents |",
+            "|---|---|---:|",
+        ]
+    )
+    for unit in audit.get("units", {}).get("samples", []):
+        key = unit.get("_id", {})
+        lines.append(
+            f"| `{key.get('source', 'unknown')}` | `{key.get('priceUnit', 'unknown')}` | "
+            f"{unit.get('documents', 0)} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Quality Counts",
+            "",
+            f"- Documents: `{quality.get('documents', 0)}`",
+            f"- Missing identity: `{quality.get('missingIdentity', 0)}`",
+            f"- Missing provenance: `{quality.get('missingProvenance', 0)}`",
+            f"- Invalid units: `{quality.get('invalidUnit', 0)}`",
+            f"- Invalid OHLC: `{quality.get('invalidOhlc', 0)}`",
+            f"- Invalid volume: `{quality.get('invalidVolume', 0)}`",
+            "",
+            "## Duplicate And Overlap Counts",
+            "",
+            f"- Exact duplicate keys: `{audit.get('exact_duplicates', {}).get('summary', {}).get('keys', 0)}`",
+            f"- Same-source logical-day duplicate keys: `{audit.get('same_source_logical_day_duplicates', {}).get('summary', {}).get('keys', 0)}`",
+            f"- Cross-source logical-day overlap keys: `{audit.get('cross_source_logical_day_overlaps', {}).get('summary', {}).get('keys', 0)}`",
+            f"- Cross-source timestamp-variant keys: `{audit.get('cross_source_logical_day_overlaps', {}).get('summary', {}).get('timestampVariantKeys', 0)}`",
+            "",
+            "## Findings",
+            "",
+        ]
+    )
+    findings = [*(audit.get("failures") or []), *(audit.get("warnings") or [])]
+    lines.extend(f"- {finding}" for finding in findings)
+    if not findings:
+        lines.append("- None")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="VNIBB Wave 7.3 read-only query-plan preflight")
     parser.add_argument("--output-json", type=Path)
+    parser.add_argument("--output-markdown", type=Path)
     parser.add_argument("--api-base-url", default=os.getenv("VNIBB_PREFLIGHT_API_BASE_URL"))
     parser.add_argument("--symbol", default=os.getenv("VNIBB_PREFLIGHT_SYMBOL", "FPT"))
     parser.add_argument("--mongo-max-time-ms", type=int, default=bounded_int(os.getenv("VNIBB_PREFLIGHT_MONGO_MAX_TIME_MS"), 5000, 1000, 30000))
+    parser.add_argument("--mongo-audit-sample-limit", type=int, default=20)
+    parser.add_argument("--audit-mongo-eod", action="store_true")
     parser.add_argument("--standard-budget-ms", type=int, default=bounded_int(os.getenv("VNIBB_SCREENER_STANDARD_BUDGET_MS"), DEFAULT_STANDARD_BUDGET_MS, 1, 60000))
     parser.add_argument("--advanced-budget-ms", type=int, default=bounded_int(os.getenv("VNIBB_SCREENER_ADVANCED_BUDGET_MS"), DEFAULT_ADVANCED_BUDGET_MS, 1, 60000))
     parser.add_argument("--require-postgres", action="store_true")
@@ -408,7 +892,13 @@ def main() -> int:
     symbol = re.sub(r"[^A-Za-z0-9]", "", args.symbol).upper()[:10] or "FPT"
     checks = [
         postgres_preflight(args.require_postgres, symbol),
-        mongo_preflight(args.require_mongo, symbol, max(1000, min(args.mongo_max_time_ms, 30000))),
+        mongo_preflight(
+            args.require_mongo,
+            symbol,
+            max(1000, min(args.mongo_max_time_ms, 30000)),
+            audit_corpus=args.audit_mongo_eod,
+            audit_sample_limit=max(1, min(args.mongo_audit_sample_limit, 100)),
+        ),
         screener_benchmark(
             args.require_screener,
             args.api_base_url,
@@ -421,6 +911,11 @@ def main() -> int:
     print(output)
     if args.output_json:
         args.output_json.write_text(f"{output}\n", encoding="utf-8")
+    if args.output_markdown:
+        args.output_markdown.write_text(
+            render_mongo_eod_audit_markdown(report),
+            encoding="utf-8",
+        )
     print_failures(report)
     return exit_code(report)
 

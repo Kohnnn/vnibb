@@ -145,6 +145,157 @@ def test_mongo_preflight_fails_when_global_latest_date_plan_contains_collscan(mo
     assert "global latest-date EOD query plan contains COLLSCAN" in result["failures"]
 
 
+def test_mongo_eod_corpus_audit_is_bounded_read_only_and_classifies_findings() -> None:
+    replies = iter(
+        [
+            {
+                "summary": [{"sourceCount": 2}],
+                "samples": [
+                    {
+                        "_id": "vietcap",
+                        "documents": 100,
+                        "symbols": 2,
+                        "firstTradeDate": "2026-01-01",
+                        "lastTradeDate": "2026-07-28",
+                    }
+                ],
+            },
+            {
+                "summary": [{"sourceUnitPairs": 2}],
+                "samples": [
+                    {
+                        "_id": {"source": "vietcap", "priceUnit": "VND"},
+                        "documents": 100,
+                    }
+                ],
+            },
+            {
+                "summary": [
+                    {
+                        "documents": 120,
+                        "missingIdentity": 1,
+                        "missingProvenance": 2,
+                        "invalidUnit": 3,
+                        "invalidOhlc": 4,
+                        "invalidVolume": 5,
+                    }
+                ],
+                "samples": [{"symbol": "FPT", "invalidUnit": True}],
+            },
+            {
+                "summary": [
+                    {
+                        "keys": 1,
+                        "documents": 2,
+                        "extraDocuments": 1,
+                        "timestampVariantKeys": 0,
+                    }
+                ],
+                "samples": [],
+            },
+            {
+                "summary": [
+                    {
+                        "keys": 2,
+                        "documents": 4,
+                        "extraDocuments": 2,
+                        "timestampVariantKeys": 2,
+                    }
+                ],
+                "samples": [],
+            },
+            {
+                "summary": [
+                    {
+                        "keys": 3,
+                        "documents": 6,
+                        "extraDocuments": 3,
+                        "timestampVariantKeys": 2,
+                    }
+                ],
+                "samples": [],
+            },
+        ]
+    )
+
+    class Database:
+        def __init__(self) -> None:
+            self.commands = []
+
+        def command(self, command):
+            self.commands.append(command)
+            return {"cursor": {"firstBatch": [next(replies)]}}
+
+    database = Database()
+    result = query_plan_preflight.mongo_eod_corpus_audit(database, 2500, 7)
+
+    assert result["status"] == "fail"
+    assert result["read_only"] is True
+    assert result["sample_limit"] == 7
+    assert "1 documents missing symbol, date, or source" in result["failures"]
+    assert "2 duplicate same-source logical trading-day keys" in result["failures"]
+    assert "3 logical trading-day keys overlap across sources" in result["warnings"]
+    assert "2 cross-source overlaps use different timestamps" in result["warnings"]
+    assert result["units"]["samples"][0]["_id"]["priceUnit"] == "VND"
+    assert len(database.commands) == 6
+    for command in database.commands:
+        assert command["aggregate"] == "market_prices_eod"
+        assert command["maxTimeMS"] == 2500
+        assert command["cursor"] == {"batchSize": 1000}
+        assert all("$out" not in stage and "$merge" not in stage for stage in command["pipeline"])
+
+
+def test_mongo_eod_audit_markdown_renders_inventory_and_findings() -> None:
+    report = {
+        "checks": [
+            {
+                "name": "mongo",
+                "corpus_audit": {
+                    "status": "fail",
+                    "collection": "market_prices_eod",
+                    "read_only": True,
+                    "max_time_ms_per_command": 2500,
+                    "sources": {
+                        "samples": [
+                            {
+                                "_id": "vietcap",
+                                "documents": 100,
+                                "symbols": 2,
+                                "firstTradeDate": "2026-01-01",
+                                "lastTradeDate": "2026-07-28",
+                            }
+                        ]
+                    },
+                    "units": {
+                        "samples": [
+                            {
+                                "_id": {"source": "vietcap", "priceUnit": "VND"},
+                                "documents": 99,
+                            }
+                        ]
+                    },
+                    "quality": {"summary": {"documents": 100, "invalidUnit": 1}},
+                    "exact_duplicates": {"summary": {"keys": 0}},
+                    "same_source_logical_day_duplicates": {"summary": {"keys": 0}},
+                    "cross_source_logical_day_overlaps": {
+                        "summary": {"keys": 2, "timestampVariantKeys": 1}
+                    },
+                    "failures": ["1 documents without priceUnit=VND"],
+                    "warnings": ["2 logical trading-day keys overlap across sources"],
+                },
+            }
+        ]
+    }
+
+    output = query_plan_preflight.render_mongo_eod_audit_markdown(report)
+
+    assert "# Mongo EOD Corpus Audit" in output
+    assert "| `vietcap` | 100 | 2 | 2026-01-01 | 2026-07-28 |" in output
+    assert "| `vietcap` | `VND` | 99 |" in output
+    assert "Invalid units: `1`" in output
+    assert "1 documents without priceUnit=VND" in output
+
+
 def test_exit_code_distinguishes_optional_skip_from_required_unavailable() -> None:
     optional_skip = {"checks": [query_plan_preflight.skipped("mongo", False, "not configured")]}
     required_unavailable = {
