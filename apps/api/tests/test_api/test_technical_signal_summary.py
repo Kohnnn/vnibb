@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import sys
+from datetime import datetime
+from types import ModuleType, SimpleNamespace
+
+import pandas as pd
 import pytest
 
+import vnibb.services.technical_analysis as technical_analysis
+from vnibb.api.v1 import technical
+from vnibb.core.config import settings
+from vnibb.providers.vnstock import runtime
 from vnibb.services.technical_analysis import TechnicalAnalysisService
 
 
@@ -95,3 +105,81 @@ async def test_signal_summary_balances_category_weights(monkeypatch):
     assert summary["buy_count"] >= 4
     assert summary["sell_count"] >= 2
     assert summary["overall_signal"] in {"neutral", "buy"}
+
+
+@pytest.mark.asyncio
+async def test_full_analysis_loads_and_merges_quote_once(monkeypatch):
+    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
+    history_calls = 0
+    quote_calls = 0
+    frame = pd.DataFrame(
+        {
+            "time": pd.date_range(end=pd.Timestamp.today().normalize(), periods=260, freq="D"),
+            "open": range(100, 360),
+            "high": range(102, 362),
+            "low": range(99, 359),
+            "close": range(101, 361),
+            "volume": [1_000_000] * 260,
+        }
+    )
+
+    class Quote:
+        def history(self, **_kwargs):
+            nonlocal history_calls
+            history_calls += 1
+            return frame
+
+    class Stock:
+        quote = Quote()
+
+    class Vnstock:
+        def stock(self, **_kwargs):
+            return Stock()
+
+    async def fetch_quote(**_kwargs):
+        nonlocal quote_calls
+        quote_calls += 1
+        return SimpleNamespace(price=360.0, updated_at=datetime.now()), False
+
+    monkeypatch.setattr(runtime, "get_vnstock_class", lambda: Vnstock)
+    monkeypatch.setattr(
+        technical_analysis.VnstockStockQuoteFetcher, "fetch", staticmethod(fetch_quote)
+    )
+
+    analysis = await TechnicalAnalysisService().get_full_technical_analysis("VCI")
+
+    assert history_calls == 1
+    assert quote_calls == 1
+    assert analysis["symbol"] == "VCI"
+
+
+@pytest.mark.asyncio
+async def test_direct_indicators_uses_shared_asyncio_thread_pool(monkeypatch):
+    calls = 0
+
+    class Quote:
+        def __init__(self, **_kwargs):
+            pass
+
+        def history(self, **_kwargs):
+            return pd.DataFrame({"close": list(range(100, 130))})
+
+    original_to_thread = asyncio.to_thread
+
+    async def to_thread(func, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return await original_to_thread(func, *args, **kwargs)
+
+    module = ModuleType("vnstock_data")
+    module.Quote = Quote
+    monkeypatch.setitem(sys.modules, "vnstock_data", module)
+    monkeypatch.setattr(asyncio, "to_thread", to_thread)
+    monkeypatch.setattr(settings, "vnstock_timeout", 5, raising=False)
+
+    payload = await technical.get_technical_indicators_direct(
+        "VCI", indicators="rsi,sma,ema", period=14, source="KBS"
+    )
+
+    assert calls == 1
+    assert payload["symbol"] == "VCI"

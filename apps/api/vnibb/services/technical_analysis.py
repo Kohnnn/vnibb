@@ -8,22 +8,24 @@ Uses vnstock_ta premium package when available, falls back to pandas calculation
 """
 
 import logging
+from contextvars import ContextVar
 from datetime import date, datetime, timedelta
-from typing import Optional, Dict, Any, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 import pandas as pd
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
-
 from vnibb.models.technical_indicator import TechnicalIndicator
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
 
 logger = logging.getLogger(__name__)
+_missing_full_analysis_frame = object()
+_full_analysis_frame: ContextVar[Any] = ContextVar("full_analysis_frame")
 
 # Type aliases
 Timeframe = Literal["D", "W", "M"]
@@ -323,6 +325,16 @@ class TechnicalAnalysisService:
         interval: str = "1D",
     ) -> Optional[pd.DataFrame]:
         """Fetch OHLCV data for a symbol. Returns None if no data."""
+        cached_frame = _full_analysis_frame.get(_missing_full_analysis_frame)
+        if cached_frame is not _missing_full_analysis_frame:
+            if cached_frame is None:
+                return None
+            start_timestamp = pd.Timestamp(start_date)
+            end_timestamp = pd.Timestamp(end_date) + pd.Timedelta(days=1)
+            return cached_frame[
+                (cached_frame["time"] >= start_timestamp) & (cached_frame["time"] < end_timestamp)
+            ].reset_index(drop=True)
+
         import asyncio
 
         def _fetch():
@@ -434,7 +446,8 @@ class TechnicalAnalysisService:
                 "bars": 0,
                 "issues": [f"No OHLCV rows returned for {symbol.upper()}"],
             }
-        frame = self._clean_ohlcv_frame(raw)
+        cached_frame = _full_analysis_frame.get(_missing_full_analysis_frame)
+        frame = raw if cached_frame is not _missing_full_analysis_frame else self._clean_ohlcv_frame(raw)
         issues: List[str] = []
         if len(frame) < 60:
             issues.append(f"Only {len(frame)} clean bars available; most indicators need at least 60.")
@@ -1262,34 +1275,43 @@ class TechnicalAnalysisService:
         elif timeframe == "M":
             lookback_days = lookback_days * 20  # ~16 years of monthly data
 
-        quality_task = self.get_data_quality_summary(symbol, lookback_days)
-        # Fetch all data in parallel
-        ma_task = self.get_moving_averages(symbol, [10, 20, 50, 200], lookback_days)
-        rsi_task = self.get_rsi(symbol, 14, lookback_days)
-        macd_task = self.get_macd(symbol, 12, 26, 9, lookback_days)
-        bb_task = self.get_bollinger_bands(symbol, 20, 2, lookback_days)
-        stoch_task = self.get_stochastic(symbol, 14, 3, lookback_days)
-        adx_task = self.get_adx(symbol, 14, lookback_days)
-        sr_task = self.get_support_resistance(symbol, lookback_days)
-        fib_task = self.get_fibonacci_levels(symbol, lookback_days)
-        ichimoku_task = self.get_ichimoku_cloud(symbol, lookback_days=lookback_days)
-        signal_task = self.get_signal_summary(symbol, lookback_days)
-        volume_full_task = self.get_volume_analysis(symbol, 20, lookback_days)
-
-        quality, ma, rsi, macd, bb, stoch, adx, sr, fib, ichimoku, signals, vol = await asyncio.gather(
-            quality_task,
-            ma_task,
-            rsi_task,
-            macd_task,
-            bb_task,
-            stoch_task,
-            adx_task,
-            sr_task,
-            fib_task,
-            ichimoku_task,
-            signal_task,
-            volume_full_task,
+        end_date = date.today()
+        frame = await self.get_ohlcv_data(
+            symbol,
+            end_date - timedelta(days=lookback_days + 26),
+            end_date,
         )
+        token = _full_analysis_frame.set(frame)
+        try:
+            quality_task = self.get_data_quality_summary(symbol, lookback_days)
+            ma_task = self.get_moving_averages(symbol, [10, 20, 50, 200], lookback_days)
+            rsi_task = self.get_rsi(symbol, 14, lookback_days)
+            macd_task = self.get_macd(symbol, 12, 26, 9, lookback_days)
+            bb_task = self.get_bollinger_bands(symbol, 20, 2, lookback_days)
+            stoch_task = self.get_stochastic(symbol, 14, 3, lookback_days)
+            adx_task = self.get_adx(symbol, 14, lookback_days)
+            sr_task = self.get_support_resistance(symbol, lookback_days)
+            fib_task = self.get_fibonacci_levels(symbol, lookback_days)
+            ichimoku_task = self.get_ichimoku_cloud(symbol, lookback_days=lookback_days)
+            signal_task = self.get_signal_summary(symbol, lookback_days)
+            volume_full_task = self.get_volume_analysis(symbol, 20, lookback_days)
+
+            quality, ma, rsi, macd, bb, stoch, adx, sr, fib, ichimoku, signals, vol = await asyncio.gather(
+                quality_task,
+                ma_task,
+                rsi_task,
+                macd_task,
+                bb_task,
+                stoch_task,
+                adx_task,
+                sr_task,
+                fib_task,
+                ichimoku_task,
+                signal_task,
+                volume_full_task,
+            )
+        finally:
+            _full_analysis_frame.reset(token)
 
         return {
             "symbol": symbol.upper(),

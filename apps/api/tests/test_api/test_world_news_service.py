@@ -1,5 +1,7 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 
 from vnibb.services import world_news_service
@@ -14,6 +16,20 @@ from vnibb.services.world_news_service import (
     get_world_news_feed,
     get_world_news_map,
 )
+
+
+def _source(source_id: str, feed_url: str) -> WorldNewsSourceConfig:
+    return WorldNewsSourceConfig(
+        id=source_id,
+        name=source_id,
+        domain=f"{source_id}.example",
+        region="global",
+        category="business",
+        language="en",
+        tier=1,
+        homepage_url=f"https://{source_id}.example",
+        feed_urls=(feed_url,),
+    )
 
 
 def test_parse_feed_preserves_live_links_and_classifies_vietnam_markets():
@@ -357,3 +373,191 @@ async def test_get_world_news_map_groups_articles_by_source_geography(monkeypatc
     assert bucket.top_sources == ["Source A", "Source B"]
     assert bucket.latest_headline == "VN-Index extends gains"
     assert bucket.latest_articles[0].source_url == "https://a.example"
+
+
+@pytest.mark.asyncio
+async def test_get_world_news_feed_bounds_fetch_concurrency(monkeypatch):
+    sources = tuple(_source(f"source_{index}", f"https://{index}.example/rss") for index in range(3))
+    active = 0
+    peak = 0
+
+    async def fake_fetch_feed(_client, _source_config, _feed_url):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return FeedFetchResult(articles=[])
+
+    monkeypatch.setattr(world_news_service, "WORLD_NEWS_SOURCES", sources)
+    monkeypatch.setattr(world_news_service, "_world_news_fetch_semaphore", asyncio.Semaphore(2))
+    monkeypatch.setattr(world_news_service, "_fetch_feed", fake_fetch_feed)
+
+    response = await get_world_news_feed()
+
+    assert response.failed_feed_count == 0
+    assert peak == 2
+
+
+@pytest.mark.asyncio
+async def test_get_world_news_feed_shares_fetch_limit_across_refreshes(monkeypatch):
+    active = 0
+    peak = 0
+    release = asyncio.Event()
+    sources = (_source("source", "https://source.example/rss"),)
+
+    async def fake_fetch_feed(_client, _source_config, _feed_url):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await release.wait()
+        active -= 1
+        return FeedFetchResult(articles=[])
+
+    monkeypatch.setattr(world_news_service, "WORLD_NEWS_SOURCES", sources)
+    monkeypatch.setattr(world_news_service, "_world_news_fetch_semaphore", asyncio.Semaphore(1))
+    monkeypatch.setattr(world_news_service, "_fetch_feed", fake_fetch_feed)
+
+    first = asyncio.create_task(get_world_news_feed())
+    await asyncio.sleep(0)
+    second = asyncio.create_task(get_world_news_feed())
+    await asyncio.sleep(0.01)
+    assert peak == 1
+    release.set()
+    await asyncio.gather(first, second)
+
+
+@pytest.mark.asyncio
+async def test_get_world_news_feed_returns_partial_results_at_deadline(monkeypatch):
+    sources = (_source("fast", "https://fast.example/rss"), _source("slow", "https://slow.example/rss"))
+
+    async def fake_fetch_feed(_client, source, feed_url):
+        if source.id == "slow":
+            await asyncio.sleep(1)
+            return FeedFetchResult(articles=[])
+        return FeedFetchResult(
+            articles=[
+                WorldNewsArticle(
+                    id="fast-article",
+                    title="Fast feed result",
+                    source_id=source.id,
+                    source=source.name,
+                    source_domain=source.domain,
+                    source_url=source.homepage_url,
+                    feed_url=feed_url,
+                    url="https://fast.example/article",
+                    published_at=datetime.now(UTC),
+                    region=source.region,
+                    category=source.category,
+                    language=source.language,
+                )
+            ]
+        )
+
+    monkeypatch.setattr(world_news_service, "WORLD_NEWS_SOURCES", sources)
+    monkeypatch.setattr(world_news_service, "WORLD_NEWS_REFRESH_DEADLINE_SECONDS", 0.01)
+    monkeypatch.setattr(world_news_service, "_fetch_feed", fake_fetch_feed)
+
+    response = await get_world_news_feed()
+
+    assert response.total == 1
+    assert response.articles[0].id == "fast-article"
+    assert response.failed_feed_count == 1
+    assert response.failed_feeds[0].source_id == "slow"
+    assert response.failed_feeds[0].reason == "Refresh deadline exceeded"
+
+
+@pytest.mark.asyncio
+async def test_get_world_news_feed_deadline_does_not_wait_for_cleanup(monkeypatch):
+    source = _source("slow", "https://slow.example/rss")
+    entered = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
+    async def fake_fetch_feed(_client, _source_config, _feed_url):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cleanup_started.set()
+            await release_cleanup.wait()
+            return FeedFetchResult(articles=[])
+
+    async def fake_wait(tasks, *, timeout):
+        await entered.wait()
+        return set(), set(tasks)
+
+    monkeypatch.setattr(world_news_service, "WORLD_NEWS_SOURCES", (source,))
+    monkeypatch.setattr(world_news_service, "WORLD_NEWS_REFRESH_DEADLINE_SECONDS", 0.01)
+    monkeypatch.setattr(world_news_service, "_fetch_feed", fake_fetch_feed)
+    monkeypatch.setattr(world_news_service.asyncio, "wait", fake_wait)
+
+    response = await asyncio.wait_for(get_world_news_feed(), timeout=0.5)
+
+    assert response.failed_feeds[0].reason == "Refresh deadline exceeded"
+    await asyncio.wait_for(cleanup_started.wait(), timeout=0.5)
+    cleanup = next(iter(world_news_service._world_news_cleanup_tasks))
+    assert not cleanup.done()
+    release_cleanup.set()
+    await asyncio.wait_for(cleanup, timeout=0.5)
+    assert not world_news_service._world_news_cleanup_tasks
+
+
+@pytest.mark.asyncio
+async def test_get_world_news_feed_cancellation_cleans_up_tasks_and_client(monkeypatch):
+    source = _source("blocked", "https://blocked.example/rss")
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+    feed_task = None
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.closed = asyncio.Event()
+
+        async def aclose(self):
+            self.closed.set()
+
+    client = FakeClient()
+
+    async def fake_fetch_feed(_client, _source_config, _feed_url):
+        nonlocal feed_task
+        feed_task = asyncio.current_task()
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    monkeypatch.setattr(world_news_service, "WORLD_NEWS_SOURCES", (source,))
+    monkeypatch.setattr(world_news_service.httpx, "AsyncClient", lambda **_kwargs: client)
+    monkeypatch.setattr(world_news_service, "_fetch_feed", fake_fetch_feed)
+
+    refresh = asyncio.create_task(get_world_news_feed())
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    refresh.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await refresh
+
+    assert feed_task is not None
+    assert feed_task.cancelled()
+    assert cancelled.is_set()
+    assert client.closed.is_set()
+    assert not world_news_service._world_news_cleanup_tasks
+
+
+@pytest.mark.asyncio
+async def test_fetch_feed_rejects_oversized_response_body(monkeypatch):
+    source = _source("large", "https://large.example/rss")
+
+    async def handler(request):
+        return httpx.Response(200, content=b"x" * 9)
+
+    monkeypatch.setattr(world_news_service, "WORLD_NEWS_MAX_RESPONSE_BYTES", 8)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await world_news_service._fetch_feed(client, source, source.feed_urls[0])
+
+    assert result.failed is True
+    assert result.failed_feed is not None
+    assert result.failed_feed.reason == "Response body exceeds limit"
