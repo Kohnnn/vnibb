@@ -119,6 +119,18 @@ def _normalize_index_symbol(symbol: str) -> str | None:
     return INDEX_SYMBOL_ALIASES.get(normalized)
 
 
+def _validate_symbols(raw_symbols: Any) -> tuple[set[str], list[str]]:
+    if not isinstance(raw_symbols, list):
+        return set(), [str(raw_symbols)]
+    symbols = {str(symbol).strip().upper() for symbol in raw_symbols}
+    invalid_symbols = [
+        symbol
+        for symbol in symbols
+        if not _normalize_index_symbol(symbol) and not re.fullmatch(r"[A-Z0-9]{3,6}", symbol)
+    ]
+    return symbols, sorted(invalid_symbols)
+
+
 def _to_float(value: Any) -> float | None:
     try:
         parsed = float(value)
@@ -182,94 +194,100 @@ async def _fetch_index_updates(index_codes: set[str]) -> list[PriceUpdate]:
             )
 
         return updates
-    except BaseException as e:
-        if isinstance(e, (KeyboardInterrupt, GeneratorExit)):
+    except BaseException as error:
+        if isinstance(error, (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError)):
             raise
-        logger.debug("Index WebSocket fetch failed: %s", e)
+        logger.debug("Index WebSocket fetch failed: %s", error)
         return []
 
 
-async def fetch_and_broadcast_prices():
-    """Background task to fetch and broadcast prices.
+async def _fetch_and_broadcast_equity(symbol: str, semaphore: asyncio.Semaphore):
+    async with semaphore:
+        try:
+            params = StockScreenerParams(symbol=symbol, limit=1, source=settings.vnstock_source)
+            results = await VnstockScreenerFetcher.fetch(params)
+            if not results:
+                return
+            stock = results[0]
+            await manager.broadcast_price(
+                symbol,
+                PriceUpdate(
+                    symbol=symbol,
+                    price=float(stock.price) if stock.price else 0.0,
+                    change=0.0,
+                    change_pct=0.0,
+                    volume=int(stock.volume) if stock.volume else 0,
+                    timestamp=datetime.now(VN_TZ).isoformat(),
+                ),
+                settings.websocket_send_timeout_seconds,
+            )
+        except BaseException as e:
+            if isinstance(e, (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError)):
+                raise
+            logger.debug("Price fetch failed for %s: %s", symbol, e)
 
-    Only fetches during market hours to avoid unnecessary API calls.
-    """
+
+async def _fetch_and_broadcast_cycle(symbols: set[str], market_open: bool):
+    index_symbols = {
+        normalized
+        for normalized in (_normalize_index_symbol(symbol) for symbol in symbols)
+        if normalized
+    }
+    equity_symbols = {symbol for symbol in symbols if _normalize_index_symbol(symbol) is None}
+
+    if market_open and index_symbols:
+        index_updates = await _fetch_index_updates(index_symbols)
+        for update in index_updates:
+            for subscribed_symbol in symbols:
+                if _normalize_index_symbol(subscribed_symbol) == update.symbol:
+                    await manager.broadcast_price(
+                        subscribed_symbol,
+                        PriceUpdate(
+                            symbol=subscribed_symbol,
+                            price=update.price,
+                            change=update.change,
+                            change_pct=update.change_pct,
+                            volume=update.volume,
+                            timestamp=update.timestamp,
+                        ),
+                        settings.websocket_send_timeout_seconds,
+                    )
+
+    if market_open and equity_symbols:
+        semaphore = asyncio.Semaphore(settings.websocket_fetch_concurrency)
+        await asyncio.gather(
+            *(_fetch_and_broadcast_equity(symbol, semaphore) for symbol in equity_symbols)
+        )
+
+
+async def _run_price_cycle(symbols: set[str], market_open: bool):
+    try:
+        await asyncio.wait_for(
+            _fetch_and_broadcast_cycle(symbols, market_open),
+            timeout=settings.websocket_cycle_timeout_seconds,
+        )
+    except TimeoutError:
+        logger.warning(
+            "Price broadcast cycle exceeded %.1f seconds",
+            settings.websocket_cycle_timeout_seconds,
+        )
+
+
+async def fetch_and_broadcast_prices():
+    """Background task to fetch and broadcast prices."""
     while True:
         try:
-            connection_count = manager.active_connection_count()
-            subscription_count = manager.total_subscription_count()
-            if connection_count == 0 or subscription_count == 0:
+            if manager.active_connection_count() == 0 or manager.total_subscription_count() == 0:
                 await asyncio.sleep(IDLE_SLEEP_SECONDS)
                 continue
-
-            symbols = manager.get_all_subscribed_symbols()
-
             market_open = is_market_open()
-
-            index_symbols = {
-                normalized
-                for normalized in (_normalize_index_symbol(symbol) for symbol in symbols)
-                if normalized
-            }
-            equity_symbols = {
-                symbol for symbol in symbols if _normalize_index_symbol(symbol) is None
-            }
-
-            if market_open and index_symbols:
-                index_updates = await _fetch_index_updates(index_symbols)
-                for update in index_updates:
-                    for subscribed_symbol in symbols:
-                        if _normalize_index_symbol(subscribed_symbol) != update.symbol:
-                            continue
-                        await manager.broadcast_price(
-                            subscribed_symbol,
-                            PriceUpdate(
-                                symbol=subscribed_symbol,
-                                price=update.price,
-                                change=update.change,
-                                change_pct=update.change_pct,
-                                volume=update.volume,
-                                timestamp=update.timestamp,
-                            ),
-                        )
-
-            if equity_symbols and market_open:
-                # Fetch current prices for subscribed symbols
-                for symbol in equity_symbols:
-                    try:
-                        # Create proper query params object
-                        params = StockScreenerParams(
-                            symbol=symbol, limit=1, source=settings.vnstock_source
-                        )
-                        results = await VnstockScreenerFetcher.fetch(params)
-
-                        if results:
-                            stock = results[0]
-                            # ScreenerData has price and volume, but not daily change
-                            # Change is calculated client-side from previous price
-                            update = PriceUpdate(
-                                symbol=symbol,
-                                price=float(stock.price) if stock.price else 0.0,
-                                change=0.0,  # Not available from screener
-                                change_pct=0.0,  # Not available from screener
-                                volume=int(stock.volume) if stock.volume else 0,
-                                timestamp=datetime.now(VN_TZ).isoformat(),
-                            )
-                            await manager.broadcast_price(symbol, update)
-                    except BaseException as e:
-                        logger.debug(f"Price fetch failed for {symbol}: {e}")
-
-                    await asyncio.sleep(PER_SYMBOL_DELAY_SECONDS)
-
-            # Update every 5 seconds during market hours, 30 seconds otherwise
-            sleep_time = ACTIVE_MARKET_SLEEP_SECONDS if market_open else IDLE_SLEEP_SECONDS
-            await asyncio.sleep(sleep_time)
-
+            await _run_price_cycle(manager.get_all_subscribed_symbols(), market_open)
+            await asyncio.sleep(ACTIVE_MARKET_SLEEP_SECONDS if market_open else IDLE_SLEEP_SECONDS)
         except BaseException as e:
-            if isinstance(e, (KeyboardInterrupt, GeneratorExit)):
+            if isinstance(e, (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError)):
                 raise
             logger.error(f"Price broadcast error: {e}")
-            await asyncio.sleep(5)
+            await asyncio.sleep(ACTIVE_MARKET_SLEEP_SECONDS)
 
 
 @router.websocket("/prices")
@@ -292,13 +310,16 @@ async def websocket_prices(websocket: WebSocket):
         await websocket.close(code=1008)
         return
 
-    await manager.connect(websocket)
+    if not await manager.connect(websocket):
+        return
 
-    # Send initial market status
-    try:
-        await websocket.send_json({"type": "market_status", **get_market_status()})
-    except Exception:
-        pass
+    if not await manager.send_json(
+        websocket,
+        {"type": "market_status", **get_market_status()},
+        settings.websocket_send_timeout_seconds,
+    ):
+        manager.disconnect(websocket)
+        return
 
     try:
         while True:
@@ -307,30 +328,67 @@ async def websocket_prices(websocket: WebSocket):
             message = json.loads(data)
 
             action = message.get("action")
-            symbols = {s.upper() for s in message.get("symbols", [])}
+            symbols, invalid_symbols = _validate_symbols(message.get("symbols", []))
 
             if action == "subscribe":
-                manager.subscribe(websocket, symbols)
-                # Send current cached prices immediately
+                if invalid_symbols:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error": "invalid_symbols",
+                            "message": "Symbols must be valid stock or index symbols",
+                            "symbols": invalid_symbols,
+                        }
+                    )
+                    continue
+                error = manager.subscribe(
+                    websocket,
+                    symbols,
+                    settings.websocket_max_symbols_per_connection,
+                    settings.websocket_max_active_symbols,
+                )
+                if error:
+                    await websocket.send_json(
+                        {"type": "error", "error": "subscription_limit", "message": error}
+                    )
+                    continue
                 for symbol in symbols:
-                    if symbol in manager._price_cache:
-                        await manager.send_update(websocket, manager._price_cache[symbol])
+                    if symbol in manager._price_cache and not await manager.send_update(
+                        websocket,
+                        manager._price_cache[symbol],
+                        settings.websocket_send_timeout_seconds,
+                    ):
+                        manager.disconnect(websocket)
+                        return
 
             elif action == "unsubscribe":
                 manager.unsubscribe(websocket, symbols)
 
             elif action == "ping":
-                await websocket.send_json({"action": "pong"})
+                if not await manager.send_json(
+                    websocket, {"action": "pong"}, settings.websocket_send_timeout_seconds
+                ):
+                    manager.disconnect(websocket)
+                    return
 
             elif action == "market_status":
-                await websocket.send_json({"type": "market_status", **get_market_status()})
+                if not await manager.send_json(
+                    websocket,
+                    {"type": "market_status", **get_market_status()},
+                    settings.websocket_send_timeout_seconds,
+                ):
+                    manager.disconnect(websocket)
+                    return
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-    except BaseException as e:
-        if isinstance(e, (KeyboardInterrupt, GeneratorExit)):
+    except asyncio.CancelledError:
+        manager.disconnect(websocket)
+        raise
+    except BaseException as error:
+        if isinstance(error, (KeyboardInterrupt, GeneratorExit)):
             raise
-        logger.error(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error: {error}")
         manager.disconnect(websocket)
 
 

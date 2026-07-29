@@ -76,6 +76,7 @@ async def test_exempts_health_and_preflight_requests(rate_limit_settings):
     middleware = RateLimitMiddleware(SimpleNamespace(), redis=redis, requests_per_minute=1)
 
     assert (await middleware.dispatch(build_request("/health"), call_next)).status_code == 204
+    assert (await middleware.dispatch(build_request("/metrics"), call_next)).status_code == 204
     assert (await middleware.dispatch(build_request(method="OPTIONS"), call_next)).status_code == 204
     assert redis.entries == {}
 

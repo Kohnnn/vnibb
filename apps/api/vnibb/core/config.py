@@ -58,7 +58,14 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     api_prefix: str = "/api/v1"
-    api_request_timeout_seconds: int = 30
+    api_request_timeout_seconds: int = Field(default=30, gt=1)
+    websocket_max_connections: int = Field(default=100, ge=1, le=10_000)
+    websocket_max_symbols_per_connection: int = Field(default=10, ge=1, le=100)
+    websocket_max_active_symbols: int = Field(default=20, ge=1, le=500)
+    websocket_fetch_concurrency: int = Field(default=4, ge=1, le=20)
+    websocket_broadcast_concurrency: int = Field(default=20, ge=1, le=100)
+    websocket_cycle_timeout_seconds: float = Field(default=4.5, gt=0, le=5)
+    websocket_send_timeout_seconds: float = Field(default=2, gt=0, le=5)
     admin_api_key: Optional[str] = None
     apps_script_api_key: Optional[str] = Field(default=None, validation_alias="VNIBB_APPS_SCRIPT_KEY")
     vnibb_mcp_host: str = "0.0.0.0"
@@ -111,7 +118,7 @@ class Settings(BaseSettings):
     # Applied via connect_args on the async + sync engine. Bounds long-running
     # queries, lock waits, and dangling transactions so a single bad request
     # can't starve the pool.
-    db_statement_timeout_ms: int = 30000          # Cancel any query over 30s
+    db_statement_timeout_ms: int = 25000          # Cancel any query over 25s
     db_lock_timeout_ms: int = 5000                # Bail out of lock waits after 5s
     db_idle_in_tx_timeout_ms: int = 60000         # Close idle-in-tx connections after 60s
 
@@ -151,7 +158,7 @@ class Settings(BaseSettings):
     mongodb_url: Optional[str] = None
     mongodb_database: str = "vnibb-market"
     mongodb_enabled: bool = True
-    mongodb_timeout_ms: int = 10000
+    mongodb_timeout_ms: int = Field(default=10000, ge=1)
 
     # ==========================================================================
     # Redis Cache
@@ -180,7 +187,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     vnstock_api_key: Optional[str] = None  # Golden Sponsor API key
     vnstock_source: str = "KBS"  # vnstock 4.x sources: KBS, VCI, MSN, FMP
-    vnstock_timeout: int = 30  # Request timeout in seconds
+    vnstock_timeout: int = Field(default=25, ge=1)  # Request timeout in seconds
     vnstock_rate_limit_rps: float = 500 / 60  # Global vnstock request budget (500/min)
     vnstock_reinforcement_rps: float = 50 / 60  # Reserved reinforcement budget (50/min)
     vnstock_calls_per_minute: Optional[int] = None  # Override per-operation limits
@@ -544,6 +551,20 @@ class Settings(BaseSettings):
             return "KBS"
 
         return normalized
+
+    @model_validator(mode="after")
+    def validate_request_deadlines(self) -> "Settings":
+        api_timeout_ms = self.api_request_timeout_seconds * 1000
+        errors = []
+        if self.vnstock_timeout >= self.api_request_timeout_seconds:
+            errors.append("VNSTOCK_TIMEOUT must be below API_REQUEST_TIMEOUT_SECONDS")
+        if self.db_statement_timeout_ms >= api_timeout_ms:
+            errors.append("DB_STATEMENT_TIMEOUT_MS must be below API_REQUEST_TIMEOUT_SECONDS")
+        if self.mongodb_timeout_ms >= api_timeout_ms:
+            errors.append("MONGODB_TIMEOUT_MS must be below API_REQUEST_TIMEOUT_SECONDS")
+        if errors:
+            raise ValueError("Unsafe request deadline configuration: " + "; ".join(errors))
+        return self
 
     @model_validator(mode="after")
     def validate_production_requirements(self) -> "Settings":
