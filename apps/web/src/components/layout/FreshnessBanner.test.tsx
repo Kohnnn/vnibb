@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { FreshnessBanner } from './FreshnessBanner';
 import { useMarketFreshness } from '@/lib/queries';
@@ -50,6 +50,25 @@ describe('FreshnessBanner', () => {
     const banner = screen.getByRole('status');
     expect(banner).toHaveClass('border-rose-500/30');
     expect(screen.getByText('Data sync degraded')).toBeInTheDocument();
+  });
+
+  it('links stale data to the source settings', () => {
+    setFreshness([{ label: 'Prices', status: 'stale', age_days: 2 }]);
+
+    render(<FreshnessBanner />);
+
+    expect(screen.getByRole('link', { name: 'View sources' })).toHaveAttribute('href', '/settings');
+  });
+
+  it('dismisses through an accessible 44px touch target', () => {
+    setFreshness([{ label: 'Prices', status: 'stale', age_days: 2 }]);
+
+    render(<FreshnessBanner />);
+
+    const dismissButton = screen.getByRole('button', { name: 'Dismiss banner for this session' });
+    expect(dismissButton).toHaveClass('h-11', 'w-11');
+    fireEvent.click(dismissButton);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('hides when every bucket is fresh', () => {

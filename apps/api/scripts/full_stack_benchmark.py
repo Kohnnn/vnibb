@@ -10,7 +10,6 @@ import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from statistics import median
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -50,7 +49,8 @@ TABLE_QUALITY_PROBES = {
     },
     "market_freshness": {
         "endpoint": "/api/v1/market/freshness",
-        "critical_fields": ["source", "latest_date", "status"],
+        "records_key": "buckets",
+        "critical_fields": ["label", "last_data_date", "status"],
     },
 }
 
@@ -168,6 +168,20 @@ def discover_widgets() -> list[str]:
     return sorted(set(re.findall(r"^\s*([a-zA-Z0-9_]+):", match.group("body"), re.M)))
 
 
+def percentile(values: list[float], percentile_value: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * percentile_value
+    lower_index = int(position)
+    upper_index = min(lower_index + 1, len(ordered) - 1)
+    fraction = position - lower_index
+    return round(
+        ordered[lower_index] + (ordered[upper_index] - ordered[lower_index]) * fraction,
+        2,
+    )
+
+
 def endpoint_benchmark(base_url: str, paths: list[str], repeats: int, timeout: float) -> list[dict[str, Any]]:
     rows = []
     for path in paths:
@@ -175,14 +189,23 @@ def endpoint_benchmark(base_url: str, paths: list[str], repeats: int, timeout: f
         latencies = [a["latency_ms"] for a in attempts]
         statuses = [a.get("status") for a in attempts]
         ok_attempts = [a for a in attempts if a.get("ok")]
+        if len(ok_attempts) == len(attempts):
+            failure_state = "ok"
+        elif ok_attempts:
+            failure_state = "partial"
+        else:
+            failure_state = "failed"
         rows.append(
             {
                 "path": path,
                 "attempts": len(attempts),
                 "ok_attempts": len(ok_attempts),
                 "all_ok": len(ok_attempts) == len(attempts),
+                "failure_state": failure_state,
                 "statuses": statuses,
-                "p50_latency_ms": round(median(latencies), 2) if latencies else None,
+                "p50_latency_ms": percentile(latencies, 0.50),
+                "p95_latency_ms": percentile(latencies, 0.95),
+                "p99_latency_ms": percentile(latencies, 0.99),
                 "max_latency_ms": max(latencies) if latencies else None,
                 "last_error": next((a.get("error") for a in reversed(attempts) if a.get("error")), None),
             }
@@ -208,7 +231,11 @@ def data_quality(base_url: str, symbol: str, other_symbol: str, timeout: float) 
         path = normalize_path(probe["endpoint"], symbol, other_symbol)
         attempt = fetch_status(base_url + path, timeout)
         payload = decode_payload(attempt.get("sample")) if attempt.get("ok") else None
-        records = flatten_records(extract_data(payload))
+        data = extract_data(payload)
+        records_key = probe.get("records_key")
+        if records_key and isinstance(data, dict):
+            data = data.get(records_key)
+        records = flatten_records(data)
         field_stats = {}
         for field in probe["critical_fields"]:
             total = len(records)
@@ -294,10 +321,14 @@ def print_markdown(report: dict[str, Any]) -> None:
     print(f"- Data Quality OK: `{summary['data_quality_ok_count']}/{summary['data_quality_probe_count']}`")
     print(f"- Widget Coverage: `{summary['widget_mapped_count']}/{summary['widget_count']}`")
     print("")
-    print("| Endpoint | OK | p50 ms | Max ms | Statuses |")
-    print("|----------|----|--------|--------|----------|")
+    print("| Endpoint | State | p50 ms | p95 ms | p99 ms | Max ms | Statuses |")
+    print("|----------|-------|--------|--------|--------|--------|----------|")
     for row in report["endpoints"]:
-        print(f"| `{row['path']}` | `{row['all_ok']}` | `{row['p50_latency_ms']}` | `{row['max_latency_ms']}` | `{row['statuses']}` |")
+        print(
+            f"| `{row['path']}` | `{row['failure_state']}` | `{row['p50_latency_ms']}` | "
+            f"`{row['p95_latency_ms']}` | `{row['p99_latency_ms']}` | "
+            f"`{row['max_latency_ms']}` | `{row['statuses']}` |"
+        )
     print("")
     print("| Data Probe | OK | Rows | Score | Endpoint |")
     print("|------------|----|------|-------|----------|")

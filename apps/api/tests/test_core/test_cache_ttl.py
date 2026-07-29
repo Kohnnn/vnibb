@@ -13,11 +13,13 @@ Two invariants are enforced:
 from __future__ import annotations
 
 import ast
+import asyncio
 from pathlib import Path
 
 import pytest
 
-from vnibb.core.cache import resolve_cache_ttl
+from vnibb.core import cache
+from vnibb.core.cache import RedisClient, cached, resolve_cache_ttl
 from vnibb.core.cache_constants import REDIS_CACHE_TTLS
 from vnibb.core.config import settings
 
@@ -54,6 +56,146 @@ def _iter_cached_decorators():
                 elif kw.arg == "key_prefix" and isinstance(kw.value, ast.Constant):
                     key_prefix = kw.value.value
             yield path.name, node.lineno, ttl_value, key_prefix
+
+
+@pytest.mark.asyncio
+async def test_cached_singleflight_shares_one_loader_call(monkeypatch):
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: False)
+    cache._memory_cache.clear()
+    cache._inflight_cache_loads.clear()
+    calls = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    @cached(key_prefix="quote")
+    async def load(symbol):
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return {"symbol": symbol}
+
+    first = asyncio.create_task(load("VNM"))
+    await started.wait()
+    second = asyncio.create_task(load("VNM"))
+    await asyncio.sleep(0)
+    release.set()
+
+    assert await asyncio.gather(first, second) == [{"symbol": "VNM"}, {"symbol": "VNM"}]
+    assert calls == 1
+    assert not cache._inflight_cache_loads
+
+
+@pytest.mark.asyncio
+async def test_cached_singleflight_shares_loader_failure(monkeypatch):
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: False)
+    cache._memory_cache.clear()
+    cache._inflight_cache_loads.clear()
+    calls = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    @cached(key_prefix="quote")
+    async def load(symbol):
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        raise ValueError(symbol)
+
+    first = asyncio.create_task(load("VNM"))
+    await started.wait()
+    second = asyncio.create_task(load("VNM"))
+    await asyncio.sleep(0)
+    release.set()
+
+    results = await asyncio.gather(first, second, return_exceptions=True)
+    assert all(isinstance(result, ValueError) and str(result) == "VNM" for result in results)
+    assert calls == 1
+    assert not cache._inflight_cache_loads
+
+
+@pytest.mark.asyncio
+async def test_cached_singleflight_survives_cancelled_creator(monkeypatch):
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: False)
+    cache._memory_cache.clear()
+    cache._inflight_cache_loads.clear()
+    calls = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    @cached(key_prefix="quote")
+    async def load(symbol):
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return {"symbol": symbol}
+
+    creator = asyncio.create_task(load("VNM"))
+    await started.wait()
+    waiter = asyncio.create_task(load("VNM"))
+    await asyncio.sleep(0)
+    creator.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await creator
+
+    release.set()
+    assert await waiter == {"symbol": "VNM"}
+    await asyncio.sleep(0)
+    assert calls == 1
+    assert not cache._inflight_cache_loads
+
+
+@pytest.mark.asyncio
+async def test_cached_error_result_is_not_cached(monkeypatch):
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: False)
+    cache._memory_cache.clear()
+    calls = 0
+
+    @cached(key_prefix="quote")
+    async def load(symbol):
+        nonlocal calls
+        calls += 1
+        return {"symbol": symbol, "error": "upstream"}
+
+    assert await load("VNM") == {"symbol": "VNM", "error": "upstream"}
+    assert await load("VNM") == {"symbol": "VNM", "error": "upstream"}
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_flush_prefix_deletes_scan_batches(monkeypatch):
+    class Client:
+        def __init__(self):
+            self.deleted = []
+
+        async def scan_iter(self, pattern, count):
+            assert pattern == "v:q:*"
+            assert count == 2
+            for key in ("v:q:1", "v:q:2", "v:q:3", "v:q:4", "v:q:5"):
+                yield key
+
+        async def delete(self, *keys):
+            self.deleted.append(keys)
+            return len(keys)
+
+    client = Client()
+    redis_client = RedisClient(url="redis://example", max_connections=7)
+    redis_client._client = client
+    redis_client.SCAN_BATCH_SIZE = 2
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: True)
+
+    assert await redis_client.flush_prefix("v:q:") == 5
+    assert client.deleted == [("v:q:1", "v:q:2"), ("v:q:3", "v:q:4"), ("v:q:5",)]
+
+
+def test_global_redis_client_uses_configured_connection_limit():
+    assert cache.redis_client.max_connections == cache.settings.redis_max_connections
 
 
 class TestCachedSiteConsistency:

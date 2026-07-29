@@ -720,7 +720,6 @@ async def get_technical_indicators_direct(
     Available indicators: rsi, macd, sma, ema, bb (Bollinger Bands)
     """
     import asyncio
-    from concurrent.futures import ThreadPoolExecutor
     from vnibb.core.config import settings
     from datetime import datetime, timedelta
 
@@ -802,14 +801,12 @@ async def get_technical_indicators_direct(
 
         return result
 
-    loop = asyncio.get_running_loop()
-    with ThreadPoolExecutor() as executor:
-        try:
-            result = await asyncio.wait_for(
-                loop.run_in_executor(executor, _calculate), timeout=settings.vnstock_timeout
-            )
-            return result
-        except asyncio.TimeoutError:
-            return {"error": "Request timed out"}
-        except Exception as e:
-            return {"error": str(e)}
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_calculate), timeout=settings.vnstock_timeout
+        )
+        return result
+    except TimeoutError:
+        return {"error": "Request timed out"}
+    except Exception as e:
+        return {"error": str(e)}

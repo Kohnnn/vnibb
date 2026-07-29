@@ -79,12 +79,48 @@ class TestRateLimitSettings:
         assert settings_factory(rate_limit_mode="enforce").rate_limit_mode == "enforce"
 
 
+class TestWebSocketReliabilitySettings:
+    def test_default_values(self, settings_factory):
+        settings = settings_factory()
+        assert settings.websocket_max_connections == 100
+        assert settings.websocket_max_symbols_per_connection == 10
+        assert settings.websocket_max_active_symbols == 20
+        assert settings.websocket_fetch_concurrency == 4
+        assert settings.websocket_broadcast_concurrency == 20
+        assert settings.websocket_cycle_timeout_seconds == 4.5
+        assert settings.websocket_send_timeout_seconds == 2
+
+    def test_rejects_cycle_deadline_above_target(self, settings_factory):
+        with pytest.raises(ValueError):
+            settings_factory(websocket_cycle_timeout_seconds=5.1)
+
+
+class TestRequestDeadlineSettings:
+    def test_defaults_are_below_api_deadline(self, settings_factory):
+        settings = settings_factory()
+        assert settings.vnstock_timeout < settings.api_request_timeout_seconds
+        assert settings.db_statement_timeout_ms < settings.api_request_timeout_seconds * 1000
+        assert settings.mongodb_timeout_ms < settings.api_request_timeout_seconds * 1000
+
+    @pytest.mark.parametrize(
+        ("overrides", "message"),
+        [
+            ({"vnstock_timeout": 30}, "VNSTOCK_TIMEOUT"),
+            ({"db_statement_timeout_ms": 30_000}, "DB_STATEMENT_TIMEOUT_MS"),
+            ({"mongodb_timeout_ms": 30_000}, "MONGODB_TIMEOUT_MS"),
+        ],
+    )
+    def test_rejects_deadline_at_or_above_api_timeout(self, settings_factory, overrides, message):
+        with pytest.raises(ValueError, match=message):
+            settings_factory(**overrides)
+
+
 class TestDbTimeoutSettings:
     """The three timeout settings must exist with safe defaults."""
 
     def test_default_values(self, settings_factory):
         s = settings_factory()
-        assert s.db_statement_timeout_ms == 30000
+        assert s.db_statement_timeout_ms == 25000
         assert s.db_lock_timeout_ms == 5000
         assert s.db_idle_in_tx_timeout_ms == 60000
 

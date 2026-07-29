@@ -4,23 +4,22 @@ import hmac
 import json
 import logging
 import re
-from importlib import import_module
-from importlib.metadata import PackageNotFoundError, version
 from collections import Counter
 from datetime import datetime, timedelta
+from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs
 
-from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks, Header, Body, Request
-from sqlalchemy import text, select
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Query, Request
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vnibb.core.database import get_db, engine
+from vnibb.core.appwrite_client import appwrite_runtime_summary, check_appwrite_connectivity
 from vnibb.core.cache import redis_client
 from vnibb.core.config import settings
-from vnibb.core.appwrite_client import check_appwrite_connectivity, appwrite_runtime_summary
+from vnibb.core.database import engine, get_db
 from vnibb.core.middleware.logging import get_recent_error_events
-from vnibb.models.sync_status import SyncStatus
 from vnibb.services.ai_model_catalog_service import ai_model_catalog_service
 from vnibb.services.ai_prompt_library_service import ai_prompt_library_service
 from vnibb.services.ai_runtime_config_service import ai_runtime_config_service
@@ -31,7 +30,6 @@ from vnibb.services.data_quality import (
     get_quality_run_trend,
     serialize_quality_run,
 )
-from vnibb.services.unit_runtime_config_service import unit_runtime_config_service
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.system_layout_template_service import (
     SYSTEM_DASHBOARD_KEYS,
@@ -39,6 +37,7 @@ from vnibb.services.system_layout_template_service import (
     SystemLayoutTemplateListResponse,
     system_layout_template_service,
 )
+from vnibb.services.unit_runtime_config_service import unit_runtime_config_service
 
 router = APIRouter(tags=["Admin"])
 logger = logging.getLogger(__name__)
@@ -116,7 +115,26 @@ FRESHNESS_TABLES = [
     "company_news",
     "company_events",
 ]
-SYNC_STATUS_STALE_HOURS = 24
+ADMIN_QUERY_MAX_ROWS = 500
+ADMIN_QUERY_TIMEOUT_MS = 2_000
+_ADMIN_QUERY_START = re.compile(r"^\s*(?:SELECT|WITH)\b", re.IGNORECASE)
+_ADMIN_QUERY_FORBIDDEN = re.compile(
+    r"\b(?:ALTER|ANALYZE|ATTACH|BEGIN|CALL|COMMIT|COPY|CREATE|DELETE|DETACH|DO|DROP|GRANT|INSERT|"
+    r"LOCK|MERGE|PRAGMA|REINDEX|RELEASE|REVOKE|ROLLBACK|SAVEPOINT|SET|TRUNCATE|UPDATE|VACUUM)\b|"
+    r"\bFOR\s+(?:NO\s+KEY\s+)?UPDATE\b|\bSELECT\b.*\bINTO\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _validate_admin_query(query: str) -> str:
+    normalized = query.strip()
+    if normalized.endswith(";"):
+        normalized = normalized[:-1].rstrip()
+    if not normalized or ";" in normalized or "--" in normalized or "/*" in normalized:
+        raise HTTPException(status_code=400, detail="Only one read-only SELECT statement is allowed")
+    if not _ADMIN_QUERY_START.match(normalized) or _ADMIN_QUERY_FORBIDDEN.search(normalized):
+        raise HTTPException(status_code=400, detail="Only one read-only SELECT statement is allowed")
+    return normalized
 
 
 def require_admin_access(
@@ -1166,7 +1184,7 @@ async def _schedule_data_reinforcement(
         explicit_symbols: list[str] = []
     elif mode_upper == "SYMBOLS":
         stale_requested = False
-        explicit_symbols = sorted({symbol for symbol in input_symbols})
+        explicit_symbols = sorted(set(input_symbols))
         if not explicit_symbols:
             raise HTTPException(
                 status_code=400,
@@ -1463,22 +1481,36 @@ async def get_table_sample(
 
 @router.post("/database/query", dependencies=[Depends(require_admin_access)])
 async def execute_query(query: str = Body(..., embed=True), db: AsyncSession = Depends(get_db)):
-    """Execute read-only SQL query (SELECT only)."""
-    if not query.strip().upper().startswith("SELECT"):
-        raise HTTPException(status_code=400, detail="Only SELECT allowed")
+    """Execute one bounded read-only SQL query."""
+    normalized = _validate_admin_query(query)
     try:
-        result = await db.execute(text(query))
+        if engine.dialect.name == "postgresql":
+            await db.execute(text("SET LOCAL transaction_read_only = on"))
+            await db.execute(text(f"SET LOCAL statement_timeout = '{ADMIN_QUERY_TIMEOUT_MS}ms'"))
+        result = await db.execute(
+            text(f"SELECT * FROM ({normalized}) AS admin_query LIMIT :admin_query_limit"),
+            {"admin_query_limit": ADMIN_QUERY_MAX_ROWS + 1},
+        )
         rows = result.mappings().all()
+        truncated = len(rows) > ADMIN_QUERY_MAX_ROWS
         data = []
-        for row in rows:
+        for row in rows[:ADMIN_QUERY_MAX_ROWS]:
             rd = dict(row)
-            for k, v in rd.items():
-                if hasattr(v, "isoformat"):
-                    rd[k] = v.isoformat()
+            for key, value in rd.items():
+                if hasattr(value, "isoformat"):
+                    rd[key] = value.isoformat()
             data.append(rd)
-        return {"query": query, "count": len(data), "rows": data}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return {
+            "query": normalized,
+            "count": len(data),
+            "rows": data,
+            "truncated": truncated,
+            "max_rows": ADMIN_QUERY_MAX_ROWS,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/sync-status", dependencies=[Depends(require_admin_access)])
@@ -1492,34 +1524,6 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
         "data_freshness": {},
     }
 
-    stale_cutoff = datetime.utcnow() - timedelta(hours=SYNC_STATUS_STALE_HOURS)
-
-    # 1. Auto-mark stale running jobs before returning recent sync jobs.
-    try:
-        result = await db.execute(
-            select(SyncStatus).where(
-                SyncStatus.status == "running",
-                SyncStatus.started_at < stale_cutoff,
-            )
-        )
-        stale_rows = result.scalars().all()
-        for record in stale_rows:
-            record.status = "failed"
-            record.completed_at = record.completed_at or datetime.utcnow()
-            errors = record.errors if isinstance(record.errors, dict) else {}
-            errors["reason"] = "stale_timeout"
-            record.errors = errors
-            additional_data = (
-                record.additional_data if isinstance(record.additional_data, dict) else {}
-            )
-            additional_data["stale_marked_at"] = datetime.utcnow().isoformat()
-            record.additional_data = additional_data
-        await db.commit()
-    except Exception as exc:
-        logger.warning("Failed to auto-mark stale sync jobs: %s", exc)
-        await db.rollback()
-
-    # 2. Load recent sync jobs even if stale-update logic fails.
     try:
         result = await db.execute(
             text(

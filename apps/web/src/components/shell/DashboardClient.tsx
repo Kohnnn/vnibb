@@ -96,6 +96,21 @@ type TemplateApplyStatus = {
     tone: 'success' | 'warning';
 };
 
+type DashboardSyncStatus = 'idle' | 'syncing' | 'synced' | 'local' | 'error';
+
+export function DashboardSyncStatusMessage({ enabled, status }: { enabled: boolean; status: DashboardSyncStatus }) {
+    if (status === 'syncing') {
+        return <div role="status" className="mx-3 mt-2 text-xs text-[var(--text-secondary)]">Syncing dashboard changes…</div>;
+    }
+    if (status === 'error') {
+        return <div role="alert" className="mx-3 mt-2 text-xs text-amber-200">Cloud sync failed. Check your connection and refresh to try again.</div>;
+    }
+    if (!enabled || status === 'idle' || status === 'local') {
+        return <div role="status" className="mx-3 mt-2 text-xs text-[var(--text-secondary)]">Saved on this device</div>;
+    }
+    return null;
+}
+
 const ADMIN_MANAGED_SYSTEM_IDS = new Set([
     MAIN_FUNDAMENTAL_DASHBOARD_ID,
     TECHNICAL_DASHBOARD_ID,
@@ -1201,6 +1216,8 @@ function DashboardContent() {
                 />
 
                 <FreshnessBanner />
+
+                <DashboardSyncStatusMessage enabled={backendSync.enabled} status={backendSync.status} />
 
                 {backendSync.loadPaused && (
                     <div

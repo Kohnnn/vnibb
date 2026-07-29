@@ -48,8 +48,7 @@ check_status "ready" "/ready"
 check_status "health" "/health/"
 
 if [[ -n "${CHECK_METRICS:-}" ]]; then
-  metrics_code="$("$CURL_BIN" -ksS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" "${BASE_URL}/metrics" || true)"
-  printf '%-10s %s -> %s\n' "metrics" "${BASE_URL}/metrics" "$metrics_code"
+  check_status "metrics" "/metrics"
 fi
 
 exit "$status"

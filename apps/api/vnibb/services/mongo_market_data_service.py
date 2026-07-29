@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import math
+from collections.abc import Iterable
 from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
 from typing import Any
@@ -14,29 +17,105 @@ logger = logging.getLogger(__name__)
 
 
 _EOD_SOURCE_RANK = {"vietcap": 0, "vnstock-data": 1}
+_EOD_LINEAGE_FIELDS = ("updatedAt", "observedAt", "ingestedAt", "sourceUpdatedAt")
 
 
-def _dedup_eod_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Collapse to one bar per trade date, preferring the Vietcap source.
+def _eod_lineage_rank(value: Any) -> float:
+    if isinstance(value, datetime):
+        return -value.timestamp()
+    if isinstance(value, date):
+        return -datetime.combine(value, time.min).timestamp()
+    if isinstance(value, str):
+        try:
+            return -datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+    return 0.0
 
-    The corpus holds overlapping bars from ``vietcap`` (raw VND) and the
-    ``vnstock-data`` daily sync for the same (symbol, tradeDate); returning
-    both doubles chart points and mixes price units.
-    """
 
-    best: dict[Any, tuple[int, dict[str, Any]]] = {}
+def _is_valid_eod_ohlcv(row: dict[str, Any]) -> bool:
+    values: dict[str, float] = {}
+    for field in ("open", "high", "low", "close", "volume"):
+        value = row.get(field)
+        if isinstance(value, bool):
+            return False
+        try:
+            values[field] = float(value)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(values[field]):
+            return False
+    return (
+        values["open"] > 0
+        and values["high"] > 0
+        and values["low"] > 0
+        and values["close"] > 0
+        and values["volume"] >= 0
+        and values["volume"].is_integer()
+        and values["high"] >= max(values["open"], values["low"], values["close"])
+        and values["low"] <= min(values["open"], values["high"], values["close"])
+    )
+
+
+def _eod_row_rank(row: dict[str, Any]) -> tuple[Any, ...]:
+    source = str(row.get("source") or "").strip().lower()
+    unit = str(row.get("priceUnit") or "").strip().upper()
+    return (
+        0 if unit == "VND" and _is_valid_eod_ohlcv(row) else 1,
+        _EOD_SOURCE_RANK.get(source, 2),
+        tuple(_eod_lineage_rank(row.get(field)) for field in _EOD_LINEAGE_FIELDS),
+        str(row.get("sourceKey") or ""),
+        json.dumps(row, default=str, sort_keys=True, separators=(",", ":")),
+    )
+
+
+def _eod_trade_day(row: dict[str, Any]) -> Any:
+    trade_date = row.get("tradeDate")
+    return trade_date.date() if isinstance(trade_date, datetime) else trade_date
+
+
+def _stream_eod_days(cursor: Iterable[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    days: set[Any] = set()
+    for row in cursor:
+        trade_day = _eod_trade_day(row)
+        if trade_day is None:
+            continue
+        if trade_day not in days:
+            if len(days) == limit:
+                break
+            days.add(trade_day)
+        rows.append(row)
+    return rows
+
+
+def _dedup_eod_rows(
+    rows: Iterable[dict[str, Any]],
+    *,
+    limit: int | None = None,
+    preserve_provenance: bool = False,
+) -> list[dict[str, Any]]:
+    """Collapse to one deterministically ranked bar per logical trade date."""
+
+    best: dict[Any, tuple[tuple[Any, ...], dict[str, Any]]] = {}
     for row in rows:
-        trade_date = row.get("tradeDate")
-        key = trade_date.date() if isinstance(trade_date, datetime) else trade_date
-        rank = _EOD_SOURCE_RANK.get(str(row.get("source") or ""), 2)
+        key = _eod_trade_day(row)
+        if key is None:
+            continue
+        rank = _eod_row_rank(row)
         current = best.get(key)
         if current is None or rank < current[0]:
-            best[key] = (rank, row)
+            best[key] = (rank, dict(row))
     deduped = [row for _, row in best.values()]
-    for row in deduped:
-        row.pop("source", None)
-    deduped.sort(key=lambda r: r.get("tradeDate") or datetime.min)
-    return deduped
+    if not preserve_provenance:
+        for row in deduped:
+            row.pop("source", None)
+            row.pop("sourceKey", None)
+            row.pop("priceUnit", None)
+            for field in _EOD_LINEAGE_FIELDS:
+                row.pop(field, None)
+    deduped.sort(key=lambda row: row.get("tradeDate") or datetime.min)
+    return deduped[:limit] if limit is not None else deduped
 
 
 class MongoMarketDataService:
@@ -294,6 +373,7 @@ class MongoMarketDataService:
         *,
         lookback_days: int = 365,
         limit: int = 1000,
+        include_provenance: bool = False,
     ) -> list[dict[str, Any]]:
         """Return normalized EOD OHLCV rows."""
 
@@ -303,34 +383,85 @@ class MongoMarketDataService:
 
         def _read() -> list[dict[str, Any]]:
             coll = self._get_collection("market_prices_eod")
-            cursor = (
-                coll.find(
-                    {
-                        "symbol": symbol_upper,
-                        "tradeDate": {"$gte": lookback_start.replace(tzinfo=None)},
-                    },
-                    {
-                        "_id": 0,
-                        "symbol": 1,
-                        "tradeDate": 1,
-                        "open": 1,
-                        "high": 1,
-                        "low": 1,
-                        "close": 1,
-                        "volume": 1,
-                        "value": 1,
-                        "source": 1,
-                    },
-                )
-                .sort("tradeDate", 1)
-                .limit(limit)
+            cursor = coll.find(
+                {
+                    "symbol": symbol_upper,
+                    "tradeDate": {"$gte": lookback_start.replace(tzinfo=None)},
+                },
+                {
+                    "_id": 0,
+                    "symbol": 1,
+                    "tradeDate": 1,
+                    "open": 1,
+                    "high": 1,
+                    "low": 1,
+                    "close": 1,
+                    "volume": 1,
+                    "value": 1,
+                    "source": 1,
+                    "sourceKey": 1,
+                    "priceUnit": 1,
+                    "updatedAt": 1,
+                    "observedAt": 1,
+                    "ingestedAt": 1,
+                    "sourceUpdatedAt": 1,
+                },
+            ).sort("tradeDate", 1)
+            return _dedup_eod_rows(
+                _stream_eod_days(cursor, limit),
+                preserve_provenance=include_provenance,
             )
-            return _dedup_eod_rows(list(cursor))
 
         try:
             return await asyncio.to_thread(_read)
         except Exception as exc:
             logger.warning("Mongo EOD read failed for %s: %s", symbol_upper, exc)
+            return []
+
+    async def get_latest_eod_prices(
+        self,
+        symbol: str,
+        *,
+        limit: int = 2,
+        include_provenance: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return the newest N logical EOD days, with Vietcap/VND precedence."""
+
+        symbol_upper = symbol.upper()
+        limit = max(1, min(limit, 5000))
+
+        def _read() -> list[dict[str, Any]]:
+            coll = self._get_collection("market_prices_eod")
+            cursor = coll.find(
+                {"symbol": symbol_upper},
+                {
+                    "_id": 0,
+                    "symbol": 1,
+                    "tradeDate": 1,
+                    "open": 1,
+                    "high": 1,
+                    "low": 1,
+                    "close": 1,
+                    "volume": 1,
+                    "value": 1,
+                    "source": 1,
+                    "sourceKey": 1,
+                    "priceUnit": 1,
+                    "updatedAt": 1,
+                    "observedAt": 1,
+                    "ingestedAt": 1,
+                    "sourceUpdatedAt": 1,
+                },
+            ).sort("tradeDate", -1)
+            return _dedup_eod_rows(
+                _stream_eod_days(cursor, limit),
+                preserve_provenance=include_provenance,
+            )
+
+        try:
+            return await asyncio.to_thread(_read)
+        except Exception as exc:
+            logger.warning("Mongo latest EOD read failed for %s: %s", symbol_upper, exc)
             return []
 
     async def get_eod_prices_between(
@@ -340,6 +471,7 @@ class MongoMarketDataService:
         start_date: date,
         end_date: date,
         limit: int = 20000,
+        include_provenance: bool = False,
     ) -> list[dict[str, Any]]:
         """Return normalized EOD OHLCV rows for an explicit date range."""
 
@@ -350,31 +482,36 @@ class MongoMarketDataService:
 
         def _read() -> list[dict[str, Any]]:
             coll = self._get_collection("market_prices_eod")
-            cursor = (
-                coll.find(
-                    {
-                        "symbol": symbol_upper,
-                        "tradeDate": {"$gte": start_dt, "$lte": end_dt},
-                    },
-                    {
-                        "_id": 0,
-                        "symbol": 1,
-                        "tradeDate": 1,
-                        "open": 1,
-                        "high": 1,
-                        "low": 1,
-                        "close": 1,
-                        "volume": 1,
-                        "value": 1,
-                        "adjClose": 1,
-                        "adj_close": 1,
-                        "source": 1,
-                    },
-                )
-                .sort("tradeDate", 1)
-                .limit(limit)
+            cursor = coll.find(
+                {
+                    "symbol": symbol_upper,
+                    "tradeDate": {"$gte": start_dt, "$lte": end_dt},
+                },
+                {
+                    "_id": 0,
+                    "symbol": 1,
+                    "tradeDate": 1,
+                    "open": 1,
+                    "high": 1,
+                    "low": 1,
+                    "close": 1,
+                    "volume": 1,
+                    "value": 1,
+                    "adjClose": 1,
+                    "adj_close": 1,
+                    "source": 1,
+                    "sourceKey": 1,
+                    "priceUnit": 1,
+                    "updatedAt": 1,
+                    "observedAt": 1,
+                    "ingestedAt": 1,
+                    "sourceUpdatedAt": 1,
+                },
+            ).sort("tradeDate", 1)
+            return _dedup_eod_rows(
+                _stream_eod_days(cursor, limit),
+                preserve_provenance=include_provenance,
             )
-            return _dedup_eod_rows(list(cursor))
 
         try:
             return await asyncio.to_thread(_read)

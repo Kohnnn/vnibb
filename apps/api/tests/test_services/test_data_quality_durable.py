@@ -181,6 +181,113 @@ async def test_non_market_day_does_not_advance_sustained_breach(test_db):
     assert state.consecutive_runs == 1
 
 
+def test_mongo_eod_quality_classifies_failures_and_overlap_warning():
+    from vnibb.services.data_quality import _mongo_eod_quality_status
+
+    status, issues = _mongo_eod_quality_status(
+        {
+            "audited_documents": 5,
+            "invalid_ohlcv": 1,
+            "cross_source_overlaps": 2,
+        }
+    )
+
+    assert status == "failed"
+    assert issues == ["invalid_ohlcv", "cross_source_overlaps"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [(TimeoutError("timed out"), "timeout"), (RuntimeError("unavailable"), "unavailable")],
+)
+async def test_mongo_eod_quality_failure_is_explicit(monkeypatch, error, expected_status):
+    from vnibb.services import mongo_market_data_service
+    from vnibb.services.data_quality import get_mongo_eod_quality_summary
+
+    class Collection:
+        def aggregate(self, pipeline, maxTimeMS):
+            raise error
+
+    class Service:
+        enabled = True
+
+        def _get_collection(self, name):
+            return Collection()
+
+    monkeypatch.setattr(mongo_market_data_service, "get_mongo_market_data_service", lambda: Service())
+
+    result = await get_mongo_eod_quality_summary(["FPT"])
+
+    assert result["status"] == expected_status
+    assert result["summary_counts"]["audited_documents"] == 0
+    assert result["details"]["max_time_ms"] == 1_500
+
+
+@pytest.mark.asyncio
+async def test_mongo_eod_quality_marks_empty_provenance_as_failed(monkeypatch):
+    from vnibb.services import mongo_market_data_service
+    from vnibb.services.data_quality import get_mongo_eod_quality_summary
+
+    class Collection:
+        def __init__(self):
+            self.pipelines = []
+
+        def aggregate(self, pipeline, maxTimeMS):
+            self.pipelines.append(pipeline)
+            if any("$set" in stage for stage in pipeline):
+                return [{"audited_documents": 1, "missing_provenance": 1}]
+            return []
+
+    class Service:
+        enabled = True
+
+        def __init__(self):
+            self.collection = Collection()
+
+        def _get_collection(self, name):
+            return self.collection
+
+    service = Service()
+    monkeypatch.setattr(mongo_market_data_service, "get_mongo_market_data_service", lambda: service)
+
+    result = await get_mongo_eod_quality_summary(["FPT"])
+
+    pipeline = next(
+        pipeline for pipeline in service.collection.pipelines if any("$set" in stage for stage in pipeline)
+    )
+    missing_provenance = pipeline[2]["$set"]["missing_provenance"]["$or"]
+    assert result["status"] == "failed"
+    assert result["issues"] == ["missing_provenance"]
+    assert {"$eq": ["$source", ""]} in missing_provenance
+    for field in ("source", "sourceKey", "updatedAt", "schemaVersion"):
+        assert {"$in": [{"$type": f"${field}"}, ["missing", "null"]]} in missing_provenance
+        assert {"$eq": [f"${field}", ""]} in missing_provenance
+
+
+@pytest.mark.asyncio
+async def test_mongo_eod_quality_summary_is_persisted(test_db):
+    summary_counts = {
+        "audited_symbols": 2,
+        "audited_documents": 12,
+        "invalid_ohlcv": 1,
+        "cross_source_overlaps": 1,
+    }
+    run = await complete_quality_run(
+        test_db,
+        run_id="mongo-eod-summary",
+        status="failed",
+        completed_at=datetime(2026, 7, 16, 9, 40),
+        observed_market_date=date(2026, 7, 16),
+        latest_market_date=date(2026, 7, 16),
+        market_day_staleness_value=0,
+        summary_counts=summary_counts,
+        error_category=None,
+    )
+
+    assert run.summary_counts == summary_counts
+
+
 @pytest.mark.asyncio
 async def test_same_observed_market_date_does_not_advance_sustained_breach(test_db):
     observed_at = datetime(2026, 7, 16, 9, 40)

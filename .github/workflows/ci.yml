@@ -23,8 +23,12 @@ jobs:
     env:
       NEXT_PUBLIC_API_URL: http://localhost:8000
       NEXT_PUBLIC_WS_URL: ws://localhost:8000/api/v1/ws/prices
+      CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      CI_BEFORE_SHA: ${{ github.event.before }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 9.15.4

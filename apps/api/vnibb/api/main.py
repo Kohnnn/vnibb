@@ -10,12 +10,12 @@ Creates and configures the VNIBB API server with:
 - Startup configuration validation
 """
 
-import logging
-import re
 import asyncio
-import sys
 import io
+import logging
 import os
+import re
+import sys
 
 # Ensure stdout handles emojis even on windows consoles with limited encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -30,29 +30,31 @@ elif hasattr(sys.stdout, "detach"):
         pass
 
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 from datetime import datetime
+from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException, RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.middleware.gzip import GZipMiddleware
+from starlette.responses import PlainTextResponse, Response
 
-from vnibb.core.config import settings
-from vnibb.core.cache import redis_client
 from vnibb.core.appwrite_client import check_appwrite_connectivity
+from vnibb.core.cache import redis_client
+from vnibb.core.config import settings
 from vnibb.core.exceptions import VniBBException
 from vnibb.core.logging_config import setup_logging
-from vnibb.core.monitoring import init_monitoring
 from vnibb.core.middleware import APIVersionMiddleware, RequestLoggingMiddleware
+from vnibb.core.monitoring import init_monitoring
+from vnibb.middleware.metrics import MetricsMiddleware, metrics_registry
+from vnibb.middleware.rate_limit import RateLimitMiddleware
 from vnibb.models.api_errors import (
     APIError,
-    ValidationErrorResponse,
     ValidationError,
+    ValidationErrorResponse,
 )
 
 # Configure structured logging
@@ -189,7 +191,15 @@ class PerformanceLoggingMiddleware(BaseHTTPMiddleware):
 class RequestTimeoutMiddleware(BaseHTTPMiddleware):
     """Enforce a global timeout for non-health HTTP requests."""
 
-    BYPASS_PATHS = ("/live", "/ready", "/health", "/docs", "/openapi.json", "/redoc")
+    BYPASS_PATHS = (
+        "/live",
+        "/ready",
+        "/health",
+        "/metrics",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+    )
 
     async def dispatch(self, request: Request, call_next) -> Response:
         timeout_seconds = settings.api_request_timeout_seconds
@@ -341,8 +351,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Startup: Validate config, initialize Redis, start scheduler
     Shutdown: Close Redis connection pool and scheduler
     """
-    from vnibb.core.scheduler import start_scheduler, shutdown_scheduler
     from vnibb.core.database import check_database_connection
+    from vnibb.core.scheduler import shutdown_scheduler, start_scheduler
 
     # Pre-initialize vnstock in main thread to prevent deadlocks
     # Non-blocking with timeout for robustness
@@ -546,10 +556,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Shutdown complete")
 
 
-from vnibb.middleware.rate_limit import RateLimitMiddleware
-from vnibb.middleware.metrics import MetricsMiddleware
-
-
 def create_app() -> FastAPI:
     """
     Application factory pattern.
@@ -572,9 +578,6 @@ def create_app() -> FastAPI:
 
     # Initialize monitoring (Sentry) - must be done early
     init_monitoring(app)
-
-    # Add Performance Metrics Middleware
-    app.add_middleware(MetricsMiddleware)
 
     # Add Rate Limiting Middleware
     app.add_middleware(RateLimitMiddleware, requests_per_minute=120)
@@ -605,6 +608,8 @@ def create_app() -> FastAPI:
 
     # Add CORS error middleware to preserve CORS headers on uncaught exceptions.
     app.add_middleware(CORSErrorMiddleware)
+
+    app.add_middleware(MetricsMiddleware)
 
     # Keep CORS as the outermost middleware so all responses, including
     # middleware-generated errors and preflight requests, receive CORS headers.
@@ -702,16 +707,24 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router, prefix="/health", tags=["Health"])
 
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics():
+        return PlainTextResponse(
+            metrics_registry.render(),
+            media_type="text/plain; version=0.0.4",
+        )
+
     @app.get("/debug", tags=["Debug"])
     async def debug_status():
         """Lightweight debug endpoint for sync and dependency status."""
-        from vnibb.core.database import check_database_connection, async_session_maker
+        from sqlalchemy import select
+
+        from vnibb.core.database import async_session_maker, check_database_connection
         from vnibb.models.sync_status import SyncStatus
         from vnibb.services.data_pipeline import (
-            SYNC_PROGRESS_KEY,
             DAILY_TRADING_PROGRESS_KEY,
+            SYNC_PROGRESS_KEY,
         )
-        from sqlalchemy import select
 
         db_ok = await check_database_connection()
         cache_ok = False

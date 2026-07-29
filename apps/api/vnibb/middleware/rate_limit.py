@@ -32,7 +32,7 @@ return {count, ttl}
         self.redis = redis
 
     def _is_exempt_path(self, path: str) -> bool:
-        return path.startswith(("/health", "/live", "/ready", "/docs", "/redoc", "/openapi.json", "/static"))
+        return path.startswith(("/health", "/live", "/ready", "/metrics", "/docs", "/redoc", "/openapi.json", "/static"))
 
     def _get_client_ip(self, request: Request) -> str:
         return request.client.host if request.client else "unknown"

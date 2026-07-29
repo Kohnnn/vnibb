@@ -16,6 +16,7 @@
  * even when conditions changed.
  */
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronRight, X } from 'lucide-react';
 
@@ -120,11 +121,14 @@ export function FreshnessBanner() {
             </span>
           </span>
         ))}
+        <Link href="/settings" className="font-medium underline underline-offset-2 hover:text-current">
+          View sources
+        </Link>
       </div>
       <button
         type="button"
         onClick={handleDismiss}
-        className="rounded p-0.5 text-current/70 transition-colors hover:bg-white/10 hover:text-current"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded text-current/70 transition-colors hover:bg-white/10 hover:text-current"
         aria-label="Dismiss banner for this session"
       >
         <X size={12} />

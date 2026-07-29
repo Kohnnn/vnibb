@@ -3,91 +3,94 @@ Equity API Endpoints with Graceful Degradation.
 """
 
 import asyncio
-from bisect import bisect_right
+import json
 import logging
 import math
 import re
 import unicodedata
-from datetime import date, timedelta, datetime
-from typing import List, Optional, Literal, Any, Callable, Awaitable, Dict
+from bisect import bisect_right
+from collections.abc import Awaitable, Callable
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Query, Depends, Path
 import numpy as np
 import pandas as pd
+from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, func
 
-from vnibb.api.v1.schemas import StandardResponse, MetaData
-from vnibb.core.database import get_db
-from vnibb.core.exceptions import ProviderTimeoutError
+from vnibb.api.v1.schemas import MetaData, StandardResponse
+from vnibb.core.appwrite_client import get_appwrite_stock, get_appwrite_stock_prices
 from vnibb.core.cache import build_cache_key, cached, redis_client
 from vnibb.core.config import settings
-from vnibb.core.appwrite_client import get_appwrite_stock, get_appwrite_stock_prices
+from vnibb.core.database import get_db
+from vnibb.core.exceptions import ProviderTimeoutError
 from vnibb.core.vn_sectors import VN_SECTORS
-from vnibb.services.cache_manager import CacheManager
-from vnibb.services.data_pipeline import CACHE_TTL_ORDERBOOK, CACHE_TTL_ORDERBOOK_DAILY
-from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
-
-# Providers
-from vnibb.providers.vnstock.equity_historical import (
-    VnstockEquityHistoricalFetcher,
-    EquityHistoricalQueryParams,
-    EquityHistoricalData,
-)
-from vnibb.providers.vnstock.equity_profile import (
-    VnstockEquityProfileFetcher,
-    EquityProfileQueryParams,
-    EquityProfileData,
-)
-from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.company import Company, Shareholder
+
+# Models for Fallback
+from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.news import CompanyEvent, Dividend
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily, OrderbookSnapshot
-from vnibb.providers.vnstock.financials import (
-    FinancialStatementData,
-    FinancialsQueryParams,
-    StatementType,
-    VnstockFinancialsFetcher,
-)
-from vnibb.services.financial_service import get_financials_with_ttm, normalize_statement_period
-from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher, StockQuoteData
+from vnibb.models.stock import Stock, StockPrice
+from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderbookSnapshot, OrderFlowDaily
 from vnibb.providers.vnstock.company_events import (
-    VnstockCompanyEventsFetcher,
     CompanyEventsQueryParams,
+    VnstockCompanyEventsFetcher,
     _normalize_company_action_category,
     _parse_company_action_value,
 )
-from vnibb.providers.vnstock.shareholders import (
-    VnstockShareholdersFetcher,
-    ShareholdersQueryParams,
-    ShareholderData,
-)
-from vnibb.providers.vnstock.officers import VnstockOfficersFetcher, OfficersQueryParams
-from vnibb.providers.vnstock.intraday import VnstockIntradayFetcher, IntradayQueryParams
-from vnibb.providers.vnstock.financial_ratios import (
-    VnstockFinancialRatiosFetcher,
-    FinancialRatiosQueryParams,
-    FinancialRatioData,
-)
-from vnibb.providers.vnstock.equity_screener import VnstockScreenerFetcher, StockScreenerParams
-from vnibb.providers.vnstock.foreign_trading import (
-    VnstockForeignTradingFetcher,
-    ForeignTradingQueryParams,
-    ForeignTradingData,
-)
-from vnibb.providers.vnstock.subsidiaries import VnstockSubsidiariesFetcher, SubsidiariesQueryParams
-from vnibb.providers.vnstock.price_depth import VnstockPriceDepthFetcher
 from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
-from vnibb.providers.vnstock.trading_stats import TradingStatsData, VnstockTradingStatsFetcher
-from vnibb.providers.vnstock.ownership import VnstockOwnershipFetcher
-from vnibb.providers.vnstock.general_rating import VnstockGeneralRatingFetcher
-from vnibb.services.comparison_service import comparison_service
-from vnibb.services.news_service import get_company_news_rows
 
-# Models for Fallback
-from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
+# Providers
+from vnibb.providers.vnstock.equity_historical import (
+    EquityHistoricalData,
+    EquityHistoricalQueryParams,
+    VnstockEquityHistoricalFetcher,
+)
+from vnibb.providers.vnstock.equity_profile import (
+    EquityProfileData,
+    EquityProfileQueryParams,
+    VnstockEquityProfileFetcher,
+)
+from vnibb.providers.vnstock.equity_screener import StockScreenerParams, VnstockScreenerFetcher
+from vnibb.providers.vnstock.financial_ratios import (
+    FinancialRatioData,
+    FinancialRatiosQueryParams,
+    VnstockFinancialRatiosFetcher,
+)
+from vnibb.providers.vnstock.financials import (
+    FinancialsQueryParams,
+    FinancialStatementData,
+    StatementType,
+    VnstockFinancialsFetcher,
+)
+from vnibb.providers.vnstock.foreign_trading import (
+    ForeignTradingData,
+    ForeignTradingQueryParams,
+    VnstockForeignTradingFetcher,
+)
+from vnibb.providers.vnstock.general_rating import VnstockGeneralRatingFetcher
+from vnibb.providers.vnstock.intraday import IntradayQueryParams, VnstockIntradayFetcher
+from vnibb.providers.vnstock.officers import OfficersQueryParams, VnstockOfficersFetcher
+from vnibb.providers.vnstock.ownership import VnstockOwnershipFetcher
+from vnibb.providers.vnstock.price_depth import VnstockPriceDepthFetcher
+from vnibb.providers.vnstock.shareholders import (
+    ShareholderData,
+    ShareholdersQueryParams,
+    VnstockShareholdersFetcher,
+)
+from vnibb.providers.vnstock.stock_quote import StockQuoteData, VnstockStockQuoteFetcher
+from vnibb.providers.vnstock.subsidiaries import SubsidiariesQueryParams, VnstockSubsidiariesFetcher
+from vnibb.providers.vnstock.trading_stats import TradingStatsData, VnstockTradingStatsFetcher
+from vnibb.services.cache_manager import CacheManager
+from vnibb.services.comparison_service import comparison_service
+from vnibb.services.data_pipeline import CACHE_TTL_ORDERBOOK, CACHE_TTL_ORDERBOOK_DAILY
+from vnibb.services.data_quality import is_market_business_day
+from vnibb.services.financial_service import get_financials_with_ttm, normalize_statement_period
+from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+from vnibb.services.news_service import get_company_news_rows
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1384,59 +1387,29 @@ async def _load_historical_from_mongo(
     end_date: date,
     interval: str,
     adjustment_mode: str = "raw",
-) -> List[EquityHistoricalData]:
+    include_provenance: bool = False,
+) -> list[EquityHistoricalData] | tuple[list[EquityHistoricalData], list[dict[str, Any]]]:
     if (interval or "1D").upper() != "1D":
-        return []
+        return ([], []) if include_provenance else []
 
     mongo = get_mongo_market_data_service()
     if not mongo.enabled:
-        return []
+        return ([], []) if include_provenance else []
 
     docs = await mongo.get_eod_prices_between(
         symbol,
         start_date=start_date,
         end_date=end_date,
+        include_provenance=include_provenance,
     )
-    rows: List[EquityHistoricalData] = []
-    for doc in docs:
-        item = _to_historical_data_from_mongo(doc, adjustment_mode=adjustment_mode)
-        if item is not None:
-            rows.append(item)
+    rows = [
+        item
+        for doc in docs
+        if (item := _to_historical_data_from_mongo(doc, adjustment_mode=adjustment_mode)) is not None
+    ]
+    rows.sort(key=lambda item: item.time)
+    return (rows, docs) if include_provenance else rows
 
-    # QA-v4: Deduplicate Mongo rows that share the same trade date.
-    # Mongo's `market_prices_eod` collection accumulated multiple shape
-    # generations (early raw-VND backfill at 00:00 UTC plus newer
-    # adjusted-price backfill at 07:00 ICT) for the same logical trading
-    # day. Returning both poisons the chart series — lightweight-charts
-    # accepts the duplicate but renders the second entry on top of the
-    # first with conflicting OHLC values, which is the root cause of the
-    # "Price Chart no candles" symptom (CC1/T1 across v1/v2/v3).
-    #
-    # Strategy: keep the latest (highest) close-price row per date.
-    # Newer backfills tend to use higher-precision adjusted prices that
-    # reflect post-split divisors; we prefer those when available.
-    dedup: dict[date, EquityHistoricalData] = {}
-    for item in rows:
-        existing = dedup.get(item.time)
-        if existing is None:
-            dedup[item.time] = item
-            continue
-        # Prefer rows that have a non-null adjusted_close + a numerically
-        # smaller close value (post-adjustment factor < 1 reduces price).
-        # Otherwise keep the row whose `volume` matches the maximum so
-        # we never drop the canonical session.
-        existing_score = (
-            (1 if existing.adjusted_close is not None else 0),
-            -abs((existing.close or 0) - (existing.raw_close or existing.close or 0)),
-        )
-        candidate_score = (
-            (1 if item.adjusted_close is not None else 0),
-            -abs((item.close or 0) - (item.raw_close or item.close or 0)),
-        )
-        if candidate_score > existing_score:
-            dedup[item.time] = item
-
-    return [dedup[d] for d in sorted(dedup.keys())]
 
 
 def _appwrite_optional_int(value: Any) -> Optional[int]:
@@ -1765,7 +1738,7 @@ def _apply_corporate_action_adjustments(
 
 
 def _historical_adjustment_meta(
-    rows: List[EquityHistoricalData], adjustment_mode: str
+    rows: list[EquityHistoricalData], adjustment_mode: str, **extra: Any
 ) -> MetaData:
     normalized_mode = str(adjustment_mode or "raw").strip().lower() or "raw"
     requested_count = len(rows) if normalized_mode == "adjusted" else 0
@@ -1790,6 +1763,120 @@ def _historical_adjustment_meta(
             if raw_count
             else None
         ),
+        **extra,
+    )
+
+
+_HISTORICAL_SOURCE_RANK = {
+    "mongo": 0,
+    "cache": 1,
+    "recent_cache": 2,
+    "appwrite": 3,
+    "provider": 4,
+    "db": 5,
+}
+
+
+def _merge_historical_rows(
+    source_rows: list[tuple[str, list[EquityHistoricalData]]],
+) -> tuple[list[EquityHistoricalData], dict[str, int]]:
+    selected: dict[date, tuple[tuple[Any, ...], str, EquityHistoricalData]] = {}
+    for source_name, rows in source_rows:
+        source_rank = _HISTORICAL_SOURCE_RANK.get(source_name, len(_HISTORICAL_SOURCE_RANK))
+        for row in rows:
+            row_key = json.dumps(row.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+            candidate = (source_rank, row_key)
+            existing = selected.get(row.time)
+            if existing is None or candidate < existing[0]:
+                selected[row.time] = (candidate, source_name, row)
+    source_counts: dict[str, int] = {}
+    merged: list[EquityHistoricalData] = []
+    for _, source_name, row in sorted(selected.values(), key=lambda item: item[2].time):
+        source_counts[source_name] = source_counts.get(source_name, 0) + 1
+        merged.append(row)
+    return merged, source_counts
+
+
+def _historical_rows_cover_request(
+    rows: list[EquityHistoricalData], start_date: date, end_date: date, interval: str
+) -> bool:
+    if (interval or "1D").upper() != "1D":
+        return bool(rows)
+    holidays = {date.fromisoformat(value) for value in settings.market_holiday_dates}
+    returned_dates = {row.time for row in rows}
+    return all(
+        cursor in returned_dates
+        for cursor in (start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1))
+        if is_market_business_day(cursor, holidays)
+    )
+
+
+def _historical_resolution_meta(
+    rows: list[EquityHistoricalData],
+    adjustment_mode: str,
+    *,
+    start_date: date,
+    end_date: date,
+    interval: str,
+    source_counts: dict[str, int],
+    mongo_docs: list[dict[str, Any]],
+    warnings: list[str],
+) -> MetaData:
+    normalized_interval = (interval or "1D").upper()
+    freshness = rows[-1].time.isoformat() if rows else None
+    primary_source = min(
+        source_counts,
+        key=lambda name: _HISTORICAL_SOURCE_RANK.get(name, 99),
+        default=None,
+    )
+    completeness_status = "unknown"
+    if normalized_interval == "1D":
+        holidays = {date.fromisoformat(value) for value in settings.market_holiday_dates}
+        expected_dates = [
+            cursor
+            for cursor in (start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1))
+            if is_market_business_day(cursor, holidays)
+        ]
+        returned_dates = {row.time for row in rows}
+        missing_dates = [day for day in expected_dates if day not in returned_dates]
+        completeness_status = "complete" if not missing_dates else "partial"
+        if missing_dates:
+            first_expected = expected_dates[0] if expected_dates else None
+            last_expected = expected_dates[-1] if expected_dates else None
+            internal_gaps = [
+                day for day in missing_dates if day not in {first_expected, last_expected}
+            ]
+            if internal_gaps:
+                warnings.append("internal business-day gaps detected; exchange-calendar certainty is limited")
+            else:
+                warnings.append("requested-range boundary gaps detected; exchange-calendar certainty is limited")
+        elif not holidays:
+            warnings.append("business-day completeness excludes unconfigured exchange holidays")
+    mongo_units = {str(doc.get("priceUnit") or "").strip().upper() for doc in mongo_docs}
+    unit_status = (
+        "not_applicable"
+        if not mongo_units
+        else "confirmed_vnd"
+        if mongo_units == {"VND"}
+        else "mixed"
+        if "VND" in mongo_units
+        else "unconfirmed"
+    )
+    return _historical_adjustment_meta(
+        rows,
+        adjustment_mode,
+        requested_start_date=start_date.isoformat(),
+        requested_end_date=end_date.isoformat(),
+        returned_start_date=rows[0].time.isoformat() if rows else None,
+        returned_end_date=freshness,
+        logical_day_count=len(rows),
+        source_mode=("empty" if not source_counts else "merged" if len(source_counts) > 1 else primary_source),
+        source_counts=source_counts,
+        fallback_used=any(source not in {"mongo", "cache"} for source in source_counts),
+        freshness_as_of=freshness,
+        completeness_status=completeness_status,
+        unit_status=unit_status,
+        warnings=warnings,
     )
 
 
@@ -4618,7 +4705,7 @@ async def _enrich_missing_ratio_metrics(
     return rows
 
 
-@router.get("/historical", response_model=StandardResponse[List[EquityHistoricalData]])
+@router.get("/historical", response_model=StandardResponse[list[EquityHistoricalData]])
 @cached(ttl=300, key_prefix="historical_v3")
 async def get_historical_prices(
     symbol: str = Query(..., min_length=1, max_length=10),
@@ -4646,27 +4733,16 @@ async def get_historical_prices(
         "hybrid",
     }
 
-    mongo_data = await _load_historical_from_mongo(
+    mongo_data, mongo_docs = await _load_historical_from_mongo(
         symbol=symbol_upper,
         start_date=start_date,
         end_date=end_date,
         interval=interval,
         adjustment_mode=adjustment_mode,
+        include_provenance=True,
     )
-    if mongo_data:
-        mongo_data = _apply_corporate_action_adjustments(
-            mongo_data, corporate_actions, adjustment_mode
-        )
-        logger.info(
-            "Historical endpoint served Mongo EOD data (symbol=%s interval=%s rows=%s)",
-            symbol_upper,
-            interval,
-            len(mongo_data),
-        )
-        return StandardResponse(
-            data=mongo_data,
-            meta=_historical_adjustment_meta(mongo_data, adjustment_mode),
-        )
+    source_rows: list[tuple[str, list[EquityHistoricalData]]] = [("mongo", mongo_data)]
+    warnings: list[str] = []
 
     cache_result = await cache_manager.get_historical_prices(
         symbol=symbol_upper,
@@ -4675,31 +4751,26 @@ async def get_historical_prices(
         interval=interval,
         allow_stale=True,
     )
-    if cache_result.hit and cache_result.data:
-        data = [_to_historical_data(r, adjustment_mode=adjustment_mode) for r in cache_result.data]
-        data = _apply_corporate_action_adjustments(data, corporate_actions, adjustment_mode)
-        return StandardResponse(
-            data=data,
-            meta=_historical_adjustment_meta(data, adjustment_mode),
-        )
-
-    recent_cache_data = await _load_historical_from_recent_cache(
-        symbol=symbol_upper,
-        start_date=start_date,
-        end_date=end_date,
-        interval=interval,
-        adjustment_mode=adjustment_mode,
+    cache_data = (
+        [_to_historical_data(row, adjustment_mode=adjustment_mode) for row in cache_result.data]
+        if cache_result.hit and cache_result.data
+        else []
     )
-    if recent_cache_data:
-        recent_cache_data = _apply_corporate_action_adjustments(
-            recent_cache_data, corporate_actions, adjustment_mode
-        )
-        return StandardResponse(
-            data=recent_cache_data,
-            meta=_historical_adjustment_meta(recent_cache_data, adjustment_mode),
-        )
+    source_rows.append(("cache", cache_data))
+    merged, _ = _merge_historical_rows(source_rows)
 
-    if settings.resolved_data_backend == "appwrite" and use_appwrite_data:
+    if not _historical_rows_cover_request(merged, start_date, end_date, interval):
+        recent_cache_data = await _load_historical_from_recent_cache(
+            symbol=symbol_upper,
+            start_date=start_date,
+            end_date=end_date,
+            interval=interval,
+            adjustment_mode=adjustment_mode,
+        )
+        source_rows.append(("recent_cache", recent_cache_data))
+        merged, _ = _merge_historical_rows(source_rows)
+
+    if not _historical_rows_cover_request(merged, start_date, end_date, interval) and use_appwrite_data:
         appwrite_data = await _load_historical_from_appwrite(
             symbol=symbol_upper,
             start_date=start_date,
@@ -4707,58 +4778,41 @@ async def get_historical_prices(
             interval=interval,
             adjustment_mode=adjustment_mode,
         )
-        if appwrite_data:
-            appwrite_data = _apply_corporate_action_adjustments(
-                appwrite_data, corporate_actions, adjustment_mode
-            )
-            return StandardResponse(
-                data=appwrite_data,
-                meta=_historical_adjustment_meta(appwrite_data, adjustment_mode),
-            )
+        source_rows.append(("appwrite", appwrite_data))
+        merged, _ = _merge_historical_rows(source_rows)
 
-    try:
-        params = EquityHistoricalQueryParams(
-            symbol=symbol,
-            start_date=start_date,
-            end_date=end_date,
-            interval=interval,
-            source=source,
-        )
-        data = await VnstockEquityHistoricalFetcher.fetch(params)
-        if data:
-            normalized_data = [
-                _apply_adjustment_mode_to_historical_row(item, adjustment_mode) for item in data
-            ]
-            normalized_data = _apply_corporate_action_adjustments(
-                normalized_data, corporate_actions, adjustment_mode
-            )
-            return StandardResponse(
-                data=normalized_data,
-                meta=_historical_adjustment_meta(normalized_data, adjustment_mode),
-            )
-
-        if use_appwrite_data:
-            appwrite_data = await _load_historical_from_appwrite(
-                symbol=symbol_upper,
+    provider_error: Exception | None = None
+    if not _historical_rows_cover_request(merged, start_date, end_date, interval):
+        try:
+            params = EquityHistoricalQueryParams(
+                symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
                 interval=interval,
-                adjustment_mode=adjustment_mode,
+                source=source,
             )
-            if appwrite_data:
-                appwrite_data = _apply_corporate_action_adjustments(
-                    appwrite_data, corporate_actions, adjustment_mode
+            provider_data = await VnstockEquityHistoricalFetcher.fetch(params)
+            source_rows.append(
+                (
+                    "provider",
+                    [
+                        _apply_adjustment_mode_to_historical_row(item, adjustment_mode)
+                        for item in provider_data
+                    ],
                 )
-                logger.info(
-                    "Historical endpoint served Appwrite fallback after empty provider payload (symbol=%s interval=%s)",
-                    symbol_upper,
-                    interval,
-                )
-                return StandardResponse(
-                    data=appwrite_data,
-                    meta=_historical_adjustment_meta(appwrite_data, adjustment_mode),
-                )
+            )
+        except Exception as exc:
+            provider_error = exc
+            warnings.append("provider resolution failed; retained trusted partial rows")
+            logger.warning(
+                "Historical endpoint provider failed (symbol=%s interval=%s): %s",
+                symbol_upper,
+                interval,
+                exc,
+            )
+        merged, _ = _merge_historical_rows(source_rows)
 
+    if not _historical_rows_cover_request(merged, start_date, end_date, interval):
         fallback_data = await _load_historical_from_db(
             db=db,
             symbol=symbol_upper,
@@ -4767,91 +4821,47 @@ async def get_historical_prices(
             interval=interval,
             adjustment_mode=adjustment_mode,
         )
-        if fallback_data:
-            fallback_data = _apply_corporate_action_adjustments(
-                fallback_data, corporate_actions, adjustment_mode
-            )
-            logger.info(
-                "Historical endpoint served DB fallback after empty provider payload (symbol=%s interval=%s)",
-                symbol_upper,
-                interval,
-            )
-            return StandardResponse(
-                data=fallback_data,
-                meta=_historical_adjustment_meta(fallback_data, adjustment_mode),
-            )
+        source_rows.append(("db", fallback_data))
+        merged, _ = _merge_historical_rows(source_rows)
 
-        await _schedule_critical_reinforcement(
-            symbol=symbol_upper,
-            endpoint="equity.historical",
-            domains=["prices"],
-        )
+    if merged:
+        merged, source_counts = _merge_historical_rows(source_rows)
+        merged = _apply_corporate_action_adjustments(merged, corporate_actions, adjustment_mode)
         return StandardResponse(
-            data=[],
-            meta=_historical_adjustment_meta([], adjustment_mode),
-        )
-    except Exception as e:
-        logger.warning(
-            "Historical endpoint provider failed (symbol=%s interval=%s): %s",
-            symbol_upper,
-            interval,
-            e,
-        )
-
-        if use_appwrite_data:
-            appwrite_data = await _load_historical_from_appwrite(
-                symbol=symbol_upper,
+            data=merged,
+            meta=_historical_resolution_meta(
+                merged,
+                adjustment_mode,
                 start_date=start_date,
                 end_date=end_date,
                 interval=interval,
-                adjustment_mode=adjustment_mode,
-            )
-            if appwrite_data:
-                appwrite_data = _apply_corporate_action_adjustments(
-                    appwrite_data, corporate_actions, adjustment_mode
-                )
-                logger.info(
-                    "Historical endpoint recovered via Appwrite fallback after provider error (symbol=%s interval=%s)",
-                    symbol_upper,
-                    interval,
-                )
-                return StandardResponse(
-                    data=appwrite_data,
-                    meta=_historical_adjustment_meta(appwrite_data, adjustment_mode),
-                )
+                source_counts=source_counts,
+                mongo_docs=mongo_docs,
+                warnings=warnings,
+            ),
+        )
 
-        fallback_data = await _load_historical_from_db(
-            db=db,
-            symbol=symbol_upper,
-            start_date=start_date,
-            end_date=end_date,
-            interval=interval,
-            adjustment_mode=adjustment_mode,
-        )
-        if fallback_data:
-            fallback_data = _apply_corporate_action_adjustments(
-                fallback_data, corporate_actions, adjustment_mode
-            )
-            logger.info(
-                "Historical endpoint recovered via DB fallback after provider error (symbol=%s interval=%s)",
-                symbol_upper,
-                interval,
-            )
-            return StandardResponse(
-                data=fallback_data,
-                meta=_historical_adjustment_meta(fallback_data, adjustment_mode),
-            )
+    await _schedule_critical_reinforcement(
+        symbol=symbol_upper,
+        endpoint="equity.historical",
+        domains=["prices"],
+    )
+    empty_meta = _historical_resolution_meta(
+        [],
+        adjustment_mode,
+        start_date=start_date,
+        end_date=end_date,
+        interval=interval,
+        source_counts={},
+        mongo_docs=mongo_docs,
+        warnings=warnings,
+    )
+    return StandardResponse(
+        data=[],
+        meta=empty_meta,
+        error=f"Data unavailable: {provider_error}" if provider_error else None,
+    )
 
-        await _schedule_critical_reinforcement(
-            symbol=symbol_upper,
-            endpoint="equity.historical",
-            domains=["prices"],
-        )
-        return StandardResponse(
-            data=[],
-            meta=_historical_adjustment_meta([], adjustment_mode),
-            error=f"Data unavailable: {str(e)}",
-        )
 
 
 @router.get("/{symbol}/quote", response_model=StandardResponse[StockQuoteData])
@@ -4885,7 +4895,7 @@ async def get_quote(
         "hybrid",
     }
 
-    async def _get_mongo_quote() -> Optional[StockQuoteData]:
+    async def _get_mongo_quote() -> StockQuoteData | None:
         """Build a quote from the canonical Mongo `market_prices_eod` corpus.
 
         Mongo only carries settled EOD bars, so this is used as a fallback when
@@ -4898,7 +4908,7 @@ async def get_quote(
             mongo = get_mongo_market_data_service()
             if not mongo.enabled:
                 return None
-            docs = await mongo.get_eod_prices(symbol_upper, lookback_days=30, limit=2)
+            docs = await mongo.get_latest_eod_prices(symbol_upper, limit=2)
         except Exception as mongo_err:  # pragma: no cover - defensive
             logger.warning("Quote Mongo fallback failed for %s: %s", symbol_upper, mongo_err)
             return None

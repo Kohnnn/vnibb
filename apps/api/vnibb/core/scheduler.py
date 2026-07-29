@@ -51,6 +51,67 @@ _last_populate_at: datetime | None = None
 _last_populate_counts: dict[str, int] | None = None
 
 
+async def _run_with_lock_renewal(
+    job_name: str,
+    runner: Callable[[], Awaitable[object]],
+    distributed_lock: DistributedJobLock,
+) -> object:
+    runner_task = asyncio.create_task(runner())
+
+    async def renew_while_running() -> bool:
+        interval = min(max(1, distributed_lock.ttl_seconds // 3), 300)
+        while not runner_task.done():
+            await asyncio.sleep(interval)
+            if not runner_task.done() and not await distributed_lock.renew():
+                logger.error("Cancelling %s because distributed lock renewal failed", job_name)
+                runner_task.cancel()
+                return False
+        return True
+
+    renewal_task = asyncio.create_task(renew_while_running())
+    try:
+        done, _ = await asyncio.wait(
+            {runner_task, renewal_task}, return_when=asyncio.FIRST_COMPLETED
+        )
+        if runner_task in done:
+            try:
+                return await runner_task
+            except asyncio.CancelledError:
+                if renewal_task.done() and not renewal_task.cancelled() and not renewal_task.result():
+                    raise RuntimeError("distributed lock renewal failed") from None
+                raise
+            except Exception:
+                if renewal_task.done() and not renewal_task.cancelled() and not renewal_task.result():
+                    logger.exception("%s failed while being cancelled", job_name)
+                    raise RuntimeError("distributed lock renewal failed") from None
+                raise
+        if not await renewal_task:
+            try:
+                await runner_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("%s failed while being cancelled", job_name)
+            raise RuntimeError("distributed lock renewal failed")
+        return await runner_task
+    finally:
+        if not runner_task.done():
+            runner_task.cancel()
+            try:
+                await runner_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("%s failed while being cancelled", job_name)
+        renewal_task.cancel()
+        try:
+            await renewal_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("%s lock renewal failed while being cancelled", job_name)
+
+
 async def _run_guarded_job(
     job_name: str,
     runner: Callable[[], Awaitable[object]],
@@ -74,10 +135,15 @@ async def _run_guarded_job(
             logger.warning("Running %s without distributed coordination", job_name)
         started_at = datetime.utcnow()
         try:
+            guarded_runner = (
+                _run_with_lock_renewal(job_name, runner, distributed_lock)
+                if lock_state == "acquired"
+                else runner()
+            )
             if timeout_seconds > 0:
-                await asyncio.wait_for(runner(), timeout=timeout_seconds)
+                await asyncio.wait_for(guarded_runner, timeout=timeout_seconds)
             else:
-                await runner()
+                await guarded_runner
             elapsed = (datetime.utcnow() - started_at).total_seconds()
             logger.info("%s completed in %.1fs", job_name, elapsed)
         except TimeoutError:

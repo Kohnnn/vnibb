@@ -37,6 +37,15 @@ VALID_WORLD_NEWS_CATEGORIES = {"markets", "economy", "business", "geopolitics", 
 VALID_WORLD_NEWS_LANGUAGES = {"vi", "en"}
 CUSTOM_RSS_SOURCE_ID_PREFIX = "custom_rss"
 MAX_CUSTOM_RSS_URL_LENGTH = 500
+WORLD_NEWS_MAX_CONCURRENT_FETCHES = 8
+WORLD_NEWS_REFRESH_DEADLINE_SECONDS = 15.0
+WORLD_NEWS_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+_world_news_fetch_semaphore = asyncio.Semaphore(WORLD_NEWS_MAX_CONCURRENT_FETCHES)
+_world_news_cleanup_tasks: set[asyncio.Future[Any]] = set()
+
+
+class FeedResponseTooLargeError(Exception):
+    pass
 
 
 @dataclass(frozen=True)
@@ -1362,6 +1371,28 @@ def list_world_news_sources(
     return WorldNewsSourcesResponse(sources=source_infos, total=len(source_infos))
 
 
+async def _cancel_and_close_world_news_refresh(
+    tasks: set[asyncio.Task[FeedFetchResult]], client: httpx.AsyncClient
+) -> None:
+    for task in tasks:
+        task.cancel()
+    try:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        await client.aclose()
+
+
+def _track_world_news_cleanup(cleanup: asyncio.Task[None]) -> None:
+    _world_news_cleanup_tasks.add(cleanup)
+
+    def observe_cleanup(completed: asyncio.Task[None]) -> None:
+        _world_news_cleanup_tasks.discard(completed)
+        if not completed.cancelled():
+            completed.exception()
+
+    cleanup.add_done_callback(observe_cleanup)
+
+
 async def get_world_news_feed(
     *,
     region: str | None = None,
@@ -1411,18 +1442,59 @@ async def get_world_news_feed(
 
     timeout = min(max(settings.scraper_timeout, 5), 12)
     headers = {"User-Agent": settings.scraper_user_agent}
-    async with httpx.AsyncClient(
+
+    async def fetch(source_config: WorldNewsSourceConfig, feed_url: str) -> FeedFetchResult:
+        async with _world_news_fetch_semaphore:
+            return await _fetch_feed(client, source_config, feed_url)
+
+    client = httpx.AsyncClient(
         headers=headers,
         follow_redirects=True,
         timeout=httpx.Timeout(timeout),
-    ) as client:
-        results = await asyncio.gather(
-            *(
-                _fetch_feed(client, source_config, feed_url)
-                for source_config in selected_sources
-                for feed_url in source_config.feed_urls
+    )
+    tasks: dict[asyncio.Task[FeedFetchResult], tuple[WorldNewsSourceConfig, str]] = {}
+    cleanup: asyncio.Task[None] | None = None
+    owns_client = True
+    try:
+        for source_config in selected_sources:
+            for feed_url in source_config.feed_urls:
+                tasks[asyncio.create_task(fetch(source_config, feed_url))] = (source_config, feed_url)
+        done, pending = await asyncio.wait(tasks, timeout=WORLD_NEWS_REFRESH_DEADLINE_SECONDS)
+        results = []
+        for task in done:
+            source_config, feed_url = tasks[task]
+            try:
+                results.append(task.result())
+            except Exception as exc:
+                results.append(
+                    FeedFetchResult(
+                        articles=[],
+                        failed=True,
+                        failed_feed=_failed_feed(source_config, feed_url, reason=_feed_error_reason(exc)),
+                    )
+                )
+        for task in pending:
+            source_config, feed_url = tasks[task]
+            results.append(
+                FeedFetchResult(
+                    articles=[],
+                    failed=True,
+                    failed_feed=_failed_feed(source_config, feed_url, reason="Refresh deadline exceeded"),
+                )
             )
-        )
+        if pending:
+            cleanup = asyncio.create_task(_cancel_and_close_world_news_refresh(set(pending), client))
+            _track_world_news_cleanup(cleanup)
+            owns_client = False
+        else:
+            await client.aclose()
+            owns_client = False
+    except BaseException:
+        if owns_client:
+            await _cancel_and_close_world_news_refresh(set(tasks), client)
+        elif cleanup is not None:
+            await asyncio.shield(cleanup)
+        raise
 
     failed_feeds = [result.failed_feed for result in results if result.failed_feed is not None]
     failed_feed_count = sum(1 for result in results if result.failed)
@@ -1684,6 +1756,8 @@ def _clean_custom_source_name(name: str | None, domain: str) -> str:
 
 
 def _feed_error_reason(exc: Exception) -> str:
+    if isinstance(exc, FeedResponseTooLargeError):
+        return "Response body exceeds limit"
     if isinstance(exc, httpx.HTTPStatusError):
         return f"HTTP {exc.response.status_code}"
     if isinstance(exc, httpx.TimeoutException):
@@ -1785,14 +1859,25 @@ async def _fetch_feed(
         )
 
     last_error: Exception | None = None
-    response: httpx.Response | None = None
+    response_body: bytes | None = None
 
     # 1 attempt + 1 retry. Backoff is short because the gather is concurrent
     # and the endpoint-level cache absorbs a fast retry on the next refresh.
     for attempt in range(2):
         try:
-            response = await client.get(feed_url)
-            response.raise_for_status()
+            async with client.stream("GET", feed_url) as response:
+                response.raise_for_status()
+                content_length = response.headers.get("content-length")
+                if content_length and content_length.isdigit() and int(content_length) > WORLD_NEWS_MAX_RESPONSE_BYTES:
+                    raise FeedResponseTooLargeError
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > WORLD_NEWS_MAX_RESPONSE_BYTES:
+                        raise FeedResponseTooLargeError
+                    chunks.append(chunk)
+                response_body = b"".join(chunks)
             last_error = None
             break
         except httpx.HTTPStatusError as exc:
@@ -1823,7 +1908,7 @@ async def _fetch_feed(
             last_error = exc
             break
 
-    if last_error is not None or response is None:
+    if last_error is not None or response_body is None:
         logger.warning(
             "World news feed fetch failed",
             extra={
@@ -1840,7 +1925,7 @@ async def _fetch_feed(
             failed_feed=_failed_feed(source, feed_url, reason=reason),
         )
 
-    articles = _parse_feed(response.text, source=source, feed_url=feed_url)
+    articles = _parse_feed(response_body.decode("utf-8", errors="replace"), source=source, feed_url=feed_url)
     if articles is None:
         _feed_circuit_record_failure(source.id, feed_url, "Invalid RSS/Atom XML")
         return FeedFetchResult(

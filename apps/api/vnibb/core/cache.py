@@ -21,7 +21,6 @@ from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable, Optional, TypeVar, Union, Dict, List
 
 import redis.asyncio as redis
-from fastapi import HTTPException
 from pydantic import BaseModel
 
 from vnibb.core.config import settings
@@ -38,6 +37,8 @@ R = TypeVar("R")
 # In-memory fallback cache: {key: (data, expiry)}
 _memory_cache: Dict[str, tuple[Any, datetime]] = {}
 _memory_cache_lock = asyncio.Lock()
+_inflight_cache_loads: dict[str, asyncio.Future[Any]] = {}
+_inflight_cache_loads_lock = asyncio.Lock()
 _warned_appwrite_cache_fallback = False
 
 
@@ -93,6 +94,15 @@ def _redis_cache_enabled() -> bool:
 def _has_error_result(result: Any) -> bool:
     error = result.get("error") if isinstance(result, dict) else getattr(result, "error", None)
     return bool(error)
+
+
+def _record_cache_outcome(key_prefix: str, outcome: str) -> None:
+    try:
+        from vnibb.middleware.metrics import metrics_registry
+
+        metrics_registry.cache_outcome(key_prefix, outcome)
+    except Exception:
+        pass
 
 
 def resolve_cache_ttl(ttl: Optional[int], key_prefix: str) -> int:
@@ -213,24 +223,42 @@ def cached(
                     _memory_cache[cache_key] = (data, expiry)
                     await _prune_memory_cache_locked(datetime.now())
 
-            try:
+            async def load_cached_value():
+                nonlocal redis_available
                 if redis_available:
                     try:
                         cached_data = await redis_client.get_json(cache_key)
                         if cached_data is not None:
-                            logger.info(f"Cache HIT (Redis) for {func.__name__}: {cache_key}")
                             return cached_data
                     except Exception as redis_err:
                         redis_available = False
                         logger.warning(f"Redis error, falling back to memory: {redis_err}")
-
                 if not redis_available:
-                    mem_data = await get_mem_cache()
-                    if mem_data is not None:
-                        logger.info(f"Cache HIT (Memory) for {func.__name__}: {cache_key}")
-                        return mem_data
+                    return await get_mem_cache()
+                return None
 
-                logger.info(f"Cache MISS for {func.__name__}: {cache_key}")
+            try:
+                cached_data = await load_cached_value()
+            except Exception as error:
+                logger.warning(f"Caching logic error for {func.__name__}: {error}")
+                _record_cache_outcome(key_prefix, "bypass")
+                return await func(*args, **kwargs)
+            if cached_data is not None:
+                _record_cache_outcome(key_prefix, "hit")
+                return cached_data
+
+            async def load_and_store() -> Any:
+                try:
+                    cached_value = await load_cached_value()
+                except Exception as error:
+                    logger.warning(f"Caching logic error for {func.__name__}: {error}")
+                    _record_cache_outcome(key_prefix, "bypass")
+                    return await func(*args, **kwargs)
+                if cached_value is not None:
+                    _record_cache_outcome(key_prefix, "hit")
+                    return cached_value
+
+                _record_cache_outcome(key_prefix, "miss")
                 result = await func(*args, **kwargs)
                 if _has_error_result(result):
                     return result
@@ -243,17 +271,33 @@ def cached(
                         )
                     except Exception as redis_err:
                         logger.warning(f"Failed to set Redis cache: {redis_err}")
-                        stored_in_redis = False
-
                 if not stored_in_redis:
-                    await set_mem_cache(result)
-
+                    if redis_available:
+                        _record_cache_outcome(key_prefix, "store_error")
+                    try:
+                        await set_mem_cache(result)
+                    except Exception as error:
+                        logger.warning(f"Failed to set memory cache: {error}")
+                        _record_cache_outcome(key_prefix, "store_error")
                 return result
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.warning(f"Caching logic error for {func.__name__}: {e}")
-                return await func(*args, **kwargs)
+
+            async with _inflight_cache_loads_lock:
+                task = _inflight_cache_loads.get(cache_key)
+                if task is None:
+                    task = asyncio.create_task(load_and_store())
+
+                    def cleanup(completed: asyncio.Task[Any]) -> None:
+                        if _inflight_cache_loads.get(cache_key) is completed:
+                            _inflight_cache_loads.pop(cache_key, None)
+                        if not completed.cancelled():
+                            completed.exception()
+
+                    task.add_done_callback(cleanup)
+                    _inflight_cache_loads[cache_key] = task
+                else:
+                    _record_cache_outcome(key_prefix, "waiter")
+
+            return await asyncio.shield(task)
 
         return wrapper
 
@@ -268,7 +312,13 @@ class RedisClient:
     for Pydantic models.
     """
 
-    def __init__(self, url: str = settings.redis_url, max_connections: int = 10):
+    SCAN_BATCH_SIZE = 100
+
+    def __init__(
+        self,
+        url: str = settings.redis_url,
+        max_connections: int = settings.redis_max_connections,
+    ):
         self.url = url
         self.max_connections = max_connections
         self._pool: Optional[redis.ConnectionPool] = None
@@ -461,12 +511,16 @@ class RedisClient:
         try:
             if not self._client:
                 await self.connect()
-            keys = []
-            async for key in self.client.scan_iter(f"{prefix}*"):
-                keys.append(key)
-            if keys:
-                return await self.client.delete(*keys)
-            return 0
+            deleted = 0
+            batch = []
+            async for key in self.client.scan_iter(f"{prefix}*", count=self.SCAN_BATCH_SIZE):
+                batch.append(key)
+                if len(batch) == self.SCAN_BATCH_SIZE:
+                    deleted += await self.client.delete(*batch)
+                    batch.clear()
+            if batch:
+                deleted += await self.client.delete(*batch)
+            return deleted
         except (redis.RedisError, RuntimeError) as e:
             logger.warning(f"Redis FLUSH error for prefix {prefix}: {e}")
             return 0

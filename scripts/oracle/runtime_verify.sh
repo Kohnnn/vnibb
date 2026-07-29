@@ -7,6 +7,10 @@ TIMEOUT="${TIMEOUT:-15}"
 EXPECTED_DATA_BACKEND="${EXPECTED_DATA_BACKEND:-hybrid}"
 EXPECTED_APPWRITE_WRITE_ENABLED="${EXPECTED_APPWRITE_WRITE_ENABLED:-false}"
 EXPECTED_ANON_DASHBOARD_WRITES="${EXPECTED_ANON_DASHBOARD_WRITES:-true}"
+EXPECTED_RELEASE_REVISION="${EXPECTED_RELEASE_REVISION:-}"
+EXPECTED_IMAGE_REPOSITORY="${EXPECTED_IMAGE_REPOSITORY:-${VNIBB_API_IMAGE_REPOSITORY:-}}"
+EXPECTED_IMAGE_DIGEST="${EXPECTED_IMAGE_DIGEST:-${VNIBB_API_IMAGE_DIGEST:-}}"
+API_CONTAINER_NAME="${API_CONTAINER_NAME:-vnibb-api}"
 DASHBOARD_CLIENT_ID="${DASHBOARD_CLIENT_ID:-browserlocalclient01}"
 CORS_TEST_ORIGIN="${CORS_TEST_ORIGIN:-https://vnibb-web.vercel.app}"
 CURL_BIN="${CURL_BIN:-}"
@@ -64,10 +68,17 @@ printf 'health payload -> %s\n' "$health_json"
 data_backend="$(read_json_field "$health_json" "providers.data_backend")"
 appwrite_write_enabled="$(read_json_field "$health_json" "providers.appwrite_write_enabled")"
 anon_dashboard_writes="$(read_json_field "$health_json" "providers.allow_anonymous_dashboard_writes")"
+release_revision="$(read_json_field "$health_json" "revision")"
 
 printf 'resolved data backend      -> %s\n' "$data_backend"
 printf 'appwrite writes enabled    -> %s\n' "$appwrite_write_enabled"
 printf 'anonymous dashboard writes -> %s\n' "$anon_dashboard_writes"
+printf 'release revision           -> %s\n' "$release_revision"
+
+if [[ -n "$EXPECTED_RELEASE_REVISION" && "$release_revision" != "$EXPECTED_RELEASE_REVISION" ]]; then
+  echo "Expected release revision ${EXPECTED_RELEASE_REVISION}, got ${release_revision}"
+  status=1
+fi
 
 if [[ "$data_backend" != "$EXPECTED_DATA_BACKEND" ]]; then
   echo "Expected data backend ${EXPECTED_DATA_BACKEND}, got ${data_backend}"
@@ -82,6 +93,27 @@ fi
 if [[ "$anon_dashboard_writes" != "$EXPECTED_ANON_DASHBOARD_WRITES" ]]; then
   echo "Expected allow_anonymous_dashboard_writes=${EXPECTED_ANON_DASHBOARD_WRITES}, got ${anon_dashboard_writes}"
   status=1
+fi
+
+if [[ -n "$EXPECTED_IMAGE_REPOSITORY$EXPECTED_IMAGE_DIGEST" ]]; then
+  if [[ -z "$EXPECTED_IMAGE_REPOSITORY" || -z "$EXPECTED_IMAGE_DIGEST" ]]; then
+    echo "Set both EXPECTED_IMAGE_REPOSITORY and EXPECTED_IMAGE_DIGEST to verify the deployed image"
+    status=1
+  elif ! command -v docker >/dev/null 2>&1; then
+    echo "Docker unavailable; cannot verify deployed image digest"
+    status=1
+  else
+    expected_image="${EXPECTED_IMAGE_REPOSITORY}@${EXPECTED_IMAGE_DIGEST}"
+    if ! configured_image="$(docker inspect --format '{{.Config.Image}}' "$API_CONTAINER_NAME" 2>/dev/null)"; then
+      echo "Unable to inspect deployed API container ${API_CONTAINER_NAME} for image digest verification"
+      status=1
+    elif [[ "$configured_image" != "$expected_image" ]]; then
+      echo "Expected configured image ${expected_image}, got ${configured_image}"
+      status=1
+    else
+      printf 'configured image digest   -> %s\n' "$EXPECTED_IMAGE_DIGEST"
+    fi
+  fi
 fi
 
 dashboard_code="$($CURL_BIN -ksS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" \
