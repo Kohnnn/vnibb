@@ -74,7 +74,7 @@ class ConnectionManager:
         logger.info(f"Subscribed to {symbols}")
         return None
 
-    def unsubscribe(self, websocket: WebSocket, symbols: Set[str]):
+    def unsubscribe(self, websocket: WebSocket, symbols: set[str]):
         """Unsubscribe connection from symbols."""
         if websocket in self.active_connections:
             self.active_connections[websocket] -= symbols
