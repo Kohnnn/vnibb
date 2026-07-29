@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -7,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
 WINDOWS_BASH = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/bin/bash.exe"
-BASH = str(WINDOWS_BASH) if os.name == "nt" and WINDOWS_BASH.exists() else "bash"
+BASH = str(WINDOWS_BASH) if os.name == "nt" and WINDOWS_BASH.exists() else shutil.which("bash") or "bash"
 
 
 def test_release_build_passes_the_git_revision_without_a_secret() -> None:
