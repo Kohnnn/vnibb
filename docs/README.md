@@ -39,6 +39,7 @@ Current source of truth:
 - `WIDGET_CATALOG.md`: legacy widget snapshot, useful as historical context only
 - `NEXT_PHASES_EXECUTION_PLAN.md`: execution-ready plan for the next selected product phases
 - `PRODUCT_INFRA_DATA_EXECUTION_PLAN.md`: active product trust, OCI hardening, n6v backup/Parquet, rate-limit, and scheduler rollout plan and progress
+- `V1_6_1_BACKEND_DATA_EXECUTION_PLAN.md`: v1.6.1 backend observability, corpus quality, database, performance, hardening, and rollout plan and progress
 - `VNIBB_PRODUCT_IMPROVEMENT_EXECUTION_PLAN.md`: active research, discovery, investor workflow, activation, and product-enabling platform plan and progress
 - `WAVE_5_5_STRATEGY_EDITOR_SANDBOX_DESIGN.md`: design-only strategy editor sandbox threat model, gates, and hard rules
 - `reverse-engineering/turtle-hub-crawl-2026-06-09/`: public Turtle Hub feature crawl, Quant deep dive, and VNIBB widget/news improvement ideas
