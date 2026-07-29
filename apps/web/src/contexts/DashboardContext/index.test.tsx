@@ -43,7 +43,7 @@ const customDashboard: Dashboard = {
 };
 
 function DashboardStateProbe() {
-  const { createDashboard, migrationNotice, setActiveDashboard, setActiveTab, state } = useDashboard();
+  const { backendSync, createDashboard, migrationNotice, setActiveDashboard, setActiveTab, state } = useDashboard();
 
   return (
     <>
@@ -54,6 +54,8 @@ function DashboardStateProbe() {
       <output data-testid="folder-names">{state.folders.map((folder) => folder.name).join(',')}</output>
       <output data-testid="sync-groups">{state.dashboards.flatMap((dashboard) => dashboard.syncGroups.map((group) => `${group.id}:${group.name}:${group.color}:${group.currentSymbol}`)).join(',')}</output>
       <output data-testid="storage-notice">{migrationNotice?.message || ''}</output>
+      <output data-testid="backend-sync-status">{backendSync.status}</output>
+      <output data-testid="backend-sync-enabled">{String(backendSync.enabled)}</output>
       <button onClick={() => createDashboard({ name: 'Unsaved dashboard' })}>create dashboard</button>
       <button onClick={() => { setActiveDashboard(customDashboard.id); setActiveTab('saved-tab'); }}>open saved tab</button>
     </>
@@ -98,6 +100,37 @@ describe('DashboardProvider backend sync flag', () => {
       expect.objectContaining({ enabled }),
     ));
     expect(mockUseLoadFromBackend).toHaveBeenLastCalledWith(expect.any(Function), enabled);
+    expect(screen.getByTestId('backend-sync-enabled')).toHaveTextContent(String(enabled));
+  });
+
+  it('tracks cloud sync callbacks without treating disabled sync as cloud persistence', async () => {
+    (config as { backendSyncEnabled: boolean }).backendSyncEnabled = true;
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('backend-sync-enabled')).toHaveTextContent('true'));
+    const syncOptions = mockUseDashboardSync.mock.calls[mockUseDashboardSync.mock.calls.length - 1]?.[1];
+
+    act(() => syncOptions?.onSyncStart?.());
+    expect(screen.getByTestId('backend-sync-status')).toHaveTextContent('syncing');
+
+    act(() => syncOptions?.onSyncSuccess?.('cloud'));
+    expect(screen.getByTestId('backend-sync-status')).toHaveTextContent('synced');
+
+    act(() => syncOptions?.onSyncSuccess?.('local'));
+    expect(screen.getByTestId('backend-sync-status')).toHaveTextContent('local');
+
+    act(() => syncOptions?.onSyncError?.(new Error('unavailable')));
+    expect(screen.getByTestId('backend-sync-status')).toHaveTextContent('error');
+  });
+
+  it('creates a dash-prefixed dashboard eligible for cloud sync', async () => {
+    (config as { backendSyncEnabled: boolean }).backendSyncEnabled = true;
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('dashboard-count')).toHaveTextContent('4'));
+    fireEvent.click(screen.getByRole('button', { name: 'create dashboard' }));
+
+    expect(screen.getByTestId('dashboards')).toHaveTextContent(/dash-/);
   });
 });
 

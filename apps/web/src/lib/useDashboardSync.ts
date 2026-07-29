@@ -26,11 +26,13 @@ interface BackendDashboardRecord {
     updated_at?: string;
 }
 
+export type DashboardSyncResult = 'cloud' | 'local';
+
 interface UseDashboardSyncOptions {
     enabled?: boolean;
     onSyncStart?: () => void;
     onSyncError?: (error: Error) => void;
-    onSyncSuccess?: () => void;
+    onSyncSuccess?: (result: DashboardSyncResult) => void;
     onDashboardIdReconciled?: (localId: string, dashboard: Dashboard) => void;
 }
 
@@ -143,6 +145,7 @@ export function useDashboardSync(
         onSyncStart?.();
         try {
             const currentDashboardIds = new Set(dashboards.map((dashboard) => dashboard.id));
+            let cloudSynced = false;
 
             for (const previousDashboard of previousDashboards.current) {
                 const dashboardId = parseNumericDashboardId(previousDashboard.id);
@@ -151,6 +154,7 @@ export function useDashboardSync(
                 }
 
                 await api.deleteDashboard(dashboardId);
+                cloudSynced = true;
                 logClientInfo('[DashboardSync] Deleted dashboard from backend:', previousDashboard.name);
             }
 
@@ -172,7 +176,8 @@ export function useDashboardSync(
                         ) as unknown as BackendDashboardRecord;
                         const createdFrontendDashboard = toFrontendDashboard(createdDashboard);
 
-                        if (!latestDashboards.current.some((item) => item.id === dashboard.id)) {
+                        const latestDashboard = latestDashboards.current.find((item) => item.id === dashboard.id);
+                        if (!latestDashboard) {
                             const createdDashboardId = parseNumericDashboardId(createdFrontendDashboard.id);
                             if (createdDashboardId) {
                                 await api.deleteDashboard(createdDashboardId);
@@ -180,7 +185,10 @@ export function useDashboardSync(
                             continue;
                         }
 
-                        onDashboardIdReconciled?.(dashboard.id, createdFrontendDashboard);
+                        const reconciledDashboard = { ...latestDashboard, id: createdFrontendDashboard.id };
+                        const hasUnsyncedChanges = JSON.stringify(toBackendPayload(dashboard)) !== JSON.stringify(toBackendPayload(latestDashboard));
+                        onDashboardIdReconciled?.(dashboard.id, reconciledDashboard);
+                        cloudSynced = !hasUnsyncedChanges;
                         logClientInfo('[DashboardSync] Created dashboard in backend:', dashboard.name);
                     } finally {
                         pendingCreateIds.current.delete(dashboard.id);
@@ -191,6 +199,7 @@ export function useDashboardSync(
                 // Has a numeric ID; safe to PATCH.
                 try {
                     await api.updateDashboard(dashboardId, toBackendPayload(dashboard));
+                    cloudSynced = true;
                     logClientInfo('[DashboardSync] Synced dashboard:', dashboard.name);
                 } catch (patchError) {
                     if (!loggedFirstFailure.current) {
@@ -204,7 +213,7 @@ export function useDashboardSync(
             }
 
             previousDashboards.current = dashboards;
-            onSyncSuccess?.();
+            onSyncSuccess?.(cloudSynced ? 'cloud' : 'local');
         } catch (error) {
             logClientError('[DashboardSync] Sync failed:', error);
             onSyncError?.(error as Error);

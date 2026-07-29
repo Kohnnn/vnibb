@@ -141,7 +141,7 @@ export interface DashboardContextValue {
     dismissMigrationNotice: () => void;
     backendSync: {
         enabled: boolean;
-        status: 'idle' | 'syncing' | 'synced' | 'error';
+        status: 'idle' | 'syncing' | 'synced' | 'local' | 'error';
         loadPaused: boolean;
     };
     availableTemplates: string[];

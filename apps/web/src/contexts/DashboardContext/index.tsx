@@ -542,7 +542,7 @@ interface DashboardContextValue {
     dismissMigrationNotice: () => void;
     backendSync: {
         enabled: boolean;
-        status: 'idle' | 'syncing' | 'synced' | 'error';
+        status: 'idle' | 'syncing' | 'synced' | 'local' | 'error';
         loadPaused: boolean;
     };
     availableTemplates: string[];
@@ -562,6 +562,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const [state, dispatch] = useReducer(dashboardReducer, undefined, createInitialState);
     const [localStateReady, setLocalStateReady] = useState(false);
     const [migrationNotice, setMigrationNotice] = useState<DashboardMigrationNotice | null>(null);
+    const [backendSyncStatus, setBackendSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'local' | 'error'>('idle');
     const [recentlyClosed, setRecentlyClosed] = useState<
         Array<{ dashboardId: string; tab: DashboardTab; closedAt: number }>
     >([]);
@@ -956,9 +957,18 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const backendSyncReady = localStateReady && config.backendSyncEnabled;
     useDashboardSync(state, {
         enabled: backendSyncReady,
-        onSyncStart: () => { },
-        onSyncError: (error) => { console.error('Dashboard sync error:', error); },
-        onSyncSuccess: () => { },
+        onSyncStart: () => setBackendSyncStatus('syncing'),
+        onSyncError: (error) => {
+            console.error('Dashboard sync error:', error);
+            setBackendSyncStatus('error');
+        },
+        onSyncSuccess: (result) => setBackendSyncStatus(result === 'cloud' ? 'synced' : 'local'),
+        onDashboardIdReconciled: (localId, dashboard) => {
+            dispatch({ type: 'UPDATE_DASHBOARD', payload: { dashboardId: localId, updates: dashboard } });
+            if (state.activeDashboardId === localId) {
+                dispatch({ type: 'SET_ACTIVE_DASHBOARD', payload: { dashboardId: dashboard.id } });
+            }
+        },
     });
 
     // Backend load hook
@@ -982,7 +992,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const createDashboard = useCallback((data: DashboardCreate): Dashboard => {
         const now = new Date().toISOString();
         const newDashboard: Dashboard = {
-            id: generateId(),
+            id: `dash-${generateId()}`,
             name: data.name,
             description: data.description,
             folderId: data.folderId,
@@ -1228,8 +1238,8 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         migrationNotice,
         dismissMigrationNotice,
         backendSync: {
-            enabled: config.backendSyncEnabled,
-            status: 'idle',
+            enabled: backendSyncReady,
+            status: backendSyncReady ? backendSyncStatus : 'idle',
             loadPaused: false,
         },
         availableTemplates,
