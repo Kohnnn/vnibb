@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -26,9 +27,12 @@ class FakeRedis:
         self.expiries[key] = ex
         return True
 
-    async def eval(self, script, count, key, token):
+    async def eval(self, script, count, key, token, *args):
         if self.values.get(key) != token:
             return 0
+        if args:
+            self.expiries[key] = args[0]
+            return 1
         del self.values[key]
         self.expiries.pop(key, None)
         return 1
@@ -64,6 +68,47 @@ async def test_lock_contention_and_expiry_allow_next_owner(fake_redis):
     assert await second.acquire() == "contended"
     fake_redis.values.pop(first.key)
     assert await second.acquire() == "acquired"
+
+
+@pytest.mark.asyncio
+async def test_lock_renewal_refreshes_ttl_and_status(fake_redis):
+    lock = DistributedJobLock("hourly_news", 10)
+    assert await lock.acquire() == "acquired"
+    assert await lock.renew()
+    assert fake_redis.expiries[lock.key] == 70
+    assert scheduler_lock.get_scheduler_lock_status()["renewal"] == {
+        "state": "renewed",
+        "detail": "hourly_news",
+    }
+
+
+@pytest.mark.asyncio
+async def test_guarded_job_cancels_when_lock_renewal_fails(monkeypatch):
+    class FailingRenewalLock:
+        def __init__(self, *args):
+            self.ttl_seconds = 1
+
+        async def acquire(self):
+            return "acquired"
+
+        async def renew(self):
+            return False
+
+        async def release(self):
+            return True
+
+    cancelled = asyncio.Event()
+
+    async def runner():
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    scheduler._job_guards.clear()
+    monkeypatch.setattr(scheduler, "DistributedJobLock", FailingRenewalLock)
+    await scheduler._run_guarded_job("renewal_failure", runner, 5)
+    assert cancelled.is_set()
 
 
 @pytest.mark.asyncio

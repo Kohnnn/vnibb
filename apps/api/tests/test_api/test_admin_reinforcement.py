@@ -1,7 +1,12 @@
+from datetime import datetime, timedelta
+
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from vnibb.api.main import app
+from vnibb.api.v1.admin import _validate_admin_query
+from vnibb.models.sync_status import SyncStatus
 
 
 @pytest.fixture
@@ -88,6 +93,42 @@ async def test_admin_reinforce_rejects_invalid_domain(client):
     payload = response.json()
     assert payload["message"] == "Unsupported domains requested"
     assert payload["invalid_domains"] == ["invalid_domain"]
+
+
+def test_admin_query_rejects_write_and_multiple_statements():
+    for query in ("SELECT 1; DELETE FROM stocks", "WITH x AS (DELETE FROM stocks RETURNING id) SELECT * FROM x"):
+        with pytest.raises(HTTPException, match="read-only"):
+            _validate_admin_query(query)
+
+
+@pytest.mark.asyncio
+async def test_admin_query_caps_rows_and_reports_truncation(client):
+    response = await client.post(
+        "/api/v1/admin/database/query",
+        json={"query": "SELECT 1 AS value UNION ALL SELECT 2 UNION ALL SELECT 3"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["truncated"] is False
+    assert response.json()["max_rows"] == 500
+
+
+@pytest.mark.asyncio
+async def test_sync_status_does_not_mutate_stale_records(client, test_db):
+    record = SyncStatus(
+        sync_type="test",
+        status="running",
+        started_at=datetime.utcnow() - timedelta(days=2),
+    )
+    test_db.add(record)
+    await test_db.commit()
+
+    response = await client.get("/api/v1/admin/sync-status")
+    await test_db.refresh(record)
+
+    assert response.status_code == 200
+    assert record.status == "running"
+    assert record.completed_at is None
 
 
 @pytest.mark.asyncio

@@ -1,36 +1,53 @@
-
-from datetime import date, timedelta
-from typing import List, Literal, Optional
-import io
-import csv
 import json
+from datetime import date, timedelta
+from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, Response, Depends
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from vnibb.services.export_service import ExportService
+from vnibb.core.auth import User, get_dashboard_user
+from vnibb.core.config import settings
+from vnibb.core.database import get_db
+from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.models.dashboard import UserDashboard
+from vnibb.providers.vnstock.equity_historical import (
+    EquityHistoricalQueryParams,
+    VnstockEquityHistoricalFetcher,
+)
 from vnibb.providers.vnstock.financials import (
-    VnstockFinancialsFetcher,
     FinancialsQueryParams,
     StatementType,
+    VnstockFinancialsFetcher,
 )
-from vnibb.providers.vnstock.equity_historical import (
-    VnstockEquityHistoricalFetcher,
-    EquityHistoricalQueryParams,
-)
-from vnibb.providers.vnstock.equity_profile import (
-    VnstockEquityProfileFetcher,
-    EquityProfileQueryParams,
-)
-
-from vnibb.core.config import settings
 from vnibb.services.comparison_service import comparison_service
-from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
-from vnibb.core.database import get_db
+from vnibb.services.export_service import MAX_EXPORT_ROWS, ExportLimitError, ExportService
 
 router = APIRouter(prefix="/export", tags=["Export"])
+
+MAX_EXPORT_PEERS = 20
+MAX_HISTORICAL_DAYS = {
+    "1m": 7,
+    "5m": 31,
+    "15m": 90,
+    "30m": 180,
+    "1H": 365,
+    "1D": 3650,
+    "1W": 7300,
+    "1M": 10950,
+}
+MAX_HISTORICAL_ROWS = 10_000
+
+
+def _validate_historical_window(start_date: date, end_date: date, interval: str) -> None:
+    if end_date < start_date:
+        raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
+    if (end_date - start_date).days > MAX_HISTORICAL_DAYS[interval]:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Historical range exceeds {MAX_HISTORICAL_DAYS[interval]} days for {interval}",
+        )
 
 
 @router.get("/dashboard/{dashboard_id}")
@@ -38,46 +55,46 @@ async def export_dashboard(
     dashboard_id: int,
     format: Literal["json", "csv"] = Query(default="json"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_dashboard_user),
 ):
     """Export entire dashboard data as JSON or CSV."""
-    from vnibb.services.dashboard_service import dashboard_service
-    
-    # Fetch dashboard
-    dashboard = await dashboard_service.get_dashboard(dashboard_id, db)
-    
+    result = await db.execute(
+        select(UserDashboard)
+        .options(selectinload(UserDashboard.widgets))
+        .where(
+            UserDashboard.id == dashboard_id,
+            UserDashboard.user_id == current_user.id,
+        )
+    )
+    dashboard = result.scalar_one_or_none()
     if not dashboard:
         raise HTTPException(404, "Dashboard not found")
-    
+    if len(dashboard.widgets) > MAX_EXPORT_ROWS:
+        raise HTTPException(status_code=413, detail="Dashboard exceeds export row limit")
+
     if format == "json":
         return dashboard
-    
-    # CSV export - flatten dashboard config
-    output = io.StringIO()
-    writer = csv.writer(output)
-    
-    writer.writerow([f"=== Dashboard: {dashboard.name} ==="])
-    writer.writerow([f"ID: {dashboard.id}", f"User: {dashboard.user_id}"])
-    writer.writerow([])
-    
-    writer.writerow(["=== Widgets ==="])
-    writer.writerow(["ID", "Type", "Layout", "Config"])
-    
-    for widget in dashboard.widgets:
-        writer.writerow([
+
+    rows = [
+        [f"=== Dashboard: {dashboard.name} ==="],
+        [f"ID: {dashboard.id}", f"User: {dashboard.user_id}"],
+        [],
+        ["=== Widgets ==="],
+        ["ID", "Type", "Layout", "Config"],
+    ]
+    rows.extend(
+        [
             widget.widget_id,
             widget.widget_type,
             json.dumps(widget.layout),
-            json.dumps(widget.widget_config)
-        ])
-    
-    output.seek(0)
-    return StreamingResponse(
-        io.BytesIO(output.getvalue().encode()),
-        media_type="text/csv",
-        headers={
-            "Content-Disposition": f"attachment; filename=dashboard_{dashboard_id}.csv"
-        }
+            json.dumps(widget.widget_config),
+        ]
+        for widget in dashboard.widgets
     )
+    try:
+        return ExportService.to_csv_rows(rows, f"dashboard_{dashboard_id}")
+    except ExportLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
 
 
 @router.get(
@@ -96,31 +113,35 @@ async def export_financials(
     try:
         # Map statement_type to the enum
         st_enum = StatementType(statement_type)
-        
+
         params = FinancialsQueryParams(
             symbol=symbol,
             statement_type=st_enum,
             period=period,
             limit=limit,
         )
-        
+
         # Determine strict structure for export if necessary, but here we dump pydantic models
         data = await VnstockFinancialsFetcher.fetch(params)
-        
+
         # Provide meaningful filename
         filename = f"{symbol}_{statement_type}_{period}"
-        
+
         if format == "excel":
             return ExportService.to_excel(data, filename)
-        else:
-            return ExportService.to_csv(data, filename)
-            
+        return ExportService.to_csv(data, filename)
+
+    except HTTPException:
+        raise
+    except ExportLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except (ProviderError, ProviderTimeoutError) as e:
-        raise HTTPException(status_code=502, detail=f"Provider error: {e.message}")
+        raise HTTPException(status_code=502, detail=f"Provider error: {e.message}") from e
     except ImportError as e:
-         raise HTTPException(status_code=501, detail=str(e))
+        raise HTTPException(status_code=501, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
 
 
 @router.get(
@@ -142,23 +163,28 @@ async def export_historical(
             start_date=start_date,
             end_date=end_date,
             interval=interval,
-            source=settings.vnstock_source 
-
+            source=settings.vnstock_source,
         )
-        
+        _validate_historical_window(params.start_date, params.end_date, params.interval)
+
         data = await VnstockEquityHistoricalFetcher.fetch(params)
-        
+        if len(data) > MAX_HISTORICAL_ROWS:
+            raise ExportLimitError(f"Export exceeds {MAX_HISTORICAL_ROWS} row limit")
+
         filename = f"{symbol}_ohlcv_{start_date}_{end_date}"
-        
+
         if format == "excel":
             return ExportService.to_excel(data, filename)
-        else:
-            return ExportService.to_csv(data, filename)
+        return ExportService.to_csv(data, filename)
 
+    except HTTPException:
+        raise
+    except ExportLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except (ProviderError, ProviderTimeoutError) as e:
-        raise HTTPException(status_code=502, detail=f"Provider error: {e.message}")
+        raise HTTPException(status_code=502, detail=f"Provider error: {e.message}") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get(
     "/peers",
@@ -172,31 +198,36 @@ async def export_peers(
     """Export peers comparison data."""
     try:
         symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
-        
+
         if not symbol_list:
-             raise HTTPException(status_code=400, detail="No symbols provided")
-        
+            raise HTTPException(status_code=400, detail="No symbols provided")
+        if len(symbol_list) > MAX_EXPORT_PEERS:
+            raise HTTPException(status_code=413, detail=f"Export exceeds {MAX_EXPORT_PEERS} peer limit")
+
         # Use comparison_service to get detailed metrics
         result = await comparison_service.compare(symbol_list)
-        
+
         # Transform map to flat list for export
         # The service returns: { "VNM": StockMetrics(...), ... }
         # We need a list of dicts: [ {symbol: "VNM", price: ...}, ... ]
-        
+
         export_data = []
         if result and result.data:
-            for sym, metrics in result.data.items():
+            for metrics in result.data.values():
                 # metrics is a StockMetrics object
                 export_data.append(metrics)
-        
+
         filename = f"peers_comparison_{len(symbol_list)}_stocks"
-        
+
         if format == "excel":
             return ExportService.to_excel(export_data, filename)
-        else:
-            return ExportService.to_csv(export_data, filename)
+        return ExportService.to_csv(export_data, filename)
 
+    except HTTPException:
+        raise
+    except ExportLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except (ProviderError, ProviderTimeoutError) as e:
-        raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"Provider error: {e}") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

@@ -26,7 +26,12 @@ redis.call('expire', KEYS[1], ARGV[2])
 return 1
 """
 
-_status = {"enabled": settings.scheduler_lock_enabled, "state": "not_used", "detail": None}
+_status = {
+    "enabled": settings.scheduler_lock_enabled,
+    "state": "not_used",
+    "detail": None,
+    "renewal": {"state": "not_attempted", "detail": None},
+}
 
 
 @dataclass
@@ -79,13 +84,16 @@ class DistributedJobLock:
             )
         except (RedisError, RuntimeError) as exc:
             _set_status("renew_unavailable", type(exc).__name__)
+            _set_renewal_status("unavailable", type(exc).__name__)
             logger.error("Scheduler lock renewal failed for %s: %s", self.job_name, exc)
             return False
         if not renewed:
             _set_status("ownership_lost", self.job_name)
+            _set_renewal_status("ownership_lost", self.job_name)
             logger.warning("Scheduler lock ownership lost before renewal for %s", self.job_name)
             return False
         _set_status("renewed", self.job_name)
+        _set_renewal_status("renewed", self.job_name)
         return True
 
     async def release(self) -> bool:
@@ -113,3 +121,7 @@ def get_scheduler_lock_status() -> dict[str, object]:
 def _set_status(state: str, detail: str | None) -> None:
     _status["state"] = state
     _status["detail"] = detail
+
+
+def _set_renewal_status(state: str, detail: str | None) -> None:
+    _status["renewal"] = {"state": state, "detail": detail}
