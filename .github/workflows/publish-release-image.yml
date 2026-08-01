@@ -1,0 +1,92 @@
+name: Publish Release Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Full Git commit SHA to build
+        required: true
+        type: string
+      tag:
+        description: Immutable release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-image-${{ inputs.revision }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision }}
+          fetch-depth: 0
+
+      - name: Validate release identity
+        env:
+          RELEASE_REVISION: ${{ inputs.revision }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$RELEASE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$ ]]
+          test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"
+          git merge-base --is-ancestor "$RELEASE_REVISION" origin/main
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Require unused release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/vnibb-api"
+          if docker buildx imagetools inspect "${repository}:${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Release tag already exists: ${repository}:${RELEASE_TAG}"
+            exit 1
+          fi
+
+      - name: Build and publish ARM64 image
+        env:
+          IMAGE_RELEASE_REVISION: ${{ inputs.revision }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          PLATFORM: linux/arm64
+        run: |
+          repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/vnibb-api"
+          bash scripts/oracle/build_release_image.sh "${repository}:${RELEASE_TAG}" | tee release-manifest.json
+          python - <<'PY'
+          import json
+          import os
+
+          with open("release-manifest.json", encoding="utf-8") as manifest_file:
+              manifest = json.load(manifest_file)
+
+          assert manifest["revision"] == os.environ["IMAGE_RELEASE_REVISION"]
+          assert manifest["platform"] == "linux/arm64"
+          assert manifest["tag"] == os.environ["RELEASE_TAG"]
+          assert manifest["repository"] == f"ghcr.io/{os.environ['GITHUB_REPOSITORY_OWNER'].lower()}/vnibb-api"
+          PY
+
+      - name: Upload immutable manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-image-${{ inputs.tag }}
+          path: release-manifest.json
+          if-no-files-found: error
