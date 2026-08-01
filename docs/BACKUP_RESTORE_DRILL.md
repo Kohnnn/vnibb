@@ -33,10 +33,11 @@ The script, for each engine:
 
 1. Rechecks the artifact SHA256 against the manifest (aborts on mismatch).
 2. Starts a throwaway container from the manifest-pinned image.
-3. Restores the dump and counts restored objects.
+3. Copies the artifact in with `docker cp` and restores it, failing on any
+   restore error.
 4. Asserts object-count parity against the manifest, then removes the container.
 
-Exit code is non-zero if any parity check fails.
+Exit code is non-zero if any restore command or parity check fails.
 
 ## Engine-specific gotchas
 
@@ -44,20 +45,33 @@ Exit code is non-zero if any parity check fails.
   vanilla `postgres:17`. The dump references Supabase-only roles (`supabase_admin`,
   `supabase_vault`) and extensions (`http`, `pg_stat_statements`, `pgcrypto`,
   `supabase_vault`, `uuid-ossp`, `plpgsql`); a vanilla image errors on them.
+- **Restore into a fresh `template0` database**, not the image's preseeded
+  `postgres`. Restoring into `postgres` requires `--clean --if-exists` and then
+  emits unavoidable errors (`cannot drop schema graphql_public`, missing
+  `supabase_functions_admin` / `supabase_realtime_admin` roles) that force the
+  drill to tolerate a non-zero `pg_restore` exit — which would also hide a genuinely
+  partial restore. The drill therefore runs
+  `createdb -T template0 vnibb_restore` and
+  `pg_restore --no-owner --no-privileges`, and treats any error as a failure.
 - Restore and admin queries run as `supabase_admin`, not `postgres`.
 - The Supabase image is a ~45s two-stage boot, so readiness is polled up to 120s.
-- MongoDB restores with `--drop` so a re-run is idempotent inside the container.
+- **Copy artifacts in with `docker cp`**, never `Get-Content | docker exec -i`:
+  PowerShell stringifies bytes on a native-command pipeline and corrupts the
+  archive.
+- MongoDB restores with `--drop --stopOnError` so a re-run is idempotent inside the
+  container and a truncated archive fails loudly (a partial download once restored
+  202390 documents before erroring, which `--stopOnError` surfaces immediately).
 
 ## Last verified drill
 
-Backup set `20260721T181749Z`:
+Backup set `20260729T190249Z`:
 
-| Engine     | Image                          | Parity          | Result |
-| ---------- | ------------------------------ | --------------- | ------ |
-| PostgreSQL | `supabase/postgres:17.6.1.136` | 34/34 tables    | pass   |
-| MongoDB    | `mongo:7`                      | 16/16 collections | pass |
+| Engine     | Image                          | Parity            | Result |
+| ---------- | ------------------------------ | ----------------- | ------ |
+| PostgreSQL | `supabase/postgres:17.6.1.136` | 37/37 tables      | pass   |
+| MongoDB    | `mongo:7`                      | 16/16 collections | pass   |
 
-Checksum recheck: pass. See `../backups/BACKUP_VERIFICATION_20260721T181749Z.json`.
+Checksum recheck: pass. See `../backups/BACKUP_VERIFICATION_20260729T190249Z.json`.
 
 ## Known gap
 

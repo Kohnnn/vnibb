@@ -89,6 +89,7 @@ $mongoImage = $manifest.verification.mongodb_isolated_restore.image
 if (-not $mongoImage) { $mongoImage = 'mongo:7' }
 
 $stamp = (Get-Date -Format 'yyyyMMddHHmmss')
+$pgRestoreDb = 'vnibb_restore'
 $results = [ordered]@{}
 $failures = @()
 
@@ -117,12 +118,21 @@ if (-not $SkipPostgres) {
         }
         if (-not $ready) { throw "PostgreSQL did not become ready within 120s" }
 
-        Get-Content -LiteralPath $pgDump -AsByteStream |
-            docker exec -i $ctr pg_restore -U supabase_admin -d postgres --no-owner --clean --if-exists 2>&1 |
-            Out-Null
+        docker exec $ctr createdb -U supabase_admin -T template0 $pgRestoreDb
+        if ($LASTEXITCODE -ne 0) { throw "createdb $pgRestoreDb failed (exit $LASTEXITCODE)" }
 
-        $count = docker exec $ctr psql -U supabase_admin -d postgres -tAc `
-            "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'"
+        docker cp $pgDump "${ctr}:/tmp/restore.dump"
+        if ($LASTEXITCODE -ne 0) { throw "docker cp of $pgDump failed (exit $LASTEXITCODE)" }
+
+        $restoreLog = docker exec $ctr pg_restore -U supabase_admin -d $pgRestoreDb `
+            --no-owner --no-privileges /tmp/restore.dump 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $restoreLog | Select-Object -Last 20 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkRed }
+            throw "pg_restore into $pgRestoreDb failed (exit $LASTEXITCODE)"
+        }
+
+        $count = docker exec $ctr psql -U supabase_admin -d $pgRestoreDb -tAc `
+            "select count(*) from pg_catalog.pg_tables where schemaname='public'"
         $count = [int]($count | Select-Object -Last 1).Trim()
 
         $ok = ($count -eq $expected)
@@ -156,8 +166,15 @@ if (-not $SkipMongo) {
         }
         if (-not $ready) { throw "MongoDB did not become ready within 60s" }
 
-        Get-Content -LiteralPath $mongoArchive -AsByteStream |
-            docker exec -i $ctr mongorestore --archive --gzip --drop 2>&1 | Out-Null
+        docker cp $mongoArchive "${ctr}:/tmp/restore.archive.gz"
+        if ($LASTEXITCODE -ne 0) { throw "docker cp of $mongoArchive failed (exit $LASTEXITCODE)" }
+
+        $restoreLog = docker exec $ctr mongorestore --archive=/tmp/restore.archive.gz `
+            --gzip --drop --stopOnError 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $restoreLog | Select-Object -Last 20 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkRed }
+            throw "mongorestore failed (exit $LASTEXITCODE)"
+        }
 
         $count = docker exec $ctr mongosh $db --quiet --eval 'db.getCollectionNames().length'
         $count = [int]($count | Select-Object -Last 1).Trim()

@@ -77,6 +77,21 @@ def test_release_build_emits_the_published_immutable_manifest(tmp_path: Path) ->
     }
 
 
+def test_release_workflow_publishes_only_immutable_main_revisions() -> None:
+    workflow = (ROOT / ".github/workflows/publish-release-image.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "workflow_dispatch:" in workflow
+    assert "contents: read" in workflow
+    assert "packages: write" in workflow
+    assert "git merge-base --is-ancestor" in workflow
+    assert "secrets.GITHUB_TOKEN" in workflow
+    assert "Require unused release tag" in workflow
+    assert 'build_release_image.sh "${repository}:${RELEASE_TAG}"' in workflow
+    assert "VNSTOCK_API_KEY" not in workflow
+
+
 def test_runtime_verification_checks_expected_revision_and_configured_digest() -> None:
     script = (ROOT / "scripts/oracle/runtime_verify.sh").read_text(encoding="utf-8")
 
