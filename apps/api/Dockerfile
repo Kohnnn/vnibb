@@ -40,13 +40,12 @@ RUN --mount=type=secret,id=vnstock_api_key,required=false \
         curl --fail --silent --show-error --location https://vnstocks.com/files/vnstock-cli-installer.run --output /tmp/vnstock-cli-installer.run; \
         printf '%s  %s\n' "$VNSTOCK_INSTALLER_SHA256" /tmp/vnstock-cli-installer.run | sha256sum --check --status -; \
         chmod +x /tmp/vnstock-cli-installer.run; \
-        /tmp/vnstock-cli-installer.run -- --api-key "$(cat /run/secrets/vnstock_api_key)"; \
-        premium_site_packages="$(find /root/.venv/lib -type d -path '*/site-packages' -print -quit)"; \
-        test -n "$premium_site_packages"; \
-        for module in $(printf '%s' "$VNSTOCK_PREMIUM_REQUIRED_MODULES" | tr ',' ' '); do find "$premium_site_packages" -maxdepth 1 -name "${module}*" -exec cp -a {} /opt/venv/lib/python3.12/site-packages/ \;; done; \
+        installer_status=0; \
+        /tmp/vnstock-cli-installer.run -- --non-interactive --venv-path /opt/venv --api-key "$(cat /run/secrets/vnstock_api_key)" || installer_status=$?; \
         pip install --no-cache-dir html2text pta_reload tqdm; \
-        VNSTOCK_MODULES="$VNSTOCK_PREMIUM_REQUIRED_MODULES" python -c "import importlib, os; [importlib.import_module(module.strip()) for module in os.environ['VNSTOCK_MODULES'].split(',') if module.strip()]"; \
-        rm -rf /tmp/vnstock-cli-installer.run /root/.venv; \
+        VNSTOCK_MODULES="vnstock,$VNSTOCK_PREMIUM_REQUIRED_MODULES" python -c "import importlib, os; [importlib.import_module(module.strip()) for module in os.environ['VNSTOCK_MODULES'].split(',') if module.strip()]"; \
+        printf 'VNStock installer status: %s; independent import verification passed\n' "$installer_status"; \
+        rm -rf /tmp/vnstock-cli-installer.run /root/.vnstock /root/vnstock_installer_debug.log; \
     fi
 
 COPY entrypoint.sh .
