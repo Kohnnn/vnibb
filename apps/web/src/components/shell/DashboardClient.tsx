@@ -55,7 +55,6 @@ import {
     selectOnboardingGoal,
     shouldShowDashboardWalkthrough,
     type OnboardingGoalId,
-    type OnboardingMeaningfulActionId,
 } from '@/lib/userPreferences';
 import type { WidgetInstance, WidgetType, WidgetConfig, Dashboard } from '@/types/dashboard';
 import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '@/types/dashboard-templates';
@@ -66,7 +65,7 @@ const WidgetSettingsModal = dynamic(() => import('@/components/modals').then((m)
 const AppsLibrary = dynamic(() => import('@/components/modals').then((m) => ({ default: m.AppsLibrary })), { ssr: false });
 const TemplateSelector = dynamic(() => import('@/components/modals').then((m) => ({ default: m.TemplateSelector as unknown as React.ComponentType<{ open: boolean; onClose: () => void; onSelectTemplate: (template: DashboardTemplate) => void; currentDashboard: Dashboard | null; currentSymbol: string }> })), { ssr: false });
 const AICopilot = dynamic(() => import('@/components/ui/AICopilot').then((m) => ({ default: m.AICopilot })), { ssr: false });
-const OnboardingWalkthrough = dynamic(() => import('@/components/onboarding/OnboardingWalkthrough').then((m) => ({ default: m.OnboardingWalkthrough as unknown as React.ComponentType<{ open: boolean; onSkip: () => void; onGoalSelect: (goalId: OnboardingGoalId) => void; onMeaningfulAction: (actionId: OnboardingMeaningfulActionId) => void }> })), { ssr: false });
+const OnboardingWalkthrough = dynamic(() => import('@/components/onboarding/OnboardingWalkthrough').then((m) => ({ default: m.OnboardingWalkthrough as unknown as React.ComponentType<{ open: boolean; currentSymbol: string; onSkip: () => void; onGoalSelect: (goalId: OnboardingGoalId, symbol?: string) => boolean; onComplete: (goalId: OnboardingGoalId, openVniAgent?: boolean) => void }> })), { ssr: false });
 
 export default function DashboardPage() {
     return (
@@ -347,11 +346,11 @@ function DashboardContent() {
         setIsWalkthroughOpen(false);
     }, []);
 
-    const completeWalkthrough = useCallback((actionId: OnboardingMeaningfulActionId) => {
+    const completeWalkthrough = useCallback((goalId: OnboardingGoalId) => {
         markDashboardWalkthroughCompleted();
         setIsWalkthroughOpen(false);
         captureAnalyticsEvent(ANALYTICS_EVENTS.onboardingWalkthroughCompleted, {
-            action_id: actionId,
+            goal_id: goalId,
             dashboard_id: activeDashboard?.id,
             tab_id: activeTab?.id,
         });
@@ -420,7 +419,7 @@ function DashboardContent() {
         };
     }, [activeDashboard, activeTab, mounted, openWalkthrough]);
 
-    const applySelectedSymbol = useCallback((rawSymbol: string, options?: { domain?: 'vn' | 'tv' }) => {
+    const applySelectedSymbol = useCallback((rawSymbol: string, options?: { domain?: 'vn' | 'tv'; dashboardId?: string; completeOnboarding?: boolean }) => {
         const normalizedSymbol = rawSymbol.trim().toUpperCase();
         if (!normalizedSymbol) return;
 
@@ -434,7 +433,9 @@ function DashboardContent() {
         const domain = options?.domain || inferredDomain;
 
         if (normalizedSymbol !== stockGlobalSymbol) {
-            dispatchOnboardingMeaningfulAction('symbol_change');
+            if (options?.completeOnboarding !== false) {
+                dispatchOnboardingMeaningfulAction('symbol_change');
+            }
             captureAnalyticsEvent(ANALYTICS_EVENTS.symbolChanged, {
                 from_symbol: stockGlobalSymbol,
                 to_symbol: normalizedSymbol,
@@ -444,19 +445,20 @@ function DashboardContent() {
             });
         }
 
+        const targetDashboardId = options?.dashboardId ?? activeDashboard?.id;
         if (domain === 'vn') {
             setStockGlobalSymbol(normalizedSymbol);
             setContextGlobalSymbol(normalizedSymbol);
-            if (activeDashboard) {
-                updateSyncGroupSymbol(activeDashboard.id, 1, normalizedSymbol);
+            if (targetDashboardId) {
+                updateSyncGroupSymbol(targetDashboardId, 1, normalizedSymbol);
             }
             return;
         }
 
         // domain === 'tv'
         setGlobalMarketsSymbol(normalizedSymbol);
-        if (activeDashboard) {
-            updateSyncGroupSymbol(activeDashboard.id, 1, normalizedSymbol);
+        if (targetDashboardId) {
+            updateSyncGroupSymbol(targetDashboardId, 1, normalizedSymbol);
         }
     }, [activeDashboard, activeTab?.id, setContextGlobalSymbol, setGlobalMarketsSymbol, setStockGlobalSymbol, stockGlobalSymbol, updateSyncGroupSymbol]);
 
@@ -968,30 +970,46 @@ function DashboardContent() {
         }
     }, [applyTemplateToDashboard, createDashboard, createTab, setActiveDashboard, setActiveTab]);
 
-    const handleOnboardingGoalSelect = useCallback((goalId: OnboardingGoalId) => {
-        selectOnboardingGoal(goalId);
-
+    const handleOnboardingGoalSelect = useCallback((goalId: OnboardingGoalId, symbol?: string): boolean => {
         if (goalId === 'scan_market') {
             const template = DASHBOARD_TEMPLATES.find((item) => item.id === 'market-overview');
-            if (template) {
-                handleApplyTemplate(template);
+            if (!template || template.widgets.length === 0) return false;
+            try {
+                const dashboard = createDashboard({ name: `${template.name} Workspace` });
+                const tab = createTab(dashboard.id, template.name);
+                applyTemplateToDashboard(template, dashboard.id, tab.id);
+                setActiveDashboard(dashboard.id);
+                setActiveTab(tab.id);
+                setTemplateApplyStatus({ message: `Opened ${template.name}.`, tone: 'success' });
+                selectOnboardingGoal(goalId);
+                return true;
+            } catch (err) {
+                console.error('[handleOnboardingGoalSelect] failed', err);
+                setTemplateApplyStatus({ message: 'Could not open the market overview.', tone: 'warning' });
+                return false;
             }
-            dispatchOnboardingMeaningfulAction('view_open');
-            return;
         }
 
         const dashboard = state.dashboards.find((item) => item.id === MAIN_FUNDAMENTAL_DASHBOARD_ID);
         const tabName = goalId === 'follow_ticker' ? 'Overview' : 'Financials';
         const tab = dashboard?.tabs.find((item) => item.name === tabName);
-        if (dashboard && tab) {
-            setActiveDashboard(dashboard.id);
-            setActiveTab(tab.id);
-        }
+        if (!dashboard || !tab || !symbol) return false;
+
+        setActiveDashboard(dashboard.id);
+        setActiveTab(tab.id);
+        applySelectedSymbol(symbol, { domain: 'vn', dashboardId: dashboard.id, completeOnboarding: false });
+        setTemplateApplyStatus({ message: `Opened ${symbol} ${tabName}.`, tone: 'success' });
+        selectOnboardingGoal(goalId);
+        return true;
+    }, [applySelectedSymbol, applyTemplateToDashboard, createDashboard, createTab, setActiveDashboard, setActiveTab, state.dashboards]);
+
+    const handleOnboardingComplete = useCallback((goalId: OnboardingGoalId, openVniAgent = false) => {
+        completeWalkthrough(goalId);
+        if (!openVniAgent || goalId === 'scan_market') return;
         setCopilotStarterPrompt(goalId === 'follow_ticker' ? 'technical' : 'analyze');
         setCopilotStarterPromptRequestId((current) => current + 1);
-        openCopilot('onboarding');
-        dispatchOnboardingMeaningfulAction('view_open');
-    }, [handleApplyTemplate, openCopilot, setActiveDashboard, setActiveTab, state.dashboards]);
+        window.requestAnimationFrame(() => openCopilot('onboarding'));
+    }, [completeWalkthrough, openCopilot]);
 
     const handleSeedEmptyTab = useCallback((template: DashboardTemplate) => {
         if (!activeDashboard || !activeTab) return;
@@ -1597,9 +1615,10 @@ function DashboardContent() {
 
             <OnboardingWalkthrough
                 open={isWalkthroughOpen}
+                currentSymbol={stockGlobalSymbol}
                 onSkip={skipWalkthrough}
                 onGoalSelect={handleOnboardingGoalSelect}
-                onMeaningfulAction={completeWalkthrough}
+                onComplete={handleOnboardingComplete}
             />
         </div>
     );

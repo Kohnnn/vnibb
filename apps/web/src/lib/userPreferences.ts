@@ -1,7 +1,7 @@
 import { DEFAULT_TICKER, normalizeTickerSymbol, writeStoredTicker } from '@/lib/defaultTicker'
 
 export const USER_PREFERENCES_STORAGE_KEY = 'vnibb-user-preferences'
-export const DASHBOARD_WALKTHROUGH_VERSION = 3
+export const DASHBOARD_WALKTHROUGH_VERSION = 4
 export const DASHBOARD_WALKTHROUGH_RESTART_EVENT = 'vnibb:restart-dashboard-walkthrough'
 export const ONBOARDING_MEANINGFUL_ACTION_EVENT = 'vnibb:onboarding-meaningful-action'
 
