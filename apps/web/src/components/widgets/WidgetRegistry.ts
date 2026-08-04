@@ -207,13 +207,13 @@ registerWidget(
 );
 registerWidget(
   'world_news_live_stream',
-  placeholderLoader('world_news_live_stream'),
+  () => import('./WorldNewsLiveStreamWidget'),
   'news',
   ['world', 'news', 'live', 'stream']
 );
 registerWidget(
   'world_news_sources',
-  placeholderLoader('world_news_sources'),
+  () => import('./WorldNewsSourcesWidget'),
   'global_markets',
   ['world', 'news', 'sources']
 );
@@ -410,8 +410,8 @@ registerWidget(
   'charting',
   ['signal', 'summary']
 );
-registerWidget('ichimoku', placeholderLoader('ichimoku'), 'charting', ['ichimoku', 'cloud']);
-registerWidget('fibonacci', placeholderLoader('fibonacci'), 'charting', ['fibonacci', 'retracement']);
+registerWidget('ichimoku', () => import('./IchimokuWidget'), 'charting', ['ichimoku', 'cloud']);
+registerWidget('fibonacci', () => import('./FibonacciWidget'), 'charting', ['fibonacci', 'retracement']);
 registerWidget(
   'market_structure',
   lazyNamed(() => import('./MarketStructureWidget'), 'MarketStructureWidget'),
@@ -532,7 +532,7 @@ registerWidget('seasonality_spiral_heatmap', placeholderLoader('seasonality_spir
 registerWidget('backtest_lab', () => import('./BacktestLabWidget'), 'quant', ['backtest', 'lab']);
 registerWidget('monte_carlo_lab', () => import('./MonteCarloLabWidget'), 'quant', ['monte', 'carlo']);
 registerWidget('risk_dashboard', () => import('./RiskDashboardWidget'), 'quant', ['risk', 'dashboard']);
-registerWidget('quant_summary', placeholderLoader('quant_summary'), 'quant', ['quant', 'summary']);
+registerWidget('quant_summary', () => import('./QuantSummaryWidget'), 'quant', ['quant', 'summary']);
 registerWidget('market_lab', placeholderLoader('market_lab'), 'quant', ['market', 'lab']);
 registerWidget('signal_robustness_lab', placeholderLoader('signal_robustness_lab'), 'quant', ['signal', 'robustness']);
 registerWidget('edge_half_life', placeholderLoader('edge_half_life'), 'quant', ['edge', 'half', 'life']);
@@ -582,7 +582,7 @@ registerWidget(
   ['garch', 'volatility']
 );
 registerWidget('ema_respect', placeholderLoader('ema_respect'), 'quant', ['ema', 'respect']);
-registerWidget('drawdown_recovery', placeholderLoader('drawdown_recovery'), 'quant', ['drawdown', 'recovery']);
+registerWidget('drawdown_recovery', () => import('./DrawdownRecoveryWidget'), 'quant', ['drawdown', 'recovery']);
 registerWidget(
   'gamma_exposure',
   lazyNamed(() => import('./GammaExposureWidget'), 'GammaExposureWidget'),
@@ -625,12 +625,12 @@ registerWidget(
   'quant',
   ['hurst', 'market', 'structure']
 );
-registerWidget('volume_analysis', placeholderLoader('volume_analysis'), 'quant', ['volume', 'analysis']);
+registerWidget('volume_analysis', lazyNamed(() => import('./VolumeAnalysisWidget'), 'VolumeAnalysisWidget'), 'quant', ['volume', 'analysis']);
 registerWidget('obv_divergence', lazyNamed(() => import('./OBVDivergenceWidget'), 'OBVDivergenceWidget'), 'quant', ['obv', 'divergence']);
-registerWidget('atr_regime', placeholderLoader('atr_regime'), 'quant', ['atr', 'regime']);
-registerWidget('gap_fill_stats', placeholderLoader('gap_fill_stats'), 'quant', ['gap', 'fill']);
+registerWidget('atr_regime', () => import('./ATRRegimeWidget'), 'quant', ['atr', 'regime']);
+registerWidget('gap_fill_stats', () => import('./GapFillStatsWidget'), 'quant', ['gap', 'fill']);
 registerWidget('volume_delta', placeholderLoader('volume_delta'), 'quant', ['volume', 'delta']);
-registerWidget('footprint_proxy', placeholderLoader('footprint_proxy'), 'quant', ['footprint', 'proxy']);
+registerWidget('footprint_proxy', () => import('./FootprintProxyWidget'), 'quant', ['footprint', 'proxy']);
 registerWidget('amihud_illiquidity', placeholderLoader('amihud_illiquidity'), 'quant', ['amihud', 'illiquidity']);
 
 // --- Analysis / Screener ---

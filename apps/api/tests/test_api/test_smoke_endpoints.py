@@ -3654,6 +3654,10 @@ async def test_market_freshness_uses_latest_fully_settled_foreign_date(client, t
         bucket for bucket in response.json()["buckets"] if bucket["label"] == "Foreign trading"
     )
     assert foreign_bucket["last_data_date"] == settled_date.isoformat()
+    assert foreign_bucket["raw_last_data_date"] == partial_date.isoformat()
+    assert foreign_bucket["settled_last_data_date"] == settled_date.isoformat()
+    assert foreign_bucket["reason"] == "latest_sync_unsettled"
+    assert foreign_bucket["detail"] == "Current rows await completed sync validation."
     assert foreign_bucket["status"] == "fresh"
 
 

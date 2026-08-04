@@ -89,7 +89,7 @@ export function useCompanyNews(
     options?: { limit?: number; enabled?: boolean }
 ) {
     return useQuery({
-        queryKey: queryKeys.companyNews(symbol),
+        queryKey: queryKeys.companyNews(symbol, options?.limit),
         queryFn: () => api.getCompanyNews(symbol, { limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000, // 5 minutes
@@ -101,7 +101,7 @@ export function useCompanyEvents(
     options?: { limit?: number; enabled?: boolean }
 ) {
     return useQuery({
-        queryKey: queryKeys.companyEvents(symbol),
+        queryKey: queryKeys.companyEvents(symbol, options?.limit),
         queryFn: () => api.getCompanyEvents(symbol, { limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 10 * 60 * 1000, // 10 minutes
@@ -150,7 +150,7 @@ export function useIntraday(
     options?: { limit?: number; enabled?: boolean }
 ) {
     return useQuery({
-        queryKey: queryKeys.intraday(symbol),
+        queryKey: queryKeys.intraday(symbol, options?.limit),
         queryFn: () => api.getIntraday(symbol, { limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 30 * 1000, // 30 seconds - refresh frequently
@@ -182,7 +182,7 @@ export function useRatioHistory(
     const ratios = options?.ratios || ['pe', 'pb', 'ps', 'ev_ebitda'];
     const period = options?.period || 'year';
     return useQuery({
-        queryKey: queryKeys.ratioHistory(symbol, period, ratios),
+        queryKey: queryKeys.ratioHistory(symbol, period, ratios, options?.limit),
         queryFn: () => api.getRatioHistory(symbol, { ratios, period, limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 60 * 60 * 1000,
@@ -1122,7 +1122,7 @@ export function useFinancials(
     const type = options?.type || 'income';
     const period = options?.period || 'FY';
     return useQuery({
-        queryKey: queryKeys.financials(symbol, type, period),
+        queryKey: queryKeys.financials(symbol, type, period, options?.limit),
         queryFn: () => api.getFinancials(symbol, { type, period, limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 60 * 60 * 1000, // 1 hour - financial statements don't change frequently

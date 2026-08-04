@@ -10,6 +10,7 @@
 
 import { isWidgetPlaceholder, widgetRegistry } from './WidgetRegistry';
 import { normalizeWidgetType, widgetDefinitions } from '@/data/widgetDefinitions';
+import { createGlobalMarketsDashboard, createMainSystemDashboard } from '@/contexts/DashboardContext/systemDashboards';
 
 describe('WidgetRegistry completeness', () => {
     const declaredTypes = widgetDefinitions.map((entry: { type: string }) => entry.type);
@@ -64,6 +65,36 @@ describe('WidgetRegistry completeness', () => {
         expect(isWidgetPlaceholder('obv_divergence')).toBe(false);
         expect(isWidgetPlaceholder('source_transparent_research_notebook')).toBe(false);
         expect(isWidgetPlaceholder('earnings_season_monitor')).toBe(false);
+    });
+
+    it('wires the QA-reported and system-default widgets to real modules', async () => {
+        const activatedTypes = [
+            'volume_analysis',
+            'atr_regime',
+            'quant_summary',
+            'fibonacci',
+            'ichimoku',
+            'drawdown_recovery',
+            'world_news_live_stream',
+            'world_news_sources',
+            'gap_fill_stats',
+            'footprint_proxy',
+        ];
+
+        for (const type of activatedTypes) {
+            expect(isWidgetPlaceholder(type as never)).toBe(false);
+            const resolved = await widgetRegistry.get(type as never)?.lazyComponent();
+            expect(isRenderableComponent(resolved?.default)).toBe(true);
+        }
+    });
+
+    it('keeps system-default dashboards free of placeholder widgets', () => {
+        const defaultWidgetTypes = [createMainSystemDashboard(), createGlobalMarketsDashboard()]
+            .flatMap((dashboard) => dashboard.tabs)
+            .flatMap((tab) => tab.widgets)
+            .map((widget) => widget.type);
+
+        expect(defaultWidgetTypes.filter((type) => isWidgetPlaceholder(type))).toEqual([]);
     });
 
     it('activates only the Wave 12 placeholders with resolvable loaders', async () => {

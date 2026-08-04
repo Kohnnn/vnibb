@@ -802,8 +802,11 @@ export async function getFlowCoverage(
 export interface FreshnessBucket {
     label: string;
     last_data_date: string | null;
+    raw_last_data_date?: string | null;
+    settled_last_data_date?: string | null;
     age_days: number | null;
     status: 'fresh' | 'stale' | 'critical' | 'unknown';
+    reason?: 'latest_sync_unsettled' | null;
     detail: string | null;
 }
 

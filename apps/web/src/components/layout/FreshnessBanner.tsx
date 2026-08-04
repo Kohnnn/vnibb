@@ -28,6 +28,7 @@ const SESSION_KEY = 'vnibb-freshness-banner-dismissed-hash';
 interface FreshnessBucketLike {
   label: string;
   status: string;
+  reason?: string | null;
 }
 
 function buildStatusHash(
@@ -36,7 +37,7 @@ function buildStatusHash(
 ): string {
   const parts = [overall ?? 'unknown'];
   for (const bucket of [...buckets].sort((a, b) => a.label.localeCompare(b.label))) {
-    parts.push(`${bucket.label}:${bucket.status}`);
+    parts.push(`${bucket.label}:${bucket.status}:${bucket.reason ?? 'none'}`);
   }
   return parts.join('|');
 }
@@ -63,6 +64,12 @@ export function FreshnessBanner() {
   }, [data]);
 
   const isCritical = affectedBuckets?.some((bucket) => bucket.status === 'critical') ?? false;
+  const hasUnsettledSync = affectedBuckets?.some(
+    (bucket) => bucket.reason === 'latest_sync_unsettled',
+  ) ?? false;
+  const heading = `${hasUnsettledSync ? 'Data validation' : 'Data sync'} ${
+    isCritical ? 'degraded' : 'delayed'
+  }`;
 
   const currentHash = useMemo(
     () => (data ? buildStatusHash(data.overall, data.buckets) : null),
@@ -107,17 +114,17 @@ export function FreshnessBanner() {
         )}
       />
       <div className="flex flex-1 flex-wrap items-baseline gap-x-4 gap-y-1">
-        <span className="font-semibold uppercase tracking-[0.16em]">
-          {isCritical ? 'Data sync degraded' : 'Data sync delayed'}
-        </span>
+        <span className="font-semibold uppercase tracking-[0.16em]">{heading}</span>
         {affectedBuckets.map((bucket) => (
           <span key={bucket.label} className="inline-flex items-center gap-1.5">
             <ChevronRight size={11} className="opacity-60" />
             <span className="font-medium">{bucket.label}:</span>
             <span className="opacity-80">
-              {bucket.age_days !== null
-                ? `${Math.floor(bucket.age_days)} day${Math.floor(bucket.age_days) === 1 ? '' : 's'} old`
-                : 'unknown age'}
+              {bucket.reason === 'latest_sync_unsettled' && bucket.raw_last_data_date
+                ? `current through ${bucket.raw_last_data_date}; validated through ${bucket.settled_last_data_date ?? 'unknown'}`
+                : bucket.age_days !== null
+                  ? `${Math.floor(bucket.age_days)} day${Math.floor(bucket.age_days) === 1 ? '' : 's'} old`
+                  : 'unknown age'}
             </span>
           </span>
         ))}

@@ -44,7 +44,7 @@ export function InvestorEventCalendarWidget({ id, config, widgetGroup, onDataCha
             config: { ...widgetLocation.widget.config, manualSymbols: nextManualSymbols },
         });
     };
-    const eventQueries = useQueries({ queries: symbols.map((symbol) => ({ queryKey: equityQueryKeys.companyEvents(symbol), queryFn: () => getCompanyEvents(symbol, { limit: 30 }), staleTime: 10 * 60 * 1000 })) });
+    const eventQueries = useQueries({ queries: symbols.map((symbol) => ({ queryKey: equityQueryKeys.companyEvents(symbol, 30), queryFn: () => getCompanyEvents(symbol, { limit: 30 }), staleTime: 10 * 60 * 1000 })) });
     const events = useMemo(() => {
         const corporate = eventQueries.flatMap((query) => query.data?.data?.map(companyEventToInvestorEvent).filter((event): event is InvestorCalendarEvent => Boolean(event)) || []);
         return aggregateInvestorEvents(corporate);

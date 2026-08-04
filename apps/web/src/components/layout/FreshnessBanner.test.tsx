@@ -9,7 +9,14 @@ jest.mock('@/lib/queries', () => ({
 
 const mockUseMarketFreshness = useMarketFreshness as jest.MockedFunction<typeof useMarketFreshness>;
 
-function setFreshness(buckets: Array<{ label: string; status: 'fresh' | 'stale' | 'critical' | 'unknown'; age_days: number | null }>) {
+function setFreshness(buckets: Array<{
+  label: string;
+  status: 'fresh' | 'stale' | 'critical' | 'unknown';
+  age_days: number | null;
+  raw_last_data_date?: string | null;
+  settled_last_data_date?: string | null;
+  reason?: 'latest_sync_unsettled' | null;
+}>) {
   mockUseMarketFreshness.mockReturnValue({
     data: {
       timestamp: '2026-07-15T00:00:00Z',
@@ -50,6 +57,22 @@ describe('FreshnessBanner', () => {
     const banner = screen.getByRole('status');
     expect(banner).toHaveClass('border-rose-500/30');
     expect(screen.getByText('Data sync degraded')).toBeInTheDocument();
+  });
+
+  it('distinguishes current unvalidated rows from stale raw data', () => {
+    setFreshness([{
+      label: 'Foreign trading',
+      status: 'critical',
+      age_days: 33,
+      raw_last_data_date: '2026-08-03',
+      settled_last_data_date: '2026-07-02',
+      reason: 'latest_sync_unsettled',
+    }]);
+
+    render(<FreshnessBanner />);
+
+    expect(screen.getByText('Data validation degraded')).toBeInTheDocument();
+    expect(screen.getByText('current through 2026-08-03; validated through 2026-07-02')).toBeInTheDocument();
   });
 
   it('links stale data to the source settings', () => {

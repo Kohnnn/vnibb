@@ -4358,8 +4358,11 @@ async def get_flow_coverage(
 class FreshnessBucket(BaseModel):
     label: str
     last_data_date: Optional[date] = None
+    raw_last_data_date: Optional[date] = None
+    settled_last_data_date: Optional[date] = None
     age_days: Optional[float] = None
     status: str  # "fresh" | "stale" | "critical" | "unknown"
+    reason: Optional[str] = None
     detail: Optional[str] = None
 
 
@@ -4396,6 +4399,13 @@ async def get_market_freshness(
     ).scalar_one_or_none()
 
     completed_foreign_dates = await _load_completed_foreign_settlement_dates(db, 100)
+    raw_foreign_dt = (
+        await db.execute(
+            select(func.max(ForeignTrading.trade_date)).where(
+                ForeignTrading.net_volume.is_not(None) | ForeignTrading.net_value.is_not(None),
+            )
+        )
+    ).scalar_one_or_none()
     foreign_dt = (
         (
             await db.execute(
@@ -4446,6 +4456,10 @@ async def get_market_freshness(
     foreign_age = _age(foreign_dt)
     news_age = _age(news_dt)
 
+    foreign_reason = None
+    if raw_foreign_dt is not None and (foreign_dt is None or raw_foreign_dt > foreign_dt):
+        foreign_reason = "latest_sync_unsettled"
+
     buckets = [
         FreshnessBucket(
             label="Daily prices",
@@ -4459,9 +4473,16 @@ async def get_market_freshness(
         FreshnessBucket(
             label="Foreign trading",
             last_data_date=foreign_dt,
+            raw_last_data_date=raw_foreign_dt,
+            settled_last_data_date=foreign_dt,
             age_days=foreign_age,
             status=_classify_age(foreign_age, stale_threshold=2, critical_threshold=7),
-            detail="Drives foreign-flow widget and the Transaction Flow buckets.",
+            reason=foreign_reason,
+            detail=(
+                "Current rows await completed sync validation."
+                if foreign_reason
+                else "Drives foreign-flow widget and the Transaction Flow buckets."
+            ),
         ),
         FreshnessBucket(
             label="Market news",
