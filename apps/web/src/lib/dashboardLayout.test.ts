@@ -11,7 +11,7 @@ import { tradingViewWidgetDefaultLayouts } from '@/lib/tradingViewWidgets';
 import type { Dashboard, WidgetType } from '@/types/dashboard';
 import {
   createGlobalMarketsDashboard,
-  shouldRefreshGlobalMarketsLayout,
+  migrateLegacyGlobalMarketsDashboard,
 } from '@/contexts/DashboardContext';
 
 /**
@@ -21,47 +21,62 @@ import {
  * `widgetDefinitions[].defaultLayout` is derived from it at module load. These tests
  * make the "three sources of truth" drift risk a CI failure instead of a silent bug.
  */
-const getDashboardWidgetTypes = (dashboard: Dashboard): WidgetType[] =>
-  dashboard.tabs.flatMap((tab) => tab.widgets.map((widget) => widget.type));
-
 describe('default dashboard layouts', () => {
-  it('includes Polymarket in the Global Markets system dashboard', () => {
-    // Given: the static Global Markets system dashboard template.
+  it('ships Global Markets as one coherent TradingView-first tab', () => {
     const dashboard = createGlobalMarketsDashboard();
 
-    // When: its default widgets are flattened across tabs.
-    const widgetTypes = getDashboardWidgetTypes(dashboard);
+    expect(dashboard.tabs).toHaveLength(1);
+    expect(dashboard.tabs[0]).toEqual(expect.objectContaining({
+      id: 'default-global-markets-tab-0',
+      name: 'Global Markets',
+      order: 0,
+    }));
 
-    // Then: Polymarket is present on first-load/global default layout.
-    expect(widgetTypes).toContain('polymarket');
+    const widgets = dashboard.tabs[0].widgets;
+    expect(widgets.every((widget) => widget.tabId === dashboard.tabs[0].id)).toBe(true);
+    expect(widgets.map((widget) => widget.type)).toEqual([
+      'tradingview_ticker_tape',
+      'tradingview_chart',
+      'tradingview_technical_analysis',
+      'tradingview_market_overview',
+      'tradingview_market_data',
+      'polymarket',
+      'world_news_map',
+      'world_news_live_stream',
+      'world_news_monitor',
+      'world_news_sources',
+    ]);
+    expect(widgets.filter((widget) => ['polymarket', 'world_news_map', 'world_news_live_stream'].includes(widget.type)).map((widget) => widget.layout.y)).toEqual([22, 22, 22]);
   });
 
-  it('does not force a refresh for the up-to-date default Global Markets dashboard', () => {
-    // Given: the current default template (already contains Polymarket + world-news widgets).
-    const dashboard = createGlobalMarketsDashboard();
-
-    // Then: no needless re-layout churn for users already on the latest template.
-    expect(shouldRefreshGlobalMarketsLayout(dashboard)).toBe(false);
-  });
-
-  it('forces a refresh for an existing persisted dashboard that is missing Polymarket', () => {
-    // Given: a persisted Global Markets dashboard from before Polymarket existed -
-    // it has the world-news widgets and no legacy symbols, so it otherwise looks current.
-    const upToDate = createGlobalMarketsDashboard();
+  it('migrates only the legacy seven-tab Global Markets fallback', () => {
+    const current = createGlobalMarketsDashboard();
+    const legacyTypes: WidgetType[] = [
+      'tradingview_ticker_tape',
+      'polymarket',
+      'tradingview_chart',
+      'tradingview_market_overview',
+      'tradingview_market_data',
+      'world_news_map',
+      'world_news_live_stream',
+    ];
     const legacy: Dashboard = {
-      ...upToDate,
-      tabs: upToDate.tabs.map((tab) => ({
-        ...tab,
-        widgets: tab.widgets.filter((widget) => widget.type !== 'polymarket'),
-      })),
+      ...current,
+      tabs: legacyTypes.map((type, index) => {
+        const tabId = `default-global-markets-tab-${index}`;
+        const widget = current.tabs[0].widgets.find((item) => item.type === type)!;
+        return {
+          id: tabId,
+          name: `Tab ${index + 1}`,
+          order: index,
+          widgets: [{ ...widget, tabId }],
+        };
+      }),
     };
+    const custom = { ...legacy, id: 'custom-global-markets' };
 
-    // Sanity: the legacy fixture really has no polymarket widget.
-    expect(getDashboardWidgetTypes(legacy)).not.toContain('polymarket');
-
-    // Then: the gate detects the missing widget and triggers a re-layout so
-    // existing users actually receive the Polymarket widget (not just fresh installs).
-    expect(shouldRefreshGlobalMarketsLayout(legacy)).toBe(true);
+    expect(migrateLegacyGlobalMarketsDashboard([legacy])[0].tabs).toHaveLength(1);
+    expect(migrateLegacyGlobalMarketsDashboard([custom])[0]).toBe(custom);
   });
 });
 

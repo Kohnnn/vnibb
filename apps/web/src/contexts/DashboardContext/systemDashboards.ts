@@ -3,7 +3,7 @@
 // These wrap the actual dashboard definitions from index.tsx and templates.ts.
 
 import type { Dashboard } from '@/types/dashboard';
-import { MAIN_TAB_TEMPLATES } from './templates';
+import { GLOBAL_MARKETS_TEMPLATE, MAIN_TAB_TEMPLATES } from './templates';
 import {
     MAIN_DASHBOARD_ID,
     MAIN_DASHBOARD_NAME,
@@ -86,17 +86,6 @@ export function createQuantSystemDashboard(): Dashboard {
         'Quantitative analysis and backtesting workspace'
     );
 }
-
-// Global Markets tab templates (mirrored from templates.ts)
-const GLOBAL_MARKETS_TAB_TEMPLATE: TemplateWidget[] = [
-    { type: 'tradingview_ticker_tape', syncGroupId: 1, config: {}, layout: { x: 0, y: 0, w: 24, h: 4, minW: 12, minH: 3 } },
-    { type: 'polymarket', syncGroupId: 1, config: {}, layout: { x: 0, y: 4, w: 8, h: 7, minW: 6, minH: 6 } },
-    { type: 'tradingview_chart', syncGroupId: 1, config: { symbol: 'AMEX:SPY', useLinkedSymbol: false, allow_symbol_change: false }, layout: { x: 8, y: 4, w: 16, h: 12, minW: 10, minH: 8 } },
-    { type: 'tradingview_market_overview', syncGroupId: 1, config: {}, layout: { x: 0, y: 16, w: 12, h: 8, minW: 8, minH: 6 } },
-    { type: 'tradingview_market_data', syncGroupId: 1, config: {}, layout: { x: 12, y: 16, w: 12, h: 8, minW: 8, minH: 6 } },
-    { type: 'world_news_map', syncGroupId: 1, config: { region: 'all', category: 'all', limit: 120, freshnessHours: 72 }, layout: { x: 0, y: 24, w: 12, h: 9, minW: 8, minH: 6 } },
-    { type: 'world_news_live_stream', syncGroupId: 1, config: { region: 'all', category: 'all', limit: 30, freshnessHours: 24, pollSeconds: 60 }, layout: { x: 12, y: 24, w: 12, h: 9, minW: 6, minH: 6 } },
-];
 
 // Phase 7.7 — Prediction Markets tab template.
 //
@@ -188,25 +177,17 @@ export function createGlobalMarketsDashboard(): Dashboard {
         isEditable: true,
         adminUnlocked: false,
         showGroupLabels: false,
-        tabs: GLOBAL_MARKETS_TAB_TEMPLATE.map((template, index) => ({
-            id: `${GLOBAL_MARKETS_DASHBOARD_ID}-tab-${index}`,
-            name: `Tab ${index + 1}`,
-            order: index,
-            widgets: createWidgetsFromTemplate([template], `${GLOBAL_MARKETS_DASHBOARD_ID}-tab-${index}`),
-        })),
+        tabs: [{
+            id: `${GLOBAL_MARKETS_DASHBOARD_ID}-tab-0`,
+            name: GLOBAL_MARKETS_DASHBOARD_NAME,
+            order: 0,
+            widgets: createWidgetsFromTemplate(
+                GLOBAL_MARKETS_TEMPLATE,
+                `${GLOBAL_MARKETS_DASHBOARD_ID}-tab-0`,
+            ),
+        }],
         syncGroups: [],
         createdAt: now,
         updatedAt: now,
     };
-}
-
-/**
- * Determines whether an existing Global Markets dashboard needs a layout refresh.
- * Returns true if the dashboard is missing 'polymarket' widgets.
- */
-export function shouldRefreshGlobalMarketsLayout(dashboard: Dashboard): boolean {
-    const hasPolymarket = dashboard.tabs.some((tab) =>
-        tab.widgets.some((widget) => widget.type === 'polymarket')
-    );
-    return !hasPolymarket;
 }

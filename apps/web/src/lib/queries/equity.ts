@@ -23,15 +23,15 @@ export function useVnstockSource(): VnstockSource {
 
 export const equityQueryKeys = {
     profile: (symbol: string) => ['profile', symbol] as const,
-    companyNews: (symbol: string) => ['companyNews', symbol] as const,
-    companyEvents: (symbol: string) => ['companyEvents', symbol] as const,
+    companyNews: (symbol: string, limit?: number) => ['companyNews', symbol, limit] as const,
+    companyEvents: (symbol: string, limit?: number) => ['companyEvents', symbol, limit] as const,
     analystEstimates: (symbol: string) => ['analystEstimates', symbol] as const,
     fundamentalAnalysis: (symbol: string) => ['fundamentalAnalysis', symbol] as const,
     shareholders: (symbol: string) => ['shareholders', symbol] as const,
     officers: (symbol: string) => ['officers', symbol] as const,
-    intraday: (symbol: string) => ['intraday', symbol] as const,
+    intraday: (symbol: string, limit?: number) => ['intraday', symbol, limit] as const,
     financialRatios: (symbol: string, period: string) => ['financialRatios', symbol, period] as const,
-    ratioHistory: (symbol: string, period: string, ratios: string[]) => ['ratioHistory', symbol, period, ratios] as const,
+    ratioHistory: (symbol: string, period: string, ratios: string[], limit?: number) => ['ratioHistory', symbol, period, ratios, limit] as const,
     metricsHistory: (symbol: string, limit?: number) => ['metricsHistory', symbol, limit] as const,
     foreignTrading: (symbol: string, limit?: number) => ['foreignTrading', symbol, limit] as const,
     transactionFlow: (symbol: string, days: number) => ['transactionFlow', symbol, days] as const,
@@ -43,7 +43,7 @@ export const equityQueryKeys = {
     cashFlow: (symbol: string, period: string) => ['cashFlow', symbol, period] as const,
     ownership: (symbol: string) => ['ownership', symbol] as const,
     rating: (symbol: string) => ['rating', symbol] as const,
-    financials: (symbol: string, type: string, period: string) => ['financials', symbol, type, period] as const,
+    financials: (symbol: string, type: string, period: string, limit?: number) => ['financials', symbol, type, period, limit] as const,
     priceDepth: (symbol: string) => ['priceDepth', symbol] as const,
     dividends: (symbol: string) => ['dividends', symbol] as const,
     tradingStats: (symbol: string) => ['tradingStats', symbol] as const,
@@ -79,7 +79,7 @@ export function useCompanyNews(
     options?: { limit?: number; enabled?: boolean }
 ) {
     return useQuery({
-        queryKey: equityQueryKeys.companyNews(symbol),
+        queryKey: equityQueryKeys.companyNews(symbol, options?.limit),
         queryFn: () => api.getCompanyNews(symbol, { limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
@@ -91,7 +91,7 @@ export function useCompanyEvents(
     options?: { limit?: number; enabled?: boolean }
 ) {
     return useQuery({
-        queryKey: equityQueryKeys.companyEvents(symbol),
+        queryKey: equityQueryKeys.companyEvents(symbol, options?.limit),
         queryFn: () => api.getCompanyEvents(symbol, { limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 10 * 60 * 1000,
@@ -142,7 +142,7 @@ export function useIntraday(
     options?: { limit?: number; enabled?: boolean }
 ) {
     return useQuery({
-        queryKey: equityQueryKeys.intraday(symbol),
+        queryKey: equityQueryKeys.intraday(symbol, options?.limit),
         queryFn: () => api.getIntraday(symbol, { limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 30 * 1000,
@@ -236,7 +236,7 @@ export function useRatioHistory(
     const ratios = options?.ratios || ['pe', 'pb', 'ps', 'ev_ebitda'];
     const period = options?.period || 'year';
     return useQuery({
-        queryKey: equityQueryKeys.ratioHistory(symbol, period, ratios),
+        queryKey: equityQueryKeys.ratioHistory(symbol, period, ratios, options?.limit),
         queryFn: () => api.getRatioHistory(symbol, { ratios, period, limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 60 * 60 * 1000,
@@ -318,7 +318,7 @@ export function useFinancials(
     const type = options?.type || 'income';
     const period = options?.period || 'FY';
     return useQuery({
-        queryKey: equityQueryKeys.financials(symbol, type, period),
+        queryKey: equityQueryKeys.financials(symbol, type, period, options?.limit),
         queryFn: () => api.getFinancials(symbol, { type, period, limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 60 * 60 * 1000,

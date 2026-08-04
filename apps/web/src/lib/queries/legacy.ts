@@ -19,8 +19,8 @@ export const queryKeys = {
     profile: (symbol: string) => ['profile', symbol] as const,
 
     // Company
-    companyNews: (symbol: string) => ['companyNews', symbol] as const,
-    companyEvents: (symbol: string) => ['companyEvents', symbol] as const,
+    companyNews: (symbol: string, limit?: number) => ['companyNews', symbol, limit] as const,
+    companyEvents: (symbol: string, limit?: number) => ['companyEvents', symbol, limit] as const,
 
     // Analyst
     analystEstimates: (symbol: string) => ['analystEstimates', symbol] as const,
@@ -31,9 +31,9 @@ export const queryKeys = {
     officers: (symbol: string) => ['officers', symbol] as const,
 
     // Trading
-    intraday: (symbol: string) => ['intraday', symbol] as const,
+    intraday: (symbol: string, limit?: number) => ['intraday', symbol, limit] as const,
     financialRatios: (symbol: string, period: string) => ['financialRatios', symbol, period] as const,
-    ratioHistory: (symbol: string, period: string, ratios: string[]) => ['ratioHistory', symbol, period, ratios] as const,
+    ratioHistory: (symbol: string, period: string, ratios: string[], limit?: number) => ['ratioHistory', symbol, period, ratios, limit] as const,
     foreignTrading: (symbol: string, limit?: number) => ['foreignTrading', symbol, limit] as const,
     transactionFlow: (symbol: string, days: number) => ['transactionFlow', symbol, days] as const,
     correlationMatrix: (symbol: string, days: number, topN: number) => ['correlationMatrix', symbol, days, topN] as const,
@@ -117,7 +117,7 @@ export const queryKeys = {
     rating: (symbol: string) => ['rating', symbol] as const,
 
     // Financials
-    financials: (symbol: string, type: string, period: string) => ['financials', symbol, type, period] as const,
+    financials: (symbol: string, type: string, period: string, limit?: number) => ['financials', symbol, type, period, limit] as const,
 
     // Technical
     taFull: (symbol: string, timeframe: string) => ['taFull', symbol, timeframe] as const,

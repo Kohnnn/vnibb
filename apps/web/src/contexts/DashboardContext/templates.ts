@@ -100,10 +100,11 @@ const GLOBAL_MARKETS_TEMPLATE: TemplateWidget[] = [
     { type: 'tradingview_technical_analysis', syncGroupId: 1, config: { symbol: 'AMEX:SPY', useLinkedSymbol: false }, layout: { x: 14, y: 4, w: 10, h: 10, minW: 8, minH: 8 } },
     { type: 'tradingview_market_overview', syncGroupId: 1, config: {}, layout: { x: 0, y: 14, w: 12, h: 8, minW: 8, minH: 6 } },
     { type: 'tradingview_market_data', syncGroupId: 1, config: {}, layout: { x: 12, y: 14, w: 12, h: 8, minW: 8, minH: 6 } },
-    { type: 'world_news_map', syncGroupId: 1, config: { region: 'all', category: 'all', limit: 120, freshnessHours: 72 }, layout: { x: 0, y: 37, w: 12, h: 9, minW: 8, minH: 6 } },
-    { type: 'world_news_live_stream', syncGroupId: 1, config: { region: 'all', category: 'all', limit: 30, freshnessHours: 24, pollSeconds: 60 }, layout: { x: 12, y: 37, w: 12, h: 9, minW: 6, minH: 6 } },
-    { type: 'world_news_monitor', syncGroupId: 1, config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 }, layout: { x: 0, y: 46, w: 16, h: 9, minW: 8, minH: 6 } },
-    { type: 'world_news_sources', syncGroupId: 1, config: { region: 'all', category: 'all', language: 'all' }, layout: { x: 16, y: 46, w: 8, h: 9, minW: 5, minH: 6 } },
+    { type: 'polymarket', syncGroupId: 1, config: {}, layout: { x: 0, y: 22, w: 8, h: 9, minW: 6, minH: 6 } },
+    { type: 'world_news_map', syncGroupId: 1, config: { region: 'all', category: 'all', limit: 120, freshnessHours: 72 }, layout: { x: 8, y: 22, w: 8, h: 9, minW: 8, minH: 6 } },
+    { type: 'world_news_live_stream', syncGroupId: 1, config: { region: 'all', category: 'all', limit: 30, freshnessHours: 24, pollSeconds: 60 }, layout: { x: 16, y: 22, w: 8, h: 9, minW: 6, minH: 6 } },
+    { type: 'world_news_monitor', syncGroupId: 1, config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 }, layout: { x: 0, y: 31, w: 16, h: 9, minW: 8, minH: 6 } },
+    { type: 'world_news_sources', syncGroupId: 1, config: { region: 'all', category: 'all', language: 'all' }, layout: { x: 16, y: 31, w: 8, h: 9, minW: 5, minH: 6 } },
 ];
 
 const GLOBAL_MARKETS_SCREENER_TEMPLATE: TemplateWidget[] = [
