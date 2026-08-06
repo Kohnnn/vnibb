@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import vnibb.api.v1.screener as screener_module
 from vnibb.api.v1.screener import (
     _apply_fundamental_filters,
     _apply_fundamental_enrichment,
+    _blob_names_fundamental_field,
+    _sort_names_fundamental_field,
 )
 from vnibb.providers.vnstock.equity_screener import ScreenerData
 
@@ -159,6 +163,141 @@ class TestApplyFundamentalFilters:
         assert [r.symbol for r in result] == ["VNM"]
 
 
+def _cond(field: str, operator: str = "gt", value=0):
+    return {"field": field, "operator": operator, "value": value}
+
+
+class TestBlobNamesFundamentalField:
+    """The filter-tree walk decides whether a request gets enriched at all.
+
+    Every miss here is a screen that silently filters on empty columns, so
+    the walk is pinned directly rather than only through HTTP.
+    """
+
+    def test_flat_group_names_fundamental_field(self):
+        blob = json.dumps({"logic": "AND", "conditions": [_cond("fcf_positive", "eq", True)]})
+        assert _blob_names_fundamental_field(blob) is True
+
+    def test_flat_group_without_fundamental_field(self):
+        blob = json.dumps({"logic": "AND", "conditions": [_cond("pe", "lt", 15)]})
+        assert _blob_names_fundamental_field(blob) is False
+
+    def test_nested_group_under_and(self):
+        blob = json.dumps(
+            {
+                "logic": "AND",
+                "conditions": [
+                    _cond("pe", "lt", 15),
+                    {"logic": "AND", "conditions": [_cond("margin_of_safety", "gt", 20)]},
+                ],
+            }
+        )
+        assert _blob_names_fundamental_field(blob) is True
+
+    def test_nested_group_under_or(self):
+        blob = json.dumps(
+            {
+                "logic": "OR",
+                "conditions": [
+                    _cond("pb", "lt", 2),
+                    {"logic": "OR", "conditions": [_cond("moat", "eq", "wide")]},
+                ],
+            }
+        )
+        assert _blob_names_fundamental_field(blob) is True
+
+    def test_deeply_nested_group(self):
+        """Depth must not be a way to smuggle a fundamental criterion past detection."""
+        blob = json.dumps(
+            {
+                "logic": "AND",
+                "conditions": [
+                    {
+                        "logic": "OR",
+                        "conditions": [
+                            {
+                                "logic": "AND",
+                                "conditions": [
+                                    {
+                                        "logic": "OR",
+                                        "conditions": [_cond("intrinsic_value", "gt", 1000)],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        assert _blob_names_fundamental_field(blob) is True
+
+    def test_deeply_nested_without_fundamental_field(self):
+        blob = json.dumps(
+            {
+                "logic": "AND",
+                "conditions": [
+                    {
+                        "logic": "OR",
+                        "conditions": [
+                            {"logic": "AND", "conditions": [_cond("roe", "gt", 15)]}
+                        ],
+                    }
+                ],
+            }
+        )
+        assert _blob_names_fundamental_field(blob) is False
+
+    def test_unknown_field_is_not_fundamental(self):
+        blob = json.dumps({"logic": "AND", "conditions": [_cond("not_a_real_field")]})
+        assert _blob_names_fundamental_field(blob) is False
+
+    @pytest.mark.parametrize("blob", [None, "", "   "])
+    def test_empty_input_names_nothing(self, blob):
+        assert _blob_names_fundamental_field(blob) is False
+
+    @pytest.mark.parametrize(
+        "blob",
+        [
+            "{not json at all",
+            "[]",
+            "null",
+            '{"logic": "AND"}',
+            '{"conditions": "not-a-list"}',
+            '{"logic": "AND", "conditions": [{"field": "fcf_positive"}]}',
+        ],
+    )
+    def test_malformed_blob_names_nothing_and_does_not_raise(self, blob):
+        """A malformed blob must degrade, not 500. The filter service logs the parse failure."""
+        assert _blob_names_fundamental_field(blob) is False
+
+    def test_empty_conditions_list(self):
+        assert _blob_names_fundamental_field(json.dumps({"logic": "AND", "conditions": []})) is False
+
+
+class TestSortNamesFundamentalField:
+    def test_sort_by_fundamental_field(self):
+        assert _sort_names_fundamental_field(None, "margin_of_safety") is True
+
+    def test_sort_by_non_fundamental_field(self):
+        assert _sort_names_fundamental_field(None, "pe") is False
+
+    def test_multi_sort_string_with_fundamental_field(self):
+        assert _sort_names_fundamental_field("pe:asc,intrinsic_value:desc", None) is True
+
+    def test_multi_sort_string_without_fundamental_field(self):
+        assert _sort_names_fundamental_field("pe:asc,volume:desc", None) is False
+
+    def test_sort_field_without_direction(self):
+        assert _sort_names_fundamental_field("moat", None) is True
+
+    def test_whitespace_padded_sort_field(self):
+        assert _sort_names_fundamental_field("  dividend_years : desc ", None) is True
+
+    @pytest.mark.parametrize("sort", [None, "", ",", " , "])
+    def test_empty_sort_names_nothing(self, sort):
+        assert _sort_names_fundamental_field(sort, None) is False
+
+
 class _FakeMongoService:
     def __init__(self, *, enabled: bool = True, docs: dict | None = None, error: bool = False):
         self.enabled = enabled
@@ -305,6 +444,22 @@ async def test_screener_enriches_fundamentals_when_requested(client, monkeypatch
 
 _FCF_BLOB = '{"logic":"AND","conditions":[{"field":"fcf_positive","operator":"eq","value":true}]}'
 
+# The same criterion buried inside an OR sub-group -- the shape a saved screen
+# with grouped criteria actually produces.
+_NESTED_MOAT_BLOB = json.dumps(
+    {
+        "logic": "AND",
+        "conditions": [
+            {"field": "pe", "operator": "lt", "value": 100},
+            {
+                "logic": "OR",
+                "conditions": [{"field": "moat", "operator": "eq", "value": "wide"}],
+            },
+        ],
+    },
+    separators=(",", ":"),
+)
+
 
 async def _seed_screener_snapshots(session, symbols: list[str]) -> None:
     """Populate the Screener Snapshot so cache-path requests get a Candidate Set."""
@@ -319,6 +474,7 @@ async def _seed_screener_snapshots(session, symbols: list[str]) -> None:
                 snapshot_date=_date.today(),
                 exchange="HOSE",
                 price=10000.0,
+                pe=10.0,
                 source="vnstock_ratio",
             )
         )
@@ -504,6 +660,83 @@ async def test_non_fundamental_request_reports_enrichment_skipped(client, monkey
     await _seed_screener_snapshots(test_db, ["AAA", "BBB"])
 
     response = await client.get("/api/v1/screener/?limit=10")
+
+    assert response.status_code == 200
+    assert response.json()["meta"]["fundamental_enrichment"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_nested_blob_fundamental_reference_triggers_enrichment(
+    client, monkeypatch, test_db
+):
+    """A criterion inside an OR sub-group is still a criterion.
+
+    Nesting is the shape a grouped saved screen produces, and it must not be a
+    way to reach an unenriched column.
+    """
+    await _seed_screener_snapshots(test_db, ["AAA", "BBB", "CCC", "DDD", "ZZZ"])
+
+    enrichment_calls = 0
+
+    async def fake_enrich(rows):
+        nonlocal enrichment_calls
+        enrichment_calls += 1
+        for row in rows:
+            row.moat = "wide" if row.symbol == "ZZZ" else "none"
+        return rows, "ok"
+
+    monkeypatch.setattr(screener_module, "_apply_fundamental_enrichment", fake_enrich)
+
+    response = await client.get(f"/api/v1/screener/?limit=2&filters={_NESTED_MOAT_BLOB}")
+
+    assert response.status_code == 200
+    assert enrichment_calls == 1
+    assert [r["symbol"] for r in response.json()["data"]] == ["ZZZ"]
+
+
+@pytest.mark.asyncio
+async def test_fundamental_sort_triggers_enrichment(client, monkeypatch, test_db):
+    """Sorting an unenriched column yields arbitrary order -- as wrong as filtering one."""
+    await _seed_screener_snapshots(test_db, ["AAA", "BBB", "CCC"])
+
+    enrichment_calls = 0
+
+    async def fake_enrich(rows):
+        nonlocal enrichment_calls
+        enrichment_calls += 1
+        ranks = {"AAA": 10.0, "BBB": 30.0, "CCC": 20.0}
+        for row in rows:
+            row.margin_of_safety = ranks[row.symbol]
+        return rows, "ok"
+
+    monkeypatch.setattr(screener_module, "_apply_fundamental_enrichment", fake_enrich)
+
+    response = await client.get(
+        "/api/v1/screener/?limit=3&sort=margin_of_safety:desc"
+    )
+
+    assert response.status_code == 200
+    assert enrichment_calls == 1
+    assert [r["symbol"] for r in response.json()["data"]] == ["BBB", "CCC", "AAA"]
+
+
+@pytest.mark.parametrize(
+    "blob",
+    ["{not json at all", '{"conditions":"not-a-list"}', '{"logic":"AND"}'],
+)
+@pytest.mark.asyncio
+async def test_malformed_filter_blob_degrades_without_error(
+    client, monkeypatch, test_db, blob
+):
+    """A blob the api cannot parse names nothing; the screen still answers 200."""
+    await _seed_screener_snapshots(test_db, ["AAA", "BBB"])
+
+    async def fail_enrich(_rows):
+        raise AssertionError("an unparseable blob names no Fundamental Field")
+
+    monkeypatch.setattr(screener_module, "_apply_fundamental_enrichment", fail_enrich)
+
+    response = await client.get(f"/api/v1/screener/?limit=10&filters={blob}")
 
     assert response.status_code == 200
     assert response.json()["meta"]["fundamental_enrichment"] == "skipped"
