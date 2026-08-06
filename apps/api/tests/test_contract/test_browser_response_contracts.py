@@ -106,6 +106,9 @@ async def test_browser_screener_envelope_keeps_display_identity(client, monkeypa
     async def identity(rows, *args, **kwargs):
         return rows
 
+    async def enrichment_identity(rows, *args, **kwargs):
+        return rows, "ok"
+
     async def universe(_universe):
         return None, {"universe": "ALL"}
 
@@ -116,7 +119,7 @@ async def test_browser_screener_envelope_keeps_display_identity(client, monkeypa
     monkeypatch.setattr(screener, "_enrich_screener_metrics", identity)
     monkeypatch.setattr(screener, "_hydrate_screener_rows", identity)
     monkeypatch.setattr(screener, "_enrich_discovery_fields", identity)
-    monkeypatch.setattr(screener, "_merge_fundamental_snapshots", identity)
+    monkeypatch.setattr(screener, "_apply_fundamental_enrichment", enrichment_identity)
     monkeypatch.setattr(screener, "_resolve_index_universe", universe)
     monkeypatch.setattr(screener.CacheManager, "store_screener_data", store)
 
