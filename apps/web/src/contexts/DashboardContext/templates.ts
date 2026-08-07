@@ -180,6 +180,14 @@ const MAIN_MACRO_TEMPLATE: TemplateWidget[] = [
     { type: 'listing_browser', syncGroupId: 1, config: {}, layout: { x: 12, y: 8, w: 12, h: 12, minW: 8, minH: 8 } },
 ];
 
+const INVESTOR_HOME_TEMPLATE: TemplateWidget[] = [
+    { type: 'market_overview', syncGroupId: 1, config: {}, layout: { x: 0, y: 0, w: 8, h: 8, minW: 6, minH: 6 } },
+    { type: 'portfolio_tracker', syncGroupId: 1, config: {}, layout: { x: 8, y: 0, w: 16, h: 8, minW: 8, minH: 6 } },
+    { type: 'notes', syncGroupId: 1, config: {}, layout: { x: 0, y: 8, w: 12, h: 10, minW: 8, minH: 7 } },
+    { type: 'investor_event_calendar', syncGroupId: 1, config: {}, layout: { x: 12, y: 8, w: 12, h: 10, minW: 8, minH: 7 } },
+    { type: 'alert_activity_inbox', syncGroupId: 1, config: {}, layout: { x: 0, y: 18, w: 24, h: 8, minW: 8, minH: 6 } },
+];
+
 // ============================================================================
 // Create Widgets From Template
 // ============================================================================
@@ -213,10 +221,9 @@ export const MAIN_TAB_TEMPLATES = [
     { name: 'Financials', widgets: FINANCIALS_TEMPLATE },
     { name: 'Technical', widgets: TECHNICAL_TEMPLATE },
     { name: 'Quant', widgets: QUANT_TEMPLATE },
-    { name: 'Market', widgets: [] as TemplateWidget[] },
+    { name: 'Investor Home', widgets: INVESTOR_HOME_TEMPLATE },
     { name: 'Ownership', widgets: OWNERSHIP_TEMPLATE },
     { name: 'Calendar', widgets: CALENDAR_TEMPLATE },
-    { name: 'Trading', widgets: [] as TemplateWidget[] },
     { name: 'Comparison', widgets: COMPARISON_TEMPLATE },
 ] as const;
 
@@ -229,8 +236,7 @@ export const TAB_WIDGET_TEMPLATES: Record<string, TemplateWidget[]> = {
     financials: FINANCIALS_TEMPLATE,
     quant: QUANT_TEMPLATE,
     technical: TECHNICAL_TEMPLATE,
-    trading: [] as TemplateWidget[],
-    market: [] as TemplateWidget[],
+    investor_home: INVESTOR_HOME_TEMPLATE,
     comparison: COMPARISON_TEMPLATE,
     ownership: OWNERSHIP_TEMPLATE,
     calendar: CALENDAR_TEMPLATE,
@@ -255,8 +261,7 @@ export const TAB_NAME_TO_TEMPLATE_KEY: Record<string, string> = {
     'quant and technical': 'quant',
     'technical analysis': 'technical',
     'technical': 'technical',
-    'trading': 'trading',
-    'trade': 'trading',
+    'investor home': 'investor_home',
     'comparison analysis': 'comparison',
     'comparison': 'comparison',
     'ownership': 'ownership',

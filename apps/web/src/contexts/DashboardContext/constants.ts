@@ -6,7 +6,7 @@ export const FOLDERS_KEY = 'vnibb_folders';
 export const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 export const CURRENT_STORAGE_VERSION = 'v74';
 export const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-export const CURRENT_MIGRATION_VERSION = 24;
+export const CURRENT_MIGRATION_VERSION = 25;
 export const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';
 export const DASHBOARD_STORAGE_COMMIT_KEY = 'vnibb-dashboard-storage-commit';
 export const DASHBOARD_RECOVERY_BACKUP_KEY = 'vnibb_dashboards_recovery_backup_v1';
@@ -45,9 +45,8 @@ export const MAIN_TAB_TEMPLATES = [
     { name: 'Financials', widgets: [] as any[] },
     { name: 'Technical', widgets: [] as any[] },
     { name: 'Quant', widgets: [] as any[] },
-    { name: 'Market', widgets: [] as any[] },
+    { name: 'Investor Home', widgets: [] as any[] },
     { name: 'Ownership', widgets: [] as any[] },
     { name: 'Calendar', widgets: [] as any[] },
-    { name: 'Trading', widgets: [] as any[] },
     { name: 'Comparison', widgets: [] as any[] },
 ] as const;

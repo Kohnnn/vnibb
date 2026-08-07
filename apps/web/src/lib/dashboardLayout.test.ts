@@ -11,6 +11,8 @@ import { tradingViewWidgetDefaultLayouts } from '@/lib/tradingViewWidgets';
 import type { Dashboard, WidgetType } from '@/types/dashboard';
 import {
   createGlobalMarketsDashboard,
+  createMainSystemDashboard,
+  migrateDefaultInvestorHome,
   migrateLegacyGlobalMarketsDashboard,
 } from '@/contexts/DashboardContext';
 
@@ -47,6 +49,49 @@ describe('default dashboard layouts', () => {
       'world_news_sources',
     ]);
     expect(widgets.filter((widget) => ['polymarket', 'world_news_map', 'world_news_live_stream'].includes(widget.type)).map((widget) => widget.layout.y)).toEqual([22, 22, 22]);
+  });
+
+  it('ships Investor Home instead of empty Market and Trading tabs', () => {
+    const dashboard = createMainSystemDashboard();
+    const investorHome = dashboard.tabs.find((tab) => tab.name === 'Investor Home');
+
+    expect(investorHome?.widgets.map((widget) => widget.type)).toEqual([
+      'market_overview',
+      'portfolio_tracker',
+      'notes',
+      'investor_event_calendar',
+      'alert_activity_inbox',
+    ]);
+    expect(dashboard.tabs.some((tab) => tab.name === 'Market')).toBe(false);
+    expect(dashboard.tabs.some((tab) => tab.name === 'Trading')).toBe(false);
+  });
+
+  it('migrates only the untouched default Market and Trading pair', () => {
+    const current = createMainSystemDashboard();
+    const legacy: Dashboard = {
+      ...current,
+      tabs: current.tabs.flatMap((tab) => tab.name === 'Investor Home'
+        ? [
+          { ...tab, name: 'Market', widgets: [] },
+          { id: 'default-fundamental-tab-trading', name: 'Trading', order: tab.order + 1, widgets: [] },
+        ]
+        : [tab]),
+    };
+    const custom = { ...legacy, id: 'custom-dashboard' };
+    const customized = {
+      ...legacy,
+      tabs: legacy.tabs.map((tab) => tab.name === 'Trading'
+        ? { ...tab, widgets: current.tabs[0].widgets }
+        : tab),
+    };
+
+    const migrated = migrateDefaultInvestorHome([legacy])[0];
+
+    expect(migrated.tabs.some((tab) => tab.name === 'Investor Home')).toBe(true);
+    expect(migrated.tabs.some((tab) => tab.name === 'Market')).toBe(false);
+    expect(migrated.tabs.some((tab) => tab.name === 'Trading')).toBe(false);
+    expect(migrateDefaultInvestorHome([custom])[0]).toBe(custom);
+    expect(migrateDefaultInvestorHome([customized])[0]).toBe(customized);
   });
 
   it('migrates only the legacy seven-tab Global Markets fallback', () => {

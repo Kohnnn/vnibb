@@ -8,6 +8,7 @@ import { normalizeThesisConfig } from '@/lib/investorWorkflow';
 
 import {
     GLOBAL_MARKETS_DASHBOARD_ID,
+    MAIN_DASHBOARD_ID,
     LEGACY_DASHBOARD_NAME_RE,
     LEGACY_SIDEBAR_DASHBOARD_RE,
     LEGACY_MANAGE_TAB_NAME_RE,
@@ -193,6 +194,22 @@ const LEGACY_GLOBAL_MARKETS_WIDGET_TYPES = [
     'world_news_map',
     'world_news_live_stream',
 ] as const;
+
+export const migrateDefaultInvestorHome = (dashboards: Dashboard[]): Dashboard[] => dashboards.map((dashboard) => {
+    if (dashboard.id !== MAIN_DASHBOARD_ID) return dashboard;
+
+    const market = dashboard.tabs.find((tab) => tab.name === 'Market');
+    const trading = dashboard.tabs.find((tab) => tab.name === 'Trading');
+    if (!market || !trading || market.widgets.length > 0 || trading.widgets.length > 0) return dashboard;
+
+    const widgets = createWidgetsFromTemplate(TAB_WIDGET_TEMPLATES.investor_home, market.id);
+    const tabs = dashboard.tabs
+        .filter((tab) => tab.id !== trading.id)
+        .map((tab) => tab.id === market.id ? { ...tab, name: 'Investor Home', widgets } : tab)
+        .map((tab, order) => ({ ...tab, order }));
+
+    return { ...dashboard, tabs, updatedAt: new Date().toISOString() };
+});
 
 export const migrateLegacyGlobalMarketsDashboard = (dashboards: Dashboard[]): Dashboard[] => dashboards.map((dashboard) => {
     if (dashboard.id !== GLOBAL_MARKETS_DASHBOARD_ID) return dashboard;

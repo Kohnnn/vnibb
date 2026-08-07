@@ -43,7 +43,7 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v74';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 24;
+const CURRENT_MIGRATION_VERSION = 25;
 const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';
 const DASHBOARD_STORAGE_COMMIT_KEY = 'vnibb-dashboard-storage-commit';
 const DASHBOARD_RECOVERY_BACKUP_KEY = 'vnibb_dashboards_recovery_backup_v1';
@@ -221,6 +221,7 @@ export {
     migrateLegacyWidgetLayoutBounds,
     migrateLegacyThesisConfig,
     migrateLegacyGlobalMarketsDashboard,
+    migrateDefaultInvestorHome,
     migrateLegacyDashboardNames,
     migrateLegacyChartWidgets,
     migrateLegacySidebarDashboards,
@@ -245,6 +246,7 @@ import {
     migrateLegacyWidgetLayoutBounds,
     migrateLegacyThesisConfig,
     migrateLegacyGlobalMarketsDashboard,
+    migrateDefaultInvestorHome,
     migrateLegacyDashboardNames,
     migrateLegacyChartWidgets,
     migrateLegacySidebarDashboards,
@@ -466,6 +468,7 @@ function readDashboardStorageSnapshot(): { dashboards: Dashboard[]; folders: Das
         if (version < 7) normalizedDashboards = migrateLegacyWidgetTypes(normalizedDashboards);
         if (version < 23) normalizedDashboards = migrateLegacyThesisConfig(normalizedDashboards);
         if (version < 24) normalizedDashboards = migrateLegacyGlobalMarketsDashboard(normalizedDashboards);
+        if (version < 25) normalizedDashboards = migrateDefaultInvestorHome(normalizedDashboards);
 
         const normalizedFolders = folders.some((folder) => folder.id === INITIAL_FOLDER_ID)
             ? folders as unknown as DashboardFolder[]
@@ -617,10 +620,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             if (published.length > 0) {
                 dispatch({
                     type: 'APPLY_SYSTEM_TEMPLATES',
-                    payload: published.map((record) => ({
+                    payload: migrateDefaultInvestorHome(published.map((record) => ({
                         ...(record as { dashboard: Record<string, unknown> }).dashboard,
                         adminUnlocked: false,
-                    })) as unknown as Dashboard[],
+                    })) as unknown as Dashboard[]),
                 });
             }
             // Empty must stay a no-op: sync init already seeded system dashboards.
@@ -757,6 +760,12 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 (d) => {
                     if (migrationVersion < 24) {
                         d = migrateLegacyGlobalMarketsDashboard(d);
+                    }
+                    return { dashboards: d };
+                },
+                (d) => {
+                    if (migrationVersion < 25) {
+                        d = migrateDefaultInvestorHome(d);
                     }
                     return { dashboards: d };
                 },
