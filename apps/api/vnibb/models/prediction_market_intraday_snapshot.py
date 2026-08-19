@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Index, Integer, JSON, String
+from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from vnibb.core.database import Base
@@ -34,8 +34,8 @@ class PredictionMarketIntradaySnapshot(Base):
     source: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     source_id: Mapped[str] = mapped_column(String(128), nullable=False)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    question: Mapped[str] = mapped_column(String(512), nullable=False)
-    url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
     yes_price: Mapped[float] = mapped_column(Float, nullable=False)
     volume: Mapped[float | None] = mapped_column(Float, nullable=True)
     liquidity: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import Text
 
+from vnibb.models.prediction_market_intraday_snapshot import PredictionMarketIntradaySnapshot
 from vnibb.models.prediction_market_snapshot import PredictionMarketSnapshot
 from vnibb.services.prediction_market_service import (
     canonical_topics,
@@ -39,8 +40,9 @@ def test_canonical_topics_includes_explicit_categories():
 
 
 def test_snapshot_preserves_unbounded_parent_text_fields():
-    assert isinstance(PredictionMarketSnapshot.__table__.c.question.type, Text)
-    assert isinstance(PredictionMarketSnapshot.__table__.c.url.type, Text)
+    for model in (PredictionMarketSnapshot, PredictionMarketIntradaySnapshot):
+        assert isinstance(model.__table__.c.question.type, Text)
+        assert isinstance(model.__table__.c.url.type, Text)
 
 
 @pytest.mark.asyncio
