@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import Text
 
+from vnibb.models.prediction_market_snapshot import PredictionMarketSnapshot
 from vnibb.services.prediction_market_service import (
     canonical_topics,
-    category_taxonomy,
 )
 from vnibb.services.prediction_market_snapshot_service import (
     backfill_prediction_market_snapshots,
@@ -38,6 +38,11 @@ def test_canonical_topics_includes_explicit_categories():
     assert "election" in topics
 
 
+def test_snapshot_preserves_unbounded_parent_text_fields():
+    assert isinstance(PredictionMarketSnapshot.__table__.c.question.type, Text)
+    assert isinstance(PredictionMarketSnapshot.__table__.c.url.type, Text)
+
+
 @pytest.mark.asyncio
 async def test_snapshot_row_count_returns_int():
     """snapshot_row_count returns 0 when the table is empty (no exceptions)."""
@@ -61,7 +66,7 @@ class AsyncExecute:
 @pytest.mark.asyncio
 async def test_backfill_writes_expected_row_count(monkeypatch):
     """Backfill writes ``days * snapshots_per_day`` rows per active market."""
-    now = datetime.now(timezone.utc)
+
 
     # Pin the drift sign so the series deterministically contains both an
     # upward and a downward snapshot. Otherwise the unseeded random.choice
