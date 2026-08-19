@@ -143,7 +143,7 @@ def normalize_kalshi_market(payload: KalshiMarketPayload) -> NormalizedKalshiMar
         category=category_taxonomy(raw_category),
         url=f"https://kalshi.com/markets/{payload.event_ticker}/{payload.ticker}" if payload.event_ticker else None,
         end_date=payload.close_time,
-        active=payload.status == "open",
+        active=payload.status in {"active", "open"},
         closed=payload.status == "closed",
         volume=float(payload.volume) if payload.volume is not None else None,
         liquidity=float(payload.open_interest) if payload.open_interest is not None else None,

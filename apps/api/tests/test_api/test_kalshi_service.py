@@ -44,6 +44,11 @@ def test_normalize_kalshi_market_converts_price_to_probability(sample_payload):
     assert market.url is not None and "kalshi.com" in market.url
 
 
+def test_normalize_kalshi_market_accepts_active_status(sample_payload):
+    market = normalize_kalshi_market(sample_payload.model_copy(update={"status": "active"}))
+    assert market.active is True
+
+
 def test_normalize_kalshi_handles_missing_yes_price():
     payload = KalshiMarketPayload(
         ticker="KXRECESSION-26",
