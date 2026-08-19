@@ -1,7 +1,7 @@
 """Kalshi ingestion and prediction-market persistence.
 
 Kalshi is a CFTC-regulated exchange. The public REST API at
-https://api.elections.kalshi.com/trade/v2/markets returns active markets
+https://api.elections.kalshi.com/trade-api/v2/markets returns active markets
 without authentication for read-only consumers. We normalise each market
 into the same source-agnostic `PredictionMarket` shape used for Polymarket
 so the read endpoints do not need to special-case the source.
@@ -17,15 +17,12 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vnibb.models.prediction_market import PredictionMarket
 from vnibb.services.prediction_market_service import (
-    NormalizedPredictionMarket,
     UnsupportedPredictionMarketDialectError,
     category_taxonomy,
-    normalize_gamma_market,  # reuse upsert helper indirectly
 )
 
-KALSHI_BASE_URL: Final = "https://api.elections.kalshi.com/trade/v2"
+KALSHI_BASE_URL: Final = "https://api.elections.kalshi.com/trade-api/v2"
 KALSHI_MAX_PAGES: Final = 10
 KALSHI_PAGE_LIMIT: Final = 200
 
@@ -176,7 +173,7 @@ async def fetch_kalshi_markets(
 
     rows: list[KalshiMarketPayload] = []
     cursor: str | None = None
-    for page in range(max_pages):
+    for _ in range(max_pages):
         params: dict[str, Any] = {"status": "open", "limit": min(limit, KALSHI_PAGE_LIMIT)}
         if cursor:
             params["cursor"] = cursor

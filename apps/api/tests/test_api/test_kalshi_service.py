@@ -2,7 +2,15 @@
 
 import pytest
 
-from vnibb.services.kalshi_service import KalshiMarketPayload, normalize_kalshi_market
+from vnibb.services.kalshi_service import (
+    KALSHI_BASE_URL,
+    KalshiMarketPayload,
+    normalize_kalshi_market,
+)
+
+
+def test_kalshi_base_url_uses_public_trade_api():
+    assert KALSHI_BASE_URL == "https://api.elections.kalshi.com/trade-api/v2"
 
 
 @pytest.fixture
