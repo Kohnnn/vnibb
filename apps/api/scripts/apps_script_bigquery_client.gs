@@ -553,9 +553,8 @@ function pullPrices(symbol, days) {
 }
 
 /**
- * EOD prices from market_prices_eod (partitioned by trade_date, clustered
- * by symbol — a single-symbol window scans almost nothing). This is the
- * vnstock-sourced series (often adjusted / more complete).
+ * EOD prices from market_prices_eod (clustered by symbol, trade_date - a
+ * single-symbol window scans almost nothing). Vietcap-sourced, prices in VND.
  * @param {string} symbol  Ticker.
  * @param {number=} days   Look-back window in days (default 365).
  * @returns {number}       Rows written.

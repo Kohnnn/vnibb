@@ -13,6 +13,10 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
 
+	handle_path /auth/v1/* {
+		reverse_proxy {$AUTH_UPSTREAM}
+	}
+
 	@mcpHealth path /mcp-health
 	handle @mcpHealth {
 		uri replace /mcp-health /health

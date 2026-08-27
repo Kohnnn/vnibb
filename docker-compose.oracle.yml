@@ -10,6 +10,13 @@ services:
     container_name: vnibb-api
     hostname: vnibb-api
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     env_file:
       - path: ./deployment/env.oracle
         required: false
@@ -119,6 +126,7 @@ services:
     environment:
       SITE_HOSTNAME: ${SITE_HOSTNAME:?Set SITE_HOSTNAME in deployment/env.oracle and pass --env-file deployment/env.oracle}
       API_UPSTREAM: ${API_UPSTREAM:-api:8000}
+      AUTH_UPSTREAM: ${AUTH_UPSTREAM:-auth:9999}
       MCP_UPSTREAM: ${MCP_UPSTREAM:-mcp:8001}
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in deployment/env.oracle and pass --env-file deployment/env.oracle}
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
@@ -134,23 +142,108 @@ services:
     pids_limit: ${CADDY_PIDS_LIMIT:-128}
     logging: *docker-logging
 
+  db:
+    image: supabase/postgres:17.6.1.136
+    container_name: vnibb-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deployment/env.oracle}
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+    volumes:
+      - vnibb_postgres:/var/lib/postgresql/data
+    cpus: ${POSTGRES_CPUS:-1.00}
+    mem_limit: ${POSTGRES_MEM_LIMIT:-3g}
+    pids_limit: ${POSTGRES_PIDS_LIMIT:-256}
+    logging: *docker-logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supabase_admin -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+
+  mongo:
+    image: mongo:7
+    container_name: vnibb-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in deployment/env.oracle}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in deployment/env.oracle}
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+    volumes:
+      - vnibb_mongo:/data/db
+    cpus: ${MONGO_CPUS:-1.00}
+    mem_limit: ${MONGO_MEM_LIMIT:-3g}
+    pids_limit: ${MONGO_PIDS_LIMIT:-256}
+    logging: *docker-logging
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'quit(db.adminCommand({ ping: 1 }).ok ? 0 : 2)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
   redis:
     image: redis:7-alpine
     container_name: vnibb-redis
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
-    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
-    profiles: ["local-redis"]
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in deployment/env.oracle}
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --save 60 1000"]
     volumes:
       - vnibb_redis:/data
     cpus: ${REDIS_CPUS:-0.50}
     mem_limit: ${REDIS_MEM_LIMIT:-512m}
     pids_limit: ${REDIS_PIDS_LIMIT:-128}
     logging: *docker-logging
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  auth:
+    image: supabase/gotrue:v2.177.0
+    container_name: vnibb-auth
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      API_EXTERNAL_URL: ${SUPABASE_URL:?Set SUPABASE_URL in deployment/env.oracle}/auth/v1
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: ${GOTRUE_DB_DATABASE_URL:?Set GOTRUE_DB_DATABASE_URL in deployment/env.oracle}
+      GOTRUE_DB_NAMESPACE: auth
+      GOTRUE_SITE_URL: ${GOTRUE_SITE_URL:-https://vnibb-web.vercel.app}
+      GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST:-https://vnibb-web.vercel.app/**}
+      GOTRUE_DISABLE_SIGNUP: ${GOTRUE_DISABLE_SIGNUP:-false}
+      GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET:?Set SUPABASE_JWT_SECRET in deployment/env.oracle}
+      GOTRUE_JWT_EXP: ${GOTRUE_JWT_EXP:-3600}
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${GOTRUE_EXTERNAL_EMAIL_ENABLED:-true}
+      GOTRUE_MAILER_AUTOCONFIRM: ${GOTRUE_MAILER_AUTOCONFIRM:-false}
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+    expose:
+      - "9999"
+    cpus: ${AUTH_CPUS:-0.50}
+    mem_limit: ${AUTH_MEM_LIMIT:-512m}
+    pids_limit: ${AUTH_PIDS_LIMIT:-128}
+    logging: *docker-logging
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9999/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
 volumes:
   vnibb_api_logs:
+  vnibb_postgres:
+  vnibb_mongo:
   vnibb_redis:
   caddy_data:
   caddy_config:
