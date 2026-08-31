@@ -1011,6 +1011,7 @@ export interface ScreenerFilterParams {
     // Dynamic Filters
     filters?: string; // JSON FilterGroup
     sort?: string;    // Multi-sort string (e.g. "field:order,field2:order")
+    columns?: string;
     // Legacy filters (keep for compatibility)
     pe_min?: number;
     pe_max?: number;

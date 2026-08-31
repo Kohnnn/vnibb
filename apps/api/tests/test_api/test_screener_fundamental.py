@@ -720,6 +720,44 @@ async def test_fundamental_sort_triggers_enrichment(client, monkeypatch, test_db
     assert [r["symbol"] for r in response.json()["data"]] == ["BBB", "CCC", "AAA"]
 
 
+@pytest.mark.asyncio
+async def test_fundamental_column_triggers_enrichment(client, monkeypatch, test_db):
+    await _seed_screener_snapshots(test_db, ["AAA", "BBB"])
+
+    enrichment_calls = 0
+
+    async def fake_enrich(rows):
+        nonlocal enrichment_calls
+        enrichment_calls += 1
+        for row in rows:
+            row.margin_of_safety = 20.0
+        return rows, "ok"
+
+    monkeypatch.setattr(screener_module, "_apply_fundamental_enrichment", fake_enrich)
+
+    response = await client.get(
+        "/api/v1/screener/?limit=2&columns=symbol,margin_of_safety"
+    )
+
+    assert response.status_code == 200
+    assert enrichment_calls == 1
+    assert all(row["margin_of_safety"] == 20.0 for row in response.json()["data"])
+
+
+@pytest.mark.asyncio
+async def test_cached_early_limit_reports_page_scope_and_page_candidate_count(
+    client, test_db
+):
+    await _seed_screener_snapshots(test_db, ["AAA", "BBB", "CCC"])
+
+    response = await client.get("/api/v1/screener/?limit=2")
+
+    assert response.status_code == 200
+    assert response.json()["meta"]["screen_scope"] == "page"
+    assert response.json()["meta"]["candidate_count"] == 2
+    assert response.json()["meta"]["matched_count"] == 2
+
+
 @pytest.mark.parametrize(
     "blob",
     ["{not json at all", '{"conditions":"not-a-list"}', '{"logic":"AND"}'],

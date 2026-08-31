@@ -436,6 +436,7 @@ export function useScreenerData(options?: {
     // Dynamic filters (new)
     filters?: string; // JSON encoded FilterGroup
     sort?: string;    // Multi-sort string: "field:order,field2:order2"
+    columns?: string;
     // Legacy filters (kept for backward compatibility)
     pe_min?: number;
     pe_max?: number;

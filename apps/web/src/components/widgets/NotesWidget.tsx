@@ -32,10 +32,23 @@ const emptyThesis: InvestmentThesis = {
 };
 
 export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: NotesWidgetProps) {
-    const { updateWidget } = useDashboard();
+    const { state, updateWidget } = useDashboard();
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetId: id, widgetType: 'notes', symbol });
     const widgetLocation = useDashboardWidget(id);
     const persisted = useMemo(() => normalizeThesisConfig(config), [config]);
+    const workspaceTheses = useMemo(() => {
+        const theses: Record<string, InvestmentThesis> = {};
+        for (const dashboard of state.dashboards) {
+            for (const tab of dashboard.tabs) {
+                for (const widget of tab.widgets) {
+                    if (widget.type === 'notes' && widget.id !== id) {
+                        Object.assign(theses, normalizeThesisConfig(widget.config).thesesBySymbol);
+                    }
+                }
+            }
+        }
+        return { ...theses, ...persisted.thesesBySymbol };
+    }, [id, persisted.thesesBySymbol, state.dashboards]);
     const [notes, setNotes] = useState('');
     const [thesis, setThesis] = useState<InvestmentThesis>(emptyThesis);
     const [notebookItems, setNotebookItems] = useState<NotebookItem[]>([]);
@@ -55,9 +68,10 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
         return () => window.removeEventListener(RESEARCH_NOTEBOOK_EVENT, refresh);
     }, []);
 
-    const dueTheses = useMemo(() => Object.entries(persisted.thesesBySymbol)
+    const dueTheses = useMemo(() => Object.entries(workspaceTheses)
         .filter(([, value]) => isReviewDue(value.reviewDate))
-        .sort(([, left], [, right]) => left.reviewDate.localeCompare(right.reviewDate)), [persisted.thesesBySymbol]);
+        .sort(([, left], [, right]) => left.reviewDate.localeCompare(right.reviewDate)), [workspaceTheses]);
+    const availableEvidenceIds = useMemo(() => new Set(notebookItems.map((item) => item.id)), [notebookItems]);
     const linkedEvidence = useMemo(() => {
         const byId = new Map(notebookItems.map((item) => [item.id, item]));
         return (thesis.notebookItemIds || []).map((itemId) => ({ itemId, item: byId.get(itemId) ?? null }));
@@ -93,7 +107,7 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
                 thesesBySymbol: { ...persisted.thesesBySymbol, [symbol]: thesis },
             },
         });
-        if (isThesisComplete(thesis) && !isThesisComplete(persisted.thesesBySymbol[symbol] || emptyThesis)) {
+        if (isThesisComplete(thesis, availableEvidenceIds) && !isThesisComplete(persisted.thesesBySymbol[symbol] || emptyThesis, availableEvidenceIds)) {
             captureAnalyticsEvent(ANALYTICS_EVENTS.thesisCompleted, {
                 source: 'notes_widget',
                 evidence_attached: true,

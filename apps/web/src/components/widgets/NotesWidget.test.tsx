@@ -5,9 +5,10 @@ import { addNotebookItem, clearNotebook } from '@/lib/researchNotebook';
 
 const updateWidget = jest.fn();
 const setLinkedSymbol = jest.fn();
+let mockDashboards: Array<Record<string, unknown>> = [];
 
 jest.mock('@/contexts/DashboardContext', () => ({
-  useDashboard: () => ({ updateWidget }),
+  useDashboard: () => ({ updateWidget, state: { dashboards: mockDashboards } }),
 }));
 jest.mock('@/hooks/useWidgetSymbolLink', () => ({
   useWidgetSymbolLink: () => ({ setLinkedSymbol }),
@@ -32,6 +33,7 @@ describe('NotesWidget evidence links', () => {
     window.localStorage.clear();
     updateWidget.mockClear();
     setLinkedSymbol.mockClear();
+    mockDashboards = [];
     (jest.requireMock('@/lib/analytics').captureAnalyticsEvent as jest.Mock).mockClear();
   });
 
@@ -82,8 +84,8 @@ describe('NotesWidget evidence links', () => {
     expect(analyticsEvent.mock.calls[0][1]).not.toHaveProperty('thesis');
   });
 
-  it('does not complete a thesis without linked evidence', () => {
-    render(<NotesWidget id="notes" symbol="FPT" config={{}} />);
+  it('does not complete a thesis without available linked evidence', () => {
+    render(<NotesWidget id="notes" symbol="FPT" config={{ thesesBySymbol: { FPT: { notebookItemIds: ['nb:missing'] } } }} />);
     fireEvent.change(screen.getByLabelText('Review date'), { target: { value: '2026-12-31' } });
     fireEvent.change(screen.getByLabelText('Thesis'), { target: { value: 'Durable earnings growth' } });
     fireEvent.change(screen.getByLabelText('Risks'), { target: { value: 'Execution risk' } });
@@ -92,8 +94,19 @@ describe('NotesWidget evidence links', () => {
 
     expect((jest.requireMock('@/lib/analytics').captureAnalyticsEvent as jest.Mock)).not.toHaveBeenCalled();
   });
-  it('opens a due thesis through linked-symbol navigation', () => {
-    render(<NotesWidget id="notes" symbol="FPT" config={{ thesesBySymbol: { vnm: { reviewDate: '2020-01-01', thesis: 'Review case' } } }} />);
+
+  it('opens a due thesis saved in another notes widget', () => {
+    mockDashboards = [{
+      tabs: [{
+        widgets: [{
+          id: 'other-notes',
+          type: 'notes',
+          config: { thesesBySymbol: { vnm: { reviewDate: '2020-01-01', thesis: 'Review case' } } },
+        }],
+      }],
+    }];
+
+    render(<NotesWidget id="notes" symbol="FPT" config={{}} />);
     fireEvent.click(screen.getByRole('button', { name: 'Show theses due for review' }));
     fireEvent.click(screen.getByRole('button', { name: 'View due thesis for VNM' }));
     expect(setLinkedSymbol).toHaveBeenCalledWith('VNM');

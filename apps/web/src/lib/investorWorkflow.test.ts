@@ -11,11 +11,12 @@ const complete: InvestmentThesis = {
 };
 
 describe('isThesisComplete', () => {
-  it('requires evidence, risks, invalidation, and a review date', () => {
-    expect(isThesisComplete(complete)).toBe(true);
-    expect(isThesisComplete({ ...complete, notebookItemIds: [] })).toBe(false);
-    expect(isThesisComplete({ ...complete, risks: '' })).toBe(false);
-    expect(isThesisComplete({ ...complete, invalidation: '' })).toBe(false);
-    expect(isThesisComplete({ ...complete, reviewDate: '' })).toBe(false);
+  it('requires available evidence, risks, invalidation, and a review date', () => {
+    expect(isThesisComplete(complete, new Set(['nb:source-1']))).toBe(true);
+    expect(isThesisComplete(complete, new Set())).toBe(false);
+    expect(isThesisComplete({ ...complete, notebookItemIds: [] }, new Set())).toBe(false);
+    expect(isThesisComplete({ ...complete, risks: '' }, new Set(['nb:source-1']))).toBe(false);
+    expect(isThesisComplete({ ...complete, invalidation: '' }, new Set(['nb:source-1']))).toBe(false);
+    expect(isThesisComplete({ ...complete, reviewDate: '' }, new Set(['nb:source-1']))).toBe(false);
   });
 });
