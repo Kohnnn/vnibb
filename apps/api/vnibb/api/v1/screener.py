@@ -10,8 +10,9 @@ Provides endpoints for:
 import logging
 import asyncio
 import math
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
-from typing import Any, Awaitable, Callable, List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Query, Request, Depends
 from sqlalchemy import select, func
