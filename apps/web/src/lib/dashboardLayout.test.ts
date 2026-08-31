@@ -130,6 +130,14 @@ describe('widget layout contract', () => {
   const tvTypes = Object.keys(tradingViewWidgetDefaultLayouts) as WidgetType[];
   const allTypes = Array.from(new Set<WidgetType>([...definitionTypes, ...tvTypes]));
 
+  it('describes portfolio_tracker as bounded holdings monitoring', () => {
+    const holdings = widgetDefinitions.find((definition) => definition.type === 'portfolio_tracker');
+
+    expect(holdings?.name).toBe('Holdings Tracker');
+    expect(holdings?.description).toContain('unrealized P&L');
+    expect(holdings?.description).not.toContain('real-time P&L');
+  });
+
   it('covers every widget type that can be inserted', () => {
     const missing = allTypes.filter((t) => !(t in WIDGET_LAYOUT_BEHAVIORS));
     expect(missing).toEqual([]);

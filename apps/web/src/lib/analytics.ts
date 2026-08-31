@@ -53,6 +53,7 @@ export const ANALYTICS_EVENTS = {
   promptLibraryPromptAdded: 'prompt_library_prompt_added',
   promptLibraryPromptDeleted: 'prompt_library_prompt_deleted',
   settingsOpened: 'settings_opened',
+  thesisCompleted: 'thesis_completed',
   settingsTabViewed: 'settings_tab_viewed',
   sidebarCollapsedToggled: 'sidebar_collapsed_toggled',
   symbolChanged: 'symbol_changed',

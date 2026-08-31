@@ -87,6 +87,16 @@ export function normalizeThesisConfig(config: Record<string, unknown> | undefine
     return { notesBySymbol, thesesBySymbol };
 }
 
+export function isThesisComplete(thesis: InvestmentThesis): boolean {
+    return Boolean(
+        thesis.thesis.trim()
+        && thesis.risks.trim()
+        && thesis.invalidation.trim()
+        && /^\d{4}-\d{2}-\d{2}$/.test(thesis.reviewDate)
+        && thesis.notebookItemIds?.length
+    );
+}
+
 export function isReviewDue(reviewDate: string, today = new Date().toISOString().slice(0, 10)): boolean {
     return Boolean(reviewDate) && reviewDate <= today;
 }

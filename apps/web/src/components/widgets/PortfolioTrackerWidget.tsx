@@ -463,10 +463,10 @@ export function PortfolioTrackerWidget({
             { section: 'sector_resolution_coverage', ...exportPayload.sectorResolutionCoverage },
             ...valueHistory.map((snapshot) => ({ section: 'value_history', ...snapshot })),
         ];
-        exportToCSV(rows, `portfolio_${new Date().toISOString().split('T')[0]}`, {
+        exportToCSV(rows,             `holdings_${new Date().toISOString().split('T')[0]}`, {
             widgetType: 'portfolio_tracker',
-            widgetTitle: 'Portfolio Tracker',
-            sourceLabel: 'Browser-local portfolio',
+            widgetTitle: 'Holdings Tracker',
+            sourceLabel: 'Browser-local holdings',
             apiGroup: '/equity',
             endpoint: '/api/v1/market/quotes/batch',
             localOnly: true,
@@ -474,10 +474,10 @@ export function PortfolioTrackerWidget({
     }, [enrichedPositions.length, exportPayload, valueHistory]);
 
     const handleExportJSON = useCallback(() => {
-        exportToJSON(exportPayload, `portfolio_${new Date().toISOString().split('T')[0]}`, {
+        exportToJSON(exportPayload,             `holdings_${new Date().toISOString().split('T')[0]}`, {
             widgetType: 'portfolio_tracker',
-            widgetTitle: 'Portfolio Tracker',
-            sourceLabel: 'Browser-local portfolio',
+            widgetTitle: 'Holdings Tracker',
+            sourceLabel: 'Browser-local holdings',
             apiGroup: '/equity',
             endpoint: '/api/v1/market/quotes/batch',
             localOnly: true,
@@ -522,7 +522,7 @@ export function PortfolioTrackerWidget({
                     <WidgetMeta
                         updatedAt={latestQuoteUpdatedAt}
                         isFetching={pricesLoading}
-                        note="Local portfolio"
+                        note="Local holdings"
                         align="right"
                     />
                     <button
@@ -575,6 +575,10 @@ export function PortfolioTrackerWidget({
                         <Plus size={12} />
                     </button>
                 </div>
+            </div>
+
+            <div className="border-b border-zinc-800 px-2 py-1 text-[10px] text-zinc-500">
+                Browser-local holdings monitor. Not transaction accounting; realized returns, fees, dividends, deposits, withdrawals, and cash-flow-aware performance are not included.
             </div>
 
             <div className="grid grid-cols-2 gap-2 px-2 py-1.5 border-b border-zinc-800 text-xs sm:grid-cols-4">

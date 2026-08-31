@@ -22,11 +22,17 @@ jest.mock('@/lib/widgetRuntime', () => ({
   buildWidgetRuntime: jest.fn((value) => value),
 }));
 
+jest.mock('@/lib/analytics', () => ({
+  ANALYTICS_EVENTS: { thesisCompleted: 'thesis_completed' },
+  captureAnalyticsEvent: jest.fn(),
+}));
+
 describe('NotesWidget evidence links', () => {
   beforeEach(() => {
     window.localStorage.clear();
     updateWidget.mockClear();
     setLinkedSymbol.mockClear();
+    (jest.requireMock('@/lib/analytics').captureAnalyticsEvent as jest.Mock).mockClear();
   });
 
   afterEach(() => {
@@ -53,6 +59,39 @@ describe('NotesWidget evidence links', () => {
     expect(screen.getByText('Evidence unavailable or deleted: nb:missing')).toBeInTheDocument();
   });
 
+  it('records one metadata-only event when a thesis is completed', () => {
+    act(() => {
+      addNotebookItem({ kind: 'news', title: 'FPT source', symbol: 'FPT' });
+    });
+
+    render(<NotesWidget id="notes" symbol="FPT" config={{}} />);
+    fireEvent.change(screen.getByLabelText('Review date'), { target: { value: '2026-12-31' } });
+    fireEvent.change(screen.getByLabelText('Thesis'), { target: { value: 'Durable earnings growth' } });
+    fireEvent.change(screen.getByLabelText('Risks'), { target: { value: 'Execution risk' } });
+    fireEvent.change(screen.getByLabelText('Invalidation'), { target: { value: 'Margin falls below target' } });
+    fireEvent.change(screen.getByLabelText('Attach browser-local research evidence'), { target: { value: screen.getByRole('option', { name: 'FPT · FPT source' }).getAttribute('value') } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save thesis' }));
+
+    const analyticsEvent = jest.requireMock('@/lib/analytics').captureAnalyticsEvent as jest.Mock;
+    expect(analyticsEvent).toHaveBeenCalledWith('thesis_completed', {
+      source: 'notes_widget',
+      evidence_attached: true,
+      review_date_set: true,
+    });
+    expect(analyticsEvent.mock.calls[0][1]).not.toHaveProperty('symbol');
+    expect(analyticsEvent.mock.calls[0][1]).not.toHaveProperty('thesis');
+  });
+
+  it('does not complete a thesis without linked evidence', () => {
+    render(<NotesWidget id="notes" symbol="FPT" config={{}} />);
+    fireEvent.change(screen.getByLabelText('Review date'), { target: { value: '2026-12-31' } });
+    fireEvent.change(screen.getByLabelText('Thesis'), { target: { value: 'Durable earnings growth' } });
+    fireEvent.change(screen.getByLabelText('Risks'), { target: { value: 'Execution risk' } });
+    fireEvent.change(screen.getByLabelText('Invalidation'), { target: { value: 'Margin falls below target' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save thesis' }));
+
+    expect((jest.requireMock('@/lib/analytics').captureAnalyticsEvent as jest.Mock)).not.toHaveBeenCalled();
+  });
   it('opens a due thesis through linked-symbol navigation', () => {
     render(<NotesWidget id="notes" symbol="FPT" config={{ thesesBySymbol: { vnm: { reviewDate: '2020-01-01', thesis: 'Review case' } } }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Show theses due for review' }));
