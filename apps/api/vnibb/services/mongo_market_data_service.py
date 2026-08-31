@@ -765,6 +765,34 @@ class MongoMarketDataService:
             logger.warning("Mongo fundamental snapshot read failed: %s", exc)
             return {}
 
+    async def check_fundamental_snapshot_index(self) -> bool:
+        """Report whether the (symbol, snapshotDate) index backing enrichment exists.
+
+        The bulk enrichment aggregation sorts every fundamental snapshot by
+        ``(symbol, snapshotDate)``. Without that index the sort is a collection
+        scan and enrichment silently becomes the slowest part of a screen.
+
+        Diagnostic only: never creates the index (that belongs to the backfill
+        script) and never raises.
+        """
+
+        if not self.enabled:
+            return False
+
+        def _probe() -> bool:
+            coll = self._get_collection("market_fundamental_screener")
+            for spec in coll.list_indexes():
+                keys = [field for field, _ in spec.get("key", {}).items()]
+                if keys[:2] == ["symbol", "snapshotDate"]:
+                    return True
+            return False
+
+        try:
+            return await asyncio.to_thread(_probe)
+        except Exception as exc:
+            logger.warning("Mongo fundamental index probe failed: %s", exc)
+            return False
+
     async def bulk_upsert_eod_prices(
         self,
         symbol: str,

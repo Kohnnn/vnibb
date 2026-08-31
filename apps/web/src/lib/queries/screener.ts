@@ -39,6 +39,7 @@ export function useScreenerData(options?: {
     // Dynamic filters (new)
     filters?: string;
     sort?: string;
+    columns?: string;
     // Legacy filters (kept for backward compatibility)
     pe_min?: number;
     pe_max?: number;

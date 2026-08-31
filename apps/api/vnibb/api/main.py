@@ -522,6 +522,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning(f"WebSocket broadcaster start failed (non-fatal): {e}")
 
+    # Probe the index backing fundamental enrichment. Diagnostic only: a
+    # missing index makes screens slow, not wrong, so this never blocks boot.
+    try:
+        from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+
+        _mongo = get_mongo_market_data_service()
+        if _mongo.enabled:
+            if await asyncio.wait_for(
+                _mongo.check_fundamental_snapshot_index(), timeout=5
+            ):
+                logger.info("Fundamental snapshot index (symbol, snapshotDate) present")
+            else:
+                logger.warning(
+                    "Fundamental snapshot index (symbol, snapshotDate) is MISSING - "
+                    "screener fundamental enrichment will fall back to a collection scan. "
+                    "Run scripts/build_fundamental_screener.py to create it."
+                )
+    except asyncio.TimeoutError:
+        logger.warning("Fundamental snapshot index probe timed out (non-fatal)")
+    except Exception as e:
+        logger.warning(f"Fundamental snapshot index probe failed (non-fatal): {e}")
+
     # Log startup complete
     effective_port = os.getenv("PORT", str(settings.api_port))
     logger.info(
@@ -767,6 +789,28 @@ def create_app() -> FastAPI:
         except Exception as exc:
             history_error = str(exc)
 
+        # Diagnostic, not a readiness gate: a missing index makes fundamental
+        # screening slow, not wrong.
+        fundamental_index = "unknown"
+        try:
+            from vnibb.services.mongo_market_data_service import (
+                get_mongo_market_data_service,
+            )
+
+            _mongo = get_mongo_market_data_service()
+            if not _mongo.enabled:
+                fundamental_index = "mongo_disabled"
+            else:
+                fundamental_index = (
+                    "present"
+                    if await asyncio.wait_for(
+                        _mongo.check_fundamental_snapshot_index(), timeout=5
+                    )
+                    else "missing"
+                )
+        except Exception as exc:
+            fundamental_index = f"probe_failed: {exc}"
+
         return {
             "status": "ok",
             "db": "connected" if db_ok else "disconnected",
@@ -775,6 +819,7 @@ def create_app() -> FastAPI:
             "sync_history": history,
             "sync_history_error": history_error,
             "sync_progress": progress,
+            "fundamental_snapshot_index": fundamental_index,
             "timestamp": datetime.utcnow().isoformat(),
         }
 

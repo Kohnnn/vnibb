@@ -1,6 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { getCompanyEvents } from '@/lib/api';
+import { equityQueryKeys } from '@/lib/queries/equity';
+import { queryKeys } from '@/lib/queries/legacy';
 import { InvestorEventCalendarWidget } from './InvestorEventCalendarWidget';
 
 jest.mock('@tanstack/react-query', () => ({
@@ -42,6 +44,23 @@ const mockUseQueries = jest.mocked(useQueries);
 const mockUseQuery = jest.mocked(useQuery);
 const mockGetCompanyEvents = jest.mocked(getCompanyEvents);
 
+describe.each([
+  ['modular', equityQueryKeys],
+  ['legacy', queryKeys],
+])('%s limited equity query keys', (_name, keys) => {
+  it('includes request limits in cache identities', () => {
+    expect(keys.companyNews('FPT', 5)).toEqual(['companyNews', 'FPT', 5]);
+    expect(keys.companyEvents('FPT', 30)).toEqual(['companyEvents', 'FPT', 30]);
+    expect(keys.intraday('FPT', 1_000)).toEqual(['intraday', 'FPT', 1_000]);
+    expect(keys.ratioHistory('FPT', 'year', ['pe'], 60)).toEqual([
+      'ratioHistory', 'FPT', 'year', ['pe'], 60,
+    ]);
+    expect(keys.financials('FPT', 'income', 'FY', 8)).toEqual([
+      'financials', 'FPT', 'income', 'FY', 8,
+    ]);
+  });
+});
+
 describe('InvestorEventCalendarWidget', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -67,6 +86,9 @@ describe('InvestorEventCalendarWidget', () => {
 
     expect(screen.getByText('Annual general meeting')).toBeInTheDocument();
     expect(screen.getByText('FPT · MEETING')).toBeInTheDocument();
+    expect(mockUseQueries).toHaveBeenCalledWith(expect.objectContaining({
+      queries: [expect.objectContaining({ queryKey: ['companyEvents', 'FPT', 30] })],
+    }));
     expect(mockUseQuery).not.toHaveBeenCalled();
     expect(mockGetCompanyEvents).not.toHaveBeenCalled();
 

@@ -6,7 +6,8 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import { isReviewDue, normalizeThesisConfig, type InvestmentThesis, type ThesisStatus } from '@/lib/investorWorkflow';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
+import { isReviewDue, isThesisComplete, normalizeThesisConfig, type InvestmentThesis, type ThesisStatus } from '@/lib/investorWorkflow';
 import { RESEARCH_NOTEBOOK_EVENT, readNotebookItems, type NotebookItem } from '@/lib/researchNotebook';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { WidgetGroupId } from '@/types/widget';
@@ -31,10 +32,23 @@ const emptyThesis: InvestmentThesis = {
 };
 
 export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: NotesWidgetProps) {
-    const { updateWidget } = useDashboard();
+    const { state, updateWidget } = useDashboard();
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetId: id, widgetType: 'notes', symbol });
     const widgetLocation = useDashboardWidget(id);
     const persisted = useMemo(() => normalizeThesisConfig(config), [config]);
+    const workspaceTheses = useMemo(() => {
+        const theses: Record<string, InvestmentThesis> = {};
+        for (const dashboard of state.dashboards) {
+            for (const tab of dashboard.tabs) {
+                for (const widget of tab.widgets) {
+                    if (widget.type === 'notes' && widget.id !== id) {
+                        Object.assign(theses, normalizeThesisConfig(widget.config).thesesBySymbol);
+                    }
+                }
+            }
+        }
+        return { ...theses, ...persisted.thesesBySymbol };
+    }, [id, persisted.thesesBySymbol, state.dashboards]);
     const [notes, setNotes] = useState('');
     const [thesis, setThesis] = useState<InvestmentThesis>(emptyThesis);
     const [notebookItems, setNotebookItems] = useState<NotebookItem[]>([]);
@@ -54,9 +68,10 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
         return () => window.removeEventListener(RESEARCH_NOTEBOOK_EVENT, refresh);
     }, []);
 
-    const dueTheses = useMemo(() => Object.entries(persisted.thesesBySymbol)
+    const dueTheses = useMemo(() => Object.entries(workspaceTheses)
         .filter(([, value]) => isReviewDue(value.reviewDate))
-        .sort(([, left], [, right]) => left.reviewDate.localeCompare(right.reviewDate)), [persisted.thesesBySymbol]);
+        .sort(([, left], [, right]) => left.reviewDate.localeCompare(right.reviewDate)), [workspaceTheses]);
+    const availableEvidenceIds = useMemo(() => new Set(notebookItems.map((item) => item.id)), [notebookItems]);
     const linkedEvidence = useMemo(() => {
         const byId = new Map(notebookItems.map((item) => [item.id, item]));
         return (thesis.notebookItemIds || []).map((itemId) => ({ itemId, item: byId.get(itemId) ?? null }));
@@ -64,6 +79,15 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
     const attachableEvidence = useMemo(() => notebookItems.filter((item) => (
         (item.symbol?.toUpperCase() === symbol.toUpperCase() || !item.symbol) && !(thesis.notebookItemIds || []).includes(item.id)
     )), [notebookItems, symbol, thesis.notebookItemIds]);
+    const completionChecks = [
+        ['Thesis', Boolean(thesis.thesis.trim())],
+        ['Catalysts', Boolean(thesis.catalysts.trim())],
+        ['Risks', Boolean(thesis.risks.trim())],
+        ['Invalidation', Boolean(thesis.invalidation.trim())],
+        ['Evidence', linkedEvidence.some(({ item }) => Boolean(item))],
+        ['Review date', Boolean(thesis.reviewDate)],
+    ] as const;
+    const completedChecks = completionChecks.filter(([, complete]) => complete).length;
 
     useEffect(() => {
         onDataChange?.(buildWidgetRuntime({
@@ -84,6 +108,13 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
                 thesesBySymbol: { ...persisted.thesesBySymbol, [symbol]: thesis },
             },
         });
+        if (isThesisComplete(thesis, availableEvidenceIds) && !isThesisComplete(persisted.thesesBySymbol[symbol] || emptyThesis, availableEvidenceIds)) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.thesisCompleted, {
+                source: 'notes_widget',
+                evidence_attached: true,
+                review_date_set: true,
+            });
+        }
         setIsSaved(true);
     };
 
@@ -127,6 +158,10 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
                     <button type="button" onClick={() => setShowDueOnly(true)} className="rounded px-2 py-1 hover:bg-[var(--bg-tertiary)]" aria-label="Show theses due for review">Due {dueTheses.length}</button>
                     <button type="button" onClick={save} className="rounded p-1 hover:bg-[var(--bg-tertiary)] hover:text-green-400" aria-label="Save thesis"><Save size={13} /></button>
                 </div>
+            </div>
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 text-[10px]" aria-label="Investment Thesis completion checklist">
+                <div className="flex items-center justify-between text-[var(--text-muted)]"><span>Thesis completion</span><span>{completedChecks}/6</span></div>
+                <div className="mt-1 grid grid-cols-6 gap-1">{completionChecks.map(([label, complete]) => <span key={label} className={complete ? 'text-emerald-400' : 'text-[var(--text-muted)]'} title={label}>{complete ? 'Ready' : label}</span>)}</div>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
                 <label className="text-[var(--text-muted)]">Status<select value={thesis.status} onChange={(event) => updateThesis('status', event.target.value as ThesisStatus)} className="mt-1 w-full rounded bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-primary)]"><option value="researching">Researching</option><option value="watching">Watching</option><option value="active">Active</option><option value="closed">Closed</option></select></label>

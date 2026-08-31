@@ -7,11 +7,14 @@ import { autoFitGridItems } from '@/lib/dashboardLayout';
 import { normalizeThesisConfig } from '@/lib/investorWorkflow';
 
 import {
+    GLOBAL_MARKETS_DASHBOARD_ID,
+    MAIN_DASHBOARD_ID,
     LEGACY_DASHBOARD_NAME_RE,
     LEGACY_SIDEBAR_DASHBOARD_RE,
     LEGACY_MANAGE_TAB_NAME_RE,
     LEGACY_STALE_TAB_RE,
 } from './constants';
+import { createGlobalMarketsDashboard } from './systemDashboards';
 
 import {
     TAB_WIDGET_TEMPLATES,
@@ -180,6 +183,52 @@ export const migrateLegacyThesisConfig = (dashboards: Dashboard[]): Dashboard[] 
         }),
     }));
     return changed ? { ...dashboard, tabs, updatedAt: new Date().toISOString() } : dashboard;
+});
+
+const LEGACY_GLOBAL_MARKETS_WIDGET_TYPES = [
+    'tradingview_ticker_tape',
+    'polymarket',
+    'tradingview_chart',
+    'tradingview_market_overview',
+    'tradingview_market_data',
+    'world_news_map',
+    'world_news_live_stream',
+] as const;
+
+export const migrateDefaultInvestorHome = (dashboards: Dashboard[]): Dashboard[] => dashboards.map((dashboard) => {
+    if (dashboard.id !== MAIN_DASHBOARD_ID) return dashboard;
+
+    const market = dashboard.tabs.find((tab) => tab.name === 'Market');
+    const trading = dashboard.tabs.find((tab) => tab.name === 'Trading');
+    if (!market || !trading || market.widgets.length > 0 || trading.widgets.length > 0) return dashboard;
+
+    const widgets = createWidgetsFromTemplate(TAB_WIDGET_TEMPLATES.investor_home, market.id);
+    const tabs = dashboard.tabs
+        .filter((tab) => tab.id !== trading.id)
+        .map((tab) => tab.id === market.id ? { ...tab, name: 'Investor Home', widgets } : tab)
+        .map((tab, order) => ({ ...tab, order }));
+
+    return { ...dashboard, tabs, updatedAt: new Date().toISOString() };
+});
+
+export const migrateLegacyGlobalMarketsDashboard = (dashboards: Dashboard[]): Dashboard[] => dashboards.map((dashboard) => {
+    if (dashboard.id !== GLOBAL_MARKETS_DASHBOARD_ID) return dashboard;
+
+    const isLegacyFallback = dashboard.tabs.length === LEGACY_GLOBAL_MARKETS_WIDGET_TYPES.length
+        && dashboard.tabs.every((tab, index) => (
+            tab.id === `${GLOBAL_MARKETS_DASHBOARD_ID}-tab-${index}`
+            && tab.name === `Tab ${index + 1}`
+            && tab.order === index
+            && tab.widgets.length === 1
+            && tab.widgets[0].type === LEGACY_GLOBAL_MARKETS_WIDGET_TYPES[index]
+        ));
+    if (!isLegacyFallback) return dashboard;
+
+    return {
+        ...dashboard,
+        tabs: createGlobalMarketsDashboard().tabs,
+        updatedAt: new Date().toISOString(),
+    };
 });
 
 // ============================================================================

@@ -10,8 +10,9 @@ Provides endpoints for:
 import logging
 import asyncio
 import math
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
-from typing import Any, List, Optional, Callable, Awaitable
+from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Query, Request, Depends
 from sqlalchemy import select, func
@@ -38,6 +39,10 @@ from vnibb.core.retry import vnstock_cb
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# How Fundamental Enrichment actually went. An empty screen caused by an
+# unreachable corpus is not the same answer as one where nothing matched.
+EnrichmentOutcome = Literal["skipped", "ok", "unavailable", "failed"]
 
 _REFRESH_LOCK = asyncio.Lock()
 _REFRESH_IN_FLIGHT: set[str] = set()
@@ -80,6 +85,10 @@ def _build_screener_meta(
     fallback: bool = False,
     cached_at: Optional[datetime] = None,
     discovery_meta: Optional[dict[str, Any]] = None,
+    candidate_count: Optional[int] = None,
+    matched_count: Optional[int] = None,
+    page_scoped: bool = False,
+    fundamental_enrichment: EnrichmentOutcome = "skipped",
 ) -> MetaData:
     visible_fields = (
         "symbol",
@@ -132,6 +141,10 @@ def _build_screener_meta(
         visible_field_possible_values=len(rows) * len(visible_fields),
         discovery_coverage={**discovery_coverage, "target_reference_stale": target_reference_stale},
         target_reference_note="Provider/broker reference data, not VNIBB valuation or investment advice.",
+        candidate_count=candidate_count,
+        matched_count=matched_count if matched_count is not None else len(rows),
+        screen_scope="page" if page_scoped else "universe",
+        fundamental_enrichment=fundamental_enrichment,
         **(discovery_meta or {}),
     )
 
@@ -1272,26 +1285,117 @@ _FUNDAMENTAL_DOC_FIELD_MAP = {
     "snapshotDate": "fundamental_as_of",
 }
 
+# The single declaration of what counts as a Fundamental Field. Everything that
+# needs to know -- the enrichment decision, the early-limit shortcut, the
+# metadata -- derives from here, so adding a field to the map above is enough.
+FUNDAMENTAL_FIELD_NAMES = frozenset(_FUNDAMENTAL_DOC_FIELD_MAP.values())
 
-async def _merge_fundamental_snapshots(rows: List[ScreenerData]) -> List[ScreenerData]:
-    """Best-effort merge of latest fundamental-screener snapshots onto rows.
 
-    Reads the latest snapshot per symbol from Mongo
-    (`market_fundamental_screener`). Mongo disabled, missing collection, or
-    any failure leaves the rows unchanged (fields stay null).
+def _blob_names_fundamental_field(filters: Optional[str]) -> bool:
+    """True when a serialized filter blob references any Fundamental Field.
+
+    Walks nested groups at arbitrary depth under both AND and OR. An
+    unparseable blob names nothing; the filter service already logs the
+    parse failure.
+    """
+
+    if not filters:
+        return False
+    group = ScreenerFilterService.parse_filter_json(filters)
+    if group is None:
+        return False
+
+    def _walk(node) -> bool:
+        conditions = getattr(node, "conditions", None)
+        if conditions is None:
+            return getattr(node, "field", None) in FUNDAMENTAL_FIELD_NAMES
+        return any(_walk(child) for child in conditions)
+
+    return _walk(group)
+
+
+def _sort_names_fundamental_field(sort: Optional[str], sort_by: Optional[str]) -> bool:
+    """True when a sort targets a Fundamental Field.
+
+    Sorting an unenriched column silently yields arbitrary order, which is the
+    same class of wrong answer as filtering one -- so it earns enrichment too.
+    """
+
+    if sort_by and sort_by in FUNDAMENTAL_FIELD_NAMES:
+        return True
+    if not sort:
+        return False
+    return any(
+        part.split(":", 1)[0].strip() in FUNDAMENTAL_FIELD_NAMES
+        for part in sort.split(",")
+        if part.strip()
+    )
+
+
+def request_needs_fundamental_enrichment(
+    *,
+    include_fundamental: bool,
+    columns: Optional[str],
+    moat: Optional[str],
+    margin_of_safety_min: Optional[float],
+    margin_of_safety_max: Optional[float],
+    dividend_years_min: Optional[int],
+    fcf_positive: Optional[bool],
+    filters: Optional[str],
+    sort: Optional[str],
+    sort_by: Optional[str],
+) -> bool:
+    """Whether a request needs Fundamental Enrichment.
+
+    Decided once per request, before any path branches, and threaded to the
+    places that act on it. Typed params are only one of three ways to ask:
+    web sends criteria exclusively inside the serialized blob.
+    """
+
+    if include_fundamental:
+        return True
+    if columns and any(
+        column.strip() in FUNDAMENTAL_FIELD_NAMES for column in columns.split(",")
+    ):
+        return True
+    if any(
+        value is not None
+        for value in (
+            moat,
+            margin_of_safety_min,
+            margin_of_safety_max,
+            dividend_years_min,
+            fcf_positive,
+        )
+    ):
+        return True
+    if _blob_names_fundamental_field(filters):
+        return True
+    return _sort_names_fundamental_field(sort, sort_by)
+
+
+async def _apply_fundamental_enrichment(
+    rows: List[ScreenerData],
+) -> tuple[List[ScreenerData], EnrichmentOutcome]:
+    """Join the latest Fundamental Snapshots onto a Candidate Set.
+
+    Best-effort by contract: any failure leaves the fields empty rather than
+    failing the screen. The outcome is returned alongside the rows because an
+    empty screen caused by an unreachable corpus is not the same answer as an
+    empty screen caused by nothing matching, and the caller has to say which.
     """
 
     if not rows:
-        return rows
+        return rows, "ok"
     try:
         svc = get_mongo_market_data_service()
         if not svc.enabled:
-            return rows
+            return rows, "unavailable"
         docs = await svc.get_latest_fundamental_snapshots(
             [row.symbol for row in rows if row.symbol]
         )
         if not docs:
-            return rows
+            return rows, "ok"
         for row in rows:
             doc = docs.get((row.symbol or "").upper())
             if not isinstance(doc, dict):
@@ -1300,10 +1404,10 @@ async def _merge_fundamental_snapshots(rows: List[ScreenerData]) -> List[Screene
                 value = doc.get(doc_key)
                 if value is not None:
                     setattr(row, attr, value)
-        return rows
+        return rows, "ok"
     except Exception as e:
-        logger.warning(f"Fundamental snapshot merge failed: {e}")
-        return rows
+        logger.warning(f"Fundamental enrichment failed: {e}")
+        return rows, "failed"
 
 
 def _apply_fundamental_filters(
@@ -1351,28 +1455,6 @@ def _apply_fundamental_filters(
     return rows
 
 
-async def _finalize_fundamental_rows(
-    rows: List[ScreenerData],
-    *,
-    moat: Optional[str],
-    margin_of_safety_min: Optional[float],
-    margin_of_safety_max: Optional[float],
-    dividend_years_min: Optional[int],
-    fcf_positive: Optional[bool],
-) -> List[ScreenerData]:
-    """Shared last step before every screener response: merge then filter."""
-
-    rows = await _merge_fundamental_snapshots(rows)
-    return _apply_fundamental_filters(
-        rows,
-        moat=moat,
-        margin_of_safety_min=margin_of_safety_min,
-        margin_of_safety_max=margin_of_safety_max,
-        dividend_years_min=dividend_years_min,
-        fcf_positive=fcf_positive,
-    )
-
-
 async def _prepare_cached_screener_rows(
     snapshots: List[object],
     db: AsyncSession,
@@ -1400,8 +1482,12 @@ async def _prepare_cached_screener_rows(
     as_of_date: Optional[date],
     min_listing_age_days: Optional[int],
     target_upside_min: Optional[float],
-) -> tuple[List[ScreenerData], dict[str, Any]]:
+    enrich: Callable[[List[ScreenerData]], Awaitable[List[ScreenerData]]],
+    fundamental_filter: Callable[[List[ScreenerData]], List[ScreenerData]],
+    needs_fundamental_enrichment: bool,
+) -> tuple[List[ScreenerData], dict[str, Any], int, int, bool]:
     data = [_to_screener_data_row(snapshot) for snapshot in snapshots]
+    candidate_count = len(data)
 
     has_advanced_filters = _has_advanced_screener_filters(
         filters=filters,
@@ -1421,8 +1507,11 @@ async def _prepare_cached_screener_rows(
         sort_by=sort_by,
     )
 
+    # A fundamental request must keep the whole Candidate Set: truncating here
+    # would leave the later fundamental filter screening an arbitrary Page.
     can_early_limit = (
         not has_advanced_filters
+        and not needs_fundamental_enrichment
         and universe == "ALL"
         and exchange.upper() == "ALL"
         and not industry
@@ -1437,6 +1526,7 @@ async def _prepare_cached_screener_rows(
     data = fill_market_cap(data)
     data = await _enrich_screener_metrics(data, db)
     data = await _enrich_discovery_fields(data, db, as_of_date=as_of_date)
+    data = await enrich(data)
     members, discovery_meta = await _resolve_index_universe(universe)
     if members is not None:
         data = [row for row in data if row.symbol in members]
@@ -1446,6 +1536,8 @@ async def _prepare_cached_screener_rows(
         min_listing_age_days=min_listing_age_days,
         target_upside_min=target_upside_min,
     )
+    if not can_early_limit:
+        candidate_count = len(data)
 
     if has_advanced_filters:
         data = apply_advanced_filters(
@@ -1468,8 +1560,13 @@ async def _prepare_cached_screener_rows(
             sort_order=sort_order,
         )
     data = _sort_discovery_rows(data, sort_by, sort_order)
+    # Fundamental filtering belongs before the Page cut, exactly like every
+    # other filter -- otherwise it only refines an arbitrary Page.
+    data = fundamental_filter(data)
+    matched_count = candidate_count if can_early_limit else len(data)
+    page_scoped = can_early_limit
 
-    return data[:limit], discovery_meta
+    return data[:limit], discovery_meta, candidate_count, matched_count, page_scoped
 
 
 async def _refresh_screener_cache(params: StockScreenerParams) -> None:
@@ -1549,11 +1646,54 @@ async def get_screener(
     margin_of_safety_max: Optional[float] = Query(None),
     dividend_years_min: Optional[int] = Query(None),
     fcf_positive: Optional[bool] = Query(None),
+    include_fundamental: bool = Query(False),
+    columns: Optional[str] = Query(None),
     sort_by: Optional[str] = Query(None),
     sort_order: str = Query(default="desc", pattern=r"^(asc|desc)$"),
     db: AsyncSession = Depends(get_db),
 ) -> StandardResponse[List[ScreenerData]]:
     cache_manager = CacheManager(db)
+
+    # Decided once, before any path branches, then threaded to the places that
+    # act on it: the early-limit shortcut, the enrichment step, and the meta.
+    needs_fundamental_enrichment = request_needs_fundamental_enrichment(
+        include_fundamental=include_fundamental,
+        columns=columns,
+        moat=moat,
+        margin_of_safety_min=margin_of_safety_min,
+        margin_of_safety_max=margin_of_safety_max,
+        dividend_years_min=dividend_years_min,
+        fcf_positive=fcf_positive,
+        filters=filters,
+        sort=sort,
+        sort_by=sort_by,
+    )
+
+    # Enrichment happens deep inside the row pipeline but has to be reported at
+    # the top; the closure records its outcome here rather than threading a
+    # return value back through four call paths.
+    enrichment_outcome: EnrichmentOutcome = "skipped"
+
+    async def _enrich(rows: List[ScreenerData]) -> List[ScreenerData]:
+        """Fundamental Enrichment, ahead of every truncation to a Page."""
+        nonlocal enrichment_outcome
+        if not needs_fundamental_enrichment:
+            return rows
+        rows, enrichment_outcome = await _apply_fundamental_enrichment(rows)
+        return rows
+
+    def _fundamental_filter(rows: List[ScreenerData]) -> List[ScreenerData]:
+        """Typed fundamental filters, applied to the enriched Candidate Set."""
+        if not needs_fundamental_enrichment:
+            return rows
+        return _apply_fundamental_filters(
+            rows,
+            moat=moat,
+            margin_of_safety_min=margin_of_safety_min,
+            margin_of_safety_max=margin_of_safety_max,
+            dividend_years_min=dividend_years_min,
+            fcf_positive=fcf_positive,
+        )
 
     async def _respond(
         rows: List[ScreenerData],
@@ -1563,17 +1703,15 @@ async def get_screener(
         fallback: bool = False,
         cached_at: Optional[datetime] = None,
         discovery_meta: Optional[dict[str, Any]] = None,
+        candidate_count: Optional[int] = None,
+        matched_count: Optional[int] = None,
+        page_scoped: bool = False,
     ) -> StandardResponse[List[ScreenerData]]:
-        """Single funnel for every row-emitting return path: merge fundamental
-        snapshots, apply fundamental filters, then build the response."""
-        rows = await _finalize_fundamental_rows(
-            rows,
-            moat=moat,
-            margin_of_safety_min=margin_of_safety_min,
-            margin_of_safety_max=margin_of_safety_max,
-            dividend_years_min=dividend_years_min,
-            fcf_positive=fcf_positive,
-        )
+        """Single funnel for every row-emitting return path.
+
+        Enrichment and fundamental filtering both happened upstream, before
+        truncation. This funnel only builds the response.
+        """
         return StandardResponse(
             data=rows,
             meta=_build_screener_meta(
@@ -1583,6 +1721,10 @@ async def get_screener(
                 fallback=fallback,
                 cached_at=cached_at,
                 discovery_meta=discovery_meta,
+                candidate_count=candidate_count,
+                matched_count=matched_count,
+                page_scoped=page_scoped,
+                fundamental_enrichment=enrichment_outcome,
             ),
         )
 
@@ -1592,7 +1734,7 @@ async def get_screener(
                 symbol=symbol, source=source, allow_stale=True
             )
             if cache_result.hit and cache_result.data:
-                data, discovery_meta = await _prepare_cached_screener_rows(
+                data, discovery_meta, candidate_count, matched_count, page_scoped = await _prepare_cached_screener_rows(
                     cache_result.data,
                     db,
                     limit=limit,
@@ -1618,6 +1760,9 @@ async def get_screener(
                     as_of_date=as_of_date,
                     min_listing_age_days=min_listing_age_days,
                     target_upside_min=target_upside_min,
+                    enrich=_enrich,
+                    fundamental_filter=_fundamental_filter,
+                    needs_fundamental_enrichment=needs_fundamental_enrichment,
                 )
                 if cache_result.is_stale and not refresh:
                     refresh_key = f"screener:{source}:full"
@@ -1638,6 +1783,9 @@ async def get_screener(
                     stale=cache_result.is_stale,
                     cached_at=cache_result.cached_at,
                     discovery_meta=discovery_meta,
+                    candidate_count=candidate_count,
+                    matched_count=matched_count,
+                    page_scoped=page_scoped,
                 )
 
             if source:
@@ -1645,14 +1793,12 @@ async def get_screener(
                     symbol=symbol, source=None, allow_stale=True
                 )
                 if fallback_cache.hit and fallback_cache.data:
-                    data, discovery_meta = await _prepare_cached_screener_rows(
+                    data, discovery_meta, candidate_count, matched_count, page_scoped = await _prepare_cached_screener_rows(
                         fallback_cache.data,
                         db,
                         limit=limit,
                         universe=universe,
                         exchange=exchange,
-
-
                         industry=industry,
                         filters=filters,
                         sort=sort,
@@ -1673,6 +1819,9 @@ async def get_screener(
                         as_of_date=as_of_date,
                         min_listing_age_days=min_listing_age_days,
                         target_upside_min=target_upside_min,
+                        enrich=_enrich,
+                        fundamental_filter=_fundamental_filter,
+                        needs_fundamental_enrichment=needs_fundamental_enrichment,
                     )
                     return await _respond(
                         data,
@@ -1681,6 +1830,9 @@ async def get_screener(
                         fallback=True,
                         cached_at=fallback_cache.cached_at,
                         discovery_meta=discovery_meta,
+                        candidate_count=candidate_count,
+                        matched_count=matched_count,
+                        page_scoped=page_scoped,
                     )
         except Exception as e:
             logger.warning(f"Cache lookup failed: {e}")
@@ -1698,7 +1850,12 @@ async def get_screener(
         data = await _enrich_screener_metrics(data, db)
         data = await _hydrate_screener_rows(data, db)
         data = await _enrich_discovery_fields(data, db, as_of_date=as_of_date)
-        cache_data = data
+        # Snapshot the cache payload BEFORE Fundamental Enrichment. Enrichment
+        # mutates rows in place, and a Fundamental Snapshot carries its own
+        # as-of date -- persisting it onto a daily Screener Snapshot would pin
+        # it to a date it does not belong to (ADR-0002).
+        cache_data = [row.model_copy(deep=True) for row in data]
+        data = await _enrich(data)
         members, discovery_meta = await _resolve_index_universe(universe)
         if members is not None:
             data = [row for row in data if row.symbol in members]
@@ -1708,6 +1865,7 @@ async def get_screener(
             min_listing_age_days=min_listing_age_days,
             target_upside_min=target_upside_min,
         )
+        candidate_count = len(data)
         data = apply_advanced_filters(
             data,
             filters=filters,
@@ -1727,10 +1885,21 @@ async def get_screener(
             sort_by=sort_by,
             sort_order=sort_order,
         )
-        data = _sort_discovery_rows(data, sort_by, sort_order)[:limit]
+        data = _sort_discovery_rows(data, sort_by, sort_order)
+        data = _fundamental_filter(data)
+        matched_count = len(data)
+        data = data[:limit]
 
         await cache_manager.store_screener_data(data=[d.model_dump() for d in cache_data], source=source)
-        return await _respond(data, discovery_meta=discovery_meta)
+        # The provider head-slices the Universe to `limit` before fetching, so
+        # full-Universe screening is unreachable here regardless of ordering.
+        return await _respond(
+            data,
+            discovery_meta=discovery_meta,
+            candidate_count=candidate_count,
+            matched_count=matched_count,
+            page_scoped=True,
+        )
 
     except (ProviderTimeoutError, ProviderError, ProviderRateLimitError) as e:
         if use_cache:
@@ -1738,7 +1907,7 @@ async def get_screener(
                 symbol=symbol, source=source, allow_stale=True
             )
             if cache_result.hit and cache_result.data:
-                data, discovery_meta = await _prepare_cached_screener_rows(
+                data, discovery_meta, candidate_count, matched_count, page_scoped = await _prepare_cached_screener_rows(
                     cache_result.data,
                     db,
                     limit=limit,
@@ -1764,6 +1933,9 @@ async def get_screener(
                     as_of_date=as_of_date,
                     min_listing_age_days=min_listing_age_days,
                     target_upside_min=target_upside_min,
+                    enrich=_enrich,
+                    fundamental_filter=_fundamental_filter,
+                    needs_fundamental_enrichment=needs_fundamental_enrichment,
                 )
                 return await _respond(
                     data,
@@ -1772,16 +1944,25 @@ async def get_screener(
                     fallback=True,
                     cached_at=cache_result.cached_at,
                     discovery_meta=discovery_meta,
+                    candidate_count=candidate_count,
+                    matched_count=matched_count,
+                    page_scoped=page_scoped,
                 )
 
         # Final fallback: return empty results with user-friendly message
-        # This prevents 502 errors and provides better UX
+        # This prevents 502 errors and provides better UX.
+        # An empty screen is exactly the case that must not be mistaken for
+        # "nothing matched", so it carries the degraded markers too.
         logger.warning(f"Screener request failed, returning empty results: {e}")
         return StandardResponse(
             data=[],
             meta=MetaData(
                 count=0,
                 message="No data available. Please try again later or check your connection.",
+                screen_scope="page",
+                candidate_count=0,
+                matched_count=0,
+                fundamental_enrichment=enrichment_outcome,
             ),
         )
 
@@ -1789,5 +1970,13 @@ async def get_screener(
         # Catch-all for unexpected errors
         logger.error(f"Unexpected screener error: {e}")
         return StandardResponse(
-            data=[], meta=MetaData(count=0, message="An error occurred. Please try again.")
+            data=[],
+            meta=MetaData(
+                count=0,
+                message="An error occurred. Please try again.",
+                screen_scope="page",
+                candidate_count=0,
+                matched_count=0,
+                fundamental_enrichment=enrichment_outcome,
+            ),
         )

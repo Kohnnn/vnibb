@@ -518,9 +518,9 @@ export const widgetDefinitions: WidgetDefinition[] = [
 
     // Portfolio & Alerts
     {
-        type: 'portfolio_tracker',
-        name: 'Portfolio Tracker',
-        description: 'Track holdings with real-time P&L, sector allocation, and CSV export',
+         type: 'portfolio_tracker',
+         name: 'Holdings Tracker',
+         description: 'Monitor current holdings, quoted value, and unrealized P&L; not transaction accounting',
         category: 'core_data',
         defaultConfig: {},
         defaultLayout: { w: 6, h: 8, minW: 4, minH: 6 }

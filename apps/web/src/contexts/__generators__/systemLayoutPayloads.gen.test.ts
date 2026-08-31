@@ -104,6 +104,16 @@ describe('system layout publish payload generator', () => {
         expect(mainWidgetTypes).toContain('ticker_info');
         expect(mainWidgetTypes).toContain('price_chart');
 
+        const globalMarkets = dashboards['default-global-markets'];
+        expect(globalMarkets.tabs).toHaveLength(1);
+        expect(globalMarkets.tabs[0]).toEqual(expect.objectContaining({
+            id: 'default-global-markets-tab-0',
+            name: 'Global Markets',
+        }));
+        expect(globalMarkets.tabs[0].widgets.map((widget) => widget.type)).toContain(
+            'tradingview_technical_analysis',
+        );
+
         if (process.env.GENERATE_SYSTEM_LAYOUTS !== '1') {
             return;
         }

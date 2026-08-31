@@ -78,7 +78,17 @@ class ScreenerFilterService:
         if cond.field not in df.columns:
             logger.warning(f"Field {cond.field} not found in DataFrame columns")
             return df
-            
+
+        # A present-but-entirely-empty column filters everything out while
+        # looking like a legitimate no-match. Enrichment probably failed.
+        if logger.isEnabledFor(logging.WARNING) and len(df) and df[cond.field].isna().all():
+            logger.warning(
+                "Filter field %s is present but empty for all %d rows; "
+                "enrichment for this field likely failed, so the filter will match nothing",
+                cond.field,
+                len(df),
+            )
+
         field = cond.field
         op = cond.operator
         val = cond.value

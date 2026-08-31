@@ -361,7 +361,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
                   <Star className="text-blue-400" size={18} />
                   <div>
                     <h3 className="text-sm font-black text-[var(--text-primary)] uppercase tracking-tight">Your saved layouts</h3>
-                    <p className="text-[11px] text-[var(--text-muted)]">Save the current dashboard as a reusable template, or import a JSON layout from a colleague.</p>
+                    <p className="text-[11px] text-[var(--text-muted)]">Saved on this device. Export a saved layout to back it up or import it on another browser.</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

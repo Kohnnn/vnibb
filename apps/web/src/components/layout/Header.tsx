@@ -213,9 +213,9 @@ export function Header({
   }, [marketOverviewQuery.data?.data])
   const showIndexSkeletons = marketOverviewQuery.isLoading && !marketOverviewQuery.data
   const authBypassEnabled = env.authBypassEnabled
-  const userDisplayName = authBypassEnabled ? 'Local workspace' : getUserDisplayName(user)
+  const userDisplayName = getUserDisplayName(user)
   const userInitials = getUserInitials(userDisplayName)
-  const userRoleLabel = authBypassEnabled ? 'Local tenant mode' : isAdmin ? 'Admin' : isGuest ? 'Guest' : user ? 'Member' : 'Signed out'
+  const userRoleLabel = isAdmin ? 'Admin' : isGuest ? 'Guest' : user ? 'Member' : 'Signed out'
 
   const healthBadge = useMemo(() => {
     if (connectionStatus === 'online') {
@@ -505,8 +505,8 @@ export function Header({
           )}
 
           {hasActionMenu && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+           <DropdownMenu>
+            <DropdownMenuTrigger asChild>
                 <button
                   className="flex items-center rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
                   title="Dashboard actions"
@@ -557,14 +557,15 @@ export function Header({
             <span>{marketStatus.isOpen ? 'HOSE Open' : 'HOSE Closed'}</span>
           </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="hidden items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] sm:flex"
-                title="Account menu"
-                aria-label="Open account menu"
-              >
+          {!authBypassEnabled && (
+           <DropdownMenu>
+             <DropdownMenuTrigger asChild>
+               <button
+                 type="button"
+                 className="hidden items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] sm:flex"
+                 title="Account menu"
+                 aria-label="Open account menu"
+               >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/15 text-[10px] font-black uppercase text-blue-200">
                   {authLoading ? <User size={13} /> : userInitials}
                 </span>
@@ -579,14 +580,12 @@ export function Header({
                   {authLoading ? 'Checking session' : userDisplayName}
                 </span>
                 <span className="text-[10px] text-[var(--text-muted)]">
-                  {authBypassEnabled
-                    ? 'Login disabled until tenant auth phase'
-                    : user?.email || (authLoading ? 'Loading account state' : 'No active account')}
+                  {user?.email || (authLoading ? 'Loading account state' : 'No active account')}
                 </span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="text-xs text-[var(--text-secondary)] focus:bg-transparent">
-                {authBypassEnabled ? userRoleLabel : `${userRoleLabel} via ${provider}`}
+                {`${userRoleLabel} via ${provider}`}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => window.location.assign('/settings')}
@@ -594,7 +593,7 @@ export function Header({
               >
                 Settings
               </DropdownMenuItem>
-              {authBypassEnabled ? null : user ? (
+              {user ? (
                 <DropdownMenuItem
                   onClick={() => { void signOut() }}
                   className="text-xs text-rose-300"
@@ -612,6 +611,7 @@ export function Header({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          )}
           </div>
         </div>
       </div>

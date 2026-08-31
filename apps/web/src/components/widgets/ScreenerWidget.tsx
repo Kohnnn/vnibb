@@ -460,6 +460,7 @@ export function ScreenerWidget({
         exchange: market === 'HOSE' || market === 'HNX' || market === 'UPCOM' ? market : undefined,
         filters: serializedFilters,
         sort,
+        columns: activeColumnIds.join(','),
     });
 
     const dataWithPassReasons = useMemo(() => {
