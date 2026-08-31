@@ -1563,7 +1563,7 @@ async def _prepare_cached_screener_rows(
     # other filter -- otherwise it only refines an arbitrary Page.
     data = fundamental_filter(data)
     matched_count = candidate_count if can_early_limit else len(data)
-    page_scoped = matched_count > limit
+    page_scoped = can_early_limit
 
     return data[:limit], discovery_meta, candidate_count, matched_count, page_scoped
 

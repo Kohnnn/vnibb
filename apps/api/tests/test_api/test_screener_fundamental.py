@@ -552,7 +552,7 @@ async def test_cached_fundamental_request_reads_mongo_once(client, monkeypatch, 
 
 @pytest.mark.asyncio
 async def test_fundamental_response_reports_scope_and_counts(client, monkeypatch, test_db):
-    """A Page hides how much was screened, so the meta has to say it."""
+    """The scope describes the Candidate Set, not the limited output."""
     await _seed_screener_snapshots(test_db, ["AAA", "BBB", "CCC", "DDD", "ZZZ"])
 
     async def fake_enrich(rows):
@@ -565,7 +565,7 @@ async def test_fundamental_response_reports_scope_and_counts(client, monkeypatch
 
     assert response.status_code == 200
     meta = response.json()["meta"]
-    assert meta["screen_scope"] == "page"
+    assert meta["screen_scope"] == "universe"
     assert meta["fundamental_enrichment"] == "ok"
     assert meta["candidate_count"] == 5
     assert meta["matched_count"] == 2
