@@ -1486,6 +1486,7 @@ async def _prepare_cached_screener_rows(
     needs_fundamental_enrichment: bool,
 ) -> tuple[List[ScreenerData], dict[str, Any], int, int, bool]:
     data = [_to_screener_data_row(snapshot) for snapshot in snapshots]
+    candidate_count = len(data)
 
     has_advanced_filters = _has_advanced_screener_filters(
         filters=filters,
@@ -1534,7 +1535,8 @@ async def _prepare_cached_screener_rows(
         min_listing_age_days=min_listing_age_days,
         target_upside_min=target_upside_min,
     )
-    candidate_count = len(data)
+    if not can_early_limit:
+        candidate_count = len(data)
 
     if has_advanced_filters:
         data = apply_advanced_filters(
@@ -1560,9 +1562,10 @@ async def _prepare_cached_screener_rows(
     # Fundamental filtering belongs before the Page cut, exactly like every
     # other filter -- otherwise it only refines an arbitrary Page.
     data = fundamental_filter(data)
-    matched_count = len(data)
+    matched_count = candidate_count if can_early_limit else len(data)
+    page_scoped = matched_count > limit
 
-    return data[:limit], discovery_meta, candidate_count, matched_count, can_early_limit
+    return data[:limit], discovery_meta, candidate_count, matched_count, page_scoped
 
 
 async def _refresh_screener_cache(params: StockScreenerParams) -> None:

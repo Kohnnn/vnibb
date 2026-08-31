@@ -565,7 +565,7 @@ async def test_fundamental_response_reports_scope_and_counts(client, monkeypatch
 
     assert response.status_code == 200
     meta = response.json()["meta"]
-    assert meta["screen_scope"] == "universe"
+    assert meta["screen_scope"] == "page"
     assert meta["fundamental_enrichment"] == "ok"
     assert meta["candidate_count"] == 5
     assert meta["matched_count"] == 2
@@ -754,8 +754,8 @@ async def test_cached_early_limit_reports_page_scope_and_page_candidate_count(
 
     assert response.status_code == 200
     assert response.json()["meta"]["screen_scope"] == "page"
-    assert response.json()["meta"]["candidate_count"] == 2
-    assert response.json()["meta"]["matched_count"] == 2
+    assert response.json()["meta"]["candidate_count"] == 3
+    assert response.json()["meta"]["matched_count"] == 3
 
 
 @pytest.mark.parametrize(

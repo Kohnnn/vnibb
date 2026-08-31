@@ -15,6 +15,7 @@ describe('isThesisComplete', () => {
     expect(isThesisComplete(complete, new Set(['nb:source-1']))).toBe(true);
     expect(isThesisComplete(complete, new Set())).toBe(false);
     expect(isThesisComplete({ ...complete, notebookItemIds: [] }, new Set())).toBe(false);
+    expect(isThesisComplete({ ...complete, catalysts: '' }, new Set(['nb:source-1']))).toBe(false);
     expect(isThesisComplete({ ...complete, risks: '' }, new Set(['nb:source-1']))).toBe(false);
     expect(isThesisComplete({ ...complete, invalidation: '' }, new Set(['nb:source-1']))).toBe(false);
     expect(isThesisComplete({ ...complete, reviewDate: '' }, new Set(['nb:source-1']))).toBe(false);

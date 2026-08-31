@@ -69,6 +69,7 @@ describe('NotesWidget evidence links', () => {
     render(<NotesWidget id="notes" symbol="FPT" config={{}} />);
     fireEvent.change(screen.getByLabelText('Review date'), { target: { value: '2026-12-31' } });
     fireEvent.change(screen.getByLabelText('Thesis'), { target: { value: 'Durable earnings growth' } });
+    fireEvent.change(screen.getByLabelText('Catalysts'), { target: { value: 'New capacity' } });
     fireEvent.change(screen.getByLabelText('Risks'), { target: { value: 'Execution risk' } });
     fireEvent.change(screen.getByLabelText('Invalidation'), { target: { value: 'Margin falls below target' } });
     fireEvent.change(screen.getByLabelText('Attach browser-local research evidence'), { target: { value: screen.getByRole('option', { name: 'FPT · FPT source' }).getAttribute('value') } });
@@ -88,6 +89,7 @@ describe('NotesWidget evidence links', () => {
     render(<NotesWidget id="notes" symbol="FPT" config={{ thesesBySymbol: { FPT: { notebookItemIds: ['nb:missing'] } } }} />);
     fireEvent.change(screen.getByLabelText('Review date'), { target: { value: '2026-12-31' } });
     fireEvent.change(screen.getByLabelText('Thesis'), { target: { value: 'Durable earnings growth' } });
+    fireEvent.change(screen.getByLabelText('Catalysts'), { target: { value: 'New capacity' } });
     fireEvent.change(screen.getByLabelText('Risks'), { target: { value: 'Execution risk' } });
     fireEvent.change(screen.getByLabelText('Invalidation'), { target: { value: 'Margin falls below target' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save thesis' }));
