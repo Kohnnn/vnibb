@@ -62,6 +62,14 @@ live in `docs/`.
   nothing else — leaving a snapshot day that looked complete by row count while
   the visible fields were empty for most of the market. Those rows are now
   skipped and written properly by the next full sync.
+- The scheduled screener sync no longer writes rows with a silently unset
+  price. Its optional fields were guarded with `hasattr`, which is true
+  whenever a field is *declared*, so a provider model that declared `price`
+  but left it unset wrote a NULL that no reader could distinguish from a
+  symbol with no quote. Mapping now checks the value, the upsert coalesces
+  instead of overwriting (so a sparse sync cannot blank another writer's
+  column), `source` is insert-only there too, and `snapshot_date` is stamped
+  in UTC rather than the host's local date.
 
 ### Internal
 - Added `apps/api/tests/test_core/test_config.py` covering the new timeout
@@ -91,6 +99,10 @@ live in `docs/`.
   when the RS rating service may create a Screener Snapshot row on its own:
   a carry-forward price must exist, an existing same-day row is enriched in
   place rather than duplicated, and a same-day row's provenance is preserved.
+- Added `apps/api/tests/test_services/test_screener_sync_payload.py` covering
+  the scheduled sync's row payload: a declared-but-unset price is omitted
+  rather than written as NULL, a repeat sync cannot blank a populated column,
+  and the row is keyed to the UTC snapshot date.
 
 ## [v1.5.0] - 2026-07-02
 
