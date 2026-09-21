@@ -462,6 +462,15 @@ class RSRatingService:
                     # Create new snapshot seeded from the latest prior snapshot
                     # so we don't replace a rich snapshot with an RS-only NULL row.
                     seed = carry_forward.get(stock["symbol"])
+                    # RS membership is derived from price history, so a symbol
+                    # whose most recent prior snapshot carries no price has no
+                    # price to rank by and no valuation to carry forward. Adding
+                    # it would create a row that exists *only* to hold an RS
+                    # score, which is what leaves a snapshot day looking complete
+                    # by row count while most of its visible fields are empty.
+                    # The next full sync writes the row properly.
+                    if seed is None or seed.price is None:
+                        continue
                     snapshot = ScreenerSnapshot(
                         symbol=stock["symbol"],
                         snapshot_date=snapshot_date,
