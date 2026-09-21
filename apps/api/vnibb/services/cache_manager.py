@@ -62,10 +62,16 @@ class CacheManager:
     # Legacy constants (for backward compatibility)
     SCREENER_TTL_MINUTES = 60
     PROFILE_TTL_HOURS = 168
-    # QA-v4 Heatmap: never serve a screener snapshot older than this from
-    # the stale cache. The daily sync should keep us inside ~1 trading
-    # day; 7 days gives plenty of headroom over weekends and Vietnamese
-    # market holidays before forcing a fresh fetch.
+    # Hard ceiling for `allow_stale` reads, measured in snapshot_date days
+    # (see `get_screener_data`). A snapshot older than this is treated as a
+    # miss so a stuck writer cannot poison universe readers indefinitely.
+    #
+    # Note this is deliberately far wider than the freshness threshold: the
+    # stale header is what *labels* the degradation, while this constant is
+    # only the point at which serving nothing is judged better than serving
+    # a visibly-stale number. Today's provider lag is real and observable
+    # (`data_quality_runs` records `freshness_breach`), so collapsing the two
+    # would trade a labelled stale answer for a blank universe.
     MAX_STALE_DAYS = 7
 
     def __init__(self, db: Optional[AsyncSession] = None):
@@ -109,8 +115,12 @@ class CacheManager:
         own_session = self._db is None
 
         try:
+            # Same clock as the writer (`store_screener_data`). Both the date
+            # filter and the staleness comparison below are defined in UTC
+            # days; using the host's local date here would look for a row the
+            # writer never created whenever the host runs ahead of UTC.
             now = datetime.utcnow()
-            today = date.today()
+            today = now.date()
             fresh_threshold = now - timedelta(minutes=self.SCREENER_TTL_MINUTES)
 
             # RC-1 (data-quality remediation 2026-06-08): the `source` filter used to
@@ -183,9 +193,17 @@ class CacheManager:
                 logger.debug(f"Cache miss for screener data (symbol={symbol}, source={source})")
                 return CacheResult(data=None, is_stale=False, cached_at=None, hit=False)
 
-            # Check if data is fresh
+            # Freshness is a property of the data's trade date, not of when
+            # the row was last written. Every scheduled pass rewrites
+            # `created_at`, so measuring write time reported a snapshot whose
+            # prices stopped advancing weeks ago as "just refreshed" for the
+            # first hour after each run, and then as "stale" again shortly
+            # after -- the label tracked the job's cron rather than the
+            # market. Readers use `stale` to decide whether to trust a number,
+            # so it must be derived from `snapshot_date`.
+            latest_snapshot_date = max(s.snapshot_date for s in snapshots)
             latest_created = max(s.created_at for s in snapshots)
-            is_stale = latest_created < fresh_threshold
+            is_stale = (today - latest_snapshot_date).days > self.SCREENER_TTL_MINUTES // 1440
 
             if is_stale and not allow_stale:
                 logger.debug(f"Cache stale for screener data, age={now - latest_created}")
@@ -233,8 +251,17 @@ class CacheManager:
         own_session = self._db is None
 
         try:
-            today = date.today()
+            # Both values must come from one clock. `date.today()` reads the
+            # host's local date while `datetime.utcnow()` reads UTC, so a
+            # host running ahead of UTC (Asia/Ho_Chi_Minh, UTC+7) stamped a
+            # snapshot under tomorrow's date while recording it as written
+            # today. Readers filter on a date, so the two writers then
+            # upserted into different rows and never converged: the scheduled
+            # sync owned the UTC day, the request path owned the local day,
+            # and whichever day a caller asked for determined which writer it
+            # saw.
             now = datetime.utcnow()
+            today = now.date()
 
             prep_data = []
             for record in data:
@@ -332,14 +359,31 @@ class CacheManager:
             if not prep_data:
                 return 0
 
-            # PostgreSQL bulk upsert (INSERT ... ON CONFLICT)
+            # PostgreSQL bulk upsert (INSERT ... ON CONFLICT).
+            #
+            # Issue 8: a request-path writer must never be able to degrade a
+            # row that the scheduled full-universe sync already owns. Two
+            # distinct hazards are handled here.
+            #
+            # 1. Provenance. `source` records who wrote the row. Overwriting it
+            #    with the latest caller's label destroyed the audit trail used
+            #    to tell a live partial write apart from the daily sync, so it
+            #    is insert-only.
+            # 2. Coverage. A live fetch is bounded by the caller's `limit` and
+            #    only some enrichers run, so incoming values are frequently
+            #    NULL for fields the stored row already has populated. Letting
+            #    NULL win would blank price, market_cap, pe and friends for
+            #    every other reader of the shared snapshot.
+            #
+            # Regressing a populated field to NULL is never a legitimate
+            # update: a genuinely delisted or unavailable value is handled by
+            # the retention sweep, not by an incidental request-path write.
             stmt = insert(ScreenerSnapshot).values(prep_data)
 
-            # Identify columns to update (all except symbol and date which are keys)
             update_cols = {
-                k: stmt.excluded[k]
+                k: func.coalesce(stmt.excluded[k], ScreenerSnapshot.__table__.c[k])
                 for k in prep_data[0].keys()
-                if k not in ["symbol", "snapshot_date"]
+                if k not in ["symbol", "snapshot_date", "source"]
             }
 
             stmt = stmt.on_conflict_do_update(

@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
@@ -25,6 +25,31 @@ _BASIC_HEALTH_TTL_SECONDS = 30
 HEALTH_CACHE_HEADERS = {
     "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
 }
+
+# Calendar days after which the newest Screener Snapshot is reported as a
+# freshness breach. Three days clears a weekend plus a Vietnamese market
+# holiday, so this flags a genuinely stalled feed rather than a long weekend.
+_SCREENER_FRESHNESS_BREACH_DAYS = 3
+
+
+def _coerce_snapshot_date(value: object) -> date | None:
+    """Normalize a `MAX(snapshot_date)` result to a `date`.
+
+    PostgreSQL hands back a `date` for a Date column; SQLite hands back the
+    stored ISO text. Accepting both keeps the probe portable across the test
+    and production drivers instead of raising on whichever one it did not
+    anticipate.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
 
 
 @router.get("/", response_class=Response)
@@ -164,15 +189,44 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
         # Check basic connectivity
         await db.execute(text("SELECT 1"))
 
-        # Get counts
+        # Get counts, and the age of the newest snapshot. A row count alone
+        # cannot distinguish a healthy corpus from one that is being
+        # faithfully rewritten every day with the same stale provider
+        # response, so the trade date has to travel with the count. The
+        # scheduled data-quality job already detects this and records a
+        # `freshness_breach`, but that verdict lived only in
+        # `data_quality_runs`, where no operator watching `/health` would
+        # ever see it. Report the breach here so a degraded feed is visible
+        # from the endpoint operators actually poll.
         db_rows = await db.execute(text("SELECT COUNT(*) FROM stocks"))
         screener_rows = await db.execute(text("SELECT COUNT(*) FROM screener_snapshots"))
+        # `MAX()` over a Date column is driver-dependent: PostgreSQL returns a
+        # `date`, SQLite returns the stored text. Coerce through `fromisoformat`
+        # so the probe cannot fail on the backend it happens to run against --
+        # a health check that throws is worse than one that omits a field.
+        raw_snapshot_date = (
+            await db.execute(text("SELECT MAX(snapshot_date) FROM screener_snapshots"))
+        ).scalar()
+        snapshot_date = _coerce_snapshot_date(raw_snapshot_date)
+        snapshot_age_days = (
+            (datetime.utcnow().date() - snapshot_date).days
+            if snapshot_date is not None
+            else None
+        )
 
-        health["components"]["database"] = {
+        database_component = {
             "status": "healthy",
             "stocks_count": db_rows.scalar(),
             "screener_count": screener_rows.scalar(),
+            "screener_snapshot_date": (
+                snapshot_date.isoformat() if snapshot_date is not None else None
+            ),
+            "screener_snapshot_age_days": snapshot_age_days,
         }
+        if snapshot_age_days is not None and snapshot_age_days > _SCREENER_FRESHNESS_BREACH_DAYS:
+            database_component["freshness_breach"] = True
+            health["status"] = "degraded"
+        health["components"]["database"] = database_component
     except Exception as e:
         health["components"]["database"] = {"status": "unhealthy", "error": str(e)}
         health["status"] = "degraded"
