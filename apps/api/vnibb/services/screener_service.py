@@ -5,11 +5,11 @@ Extracts logic from DataPipeline to avoid circular dependency issues.
 """
 
 import logging
-from datetime import date
+from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from vnibb.core.database import async_session_maker
 from vnibb.core.config import settings
@@ -66,7 +66,7 @@ class ScreenerService:
 
                         values = {
                             "symbol": item.symbol,
-                            "snapshot_date": date.today(),
+                            "snapshot_date": datetime.utcnow().date(),
                             "company_name": getattr(item, "organ_name", None)
                             or getattr(item, "company_name", None),
                             "market_cap": item.market_cap,
@@ -80,26 +80,34 @@ class ScreenerService:
                             # For now, sticking to the DataPipeline logic + verified fields
                         }
 
-                        # Add optional fields if they exist in the source item
-                        if hasattr(item, "price"):
-                            values["price"] = item.price
-                        if hasattr(item, "volume"):
-                            values["volume"] = item.volume
-                        if hasattr(item, "roa"):
-                            values["roa"] = item.roa
-                        # if hasattr(item, 'eps'): values['eps'] = item.eps
+                        # Map on the value, not on the attribute's existence.
+                        # `hasattr` is true whenever the field is declared, so a
+                        # provider model that declares `price` but leaves it
+                        # unset still passed the guard and wrote a row whose
+                        # price was NULL -- indistinguishable downstream from a
+                        # symbol that genuinely has no quote.
+                        price = getattr(item, "price", None)
+                        if price is not None:
+                            values["price"] = price
+                        volume = getattr(item, "volume", None)
+                        if volume is not None:
+                            values["volume"] = volume
+                        roa = getattr(item, "roa", None)
+                        if roa is not None:
+                            values["roa"] = roa
 
-                        stmt = (
-                            pg_insert(ScreenerSnapshot)
-                            .values(**values)
-                            .on_conflict_do_update(
-                                constraint="uq_screener_snapshot_symbol_date",
-                                set_={
-                                    k: v
-                                    for k, v in values.items()
-                                    if k not in ["symbol", "snapshot_date"]
-                                },
-                            )
+                        # Same ownership rule as `CacheManager.store_screener_data`:
+                        # a scheduled sync must not blank a column another writer
+                        # already populated, and `source` is insert-only so the
+                        # row's provenance survives a second writer.
+                        stmt = pg_insert(ScreenerSnapshot).values(**values)
+                        stmt = stmt.on_conflict_do_update(
+                            constraint="uq_screener_snapshot_symbol_date",
+                            set_={
+                                k: func.coalesce(stmt.excluded[k], ScreenerSnapshot.__table__.c[k])
+                                for k in values
+                                if k not in ("symbol", "snapshot_date", "source")
+                            },
                         )
 
                         await session.execute(stmt)
