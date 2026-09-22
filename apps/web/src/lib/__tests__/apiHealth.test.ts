@@ -161,10 +161,14 @@ describe('/api/health', () => {
         const response = await GET()
         const body = await response.json()
 
-        // Then: the proxy degrades without leaking backend internals or failing the route.
+        // Then: the proxy degrades without leaking backend internals or failing
+        // the route. `status` must agree with `healthy`/`degraded`: reporting
+        // `ok` while `healthy: false` was the inconsistency this contract test
+        // used to pin, and it is exactly the shape that let a degraded backend
+        // look green to anything keying off `status`.
         expect(response.status).toBe(200)
         expect(body).toMatchObject({
-            status: 'ok',
+            status: 'unhealthy',
             healthy: false,
             degraded: true,
             backend: {
