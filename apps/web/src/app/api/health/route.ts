@@ -44,7 +44,6 @@ export async function GET() {
             { status: 502 },
         )
     }
-
     try {
         const [basicRes, detailedRes] = await Promise.all([
             fetch(`${BACKEND_API_URL}/health/`, {
@@ -60,14 +59,29 @@ export async function GET() {
         const elapsed = Date.now() - start
 
         const basicBody = basicRes.ok ? await basicRes.json().catch(() => null) : null
+        const detailedBody = detailedRes.ok
+            ? await detailedRes.json().catch(() => null)
+            : null
+
+        // The backend reports `degraded` (stale snapshot, DB error) while still
+        // answering 200, so an `ok` here used to imply health we had not
+        // actually confirmed. Carry the backend's own verdict through, and count
+        // a missing detailed body as unknown rather than healthy.
+        const backendStatus =
+            detailedBody && typeof detailedBody === 'object'
+                ? (detailedBody as { status?: unknown }).status
+                : undefined
+        const backendDegraded = backendStatus === 'degraded' || backendStatus === 'unhealthy'
+        const reachable = basicRes.ok && detailedRes.ok
 
         return NextResponse.json({
-            status: 'ok',
-            healthy: basicRes.ok && detailedRes.ok,
-            degraded: !basicRes.ok || !detailedRes.ok,
+            status: !reachable ? 'unhealthy' : backendDegraded ? 'degraded' : 'ok',
+            healthy: reachable && !backendDegraded,
+            degraded: !reachable || backendDegraded,
             stale: elapsed > 3000,
             timeout: elapsed > 5000,
             data_backend: readDataBackend(basicBody),
+            backend_status: typeof backendStatus === 'string' ? backendStatus : null,
             backend: {
                 health: publicEndpointHealth(basicRes),
                 health_detailed: publicEndpointHealth(detailedRes),

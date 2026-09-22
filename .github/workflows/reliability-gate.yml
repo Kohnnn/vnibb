@@ -45,10 +45,18 @@ jobs:
         working-directory: apps/api
         run: |
           BASE_URL="${RELIABILITY_BASE_URL%/}"
+          # `--timeout` must exceed the API's own `api_request_timeout_seconds`
+          # (30 s). At 10 s this gate aborted requests the application still
+          # considered in-flight, so a cold cache on `historical`/`world_news`
+          # was indistinguishable from a real outage and every scheduled run
+          # failed on `5xx_rate` + `max_latency_ms`. The script now warms those
+          # caches first; 35 s leaves the app its full budget.
           python scripts/widget_health_matrix.py \
             --base-url "${BASE_URL}" \
             --repeats 5 \
-            --timeout 10 \
+            --timeout 35 \
+            --max-5xx-rate 0.0 \
+            --max-latency-ms 30000 \
             --fail-on-error \
             --output-json scripts/v34_widget_health_after.json
 

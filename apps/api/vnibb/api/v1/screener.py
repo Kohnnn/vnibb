@@ -32,6 +32,8 @@ from vnibb.providers.vnstock.equity_screener import (
 )
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError, ProviderRateLimitError
 from vnibb.services.cache_manager import CacheManager
+from vnibb.core.cache import redis_client
+from vnibb.core.cache_constants import REDIS_TTL_INDEX_CONSTITUENTS
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.screener_filter_service import ScreenerFilterService
 from vnibb.api.v1.schemas import StandardResponse, MetaData
@@ -562,19 +564,50 @@ async def _resolve_index_universe(universe: str) -> tuple[Optional[set[str]], di
     service = get_mongo_market_data_service()
     if not service.enabled:
         return set(), meta
-    record = await service.get_current_index_constituents(normalized)
+
+    # Membership changes only on a Vietcap rebalance, but this was awaited on
+    # every `universe != ALL` request -- a blocking Mongo find_one behind an
+    # `asyncio.to_thread`. On the worker pool that added seconds to the whole
+    # screener endpoint (measured 5.9 s avg against a 24 ms profile call).
+    # Cache the raw read; the staleness verdict below is still recomputed from
+    # `synced_at`, so the effective max age stays exactly the same.
+    cache_key = f"v:ic:{normalized}"
+    record = None
+    try:
+        record = await redis_client.get_json(cache_key)
+    except Exception as cache_err:  # pragma: no cover - cache is best effort
+        logger.warning("Index constituent cache read failed for %s: %s", normalized, cache_err)
+    if record is None:
+        record = await service.get_current_index_constituents(normalized)
+        if record:
+            try:
+                await redis_client.set_json(
+                    cache_key, record, ttl=REDIS_TTL_INDEX_CONSTITUENTS
+                )
+            except Exception as cache_err:  # pragma: no cover - cache is best effort
+                logger.warning(
+                    "Index constituent cache write failed for %s: %s", normalized, cache_err
+                )
     if not record:
         return set(), meta
+
+    # The service already computed staleness against its own `max_age_days`.
+    # Do NOT recompute it from `synced_at` here: that would apply a second,
+    # stricter rule and start rejecting members the service considers fresh.
+    is_stale = bool(record.get("stale"))
+    synced_at = record["synced_at"]
     meta.update(
         {
             "membership_source": record["source"],
-            "membership_synced_at": record["synced_at"].isoformat(),
+            "membership_synced_at": (
+                synced_at.isoformat() if isinstance(synced_at, datetime) else str(synced_at)
+            ),
             "membership_coverage": record["member_count"],
-            "membership_available": not record["stale"],
-            "membership_stale": record["stale"],
+            "membership_available": not is_stale,
+            "membership_stale": is_stale,
         }
     )
-    return set(record["members"]) if not record["stale"] else set(), meta
+    return set(record["members"]) if not is_stale else set(), meta
 
 
 def _shares_multiplier(shares: float) -> float:

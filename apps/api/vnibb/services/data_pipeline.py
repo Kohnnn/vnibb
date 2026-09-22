@@ -5307,7 +5307,16 @@ class DataPipeline:
                 error_counts[error_key] = error_counts.get(error_key, 0) + 1
                 if len(error_samples) < 5:
                     error_samples.append(f"{symbol}:{error_key}")
-                logger.debug(f"Intraday sync failed for {symbol}: {message}")
+                # This was `logger.debug`, so a stage that failed for EVERY
+                # symbol (intraday_trades ran 0 success / 60 errors for seven
+                # consecutive days) produced no operator-visible output at the
+                # production LOG_LEVEL=INFO. A per-symbol warning would flood
+                # the log, so the first few carry the real message and the
+                # aggregate summary at the end of the stage carries the counts.
+                if len(error_samples) < 5:
+                    logger.warning(
+                        "Intraday sync failed for %s: %s", symbol, message[:300]
+                    )
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["intraday_trades"]["errors"] += 1
@@ -5340,6 +5349,17 @@ class DataPipeline:
                     "error_samples": error_samples,
                 },
             )
+            # Also land the reasons in the checkpointed stage payload. The
+            # structured `extra=` above only reaches the log stream; recovery
+            # decisions are made from `sync_status.additional_data`, which
+            # previously recorded error COUNTS with no reasons -- the reason a
+            # 7-day outage on this stage could not be diagnosed after the fact.
+            if progress is not None:
+                stage = progress.setdefault("stage_stats", {}).setdefault(
+                    "intraday_trades", {}
+                )
+                stage["error_breakdown"] = error_counts
+                stage["error_samples"] = error_samples
 
         if settings.cache_order_flow_chunked and order_flow_cache_records:
             await self._cache_chunked_records(

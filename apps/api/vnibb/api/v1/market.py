@@ -4600,8 +4600,14 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "key": "rs_rating",
         "label": "RS rating",
         "description": "Relative-strength leaders/laggards rankings.",
-        "table": "rs_rating_snapshots",
+        # RS ratings are a column on screener_snapshots, written by
+        # `rs_rating_sync` via `ScreenerSnapshot.rs_rating`. There is no
+        # `rs_rating_snapshots` table; probing one raised
+        # UndefinedTableError, which aborted the shared session and made
+        # every later probe in this list report `null`.
+        "table": "screener_snapshots",
         "timestamp_column": "snapshot_date",
+        "filter": "rs_rating IS NOT NULL",
         "stale": 2,
         "critical": 7,
         "next_sync": "Daily 09:10 UTC",
@@ -4665,11 +4671,22 @@ async def get_data_sources_freshness(
                 sql += f' WHERE {spec["filter"]}'
             res = await db.execute(text(sql))
             last_value = res.scalar()
-        except Exception as e:  # pragma: no cover - defensive, schema drift
+        except Exception as e:
             logger.warning(
                 "data-sources freshness probe failed for %s: %s", spec["table"], e
             )
             last_value = None
+            # A failed statement leaves the session's transaction in an
+            # aborted state. Without an explicit rollback every subsequent
+            # probe in this loop fails too, so ONE bad spec used to report
+            # `null` for all the feeds that came after it. Roll back so each
+            # feed's freshness is judged on its own.
+            try:
+                await db.rollback()
+            except Exception:  # pragma: no cover - rollback of a dead session
+                logger.warning(
+                    "could not roll back after failed probe for %s", spec["table"]
+                )
 
         age_days: Optional[float] = None
         last_dt: Optional[datetime] = None

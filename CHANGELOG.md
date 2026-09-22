@@ -14,6 +14,21 @@ live in `docs/`.
 ## [Unreleased]
 
 ### Fixed
+- **Root cause of the nightly `daily_trading` failure: twelve unique
+  constraints declared in the models were never actually created in the
+  database.** Every writer using `get_upsert_stmt` emits `INSERT ... ON
+  CONFLICT`, which Postgres rejects with `InvalidColumnReferenceError: there
+  is no unique or exclusion constraint matching the ON CONFLICT specification`
+  when the constraint is absent. `intraday_trades` had therefore failed for
+  every symbol (0 success / 60 errors) for seven consecutive days, and several
+  other feeds were silently frozen at their last successful load. A new
+  migration restores all twelve constraints, deduplicating first (only
+  `dividends` and `company_events` actually held duplicates).
+- The intraday stage logged per-symbol failures at `debug`, so a stage failing
+  for every symbol produced no operator-visible output at production
+  `LOG_LEVEL=INFO`; the first few failures now log at `warning`, and the
+  per-stage error breakdown and samples are persisted into the checkpointed
+  sync payload instead of counts alone.
 - Quant endpoints no longer serve empty price frames: the six historical
   loaders (`_load_historical_from_*`, `_load_corporate_actions_for_adjustment`,
   `_apply_corporate_action_adjustments`) are now re-exported from

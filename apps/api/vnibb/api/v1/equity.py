@@ -4496,7 +4496,7 @@ async def _enrich_missing_ratio_metrics(
 
 
 @router.get("/historical", response_model=StandardResponse[list[EquityHistoricalData]])
-@cached(ttl=300, key_prefix="historical_v3")
+@cached(key_prefix="historical_v3")
 async def get_historical_prices(
     symbol: str = Query(..., min_length=1, max_length=10),
     start_date: date = Query(default_factory=lambda: date.today() - timedelta(days=365)),

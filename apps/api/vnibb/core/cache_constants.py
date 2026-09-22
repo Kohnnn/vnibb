@@ -27,10 +27,21 @@ REDIS_TTL_FINANCIALS = 86400  # 24 hours
 REDIS_TTL_INCOME_STATEMENT = 86400  # 24 hours
 REDIS_TTL_BALANCE_SHEET = 86400  # 24 hours
 REDIS_TTL_CASH_FLOW = 86400  # 24 hours
+REDIS_TTL_HISTORICAL_V3 = 3600  # 1 hour (EOD bars; refreshed by the daily sync)
+
+# Index membership (VN30/VN100/HNX30) changes only when Vietcap rebalances.
+# The screener awaited it on every `universe != ALL` request, which is most of
+# them, so this is cached in Redis rather than re-read from Mongo each time.
+REDIS_TTL_INDEX_CONSTITUENTS = 3600  # 1 hour
 
 # News data - medium TTL
 REDIS_TTL_NEWS = 1800  # 30 minutes
 REDIS_TTL_COMPANY_NEWS_V26 = 1800  # 30 minutes
+# World news aggregates a dozen external RSS feeds on every cold fetch and
+# measured 6.8 s live. It is a headline feed, not a trading input, so a long
+# TTL costs little and removes the multi-second cold path that was pushing
+# batches of requests past the 10 s reliability-gate timeout.
+REDIS_TTL_WORLD_NEWS = 3600  # 1 hour
 REDIS_TTL_COMPANY_EVENTS_V26 = 1800  # 30 minutes
 
 # Profile data - very long TTL (static data)
@@ -56,6 +67,12 @@ REDIS_CACHE_TTLS: Dict[str, int] = {
     "news": REDIS_TTL_NEWS,
     "company_news_v26": REDIS_TTL_COMPANY_NEWS_V26,
     "company_events_v26": REDIS_TTL_COMPANY_EVENTS_V26,
+    "world_news": REDIS_TTL_WORLD_NEWS,
+    "world_news_map": REDIS_TTL_WORLD_NEWS,
+    # EOD bars only change once per trading day, so the 300 s the route asks
+    # for forces a ~6 s cold rebuild twelve times an hour for no freshness
+    # gain. One hour still refreshes within the same session.
+    "historical_v3": REDIS_TTL_HISTORICAL_V3,
     "profile": REDIS_TTL_PROFILE,
 }
 
@@ -77,6 +94,8 @@ REDIS_CACHE_PREFIX_SHORT: Dict[str, str] = {
     "world_indices": "wi",
     "market_heatmap": "mh",
     "microstructure": "ms",
+    "world_news": "wn",
+    "historical_v3": "hv",
 }
 
 

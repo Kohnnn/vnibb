@@ -238,7 +238,7 @@ class HeatmapResponse(BaseModel):
     summary="Get World News Monitor Feed",
     description="Get live RSS/Atom headlines from Vietnam and global business, market, and macro sources.",
 )
-@cached(ttl=300, key_prefix="world_news")
+@cached(key_prefix="world_news")
 async def get_world_news_api(
     region: str | None = Query(
         default=None,
@@ -290,7 +290,7 @@ async def get_world_news_api(
     summary="Get World News Map",
     description="Get live world news article counts and latest headlines grouped by source geography.",
 )
-@cached(ttl=300, key_prefix="world_news_map")
+@cached(key_prefix="world_news_map")
 async def get_world_news_map_api(
     region: str | None = Query(
         default=None,
