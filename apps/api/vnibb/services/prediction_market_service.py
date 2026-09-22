@@ -83,6 +83,7 @@ class PredictionMarketValues(TypedDict, total=False):
     outcome_prices: list[float]
     extra: dict
     updated_at: datetime
+    is_synthetic: bool
 
 
 class GammaMarketPayload(BaseModel):
@@ -321,6 +322,10 @@ def _upsert_prediction_market(values: PredictionMarketValues, dialect_name: str)
             "liquidity": stmt.excluded.liquidity,
             "outcomes": stmt.excluded.outcomes,
             "outcome_prices": stmt.excluded.outcome_prices,
+            # Provenance must be authoritative in both directions: a live sync
+            # overwriting a fixture row has to clear the flag, and a fixture
+            # fallback must set it.
+            "is_synthetic": stmt.excluded.is_synthetic,
             "extra": stmt.excluded.extra,
             "updated_at": stmt.excluded.updated_at,
         },

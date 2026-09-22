@@ -246,7 +246,58 @@ async def test_source_health_route_when_rows_exist_returns_all_known_sources(
         "snapshot_count": 0,
         "latest_snapshot_at": None,
         "stale_after_seconds": 86400,
+        "synthetic_market_count": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_source_health_does_not_report_fixture_seeded_source_as_synced(
+    client,
+    test_db,
+) -> None:
+    # Given: a source whose entire population came from the offline fixture
+    # fallback, with a fresh snapshot so freshness alone would call it synced.
+    now = datetime.now(UTC)
+    test_db.add(
+        PredictionMarket(
+            source="predictit",
+            source_id="fx-1",
+            question="Fixture-seeded contract",
+            active=True,
+            closed=False,
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.5, 0.5],
+            is_synthetic=True,
+        )
+    )
+    test_db.add(
+        PredictionMarketSnapshot(
+            market_id=1,
+            source="predictit",
+            source_id="fx-1",
+            category="Politics",
+            question="Fixture-seeded contract",
+            url=None,
+            yes_price=0.5,
+            volume=0.0,
+            liquidity=0.0,
+            extra={},
+            captured_at=now,
+        )
+    )
+    await test_db.commit()
+
+    # When: source health is requested.
+    response = await client.get("/api/v1/prediction-markets/source-health")
+
+    # Then: the source is not reported as synced. Its snapshot is fresh, so
+    # freshness alone would have called the provider healthy; the provenance
+    # is what reveals the ingest fell back.
+    assert response.status_code == 200
+    sources = {row["source"]: row for row in response.json()["sources"]}
+    assert sources["predictit"]["synthetic_market_count"] == 1
+    assert sources["predictit"]["market_count"] == 1
+    assert sources["predictit"]["status"] == "stale"
 
 
 @pytest.mark.asyncio
@@ -287,6 +338,7 @@ async def test_source_health_route_when_tables_missing_returns_empty_sources(
                 "snapshot_count": 0,
                 "latest_snapshot_at": None,
                 "stale_after_seconds": 86400,
+                "synthetic_market_count": 0,
             }
             for source in ("polymarket", "kalshi", "predictit", "limitless", "manifold")
         ]

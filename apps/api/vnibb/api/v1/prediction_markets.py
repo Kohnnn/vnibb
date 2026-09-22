@@ -127,6 +127,10 @@ class PredictionMarketSourceHealthRow(BaseModel):
     snapshot_count: int
     latest_snapshot_at: datetime | None
     stale_after_seconds: int
+    # Provenance. A source whose rows all came from the checked-in fixture is
+    # not actually synced, and reporting it as such is what let a provider
+    # outage look like a healthy feed.
+    synthetic_market_count: int = 0
 
 
 class PredictionMarketSourceHealthResponse(BaseModel):
@@ -362,6 +366,15 @@ async def get_prediction_market_source_health(
                 )
             ).all()
         )
+        synthetic_counts = dict(
+            (
+                await db.execute(
+                    select(PredictionMarket.source, func.count(PredictionMarket.id))
+                    .where(PredictionMarket.is_synthetic.is_(True))
+                    .group_by(PredictionMarket.source)
+                )
+            ).all()
+        )
         snapshot_stats = {
             source: (count, latest)
             for source, count, latest in (
@@ -385,6 +398,7 @@ async def get_prediction_market_source_health(
     sources: list[PredictionMarketSourceHealthRow] = []
     for source in KNOWN_PREDICTION_MARKET_SOURCES:
         market_count = int(market_counts.get(source, 0))
+        synthetic_market_count = int(synthetic_counts.get(source, 0))
         snapshot_count, latest_snapshot_at = snapshot_stats.get(source, (0, None))
         status: Literal["synced", "stale", "empty"] = "empty"
         if market_count > 0 or snapshot_count > 0:
@@ -395,6 +409,11 @@ async def get_prediction_market_source_health(
                 latest = latest.replace(tzinfo=UTC)
             if now - latest <= timedelta(seconds=PREDICTION_MARKET_STALE_AFTER_SECONDS):
                 status = "synced"
+        # A source whose rows are entirely fixture-derived is not synced no
+        # matter how fresh its snapshot looks: the ingest fell back, which
+        # means the provider did not deliver.
+        if market_count > 0 and synthetic_market_count >= market_count:
+            status = "stale"
         sources.append(
             PredictionMarketSourceHealthRow(
                 source=source,
@@ -403,6 +422,7 @@ async def get_prediction_market_source_health(
                 snapshot_count=int(snapshot_count),
                 latest_snapshot_at=latest_snapshot_at,
                 stale_after_seconds=PREDICTION_MARKET_STALE_AFTER_SECONDS,
+                synthetic_market_count=synthetic_market_count,
             )
         )
     return PredictionMarketSourceHealthResponse(sources=sources)

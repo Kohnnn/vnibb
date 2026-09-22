@@ -39,6 +39,13 @@ class PredictionMarket(Base):
     outcomes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     outcome_prices: Mapped[list[float]] = mapped_column(JSON, nullable=False, default=list)
     extra: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    # Provenance. Fixture-seeded rows are synthetic and must never be mistaken
+    # for live provider data: the ingest path falls back to a checked-in
+    # fixture whenever the live fetch fails or returns nothing, and without
+    # this flag a provider outage was indistinguishable from success.
+    is_synthetic: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false", index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,

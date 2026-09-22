@@ -154,6 +154,10 @@ async def _seed_from_fixture(
         if market is None:
             continue
         values: PredictionMarketValues = market.to_values()
+        # Fixture rows are synthetic: the caller only reaches this path after a
+        # live ingest failed or returned nothing. Stamp the provenance so a
+        # provider outage cannot masquerade as fresh data.
+        values["is_synthetic"] = True
         await session.execute(_upsert_prediction_market(values, dialect_name))
         count += 1
     await session.commit()
@@ -179,9 +183,9 @@ async def seed_predictit_from_fixture(session: AsyncSession, *, path: str | None
             market = _normalise_predictit_row(row)
             if market is None:
                 continue
-            await session.execute(
-                _upsert_prediction_market(market.to_values(), dialect_name)
-            )
+            values = market.to_values()
+            values["is_synthetic"] = True
+            await session.execute(_upsert_prediction_market(values, dialect_name))
             count += 1
         await session.commit()
         logger.info("Seeded %d PredictIt markets from %s", count, path)
@@ -206,9 +210,9 @@ async def seed_limitless_from_fixture(session: AsyncSession, *, path: str | None
             market = _normalise_limitless_row(row)
             if market is None:
                 continue
-            await session.execute(
-                _upsert_prediction_market(market.to_values(), dialect_name)
-            )
+            values = market.to_values()
+            values["is_synthetic"] = True
+            await session.execute(_upsert_prediction_market(values, dialect_name))
             count += 1
         await session.commit()
         logger.info("Seeded %d Limitless markets from %s", count, path)
@@ -233,9 +237,9 @@ async def seed_manifold_from_fixture(session: AsyncSession, *, path: str | None 
             market = _normalise_manifold_row(row)
             if market is None:
                 continue
-            await session.execute(
-                _upsert_prediction_market(market.to_values(), dialect_name)
-            )
+            values = market.to_values()
+            values["is_synthetic"] = True
+            await session.execute(_upsert_prediction_market(values, dialect_name))
             count += 1
         await session.commit()
         logger.info("Seeded %d Manifold markets from %s", count, path)
