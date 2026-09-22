@@ -6439,16 +6439,6 @@ async def run_daily_trading_sync():
     """Wrapper for scheduler to run daily trading updates."""
     await data_pipeline.run_daily_trading_updates()
 
-    from vnibb.services.appwrite_population import populate_appwrite_tables
-
-    tables = ["foreign_trading", "order_flow_daily", "derivative_prices"]
-    if settings.store_intraday_trades:
-        tables.append("intraday_trades")
-    if not settings.orderbook_at_close_only:
-        tables.append("orderbook_snapshots")
-
-    await populate_appwrite_tables(tables)
-
 
 async def run_hourly_news_sync():
     """Wrapper for scheduler to run hourly news sync."""
@@ -6476,16 +6466,6 @@ async def run_intraday_sync():
     results["intraday_trades"] = await data_pipeline.sync_intraday_trades(symbols=symbols)
     results["orderbook_snapshots"] = await data_pipeline.sync_orderbook_snapshots(symbols=symbols)
     results["derivative_prices"] = await data_pipeline.sync_derivatives_prices()
-
-    from vnibb.services.appwrite_population import populate_appwrite_tables
-
-    tables = ["order_flow_daily", "derivative_prices"]
-    if settings.store_intraday_trades:
-        tables.append("intraday_trades")
-    if not settings.orderbook_at_close_only:
-        tables.append("orderbook_snapshots")
-    await populate_appwrite_tables(tables)
-
     logger.info(
         "Intraday scheduler sync completed for %s symbols with results=%s",
         len(symbols),

@@ -18,7 +18,7 @@ Ship trustworthy market data and a predictable backend without changing the serv
 ## Release Boundary
 
 - The outcome-first walkthrough remains v1.6.0 work on its existing branch.
-- v1.6.1 does not re-enable Appwrite writes.
+- v1.6.1 keeps Postgres as the only durable write target and introduces no new write path.
 - v1.6.1 does not combine data repair with a Supabase/PostgreSQL platform upgrade.
 - Live corpus mutation, destructive deduplication, and index creation require an audited report, backup evidence, an exact operator command, and explicit approval.
 - Repository completion and live rollout completion are tracked separately.

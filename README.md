@@ -251,7 +251,6 @@ apps/web/src/
 ├── lib/
 │   ├── api.ts           # fetchAPI() wrapper with error handling
 │   ├── queries.ts       # TanStack Query hooks (useFinancialRatios, etc.)
-│   ├── appwrite.ts      # Appwrite client
 │   └── supabase.ts      # Supabase client
 ├── types/               # TypeScript interfaces
 └── styles/             # Global CSS

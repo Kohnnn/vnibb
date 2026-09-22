@@ -18,7 +18,7 @@ jest.mock('@/lib/api', () => ({ submitCopilotOutcome: jest.fn() }))
 
 describe('CopilotEvidencePanel', () => {
   test('connects the evidence disclosure control to its panel', () => {
-    render(<CopilotEvidencePanel sources={[{ id: 'source-1', label: 'VNIBB source', source: 'appwrite' }]} />)
+    render(<CopilotEvidencePanel sources={[{ id: 'source-1', label: 'VNIBB source', source: 'postgres' }]} />)
 
     const trigger = screen.getByRole('button', { name: /evidence/i })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')

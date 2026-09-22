@@ -21,7 +21,7 @@ Out of scope for this wave:
 - Implementing sandbox execution.
 - Client-side execution using `eval`, `Function`, `new Function`, string timers, or WebAssembly plugins in the main app.
 - Arbitrary Python execution inside the FastAPI process.
-- Enabling Appwrite writes or durable strategy storage.
+- Durable strategy storage in Postgres.
 - Live trading, paper trading execution, strategy marketplace, or strategy sharing.
 
 ## Non-Goals
@@ -30,7 +30,7 @@ Out of scope for this wave:
 | --- | --- |
 | General-purpose Python notebook | Too broad; every package/import expands the escape surface. |
 | Full backtesting engine | Existing quant routes have bounded, fixed algorithms. User-authored strategies need a separate safety model. |
-| Persistent user code | Durable writes cross the Appwrite-primary bridge, which remains frozen by default. |
+| Persistent user code | Durable writes need a storage schema, ownership model, and cleanup policy that do not exist yet. |
 | Client-side code execution | Browser execution would make XSS and data exfiltration harder to contain. |
 | In-process backend execution | A sandbox escape would become API-host compromise. |
 | Multi-tenant hardening by assumption | Must be proven by runtime isolation, not asserted. |
@@ -43,7 +43,7 @@ VNIBB is a monorepo:
 - Backend: `apps/api`, FastAPI routers under `apps/api/vnibb/api/v1`.
 - Quant surface: `apps/api/vnibb/api/v1/quant.py`.
 - Market surface: `apps/api/vnibb/api/v1/market.py`.
-- Runtime data model: Appwrite-primary with PostgreSQL/Supabase fallback/bridge; writes are frozen by default and must not be changed by this wave.
+- Runtime data model: Postgres is the durable app store; MongoDB holds the read-only analytical corpus. Writes are limited to the authenticated Postgres path and must not be changed by this wave.
 - Existing quant/backtest routes are fixed-algorithm endpoints, not arbitrary execution surfaces.
 
 ## Assumptions
@@ -53,7 +53,7 @@ VNIBB is a monorepo:
 | User-authenticated dashboard is the only intended entry point. | Public unauthenticated access would raise every sandbox threat to high/critical. |
 | Initial design can start with templates/DSL before arbitrary code. | If arbitrary code is required from day one, Stage 3 gates become mandatory first. |
 | Market data needed for strategy evaluation can be pre-baked by the API. | If workers need dynamic reads, a scoped read-only data API and token model are required. |
-| Appwrite writes remain disabled. | Durable strategy persistence becomes a separate write-bridge project. |
+| Postgres is the only durable write target. | Durable strategy persistence becomes a separate schema-plus-write-path project. |
 | No deployed job queue exists for user workloads. | Sandbox execution cannot be safely synchronous in the API request path. |
 
 ## Trust Boundaries
@@ -91,7 +91,7 @@ Boundary requirements:
 | Market data payload | API response, sandbox memory | Medium | Public-ish data, commercially valuable in bulk. |
 | Database credentials | API process environment | Critical | Sandbox escape must not expose them. |
 | vnstock/API provider keys | API process environment | High | Provider quota and premium-data access. |
-| Appwrite/admin credentials | API process environment | Critical | Write freeze and admin operations depend on isolation. |
+| Database/admin credentials | API process environment | Critical | Write access and admin operations depend on isolation. |
 | Sandbox compute budget | Worker host/container | High | Resource abuse can degrade API availability. |
 | Audit log | API-side logs/table | Medium | Needed for investigation and abuse response. |
 
@@ -110,7 +110,7 @@ Assume an attacker cannot:
 
 - Access API host files before sandbox escape.
 - Reach the database or MongoDB directly.
-- Toggle Appwrite writes or admin configuration through normal user APIs.
+- Toggle database writes or admin configuration through normal user APIs.
 - Access another user’s browser session without a separate web vulnerability.
 
 ## Abuse Paths
@@ -223,7 +223,7 @@ The default implementation path should be Stage 1 templates, then Stage 2 signed
 
 - No client-side `eval`, `Function`, `new Function`, string timers, or main-app WASM plugin execution.
 - No arbitrary Python in the FastAPI process.
-- No Appwrite write enablement.
+- No new durable write path for user-authored code.
 - No database credentials, provider keys, or admin secrets inside any worker.
 - No synchronous long-running sandbox execution in a request handler.
 - No raw HTML rendering of strategy output.

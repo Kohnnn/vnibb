@@ -66,8 +66,7 @@ Edit `deployment/env.oracle` and set:
 - `ACME_EMAIL`
 - `DATABASE_URL`
 - `DATABASE_URL_SYNC`
-- `DATA_BACKEND=hybrid`
-- `APPWRITE_WRITE_ENABLED=false` for the current month
+- `DATA_BACKEND=postgres`
 - `ALLOW_ANONYMOUS_DASHBOARD_WRITES=true`
 - `MONGODB_URL` for shared market/raw analytical records used by microstructure widgets
 - `MONGODB_DATABASE=vnibb-market`
@@ -75,11 +74,6 @@ Edit `deployment/env.oracle` and set:
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 - `SUPABASE_JWT_SECRET`
-- `APPWRITE_ENDPOINT`
-- `APPWRITE_PROJECT_ID`
-- `APPWRITE_API_KEY`
-- `APPWRITE_DATABASE_ID` (reuse the existing VNIBB database)
-- `APPWRITE_SYSTEM_TEMPLATES_COLLECTION_ID=system_dashboard_templates`
 - `VNIBB_MCP_URL=http://mcp:8001/mcp`
 - `VNIBB_MCP_SHARED_BEARER_TOKEN`
 - `MCP_PUBLIC_BIND=127.0.0.1`
@@ -94,25 +88,9 @@ Edit `deployment/env.oracle` and set:
 - `VNIBB_API_IMAGE_REPOSITORY` as the registry repository and `VNIBB_API_IMAGE_DIGEST` as the published `sha256:<digest>`
 - resource and log limit values from `deployment/env.oracle.example`, adjusted only after a measured baseline
 
-### Create the system templates collection
+### System layout templates
 
-For the exact click-by-click setup, see the archived `appwrite_system_layouts_manual_setup.md` under the workspace archive (`../docs/archive/vnibb-docs-2026-06-09/`, outside this repo).
-
-Before expecting admin draft/publish to work, create collection `system_dashboard_templates` in the existing VNIBB database with these attributes:
-
-- `dashboard_key` string
-- `status` string
-- `version` integer
-- `dashboard_json` string
-- `notes` string
-- `updated_by` string
-- `updated_at` string
-- `published_at` string
-
-Recommended indexes:
-
-- `dashboard_key + status`
-- `dashboard_key + version`
+No manual store setup is required. Draft and published system layouts live in the Postgres `app_kv` table under the `system_layout_template` key prefix, so admin draft/publish works as soon as the backend is deployed against the app database.
 
 ### Admin-first workflow result
 
@@ -231,12 +209,11 @@ docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml log
 ### What to confirm
 
 - `/live`, `/ready`, `/health/`, and `/api/v1/health` return `200`
-- `/health/` reports `providers.data_backend=hybrid`
-- `/health/` reports `providers.appwrite_write_enabled=false`
+- `/health/` reports `providers.data_backend=postgres`
 - `/health/` reports `providers.allow_anonymous_dashboard_writes=true`
 - `/api/v1/dashboard/` returns `200` when called with `X-VNIBB-Client-ID`
 - `/mcp-health` returns `200`
-- `/mcp` accepts MCP initialization and `get_appwrite_status`
+- `/mcp` accepts MCP initialization and `get_database_status`
 - the database stack is reported as connected
 - CORS preflight succeeds for `https://vnibb-web.vercel.app`
 - Key API endpoints succeed

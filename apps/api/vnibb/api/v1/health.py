@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vnibb.core.appwrite_client import check_appwrite_connectivity
 from vnibb.core.cache import redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
@@ -68,7 +67,6 @@ async def basic_health():
         "status": "ok",
         "db": "connected",
         "cache": "unavailable",
-        "appwrite": "not_configured",
         "providers": {
             "data_backend_requested": settings.data_backend,
             "data_backend": settings.resolved_data_backend,
@@ -78,9 +76,6 @@ async def basic_health():
             "vietcap_primary_eod": True,
             "premium_realtime_streaming": settings.vnstock_runtime_tier == "premium",
             "premium_news_crawler": settings.vnstock_runtime_tier == "premium",
-            "appwrite_write_enabled": settings.appwrite_write_enabled,
-            "appwrite_writes_active": settings.appwrite_writes_active,
-            "appwrite_configured": settings.is_appwrite_configured,
             "allow_anonymous_dashboard_writes": settings.allow_anonymous_dashboard_writes,
             "scheduler_role": settings.scheduler_role,
             "scheduler_lock_enabled": settings.scheduler_lock_enabled,
@@ -112,16 +107,6 @@ async def basic_health():
             health["cache"] = "not_configured"
     except Exception:
         health["cache"] = "unavailable"
-
-    # Appwrite check (optional and bounded)
-    try:
-        appwrite_health = await asyncio.wait_for(
-            check_appwrite_connectivity(timeout_seconds=1.5),
-            timeout=2.0,
-        )
-        health["appwrite"] = appwrite_health.get("status", "error")
-    except Exception:
-        health["appwrite"] = "error"
 
     _BASIC_HEALTH_CACHE["data"] = health
     _BASIC_HEALTH_CACHE["timestamp"] = now
@@ -274,12 +259,5 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
             health["components"]["redis"] = {"status": "unhealthy", "error": str(e)}
     else:
         health["components"]["redis"] = {"status": "not_configured"}
-
-    # Appwrite check
-    appwrite_health = await check_appwrite_connectivity(timeout_seconds=2.5)
-    health["components"]["appwrite"] = appwrite_health
-
-    if settings.resolved_data_backend == "appwrite" and appwrite_health.get("status") != "connected":
-        health["status"] = "degraded"
 
     return health

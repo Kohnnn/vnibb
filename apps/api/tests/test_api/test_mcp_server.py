@@ -15,10 +15,10 @@ def test_build_collection_queries_rejects_disallowed_filter() -> None:
 
 
 @pytest.mark.asyncio
-async def test_query_appwrite_collection_data_builds_expected_queries(monkeypatch) -> None:
+async def test_query_database_collection_data_builds_expected_queries(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_list_appwrite_documents_paginated(
+    async def fake_list_collection_documents_paginated(
         collection_id, queries=None, page_size=250, max_documents=None, timeout_seconds=8.0
     ):
         captured["collection_id"] = collection_id
@@ -29,11 +29,11 @@ async def test_query_appwrite_collection_data_builds_expected_queries(monkeypatc
 
     monkeypatch.setattr(
         server,
-        "list_appwrite_documents_paginated",
-        fake_list_appwrite_documents_paginated,
+        "list_collection_documents_paginated",
+        fake_list_collection_documents_paginated,
     )
 
-    result = await server.query_appwrite_collection_data(
+    result = await server.query_database_collection_data(
         collection="stock_prices",
         symbol="vnm",
         interval="1d",

@@ -2,8 +2,8 @@
 Full market synchronization orchestrator.
 
 This service replaces legacy vnstock-only placeholders with calls into the
-production DataPipeline, so /sync/full-market writes real data to Postgres
-and mirrors Appwrite primary collections for Appwrite-first runtime reads.
+production DataPipeline, so /sync/full-market writes real data to Postgres,
+which is the single runtime data source.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 
 from sqlalchemy import func, select
 
@@ -20,7 +20,6 @@ from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
-from vnibb.services.appwrite_population import populate_appwrite_tables
 from vnibb.services.data_pipeline import data_pipeline
 
 logger = logging.getLogger(__name__)
@@ -46,37 +45,6 @@ class FullMarketSync:
     Uses DataPipeline methods that already implement persistence, retries,
     and provider fallbacks.
     """
-
-    def __init__(self, source: str = settings.vnstock_source):
-        self.source = source
-
-    @staticmethod
-    def _stage_appwrite_tables(stage_name: str) -> tuple[tuple[str, ...], bool]:
-        stage_tables = {
-            "symbols": ("stocks",),
-            "prices": ("stock_prices",),
-            "indices": (),
-            "profiles": ("stocks",),
-            "financials": (
-                "income_statements",
-                "balance_sheets",
-                "cash_flows",
-                "financial_ratios",
-            ),
-            "corporate_actions": ("dividends", "company_events"),
-            "shareholders": ("shareholders",),
-            "officers": ("officers",),
-            "subsidiaries": ("subsidiaries",),
-            "company_news": ("company_news",),
-        }
-        return stage_tables.get(stage_name, ()), stage_name in {"symbols", "profiles"}
-
-    async def _populate_appwrite_for_stage(self, stage_name: str) -> None:
-        tables, full_refresh = self._stage_appwrite_tables(stage_name)
-        if not tables:
-            return
-
-        await populate_appwrite_tables(tables, full_refresh=full_refresh)
 
     async def _get_seeded_symbols(self, max_symbols: int | None = None) -> list[str]:
         async with async_session_maker() as session:
@@ -140,8 +108,6 @@ class FullMarketSync:
         self,
         stage_name: str,
         operation: Callable[[], Awaitable[int]],
-        *,
-        populate_appwrite: bool = True,
     ) -> SyncResult:
         start = time.monotonic()
         errors: list[str] = []
@@ -150,8 +116,6 @@ class FullMarketSync:
 
         try:
             synced_count = int(await operation())
-            if populate_appwrite:
-                await self._populate_appwrite_for_stage(stage_name)
         except Exception as exc:  # noqa: BLE001
             success = False
             errors.append(str(exc))
@@ -204,7 +168,6 @@ class FullMarketSync:
 
         resolved_symbols = symbols or await self._get_seeded_symbols(max_symbols=max_symbols)
         price_days = history_days or (settings.price_history_years * 365)
-        use_appwrite_direct_prices = settings.resolved_data_backend == "appwrite"
 
         historical_start_date: date | None = None
         if include_historical and history_days is None and settings.price_backfill_start_date:
@@ -219,42 +182,7 @@ class FullMarketSync:
 
         async def _operation() -> int:
             total = await data_pipeline.sync_screener_data(symbols=resolved_symbols)
-            if use_appwrite_direct_prices:
-                from vnibb.services.appwrite_price_service import AppwritePriceService
-
-                service = AppwritePriceService(source=self.source)
-                end_date = date.today()
-                start_date = (
-                    historical_start_date
-                    if include_historical and historical_start_date is not None
-                    else end_date - timedelta(days=price_days if include_historical else 30)
-                )
-                synced_rows = await data_pipeline.sync_daily_prices(
-                    symbols=resolved_symbols,
-                    start_date=start_date,
-                    end_date=end_date,
-                    fill_missing_gaps=True,
-                    cache_recent=True,
-                )
-                mirror_stats = await service.mirror_prices_from_postgres(
-                    symbols=resolved_symbols,
-                    start_date=start_date,
-                    end_date=end_date,
-                    cache_recent=True,
-                )
-                mirrored_rows = mirror_stats.rows_upserted
-                if max(synced_rows, mirrored_rows) == 0:
-                    direct_stats = await service.sync_prices_from_provider(
-                        symbols=resolved_symbols,
-                        start_date=start_date,
-                        end_date=end_date,
-                        fill_missing_gaps=True,
-                        cache_recent=True,
-                    )
-                    total += direct_stats.rows_upserted
-                else:
-                    total += max(synced_rows, mirrored_rows)
-            elif include_historical:
+            if include_historical:
                 if historical_start_date is not None:
                     total += await data_pipeline.sync_daily_prices(
                         symbols=resolved_symbols,
@@ -272,11 +200,7 @@ class FullMarketSync:
                     )
             return total
 
-        return await self._run_stage(
-            "prices",
-            _operation,
-            populate_appwrite=not use_appwrite_direct_prices,
-        )
+        return await self._run_stage("prices", _operation)
 
     async def sync_all_financials(
         self,
@@ -309,7 +233,7 @@ class FullMarketSync:
         async def _operation() -> int:
             return await data_pipeline.sync_market_indices()
 
-        return await self._run_stage("indices", _operation, populate_appwrite=False)
+        return await self._run_stage("indices", _operation)
 
     async def sync_all_corporate_actions(
         self,
@@ -460,8 +384,6 @@ async def run_daily_market_sync(
     async def _run_direct_stage(
         stage_name: str,
         operation: Callable[[], Awaitable[int]],
-        *,
-        populate_appwrite_stage: str | None = None,
     ) -> SyncResult:
         start = time.monotonic()
         errors: list[str] = []
@@ -470,10 +392,6 @@ async def run_daily_market_sync(
 
         try:
             synced_count = int(await operation())
-            stage_key = populate_appwrite_stage or stage_name
-            tables, full_refresh = FullMarketSync._stage_appwrite_tables(stage_key)
-            if tables:
-                await populate_appwrite_tables(tables, full_refresh=full_refresh)
         except Exception as exc:  # noqa: BLE001
             success = False
             errors.append(str(exc))
@@ -526,7 +444,6 @@ async def run_daily_market_sync(
         results["corporate_actions"] = await _run_direct_stage(
             "corporate_actions",
             _sync_corporate_actions,
-            populate_appwrite_stage="corporate_actions",
         )
 
     return results
@@ -559,9 +476,6 @@ async def run_supplemental_company_sync() -> dict[str, SyncResult]:
 
         try:
             synced_count = int(await operation())
-            tables, full_refresh = FullMarketSync._stage_appwrite_tables(stage_name)
-            if tables:
-                await populate_appwrite_tables(tables, full_refresh=full_refresh)
         except Exception as exc:  # noqa: BLE001
             success = False
             errors.append(str(exc))

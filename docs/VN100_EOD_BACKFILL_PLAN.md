@@ -25,7 +25,7 @@ Use MongoDB as the canonical EOD corpus:
 - Collection: `market_prices_eod`
 - Runtime readers: `/equity/historical`, quant endpoints, MCP `get_eod_price_history`
 
-Do not write this bootstrap into Appwrite user/runtime collections. Appwrite writes remain controlled by `APPWRITE_WRITE_ENABLED` and are unrelated to this market corpus backfill.
+This bootstrap writes only to the MongoDB market corpus. It does not touch Postgres user/runtime tables.
 
 ## Source Priority
 

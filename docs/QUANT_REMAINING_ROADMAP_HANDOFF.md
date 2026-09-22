@@ -230,8 +230,7 @@ registration points, helpers, and gotchas this session learned the hard way.
 - **Spec sketch:** browser-local first (mirror `quantRunHistory.ts` / `researchNotebook.ts`): a
   `paperTrades.ts` store of hypothetical entries/exits with provenance, then a journal widget. Keep
   it descriptive ("recorded hypothetical", never "executed"). Durable/multi-device sharing needs a
-  backend table + the Appwrite-primary write bridge (`docs/APPWRITE_PRIMARY_SUPABASE_WRITE_BRIDGE.md`)
-  — Appwrite writes are frozen by default (`APPWRITE_WRITE_ENABLED=false`), so coordinate that first.
+  backend Postgres table plus a write path and auth model, so design that as its own wave first.
 
 ### 5.4 Portfolio optimization lab
 - **Why parked:** optimizer constraints need validation; separate spec.

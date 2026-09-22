@@ -42,7 +42,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import PlainTextResponse, Response
 
-from vnibb.core.appwrite_client import check_appwrite_connectivity
 from vnibb.core.cache import redis_client
 from vnibb.core.config import settings
 from vnibb.core.exceptions import VniBBException
@@ -389,11 +388,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         f"Starting {settings.app_name} v{settings.app_version} (environment={settings.environment})"
     )
     logger.info(
-        "Runtime providers: data_backend(requested=%s,resolved=%s) cache_backend=%s appwrite_configured=%s",
+        "Runtime providers: data_backend(requested=%s,resolved=%s) cache_backend=%s",
         settings.data_backend,
         settings.resolved_data_backend,
         settings.resolved_cache_backend,
-        settings.is_appwrite_configured,
     )
 
     # In test environment, skip heavy startup tasks
@@ -426,21 +424,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
     else:
         logger.info("Database connection verified")
-
-    # Validate Appwrite connectivity when configured
-    if settings.is_appwrite_configured:
-        try:
-            appwrite_health = await check_appwrite_connectivity(timeout_seconds=3.0)
-            if appwrite_health.get("status") == "connected":
-                logger.info("Appwrite connectivity verified")
-            else:
-                logger.warning(
-                    "Appwrite connectivity check returned status=%s message=%s",
-                    appwrite_health.get("status"),
-                    appwrite_health.get("message"),
-                )
-        except Exception as e:
-            logger.warning(f"Appwrite connectivity check failed (non-fatal): {e}")
 
     # Check database status and warn if empty
     if db_ok:

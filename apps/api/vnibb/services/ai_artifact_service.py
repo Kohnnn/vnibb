@@ -369,7 +369,7 @@ def build_table_artifacts(message: str, context: dict[str, Any]) -> list[dict[st
             artifact = _build_table_artifact(
                 "comparison_snapshot",
                 "Comparison Snapshot",
-                "Validated cross-symbol comparison from the current Appwrite-first market context.",
+                "Validated cross-symbol comparison from the current VNIBB database-first market context.",
                 [
                     {"key": "symbol", "label": "Symbol", "kind": "text"},
                     {"key": "company", "label": "Company", "kind": "text"},

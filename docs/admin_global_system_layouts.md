@@ -3,7 +3,7 @@
 ## Purpose
 Enable an admin to edit locked Initial dashboards in the UI, save drafts, and publish layouts globally without needing SSH access, manual backend edits, or a frontend redeploy for layout-only changes.
 
-For the exact click-by-click setup, see the archived `appwrite_system_layouts_manual_setup.md` under the workspace archive (`../docs/archive/vnibb-docs-2026-06-09/`, outside this repo).
+For the exact click-by-click setup, see the archived `system_layouts_manual_setup.md` under the workspace archive (`../docs/archive/vnibb-docs-2026-06-09/`, outside this repo).
 
 This document also defines the recommended tenant-ready path so the current admin-first model can evolve cleanly into role-based tenant layout management later.
 
@@ -11,8 +11,7 @@ This document also defines the recommended tenant-ready path so the current admi
 Use the **current VNIBB database stack** as the source of truth for global and tenant layout templates.
 
 ### Recommendation
-- Keep using the existing `APPWRITE_DATABASE_ID`
-- Add **separate collections** for layout management
+- Store templates in the Postgres `app_kv` table
 - Keep backend APIs as the write boundary
 - Do **not** reintroduce a second store for layout/template storage
 
@@ -24,8 +23,8 @@ Use the **current VNIBB database stack** as the source of truth for global and t
 - best fit for the current admin-first rollout
 
 ### Why not a separate store
-- this feature is document-oriented and fits the database collections well
-- your runtime direction is already consolidated on the single database stack
+- this feature is small and key-addressed, which fits the `app_kv` table well
+- your runtime direction is already consolidated on the single Postgres store
 - using a separate store here would reintroduce split ownership and extra operational overhead
 - later tenant RBAC can still be enforced in backend APIs without changing storage
 
@@ -54,8 +53,8 @@ For the current rollout, only **Global** is implemented in code. Tenant and user
 - admin can save a hash key locally in the browser
 - admin can unlock a locked Initial dashboard in the UI
 - admin can save a draft or publish a global version through backend APIs
-- published global templates are fetched from the database stack on load
-- if the database stack is unavailable, frontend falls back to built-in templates in `apps/web/src/contexts/DashboardContext.tsx`
+- published global templates are fetched from Postgres on load
+- if Postgres is unavailable, frontend falls back to built-in templates in `apps/web/src/contexts/DashboardContext.tsx`
 
 ### Current backend endpoints
 #### Public
@@ -74,12 +73,12 @@ For the current rollout, only **Global** is implemented in code. Tenant and user
 - this is acceptable for initial admin-first operation
 - later this should be replaced by a short-lived admin session/token
 
-## Layout Collections
+## Layout Template Storage
 ### Implement now
-Use the existing database and create this collection now:
-- `system_dashboard_templates`
+Templates live in the existing `app_kv` table in Postgres:
+- key prefix `system_layout_template`
 
-### Recommended schema: `system_dashboard_templates`
+### Recommended record shape
 - `dashboard_key` string
 - `status` string (`draft` or `published`)
 - `version` integer
@@ -89,14 +88,14 @@ Use the existing database and create this collection now:
 - `updated_at` string
 - `published_at` string
 
-### Recommended indexes
+### Recommended keys
 - `(dashboard_key, status)`
 - `(dashboard_key, version)`
 
 ## Tenant-Ready Design
 These are not all implemented yet, but this is the recommended next layer.
 
-### Future collection: `tenant_dashboard_templates`
+### Future table: `tenant_dashboard_templates`
 Purpose:
 - store tenant-specific overrides for dashboards that should differ from the global Initial layouts
 
@@ -112,7 +111,7 @@ Recommended fields:
 - `published_at`
 - `inherits_global` boolean
 
-### Future collection: `tenant_memberships`
+### Future table: `tenant_memberships`
 Purpose:
 - map users to tenants and roles
 
@@ -124,7 +123,7 @@ Recommended fields:
 - `created_at`
 - `updated_at`
 
-### Future collection: `tenant_audit_logs`
+### Future table: `tenant_audit_logs`
 Purpose:
 - record save/publish/rollback events for tenant and global templates
 
@@ -176,42 +175,27 @@ Recommended fields:
 ### Persistence rules
 - global Initial layouts should not depend on local storage as the source of truth
 - local storage may keep lightweight UI state only
-- published layout JSON should live in the database stack and be loaded through backend APIs
+- published layout JSON should live in Postgres and be loaded through backend APIs
 
 ## Oracle / Production Environment
-For the current implementation, keep using the existing database collections only as an optional legacy fallback for system-template mirroring. The primary durable storage is the system of record during mirroring quota pressure.
+System-layout templates are stored in the Postgres `app_kv` table. No other store participates.
 
 ### Required backend env
 Add these to your Oracle deployment env:
 
 ```env
-APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
-APPWRITE_PROJECT_ID=your-appwrite-project-id
-APPWRITE_API_KEY=your-appwrite-server-api-key
-APPWRITE_DATABASE_ID=your-existing-vnibb-appwrite-database-id
-APPWRITE_SYSTEM_TEMPLATES_COLLECTION_ID=system_dashboard_templates
-
 ADMIN_API_KEY=replace-with-long-random-value
 DATA_BACKEND=postgres
 CACHE_BACKEND=redis
-APPWRITE_WRITE_ENABLED=false
 ```
 
 ### Frontend env
-The frontend does not need direct collection access. It only needs the normal API + auth/public settings:
+The frontend does not need direct table access. It only needs the normal API + auth/public settings:
 
 ```env
 NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/api/v1/ws/prices
 NEXT_PUBLIC_ENABLE_REALTIME=true
-NEXT_PUBLIC_AUTH_PROVIDER=supabase
-NEXT_PUBLIC_APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
-NEXT_PUBLIC_APPWRITE_PROJECT_ID=your-appwrite-project-id
-```
-
-If auth remains on the legacy auth provider temporarily, you can keep:
-
-```env
 NEXT_PUBLIC_AUTH_PROVIDER=supabase
 ```
 
@@ -239,8 +223,6 @@ they run from any Python 3.11+ host without project deps.
 
 That does **not** change the recommendation to keep system-layout APIs backend-mediated.
 
-During the current write-freeze mode, the primary template store is the durable `app_kv` store, with database-collection mirroring disabled.
-
 ## What "no backend access anymore" should mean
 After the initial deploy and database-stack setup:
 - no SSH needed for layout-only changes
@@ -258,15 +240,9 @@ The backend should remain the security boundary because:
 
 ## Rollout Checklist
 ### Implement now
-1. keep current database stack
-2. create collection `system_dashboard_templates`
-3. set:
-   - `APPWRITE_ENDPOINT`
-   - `APPWRITE_PROJECT_ID`
-   - `APPWRITE_API_KEY`
-   - `APPWRITE_DATABASE_ID`
-   - `APPWRITE_SYSTEM_TEMPLATES_COLLECTION_ID`
-   - `ADMIN_API_KEY`
+1. keep the current Postgres stack
+2. confirm the `app_kv` table exists (it ships with the base schema)
+3. set `ADMIN_API_KEY`
 4. redeploy backend + frontend
 5. save admin key in `Settings > Admin`
 6. unlock an Initial dashboard
@@ -281,8 +257,8 @@ The backend should remain the security boundary because:
 6. replace raw admin key with short-lived admin session
 
 ## Recommended Next Steps
-1. Finish the admin-first global workflow using the shared database stack
+1. Finish the admin-first global workflow using the shared Postgres store
 2. Add rollback/version history for global templates
-3. Add tenant collections and backend tenant resolution
+3. Add tenant tables and backend tenant resolution
 4. Add tenant-scoped publish controls in the UI
 5. Replace raw `X-Admin-Key` browser usage with a short-lived admin session

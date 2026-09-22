@@ -86,17 +86,17 @@ def test_build_messages_includes_citation_rules_and_source_catalog():
     messages = service._build_messages(
         [{"role": "user", "content": "Analyze VNM"}],
         {
-            "prefer_appwrite_data": True,
+            "prefer_database_data": True,
             "source_catalog": [
                 {
                     "id": "VNM-PRICES",
                     "label": "Price history snapshot",
-                    "source": "appwrite",
+                    "source": "postgres",
                 },
                 {
                     "id": "MKT-INDICES",
                     "label": "Market index snapshot",
-                    "source": "appwrite",
+                    "source": "postgres",
                 },
             ],
         },
@@ -124,7 +124,7 @@ def test_render_validated_markdown_filters_unknown_sources_and_appends_normalize
                 {
                     "id": "VNM-PRICES",
                     "label": "Price history snapshot",
-                    "source": "appwrite",
+                    "source": "postgres",
                     "as_of": "2026-04-03",
                 }
             ]
@@ -134,7 +134,7 @@ def test_render_validated_markdown_filters_unknown_sources_and_appends_normalize
     assert rendered["used_source_ids"] == ["VNM-PRICES"]
     assert "## Sources" in rendered["final_markdown"]
     assert (
-        "`[VNM-PRICES]` Price history snapshot (VNIBB database, as of 2026-04-03)"
+        "`[VNM-PRICES]` Price history snapshot (postgres, as of 2026-04-03)"
         in rendered["final_markdown"]
     )
 

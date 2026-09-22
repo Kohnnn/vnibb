@@ -1,6 +1,6 @@
 """Sanity check: quant module exposes the canonical historical loaders.
 
-The quant endpoints depend on six historical-loader helpers that live in
+The quant endpoints depend on five historical-loader helpers that live in
 ``vnibb.api.v1.equity``. Earlier this file shipped with no-op stubs that
 returned empty lists, masking any real loader regressions. This test pins the
 contract: the names imported into ``quant`` must resolve to the *same* function
@@ -15,7 +15,6 @@ EXPECTED_LOADERS = (
     "_load_historical_from_mongo",
     "_load_historical_from_db",
     "_load_historical_from_recent_cache",
-    "_load_historical_from_appwrite",
     "_load_corporate_actions_for_adjustment",
     "_apply_corporate_action_adjustments",
 )

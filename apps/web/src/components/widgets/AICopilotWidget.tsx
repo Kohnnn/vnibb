@@ -16,6 +16,7 @@ import {
     type CopilotReasoningStep,
     type CopilotSourceRef,
 } from '@/lib/api';
+import { getCopilotSourceLabel } from '@/lib/copilotSourceLabel';
 import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
@@ -75,7 +76,7 @@ function appendSourcesForExport(message: Message): string {
     }
 
     const sourceLines = message.sources.map((source) => {
-        const meta = [source.source === 'appwrite' ? 'VNIBB database' : source.source, source.asOf ? `as of ${source.asOf}` : null]
+        const meta = [getCopilotSourceLabel(source.source), source.asOf ? `as of ${source.asOf}` : null]
             .filter(Boolean)
             .join(', ');
         return `- [${source.id}] ${source.label || source.kind || 'Source'}${meta ? ` (${meta})` : ''}`;

@@ -55,11 +55,6 @@ os.environ["VNIBB_MCP_URL"] = ""
 os.environ["ADMIN_API_KEY"] = "test-admin-key"
 os.environ["DATA_BACKEND"] = "postgres"
 os.environ["MONGODB_ENABLED"] = "false"
-os.environ["APPWRITE_ENDPOINT"] = ""
-os.environ["APPWRITE_PROJECT_ID"] = ""
-os.environ["APPWRITE_API_KEY"] = ""
-os.environ["APPWRITE_DATABASE_ID"] = ""
-os.environ["APPWRITE_WRITE_ENABLED"] = "false"
 
 from vnibb.api.main import app
 from vnibb.core.database import Base, get_db

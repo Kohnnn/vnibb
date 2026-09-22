@@ -28,9 +28,6 @@ live in \`docs/\`.
   \`DB_IDLE_IN_TX_TIMEOUT_MS\`.
 - \`sync_database_url\` no longer corrupts passwords containing \`+asyncpg\` —
   it now uses a regex anchored to the URL scheme prefix.
-- \`/api/v1/health\` now reports the resolved \`appwrite_writes_active\` and
-  \`appwrite_configured\` flags (previously the raw \`appwrite_write_enabled\`
-  could not distinguish "disabled" from "credentials missing").
 - The detailed health endpoint's Redis probe reuses the shared \`redis_client\`
   instead of opening a new connection per request, which removes a leak under
   high health-check load.

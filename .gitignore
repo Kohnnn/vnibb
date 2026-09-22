@@ -110,9 +110,6 @@ apps/api/migrations/versions/20260303_2230_cleanup_invalid_financial_ratio_perio
 apps/api/tests/test_integration/test_api_integration.py
 docs/sql/financial_ratios_ghost_period_purge.sql
 
-# Appwrite migration runtime artifacts
-scripts/appwrite/migration_state*.json
-scripts/appwrite/supabase_baseline.json
 apps/api/migrations/versions/20260313_0105_ensure_block_trades_side_column.py
 apps/api/scripts/production_endpoint_probe.py
 apps/api/scripts/production_endpoint_probe.latest.json

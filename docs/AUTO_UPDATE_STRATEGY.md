@@ -107,32 +107,6 @@ Those should therefore be scheduled outside trading hours or on smaller symbol s
 - `intraday_sync` is no longer a placeholder; it now runs a limited market-hours slice against priority symbols
 - `supplemental_company_sync` runs at `10:30 UTC` / `5:30 PM VNT`
 
-## Mirroring behavior
-
-This section describes the intended projection behavior when database-stack mirroring writes are available.
-
-For the current month, mirroring writes are disabled because the org is returning `limit_databases_writes_exceeded`. The scheduler should update the primary durable storage first and treat mirroring as paused until quota is available again.
-
-Current scheduled mirroring rules:
-
-- post-close daily trading sync mirrors:
-  - `foreign_trading`
-  - `order_flow_daily`
-  - `derivative_prices`
-  - `intraday_trades` if raw intraday storage is enabled
-  - `orderbook_snapshots` if orderbook snapshots are enabled outside close-only mode
-- market-hours intraday slice mirrors:
-  - `foreign_trading`
-  - `order_flow_daily`
-  - `derivative_prices`
-  - optional `intraday_trades`
-  - optional `orderbook_snapshots`
-- supplemental company sync mirrors:
-  - `shareholders`
-  - `officers`
-  - `subsidiaries`
-  - `company_news`
-
 ## Practical rate budget guidance
 
 Suggested daily operating split:
@@ -181,17 +155,6 @@ The backend now follows this philosophy:
 - fast-moving market data during trading hours on a limited priority universe
 - post-close daily market refreshes for price, index, screener, and financial freshness
 - rotating supplemental vnstock updates for slower-changing company datasets off trading hours
-- optional database-stack mirroring for the tables that power legacy runtime reads when write quota is available
 
 This is the safest way to get materially better freshness without treating every vnstock dataset like a real-time feed.
 
-## Next-month fallback plan
-
-If write quota resets cleanly next month, re-enable mirroring writes in a controlled sequence:
-
-1. keep the database stack as the primary durable store
-2. use `DATA_BACKEND=hybrid` so runtime reads can fall back to the mirror while writes stay on the primary store
-3. enable `APPWRITE_WRITE_ENABLED=true` only during controlled off-peak windows
-4. backfill the highest-value collections first instead of turning on all live mirroring at once
-5. verify read paths against mirror freshness before expanding the projection scope
-6. if quota pressure returns, switch writes back off immediately without changing the primary source of truth

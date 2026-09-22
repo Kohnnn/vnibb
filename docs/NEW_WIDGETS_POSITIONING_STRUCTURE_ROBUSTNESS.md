@@ -4,8 +4,9 @@ Date started: 2026-06-09. Source inspiration: reverse-engineering crawls
 (`docs/reverse-engineering/turtle-hub-crawl-2026-06-09`,
 `docs/reverse-engineering/fincept-quantcept-terminal-crawl-2026-06-09`).
 
-Constraints (unchanged): Next.js + FastAPI + Appwrite-primary + Supabase/Postgres
-bridge + Redis + vnstock + read-only `vnibb-mcp`. No FinceptTerminal/Quantcept code
+Constraints (unchanged): Next.js + FastAPI + Postgres (durable app store, with
+Supabase providing auth and the legacy SQL bridge) + Redis + vnstock + read-only
+`vnibb-mcp`. No FinceptTerminal/Quantcept code
 copied. No live trading. Reuse existing API groups; new widgets are client-side over
 existing endpoints with Phase 1 source-provenance + source-aware export.
 

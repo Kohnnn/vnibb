@@ -7,14 +7,14 @@ import pytest
 async def test_chat_stream_passes_runtime_context_and_request_settings(client, monkeypatch):
     captured: dict[str, object] = {}
 
-    async def fake_build_runtime_context(*, message, history, client_context, prefer_appwrite_data):
+    async def fake_build_runtime_context(*, message, history, client_context, prefer_database_data):
         captured["message"] = message
         captured["history"] = history
         captured["client_context"] = client_context
-        captured["prefer_appwrite_data"] = prefer_appwrite_data
+        captured["prefer_database_data"] = prefer_database_data
         return {
-            "prefer_appwrite_data": prefer_appwrite_data,
-            "market_context": [{"symbol": "VNM", "source": "appwrite"}],
+            "prefer_database_data": prefer_database_data,
+            "market_context": [{"symbol": "VNM", "source": "postgres"}],
         }
 
     async def fake_generate_response_stream_events(messages, context, request_settings=None):
@@ -77,7 +77,7 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
                 "model": "openai/gpt-4o-mini",
                 "apiKey": "sk-or-test",
                 "webSearch": False,
-                "preferAppwriteData": True,
+                "preferDatabaseData": True,
             },
         },
     )
@@ -92,10 +92,10 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
     assert '"artifacts": [{"id": "comparison_snapshot"' in response.text
     assert '"actions": [{"id": "add_widget_price_chart"' in response.text
     assert '"done": true' in response.text.lower()
-    assert captured["prefer_appwrite_data"] is True
+    assert captured["prefer_database_data"] is True
     assert captured["runtime_context"] == {
-        "prefer_appwrite_data": True,
-        "market_context": [{"symbol": "VNM", "source": "appwrite"}],
+        "prefer_database_data": True,
+        "market_context": [{"symbol": "VNM", "source": "postgres"}],
     }
     assert captured["request_settings"] == {
         "mode": "browser_key",
@@ -103,7 +103,7 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
         "model": "openai/gpt-4o-mini",
         "apiKey": "sk-or-test",
         "webSearch": False,
-        "preferAppwriteData": True,
+        "preferDatabaseData": True,
         "enableWorkflowOutputs": True,
     }
 
@@ -173,11 +173,11 @@ async def test_submit_feedback_records_telemetry(client, monkeypatch):
 async def test_chat_stream_uses_admin_runtime_model_for_app_default_mode(client, monkeypatch):
     captured: dict[str, object] = {}
 
-    async def fake_build_runtime_context(*, message, history, client_context, prefer_appwrite_data):
+    async def fake_build_runtime_context(*, message, history, client_context, prefer_database_data):
         return {
             "market_context": [],
             "source_catalog": [],
-            "prefer_appwrite_data": prefer_appwrite_data,
+            "prefer_database_data": prefer_database_data,
         }
 
     async def fake_get_runtime_config():
@@ -211,7 +211,7 @@ async def test_chat_stream_uses_admin_runtime_model_for_app_default_mode(client,
                 "provider": "openrouter",
                 "model": "",
                 "webSearch": False,
-                "preferAppwriteData": True,
+                "preferDatabaseData": True,
             },
         },
     )
@@ -222,7 +222,7 @@ async def test_chat_stream_uses_admin_runtime_model_for_app_default_mode(client,
         "provider": "openrouter",
         "model": "anthropic/claude-3.5-haiku",
         "webSearch": False,
-        "preferAppwriteData": True,
+        "preferDatabaseData": True,
         "enableWorkflowOutputs": True,
     }
 
@@ -233,11 +233,11 @@ async def test_chat_stream_normalizes_unsupported_runtime_provider_to_openrouter
 ):
     captured: dict[str, object] = {}
 
-    async def fake_build_runtime_context(*, message, history, client_context, prefer_appwrite_data):
+    async def fake_build_runtime_context(*, message, history, client_context, prefer_database_data):
         return {
             "market_context": [],
             "source_catalog": [],
-            "prefer_appwrite_data": prefer_appwrite_data,
+            "prefer_database_data": prefer_database_data,
         }
 
     async def fake_get_runtime_config():
@@ -271,7 +271,7 @@ async def test_chat_stream_normalizes_unsupported_runtime_provider_to_openrouter
                 "provider": "openrouter",
                 "model": "",
                 "webSearch": False,
-                "preferAppwriteData": True,
+                "preferDatabaseData": True,
             },
         },
     )
@@ -282,7 +282,7 @@ async def test_chat_stream_normalizes_unsupported_runtime_provider_to_openrouter
         "provider": "openrouter",
         "model": "openai/gpt-4o-mini",
         "webSearch": False,
-        "preferAppwriteData": True,
+        "preferDatabaseData": True,
         "enableWorkflowOutputs": True,
     }
 

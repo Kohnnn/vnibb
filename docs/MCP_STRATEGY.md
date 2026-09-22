@@ -18,7 +18,7 @@ VNIBB already has several pieces that map well to MCP:
 - a typed backend with stable route contracts
 - a widget-based research workspace where actions are composable
 - an AI Copilot direction already present in the product
-- existing database-stack MCP launch scripts in `vnibb/scripts/appwrite/`
+- the existing read-only MCP server in `apps/api/vnibb/mcp/server.py`
 - a fallback-first backend that is better for agents than raw upstream provider access
 
 This means VNIBB should usually expose MCP over VNIBB services, not over raw `vnstock` calls.
@@ -116,7 +116,7 @@ Admin-only MCP tools could include:
 - `get_sync_status`
 - `trigger_symbol_backfill`
 - `refresh_screener_cache`
-- `verify_appwrite_counts`
+- `verify_database_counts`
 - `inspect_migration_state`
 - `check_backend_health`
 
@@ -199,7 +199,7 @@ Example prompts:
 - `run_backfill`
 - `check_cache_health`
 - `check_data_freshness`
-- `verify_appwrite_parity`
+- `verify_database_parity`
 - `inspect_pipeline_errors`
 
 ### User workflow tools

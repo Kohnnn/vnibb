@@ -13,7 +13,7 @@ export interface AISettings {
   apiKey: string
   baseUrl: string
   webSearch: boolean
-  preferAppwriteData: boolean
+  preferDatabaseData: boolean
   enableSidebarWorkflowOutputs: boolean
 }
 
@@ -24,7 +24,7 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   apiKey: '',
   baseUrl: OPENROUTER_BASE_URL,
   webSearch: false,
-  preferAppwriteData: true,
+  preferDatabaseData: true,
   enableSidebarWorkflowOutputs: false,
 }
 
@@ -84,9 +84,9 @@ export function readStoredAISettings(): AISettings {
     apiKey: String(raw.apiKey || '').trim(),
     baseUrl: normalizeBaseUrl(raw.baseUrl, provider),
     webSearch: normalizeBoolean(raw.webSearch, DEFAULT_AI_SETTINGS.webSearch),
-    preferAppwriteData: normalizeBoolean(
-      raw.preferAppwriteData,
-      DEFAULT_AI_SETTINGS.preferAppwriteData,
+    preferDatabaseData: normalizeBoolean(
+      raw.preferDatabaseData,
+      DEFAULT_AI_SETTINGS.preferDatabaseData,
     ),
     enableSidebarWorkflowOutputs: normalizeBoolean(
       raw.enableSidebarWorkflowOutputs,
@@ -116,7 +116,7 @@ export function writeStoredAISettings(next: AISettingsUpdate): AISettings {
     apiKey: String(next.apiKey ?? current.apiKey ?? '').trim(),
     baseUrl: normalizeBaseUrl(next.baseUrl ?? current.baseUrl, provider),
     webSearch: normalizeBoolean(next.webSearch, current.webSearch),
-    preferAppwriteData: normalizeBoolean(next.preferAppwriteData, current.preferAppwriteData),
+    preferDatabaseData: normalizeBoolean(next.preferDatabaseData, current.preferDatabaseData),
     enableSidebarWorkflowOutputs: normalizeBoolean(
       next.enableSidebarWorkflowOutputs,
       current.enableSidebarWorkflowOutputs,

@@ -33,6 +33,18 @@ def _normalize_copilot_provider(provider: str | None) -> str:
     return normalized if normalized in SUPPORTED_COPILOT_PROVIDERS else "openrouter"
 
 
+def _resolve_prefer_database_data(settings: "CopilotRequestSettings | None") -> bool:
+    """Resolve the database-first flag from the request.
+
+    Absent an explicit value, database-first is on.
+    """
+    if settings is None:
+        return True
+    if settings.preferDatabaseData is not None:
+        return bool(settings.preferDatabaseData)
+    return True
+
+
 # ============ Models ============
 
 
@@ -59,7 +71,7 @@ class CopilotRequestSettings(BaseModel):
     apiKey: str | None = None
     baseUrl: str | None = None
     webSearch: bool = False
-    preferAppwriteData: bool = True
+    preferDatabaseData: bool | None = None
     enableWorkflowOutputs: bool = True
 
 
@@ -210,7 +222,7 @@ async def chat_stream(request: ChatStreamRequest):
                 message=request.message,
                 history=messages,
                 client_context=context_dict,
-                prefer_appwrite_data=bool(request_settings.get("preferAppwriteData", True)),
+                prefer_database_data=_resolve_prefer_database_data(request.settings),
             )
             yield f"data: {json.dumps({'reasoning': {'eventType': 'SUCCESS', 'message': 'Runtime context ready', 'details': {'symbolCount': len(runtime_context.get('market_context') or []), 'sourceCount': len(runtime_context.get('source_catalog') or [])}}})}\n\n"
 

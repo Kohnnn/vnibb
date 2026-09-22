@@ -56,8 +56,6 @@ export const env = {
   authProvider: process.env.NEXT_PUBLIC_AUTH_PROVIDER || 'supabase',
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
   supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-  appwriteEndpoint: process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT,
-  appwriteProjectId: process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID,
   analyticsId: process.env.NEXT_PUBLIC_ANALYTICS_ID,
   posthogHost: enableAnalytics ? process.env.NEXT_PUBLIC_POSTHOG_HOST?.trim() || '' : '',
   posthogKey: enableAnalytics ? process.env.NEXT_PUBLIC_POSTHOG_KEY?.trim() || '' : '',

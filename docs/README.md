@@ -23,7 +23,6 @@ Current source of truth:
 
 - `DEPLOYMENT_AND_OPERATIONS.md`: deployment profile, Oracle runtime guidance, and ops notes
 - `DATABASE_SCHEMA.md`: database stack schema and collection model
-- `APPWRITE_PRIMARY_SUPABASE_WRITE_BRIDGE.md`: canonical durable-store, Appwrite-write-freeze, and write-bridge contract
 - `AUTO_UPDATE_STRATEGY.md`: automatic update plan, rate-budget strategy, and scheduler model
 - `VN100_EOD_BACKFILL_PLAN.md`: VN100 2008-to-now EOD bootstrap plan for quant/backtesting widgets
 - `daily_trading_updater.md`: trading-flow updater behavior and reinforced scheduler notes

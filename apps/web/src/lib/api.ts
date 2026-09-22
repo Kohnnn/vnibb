@@ -1,12 +1,5 @@
 // API client for VNIBB backend
 
-import {
-    appwriteClearSessionHint,
-    appwriteCreateJWT,
-    authProvider,
-    isAppwriteConfigured,
-    isAppwriteUnauthorizedError,
-} from './appwrite';
 import { env } from './env';
 import { isSupabaseConfigured, supabase } from './supabase';
 import type { AISettings } from './aiSettings';
@@ -356,9 +349,6 @@ async function getAuthorizationToken(): Promise<string | null> {
         return null;
     }
 
-    // Prefer a valid Supabase session when available. This makes the frontend more
-    // resilient if production env drifts back to Appwrite auth while the live runtime
-    // is already operating in Supabase-auth mode.
     if (supabase && isSupabaseConfigured) {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) {
@@ -366,38 +356,7 @@ async function getAuthorizationToken(): Promise<string | null> {
         }
     }
 
-    if (authProvider === 'appwrite') {
-        if (!isAppwriteConfigured) {
-            return null;
-        }
-
-        try {
-            return await appwriteCreateJWT();
-        } catch (error) {
-            if (isAppwriteUnauthorizedError(error)) {
-                appwriteClearSessionHint();
-                return null;
-            }
-            throw error;
-        }
-    }
-
     return null;
-}
-
-async function getAuthorizationTokenForCopilot(): Promise<string | null> {
-    if (authProvider === 'appwrite') {
-        // Copilot routes do not require a browser-minted Appwrite JWT. Skipping the
-        // direct `/account/jwts` call avoids noisy cross-origin failures when the
-        // deployed web origin is not configured as an Appwrite platform.
-        return null;
-    }
-
-    try {
-        return await getAuthorizationToken();
-    } catch (error) {
-        throw error;
-    }
 }
 
 function buildCopilotRequestPayload(request: CopilotStreamRequest): CopilotStreamRequest {
@@ -412,7 +371,9 @@ function buildCopilotRequestPayload(request: CopilotStreamRequest): CopilotStrea
         apiKey: request.settings.apiKey,
         baseUrl: request.settings.baseUrl,
         webSearch: request.settings.webSearch,
-        preferAppwriteData: request.settings.preferAppwriteData,
+        preferDatabaseData: request.settings.preferDatabaseData,
+        // Compat: legacy backends read `preferAppwriteData`; send both for one release.
+        preferAppwriteData: request.settings.preferDatabaseData,
         enableWorkflowOutputs: request.settings.enableSidebarWorkflowOutputs,
     }
 
@@ -2971,7 +2932,6 @@ export interface AdminProviderStatusResponse {
         data_backend_requested: string;
         data_backend: string;
         cache_backend: string;
-        appwrite_configured: boolean;
         vnstock_source: string;
         vnstock_timeout_seconds: number;
         vnstock_api_key_configured: boolean;
@@ -2983,8 +2943,6 @@ export interface AdminProviderStatusResponse {
         ai_runtime_provider?: string | null;
         ai_runtime_model?: string | null;
     };
-    appwrite: Record<string, unknown>;
-    appwrite_runtime: Record<string, unknown>;
 }
 
 export interface UnitRuntimeConfigResponse {
@@ -3386,7 +3344,7 @@ export async function createCopilotDocumentContext(file: File): Promise<{ docume
     const formData = new FormData()
     formData.append('file', file)
     const headers = new Headers()
-    const token = await getAuthorizationTokenForCopilot()
+    const token = await getAuthorizationToken()
     if (token) {
         headers.set('Authorization', `Bearer ${token}`)
     }
@@ -3449,7 +3407,7 @@ export async function openCopilotChatStream(
         'Content-Type': 'application/json',
     });
 
-    const token = await getAuthorizationTokenForCopilot();
+    const token = await getAuthorizationToken();
     if (token) {
         headers.set('Authorization', `Bearer ${token}`);
     }

@@ -39,7 +39,6 @@ _memory_cache: Dict[str, tuple[Any, datetime]] = {}
 _memory_cache_lock = asyncio.Lock()
 _inflight_cache_loads: dict[str, asyncio.Future[Any]] = {}
 _inflight_cache_loads_lock = asyncio.Lock()
-_warned_appwrite_cache_fallback = False
 
 
 def _env_int(name: str, default: int, minimum: int) -> int:
@@ -75,18 +74,7 @@ async def _prune_memory_cache_locked(now: datetime) -> None:
 
 def _redis_cache_enabled() -> bool:
     """Determine whether Redis should be used for cache operations."""
-    global _warned_appwrite_cache_fallback
-
     backend = settings.resolved_cache_backend
-
-    if backend == "appwrite":
-        if not _warned_appwrite_cache_fallback:
-            logger.warning(
-                "CACHE_BACKEND=appwrite configured but Appwrite cache adapter is not yet active; "
-                "falling back to in-memory cache"
-            )
-            _warned_appwrite_cache_fallback = True
-        return False
 
     return backend == "redis" and bool(settings.redis_url)
 

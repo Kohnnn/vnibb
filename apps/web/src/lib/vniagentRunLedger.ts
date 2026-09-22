@@ -14,6 +14,8 @@
  * sharing/resume requirements justify it.
  */
 
+import { getCopilotSourceLabel } from './copilotSourceLabel'
+
 export const VNIAGENT_RUN_LEDGER_KEY = 'vnibb-vniagent-run-ledger'
 
 export type VniAgentRunStatus = 'completed' | 'error' | 'timeout'
@@ -183,7 +185,7 @@ export function runToMarkdown(run: VniAgentRunEntry): string {
     run.sources.forEach((source) => {
       const label = source.label || source.kind || source.id || 'Source'
       const meta = [
-        source.source === 'appwrite' ? 'VNIBB database' : source.source,
+        getCopilotSourceLabel(source.source),
         source.symbol,
         source.asOf ? `as of ${source.asOf}` : null,
       ]

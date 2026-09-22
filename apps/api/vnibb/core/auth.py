@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import re
 
-import httpx
 from fastapi import Header, HTTPException, status
 from jose import JWTError, jwt
 from pydantic import BaseModel
@@ -81,56 +80,6 @@ def _decode_supabase_user(token: str) -> User | None:
     )
 
 
-async def _fetch_appwrite_user(token: str) -> User | None:
-    endpoint = (settings.appwrite_endpoint or "").rstrip("/")
-    project_id = settings.resolved_appwrite_project_id
-
-    if not endpoint or not project_id:
-        return None
-
-    headers = {
-        "X-Appwrite-Project": project_id,
-        "X-Appwrite-JWT": token,
-    }
-
-    url = f"{endpoint}/account"
-    try:
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
-            response = await client.get(url, headers=headers)
-    except Exception as exc:
-        logger.warning("Appwrite auth validation failed: %s", exc)
-        raise AuthError("Unable to validate Appwrite session") from exc
-
-    if response.status_code in {401, 403}:
-        return None
-
-    if response.status_code >= 400:
-        logger.warning(
-            "Appwrite auth validation returned status=%s body=%s",
-            response.status_code,
-            response.text[:300],
-        )
-        raise AuthError("Unable to validate Appwrite session")
-
-    payload = response.json()
-    user_id = str(payload.get("$id") or "").strip()
-    if not user_id:
-        raise AuthError("Invalid Appwrite session: missing user ID")
-
-    email = str(payload.get("email") or "").strip()
-    labels = payload.get("labels")
-    role: str | None = None
-    if isinstance(labels, list) and labels:
-        role = str(labels[0])
-
-    return User(
-        id=user_id,
-        email=email,
-        role=role or "authenticated",
-        aud="appwrite",
-        provider="appwrite",
-    )
-
 
 async def get_current_user(authorization: str | None = Header(None)) -> User:
     """
@@ -154,11 +103,7 @@ async def get_current_user(authorization: str | None = Header(None)) -> User:
     except JWTError:
         logger.debug("Bearer token was not a valid Supabase JWT")
 
-    appwrite_user = await _fetch_appwrite_user(token)
-    if appwrite_user is not None:
-        return appwrite_user
-
-    if settings.supabase_jwt_secret or settings.is_appwrite_configured:
+    if settings.supabase_jwt_secret:
         raise AuthError("Invalid or expired token")
 
     raise AuthError("Authentication is not configured")

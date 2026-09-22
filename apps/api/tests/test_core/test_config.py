@@ -13,10 +13,6 @@ def settings_factory(monkeypatch):
         defaults = {
             "environment": "development",
             "admin_api_key": None,
-            "appwrite_endpoint": None,
-            "appwrite_project_id": None,
-            "appwrite_api_key": None,
-            "appwrite_database_id": None,
         }
         defaults.update(overrides)
         # Wipe env-driven defaults that could leak in.

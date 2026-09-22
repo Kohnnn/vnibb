@@ -4,8 +4,7 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-${1:-http://127.0.0.1:8000}}"
 BASE_URL="${BASE_URL%/}"
 TIMEOUT="${TIMEOUT:-15}"
-EXPECTED_DATA_BACKEND="${EXPECTED_DATA_BACKEND:-hybrid}"
-EXPECTED_APPWRITE_WRITE_ENABLED="${EXPECTED_APPWRITE_WRITE_ENABLED:-false}"
+EXPECTED_DATA_BACKEND="${EXPECTED_DATA_BACKEND:-postgres}"
 EXPECTED_ANON_DASHBOARD_WRITES="${EXPECTED_ANON_DASHBOARD_WRITES:-true}"
 EXPECTED_RELEASE_REVISION="${EXPECTED_RELEASE_REVISION:-}"
 EXPECTED_IMAGE_REPOSITORY="${EXPECTED_IMAGE_REPOSITORY:-${VNIBB_API_IMAGE_REPOSITORY:-}}"
@@ -66,12 +65,10 @@ health_json="$($CURL_BIN -ksS --max-time "$TIMEOUT" "${BASE_URL}/health/")"
 printf 'health payload -> %s\n' "$health_json"
 
 data_backend="$(read_json_field "$health_json" "providers.data_backend")"
-appwrite_write_enabled="$(read_json_field "$health_json" "providers.appwrite_write_enabled")"
 anon_dashboard_writes="$(read_json_field "$health_json" "providers.allow_anonymous_dashboard_writes")"
 release_revision="$(read_json_field "$health_json" "revision")"
 
 printf 'resolved data backend      -> %s\n' "$data_backend"
-printf 'appwrite writes enabled    -> %s\n' "$appwrite_write_enabled"
 printf 'anonymous dashboard writes -> %s\n' "$anon_dashboard_writes"
 printf 'release revision           -> %s\n' "$release_revision"
 
@@ -85,8 +82,8 @@ if [[ "$data_backend" != "$EXPECTED_DATA_BACKEND" ]]; then
   status=1
 fi
 
-if [[ "$appwrite_write_enabled" != "$EXPECTED_APPWRITE_WRITE_ENABLED" ]]; then
-  echo "Expected appwrite_write_enabled=${EXPECTED_APPWRITE_WRITE_ENABLED}, got ${appwrite_write_enabled}"
+if [[ "$anon_dashboard_writes" != "$EXPECTED_ANON_DASHBOARD_WRITES" ]]; then
+  echo "Expected allow_anonymous_dashboard_writes=${EXPECTED_ANON_DASHBOARD_WRITES}, got ${anon_dashboard_writes}"
   status=1
 fi
 

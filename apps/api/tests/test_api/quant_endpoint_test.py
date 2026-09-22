@@ -780,9 +780,6 @@ async def test_load_price_frame_applies_adjustments_for_quant_history(test_db, m
     async def fake_load_recent_cache(*_args, **_kwargs):
         return []
 
-    async def fake_load_appwrite(*_args, **_kwargs):
-        return []
-
     async def fake_load_actions(*_args, **_kwargs):
         return [
             {
@@ -802,7 +799,6 @@ async def test_load_price_frame_applies_adjustments_for_quant_history(test_db, m
     monkeypatch.setattr(
         "vnibb.api.v1.quant._load_historical_from_recent_cache", fake_load_recent_cache
     )
-    monkeypatch.setattr("vnibb.api.v1.quant._load_historical_from_appwrite", fake_load_appwrite)
     monkeypatch.setattr(
         "vnibb.api.v1.quant._load_corporate_actions_for_adjustment", fake_load_actions
     )

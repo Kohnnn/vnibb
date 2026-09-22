@@ -15,10 +15,8 @@ export const config = {
   supabaseUrl: env.supabaseUrl || '',
   supabaseAnonKey: env.supabaseAnonKey || '',
 
-  // Appwrite
+  // Auth
   authProvider: env.authProvider,
-  appwriteEndpoint: env.appwriteEndpoint || '',
-  appwriteProjectId: env.appwriteProjectId || '',
   
   // Feature flags
   enableAiAnalysis: true,
@@ -33,11 +31,6 @@ export const config = {
   get isSupabaseConfigured(): boolean {
     return Boolean(this.supabaseUrl && this.supabaseAnonKey);
   },
-
-  get isAppwriteConfigured(): boolean {
-    return Boolean(this.appwriteEndpoint && this.appwriteProjectId);
-  },
-  
   get apiBaseUrl(): string {
     // Ensure no trailing slash
     return this.apiUrl.replace(/\/$/, '');

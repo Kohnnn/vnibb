@@ -128,11 +128,9 @@ docker compose --env-file deployment/env.oracle -f ../../docker-compose.oracle.y
 ```env
 DATABASE_URL=postgresql+asyncpg://...
 CACHE_BACKEND=auto  # auto|cache-tier|memory
-DATA_BACKEND=hybrid  # system of record + read fallback when configured
+DATA_BACKEND=postgres  # Postgres is the only data backend
 SUPABASE_JWT_SECRET=your-jwt-secret
 ALLOW_ANONYMOUS_DASHBOARD_WRITES=true
-APPWRITE_WRITE_ENABLED=false  # keep document-store writes frozen unless running a controlled backfill
-APPWRITE_POPULATE_MAX_ROWS=1000
 REDIS_URL=redis://localhost:6379/0  # cache-tier connection
 VNSTOCK_API_KEY=vnstock_xxx
 VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; premium modules belong in the BuildKit-built image
@@ -149,14 +147,6 @@ ENABLE_AI_SENTIMENT_ANALYSIS=0  # keep market news sentiment paused for stabilit
 # OPENROUTER_SITE_URL=https://your-app.example.com
 # OPENROUTER_APP_NAME=VNIBB
 
-# Database-stack connection variables (names retained for code compatibility):
-# APPWRITE_ENDPOINT=...
-# APPWRITE_PROJECT_ID=...
-# APPWRITE_API_KEY=...
-# APPWRITE_DATABASE_ID=...
-# Optional alias names used by MCP helper scripts:
-# APPWRITE_NAME=...
-# APPWRITE_SECRET=...
 ```
 
 If `OPENROUTER_API_KEY` is not set, the copilot falls back to a configuration warning until you add the key or use a browser-local OpenRouter key in Settings.

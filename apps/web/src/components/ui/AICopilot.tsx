@@ -41,6 +41,7 @@ import {
     type CopilotReasoningStep,
     type CopilotSourceRef,
 } from '@/lib/api';
+import { getCopilotSourceLabel } from '@/lib/copilotSourceLabel';
 import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
 import { CopilotActionPanel } from '@/components/ui/CopilotActionPanel';
 import { CopilotFeedbackBar } from '@/components/ui/CopilotFeedbackBar';
@@ -353,7 +354,7 @@ function appendSourcesForExport(message: Message): string {
     }
 
     const sourceLines = message.sources.map((source) => {
-        const meta = [source.source === 'appwrite' ? 'VNIBB database' : source.source, source.asOf ? `as of ${source.asOf}` : null]
+        const meta = [getCopilotSourceLabel(source.source), source.asOf ? `as of ${source.asOf}` : null]
             .filter(Boolean)
             .join(', ');
         return `- [${source.id}] ${source.label || source.kind || 'Source'}${meta ? ` (${meta})` : ''}${source.url ? ` — ${source.url}` : ''}`;
@@ -1112,7 +1113,7 @@ export function AICopilot({
                     <div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
                         <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-primary)]">
                             <Database size={11} className="text-cyan-300" />
-                            {aiSettings.preferAppwriteData ? 'VNIBB DB' : 'External-first'}
+                            {aiSettings.preferDatabaseData ? 'VNIBB DB' : 'External-first'}
                         </span>
                         <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em]">
                             {getProviderLabel(aiSettings.provider)}
@@ -1337,7 +1338,7 @@ export function AICopilot({
                             <Sparkles size={40} className="mx-auto mb-3 text-cyan-300/70" />
                             <div className="text-sm font-semibold text-[var(--text-primary)]">Start with evidence from the VNIBB database</div>
                             <p className="mx-auto mt-2 max-w-[26rem] text-xs leading-5">
-                                {getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)} Responses prioritize your configured VNIBB/Appwrite data, attached documents, and the active workspace context before external sources.
+                                {getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)} Responses prioritize your configured VNIBB database, attached documents, and the active workspace context before external sources.
                             </p>
                         </div>
 
@@ -1509,7 +1510,7 @@ export function AICopilot({
                     </button>
                     <div className="hidden md:flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
                         <Globe size={11} />
-                        <span>{aiSettings.preferAppwriteData ? 'VNIBB database' : 'external-first'}</span>
+                        <span>{aiSettings.preferDatabaseData ? 'VNIBB database' : 'external-first'}</span>
                         {aiSettings.webSearch ? <span>· web</span> : null}
                     </div>
                     <input

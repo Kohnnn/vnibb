@@ -113,7 +113,7 @@ def test_runtime_verification_fails_when_digest_is_requested_without_docker(
         "import sys\n"
         "arguments = sys.argv[1:]\n"
         "if any('/health/' in argument for argument in arguments):\n"
-        "    print('{\"providers\": {\"data_backend\": \"hybrid\", \"appwrite_write_enabled\": false, \"allow_anonymous_dashboard_writes\": true}, \"revision\": \"abc1234\"}')\n"
+        "    print('{\"providers\": {\"data_backend\": \"hybrid\", \"allow_anonymous_dashboard_writes\": true}, \"revision\": \"abc1234\"}')\n"
         "elif 'OPTIONS' in arguments:\n"
         "    print('access-control-allow-origin: https://vnibb-web.vercel.app')\n"
         "    print('access-control-allow-headers: X-VNIBB-Client-ID')\n"

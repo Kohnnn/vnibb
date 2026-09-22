@@ -16,20 +16,20 @@ async def test_build_runtime_context_includes_broad_market_and_symbol_context(mo
     service = AIContextService()
     captured_symbols: list[str] = []
 
-    async def fake_build_market_snapshot(*, prefer_appwrite_data: bool):
-        assert prefer_appwrite_data is True
+    async def fake_build_market_snapshot(*, prefer_database_data: bool):
+        assert prefer_database_data is True
         return {
-            "source": "appwrite",
+            "source": "postgres",
             "indices": [{"index_code": "VNINDEX", "change_pct": 0.8}],
             "sectors": {"breadth": {"advance_count": 140, "decline_count": 95}},
         }
 
-    async def fake_build_symbol_snapshot(symbol: str, *, prefer_appwrite_data: bool):
-        assert prefer_appwrite_data is True
+    async def fake_build_symbol_snapshot(symbol: str, *, prefer_database_data: bool):
+        assert prefer_database_data is True
         captured_symbols.append(symbol)
         return {
             "symbol": symbol,
-            "source": "appwrite",
+            "source": "postgres",
             "company": {"symbol": symbol},
             "recent_news": {"latest_articles": [{"title": f"{symbol} headline"}]},
         }
@@ -41,12 +41,12 @@ async def test_build_runtime_context_includes_broad_market_and_symbol_context(mo
         message="Compare VNM and FPT",
         history=[{"role": "user", "content": "Review VNM versus FPT"}],
         client_context={"symbol": "VCB", "widgetPayload": {"api_key": "filtered", "note": "ok"}},
-        prefer_appwrite_data=True,
+        prefer_database_data=True,
     )
 
     assert captured_symbols == ["VCB", "VNM", "FPT"]
     assert context["broad_market_context"] == {
-        "source": "appwrite",
+        "source": "postgres",
         "indices": [{"index_code": "VNINDEX", "change_pct": 0.8}],
         "sectors": {"breadth": {"advance_count": 140, "decline_count": 95}},
         "available_source_ids": ["MKT-INDICES", "MKT-SECTORS"],
@@ -64,7 +64,6 @@ async def test_build_runtime_context_includes_broad_market_and_symbol_context(mo
         "FPT-NEWS",
     ]
     assert context["retrieval_policy"]["source_precedence"] == [
-        "appwrite",
         "postgres",
         "browser_context",
     ]
@@ -77,7 +76,7 @@ def test_merge_snapshots_fills_recent_news_from_fallback():
     merged = service._merge_snapshots(
         {
             "symbol": "VNM",
-            "source": "appwrite",
+            "source": "postgres",
             "company": {"symbol": "VNM"},
             "recent_news": None,
             "foreign_trading": None,
@@ -92,7 +91,7 @@ def test_merge_snapshots_fills_recent_news_from_fallback():
         },
     )
 
-    assert merged["source"] == "appwrite"
+    assert merged["source"] == "postgres"
     assert merged["recent_news"] == {"latest_articles": [{"title": "Fallback article"}]}
     assert merged["foreign_trading"] == {"summary": {"net_value_5d": 120.0}}
     assert merged["dividends"] == {"recent_dividends": [{"dividend_value": 1500.0}]}
@@ -134,12 +133,12 @@ async def test_build_runtime_context_expands_single_symbol_with_peers_for_compar
     service = AIContextService()
     captured_symbols: list[str] = []
 
-    async def fake_build_market_snapshot(*, prefer_appwrite_data: bool):
+    async def fake_build_market_snapshot(*, prefer_database_data: bool):
         return None
 
-    async def fake_build_symbol_snapshot(symbol: str, *, prefer_appwrite_data: bool):
+    async def fake_build_symbol_snapshot(symbol: str, *, prefer_database_data: bool):
         captured_symbols.append(symbol)
-        return {"symbol": symbol, "source": "appwrite", "company": {"symbol": symbol}}
+        return {"symbol": symbol, "source": "postgres", "company": {"symbol": symbol}}
 
     async def fake_get_peers(symbol: str, limit: int = 2):
         assert symbol == "VNM"
@@ -157,7 +156,7 @@ async def test_build_runtime_context_expands_single_symbol_with_peers_for_compar
         message="Compare VNM with peers",
         history=[],
         client_context={"symbol": "VNM"},
-        prefer_appwrite_data=True,
+        prefer_database_data=True,
     )
 
     assert captured_symbols == ["VNM", "FPT", "MWG"]
@@ -165,11 +164,11 @@ async def test_build_runtime_context_expands_single_symbol_with_peers_for_compar
 
 
 @pytest.mark.asyncio
-async def test_build_appwrite_snapshot_uses_vnibb_mcp_when_configured(monkeypatch):
+async def test_build_database_snapshot_uses_vnibb_mcp_when_configured(monkeypatch):
     service = AIContextService()
 
     async def fail_direct(symbol: str):
-        raise AssertionError(f"direct Appwrite path should not run for {symbol}")
+        raise AssertionError(f"direct database path should not run for {symbol}")
 
     async def fake_get_symbol_snapshot(symbol: str):
         assert symbol == "VNM"
@@ -178,31 +177,31 @@ async def test_build_appwrite_snapshot_uses_vnibb_mcp_when_configured(monkeypatc
             "found": True,
             "snapshot": {
                 "symbol": "VNM",
-                "source": "appwrite",
+                "source": "postgres",
                 "company": {"symbol": "VNM"},
             },
         }
 
     monkeypatch.setattr(
-        "vnibb.services.ai_context_service.settings.vnibb_mcp_url", "http://mcp:8001/mcp"
+        "vnibb.services.vnibb_mcp_client_service.settings.vnibb_mcp_url", "http://mcp:8001/mcp"
     )
     monkeypatch.setattr(
         "vnibb.services.ai_context_service.vnibb_mcp_client_service.get_symbol_snapshot",
         fake_get_symbol_snapshot,
     )
-    monkeypatch.setattr(service, "_build_appwrite_snapshot_direct", fail_direct)
+    monkeypatch.setattr(service, "_build_database_snapshot_direct", fail_direct)
 
-    snapshot = await service._build_appwrite_snapshot("VNM", use_vnibb_mcp=True)
+    snapshot = await service._build_database_snapshot("VNM", use_vnibb_mcp=True)
 
     assert snapshot == {
         "symbol": "VNM",
-        "source": "appwrite",
+        "source": "postgres",
         "company": {"symbol": "VNM"},
     }
 
 
 @pytest.mark.asyncio
-async def test_build_appwrite_snapshot_falls_back_when_vnibb_mcp_fails(monkeypatch):
+async def test_build_database_snapshot_falls_back_when_vnibb_mcp_fails(monkeypatch):
     service = AIContextService()
 
     async def fake_get_symbol_snapshot(symbol: str):
@@ -210,17 +209,17 @@ async def test_build_appwrite_snapshot_falls_back_when_vnibb_mcp_fails(monkeypat
 
     async def fake_direct(symbol: str):
         assert symbol == "VNM"
-        return {"symbol": symbol, "source": "appwrite", "company": {"symbol": symbol}}
+        return {"symbol": symbol, "source": "postgres", "company": {"symbol": symbol}}
 
     monkeypatch.setattr(
-        "vnibb.services.ai_context_service.settings.vnibb_mcp_url", "http://mcp:8001/mcp"
+        "vnibb.services.vnibb_mcp_client_service.settings.vnibb_mcp_url", "http://mcp:8001/mcp"
     )
     monkeypatch.setattr(
         "vnibb.services.ai_context_service.vnibb_mcp_client_service.get_symbol_snapshot",
         fake_get_symbol_snapshot,
     )
-    monkeypatch.setattr(service, "_build_appwrite_snapshot_direct", fake_direct)
+    monkeypatch.setattr(service, "_build_database_snapshot_direct", fake_direct)
 
-    snapshot = await service._build_appwrite_snapshot("VNM", use_vnibb_mcp=True)
+    snapshot = await service._build_database_snapshot("VNM", use_vnibb_mcp=True)
 
-    assert snapshot == {"symbol": "VNM", "source": "appwrite", "company": {"symbol": "VNM"}}
+    assert snapshot == {"symbol": "VNM", "source": "postgres", "company": {"symbol": "VNM"}}

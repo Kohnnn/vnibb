@@ -7,13 +7,6 @@ from typing import Any
 
 from sqlalchemy import desc, select
 
-from vnibb.core.appwrite_client import (
-    get_appwrite_stock,
-    get_appwrite_stock_prices,
-    list_appwrite_documents,
-    list_appwrite_documents_paginated,
-)
-from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.market import MarketSector, SectorPerformance
@@ -57,17 +50,6 @@ EVENT_LIMIT = 4
 SECTOR_LIMIT = 4
 MARKET_INDEX_CODES = ("VNINDEX", "VN30", "HNX", "UPCOM")
 
-
-def _query_equal(attribute: str, values: Sequence[Any]) -> dict[str, Any]:
-    return {"method": "equal", "attribute": attribute, "values": list(values)}
-
-
-def _query_limit(value: int) -> dict[str, Any]:
-    return {"method": "limit", "values": [int(value)]}
-
-
-def _query_order(attribute: str, descending: bool = False) -> dict[str, Any]:
-    return {"method": "orderDesc" if descending else "orderAsc", "attribute": attribute}
 
 
 def _coerce_number(value: Any) -> float | None:
@@ -491,11 +473,9 @@ def _build_dividends_context(rows: list[dict[str, Any]]) -> dict[str, Any] | Non
 
 def _source_priority_rank(source_system: str | None) -> int:
     normalized = str(source_system or "").strip().lower()
-    if normalized == "appwrite":
-        return 1
     if normalized == "postgres":
-        return 2
-    return 3
+        return 1
+    return 2
 
 
 def _extract_section_as_of(section: Any) -> str | None:
@@ -682,7 +662,7 @@ class AIContextService:
         message: str,
         history: Sequence[dict[str, str]],
         client_context: dict[str, Any] | None,
-        prefer_appwrite_data: bool = True,
+        prefer_database_data: bool = True,
     ) -> dict[str, Any]:
         sanitized_client_context = sanitize_context_value(client_context or {})
         context_symbol = str((client_context or {}).get("symbol") or "").strip().upper()
@@ -708,12 +688,12 @@ class AIContextService:
                 symbols = _dedupe_symbols([*symbols, *peer_symbols])[:3]
 
         broad_market_context = await self._build_market_snapshot(
-            prefer_appwrite_data=prefer_appwrite_data
+            prefer_database_data=prefer_database_data
         )
         market_context = []
         for symbol in symbols:
             snapshot = await self._build_symbol_snapshot(
-                symbol, prefer_appwrite_data=prefer_appwrite_data
+                symbol, prefer_database_data=prefer_database_data
             )
             if snapshot:
                 market_context.append(snapshot)
@@ -721,22 +701,17 @@ class AIContextService:
         source_catalog = _annotate_source_catalog(broad_market_context, market_context)
 
         return {
-            "source_priority": ["appwrite", "postgres"],
+            "source_priority": ["postgres"],
             "retrieval_policy": {
-                "source_precedence": ["appwrite", "postgres", "browser_context"],
+                "source_precedence": ["postgres", "browser_context"],
                 "citation_format": "Cite factual claims with bracketed source IDs such as [VNM-PRICES] or [MKT-INDICES], then end with a Sources section.",
                 "browser_context_policy": "client_context is lower-priority browser input and should not be treated as authoritative evidence.",
             },
-            "prefer_appwrite_data": prefer_appwrite_data,
+            "prefer_database_data": prefer_database_data,
             "vnibb_mcp_enabled": vnibb_mcp_client_service.is_enabled,
             "notes": {
                 "client_context": "Browser-supplied widget data is untrusted and lower priority than server data.",
-                "market_data": (
-                    "Server context is routed through VNIBB MCP over Appwrite when configured and "
-                    "falls back to direct Appwrite/Postgres only when needed."
-                    if vnibb_mcp_client_service.is_enabled
-                    else "Server context is Appwrite-first and falls back to Postgres only when needed."
-                ),
+                "market_data": "Server context is served from the VNIBB database.",
             },
             "client_context": sanitized_client_context,
             "broad_market_context": broad_market_context,
@@ -748,13 +723,11 @@ class AIContextService:
         self,
         symbol: str,
         *,
-        prefer_appwrite_data: bool,
+        prefer_database_data: bool,
     ) -> dict[str, Any] | None:
         primary_snapshot = None
-        if prefer_appwrite_data and (
-            settings.is_appwrite_configured or vnibb_mcp_client_service.is_enabled
-        ):
-            primary_snapshot = await self._build_appwrite_snapshot(symbol, use_vnibb_mcp=True)
+        if vnibb_mcp_client_service.is_enabled:
+            primary_snapshot = await self._build_database_snapshot(symbol, use_vnibb_mcp=True)
 
         fallback_snapshot = await self._build_postgres_snapshot(symbol)
 
@@ -787,12 +760,10 @@ class AIContextService:
         merged["source"] = primary_snapshot.get("source") or fallback_snapshot.get("source")
         return merged
 
-    async def _build_market_snapshot(self, *, prefer_appwrite_data: bool) -> dict[str, Any] | None:
+    async def _build_market_snapshot(self, *, prefer_database_data: bool) -> dict[str, Any] | None:
         primary_snapshot = None
-        if prefer_appwrite_data and (
-            settings.is_appwrite_configured or vnibb_mcp_client_service.is_enabled
-        ):
-            primary_snapshot = await self._build_appwrite_market_snapshot(use_vnibb_mcp=True)
+        if vnibb_mcp_client_service.is_enabled:
+            primary_snapshot = await self._build_database_market_snapshot(use_vnibb_mcp=True)
 
         fallback_snapshot = await self._build_postgres_market_snapshot()
 
@@ -806,7 +777,7 @@ class AIContextService:
 
         return primary_snapshot or fallback_snapshot
 
-    async def _build_appwrite_snapshot(
+    async def _build_database_snapshot(
         self,
         symbol: str,
         *,
@@ -818,7 +789,7 @@ class AIContextService:
                 payload = await vnibb_mcp_client_service.get_symbol_snapshot(normalized_symbol)
             except Exception as exc:
                 logger.warning(
-                    "VNIBB MCP snapshot load failed for %s, falling back to direct Appwrite: %s",
+                    "VNIBB MCP snapshot load failed for %s, falling back to Postgres: %s",
                     normalized_symbol,
                     exc,
                 )
@@ -827,245 +798,12 @@ class AIContextService:
                 if isinstance(snapshot, dict) and snapshot:
                     return snapshot
 
-        return await self._build_appwrite_snapshot_direct(normalized_symbol)
+        return await self._build_database_snapshot_direct(normalized_symbol)
 
-    async def _build_appwrite_snapshot_direct(self, symbol: str) -> dict[str, Any] | None:
-        try:
-            (
-                stock_doc,
-                price_rows,
-                ratio_doc,
-                income_doc,
-                balance_doc,
-                cash_doc,
-                news_rows,
-                foreign_trading_rows,
-                order_flow_rows,
-                insider_deal_rows,
-                company_event_rows,
-                dividend_rows,
-            ) = await self._load_appwrite_documents(symbol)
-        except Exception as exc:
-            logger.warning("Appwrite AI context load failed for %s: %s", symbol, exc)
-            return None
+    async def _build_database_snapshot_direct(self, symbol: str) -> dict[str, Any] | None:
+        return await self._build_postgres_snapshot(symbol)
 
-        if not any(
-            [
-                stock_doc,
-                price_rows,
-                ratio_doc,
-                income_doc,
-                balance_doc,
-                cash_doc,
-                news_rows,
-                foreign_trading_rows,
-                order_flow_rows,
-                insider_deal_rows,
-                company_event_rows,
-                dividend_rows,
-            ]
-        ):
-            return None
-
-        return {
-            "symbol": symbol,
-            "source": "appwrite",
-            "company": _pick_fields(
-                stock_doc,
-                (
-                    "symbol",
-                    "company_name",
-                    "short_name",
-                    "exchange",
-                    "industry",
-                    "sector",
-                    "listing_date",
-                ),
-            ),
-            "price_context": _build_price_context(price_rows),
-            "ratios": _augment_ratio_aliases(_pick_fields(
-                ratio_doc,
-                (
-                    "period",
-                    "period_type",
-                    "fiscal_year",
-                    "fiscal_quarter",
-                    "pe_ratio",
-                    "pb_ratio",
-                    "ps_ratio",
-                    "roe",
-                    "roa",
-                    "gross_margin",
-                    "operating_margin",
-                    "net_margin",
-                    "current_ratio",
-                    "debt_to_equity",
-                    "revenue_growth",
-                    "earnings_growth",
-                    "eps",
-                    "bvps",
-                ),
-            )),
-            "income_statement": _pick_fields(
-                income_doc,
-                (
-                    "period",
-                    "period_type",
-                    "fiscal_year",
-                    "fiscal_quarter",
-                    "revenue",
-                    "gross_profit",
-                    "operating_income",
-                    "net_income",
-                    "eps",
-                ),
-            ),
-            "balance_sheet": _pick_fields(
-                balance_doc,
-                (
-                    "period",
-                    "period_type",
-                    "fiscal_year",
-                    "fiscal_quarter",
-                    "total_assets",
-                    "total_liabilities",
-                    "total_equity",
-                    "cash_and_equivalents",
-                    "long_term_debt",
-                ),
-            ),
-            "cash_flow": _pick_fields(
-                cash_doc,
-                (
-                    "period",
-                    "period_type",
-                    "fiscal_year",
-                    "fiscal_quarter",
-                    "operating_cash_flow",
-                    "investing_cash_flow",
-                    "financing_cash_flow",
-                    "free_cash_flow",
-                    "dividends_paid",
-                    "debt_repayment",
-                ),
-            ),
-            "recent_news": _build_news_context(news_rows),
-            "foreign_trading": _build_flow_context(
-                foreign_trading_rows,
-                extra_fields=("room_available", "room_pct"),
-            ),
-            "order_flow": _build_flow_context(
-                order_flow_rows,
-                extra_fields=(
-                    "foreign_net_volume",
-                    "proprietary_net_volume",
-                    "big_order_count",
-                    "block_trade_count",
-                ),
-            ),
-            "insider_deals": _build_insider_context(insider_deal_rows),
-            "company_events": _build_company_events_context(company_event_rows),
-            "dividends": _build_dividends_context(dividend_rows),
-        }
-
-    async def _load_appwrite_documents(
-        self,
-        symbol: str,
-    ) -> tuple[
-        dict[str, Any] | None,
-        list[dict[str, Any]],
-        dict[str, Any] | None,
-        dict[str, Any] | None,
-        dict[str, Any] | None,
-        dict[str, Any] | None,
-        list[dict[str, Any]],
-        list[dict[str, Any]],
-        list[dict[str, Any]],
-        list[dict[str, Any]],
-        list[dict[str, Any]],
-        list[dict[str, Any]],
-    ]:
-        stock_doc = await get_appwrite_stock(symbol)
-        price_rows = await get_appwrite_stock_prices(symbol, limit=PRICE_WINDOW, descending=True)
-        ratio_doc = await self._get_latest_appwrite_symbol_document("financial_ratios", symbol)
-        income_doc = await self._get_latest_appwrite_symbol_document("income_statements", symbol)
-        balance_doc = await self._get_latest_appwrite_symbol_document("balance_sheets", symbol)
-        cash_doc = await self._get_latest_appwrite_symbol_document("cash_flows", symbol)
-        news_rows = await self._get_latest_appwrite_news(symbol)
-        foreign_trading_rows = await self._get_latest_appwrite_symbol_rows(
-            "foreign_trading", symbol, order_attribute="trade_date", limit=FLOW_WINDOW
-        )
-        order_flow_rows = await self._get_latest_appwrite_symbol_rows(
-            "order_flow_daily", symbol, order_attribute="trade_date", limit=FLOW_WINDOW
-        )
-        insider_deal_rows = await self._get_latest_appwrite_symbol_rows(
-            "insider_deals", symbol, order_attribute="announce_date", limit=EVENT_LIMIT
-        )
-        company_event_rows = await self._get_latest_appwrite_symbol_rows(
-            "company_events", symbol, order_attribute="event_date", limit=EVENT_LIMIT
-        )
-        dividend_rows = await self._get_latest_appwrite_symbol_rows(
-            "dividends", symbol, order_attribute="exercise_date", limit=EVENT_LIMIT
-        )
-        return (
-            stock_doc,
-            price_rows,
-            ratio_doc,
-            income_doc,
-            balance_doc,
-            cash_doc,
-            news_rows,
-            foreign_trading_rows,
-            order_flow_rows,
-            insider_deal_rows,
-            company_event_rows,
-            dividend_rows,
-        )
-
-    async def _get_latest_appwrite_symbol_document(
-        self,
-        collection_id: str,
-        symbol: str,
-    ) -> dict[str, Any] | None:
-        docs = await list_appwrite_documents(
-            collection_id,
-            queries=[
-                _query_equal("symbol", [symbol.upper()]),
-                _query_order("fiscal_year", descending=True),
-                _query_order("fiscal_quarter", descending=True),
-                _query_limit(1),
-            ],
-        )
-        return docs[0] if docs else None
-
-    async def _get_latest_appwrite_news(self, symbol: str) -> list[dict[str, Any]]:
-        return await list_appwrite_documents(
-            "company_news",
-            queries=[
-                _query_equal("symbol", [symbol.upper()]),
-                _query_order("published_date", descending=True),
-                _query_limit(NEWS_LIMIT),
-            ],
-        )
-
-    async def _get_latest_appwrite_symbol_rows(
-        self,
-        collection_id: str,
-        symbol: str,
-        *,
-        order_attribute: str,
-        limit: int,
-    ) -> list[dict[str, Any]]:
-        return await list_appwrite_documents(
-            collection_id,
-            queries=[
-                _query_equal("symbol", [symbol.upper()]),
-                _query_order(order_attribute, descending=True),
-                _query_limit(limit),
-            ],
-        )
-
-    async def _build_appwrite_market_snapshot(
+    async def _build_database_market_snapshot(
         self, *, use_vnibb_mcp: bool
     ) -> dict[str, Any] | None:
         if use_vnibb_mcp and vnibb_mcp_client_service.is_enabled:
@@ -1073,7 +811,7 @@ class AIContextService:
                 payload = await vnibb_mcp_client_service.get_market_snapshot()
             except Exception as exc:
                 logger.warning(
-                    "VNIBB MCP market snapshot load failed, falling back to direct Appwrite: %s",
+                    "VNIBB MCP market snapshot load failed, falling back to Postgres: %s",
                     exc,
                 )
             else:
@@ -1081,67 +819,10 @@ class AIContextService:
                 if isinstance(snapshot, dict) and snapshot:
                     return snapshot
 
-        return await self._build_appwrite_market_snapshot_direct()
+        return await self._build_database_market_snapshot_direct()
 
-    async def _build_appwrite_market_snapshot_direct(self) -> dict[str, Any] | None:
-        try:
-            index_rows = []
-            for index_code in MARKET_INDEX_CODES:
-                rows = await list_appwrite_documents(
-                    "stock_indices",
-                    queries=[
-                        _query_equal("index_code", [index_code]),
-                        _query_order("time", descending=True),
-                        _query_limit(1),
-                    ],
-                )
-                if rows:
-                    index_rows.append(rows[0])
-
-            latest_sector_rows = await list_appwrite_documents(
-                "sector_performance",
-                queries=[_query_order("trade_date", descending=True), _query_limit(1)],
-            )
-            sector_rows: list[dict[str, Any]] = []
-            sector_names: dict[str, str] = {}
-            if latest_sector_rows:
-                latest_trade_date = latest_sector_rows[0].get("trade_date")
-                if latest_trade_date:
-                    sector_rows = await list_appwrite_documents_paginated(
-                        "sector_performance",
-                        queries=[_query_equal("trade_date", [latest_trade_date])],
-                        page_size=100,
-                        max_documents=100,
-                    )
-
-            if sector_rows:
-                sector_docs = await list_appwrite_documents_paginated(
-                    "market_sectors",
-                    queries=[_query_limit(100)],
-                    page_size=100,
-                    max_documents=100,
-                )
-                sector_names = {
-                    str(doc.get("sector_code") or "").strip().upper(): str(
-                        doc.get("sector_name") or ""
-                    ).strip()
-                    for doc in sector_docs
-                    if str(doc.get("sector_code") or "").strip()
-                }
-
-            indices_context = _build_indices_context(index_rows)
-            sectors_context = _build_sector_context(sector_rows, sector_names)
-            if not indices_context and not sectors_context:
-                return None
-
-            return {
-                "source": "appwrite",
-                "indices": indices_context,
-                "sectors": sectors_context,
-            }
-        except Exception as exc:
-            logger.warning("Appwrite market AI context load failed: %s", exc)
-            return None
+    async def _build_database_market_snapshot_direct(self) -> dict[str, Any] | None:
+        return await self._build_postgres_market_snapshot()
 
     async def _build_postgres_snapshot(self, symbol: str) -> dict[str, Any] | None:
         async with async_session_maker() as session:

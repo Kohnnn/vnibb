@@ -15,13 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 # Historical loaders are owned by ``vnibb.api.v1.equity`` and re-exported here
 # so ``quant`` endpoints reuse the same canonical implementations (DB / Mongo /
-# Appwrite / recent-cache fallbacks + corporate-action adjustments). Keeping
+# recent-cache fallbacks + corporate-action adjustments). Keeping
 # the loaders duplicated would let the two files drift and return different
 # price rows for the same symbol.
 from vnibb.api.v1.equity import (
     _apply_corporate_action_adjustments,
     _load_corporate_actions_for_adjustment,
-    _load_historical_from_appwrite,
     _load_historical_from_db,
     _load_historical_from_mongo,
     _load_historical_from_recent_cache,
@@ -1672,10 +1671,6 @@ async def _load_price_frame(
     if mongo_rows:
         rows = _merge_historical_rows(mongo_rows, rows)
 
-    use_appwrite_data = settings.is_appwrite_configured and settings.resolved_data_backend in {
-        "appwrite",
-        "hybrid",
-    }
     if not rows:
         recent_cache_rows = await _load_historical_from_recent_cache(
             symbol=symbol,
@@ -1685,16 +1680,6 @@ async def _load_price_frame(
             adjustment_mode="raw",
         )
         rows = _merge_historical_rows(rows, recent_cache_rows)
-
-    if not rows and use_appwrite_data:
-        appwrite_rows = await _load_historical_from_appwrite(
-            symbol=symbol,
-            start_date=start_date,
-            end_date=end_date,
-            interval="1D",
-            adjustment_mode="raw",
-        )
-        rows = _merge_historical_rows(rows, appwrite_rows)
 
     frame = _historical_rows_to_frame(rows)
     latest_db_timestamp = _resolve_frame_last_timestamp(frame)

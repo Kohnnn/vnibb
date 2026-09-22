@@ -33,7 +33,7 @@ async def test_live_health_endpoint_returns_200(client):
     payload = response.json()
     assert payload["alive"] is True
     assert response.headers["X-API-Version"]
-    assert response.headers["X-Data-Source"] in {"postgres", "appwrite"}
+    assert response.headers["X-Data-Source"] == "postgres"
 
 
 @pytest.mark.asyncio
@@ -316,34 +316,6 @@ async def test_income_statement_endpoint_supports_sequential_quarter_alias(
 
 
 @pytest.mark.asyncio
-async def test_profile_sync_succeeds_when_appwrite_mirror_fails(client, monkeypatch):
-    async def fake_sync_company_profiles(*, symbols=None):
-        assert symbols == ["VCI"]
-        return 1
-
-    async def fail_populate(*args, **kwargs):
-        raise RuntimeError("mirror failed")
-
-    monkeypatch.setattr(
-        "vnibb.services.data_pipeline.data_pipeline.sync_company_profiles",
-        fake_sync_company_profiles,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "vnibb.services.appwrite_population.populate_appwrite_tables",
-        fail_populate,
-        raising=False,
-    )
-
-    response = await client.post("/api/v1/data/sync/profiles?async_mode=false&symbols=VCI")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "success"
-    assert payload["count"] == 1
-
-
-@pytest.mark.asyncio
 async def test_screener_smoke_returns_data(client, monkeypatch):
     async def fake_screener_fetch(_params):
         return [
@@ -586,7 +558,7 @@ async def test_quote_smoke_returns_data(client, monkeypatch):
     assert payload["data"]["symbol"] == "VNM"
     assert payload["data"]["price"] == 75000
     assert response.headers["X-API-Version"]
-    assert response.headers["X-Data-Source"] in {"postgres", "appwrite"}
+    assert response.headers["X-Data-Source"] == "postgres"
 
 
 @pytest.mark.asyncio
@@ -974,81 +946,6 @@ async def test_shareholders_falls_back_to_db_on_timeout(client, test_db, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_appwrite_quote_uses_source_document_timestamp(monkeypatch):
-    from vnibb.api.v1.equity import _load_quote_from_appwrite
-
-    async def fake_get_appwrite_stock_prices(
-        symbol: str,
-        *,
-        interval: str = "1D",
-        start_date=None,
-        end_date=None,
-        limit: int = 250,
-        descending: bool = False,
-    ):
-        return [
-            {
-                "symbol": symbol,
-                "close": 92.9,
-                "open": 91.0,
-                "high": 93.5,
-                "low": 90.3,
-                "volume": 18_705_600,
-                "time": "2026-03-14",
-            },
-            {
-                "symbol": symbol,
-                "close": 90.5,
-                "time": "2026-03-13",
-            },
-        ]
-
-    monkeypatch.setattr(
-        "vnibb.api.v1.equity.get_appwrite_stock_prices",
-        fake_get_appwrite_stock_prices,
-    )
-
-    quote = await _load_quote_from_appwrite("FPT")
-    assert quote is not None
-    assert quote.updated_at is not None
-    assert quote.updated_at.isoformat().startswith("2026-03-14T00:00:00")
-
-
-@pytest.mark.asyncio
-async def test_appwrite_profile_enriches_db_sector_and_share_counts(test_db, monkeypatch):
-    from vnibb.api.v1.equity import _load_profile_from_appwrite
-
-    test_db.add(
-        Company(
-            symbol="VCI",
-            company_name="Vietcap",
-            exchange="HOSE",
-            industry="Chung khoan",
-            sector="Chung khoan",
-            outstanding_shares=850.1,
-            listed_shares=850.1,
-        )
-    )
-    await test_db.commit()
-
-    async def fake_get_appwrite_stock(symbol: str):
-        return {
-            "symbol": symbol,
-            "company_name": "Vietcap",
-            "exchange": "HOSE",
-        }
-
-    monkeypatch.setattr("vnibb.api.v1.equity.get_appwrite_stock", fake_get_appwrite_stock)
-
-    profile = await _load_profile_from_appwrite("VCI", test_db)
-
-    assert profile is not None
-    assert profile.sector == "Chung khoan"
-    assert profile.outstanding_shares == pytest.approx(850_100_000.0)
-    assert profile.listed_shares == pytest.approx(850_100_000.0)
-
-
-@pytest.mark.asyncio
 async def test_profile_endpoint_prefers_scaled_listed_shares_from_cached_company_row(
     client, test_db
 ):
@@ -1107,16 +1004,11 @@ async def test_historical_endpoint_uses_recent_price_cache(client, monkeypatch):
                 },
             ]
         return None
-
-    async def fail_appwrite_fetch(*args, **kwargs):
-        raise AssertionError("recent price cache should be used before Appwrite fetch")
-
     monkeypatch.setattr(
         "vnibb.api.v1.equity.CacheManager.get_historical_prices",
         fake_cache_lookup,
     )
     monkeypatch.setattr("vnibb.api.v1.equity.redis_client.get_json", fake_get_json)
-    monkeypatch.setattr("vnibb.api.v1.equity.get_appwrite_stock_prices", fail_appwrite_fetch)
 
     response = await client.get(
         "/api/v1/equity/historical?symbol=VNM&start_date=2026-03-10&end_date=2026-03-11"

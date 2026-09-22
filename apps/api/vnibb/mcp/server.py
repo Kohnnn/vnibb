@@ -13,34 +13,35 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from mcp.server.fastmcp import FastMCP
+from sqlalchemy import select
 
-from vnibb.core.appwrite_client import (
-    appwrite_runtime_summary,
-    check_appwrite_connectivity,
-    get_appwrite_stock_prices,
-    list_appwrite_documents,
-    list_appwrite_documents_paginated,
-)
 from vnibb.core.config import settings
+from vnibb.core.database import async_session_maker, check_database_connection
 from vnibb.core.logging_config import setup_logging
+from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+from vnibb.models.market import MarketSector, SectorPerformance
+from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
+from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock, StockIndex, StockPrice
+from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.services.ai_context_service import AIContextService, sanitize_context_value
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
 logger = logging.getLogger(__name__)
 
 MCP_INSTRUCTIONS = """
-VNIBB read-only MCP server for Appwrite-backed Vietnam market research.
+VNIBB read-only MCP server for Vietnam market research backed by the VNIBB Postgres database.
 
-Use this server to read curated VNIBB market data from Appwrite without mutating the database.
+Use this server to read curated VNIBB market data from the VNIBB Postgres database without mutating any table.
 
 Guardrails:
 - Prefer `get_symbol_snapshot` and `get_market_snapshot` before low-level collection queries.
-- Treat `query_appwrite_collection` as a narrow escape hatch, not the first choice.
+- Treat `query_database_collection` as a narrow escape hatch, not the first choice.
 - For deep analytical history (EOD prices, fundamentals, intraday, macro), use the MongoDB-backed
   tools: `get_eod_price_history`, `get_premium_dataset`, `get_intraday_trades`, `get_price_depth`.
   Call `list_premium_datasets` to discover allowlisted dataset names.
 - This server is intentionally read-only. It does not expose admin, write, delete, backfill, or schema-mutation tools.
-- User-owned and operationally sensitive collections are intentionally excluded.
+- User-owned and operationally sensitive tables are intentionally excluded.
 - Include freshness and source notes when summarizing data for downstream agents.
 """.strip()
 
@@ -50,7 +51,7 @@ VNIBB MCP intentionally excludes write/admin tools in this branch.
 Roadmap only:
 - dashboard mutations
 - watchlist mutations
-- Appwrite document writes
+- database row writes
 - sync/backfill triggers
 - admin/data-ops controls
 
@@ -539,7 +540,239 @@ def read_guardrails_resource() -> str:
     return ROADMAP_WARNING
 
 
-async def query_appwrite_collection_data(
+COLLECTION_MODELS: dict[str, Any] = {
+    "stocks": Stock,
+    "stock_prices": StockPrice,
+    "stock_indices": StockIndex,
+    "income_statements": IncomeStatement,
+    "balance_sheets": BalanceSheet,
+    "cash_flows": CashFlow,
+    "financial_ratios": FinancialRatio,
+    "company_news": CompanyNews,
+    "company_events": CompanyEvent,
+    "dividends": Dividend,
+    "insider_deals": InsiderDeal,
+    "foreign_trading": ForeignTrading,
+    "order_flow_daily": OrderFlowDaily,
+    "market_sectors": MarketSector,
+    "sector_performance": SectorPerformance,
+    "screener_snapshots": ScreenerSnapshot,
+}
+
+
+def _normalize_row_value(value: Any) -> Any:
+    """Normalize one column value into a JSON-friendly MCP value."""
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return value
+
+
+def _serialize_row(row: Any) -> dict[str, Any]:
+    return {key: _normalize_row_value(value) for key, value in dict(row).items()}
+
+
+def _model_columns(model: Any) -> list[Any]:
+    """Ordered column list for a mapped model, which is the MCP row shape."""
+    return list(model.__table__.columns)
+
+
+def _coerce_compared_value(column: Any, value: Any) -> Any:
+    """Adapt a filter value to the SQLAlchemy column type before comparison."""
+    if isinstance(value, (date, datetime)):
+        return value
+
+    text = str(value).strip()
+    python_type = getattr(column.type, "python_type", None)
+
+    if python_type is int:
+        try:
+            return int(text)
+        except ValueError:
+            return value
+    if python_type is float:
+        try:
+            return float(text)
+        except ValueError:
+            return value
+    if python_type is datetime:
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            parsed = parse_iso_date(text)
+            return parsed if parsed is not None else value
+    if python_type is date:
+        parsed = parse_iso_date(text)
+        return parsed if parsed is not None else value
+    return value
+
+
+def _query_offset(value: int) -> dict[str, Any]:
+    return {"method": "offset", "values": [int(value)]}
+
+
+def _apply_sql_queries(statement: Any, model: Any, queries: list[dict[str, Any]]) -> Any:
+    """Translate the MCP `queries` list semantics into SQL where/order/limit clauses."""
+    for query in queries:
+        method = str(query.get("method") or "")
+        values = list(query.get("values") or [])
+
+        if method == "limit":
+            if values:
+                statement = statement.limit(max(1, int(values[0])))
+            continue
+        if method == "offset":
+            if values:
+                statement = statement.offset(max(0, int(values[0])))
+            continue
+
+        column = getattr(model, str(query.get("attribute") or ""), None)
+        if column is None:
+            continue
+
+        if method == "equal":
+            if values:
+                statement = statement.where(column == _coerce_compared_value(column, values[0]))
+        elif method == "greaterThanEqual":
+            if values:
+                statement = statement.where(column >= _coerce_compared_value(column, values[0]))
+        elif method == "lessThanEqual":
+            if values:
+                statement = statement.where(column <= _coerce_compared_value(column, values[0]))
+        elif method in {"orderAsc", "orderDesc"}:
+            statement = statement.order_by(
+                column.desc() if method == "orderDesc" else column.asc()
+            )
+
+    return statement
+
+
+def _resolve_collection_model(collection_id: str) -> Any:
+    normalized = normalize_collection_name(collection_id)
+    model = COLLECTION_MODELS.get(normalized)
+    if model is None:
+        raise ValueError(f"Collection '{collection_id}' is not enabled for VNIBB MCP")
+    return model
+
+
+async def list_collection_documents(
+    collection_id: str,
+    queries: list[dict[str, Any]] | None = None,
+    timeout_seconds: float = 8.0,
+) -> list[dict[str, Any]]:
+    """Read rows from the VNIBB Postgres table behind a collection name."""
+    model = _resolve_collection_model(collection_id)
+    statement = _apply_sql_queries(select(*_model_columns(model)), model, list(queries or []))
+
+    async with async_session_maker() as session:
+        result = await session.execute(statement)
+        return [_serialize_row(row) for row in result.mappings().all()]
+
+
+async def list_collection_documents_paginated(
+    collection_id: str,
+    queries: list[dict[str, Any]] | None = None,
+    *,
+    page_size: int = 250,
+    max_documents: int | None = None,
+    timeout_seconds: float = 8.0,
+) -> list[dict[str, Any]]:
+    """Read up to ``max_documents`` rows, paging so a bounded query can span pages.
+
+    The collection queries the MCP builds carry a small ``limit`` that must stay
+    the *first* page's size, not the whole window: asking for 250 rows with a
+    100-row page size has to return 250 rows across three pages, otherwise a
+    bounded caller silently receives a truncated result set.
+    """
+    model = _resolve_collection_model(collection_id)
+    if max_documents is not None and max_documents <= 0:
+        return []
+
+    page_size = max(1, page_size)
+    collected: list[dict[str, Any]] = []
+    offset = 0
+
+    while max_documents is None or len(collected) < max_documents:
+        remaining = page_size if max_documents is None else min(page_size, max_documents - len(collected))
+        statement = _apply_sql_queries(
+            select(*_model_columns(model)),
+            model,
+            list(queries or []) + [_query_limit(remaining), _query_offset(offset)],
+        )
+
+        async with async_session_maker() as session:
+            result = await session.execute(statement)
+            page = [_serialize_row(row) for row in result.mappings().all()]
+
+        collected.extend(page)
+        if len(page) < remaining:
+            break
+        offset += len(page)
+
+    return collected
+
+
+async def get_stock_document(symbol: str) -> dict[str, Any] | None:
+    """Fetch a single stock master row by symbol."""
+    rows = await list_collection_documents(
+        "stocks",
+        queries=[
+            _query_equal("symbol", [symbol.upper()]),
+            _query_limit(1),
+        ],
+    )
+    return rows[0] if rows else None
+
+
+async def get_stock_price_rows(
+    symbol: str,
+    *,
+    interval: str = "1D",
+    start_date: date | None = None,
+    end_date: date | None = None,
+    limit: int = 250,
+    descending: bool = False,
+) -> list[dict[str, Any]]:
+    """Fetch stock price rows for a symbol/date window."""
+    queries: list[dict[str, Any]] = [
+        _query_equal("symbol", [symbol.upper()]),
+        _query_equal("interval", [interval]),
+        _query_order("time", descending=descending),
+    ]
+
+    if start_date is not None:
+        queries.append(_query_gte("time", start_date))
+    if end_date is not None:
+        queries.append(_query_lte("time", end_date))
+
+    return await list_collection_documents_paginated(
+        "stock_prices",
+        queries=queries,
+        page_size=min(max(limit, 1), 250),
+        max_documents=limit,
+    )
+
+
+async def check_database_connectivity(timeout_seconds: float = 3.0) -> dict[str, Any]:
+    """Validate VNIBB Postgres reachability."""
+    try:
+        connected = await check_database_connection()
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+    if connected:
+        return {"status": "connected", "message": "VNIBB Postgres database is reachable"}
+    return {"status": "error", "message": "VNIBB Postgres database is not reachable"}
+
+
+def database_runtime_summary() -> dict[str, Any]:
+    """Return a non-sensitive runtime configuration summary for the VNIBB database."""
+    return {
+        "configured": True,
+        "backend": "postgres",
+    }
+
+
+async def query_database_collection_data(
     *,
     collection: str,
     symbol: str | None = None,
@@ -575,7 +808,7 @@ async def query_appwrite_collection_data(
         descending=descending,
     )
 
-    rows = await list_appwrite_documents_paginated(
+    rows = await list_collection_documents_paginated(
         spec.collection,
         queries=queries,
         page_size=min(bounded_limit, 100),
@@ -609,8 +842,8 @@ async def _get_latest_symbol_document(
             _query_limit(1),
         ]
     )
-    docs = await list_appwrite_documents(collection_id, queries=queries)
-    return docs[0] if docs else None
+    rows = await list_collection_documents(collection_id, queries=queries)
+    return rows[0] if rows else None
 
 
 async def _get_symbol_rows(
@@ -620,7 +853,7 @@ async def _get_symbol_rows(
     order_attribute: str,
     limit: int,
 ) -> list[dict[str, Any]]:
-    return await list_appwrite_documents(
+    return await list_collection_documents(
         collection_id,
         queries=[
             _query_equal("symbol", [normalize_symbol_input(symbol)]),
@@ -630,9 +863,9 @@ async def _get_symbol_rows(
     )
 
 
-def _ensure_appwrite_available() -> None:
-    if not settings.is_appwrite_configured:
-        raise RuntimeError("Appwrite is not configured for VNIBB MCP")
+async def _ensure_database_available() -> None:
+    if not await check_database_connection():
+        raise RuntimeError("The VNIBB database is not reachable")
 
 
 def _build_transport_security() -> Any:
@@ -683,9 +916,9 @@ def resource_guardrails() -> str:
     return read_guardrails_resource()
 
 
-@mcp.resource("vnibb://appwrite/collections")
+@mcp.resource("vnibb://database/collections")
 def resource_supported_collections() -> str:
-    """Supported Appwrite collection metadata for the VNIBB read-only MCP."""
+    """Supported VNIBB database table metadata for the VNIBB read-only MCP."""
     return json.dumps(_serialize_collection_specs(), indent=2, sort_keys=True)
 
 
@@ -695,9 +928,9 @@ def resource_premium_datasets() -> str:
     return json.dumps(_serialize_premium_dataset_specs(), indent=2, sort_keys=True)
 
 
-@mcp.resource("vnibb://appwrite/schema/{collection}")
+@mcp.resource("vnibb://database/schema/{collection}")
 def resource_collection_schema(collection: str) -> str:
-    """Return the MCP-facing metadata for one supported Appwrite collection."""
+    """Return the MCP-facing metadata for one supported VNIBB database table."""
     normalized = normalize_collection_name(collection)
     spec = COLLECTION_SPECS.get(normalized)
     if spec is None:
@@ -707,10 +940,10 @@ def resource_collection_schema(collection: str) -> str:
 
 @mcp.prompt()
 def symbol_deep_dive(symbol: str) -> str:
-    """Prompt template for an Appwrite-first VNIBB symbol review."""
+    """Prompt template for a database-first VNIBB symbol review."""
     normalized = normalize_symbol_input(symbol)
     return (
-        f"Analyze {normalized} using VNIBB's read-only Appwrite MCP. Start with `get_symbol_snapshot`, "
+        f"Analyze {normalized} using VNIBB's read-only database MCP. Start with `get_symbol_snapshot`, "
         f"then validate price action with `get_symbol_prices`, recent catalysts with `get_company_news`, "
         f"and any event timeline details with `get_corporate_timeline`. Keep the answer evidence-first and "
         f"mention freshness where relevant."
@@ -722,31 +955,31 @@ def market_brief() -> str:
     """Prompt template for a market-open or market-close brief."""
     return (
         "Generate a VNIBB market brief using `get_market_snapshot` first. If one sector or symbol needs "
-        "deeper evidence, follow up with `get_symbol_snapshot` or `query_appwrite_collection`. Do not invent "
-        "data that is not present in Appwrite."
+        "deeper evidence, follow up with `get_symbol_snapshot` or `query_database_collection`. Do not invent "
+        "data that is not present in the VNIBB database."
     )
 
 
 @mcp.prompt()
-def appwrite_collection_audit(collection: str, symbol: str | None = None) -> str:
-    """Prompt template for safe collection-level inspection."""
+def database_collection_audit(collection: str, symbol: str | None = None) -> str:
+    """Prompt template for safe table-level inspection."""
     normalized_collection = normalize_collection_name(collection)
     normalized_symbol = normalize_symbol_input(symbol or "")
     if normalized_symbol:
         return (
-            f"Audit the `{normalized_collection}` Appwrite collection for `{normalized_symbol}` using "
-            "`query_appwrite_collection`. Summarize what fields are present, what looks fresh, and any obvious "
+            f"Audit the `{normalized_collection}` VNIBB database table for `{normalized_symbol}` using "
+            "`query_database_collection`. Summarize what fields are present, what looks fresh, and any obvious "
             "coverage gaps. Stay read-only."
         )
     return (
-        f"Audit the `{normalized_collection}` Appwrite collection using `list_supported_collections` and "
-        "`query_appwrite_collection`. Stay read-only and note any operational caveats."
+        f"Audit the `{normalized_collection}` VNIBB database table using `list_supported_collections` and "
+        "`query_database_collection`. Stay read-only and note any operational caveats."
     )
 
 
 @mcp.tool()
 def list_supported_collections() -> dict[str, Any]:
-    """List the Appwrite collections intentionally exposed by the read-only VNIBB MCP."""
+    """List the VNIBB database tables intentionally exposed by the read-only VNIBB MCP."""
     return {
         "server": "VNIBB Read-Only MCP",
         "read_only": True,
@@ -756,37 +989,37 @@ def list_supported_collections() -> dict[str, Any]:
 
 
 @mcp.tool()
-async def get_appwrite_status() -> dict[str, Any]:
-    """Check Appwrite connectivity and return a non-sensitive runtime summary."""
-    connectivity = await check_appwrite_connectivity()
+async def get_database_status() -> dict[str, Any]:
+    """Check VNIBB database connectivity and return a non-sensitive runtime summary."""
+    connectivity = await check_database_connectivity()
     return {
         "connectivity": connectivity,
-        "runtime": appwrite_runtime_summary(),
+        "runtime": database_runtime_summary(),
         "read_only": True,
     }
 
 
 @mcp.tool()
 async def get_symbol_snapshot(symbol: str) -> dict[str, Any]:
-    """Get a rich Appwrite-first symbol snapshot across prices, ratios, statements, news, and flows."""
-    _ensure_appwrite_available()
+    """Get a rich database-first symbol snapshot across prices, ratios, statements, news, and flows."""
+    await _ensure_database_available()
     normalized = normalize_symbol_input(symbol)
     if not normalized:
         raise ValueError("A stock symbol is required")
 
     service = AIContextService()
-    snapshot = await service._build_appwrite_snapshot(normalized, use_vnibb_mcp=False)
+    snapshot = await service._build_symbol_snapshot(normalized, prefer_database_data=True)
     if snapshot is None:
         return {
             "symbol": normalized,
-            "source": "appwrite",
+            "source": "postgres",
             "found": False,
-            "message": "No Appwrite snapshot was found for this symbol.",
+            "message": "No VNIBB database snapshot was found for this symbol.",
         }
 
     return {
         "symbol": normalized,
-        "source": "appwrite",
+        "source": "postgres",
         "found": True,
         "snapshot": sanitize_context_value(snapshot),
     }
@@ -794,12 +1027,12 @@ async def get_symbol_snapshot(symbol: str) -> dict[str, Any]:
 
 @mcp.tool()
 async def get_market_snapshot() -> dict[str, Any]:
-    """Get the current Appwrite-backed market snapshot for key VN indices and sectors."""
-    _ensure_appwrite_available()
+    """Get the current database-backed market snapshot for key VN indices and sectors."""
+    await _ensure_database_available()
     service = AIContextService()
-    snapshot = await service._build_appwrite_market_snapshot(use_vnibb_mcp=False)
+    snapshot = await service._build_market_snapshot(prefer_database_data=True)
     return {
-        "source": "appwrite",
+        "source": "postgres",
         "indices_expected": list(MARKET_INDEX_CODES),
         "snapshot": sanitize_context_value(snapshot or {}),
     }
@@ -814,14 +1047,14 @@ async def get_symbol_prices(
     limit: int = 60,
     descending: bool = False,
 ) -> dict[str, Any]:
-    """Get Appwrite OHLCV rows for one symbol and interval."""
-    _ensure_appwrite_available()
+    """Get VNIBB database OHLCV rows for one symbol and interval."""
+    await _ensure_database_available()
     normalized = normalize_symbol_input(symbol)
     if not normalized:
         raise ValueError("A stock symbol is required")
 
     bounded_limit = _coerce_limit(limit, COLLECTION_SPECS["stock_prices"].max_limit)
-    rows = await get_appwrite_stock_prices(
+    rows = await get_stock_price_rows(
         normalized,
         interval=_normalize_filter_value("interval", interval),
         start_date=parse_iso_date(start_date),
@@ -846,8 +1079,8 @@ async def get_latest_financial_statement(
     statement: str = "income_statement",
     period_type: str | None = None,
 ) -> dict[str, Any]:
-    """Get the latest Appwrite financial statement row for a symbol."""
-    _ensure_appwrite_available()
+    """Get the latest VNIBB database financial statement row for a symbol."""
+    await _ensure_database_available()
     normalized_symbol = normalize_symbol_input(symbol)
     if not normalized_symbol:
         raise ValueError("A stock symbol is required")
@@ -874,8 +1107,8 @@ async def get_latest_financial_statement(
 async def get_latest_financial_ratios(
     symbol: str, period_type: str | None = None
 ) -> dict[str, Any]:
-    """Get the latest Appwrite financial ratio row for a symbol."""
-    _ensure_appwrite_available()
+    """Get the latest VNIBB database financial ratio row for a symbol."""
+    await _ensure_database_available()
     normalized_symbol = normalize_symbol_input(symbol)
     if not normalized_symbol:
         raise ValueError("A stock symbol is required")
@@ -894,8 +1127,8 @@ async def get_latest_financial_ratios(
 
 @mcp.tool()
 async def get_company_news(symbol: str, limit: int = 10) -> dict[str, Any]:
-    """Get recent Appwrite company news rows for one symbol."""
-    _ensure_appwrite_available()
+    """Get recent VNIBB database company news rows for one symbol."""
+    await _ensure_database_available()
     normalized_symbol = normalize_symbol_input(symbol)
     if not normalized_symbol:
         raise ValueError("A stock symbol is required")
@@ -916,8 +1149,8 @@ async def get_company_news(symbol: str, limit: int = 10) -> dict[str, Any]:
 
 @mcp.tool()
 async def get_corporate_timeline(symbol: str, limit: int = 15) -> dict[str, Any]:
-    """Get a merged Appwrite timeline across company events, dividends, and insider deals."""
-    _ensure_appwrite_available()
+    """Get a merged VNIBB database timeline across company events, dividends, and insider deals."""
+    await _ensure_database_available()
     normalized_symbol = normalize_symbol_input(symbol)
     if not normalized_symbol:
         raise ValueError("A stock symbol is required")
@@ -984,7 +1217,7 @@ async def _gather_corporate_timeline_rows(
 
 
 @mcp.tool()
-async def query_appwrite_collection(
+async def query_database_collection(
     collection: str,
     symbol: str | None = None,
     exchange: str | None = None,
@@ -1001,9 +1234,9 @@ async def query_appwrite_collection(
     sort_by: str | None = None,
     descending: bool | None = None,
 ) -> dict[str, Any]:
-    """Read a supported Appwrite collection with strict VNIBB read-only guardrails."""
-    _ensure_appwrite_available()
-    return await query_appwrite_collection_data(
+    """Read a supported VNIBB database table with strict VNIBB read-only guardrails."""
+    await _ensure_database_available()
+    return await query_database_collection_data(
         collection=collection,
         symbol=symbol,
         exchange=exchange,
@@ -1239,7 +1472,7 @@ def create_http_app() -> FastAPI:
                 "read_only": True,
                 "mcp_endpoint": "/mcp",
                 "revision": settings.release_revision,
-                "appwrite": appwrite_runtime_summary(),
+                "database": database_runtime_summary(),
             }
         )
 

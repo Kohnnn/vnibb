@@ -25,9 +25,6 @@ live in `docs/`.
   `DB_IDLE_IN_TX_TIMEOUT_MS`.
 - `sync_database_url` no longer corrupts passwords containing `+asyncpg` —
   it now uses a regex anchored to the URL scheme prefix.
-- `/api/v1/health` now reports the resolved `appwrite_writes_active` and
-  `appwrite_configured` flags (previously the raw `appwrite_write_enabled`
-  could not distinguish "disabled" from "credentials missing").
 - The detailed health endpoint's Redis probe reuses the shared `redis_client`
   instead of opening a new connection per request, which removes a leak under
   high health-check load.
@@ -81,6 +78,32 @@ live in `docs/`.
   and write timestamp. The nullable expansion does not guess historical
   values; freshness prefers proven trade dates and falls back to snapshot
   dates for legacy rows during rollout.
+
+### Changed
+- Appwrite has been removed from the product. Postgres (via SQLAlchemy) is now
+  the single durable data store for every runtime read and write; MongoDB
+  remains the analytical vnstock premium source and Redis the cache tier.
+  `DATA_BACKEND` no longer accepts `appwrite`/`hybrid`, the `APPWRITE_*`
+  settings and `vnibb.core.appwrite_client` module are gone, and the
+  Appwrite population/price-mirror services and their sync hooks were deleted.
+  Historical price, quote, and profile resolution now run cache -> Mongo ->
+  Postgres -> provider, with no Appwrite rung in the ladder.
+- The VNIBB read-only MCP server now reads Postgres directly. Its
+  Appwrite-facing surface was renamed: `get_appwrite_status` ->
+  `get_database_status`, `query_appwrite_collection` ->
+  `query_database_collection`, the `vnibb://appwrite/*` resources ->
+  `vnibb://database/*`, and the `appwrite_collection_audit` prompt ->
+  `database_collection_audit`.
+- System dashboard layout templates are SQL-only (`app_kv`); the optional
+  Appwrite mirror and its connectivity requirements are gone, so template
+  saves no longer depend on a second store being reachable.
+- The copilot context contract renames `prefer_appwrite_data` to
+  `prefer_database_data`; source precedence is now `postgres` then
+  `browser_context`. The web client still sends the legacy key for one
+  release so an older backend keeps working.
+- Health and admin payloads drop the `appwrite` component and the
+  `appwrite_configured`/`appwrite_write_enabled`/`appwrite_writes_active`
+  provider flags. `X-Data-Source` always reports `postgres`.
 
 ### Internal
 - Added `apps/api/tests/test_core/test_config.py` covering the new timeout

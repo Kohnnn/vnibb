@@ -153,7 +153,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [aiApiKeyInput, setAiApiKeyInput] = useState('');
   const [aiBaseUrlInput, setAiBaseUrlInput] = useState(OPENROUTER_BASE_URL);
   const [aiWebSearch, setAiWebSearch] = useState(false);
-  const [aiPreferAppwriteData, setAiPreferAppwriteData] = useState(true);
+  const [aiPreferDatabaseData, setAiPreferDatabaseData] = useState(true);
   const [aiEnableSidebarWorkflowOutputs, setAiEnableSidebarWorkflowOutputs] = useState(false);
   const [openRouterModels, setOpenRouterModels] = useState<ModelOption[]>([]);
   const [isOpenRouterModelsLoading, setIsOpenRouterModelsLoading] = useState(false);
@@ -301,7 +301,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setAiApiKeyInput(aiSettings.apiKey);
       setAiBaseUrlInput(aiSettings.baseUrl);
       setAiWebSearch(aiSettings.webSearch);
-      setAiPreferAppwriteData(aiSettings.preferAppwriteData);
+      setAiPreferDatabaseData(aiSettings.preferDatabaseData);
       setAiEnableSidebarWorkflowOutputs(aiSettings.enableSidebarWorkflowOutputs);
       setUsdRateInputs(toRateInputs(localUsdVndRatesByYear))
       setAdminUsdRateInputs(toRateInputs(adminUsdVndRatesByYear))
@@ -449,7 +449,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       apiKey: aiApiKeyInput,
       baseUrl: normalizedBaseUrl,
       webSearch: aiWebSearch,
-      preferAppwriteData: aiPreferAppwriteData,
+      preferDatabaseData: aiPreferDatabaseData,
       enableSidebarWorkflowOutputs: aiEnableSidebarWorkflowOutputs,
     });
 
@@ -460,14 +460,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setAiApiKeyInput(nextSettings.apiKey);
     setAiBaseUrlInput(nextSettings.baseUrl);
     setAiWebSearch(nextSettings.webSearch);
-    setAiPreferAppwriteData(nextSettings.preferAppwriteData);
+    setAiPreferDatabaseData(nextSettings.preferDatabaseData);
     setAiEnableSidebarWorkflowOutputs(nextSettings.enableSidebarWorkflowOutputs);
     captureAnalyticsEvent(ANALYTICS_EVENTS.aiSettingsSaved, {
       provider: nextSettings.provider,
       mode: nextSettings.mode,
       model: nextSettings.model,
       web_search: nextSettings.webSearch,
-      prefer_vnibb_data: nextSettings.preferAppwriteData,
+      prefer_vnibb_data: nextSettings.preferDatabaseData,
       sidebar_workflow_outputs: nextSettings.enableSidebarWorkflowOutputs,
     })
     setPreferenceStatus(
@@ -768,7 +768,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <div>
                       <h4 className="text-sm font-bold text-[var(--text-primary)]">VniAgent Providers</h4>
                       <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                        VniAgent uses a VNIBB database-first workflow. The Appwrite-backed VNIBB market database stays the intended research corpus, while temporary quota-pressure writes can spill into Supabase without changing that preference.
+                        VniAgent uses a VNIBB database-first workflow. The VNIBB Postgres market database stays the intended research corpus, while temporary quota-pressure writes can spill into Supabase without changing that preference.
                       </p>
                     </div>
                     <div className="rounded-full border border-blue-500/30 bg-blue-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-300">
@@ -795,7 +795,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       {aiMode === 'browser_key' ? aiModelInput || 'Set model' : publicRuntimeModel || 'Admin runtime model'}
                     </span>
                     <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-                      {aiPreferAppwriteData ? 'VNIBB DB first' : 'External-first'}
+                      {aiPreferDatabaseData ? 'VNIBB DB first' : 'External-first'}
                     </span>
                     <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                       {aiEnableSidebarWorkflowOutputs ? 'Workflow panels on' : 'Answer-first sidebar'}
@@ -1057,13 +1057,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
                     <input
                       type="checkbox"
-                      checked={aiPreferAppwriteData}
-                      onChange={(event) => setAiPreferAppwriteData(event.target.checked)}
+                      checked={aiPreferDatabaseData}
+                      onChange={(event) => setAiPreferDatabaseData(event.target.checked)}
                       className="mt-0.5 h-4 w-4 rounded"
                     />
                     <span>
                       <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Prefer VNIBB database</span>
-                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Use the Appwrite-backed VNIBB market database first and only fall back when that context is missing or temporarily unavailable.</span>
+                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Use the VNIBB database first and only fall back when context is missing.</span>
                     </span>
                   </label>
                   <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
@@ -1125,7 +1125,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       setAiApiKeyInput(nextSettings.apiKey)
                       setAiBaseUrlInput(nextSettings.baseUrl)
                       setAiWebSearch(nextSettings.webSearch)
-                      setAiPreferAppwriteData(nextSettings.preferAppwriteData)
+                      setAiPreferDatabaseData(nextSettings.preferDatabaseData)
                       setAiEnableSidebarWorkflowOutputs(nextSettings.enableSidebarWorkflowOutputs)
                       setAiSettingsError(null)
                       setPreferenceStatus('VniAgent settings reset to defaults for this browser.')

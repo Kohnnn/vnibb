@@ -100,7 +100,6 @@ jobs:
       REDIS_HOST: ""
       REDIS_PORT: "0"
       MONGODB_ENABLED: "false"
-      APPWRITE_WRITE_ENABLED: "false"
       SKIP_SCHEDULER_STARTUP: "1"
       SKIP_WEBSOCKET_STARTUP: "1"
       SKIP_WARMUP: "true"

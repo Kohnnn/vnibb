@@ -16,10 +16,10 @@ This branch intentionally ships a safer first step:
 
 ## Why this shape
 
-VNIBB already has two useful but different MCP-adjacent pieces:
+VNIBB already has two useful but different MCP-adjacent data surfaces:
 
-- the database-stack MCP launcher in `scripts/appwrite/run_mcp_from_env.mjs`
-- the VNIBB API/backend itself, which already normalizes and consumes the database stack
+- the VNIBB API/backend, which normalizes and serves the Postgres app model
+- the private MongoDB analytical corpus, which holds the vnstock premium records
 
 This server sits between those two ideas.
 
@@ -55,10 +55,10 @@ vnibb-mcp --transport streamable-http --host 0.0.0.0 --port 8001
 
 Read-only tools exposed by this branch:
 
-App-collection-backed (curated app collections):
+Postgres-table-backed (curated VNIBB app tables):
 
 - `list_supported_collections`
-- `get_appwrite_status`
+- `get_database_status`
 - `get_symbol_snapshot`
 - `get_market_snapshot`
 - `get_symbol_prices`
@@ -66,7 +66,7 @@ App-collection-backed (curated app collections):
 - `get_latest_financial_ratios`
 - `get_company_news`
 - `get_corporate_timeline`
-- `query_appwrite_collection`
+- `query_database_collection`
 
 Analytical-corpus-backed (vnstock premium analytical corpus):
 
@@ -80,7 +80,7 @@ Analytical-corpus-backed (vnstock premium analytical corpus):
 Design notes:
 
 - `get_symbol_snapshot` and `get_market_snapshot` are the preferred high-level tools
-- `query_appwrite_collection` is intentionally constrained by allowlists, max limits, and filter validation
+- `query_database_collection` is intentionally constrained by allowlists, max limits, and filter validation
 - user-owned or operationally sensitive collections are intentionally excluded from the generic query tool
 - the database-stack tools read the private analytical store directly via `MongoMarketDataService`; they do not proxy through the FastAPI app
 - `get_premium_dataset` is constrained by a dataset allowlist (`PREMIUM_DATASET_SPECS`) and per-dataset max limits; disabled/empty source datasets (`company.capital_history`, `company.insider_deals`, `equity.block_trades`, `equity.put_through`) are intentionally excluded
@@ -107,14 +107,14 @@ MONGODB_TIMEOUT_MS=10000
 
 When the database stack is not configured, the database-stack tools return a clear "not configured"
 status (for `get_mongo_status`) or raise a descriptive error (for data tools)
-rather than failing opaquely. The app-collection tools remain unaffected.
+rather than failing opaquely. The Postgres-table tools remain unaffected.
 
 ## Resource inventory
 
 - `vnibb://mcp/guardrails`
-- `vnibb://appwrite/collections`
+- `vnibb://database/collections`
 - `vnibb://mongo/datasets`
-- `vnibb://appwrite/schema/{collection}`
+- `vnibb://database/schema/{collection}`
 
 These resources exist so clients can inspect policy and schema intent without guessing.
 
@@ -122,7 +122,7 @@ These resources exist so clients can inspect policy and schema intent without gu
 
 - `symbol_deep_dive`
 - `market_brief`
-- `appwrite_collection_audit`
+- `database_collection_audit`
 
 These prompts are lightweight helpers for recurring research workflows.
 
@@ -158,9 +158,9 @@ Important:
 - VniAgent or any other app should call the remote MCP from a trusted server-side context, not directly from an untrusted browser
 - if browser-native MCP is needed later, add a proper auth model instead of weakening this server
 
-## Supported app collections
+## Supported Postgres tables
 
-This branch allows read-only access to a curated subset only:
+This server allows read-only access to a curated subset only:
 
 - `stocks`
 - `stock_prices`
@@ -181,7 +181,6 @@ This branch allows read-only access to a curated subset only:
 
 Excluded on purpose:
 
-- user-owned dashboard/layout collections
 - system template write paths
 - tenant/admin collections
 - direct mutation or operational collections
@@ -376,4 +375,4 @@ The script verifies:
 - `/mcp` is reachable
 - MCP initialization succeeds
 - the server can list tools
-- `get_appwrite_status` executes successfully
+- `get_database_status` executes successfully

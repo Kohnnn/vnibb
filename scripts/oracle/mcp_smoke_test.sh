@@ -104,7 +104,7 @@ async def main() -> int:
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()
-                result = await session.call_tool("get_appwrite_status", arguments={})
+                result = await session.call_tool("get_database_status", arguments={})
                 if result.isError:
                     print("MCP tool call returned an error")
                     return 1
@@ -151,7 +151,7 @@ async def main() -> int:
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()
-                result = await session.call_tool("get_appwrite_status", arguments={})
+                result = await session.call_tool("get_database_status", arguments={})
                 if result.isError:
                     print("MCP tool call returned an error")
                     return 1

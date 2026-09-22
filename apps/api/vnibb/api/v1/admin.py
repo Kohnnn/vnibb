@@ -15,7 +15,6 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPExcep
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vnibb.core.appwrite_client import appwrite_runtime_summary, check_appwrite_connectivity
 from vnibb.core.cache import redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import engine, get_db
@@ -289,8 +288,7 @@ async def save_ai_prompt_library(data: Any = Body(...)) -> Dict[str, Any]:
 
 @router.get("/providers/status", dependencies=[Depends(require_admin_access)])
 async def get_provider_status() -> Dict[str, Any]:
-    """Return runtime provider configuration and migration connectivity status."""
-    appwrite_health = await check_appwrite_connectivity(timeout_seconds=2.5)
+    """Return runtime provider configuration and connectivity status."""
     ai_runtime = await ai_runtime_config_service.get_runtime_config()
     openrouter_status = await ai_model_catalog_service.get_openrouter_status()
     return {
@@ -299,7 +297,6 @@ async def get_provider_status() -> Dict[str, Any]:
             "data_backend_requested": settings.data_backend,
             "data_backend": settings.resolved_data_backend,
             "cache_backend": settings.resolved_cache_backend,
-            "appwrite_configured": settings.is_appwrite_configured,
             "vnstock_source": settings.vnstock_source,
             "vnstock_timeout_seconds": settings.vnstock_timeout,
             "vnstock_api_key_configured": bool(settings.vnstock_api_key),
@@ -311,8 +308,6 @@ async def get_provider_status() -> Dict[str, Any]:
             "ai_runtime_provider": ai_runtime.get("provider"),
             "ai_runtime_model": ai_runtime.get("model"),
         },
-        "appwrite": appwrite_health,
-        "appwrite_runtime": appwrite_runtime_summary(),
         "vnstock_runtime": _vnstock_runtime_status(),
     }
 

@@ -20,7 +20,7 @@ export interface CopilotTransportSettings {
     apiKey?: string;
     baseUrl?: string;
     webSearch?: boolean;
-    preferAppwriteData?: boolean;
+    preferDatabaseData?: boolean;
     enableSidebarWorkflowOutputs?: boolean;
 }
 

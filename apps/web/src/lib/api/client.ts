@@ -1,12 +1,5 @@
 // Core Fetch Client
 
-import {
-    appwriteClearSessionHint,
-    appwriteCreateJWT,
-    authProvider,
-    isAppwriteConfigured,
-    isAppwriteUnauthorizedError,
-} from '@/lib/appwrite';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { APIError, RateLimitError } from './errors';
 import { API_BASE_URL, getDashboardClientId } from './config';
@@ -25,27 +18,10 @@ async function getAuthorizationToken(): Promise<string | null> {
     if (window.localStorage.getItem('vnibb_dev_user')) {
         return null;
     }
-
     if (supabase && isSupabaseConfigured) {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) {
             return session.access_token;
-        }
-    }
-
-    if (authProvider === 'appwrite') {
-        if (!isAppwriteConfigured) {
-            return null;
-        }
-
-        try {
-            return await appwriteCreateJWT();
-        } catch (error) {
-            if (isAppwriteUnauthorizedError(error)) {
-                appwriteClearSessionHint();
-                return null;
-            }
-            throw error;
         }
     }
 

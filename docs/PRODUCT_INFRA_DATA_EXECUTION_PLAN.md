@@ -21,7 +21,6 @@ Ship the next VNIBB reliability program without replacing the existing serving a
 - n6v self-hosted Supabase PostgreSQL remains canonical for app, auth, user, and runtime state.
 - Redis remains non-canonical and may only hold cache, rate-limit, and coordination state.
 - Bronze and Silver Parquet outputs are analytical and recovery artifacts. API and MCP do not read them in this program.
-- Appwrite writes remain disabled unless a separate controlled backfill is approved.
 - One API process remains the production default until scheduler coordination, rate limiting, and WebSocket behavior are safe across processes.
 - Existing deployment-local OCI files and secrets are never replaced from repository examples.
 - Schema rollbacks are never automatic. Database changes use expand/contract compatibility so the previous application image remains deployable.

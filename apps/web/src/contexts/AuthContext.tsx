@@ -2,7 +2,7 @@
  * Authentication Context
  *
  * Provides authentication state and methods throughout the application.
- * Supports Supabase (default) and Appwrite (migration path) providers.
+ * Backed exclusively by Supabase.
  */
 
 "use client";
@@ -11,26 +11,12 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { getDashboardClientId } from '@/lib/api';
 import { identifyAnalyticsUser, resetAnalytics } from '@/lib/analytics';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import {
-    authProvider,
-    appwriteClearSessionHint,
-    isAppwriteConfigured,
-    appwriteCreateOAuth2Url,
-    appwriteGetAccount,
-    appwriteRememberSessionHint,
-    appwriteSendMagicLink,
-    appwriteSignInWithEmail,
-    appwriteSignOutCurrentSession,
-    appwriteSignUp,
-    appwriteShouldBootstrapSession,
-    isAppwriteUnauthorizedError,
-} from '@/lib/appwrite';
 
 // Feature flags from environment
 const ENABLE_ADMIN_LOGIN = process.env.NEXT_PUBLIC_ENABLE_ADMIN_LOGIN === 'true';
 const ENABLE_GUEST_LOGIN = process.env.NEXT_PUBLIC_ENABLE_GUEST_LOGIN === 'true';
 
-type AuthProviderName = 'supabase' | 'appwrite' | 'dev';
+type AuthProviderName = 'supabase' | 'dev';
 
 export interface AuthUser {
     id: string;
@@ -87,15 +73,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const appwriteEnabled = authProvider === 'appwrite';
-
-function toAuthFailure(error: unknown, fallback = 'Authentication failed'): AuthFailure {
-    if (error instanceof Error && error.message) {
-        return { message: error.message };
-    }
-    return { message: fallback };
-}
-
 function mapSupabaseUser(user: {
     id: string;
     email?: string | null;
@@ -108,20 +85,6 @@ function mapSupabaseUser(user: {
         user_metadata: user.user_metadata ?? {},
         role: user.role,
         provider: 'supabase',
-    };
-}
-
-function mapAppwriteUser(user: {
-    $id: string;
-    email?: string;
-    prefs?: Record<string, unknown>;
-}): AuthUser {
-    return {
-        id: user.$id,
-        email: user.email ?? null,
-        user_metadata: user.prefs ?? {},
-        role: 'authenticated',
-        provider: 'appwrite',
     };
 }
 
@@ -167,37 +130,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             localStorage.removeItem('vnibb_dev_user');
         }
 
-        if (appwriteEnabled) {
-            if (!isAppwriteConfigured) {
-                setLoading(false);
-                return;
-            }
-
-            if (!appwriteShouldBootstrapSession()) {
-                setLoading(false);
-                return;
-            }
-
-            appwriteGetAccount()
-                .then((account) => {
-                    appwriteRememberSessionHint();
-                    setUser(mapAppwriteUser(account));
-                    setSession({ provider: 'appwrite', raw: account });
-                })
-                .catch((error) => {
-                    if (isAppwriteUnauthorizedError(error)) {
-                        appwriteClearSessionHint();
-                    }
-                    setUser(null);
-                    setSession(null);
-                })
-                .finally(() => {
-                    setLoading(false);
-                });
-
-            return;
-        }
-
         if (!supabase || !isSupabaseConfigured) {
             setLoading(false);
             return;
@@ -241,23 +173,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, [user]);
 
     const signIn = async (email: string, password: string) => {
-        if (appwriteEnabled) {
-            if (!isAppwriteConfigured) {
-                return { error: { message: 'Appwrite not configured' } };
-            }
-
-            try {
-                await appwriteSignInWithEmail(email, password);
-                const account = await appwriteGetAccount();
-                appwriteRememberSessionHint();
-                setUser(mapAppwriteUser(account));
-                setSession({ provider: 'appwrite', raw: account });
-                return { error: null };
-            } catch (error) {
-                return { error: toAuthFailure(error) };
-            }
-        }
-
         if (!supabase) {
             return { error: { message: 'Supabase not configured' } };
         }
@@ -271,24 +186,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     const signUp = async (email: string, password: string) => {
-        if (appwriteEnabled) {
-            if (!isAppwriteConfigured) {
-                return { error: { message: 'Appwrite not configured' } };
-            }
-
-            try {
-                await appwriteSignUp(email, password);
-                await appwriteSignInWithEmail(email, password);
-                const account = await appwriteGetAccount();
-                appwriteRememberSessionHint();
-                setUser(mapAppwriteUser(account));
-                setSession({ provider: 'appwrite', raw: account });
-                return { error: null };
-            } catch (error) {
-                return { error: toAuthFailure(error) };
-            }
-        }
-
         if (!supabase) {
             return { error: { message: 'Supabase not configured' } };
         }
@@ -302,21 +199,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     const signInWithGoogle = async () => {
-        if (appwriteEnabled) {
-            if (!isAppwriteConfigured) {
-                return { error: { message: 'Appwrite not configured' } };
-            }
-
-            if (typeof window === 'undefined') {
-                return { error: { message: 'Google sign-in requires browser context' } };
-            }
-
-            const callbackUrl = `${window.location.origin}/auth/callback`;
-            const failureUrl = `${window.location.origin}/login?error=oauth_failed`;
-            window.location.assign(appwriteCreateOAuth2Url('google', callbackUrl, failureUrl));
-            return { error: null };
-        }
-
         if (!supabase) {
             return { error: { message: 'Supabase not configured' } };
         }
@@ -332,24 +214,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     const signInWithMagicLink = async (email: string) => {
-        if (appwriteEnabled) {
-            if (!isAppwriteConfigured) {
-                return { error: { message: 'Appwrite not configured' } };
-            }
-
-            if (typeof window === 'undefined') {
-                return { error: { message: 'Magic link requires browser context' } };
-            }
-
-            try {
-                const callbackUrl = `${window.location.origin}/auth/callback`;
-                await appwriteSendMagicLink(email, callbackUrl);
-                return { error: null };
-            } catch (error) {
-                return { error: toAuthFailure(error, 'Failed to send magic link') };
-            }
-        }
-
         if (!supabase) {
             return { error: { message: 'Supabase not configured' } };
         }
@@ -403,41 +267,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return;
         }
 
-        if (appwriteEnabled) {
-            if (!isAppwriteConfigured) {
-                appwriteClearSessionHint();
-                setUser(null);
-                setSession(null);
-                return;
-            }
-
-            try {
-                await appwriteSignOutCurrentSession();
-            } catch (error) {
-                console.warn('Appwrite sign out failed:', toAuthFailure(error).message);
-            } finally {
-                appwriteClearSessionHint();
-                setUser(null);
-                setSession(null);
-            }
-            return;
-        }
-
         if (!supabase) return;
         await supabase.auth.signOut();
     };
 
-    const activeProvider: AuthProviderName = isDevMode
-        ? 'dev'
-        : appwriteEnabled
-            ? 'appwrite'
-            : 'supabase';
+    const activeProvider: AuthProviderName = isDevMode ? 'dev' : 'supabase';
 
     const value = {
         user,
         session,
         loading,
-        isConfigured: appwriteEnabled ? isAppwriteConfigured : isSupabaseConfigured,
+        isConfigured: isSupabaseConfigured,
         provider: activeProvider,
         isAdmin,
         isGuest,

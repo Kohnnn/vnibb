@@ -83,12 +83,8 @@ async def test_browser_health_envelopes(client, monkeypatch):
     async def connected(*args, **kwargs):
         return True
 
-    async def appwrite_status(*args, **kwargs):
-        return {"status": "not_configured"}
-
     health._BASIC_HEALTH_CACHE.clear()
     monkeypatch.setattr("vnibb.core.database.check_database_connection", connected)
-    monkeypatch.setattr(health, "check_appwrite_connectivity", appwrite_status)
 
     live, ready, basic = await client.get("/live"), await client.get("/ready"), await client.get("/health/")
 

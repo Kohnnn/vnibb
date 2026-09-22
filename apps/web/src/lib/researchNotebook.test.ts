@@ -33,7 +33,7 @@ describe('research notebook', () => {
       body: 'Full rendered answer',
       symbol: 'VNM',
       agent: { provider: 'openrouter', model: 'model-a' },
-      sources: [{ id: 'source-1', label: 'VNIBB', sourceSystem: 'appwrite', url: 'https://example.test/source', asOf: '2026-07-16T00:00:00Z' }],
+      sources: [{ id: 'source-1', label: 'VNIBB', sourceSystem: 'postgres', url: 'https://example.test/source', asOf: '2026-07-16T00:00:00Z' }],
       dedupeKey: 'vniagent:answer-1',
       provenance: { endpoint: '/api/v1/copilot/chat/stream', localOnly: true },
     }
@@ -44,7 +44,7 @@ describe('research notebook', () => {
     const items = readNotebookItems()
     expect(items).toHaveLength(1)
     expect(window.localStorage.getItem(RESEARCH_NOTEBOOK_KEY)).toContain('Full rendered answer')
-    expect(notebookToMarkdown(items)).toContain('id source-1, system appwrite, as of 2026-07-16T00:00:00Z')
+    expect(notebookToMarkdown(items)).toContain('id source-1, system postgres, as of 2026-07-16T00:00:00Z')
     expect(notebookToMarkdown(items)).toContain('article: https://example.test/source')
   })
 })

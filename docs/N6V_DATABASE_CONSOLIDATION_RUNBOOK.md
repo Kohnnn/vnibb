@@ -17,8 +17,8 @@ Goal: consolidate VNIBB runtime data onto the n6v Docker stack: MongoDB for vnst
 - `postgres`: application SQL store replacing Supabase Postgres for VNIBB-owned tables. On this n6v host, Docker Desktop already occupies host port `5432`, so VNIBB Postgres is published on host port `15432` and container port `5432`.
 - `supabase-selfhosted`: official Supabase Docker bundle staged inside the canonical VNIBB stack at `C:\vnibb-stack\supabase`. Kong/API/Studio uses host port `18000`, HTTPS uses `18443`, Supavisor session mode uses `15433`, and transaction mode uses `16543`.
 - `redis`: cache and job coordination.
-- Appwrite writes remain frozen during migration unless running a controlled export/backfill.
-- Backend config after cutover: `DATA_BACKEND=hybrid`, `MONGODB_URL` to n6v Mongo, `DATABASE_URL` to n6v Postgres.
+- Postgres is the only durable write target; the n6v cutover retires every earlier dual-write path.
+- Backend config after cutover: `DATA_BACKEND=postgres`, `MONGODB_URL` to n6v Mongo, `DATABASE_URL` to n6v Postgres.
 
 ## Preflight From This Machine
 
@@ -160,8 +160,7 @@ Set deployment secrets after restore validation:
 DATABASE_URL=postgresql+asyncpg://vnibb:<password>@<n6v-tailscale-ip>:15432/vnibb
 MONGODB_URL=mongodb://<user>:<password>@<n6v-tailscale-ip>:27017/<db>?authSource=admin
 REDIS_URL=redis://<n6v-tailscale-ip>:6379/0
-DATA_BACKEND=hybrid
-APPWRITE_WRITE_ENABLED=false
+DATA_BACKEND=postgres
 ENABLE_AI_SENTIMENT_ANALYSIS=0
 SUPABASE_URL=http://<n6v-tailscale-ip>:18000
 SUPABASE_ANON_KEY=<ANON_KEY from C:\vnibb-stack\.env>

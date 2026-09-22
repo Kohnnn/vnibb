@@ -64,7 +64,7 @@ export const MCP_TOOL_CATALOG: McpToolDescriptor[] = [
     permission: 'read_only',
   },
   {
-    name: 'get_appwrite_status',
+    name: 'get_database_status',
     description: 'Report database connectivity/status for the app-collection backend.',
     source: 'app_collections',
     permission: 'read_only',
@@ -118,7 +118,7 @@ export const MCP_TOOL_CATALOG: McpToolDescriptor[] = [
     sampleInput: { symbol: 'MWG' },
   },
   {
-    name: 'query_appwrite_collection',
+    name: 'query_database_collection',
     description: 'Constrained generic read over allowlisted collections (max limits + filter validation).',
     source: 'app_collections',
     permission: 'read_only',
@@ -168,15 +168,15 @@ export const MCP_TOOL_CATALOG: McpToolDescriptor[] = [
 
 export const MCP_RESOURCE_CATALOG: McpResourceDescriptor[] = [
   { uri: 'vnibb://mcp/guardrails', description: 'Read-only policy and guardrails statement.' },
-  { uri: 'vnibb://appwrite/collections', description: 'Allowlisted app collections.' },
+  { uri: 'vnibb://database/collections', description: 'Allowlisted app collections.' },
   { uri: 'vnibb://mongo/datasets', description: 'Allowlisted analytical datasets.' },
-  { uri: 'vnibb://appwrite/schema/{collection}', description: 'Schema intent for an allowlisted collection.' },
+  { uri: 'vnibb://database/schema/{collection}', description: 'Schema intent for an allowlisted collection.' },
 ]
 
 export const MCP_PROMPT_CATALOG: McpPromptDescriptor[] = [
   { name: 'symbol_deep_dive', description: 'Recurring single-symbol research workflow.' },
   { name: 'market_brief', description: 'Recurring market overview workflow.' },
-  { name: 'appwrite_collection_audit', description: 'Audit an allowlisted collection.' },
+  { name: 'database_collection_audit', description: 'Audit an allowlisted collection.' },
 ]
 
 /** Tools the read-only MCP intentionally does NOT expose (for the diagnostics note). */

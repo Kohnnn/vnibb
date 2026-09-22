@@ -21,7 +21,6 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.api.v1.schemas import MetaData, StandardResponse
-from vnibb.core.appwrite_client import get_appwrite_stock, get_appwrite_stock_prices
 from vnibb.core.cache import build_cache_key, cached, redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
@@ -1323,7 +1322,7 @@ def _to_historical_data_from_mongo(
     high_value = _coerce_optional_float(row.get("high"))
     low_value = _coerce_optional_float(row.get("low"))
     close_value = _coerce_optional_float(row.get("close"))
-    volume_value = _appwrite_optional_int(row.get("volume"))
+    volume_value = _coerce_optional_int(row.get("volume"))
     adj_close_value = _coerce_optional_float(row.get("adj_close") or row.get("adjClose"))
 
     if None in {open_value, high_value, low_value, close_value, volume_value}:
@@ -1411,17 +1410,7 @@ async def _load_historical_from_mongo(
     return (rows, docs) if include_provenance else rows
 
 
-
-def _appwrite_optional_int(value: Any) -> Optional[int]:
-    if value is None:
-        return None
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return None
-
-
-def _appwrite_time_to_date(value: Any) -> Optional[date]:
+def _time_to_date(value: Any) -> Optional[date]:
     iso_value = _coerce_iso_date(value)
     if not iso_value:
         return None
@@ -1431,16 +1420,16 @@ def _appwrite_time_to_date(value: Any) -> Optional[date]:
         return None
 
 
-def _to_historical_data_from_appwrite(
+def _to_historical_data_from_payload(
     doc: dict[str, Any], *, adjustment_mode: str = "raw"
 ) -> Optional[EquityHistoricalData]:
-    time_value = _appwrite_time_to_date(doc.get("time"))
+    time_value = _time_to_date(doc.get("time"))
     open_value = _coerce_optional_float(doc.get("open"))
     high_value = _coerce_optional_float(doc.get("high"))
     low_value = _coerce_optional_float(doc.get("low"))
     close_value = _coerce_optional_float(doc.get("close"))
     adj_close_value = _coerce_optional_float(doc.get("adj_close") or doc.get("adjClose"))
-    volume_value = _appwrite_optional_int(doc.get("volume"))
+    volume_value = _coerce_optional_int(doc.get("volume"))
 
     if not time_value or None in {open_value, high_value, low_value, close_value, volume_value}:
         return None
@@ -1771,9 +1760,8 @@ _HISTORICAL_SOURCE_RANK = {
     "mongo": 0,
     "cache": 1,
     "recent_cache": 2,
-    "appwrite": 3,
-    "provider": 4,
-    "db": 5,
+    "provider": 3,
+    "db": 4,
 }
 
 
@@ -1880,29 +1868,6 @@ def _historical_resolution_meta(
     )
 
 
-async def _load_historical_from_appwrite(
-    symbol: str,
-    start_date: date,
-    end_date: date,
-    interval: str,
-    adjustment_mode: str = "raw",
-) -> List[EquityHistoricalData]:
-    docs = await get_appwrite_stock_prices(
-        symbol,
-        interval=interval or "1D",
-        start_date=start_date,
-        end_date=end_date,
-        limit=5000,
-        descending=False,
-    )
-    rows: List[EquityHistoricalData] = []
-    for doc in docs:
-        item = _to_historical_data_from_appwrite(doc, adjustment_mode=adjustment_mode)
-        if item is not None:
-            rows.append(item)
-    return rows
-
-
 async def _load_rolling_price_window(
     db: AsyncSession,
     symbol: str,
@@ -1913,12 +1878,6 @@ async def _load_rolling_price_window(
     start_date = end_date - timedelta(days=max(380, trading_days + 30))
 
     rows = await _load_historical_from_db(db, symbol, start_date, end_date, "1D")
-    if (
-        not rows
-        and settings.is_appwrite_configured
-        and settings.resolved_data_backend in {"appwrite", "hybrid"}
-    ):
-        rows = await _load_historical_from_appwrite(symbol, start_date, end_date, "1D")
 
     if len(rows) > trading_days:
         rows = rows[-trading_days:]
@@ -1978,7 +1937,7 @@ async def _load_historical_from_recent_cache(
     for row in cached_rows:
         if not isinstance(row, dict):
             continue
-        item = _to_historical_data_from_appwrite(
+        item = _to_historical_data_from_payload(
             {
                 "symbol": symbol.upper(),
                 "interval": "1D",
@@ -2047,177 +2006,8 @@ async def _load_quote_from_price_cache(symbol: str) -> Optional[StockQuoteData]:
         prev_close=prev_close,
         change=change,
         change_pct=round(change_pct, 2) if change_pct is not None else None,
-        volume=_appwrite_optional_int(latest_payload.get("volume")),
+        volume=_coerce_optional_int(latest_payload.get("volume")),
         updated_at=updated_at,
-    )
-
-
-async def _load_profile_from_appwrite(
-    symbol: str,
-    db: AsyncSession | None = None,
-) -> Optional[EquityProfileData]:
-    doc = await get_appwrite_stock(symbol)
-    if not doc:
-        return None
-
-    company_row: Company | None = None
-    stock_row: Stock | None = None
-    if db is not None:
-        company_row = (
-            await db.execute(select(Company).where(Company.symbol == symbol.upper()))
-        ).scalar_one_or_none()
-        stock_row = (
-            await db.execute(select(Stock).where(Stock.symbol == symbol.upper()))
-        ).scalar_one_or_none()
-
-    industry = _pick_optional_text(
-        doc.get("industry"),
-        doc.get("icb_name3"),
-        doc.get("icb_name4"),
-        company_row.industry if company_row else None,
-        stock_row.industry if stock_row else None,
-    )
-    sector = _pick_optional_text(
-        doc.get("sector"),
-        doc.get("icb_name2"),
-        company_row.sector if company_row else None,
-        stock_row.sector if stock_row else None,
-        industry,
-    )
-    listing_date = (
-        _coerce_iso_date(doc.get("listing_date"))
-        or _coerce_iso_date(company_row.listing_date if company_row else None)
-        or _coerce_iso_date(stock_row.listing_date if stock_row else None)
-    )
-    established_date = (
-        _coerce_iso_date(company_row.established_date if company_row else None)
-        or _coerce_iso_date(doc.get("established_date"))
-        or _coerce_iso_date(doc.get("founded_date"))
-        or _coerce_iso_date(doc.get("founded"))
-    )
-    no_employees = _pick_optional_int(
-        doc.get("no_employees"),
-        doc.get("employees"),
-        doc.get("employee_count"),
-        doc.get("number_of_employees"),
-        doc.get("noEmployees"),
-    )
-
-    outstanding_shares = _pick_optional_share_count(
-        doc.get("outstanding_shares"),
-        doc.get("issue_share"),
-        company_row.outstanding_shares if company_row else None,
-        company_row.listed_shares if company_row else None,
-        stock_row.outstanding_shares
-        if stock_row and hasattr(stock_row, "outstanding_shares")
-        else None,
-        await _get_outstanding_shares(db, symbol.upper()) if db is not None else None,
-    )
-    listed_shares = _resolve_listed_share_count(
-        doc.get("listed_shares"),
-        doc.get("listed_volume"),
-        company_row.listed_shares if company_row else None,
-        company_row.outstanding_shares if company_row else None,
-        outstanding_shares=outstanding_shares,
-    )
-    market_cap = (
-        await _resolve_profile_market_cap(
-            db=db,
-            symbol=symbol.upper(),
-            outstanding_shares=outstanding_shares,
-            fallback_market_cap=doc.get("market_cap"),
-        )
-        if db is not None
-        else _coerce_optional_float(doc.get("market_cap"))
-    )
-
-    return EquityProfileData(
-        symbol=str(doc.get("symbol") or symbol).upper(),
-        company_name=_pick_optional_text(
-            doc.get("company_name"),
-            company_row.company_name if company_row else None,
-            stock_row.company_name if stock_row else None,
-        ),
-        short_name=_pick_optional_text(
-            doc.get("short_name"),
-            company_row.short_name if company_row else None,
-            stock_row.short_name if stock_row else None,
-        ),
-        exchange=_pick_optional_text(
-            doc.get("exchange"),
-            company_row.exchange if company_row else None,
-            stock_row.exchange if stock_row else None,
-        ),
-        industry=industry,
-        sector=sector,
-        listing_date=listing_date,
-        established_date=established_date,
-        website=_pick_optional_text(
-            doc.get("website"), company_row.website if company_row else None
-        ),
-        description=_pick_optional_text(
-            doc.get("company_profile"),
-            doc.get("description"),
-            company_row.business_description if company_row else None,
-        ),
-        outstanding_shares=outstanding_shares,
-        listed_shares=listed_shares,
-        market_cap=market_cap,
-        no_employees=no_employees,
-        address=_pick_optional_text(
-            doc.get("address"), company_row.address if company_row else None
-        ),
-        phone=_pick_optional_text(doc.get("phone"), company_row.phone if company_row else None),
-        email=_pick_optional_text(doc.get("email"), company_row.email if company_row else None),
-        updated_at=None,
-    )
-
-
-async def _load_quote_from_appwrite(symbol: str) -> Optional[StockQuoteData]:
-    docs = await get_appwrite_stock_prices(
-        symbol,
-        interval="1D",
-        limit=2,
-        descending=True,
-    )
-    rows = [doc for doc in docs if _coerce_optional_float(doc.get("close")) is not None]
-    if not rows:
-        return None
-
-    latest_doc = rows[0]
-    previous_doc = rows[1] if len(rows) > 1 else None
-
-    latest_close = _coerce_optional_float(latest_doc.get("close"))
-    prev_close = _coerce_optional_float(previous_doc.get("close")) if previous_doc else None
-    if latest_close is None:
-        return None
-
-    change = latest_close - prev_close if prev_close is not None else None
-    change_pct = (
-        ((change / prev_close) * 100)
-        if change is not None and prev_close not in (None, 0)
-        else None
-    )
-
-    document_timestamp = _coerce_meta_datetime(
-        latest_doc.get("updated_at")
-        or latest_doc.get("$updatedAt")
-        or latest_doc.get("time")
-        or latest_doc.get("$createdAt")
-    )
-
-    return StockQuoteData(
-        symbol=str(latest_doc.get("symbol") or symbol).upper(),
-        price=latest_close,
-        open=_coerce_optional_float(latest_doc.get("open")),
-        high=_coerce_optional_float(latest_doc.get("high")),
-        low=_coerce_optional_float(latest_doc.get("low")),
-        prev_close=prev_close,
-        change=change,
-        change_pct=round(change_pct, 2) if change_pct is not None else None,
-        volume=_appwrite_optional_int(latest_doc.get("volume")),
-        value=_coerce_optional_float(latest_doc.get("value")),
-        updated_at=document_timestamp,
     )
 
 
@@ -4728,10 +4518,6 @@ async def get_historical_prices(
         if adjustment_mode == "adjusted"
         else []
     )
-    use_appwrite_data = settings.is_appwrite_configured and settings.resolved_data_backend in {
-        "appwrite",
-        "hybrid",
-    }
 
     mongo_data, mongo_docs = await _load_historical_from_mongo(
         symbol=symbol_upper,
@@ -4768,17 +4554,6 @@ async def get_historical_prices(
             adjustment_mode=adjustment_mode,
         )
         source_rows.append(("recent_cache", recent_cache_data))
-        merged, _ = _merge_historical_rows(source_rows)
-
-    if not _historical_rows_cover_request(merged, start_date, end_date, interval) and use_appwrite_data:
-        appwrite_data = await _load_historical_from_appwrite(
-            symbol=symbol_upper,
-            start_date=start_date,
-            end_date=end_date,
-            interval=interval,
-            adjustment_mode=adjustment_mode,
-        )
-        source_rows.append(("appwrite", appwrite_data))
         merged, _ = _merge_historical_rows(source_rows)
 
     provider_error: Exception | None = None
@@ -4890,10 +4665,6 @@ async def get_quote(
             error="Invalid symbol format. Expected a 3-character ticker.",
         )
 
-    use_appwrite_data = settings.is_appwrite_configured and settings.resolved_data_backend in {
-        "appwrite",
-        "hybrid",
-    }
 
     async def _get_mongo_quote() -> StockQuoteData | None:
         """Build a quote from the canonical Mongo `market_prices_eod` corpus.
@@ -4944,7 +4715,7 @@ async def get_quote(
             prev_close=prev_close,
             change=change,
             change_pct=round(change_pct, 2) if change_pct is not None else None,
-            volume=_appwrite_optional_int(latest.get("volume")),
+            volume=_coerce_optional_int(latest.get("volume")),
             updated_at=updated_at,
         )
 
@@ -5045,14 +4816,6 @@ async def get_quote(
         if mongo_quote:
             return StandardResponse(data=mongo_quote, meta=MetaData(count=1))
 
-        if settings.resolved_data_backend == "appwrite" and use_appwrite_data:
-            appwrite_quote = await _load_quote_from_appwrite(symbol_upper)
-            if appwrite_quote:
-                screener_quote = await _get_screener_snapshot_quote()
-                if _should_prefer_screener_quote(appwrite_quote, screener_quote):
-                    return StandardResponse(data=screener_quote, meta=MetaData(count=1))
-                return StandardResponse(data=appwrite_quote, meta=MetaData(count=1))
-
     try:
         data, _ = await asyncio.wait_for(
             VnstockStockQuoteFetcher.fetch(symbol=symbol_upper, source=source),
@@ -5063,16 +4826,6 @@ async def get_quote(
             data = screener_quote
         return StandardResponse(data=data, meta=MetaData(count=1))
     except Exception as e:
-        if use_appwrite_data:
-            appwrite_quote = await _load_quote_from_appwrite(symbol_upper)
-            if appwrite_quote:
-                screener_quote = await _get_screener_snapshot_quote()
-                if _should_prefer_screener_quote(appwrite_quote, screener_quote):
-                    return StandardResponse(
-                        data=screener_quote, meta=MetaData(count=1), error=str(e)
-                    )
-                return StandardResponse(data=appwrite_quote, meta=MetaData(count=1), error=str(e))
-
         fallback = await _get_db_quote()
         if fallback:
             return StandardResponse(data=fallback, meta=MetaData(count=1), error=str(e))
@@ -5106,10 +4859,6 @@ async def get_profile(
 ):
     symbol_upper = symbol.upper()
     cache_manager = CacheManager(db=db)
-    use_appwrite_data = settings.is_appwrite_configured and settings.resolved_data_backend in {
-        "appwrite",
-        "hybrid",
-    }
     try:
         if not refresh:
             cache_result = await cache_manager.get_profile_data(symbol_upper)
@@ -5230,17 +4979,6 @@ async def get_profile(
                     ),
                 )
 
-        if not refresh and settings.resolved_data_backend == "appwrite" and use_appwrite_data:
-            appwrite_profile = await _load_profile_from_appwrite(symbol_upper, db)
-            if appwrite_profile:
-                return StandardResponse(
-                    data=appwrite_profile,
-                    meta=MetaData(
-                        count=1,
-                        last_data_date=await _get_profile_last_data_date(db, symbol_upper),
-                    ),
-                )
-
         fallback_profile: Optional[EquityProfileData] = None
         if not refresh:
             stock_result = await db.execute(select(Stock).where(Stock.symbol == symbol_upper))
@@ -5275,17 +5013,6 @@ async def get_profile(
                     last_data_date=await _get_profile_last_data_date(db, symbol_upper),
                 ),
             )
-
-        if not refresh and use_appwrite_data:
-            appwrite_profile = await _load_profile_from_appwrite(symbol_upper, db)
-            if appwrite_profile:
-                return StandardResponse(
-                    data=appwrite_profile,
-                    meta=MetaData(
-                        count=1,
-                        last_data_date=await _get_profile_last_data_date(db, symbol_upper),
-                    ),
-                )
 
         params = EquityProfileQueryParams(symbol=symbol)
         data = await asyncio.wait_for(
@@ -5408,18 +5135,6 @@ async def get_profile(
         if _is_control_flow_exception(e):
             raise
         logger.warning("Profile endpoint failed open for %s: %s", symbol_upper, e)
-
-        if use_appwrite_data:
-            appwrite_profile = await _load_profile_from_appwrite(symbol_upper, db)
-            if appwrite_profile:
-                return StandardResponse(
-                    data=appwrite_profile,
-                    meta=MetaData(
-                        count=1,
-                        last_data_date=await _get_profile_last_data_date(db, symbol_upper),
-                    ),
-                    error=str(e),
-                )
 
         return StandardResponse(data=None, error=str(e))
 

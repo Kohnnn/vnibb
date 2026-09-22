@@ -503,15 +503,9 @@ For the Oracle backend deployment path, the current recommended runtime profile 
 
 ```env
 ENVIRONMENT=production
-DATA_BACKEND=hybrid
+DATA_BACKEND=postgres
 CACHE_BACKEND=auto
-APPWRITE_WRITE_ENABLED=false
 ALLOW_ANONYMOUS_DASHBOARD_WRITES=true
-APPWRITE_POPULATE_BATCH_SIZE=500
-APPWRITE_POPULATE_CONCURRENCY=5
-APPWRITE_POPULATE_MAX_ROWS=1000
-APPWRITE_POPULATE_FULL_MAX_ROWS=0
-APPWRITE_POPULATE_RESUME=true
 VNSTOCK_SOURCE=KBS
 VNSTOCK_CALLS_PER_MINUTE=100
 INTRADAY_SYMBOLS_PER_RUN=60
@@ -533,18 +527,16 @@ SKIP_WEBSOCKET_STARTUP=false
 
 ### Safe to keep
 
-- `DATA_BACKEND=hybrid`
+- `DATA_BACKEND=postgres`
 - `CACHE_BACKEND=auto`
-- `APPWRITE_WRITE_ENABLED=false`
 - `VNSTOCK_CALLS_PER_MINUTE=100`
 - `API_SKIP_SCHEDULER_STARTUP=true`
 - `SKIP_WEBSOCKET_STARTUP=false`
 
 ### Database stack writes
 
-Keep durable writes pointed at the self-hosted database stack. Env keys below are literal runtime config consumed by the backend; their names are retained for code compatibility even though the underlying store is the consolidated database stack.
+Keep durable writes pointed at the self-hosted database stack. The runtime writes every durable record to Postgres; there is no second write target.
 
-- runtime writes are gated by `APPWRITE_WRITE_ENABLED` (keep `false` unless deliberately backfilling)
 - durable state lives in the database stack
 - dashboards remain local-first with a durable save path
 - verify deploys with `bash scripts/oracle/runtime_verify.sh` before treating a rollout as successful

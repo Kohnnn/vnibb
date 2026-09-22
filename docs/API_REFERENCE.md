@@ -145,7 +145,7 @@ Prediction markets notes:
 - `/estimate/{cpi,fed,recession,macro}` returns the odds-to-estimate quant output. Each endpoint caches its result for 600 seconds; the `macro` endpoint is a composite of the other three plus Polymarket S&P-500 closes. Phase 8 adds a `confidence` field (0-1) to each estimator output.
 
 ### Health Probes (Phase 3 / DEF-06/07)
-- `GET /health` — the existing detailed readiness heartbeat. Returns the active data backend, Redis status, and Appwrite connectivity.
+- `GET /health` — the existing detailed readiness heartbeat. Returns the active data backend (`postgres`), Redis status, and Postgres connectivity.
 - `GET /health/live` — process liveness. Returns 200 as long as the Python worker is alive; deliberately cheap (no DB or remote calls). Suitable for orchestrator liveness probes.
 - `GET /health/ready` — readiness. Returns 200 once a `SELECT 1` succeeds against the configured database; otherwise 503. Suitable for orchestrator readiness probes and the workspace boot preflight.
 - `/health`, `/health/live`, and `/health/ready` all set `Cache-Control: public, s-maxage=15, stale-while-revalidate=60` so the Next.js edge proxies can serve repeat checks without round-tripping the backend.

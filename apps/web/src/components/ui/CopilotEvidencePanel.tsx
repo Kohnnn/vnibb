@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Database, ExternalLink, Plus } from 'lucide-
 
 import type { CopilotSourceRef } from '@/lib/api';
 import { submitCopilotOutcome, type CopilotResponseMeta } from '@/lib/api';
+import { getCopilotSourceLabel } from '@/lib/copilotSourceLabel';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import {
@@ -26,9 +27,7 @@ interface CopilotEvidencePanelProps {
 
 function formatSourceMeta(source: CopilotSourceRef): string {
   const parts: string[] = [];
-  if (source.source) {
-    parts.push(source.source === 'appwrite' ? 'VNIBB database' : source.source);
-  }
+  parts.push(getCopilotSourceLabel(source.source));
   if (source.symbol) {
     parts.push(source.symbol);
   }

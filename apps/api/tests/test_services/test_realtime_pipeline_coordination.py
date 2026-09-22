@@ -203,21 +203,15 @@ async def test_intraday_scheduler_wrapper_only_calls_provider_during_active_sess
     check_time = datetime(2026, 7, 13, hour, minute, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
     provider = AsyncMock(return_value=["FPT"])
     sync = AsyncMock(return_value=1)
-    populate = AsyncMock()
     monkeypatch.setattr(data_pipeline, "is_vietnam_market_open", lambda: realtime_pipeline.is_vietnam_market_open(check_time))
     monkeypatch.setattr(data_pipeline, "_get_scheduler_priority_symbols", provider)
     monkeypatch.setattr(data_pipeline.data_pipeline, "sync_intraday_trades", sync)
     monkeypatch.setattr(data_pipeline.data_pipeline, "sync_orderbook_snapshots", sync)
     monkeypatch.setattr(data_pipeline.data_pipeline, "sync_derivatives_prices", sync)
-    monkeypatch.setattr(
-        "vnibb.services.appwrite_population.populate_appwrite_tables", populate
-    )
-
     await data_pipeline.run_intraday_sync()
 
     assert provider.await_count == int(active)
     assert sync.await_count == 3 * int(active)
-    assert populate.await_count == int(active)
 
 
 @pytest.mark.asyncio

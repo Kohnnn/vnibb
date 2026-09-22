@@ -15,7 +15,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import select
 
 from vnibb.core.database import async_session_maker
-from vnibb.services.appwrite_population import populate_primary_appwrite_data
 from vnibb.services.data_pipeline import data_pipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -127,13 +126,6 @@ async def run_seeding():
         logger.info(f"✅ Synced {total_idx} index price records.")
     except Exception as e:
         logger.error(f"❌ Index sync failed: {e}")
-
-    logger.info("Step 7: Populating Appwrite primary collections...")
-    try:
-        await populate_primary_appwrite_data()
-        logger.info("✅ Appwrite primary collections populated.")
-    except Exception as e:
-        logger.error(f"❌ Appwrite population failed: {e}")
 
     logger.info("🏁 Full Seeding Pipeline Completed.")
 

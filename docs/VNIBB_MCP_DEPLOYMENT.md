@@ -142,8 +142,8 @@ What success looks like:
 - `/mcp-health` returns `200`
 - or `/health` returns `200` when using the direct host port
 - MCP initialization succeeds
-- tool listing succeeds (includes app-collection tools and the database-stack tools: `get_mongo_status`, `list_premium_datasets`, `get_eod_price_history`, `get_premium_dataset`, `get_intraday_trades`, `get_price_depth`)
-- `get_appwrite_status` returns successfully
+- tool listing succeeds (includes the Postgres-table tools and the analytical-corpus tools: `get_mongo_status`, `list_premium_datasets`, `get_eod_price_history`, `get_premium_dataset`, `get_intraday_trades`, `get_price_depth`)
+- `get_database_status` returns successfully
 - `get_mongo_status` reports `enabled: true` when the database stack is configured
 
 Quick database-stack-tool checks over the private-network bind (replace token):

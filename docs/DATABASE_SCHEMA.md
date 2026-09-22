@@ -959,7 +959,7 @@ over Tailscale on the private network; none are publicly exposed.
 | Redis | `vnibb-redis` | `6379` | Cache, locks, rate-limit coordination |
 
 **Backend cutover config** (values held only in `deployment/env.oracle` on OCI — never in docs):
-`DATA_BACKEND=hybrid`, `CACHE_BACKEND=redis`, `MONGODB_URL` -> n6v Mongo, `DATABASE_URL` -> n6v Supabase pooler, `REDIS_URL` -> n6v Redis, `APPWRITE_WRITE_ENABLED=false`.
+`DATA_BACKEND=postgres`, `CACHE_BACKEND=redis`, `MONGODB_URL` -> n6v Mongo, `DATABASE_URL` -> n6v Supabase pooler, `REDIS_URL` -> n6v Redis.
 
 **Redis migration (2026-07-03):** `REDIS_URL` moved from Upstash cloud
 (`rediss://<host>.upstash.io:6379`, credentials omitted) to n6v-local
@@ -977,7 +977,7 @@ the n6v self-hosted Supabase instance.
 ## MongoDB Market Corpus (n6v)
 
 Physical store: MongoDB database `vnibb-market` on n6v (`<n6v-tailscale-ip>:27017`).
-This is the canonical analytical/market corpus, separate from the Appwrite app
+This is the canonical analytical/market corpus, separate from the Postgres app
 model above. Runtime market reads (`/equity/historical`, quant endpoints, MCP
 `get_eod_price_history`) prefer this store.
 
@@ -1093,28 +1093,6 @@ ICB sector dictionary from `sectors/icb-codes`.
 
 **Indexes:** `(icbCode, source)` unique
 
-### Future Appwrite mirror mapping
-
-When a controlled Appwrite mirror is re-enabled, project the Mongo corpus into
-the app model as follows:
-
-| Mongo (vnibb-market) | Appwrite/app collection |
-|---|---|
-| `market_prices_eod` | `stock_prices` |
-| `market_prices_derivatives` | `derivative_prices` |
-| `market_vnstock_premium_records` (`finance.income_statement`) | `income_statements` |
-| `market_vnstock_premium_records` (`finance.balance_sheet`) | `balance_sheets` |
-| `market_vnstock_premium_records` (`finance.cash_flow`) | `cash_flows` |
-| `market_vnstock_premium_records` (`finance.ratio`) | `financial_ratios` |
-| `market_vnstock_premium_records` (`company.shareholder_structure`) | `shareholders` |
-| `market_company_profiles` | `companies` / `stocks` |
-| `market_index_constituents` | `stock_indices` constituents |
-| `market_icb_sectors` | `market_sectors` |
-
-Field-level decode for financial statements requires joining
-`market_financial_metric_map` to translate coded fields (`isa20`, `bsa53`...)
-into the named columns the app collections expect.
-
 ---
 
 ## Data Flow
@@ -1153,7 +1131,6 @@ flowchart LR
     MCP --> Caddy
     Caddy -->|HTTPS| Vercel[Vercel frontend]
 
-    Note[Appwrite writes frozen:<br/>APPWRITE_WRITE_ENABLED=false] -.-> PG
 ```
 
 ---

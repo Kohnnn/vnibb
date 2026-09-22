@@ -274,15 +274,9 @@ async def sync_profiles(
 ) -> SyncResponse:
     """Sync company profiles to database."""
     from vnibb.services.data_pipeline import data_pipeline
-    from vnibb.services.appwrite_population import populate_appwrite_tables
 
     async def _run_sync() -> int:
         count = await data_pipeline.sync_company_profiles(symbols=symbols)
-        if settings.resolved_data_backend == "appwrite" and settings.is_appwrite_configured:
-            try:
-                await populate_appwrite_tables(["stocks"], full_refresh=False, max_rows=0)
-            except Exception as exc:
-                logger.warning("Profile sync Appwrite mirror failed: %s", exc)
         return count
 
     if async_mode:
@@ -354,14 +348,7 @@ async def sync_prices(
     source: str = Query(
         default=settings.vnstock_source,
         pattern=r"^(KBS|VCI|MSN|FMP)$",
-        description="vnstock source to use for Appwrite-direct historical backfills",
-    ),
-    appwrite_direct: bool = Query(
-        default=False,
-        description=(
-            "Write directly into Appwrite stock_prices from vnstock. "
-            "When false, sync Postgres first and mirror the same range into Appwrite."
-        ),
+        description="vnstock source to use for historical backfills",
     ),
     fill_missing_gaps: bool = Query(
         default=False,
@@ -371,7 +358,6 @@ async def sync_prices(
 ) -> SyncResponse:
     """Sync daily prices for stocks."""
     from vnibb.services.data_pipeline import data_pipeline
-    from vnibb.services.appwrite_price_service import AppwritePriceService
 
     resolved_end = end_date or date.today()
     resolved_start = start_date or (resolved_end - timedelta(days=30))
@@ -379,52 +365,14 @@ async def sync_prices(
         resolved_start, resolved_end = resolved_end, resolved_start
 
     async def _run_sync() -> int:
-        if not appwrite_direct:
-            synced_rows = await data_pipeline.sync_daily_prices(
-                symbols=symbols,
-                start_date=resolved_start,
-                end_date=resolved_end,
-                fill_missing_gaps=fill_missing_gaps,
-                cache_recent=cache_recent,
-            )
-
-            if settings.resolved_data_backend == "appwrite" and settings.is_appwrite_configured:
-                service = AppwritePriceService(source=source)
-                mirror_stats = await service.mirror_prices_from_postgres(
-                    symbols=symbols,
-                    start_date=resolved_start,
-                    end_date=resolved_end,
-                    cache_recent=cache_recent,
-                )
-                mirrored_rows = mirror_stats.rows_upserted
-                if max(synced_rows, mirrored_rows) == 0:
-                    direct_stats = await service.sync_prices_from_provider(
-                        symbols=symbols,
-                        start_date=resolved_start,
-                        end_date=resolved_end,
-                        fill_missing_gaps=fill_missing_gaps,
-                        cache_recent=cache_recent,
-                    )
-                    return direct_stats.rows_upserted
-                return max(synced_rows, mirrored_rows)
-            return synced_rows
-
-        service = AppwritePriceService(source=source)
-        direct_stats = await service.sync_prices_from_provider(
+        synced_rows = await data_pipeline.sync_daily_prices(
             symbols=symbols,
             start_date=resolved_start,
             end_date=resolved_end,
             fill_missing_gaps=fill_missing_gaps,
             cache_recent=cache_recent,
         )
-        return direct_stats.rows_upserted
-
-    if async_mode:
-        background_tasks.add_task(_run_sync)
-        return SyncResponse(
-            status="started",
-            message="Price sync started in background",
-        )
+        return synced_rows
 
     try:
         count = await _run_sync()
@@ -937,16 +885,9 @@ async def sync_financials(
 ) -> SyncResponse:
     """Sync financial statements to database."""
     from vnibb.services.data_pipeline import data_pipeline
-    from vnibb.services.appwrite_population import populate_appwrite_tables
 
     async def _run_sync() -> int:
         total = await data_pipeline.sync_financials(symbols=symbols, period=period)
-        if settings.resolved_data_backend == "appwrite" and settings.is_appwrite_configured:
-            await populate_appwrite_tables(
-                ["income_statements", "balance_sheets", "cash_flows"],
-                full_refresh=False,
-                max_rows=0,
-            )
         return total
 
     if async_mode:
@@ -982,12 +923,9 @@ async def sync_metrics(
 ) -> SyncResponse:
     """Sync financial ratios to database."""
     from vnibb.services.data_pipeline import data_pipeline
-    from vnibb.services.appwrite_population import populate_appwrite_tables
 
     async def _run_sync():
         total = await data_pipeline.sync_financial_ratios(symbols=symbols, period=period)
-        if settings.resolved_data_backend == "appwrite" and settings.is_appwrite_configured:
-            await populate_appwrite_tables(["financial_ratios"], full_refresh=False, max_rows=0)
         return total
 
     if async_mode:

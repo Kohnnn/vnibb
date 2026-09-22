@@ -32,7 +32,6 @@ const INTERNAL_HEALTH_KEYS = [
     'components',
     'db',
     'cache',
-    'appwrite',
     'providers',
 ] as const
 
@@ -63,7 +62,6 @@ describe('/api/health', () => {
                 json: async () => ({
                     status: 'healthy',
                     components: { database: { status: 'healthy' } },
-                    appwrite: { endpoint: 'private' },
                     providers: { vnstock: 'ready' },
                 }),
             })
@@ -100,9 +98,9 @@ describe('/api/health', () => {
                     status: 'ok',
                     db: 'connected',
                     providers: {
-                        data_backend: 'appwrite',
-                        data_backend_requested: 'appwrite',
-                        appwrite_write_enabled: false,
+                        data_backend: 'postgres',
+                        data_backend_requested: 'postgres',
+                        database_write_enabled: false,
                         allow_anonymous_dashboard_writes: false,
                     },
                 }),
@@ -118,9 +116,9 @@ describe('/api/health', () => {
         const body = await (await GET()).json()
 
         // Then: only the non-secret backend name is exposed, flags stay stripped.
-        expect(body.data_backend).toBe('appwrite')
+        expect(body.data_backend).toBe('postgres')
         expectNoBackendInternals(body)
-        expect(body).not.toHaveProperty('appwrite_write_enabled')
+        expect(body).not.toHaveProperty('database_write_enabled')
         expect(body).not.toHaveProperty('allow_anonymous_dashboard_writes')
     })
 

@@ -3,8 +3,6 @@
 Historical Data Seeder - Bulk populate database from VNStock (Golden Sponsor)
 
 Golden Sponsor Rate Limit: 600 req/min (10 req/sec)
-Appwrite population is enabled by default so Appwrite stays warm as the
-primary runtime datastore while Supabase/Postgres remains the fallback source.
 
 Usage:
     python scripts/seed_historical.py --days 365 --include-financials
@@ -23,23 +21,17 @@ from datetime import date, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from vnibb.core.database import async_session_maker
-from vnibb.services.appwrite_population import (
-    populate_appwrite_tables,
-    populate_primary_appwrite_data,
-)
 from vnibb.services.data_pipeline import DataPipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
-async def seed_stocks(populate_appwrite: bool = True) -> int:
+async def seed_stocks() -> int:
     """Seed all stock symbols."""
     logger.info("🔄 Seeding stock list...")
     pipeline = DataPipeline()
     count = await pipeline.sync_stock_list()
-    if populate_appwrite:
-        await populate_appwrite_tables(["stocks"], full_refresh=True)
     logger.info(f"✅ Synced {count} stocks")
     return count
 
@@ -47,7 +39,6 @@ async def seed_stocks(populate_appwrite: bool = True) -> int:
 async def seed_prices(
     days: int = 365,
     symbols: list[str] | None = None,
-    populate_appwrite: bool = True,
 ) -> int:
     """Seed historical price data."""
     logger.info(f"🔄 Seeding {days} days of price history...")
@@ -61,8 +52,6 @@ async def seed_prices(
         start_date=start_date,
         end_date=end_date,
     )
-    if populate_appwrite:
-        await populate_appwrite_tables(["stock_prices"])
     logger.info(f"✅ Synced {count} price records")
     return count
 
@@ -118,14 +107,11 @@ async def seed_screener() -> int:
 
 async def seed_company_profiles(
     symbols: list[str] | None = None,
-    populate_appwrite: bool = True,
 ) -> int:
     """Seed company profiles."""
     logger.info("🔄 Seeding company profiles...")
     pipeline = DataPipeline()
     count = await pipeline.sync_company_profiles(symbols=symbols)
-    if populate_appwrite:
-        await populate_appwrite_tables(["stocks"], full_refresh=True)
     logger.info(f"✅ Synced {count} company profiles")
     return count
 
@@ -133,7 +119,6 @@ async def seed_company_profiles(
 async def seed_full(
     days: int = 365,
     include_financials: bool = True,
-    populate_appwrite: bool = True,
 ):
     """Run complete database seeding using DataPipeline with resume support."""
     logger.info("=" * 60)
@@ -142,8 +127,6 @@ async def seed_full(
 
     pipeline = DataPipeline()
     await pipeline.run_full_seeding(days=days, include_prices=True, resume=True)
-    if populate_appwrite:
-        await populate_primary_appwrite_data()
 
     logger.info("=" * 60)
     logger.info("✅ SEEDING COMPLETE")
@@ -167,27 +150,21 @@ def main():
         choices=["stocks", "prices", "screener", "profiles"],
         help="Seed specific data type",
     )
-    parser.add_argument(
-        "--skip-appwrite-populate",
-        action="store_true",
-        help="Skip Appwrite population after seeding",
-    )
 
     args = parser.parse_args()
 
     symbols = args.symbols.split(",") if args.symbols else None
-    populate_appwrite = not args.skip_appwrite_populate
 
     if args.full:
-        asyncio.run(seed_full(args.days, args.include_financials, populate_appwrite))
+        asyncio.run(seed_full(args.days, args.include_financials))
     elif args.type == "stocks":
-        asyncio.run(seed_stocks(populate_appwrite=populate_appwrite))
+        asyncio.run(seed_stocks())
     elif args.type == "prices":
-        asyncio.run(seed_prices(args.days, symbols, populate_appwrite))
+        asyncio.run(seed_prices(args.days, symbols))
     elif args.type == "screener":
         asyncio.run(seed_screener())
     elif args.type == "profiles":
-        asyncio.run(seed_company_profiles(symbols, populate_appwrite))
+        asyncio.run(seed_company_profiles(symbols))
     else:
         parser.print_help()
 
