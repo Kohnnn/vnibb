@@ -482,6 +482,7 @@ class RSRatingService:
                     if seed is not None:
                         snapshot.company_name = seed.company_name
                         snapshot.exchange = seed.exchange
+                        snapshot.trade_date = seed.trade_date
                         snapshot.price = seed.price
                         snapshot.volume = seed.volume
                         snapshot.market_cap = seed.market_cap

@@ -89,6 +89,7 @@ class ScreenerService:
                         price = getattr(item, "price", None)
                         if price is not None:
                             values["price"] = price
+                            values["trade_date"] = item.trade_date
                         volume = getattr(item, "volume", None)
                         if volume is not None:
                             values["volume"] = volume

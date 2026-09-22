@@ -10,7 +10,7 @@
     "predev": "node ./scripts/generate-changelog.mjs",
     "prebuild": "node ./scripts/generate-changelog.mjs",
     "sync:changelog": "node ./scripts/generate-changelog.mjs",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

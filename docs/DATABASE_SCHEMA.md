@@ -591,6 +591,7 @@ Daily pre-calculated screener data.
 |----------|------|-------------|
 | `symbol` | string | Stock ticker |
 | `snapshot_date` | datetime | Snapshot date |
+| `trade_date` | datetime (nullable) | Market date of the row's price and volume; distinct from materialization date |
 | `company_name` | string | Company name |
 | `exchange` | string | Exchange |
 | `industry` | string | Industry |

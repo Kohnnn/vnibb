@@ -26,6 +26,19 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+def _coerce_date(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
 
 @dataclass
 class CacheResult(Generic[T]):
@@ -193,17 +206,18 @@ class CacheManager:
                 logger.debug(f"Cache miss for screener data (symbol={symbol}, source={source})")
                 return CacheResult(data=None, is_stale=False, cached_at=None, hit=False)
 
-            # Freshness is a property of the data's trade date, not of when
-            # the row was last written. Every scheduled pass rewrites
-            # `created_at`, so measuring write time reported a snapshot whose
-            # prices stopped advancing weeks ago as "just refreshed" for the
-            # first hour after each run, and then as "stale" again shortly
-            # after -- the label tracked the job's cron rather than the
-            # market. Readers use `stale` to decide whether to trust a number,
-            # so it must be derived from `snapshot_date`.
-            latest_snapshot_date = max(s.snapshot_date for s in snapshots)
+            # Prefer the actual market date carried by quote history. Legacy
+            # rows predate that column, so fall back to their materialization
+            # partition rather than treating the whole corpus as unavailable
+            # during the expand/contract rollout.
+            trade_dates = [s.trade_date for s in snapshots if s.trade_date is not None]
+            latest_market_date = (
+                max(trade_dates)
+                if trade_dates
+                else max(s.snapshot_date for s in snapshots)
+            )
             latest_created = max(s.created_at for s in snapshots)
-            is_stale = (today - latest_snapshot_date).days > self.SCREENER_TTL_MINUTES // 1440
+            is_stale = (today - latest_market_date).days > self.SCREENER_TTL_MINUTES // 1440
 
             if is_stale and not allow_stale:
                 logger.debug(f"Cache stale for screener data, age={now - latest_created}")
@@ -319,13 +333,19 @@ class CacheManager:
                     key: value for key, value in extended_metrics.items() if value is not None
                 }
 
+                price_value = record.get("price")
                 values = {
                     "symbol": symbol.upper(),
+                    "trade_date": (
+                        _coerce_date(_pick(record.get("trade_date"), record.get("tradeDate")))
+                        if price_value is not None
+                        else None
+                    ),
                     "snapshot_date": today,
                     "company_name": record.get("organ_name") or record.get("organName"),
                     "exchange": record.get("exchange"),
                     "industry": record.get("industry_name") or record.get("industryName"),
-                    "price": record.get("price"),
+                    "price": price_value,
                     "volume": record.get("volume"),
                     "market_cap": record.get("market_cap") or record.get("marketCap"),
                     "pe": record.get("pe"),

@@ -73,6 +73,11 @@ async def basic_health():
             "data_backend_requested": settings.data_backend,
             "data_backend": settings.resolved_data_backend,
             "cache_backend": settings.resolved_cache_backend,
+            "vnstock_runtime_tier": settings.vnstock_runtime_tier,
+            "vnstock_source": settings.vnstock_source,
+            "vietcap_primary_eod": True,
+            "premium_realtime_streaming": settings.vnstock_runtime_tier == "premium",
+            "premium_news_crawler": settings.vnstock_runtime_tier == "premium",
             "appwrite_write_enabled": settings.appwrite_write_enabled,
             "appwrite_writes_active": settings.appwrite_writes_active,
             "appwrite_configured": settings.is_appwrite_configured,
@@ -207,10 +212,15 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
         raw_snapshot_date = (
             await db.execute(text("SELECT MAX(snapshot_date) FROM screener_snapshots"))
         ).scalar()
+        raw_trade_date = (
+            await db.execute(text("SELECT MAX(trade_date) FROM screener_snapshots"))
+        ).scalar()
         snapshot_date = _coerce_snapshot_date(raw_snapshot_date)
+        trade_date = _coerce_snapshot_date(raw_trade_date)
+        freshness_date = trade_date or snapshot_date
         snapshot_age_days = (
-            (datetime.utcnow().date() - snapshot_date).days
-            if snapshot_date is not None
+            (datetime.utcnow().date() - freshness_date).days
+            if freshness_date is not None
             else None
         )
 
@@ -221,7 +231,11 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
             "screener_snapshot_date": (
                 snapshot_date.isoformat() if snapshot_date is not None else None
             ),
+            "screener_trade_date": (
+                trade_date.isoformat() if trade_date is not None else None
+            ),
             "screener_snapshot_age_days": snapshot_age_days,
+            "screener_freshness_basis": "trade_date" if trade_date else "snapshot_date",
         }
         if snapshot_age_days is not None and snapshot_age_days > _SCREENER_FRESHNESS_BREACH_DAYS:
             database_component["freshness_breach"] = True

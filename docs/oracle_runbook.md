@@ -84,6 +84,7 @@ Edit `deployment/env.oracle` and set:
 - `VNIBB_MCP_SHARED_BEARER_TOKEN`
 - `MCP_PUBLIC_BIND=127.0.0.1`
 - `MCP_PUBLIC_PORT=8001`
+- `VNSTOCK_RUNTIME_TIER=free` for the default Vietcap-primary/free-VNStock runtime; use `premium` only with a premium-built image and verified license
 - `REDIS_URL` if the cache tier remains enabled
 - `MEMORY_CACHE_MAX_ENTRY_BYTES=1048576` or larger if the cache tier is disabled and microstructure payloads must fit memory fallback
 - `SENTRY_DSN`

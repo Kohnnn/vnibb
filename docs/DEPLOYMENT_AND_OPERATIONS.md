@@ -33,10 +33,11 @@ At a high level, production looks like:
 3. the backend exposes HTTP and WebSocket surfaces
 4. the `vnibb-mcp` sidecar exposes the read-only MCP HTTP surface for VniAgent and remote clients
 5. the self-hosted database stack backs persistence, runtime state, auth, and cache
-6. upstream market providers feed the service layer
-7. the API image is built once with BuildKit secrets when premium packages are needed, published, and deployed by immutable digest
-8. migrations run through the one-shot `migrate` service before API/MCP replacement; the API process does not migrate at startup
-9. API scheduling remains disabled and the profiled `scheduler` worker is the only scheduler runtime
+6. Vietcap is the primary EOD corpus; free VNStock/KBS provides runtime fallback and gap fill
+7. `VNSTOCK_RUNTIME_TIER=free` is the production default; premium modules are optional accelerators and never a startup dependency in free mode
+8. the API image is built once, published, and deployed by immutable digest; premium builds use BuildKit secrets only
+9. migrations run through the one-shot `migrate` service before API/MCP replacement; the API process does not migrate at startup
+10. API scheduling remains disabled and the profiled `scheduler` worker is the only scheduler runtime
 
 ```text
 Vercel frontend
@@ -76,9 +77,10 @@ VniAgent server context path
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| **Primary API** | VNStock 3.5+ | Vietnam stock data (KBS baseline) |
+| **Primary EOD** | Vietcap public market-data API | Canonical raw-VND OHLCV corpus and freshness basis |
+| **Runtime fallback** | VNStock 4.0 free tier (KBS baseline) | Screener, quotes, financials, and provider gap fill |
 | **AI Assist** | VNAI 2.4+ | AI-powered analysis hooks |
-| **Premium Data** | vnstock_data, vnstock_ta, vnstock_news, vnstock_pipeline | Optional premium VNStock modules |
+| **Premium accelerators** | vnstock_data, vnstock_ta, vnstock_news, vnstock_pipeline | Optional; enabled only with `VNSTOCK_RUNTIME_TIER=premium` and a premium-built image |
 
 ### Database & Persistence
 

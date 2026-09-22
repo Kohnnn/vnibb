@@ -80,6 +80,19 @@ def _is_equity_symbol(symbol: Any) -> bool:
     return True
 
 
+def _coerce_trade_date(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
 class StockScreenerParams(BaseModel):
     """
     Query parameters for stock screener data.
@@ -159,6 +172,11 @@ class ScreenerData(BaseModel):
     perf_1w: Optional[float] = Field(None, alias="perf1W", description="1-week performance (%)")
     perf_1m: Optional[float] = Field(None, alias="perf1M", description="1-month performance (%)")
     perf_ytd: Optional[float] = Field(None, alias="perfYTD", description="YTD performance (%)")
+    trade_date: Optional[date] = Field(
+        None,
+        alias="tradeDate",
+        description="Trading date of the price and volume fields",
+    )
     market_cap: Optional[float] = Field(
         None, alias="marketCap", description="Market capitalization"
     )
@@ -654,8 +672,15 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                             )
                             if hist is not None and not hist.empty:
                                 latest = hist.iloc[-1]
-                                record["price"] = latest.get("close")
+                                latest_price = _to_float(latest.get("close"))
+                                record["price"] = latest_price
                                 record["volume"] = latest.get("volume")
+                                if latest_price is not None:
+                                    record["trade_date"] = _coerce_trade_date(
+                                        latest.get("time")
+                                        or latest.get("date")
+                                        or latest.get("trading_date")
+                                    )
                         except Exception as e:
                             logger.debug(f"Failed to get quote for {query['symbol']}: {e}")
 
@@ -719,8 +744,15 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                                 )
                                 if hist is not None and not hist.empty:
                                     latest = hist.iloc[-1]
-                                    record["price"] = latest.get("close")
+                                    latest_price = _to_float(latest.get("close"))
+                                    record["price"] = latest_price
                                     record["volume"] = latest.get("volume")
+                                    if latest_price is not None:
+                                        record["trade_date"] = _coerce_trade_date(
+                                            latest.get("time")
+                                            or latest.get("date")
+                                            or latest.get("trading_date")
+                                        )
                             except Exception as e:
                                 logger.debug(f"Failed to get quote for {symbol}: {e}")
 
@@ -818,6 +850,9 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
             "price": "price",
             "close": "price",
             "volume": "volume",
+            "trade_date": "trade_date",
+            "tradeDate": "trade_date",
+            "trading_date": "trade_date",
             "change_1d": "change_1d",
             "change1d": "change_1d",
             "price_change_1d_pct": "change_1d",

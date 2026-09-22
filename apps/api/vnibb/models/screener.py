@@ -34,6 +34,7 @@ class ScreenerSnapshot(Base):
     # Stock reference
     symbol: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    trade_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     
     # Company info
     company_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

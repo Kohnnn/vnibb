@@ -17,7 +17,7 @@ from typing import Optional, List, Dict, Any, Union, Tuple
 
 import pandas as pd
 from zoneinfo import ZoneInfo
-from sqlalchemy import select, and_, or_, func, text, update, delete
+from sqlalchemy import select, and_, or_, func, text, update, delete, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -123,34 +123,36 @@ MARKET_INDEX_ALIASES = {
 }
 
 
-def get_upsert_stmt(model, index_elements, values):
-    """
-    Generate a dialect-specific upsert statement.
-    """
+def get_upsert_stmt(
+    model,
+    index_elements,
+    values,
+    preserve_existing_on_null=(),
+    preserve_columns_without=(),
+):
+    """Generate a dialect-specific upsert statement."""
     if engine.dialect.name == "postgresql":
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-        stmt = pg_insert(model).values(values)
-        return stmt.on_conflict_do_update(
-            index_elements=index_elements,
-            set_={
-                c.name: stmt.excluded[c.name]
-                for c in model.__table__.columns
-                if c.name not in index_elements and not c.primary_key
-            },
-        )
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
     else:
-        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
 
-        stmt = sqlite_insert(model).values(values)
-        return stmt.on_conflict_do_update(
-            index_elements=index_elements,
-            set_={
-                c.name: stmt.excluded[c.name]
-                for c in model.__table__.columns
-                if c.name not in index_elements and not c.primary_key
-            },
-        )
+    stmt = dialect_insert(model).values(values)
+    guard_column, guarded_columns = preserve_columns_without or (None, ())
+    update_values = {}
+    for column in model.__table__.columns:
+        if column.name in index_elements or column.primary_key:
+            continue
+        incoming = stmt.excluded[column.name]
+        existing = model.__table__.c[column.name]
+        if column.name in preserve_existing_on_null:
+            incoming = func.coalesce(incoming, existing)
+        if guard_column and column.name in guarded_columns:
+            incoming = case(
+                (stmt.excluded[guard_column].is_(None), existing),
+                else_=incoming,
+            )
+        update_values[column.name] = incoming
+    return stmt.on_conflict_do_update(index_elements=index_elements, set_=update_values)
 
 
 class RateLimiter:
@@ -1281,10 +1283,10 @@ class DataPipeline:
         ratio_sources = [primary_source]
         batch_size = 20
         cache_batch: List[Dict[str, Any]] = []
-        today = date.today()
+        today = datetime.utcnow().date()
 
         previous_snapshot_fallback: Dict[str, Dict[str, Any]] = {}
-        latest_price_fallback: Dict[str, Dict[str, Optional[float]]] = {}
+        latest_price_fallback: Dict[str, Dict[str, Any]] = {}
         async with async_session_maker() as session:
             previous_date_result = await session.execute(
                 select(func.max(ScreenerSnapshot.snapshot_date)).where(
@@ -1302,6 +1304,7 @@ class DataPipeline:
                         ScreenerSnapshot.price,
                         ScreenerSnapshot.volume,
                         ScreenerSnapshot.market_cap,
+                        ScreenerSnapshot.trade_date,
                     ).where(
                         ScreenerSnapshot.snapshot_date == previous_snapshot_date,
                         ScreenerSnapshot.symbol.in_(deduped_symbols),
@@ -1312,6 +1315,7 @@ class DataPipeline:
                         "company_name": row.company_name,
                         "exchange": row.exchange,
                         "industry": row.industry,
+                        "trade_date": row.trade_date,
                         "price": row.price,
                         "volume": row.volume,
                         "market_cap": row.market_cap,
@@ -1330,7 +1334,12 @@ class DataPipeline:
                 .subquery()
             )
             latest_price_rows = await session.execute(
-                select(StockPrice.symbol, StockPrice.close, StockPrice.volume).join(
+                select(
+                    StockPrice.symbol,
+                    StockPrice.time,
+                    StockPrice.close,
+                    StockPrice.volume,
+                ).join(
                     latest_price_subquery,
                     and_(
                         StockPrice.symbol == latest_price_subquery.c.symbol,
@@ -1341,6 +1350,7 @@ class DataPipeline:
             )
             for row in latest_price_rows.fetchall():
                 latest_price_fallback[str(row.symbol).upper()] = {
+                    "trade_date": row.time,
                     "price": _parse_float(row.close),
                     "volume": _parse_float(row.volume),
                 }
@@ -1453,6 +1463,11 @@ class DataPipeline:
                                         latest = history.iloc[-1]
                                         ratio_row["price"] = latest.get("close")
                                         ratio_row["volume"] = latest.get("volume")
+                                        ratio_row["trade_date"] = self._parse_date_value(
+                                            latest.get("time")
+                                            if latest.get("time") is not None
+                                            else latest.get("date")
+                                        )
                                 except Exception:
                                     # Price enrichment is best-effort only
                                     pass
@@ -1484,17 +1499,33 @@ class DataPipeline:
                     listing_row = listing_metadata.get(symbol, {})
                     previous_row = previous_snapshot_fallback.get(symbol, {})
                     latest_price_row = latest_price_fallback.get(symbol, {})
-
-                    price_value = (
-                        _parse_float(row.get("price"))
-                        or _parse_float(previous_row.get("price"))
-                        or _parse_float(latest_price_row.get("price"))
+                    row_price = _parse_float(row.get("price"))
+                    row_trade_date = self._parse_date_value(
+                        row.get("trade_date")
+                        or row.get("tradeDate")
+                        or row.get("trading_date")
                     )
-                    volume_value = (
-                        _parse_float(row.get("volume"))
-                        or _parse_float(previous_row.get("volume"))
-                        or _parse_float(latest_price_row.get("volume"))
-                    )
+                    row_volume = _parse_float(row.get("volume"))
+                    previous_price = _parse_float(previous_row.get("price"))
+                    previous_volume = _parse_float(previous_row.get("volume"))
+                    latest_price = _parse_float(latest_price_row.get("price"))
+                    latest_volume = _parse_float(latest_price_row.get("volume"))
+                    if row_price is not None and row_trade_date is not None:
+                        price_value = row_price
+                        volume_value = row_volume
+                        trade_date_value = row_trade_date
+                    elif previous_price is not None:
+                        price_value = previous_price
+                        volume_value = previous_volume
+                        trade_date_value = self._parse_date_value(
+                            previous_row.get("trade_date")
+                        )
+                    else:
+                        price_value = latest_price
+                        volume_value = latest_volume
+                        trade_date_value = self._parse_date_value(
+                            latest_price_row.get("trade_date")
+                        )
                     market_cap_value = (
                         _parse_float(row.get("market_cap"))
                         or _parse_float(row.get("marketCap"))
@@ -1543,6 +1574,7 @@ class DataPipeline:
                     values = {
                         "symbol": symbol,
                         "snapshot_date": today,
+                        "trade_date": trade_date_value,
                         "company_name": (
                             _normalize_text(
                                 row.get("company_name")
@@ -1627,7 +1659,13 @@ class DataPipeline:
                         "source": "vnstock_ratio",
                         "created_at": datetime.utcnow(),
                     }
-                    stmt = get_upsert_stmt(ScreenerSnapshot, ["symbol", "snapshot_date"], values)
+                    stmt = get_upsert_stmt(
+                        ScreenerSnapshot,
+                        ["symbol", "snapshot_date"],
+                        values,
+                        preserve_existing_on_null={"trade_date"},
+                        preserve_columns_without=("trade_date", {"price", "volume"}),
+                    )
                     await session.execute(stmt)
                     count += 1
 
@@ -1635,6 +1673,7 @@ class DataPipeline:
                         "company_name": values.get("company_name"),
                         "exchange": values.get("exchange"),
                         "industry": values.get("industry"),
+                        "trade_date": values.get("trade_date"),
                         "price": values.get("price"),
                         "volume": values.get("volume"),
                         "market_cap": values.get("market_cap"),
@@ -1644,6 +1683,11 @@ class DataPipeline:
                         {
                             "symbol": symbol,
                             "snapshot_date": today.isoformat(),
+                            "trade_date": (
+                                values["trade_date"].isoformat()
+                                if values.get("trade_date")
+                                else None
+                            ),
                             "company_name": values.get("company_name"),
                             "price": values.get("price"),
                             "market_cap": values.get("market_cap"),

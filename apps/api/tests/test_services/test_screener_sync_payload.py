@@ -14,7 +14,7 @@ things went wrong there:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -68,6 +68,7 @@ def _item(**overrides):
         "roe": 0.31,
         "price": 60.3,
         "volume": 2522300,
+        "trade_date": TODAY,
         "roa": 0.12,
     }
     base.update(overrides)
@@ -86,6 +87,7 @@ async def test_declared_but_unset_price_is_not_written_as_null(test_db: AsyncSes
     # The column was simply not part of the payload, so it kept its default
     # rather than being explicitly nulled.
     assert row.price is None
+    assert row.trade_date is None
     # The rest of the row still landed, proving the sync ran.
     assert row.market_cap == 1.26e14
     assert row.exchange == "HOSE"
@@ -102,6 +104,7 @@ async def test_repeated_sync_does_not_blank_a_populated_column(test_db: AsyncSes
             price=60.3,
             pe=14.2,
             market_cap=1.26e14,
+            trade_date=TODAY - timedelta(days=1),
         )
     )
     await test_db.commit()
@@ -115,6 +118,7 @@ async def test_repeated_sync_does_not_blank_a_populated_column(test_db: AsyncSes
 
     assert row.price == 60.3
     assert row.pe == 14.2
+    assert row.trade_date == TODAY - timedelta(days=1)
     # Provenance stays with the first writer.
     assert row.source == "KBS"
 
@@ -129,3 +133,4 @@ async def test_sync_stamps_utc_snapshot_date(test_db: AsyncSession, monkeypatch)
     ).scalar_one()
 
     assert row.snapshot_date == TODAY
+    assert row.trade_date == TODAY

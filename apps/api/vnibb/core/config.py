@@ -186,6 +186,7 @@ class Settings(BaseSettings):
     # VNStock Provider
     # ==========================================================================
     vnstock_api_key: Optional[str] = None  # Golden Sponsor API key
+    vnstock_runtime_tier: str = "free"
     vnstock_source: str = "KBS"  # vnstock 4.x sources: KBS, VCI, MSN, FMP
     vnstock_timeout: int = Field(default=25, ge=1)  # Request timeout in seconds
     vnstock_rate_limit_rps: float = 500 / 60  # Global vnstock request budget (500/min)
@@ -522,6 +523,14 @@ class Settings(BaseSettings):
                 f"Invalid VNIBB_MCP_TRANSPORT '{v}'. Must be one of: {valid_transports}"
             )
         return transport
+
+    @field_validator("vnstock_runtime_tier")
+    @classmethod
+    def validate_vnstock_runtime_tier(cls, v: str) -> str:
+        tier = (v or "free").strip().lower()
+        if tier not in {"free", "premium"}:
+            raise ValueError("VNSTOCK_RUNTIME_TIER must be 'free' or 'premium'")
+        return tier
 
     @field_validator("vnstock_source")
     @classmethod

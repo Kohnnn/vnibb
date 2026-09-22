@@ -49,6 +49,8 @@ async def test_detailed_health_reports_snapshot_age_and_breach(
 
     assert database["screener_snapshot_date"] == stale_day.isoformat()
     assert database["screener_snapshot_age_days"] == 24
+    assert database["screener_trade_date"] is None
+    assert database["screener_freshness_basis"] == "snapshot_date"
     assert database["freshness_breach"] is True
 
 

@@ -22,6 +22,14 @@ async def test_postgres_release_contract_uses_migrated_tables_and_api_routes(cli
 
     assert {"stocks", "sync_status", "data_quality_runs", "data_quality_breach_states"} <= set(table_names)
 
+    screener_columns = await test_db.run_sync(
+        lambda session: {
+            column["name"]
+            for column in inspect(session.bind).get_columns("screener_snapshots")
+        }
+    )
+    assert "trade_date" in screener_columns
+
     await complete_quality_run(
         test_db,
         run_id="postgres-contract:2026-07-16",

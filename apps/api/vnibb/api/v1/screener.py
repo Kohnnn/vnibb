@@ -67,9 +67,13 @@ def _coerce_meta_datetime(value: Any) -> Optional[datetime]:
 
 
 def _latest_screener_timestamp(rows: List[ScreenerData]) -> Optional[str]:
+    trade_dates = [row.trade_date for row in rows if row.trade_date is not None]
+    if trade_dates:
+        return max(trade_dates).isoformat()
+
     timestamps = [
         parsed
-        for parsed in (_coerce_meta_datetime(getattr(row, "updated_at", None)) for row in rows)
+        for parsed in (_coerce_meta_datetime(row.updated_at) for row in rows)
         if parsed is not None
     ]
     if not timestamps:
@@ -183,6 +187,7 @@ def _to_screener_data_row(row: object) -> ScreenerData:
         industry_name=getattr(row, "industry", None),
         price=getattr(row, "price", None),
         volume=getattr(row, "volume", None),
+        trade_date=getattr(row, "trade_date", None),
         change_1d=_pick(
             getattr(row, "change_1d", None),
             getattr(row, "price_change_1d_pct", None),

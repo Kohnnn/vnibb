@@ -70,6 +70,17 @@ live in `docs/`.
   instead of overwriting (so a sparse sync cannot blank another writer's
   column), `source` is insert-only there too, and `snapshot_date` is stamped
   in UTC rather than the host's local date.
+- VNStock premium packages are no longer an implicit startup requirement.
+  `VNSTOCK_RUNTIME_TIER=free` is the default operating contract: the
+  entrypoint verifies only VNStock's free runtime, while `premium` retains
+  strict module verification for premium-built images. Health metadata now
+  exposes the configured tier, KBS fallback source, Vietcap-primary EOD
+  contract, and premium capability availability.
+- Screener snapshots now preserve the actual market `trade_date` attached to
+  quote-history prices separately from the materialization `snapshot_date`
+  and write timestamp. The nullable expansion does not guess historical
+  values; freshness prefers proven trade dates and falls back to snapshot
+  dates for legacy rows during rollout.
 
 ### Internal
 - Added `apps/api/tests/test_core/test_config.py` covering the new timeout
@@ -103,6 +114,11 @@ live in `docs/`.
   the scheduled sync's row payload: a declared-but-unset price is omitted
   rather than written as NULL, a repeat sync cannot blank a populated column,
   and the row is keyed to the UTC snapshot date.
+- Added `apps/api/tests/test_core/test_vnstock_runtime_tier.py` covering the
+  explicit free/premium startup contract and health capability disclosure.
+- Added `apps/api/tests/test_services/test_screener_trade_date.py` covering
+  provider-date propagation, cache freshness precedence, legacy fallback,
+  detailed-health metadata, and the nullable migration contract.
 
 ## [v1.5.0] - 2026-07-02
 

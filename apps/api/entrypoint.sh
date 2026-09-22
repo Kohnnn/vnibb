@@ -8,12 +8,18 @@ import importlib
 import os
 import sys
 
+runtime_tier = os.getenv("VNSTOCK_RUNTIME_TIER", "free").strip().lower()
+if runtime_tier not in {"free", "premium"}:
+    print("VNSTOCK_RUNTIME_TIER must be 'free' or 'premium'", file=sys.stderr)
+    raise SystemExit(1)
+
 modules = ["uvicorn", "vnstock"]
-modules.extend(
-    module.strip()
-    for module in os.getenv("VNSTOCK_PREMIUM_REQUIRED_MODULES", "").split(",")
-    if module.strip()
-)
+if runtime_tier == "premium":
+    modules.extend(
+        module.strip()
+        for module in os.getenv("VNSTOCK_PREMIUM_REQUIRED_MODULES", "").split(",")
+        if module.strip()
+    )
 missing = []
 for module in modules:
     try:

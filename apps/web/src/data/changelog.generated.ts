@@ -37,6 +37,53 @@ live in \`docs/\`.
 - \`AnalystEstimatesWidget\` no longer renders "Coming Soon" placeholder rows
   for empty payloads; it now shows an honest empty-state explaining the
   Vietnam-market coverage gap.
+- The screener request path no longer degrades the shared Screener Snapshot
+  table (issue #8). \`store_screener_data\` is now insert-only for \`source\` and
+  lets \`NULL\` win over nothing, so a live request bounded by its own \`limit\`
+  can only add rows or fields, never blank a populated column or relabel the
+  provenance the scheduled full-universe sync recorded.
+- Screener freshness is derived from \`snapshot_date\` rather than
+  \`created_at\`. Every scheduled pass rewrites the write timestamp, so a
+  snapshot whose prices had stopped advancing was reported as "just
+  refreshed" for an hour after each run.
+- Screener snapshot writes and reads use one clock. The writer keyed rows by
+  \`date.today()\` (host local) while stamping \`datetime.utcnow()\`, which on an
+  \`Asia/Ho_Chi_Minh\` host split a single snapshot across two dates for seven
+  hours each day and left the reader unable to find the row the writer had
+  just created.
+- \`/api/v1/health/detailed\` reports the newest Screener Snapshot's trade date
+  and age, and marks the component degraded when the feed has genuinely
+  stalled. The scheduled data-quality job already recorded this verdict in
+  \`data_quality_runs\`, where no health watcher could see it. The date is
+  coerced across drivers because \`MAX()\` over a Date column returns text
+  under SQLite.
+- The RS rating service no longer creates a Screener Snapshot row for a symbol
+  it cannot carry valuation data forward for. When it reaches a date before the
+  full sync has written that date it creates the missing rows itself, seeded
+  from each symbol's most recent prior snapshot. A symbol whose prior snapshot
+  has no price has nothing to seed from, so its row held an RS score and almost
+  nothing else — leaving a snapshot day that looked complete by row count while
+  the visible fields were empty for most of the market. Those rows are now
+  skipped and written properly by the next full sync.
+- The scheduled screener sync no longer writes rows with a silently unset
+  price. Its optional fields were guarded with \`hasattr\`, which is true
+  whenever a field is *declared*, so a provider model that declared \`price\`
+  but left it unset wrote a NULL that no reader could distinguish from a
+  symbol with no quote. Mapping now checks the value, the upsert coalesces
+  instead of overwriting (so a sparse sync cannot blank another writer's
+  column), \`source\` is insert-only there too, and \`snapshot_date\` is stamped
+  in UTC rather than the host's local date.
+- VNStock premium packages are no longer an implicit startup requirement.
+  \`VNSTOCK_RUNTIME_TIER=free\` is the default operating contract: the
+  entrypoint verifies only VNStock's free runtime, while \`premium\` retains
+  strict module verification for premium-built images. Health metadata now
+  exposes the configured tier, KBS fallback source, Vietcap-primary EOD
+  contract, and premium capability availability.
+- Screener snapshots now preserve the actual market \`trade_date\` attached to
+  quote-history prices separately from the materialization \`snapshot_date\`
+  and write timestamp. The nullable expansion does not guess historical
+  values; freshness prefers proven trade dates and falls back to snapshot
+  dates for legacy rows during rollout.
 
 ### Internal
 - Added \`apps/api/tests/test_core/test_config.py\` covering the new timeout
@@ -55,6 +102,26 @@ live in \`docs/\`.
   field is present in \`/api/v1/health\`.
 - \`scripts/oracle/runtime_verify.sh\` accepts an optional \`MCP_HEALTH_URL\` and
   asserts the MCP sidecar responds 200 alongside the API.
+- Added \`apps/api/tests/test_services/test_screener_snapshot_ownership.py\`
+  pinning the Screener Snapshot write-ownership and freshness invariants: a
+  narrower writer cannot blank a populated column or relabel provenance, a
+  row's \`snapshot_date\` agrees with its write date, and staleness tracks the
+  trade date rather than the write time.
+- Added \`apps/api/tests/test_api/test_health_snapshot_freshness.py\` covering
+  the snapshot age and breach reported by \`/api/v1/health/detailed\`.
+- Added \`apps/api/tests/test_services/test_rs_rating_snapshot_rows.py\` pinning
+  when the RS rating service may create a Screener Snapshot row on its own:
+  a carry-forward price must exist, an existing same-day row is enriched in
+  place rather than duplicated, and a same-day row's provenance is preserved.
+- Added \`apps/api/tests/test_services/test_screener_sync_payload.py\` covering
+  the scheduled sync's row payload: a declared-but-unset price is omitted
+  rather than written as NULL, a repeat sync cannot blank a populated column,
+  and the row is keyed to the UTC snapshot date.
+- Added \`apps/api/tests/test_core/test_vnstock_runtime_tier.py\` covering the
+  explicit free/premium startup contract and health capability disclosure.
+- Added \`apps/api/tests/test_services/test_screener_trade_date.py\` covering
+  provider-date propagation, cache freshness precedence, legacy fallback,
+  detailed-health metadata, and the nullable migration contract.
 
 ## [v1.5.0] - 2026-07-02
 
