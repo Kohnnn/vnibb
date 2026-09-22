@@ -56,16 +56,21 @@ def upgrade() -> None:
         ["is_synthetic"],
     )
 
-    # Backfill: anything without a provider marker in `extra` came from a
-    # fixture. Live ingest paths always record at least the provider payload
-    # identity; the seed path records nothing.
+    # Backfill only the sources that actually have a fixture fallback, and
+    # only rows with no provider marker in `extra`. The scoping is not an
+    # optimisation nit: `prediction_markets` holds ~13.3M live rows, so an
+    # unscoped predicate seq-scans the whole table to touch a few dozen rows
+    # (measured 168s, with the parallel scan reading 4.25M rows per worker).
+    # The fixture sources are the three with an offline seed path; the others
+    # have none, so their rows are live by construction and are never touched.
     op.execute(
         sa.text(
             """
             UPDATE prediction_markets
             SET is_synthetic = true
-            WHERE is_synthetic = false
-              AND (extra IS NULL OR extra::text IN ('{}', 'null'))
+            WHERE source IN ('predictit', 'limitless', 'manifold')
+              AND is_synthetic = false
+              AND (extra IS NULL OR extra::jsonb = '{}'::jsonb)
             """
         )
     )
