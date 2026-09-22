@@ -1,0 +1,129 @@
+name: Production Health Watch
+
+# Off-box availability watch. This runs on GitHub's infrastructure, not on the
+# VNIBB node, so it still fires when the node itself is dead -- which is the
+# whole point: the previous reliability gate lived in the same failure domain
+# it was meant to observe, and it had been failing on every scheduled run.
+#
+# On failure it opens (or updates) a GitHub issue, so the alert arrives through
+# GitHub's own notification channels. No paid third-party service is involved.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: production-health-watch
+  cancel-in-progress: false
+
+env:
+  BASE_URL: ${{ vars.VNIBB_RELIABILITY_BASE_URL }}
+  # Mirrors the API's own api_request_timeout_seconds budget.
+  TIMEOUT: "35"
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require configured base URL
+        run: |
+          if [ -z "${BASE_URL}" ]; then
+            echo "Set repository variable VNIBB_RELIABILITY_BASE_URL." >&2
+            exit 1
+          fi
+
+      - name: Probe liveness, readiness and strict health
+        id: probe
+        run: |
+          set -u
+          base="${BASE_URL%/}"
+          failures=""
+
+          check() {
+            local name="$1" url="$2" expect="$3"
+            local code
+            code="$(curl -sS -o /dev/null -w '%{http_code}' \
+              --max-time "${TIMEOUT}" "${url}" || echo "000")"
+            echo "${name}: ${code}"
+            if [ "${code}" != "${expect}" ]; then
+              failures="${failures}${name}=${code} (want ${expect}); "
+            fi
+          }
+
+          check liveness      "${base}/live"   200
+          check readiness     "${base}/ready"  200
+
+          # Status-code-only probing cannot see a degraded backend: the API
+          # returns 200 while reporting `degraded` (stale snapshot, DB error).
+          # Read the body and fail on the reported verdict too.
+          body="$(curl -sS --max-time "${TIMEOUT}" "${base}/api/v1/health/detailed" || echo '{}')"
+          status="$(printf '%s' "${body}" | jq -r '.status // "unknown"')"
+          revision="$(printf '%s' "${body}" | jq -r '.revision // "unknown"')"
+          echo "detailed status: ${status}"
+          echo "running revision: ${revision}"
+
+          if [ "${status}" != "healthy" ]; then
+            failures="${failures}detailed_status=${status}; "
+          fi
+
+          {
+            echo "failures=${failures}"
+            echo "status=${status}"
+            echo "revision=${revision}"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ -n "${failures}" ]; then
+            exit 1
+          fi
+
+      - name: Open or update the alert issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILURES: ${{ steps.probe.outputs.failures }}
+          STATUS: ${{ steps.probe.outputs.status }}
+          REVISION: ${{ steps.probe.outputs.revision }}
+        run: |
+          set -euo pipefail
+          title="Production health watch failing"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          existing="$(gh issue list --repo "${GITHUB_REPOSITORY}" \
+            --label production-alert --state open --limit 1 --json number -q '.[0].number // ""')"
+
+          body="$(printf '%s\n' \
+            "The off-box production watch failed at $(date -u +%Y-%m-%dT%H:%M:%SZ)." \
+            "" \
+            "- Base URL: \`${BASE_URL}\`" \
+            "- Reported status: \`${STATUS:-unknown}\`" \
+            "- Running revision: \`${REVISION:-unknown}\`" \
+            "- Failed checks: \`${FAILURES:-see job log}\`" \
+            "- Job: ${run_url}" \
+            "" \
+            "This issue is reused while the watch keeps failing; it is closed" \
+            "automatically on the next passing run.")"
+
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --repo "${GITHUB_REPOSITORY}" --body "${body}"
+          else
+            gh issue create --repo "${GITHUB_REPOSITORY}" \
+              --title "${title}" --body "${body}" --label production-alert
+          fi
+
+      - name: Close the alert issue on recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --repo "${GITHUB_REPOSITORY}" \
+            --label production-alert --state open --limit 1 --json number -q '.[0].number // ""')"
+          if [ -n "${existing}" ]; then
+            gh issue close "${existing}" --repo "${GITHUB_REPOSITORY}" \
+              --comment "Production health watch is passing again as of $(date -u +%Y-%m-%dT%H:%M:%SZ)."
+          fi
