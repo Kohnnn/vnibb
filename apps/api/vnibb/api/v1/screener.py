@@ -1620,11 +1620,16 @@ async def _refresh_screener_cache(params: StockScreenerParams) -> None:
             logger.warning(f"Screener refresh returned empty data (source={params.source})")
             return
         data = fill_market_cap(data)
-        await cache_manager.store_screener_data(
-            data=[d.model_dump() for d in data],
-            source=params.source,
+        # Deliberately not persisted. This refresh exists to warm the response
+        # for the caller that triggered it, and it fetches with a request-shaped
+        # `limit` (120). Writing that prefix into the shared `screener_snapshots`
+        # table would define the Universe for every other reader for the rest of
+        # the day. See the ownership note in the live fetch path below, and #8.
+        logger.info(
+            "Background screener refresh complete (source=%s, %d rows, not persisted)",
+            params.source,
+            len(data),
         )
-        logger.info(f"Background screener refresh complete (source={params.source})")
     except Exception as e:
         logger.warning(
             "Background screener refresh failed (source=%s): %s: %r",
@@ -1888,11 +1893,17 @@ async def get_screener(
         data = await _enrich_screener_metrics(data, db)
         data = await _hydrate_screener_rows(data, db)
         data = await _enrich_discovery_fields(data, db, as_of_date=as_of_date)
-        # Snapshot the cache payload BEFORE Fundamental Enrichment. Enrichment
-        # mutates rows in place, and a Fundamental Snapshot carries its own
-        # as-of date -- persisting it onto a daily Screener Snapshot would pin
-        # it to a date it does not belong to (ADR-0002).
-        cache_data = [row.model_copy(deep=True) for row in data]
+        # No snapshot write from this path. `screener_snapshots` is the shared
+        # materialization of the Universe that the heatmap, market breadth and
+        # comparison surfaces all read, and it is owned by the scheduled
+        # `data_pipeline.sync_screener_data` (limit=1700, all exchanges). The
+        # provider head-slices its result to `params.limit` before fetching, so
+        # persisting here wrote whatever prefix the caller's `limit` happened to
+        # be -- 100 by default -- under today's date. Readers filter on today's
+        # date with no row-count floor, so one request could hand every later
+        # reader a confident Universe covering ~6% of the market. Issue #8.
+        #
+        # `data` is still returned to the caller. Only the shared write is gone.
         data = await _enrich(data)
         members, discovery_meta = await _resolve_index_universe(universe)
         if members is not None:
@@ -1928,7 +1939,9 @@ async def get_screener(
         matched_count = len(data)
         data = data[:limit]
 
-        await cache_manager.store_screener_data(data=[d.model_dump() for d in cache_data], source=source)
+        # No snapshot write here either -- see the note above the enrichment
+        # stage. The response is served from the fetched data; the shared
+        # Universe table is left to its scheduled owner.
         # The provider head-slices the Universe to `limit` before fetching, so
         # full-Universe screening is unreachable here regardless of ordering.
         return await _respond(

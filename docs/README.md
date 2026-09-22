@@ -24,10 +24,9 @@ Current source of truth:
 - `DEPLOYMENT_AND_OPERATIONS.md`: deployment profile, Oracle runtime guidance, and ops notes
 - `DATABASE_SCHEMA.md`: database stack schema and collection model
 - `AUTO_UPDATE_STRATEGY.md`: automatic update plan, rate-budget strategy, and scheduler model
-- `VN100_EOD_BACKFILL_PLAN.md`: VN100 2008-to-now EOD bootstrap plan for quant/backtesting widgets
 - `daily_trading_updater.md`: trading-flow updater behavior and reinforced scheduler notes
 - `data_retention_partitioning.md`: retention and partitioning guidance
-- `BACKUP_RESTORE_DRILL.md`: backup artifacts, the no-write restore drill (`scripts/restore-drill.ps1`), and last-verified evidence
+- `BACKUP_RESTORE_DRILL.md`: backup artifacts, the repeatable restore drill (`scripts/oracle/verify-backup.sh`), and last-verified evidence
 
 ## Product And Architecture
 
@@ -36,7 +35,8 @@ Current source of truth:
 - `VNIBB_MCP_DEPLOYMENT.md`: dedicated OCI deployment and smoke-check reference for `vnibb-mcp`
 - `DEVELOPMENT_JOURNAL.md`: maintainer journal and decision history
 - `WIDGET_CATALOG.md`: legacy widget snapshot, useful as historical context only
-- `NEXT_PHASES_EXECUTION_PLAN.md`: execution-ready plan for the next selected product phases
+- `archive/`: superseded plans kept for history, each carrying an archived
+  header. Do not action anything in there without checking that header first.
 - `PRODUCT_INFRA_DATA_EXECUTION_PLAN.md`: active product trust, OCI hardening, n6v backup/Parquet, rate-limit, and scheduler rollout plan and progress
 - `V1_6_1_BACKEND_DATA_EXECUTION_PLAN.md`: v1.6.1 backend observability, corpus quality, database, performance, hardening, and rollout plan and progress
 - `VNIBB_PRODUCT_IMPROVEMENT_EXECUTION_PLAN.md`: active research, discovery, investor workflow, activation, and product-enabling platform plan and progress

@@ -154,6 +154,48 @@ class MongoMarketDataService:
 
         return self._client[settings.mongodb_database][name]
 
+    def ensure_eod_indexes(self) -> list[str]:
+        """Create the indexes that make `market_prices_eod` self-consistent.
+
+        Uniqueness on (symbol, tradeDate, source) was enforced only by the
+        operator-run backfill scripts (`scripts/vietcap/backfill_vietcap.py`,
+        `scripts/backfill_mongo_vnstock_full_catalog.py`). The live corpus does
+        carry the index today -- verified as `uniq_symbol_tradeDate_source`,
+        unique, with zero duplicate keys across 4.87M documents -- but nothing
+        in the application recreated or asserted it. Whether duplicates were
+        possible therefore depended on script history, not on the code that
+        reads and writes the collection. This moves the guarantee into the
+        service, and the names here deliberately match what the live corpus
+        already has so the call is a no-op there rather than a second index.
+
+        Returns the names of indexes ensured. Idempotent.
+        """
+        if not self.enabled:
+            raise RuntimeError("MongoDB analytical source is not configured")
+
+        coll = self._get_collection("market_prices_eod")
+        specs = [
+            ([("symbol", 1), ("tradeDate", 1), ("source", 1)], "uniq_symbol_tradeDate_source", True),
+            ([("symbol", 1), ("tradeDate", -1)], "idx_symbol_tradeDate_desc", False),
+        ]
+        ensured: list[str] = []
+        for keys, name, unique in specs:
+            try:
+                coll.create_index(keys, name=name, unique=unique)
+                ensured.append(name)
+            except Exception as exc:  # noqa: BLE001
+                # A unique index build fails if duplicates already exist. That
+                # is a real finding, not a reason to abort a write -- surface it
+                # and let the operator run the (dry-run-by-default) dedup.
+                logger.warning(
+                    "Mongo EOD index %s not ensured: %s. If this is a "
+                    "duplicate-key failure, run scripts/dedup_mongo_eod.py first "
+                    "(it defaults to a dry run).",
+                    name,
+                    exc,
+                )
+        return ensured
+
     def _get_database(self) -> Any:
         if not self.enabled:
             raise RuntimeError("MongoDB analytical source is not configured")
@@ -817,6 +859,10 @@ class MongoMarketDataService:
         def _write() -> int:
             from pymongo import UpdateOne
 
+            # Guarantee the (symbol, tradeDate, source) uniqueness this writer
+            # and the read path both assume, rather than trusting that a
+            # backfill script happened to create it. Idempotent and cheap.
+            self.ensure_eod_indexes()
             coll = self._get_collection("market_prices_eod")
             synced_at = datetime.now(UTC).replace(tzinfo=None)
             normalized_rows: list[dict[str, Any]] = []

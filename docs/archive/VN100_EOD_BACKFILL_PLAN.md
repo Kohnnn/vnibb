@@ -1,5 +1,11 @@
 # VN100 EOD Backfill Plan
 
+> **ARCHIVED 2026-09-23 — superseded, do not action.** The Vietcap pipeline
+> named below already covers full-universe history beyond this plan's scope, so
+> every "Open Item" here is moot. The `--symbols-group` convenience it asked
+> for exists where it mattered (`scripts/build_fundamental_screener.py`).
+> Kept only for the history of why the KBS floor was abandoned.
+>
 > Update 2026-06-11: For full-universe + deeper-history backfill, prefer the
 > Vietcap pipeline (`VIETCAP_DATA_SOURCE.md`, `apps/api/scripts/vietcap/`).
 > Vietcap is now the PRIMARY source, is auth-free, off the vnstock quota, and

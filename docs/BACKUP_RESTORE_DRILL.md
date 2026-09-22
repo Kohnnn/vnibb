@@ -20,24 +20,29 @@ MongoDB host and the hosted PostgreSQL source):
 
 ## Running the drill
 
-```pwsh
-# newest backup set in ../backups
-pwsh ./scripts/restore-drill.ps1
+```bash
+# newest backup set
+./scripts/oracle/verify-backup.sh
 
-# a specific set, or skip an engine when only one image is available locally
-pwsh ./scripts/restore-drill.ps1 -BackupId 20260721T181749Z
-pwsh ./scripts/restore-drill.ps1 -SkipMongo
+# a specific set
+./scripts/oracle/verify-backup.sh 20260922T133456Z
 ```
 
 The script, for each engine:
 
-1. Rechecks the artifact SHA256 against the manifest (aborts on mismatch).
-2. Starts a throwaway container from the manifest-pinned image.
-3. Copies the artifact in with `docker cp` and restores it, failing on any
-   restore error.
-4. Asserts object-count parity against the manifest, then removes the container.
+1. Rechecks the artifact SHA256 against the run manifest (aborts on mismatch).
+2. Starts a scratch database from the manifest-pinned image.
+3. Restores the artifact, failing on any restore error.
+4. Asserts public-table parity against the live database, then drops the scratch
+   database.
 
 Exit code is non-zero if any restore command or parity check fails.
+
+This replaces `scripts/restore-drill.ps1`, which was PowerShell-only and — as
+far as the repository records go — had never been executed against this
+Postgres 17 stack. A drill that only runs on one operator's platform is not a
+drill. The gotchas below are the ones it discovered and are retained here
+because they are still true.
 
 ## Engine-specific gotchas
 
@@ -55,27 +60,40 @@ Exit code is non-zero if any restore command or parity check fails.
   `pg_restore --no-owner --no-privileges`, and treats any error as a failure.
 - Restore and admin queries run as `supabase_admin`, not `postgres`.
 - The Supabase image is a ~45s two-stage boot, so readiness is polled up to 120s.
-- **Copy artifacts in with `docker cp`**, never `Get-Content | docker exec -i`:
-  PowerShell stringifies bytes on a native-command pipeline and corrupts the
-  archive.
+- **Copy artifacts in as a file, not through a pipeline.** Feeding a binary dump
+  to a shell that stringifies stdin corrupts the archive; PowerShell's
+  `Get-Content |` was the original offender. `verify-backup.sh` copies the file
+  into the container and restores from the path.
 - MongoDB restores with `--drop --stopOnError` so a re-run is idempotent inside the
   container and a truncated archive fails loudly (a partial download once restored
   202390 documents before erroring, which `--stopOnError` surfaces immediately).
 
 ## Last verified drill
 
-Backup set `20260729T190249Z`:
+Backup set `20260922T133456Z`, run via `scripts/oracle/verify-backup.sh`:
 
 | Engine     | Image                          | Parity            | Result |
 | ---------- | ------------------------------ | ----------------- | ------ |
-| PostgreSQL | `supabase/postgres:17.6.1.136` | 37/37 tables      | pass   |
+| PostgreSQL | `supabase/postgres:17.6.1.136` | 39/39 tables      | pass   |
 | MongoDB    | `mongo:7`                      | 16/16 collections | pass   |
 
-Checksum recheck: pass. See `../backups/BACKUP_VERIFICATION_20260729T190249Z.json`.
+Checksum recheck: pass. `stocks` spot-check: 1753 rows.
 
-## Known gap
+Earlier verified set `20260729T190249Z` (via the retired PowerShell script):
+37/37 tables, 16/16 collections, checksum pass.
 
-Artifacts are compressed but **not yet encrypted off-box**. An encrypted Restic
-copy is blocked on `RESTIC_REPOSITORY` and a password source
-(`RESTIC_PASSWORD_FILE` or `RESTIC_PASSWORD_COMMAND`) being configured. Until then
-the dumps are a single-disk single point of failure.
+## Where the artifacts actually go
+
+Superceded note: the sets under `../backups` are still on the same host, but they
+are no longer the only copy. `scripts/oracle/vnibb-backup.sh` runs daily at 03:30
+host time, keeps the newest 7 sets, and the sets are pulled to an always-on
+workstation over Tailscale with sha256 parity — so the same-disk failure mode is
+covered. Restic is **not** the mechanism: OCI Object Storage authorization is
+denied in this tenancy, and instance-principal access only reaches the namespace,
+not bucket operations. The Tailscale pull is the off-box leg.
+
+Two failure modes remain, stated plainly:
+
+- Off-box copies are integrity-verified but have not been restored end-to-end
+  onto a fresh host. The drill restores into a scratch database on the same host.
+- Nothing encrypts the artifacts at rest.

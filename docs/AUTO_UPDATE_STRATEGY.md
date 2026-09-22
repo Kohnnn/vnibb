@@ -158,3 +158,26 @@ The backend now follows this philosophy:
 
 This is the safest way to get materially better freshness without treating every vnstock dataset like a real-time feed.
 
+## Observability
+
+A schedule is only as good as your ability to tell whether it ran. The
+scheduler records a per-job outcome and exposes it through `get_job_status()`
+(surfaced by the data-sync status endpoint):
+
+- `last_outcome` is one of `ok`, `failed`, `timeout`, or `skipped`;
+- `consecutive_failures` increments on `failed`/`timeout` and resets on `ok`;
+- `last_detail` carries the exception type and message for the last failure;
+- `failing_jobs` aggregates every job currently in a `failed`/`timeout` state.
+
+`skipped` deserves attention: a job is skipped when a previous run still holds
+the lock, when another scheduler owns the distributed lock, or when required
+coordination is unavailable. Before this existed, a skipped job was recorded
+nowhere — `missed_runs` counted only APScheduler misfires — so a job that was
+scheduled, ran, and quietly returned without doing its work looked identical to
+one that never fired. That is precisely how a seven-day intraday outage stayed
+invisible while the job kept reporting itself as scheduled.
+
+The lesson worth keeping: **a job that returns a count is not necessarily a job
+that did anything.** Check `failing_jobs` after any provider incident, and treat
+a rising `consecutive_failures` as the signal it is.
+

@@ -574,11 +574,19 @@ async def test_fundamental_response_reports_scope_and_counts(client, monkeypatch
 
 @pytest.mark.asyncio
 async def test_fundamentals_are_not_persisted_onto_screener_snapshots(client, monkeypatch):
-    """ADR-0002: a Fundamental Snapshot carries its own as-of date.
+    """ADR-0002 plus write ownership: the live path must not touch the snapshot.
 
-    Writing it onto a daily Screener Snapshot would pin it to a date it does
-    not belong to. Enrichment mutates rows in place, so the cache payload must
-    be snapshotted before enrichment runs.
+    ADR-0002 said a Fundamental Snapshot carries its own as-of date, so it must
+    not be pinned onto a daily Screener Snapshot. The original guard was to
+    snapshot the cache payload before enrichment ran.
+
+    That guard is now moot and the invariant is strictly stronger: the live
+    request path writes nothing to `screener_snapshots` at all. The table is a
+    shared materialization of the Universe, owned by the scheduled sync, and a
+    request-bounded write into it handed every later reader a truncated
+    Universe for the rest of the day (#8). So this asserts the stronger
+    property directly -- no write, and therefore no path by which an
+    enrichment field could reach a snapshot.
     """
     stored: list[dict] = []
 
@@ -605,10 +613,10 @@ async def test_fundamentals_are_not_persisted_onto_screener_snapshots(client, mo
     )
 
     assert response.status_code == 200
-    assert stored, "expected the live path to write through to the cache"
-    for row in stored:
-        assert row.get("intrinsic_value") is None
-        assert row.get("fcf_positive") is None
+    # The caller still gets its rows...
+    assert response.json()["meta"]["count"] == 2
+    # ...but nothing is written to the shared snapshot table.
+    assert stored == [], "the live path must not write to the shared screener snapshot"
 
 
 @pytest.mark.asyncio
@@ -799,3 +807,43 @@ def test_cached_dict_without_fundamental_fields_still_validates():
     assert revived.intrinsic_value is None
     assert revived.moat is None
     assert revived.pe == 15.2
+
+
+@pytest.mark.asyncio
+async def test_live_path_cannot_shrink_shared_snapshot_to_one_request_limit(
+    client, monkeypatch
+):
+    """Issue #8: a request-bounded write must never define the shared Universe.
+
+    The provider head-slices its result to the requested `limit` before
+    fetching, so a live write persisted whatever prefix the caller asked for
+    (100 by default) under today's date. Readers of `screener_snapshots` filter
+    on today's date with no row-count floor, so one such write handed every
+    later reader -- heatmap, market breadth, comparison -- a well-formed answer
+    covering a fraction of the market.
+
+    This asserts the ownership boundary directly: the live path serves the
+    caller and writes nothing, regardless of the `limit` that triggered it.
+    """
+    writes: list[tuple[list[dict], str | None]] = []
+
+    async def fake_fetch(_params):
+        # Simulate the provider honoring a small request limit.
+        return [_row(f"S{i:03d}") for i in range(100)]
+
+    async def fake_store(data, source=None):
+        writes.append((list(data), source))
+
+    monkeypatch.setattr(screener_module.VnstockScreenerFetcher, "fetch", fake_fetch)
+    monkeypatch.setattr(
+        screener_module.CacheManager, "store_screener_data", staticmethod(fake_store)
+    )
+
+    response = await client.get("/api/v1/screener/?limit=100&use_cache=false")
+
+    assert response.status_code == 200
+    assert response.json()["meta"]["count"] == 100, "the caller still gets its page"
+    assert writes == [], (
+        "a request-shaped fetch must not write to the shared screener snapshot: "
+        f"got {len(writes)} write(s)"
+    )
