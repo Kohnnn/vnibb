@@ -531,17 +531,24 @@ async def run_supplemental_company_sync() -> dict[str, SyncResult]:
     if not symbols:
         return results
 
+    # Company news is pulled every day; the rest rotate. Under the previous
+    # four-way rotation this stage ran one weekday in four, so `company_news`
+    # went 13 days without a crawl and the freshness probe correctly reported
+    # it critical. Shareholders/officers/subsidiaries are near-static reference
+    # data where a weekly refresh is genuinely adequate; news is not, and the
+    # freshness contract for it is measured in days.
+    results["company_news"] = await _run_direct_stage(
+        "company_news",
+        lambda: data_pipeline.sync_company_news(
+            symbols=symbols,
+            limit=settings.scheduler_company_news_limit,
+        ),
+    )
+
     weekday_plan: list[tuple[str, Callable[[], Awaitable[int]]]] = [
         ("shareholders", lambda: data_pipeline.sync_shareholders(symbols=symbols)),
         ("officers", lambda: data_pipeline.sync_officers(symbols=symbols)),
         ("subsidiaries", lambda: data_pipeline.sync_subsidiaries(symbols=symbols)),
-        (
-            "company_news",
-            lambda: data_pipeline.sync_company_news(
-                symbols=symbols,
-                limit=settings.scheduler_company_news_limit,
-            ),
-        ),
     ]
 
     stage_name, operation = weekday_plan[today.weekday() % len(weekday_plan)]
