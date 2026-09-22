@@ -29,6 +29,22 @@ live in `docs/`.
   `LOG_LEVEL=INFO`; the first few failures now log at `warning`, and the
   per-stage error breakdown and samples are persisted into the checkpointed
   sync payload instead of counts alone.
+- **Prediction-market rows seeded from the offline fixture are now labelled as
+  such.** `populate_prediction_markets` falls back to checked-in JSON fixtures
+  whenever a live provider fetch fails or returns nothing, and the resulting
+  rows were indistinguishable from live rows — a provider outage produced a
+  populated dashboard and a source-health row reading `synced`. Rows now carry
+  `is_synthetic`, fixture seeds set it, live ingests clear it, and
+  `source-health` returns `synthetic_market_count` and refuses to report a
+  source as synced when its whole population is synthetic.
+- Scheduler job outcomes are recorded per job (`ok` / `failed` / `timeout` /
+  `skipped`) with a consecutive-failure count, and exposed through
+  `get_job_status`. Previously a job that ran and failed looked identical to
+  one that never fired, and a job skipped because a lock was held was recorded
+  nowhere — `missed_runs` only counted APScheduler misfires.
+- The frontend health proxy no longer discards the backend's verdict: it
+  hardcoded `status: 'ok'`, so a degraded backend reported itself as healthy to
+  any monitor keying off `status`.
 - Quant endpoints no longer serve empty price frames: the six historical
   loaders (`_load_historical_from_*`, `_load_corporate_actions_for_adjustment`,
   `_apply_corporate_action_adjustments`) are now re-exported from
