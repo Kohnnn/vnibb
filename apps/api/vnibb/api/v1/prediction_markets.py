@@ -385,17 +385,31 @@ async def get_prediction_market_source_health(
                 )
             ).all()
         )
+        # Same shape as above, same problem: 2.23M snapshot rows, and the
+        # aggregate's count was only ever used to decide `empty` vs `stale`.
+        # Fetch the latest timestamp per source (indexed, cheap) and derive
+        # presence from it, rather than grouping the whole table.
         snapshot_stats = {
-            source: (count, latest)
-            for source, count, latest in (
-                await db.execute(
-                    select(
-                        PredictionMarketSnapshot.source,
-                        func.count(PredictionMarketSnapshot.id),
-                        func.max(PredictionMarketSnapshot.captured_at),
-                    ).group_by(PredictionMarketSnapshot.source)
-                )
-            ).all()
+            source: (
+                int(
+                    (
+                        await db.execute(
+                            select(PredictionMarketSnapshot.id)
+                            .where(PredictionMarketSnapshot.source == source)
+                            .limit(1)
+                        )
+                    ).first()
+                    is not None
+                ),
+                (
+                    await db.execute(
+                        select(func.max(PredictionMarketSnapshot.captured_at)).where(
+                            PredictionMarketSnapshot.source == source
+                        )
+                    )
+                ).scalar(),
+            )
+            for source in KNOWN_PREDICTION_MARKET_SOURCES
         }
     except (OperationalError, ProgrammingError) as error:
         if _is_missing_prediction_market_relation(error):
