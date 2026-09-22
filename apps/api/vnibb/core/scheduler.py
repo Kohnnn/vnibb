@@ -25,6 +25,27 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 _job_guards: dict[str, asyncio.Lock] = {}
 _scheduler_missed_runs = 0
+# Per-job outcome counters. `_scheduler_missed_runs` alone only counts APScheduler
+# misfires; it says nothing about a job that ran and FAILED, nor about one that
+# was silently skipped because a lock was held. That gap is why the seven-day
+# intraday outage was invisible: the job kept being scheduled and kept returning
+# without error, so nothing surfaced. Keyed by job name.
+_job_outcomes: dict[str, dict[str, object]] = {}
+
+
+def _record_job_outcome(job_name: str, outcome: str, detail: str = "") -> None:
+    """Record the most recent outcome for a job (ok / failed / timeout / skipped)."""
+    entry = _job_outcomes.setdefault(
+        job_name,
+        {"last_outcome": None, "consecutive_failures": 0, "last_detail": "", "last_at": None},
+    )
+    entry["last_outcome"] = outcome
+    entry["last_detail"] = detail[:300]
+    entry["last_at"] = datetime.utcnow().isoformat()
+    if outcome in {"failed", "timeout"}:
+        entry["consecutive_failures"] = int(entry["consecutive_failures"] or 0) + 1
+    else:
+        entry["consecutive_failures"] = 0
 
 DAILY_SYNC_TIMEOUT_SECONDS = 2 * 60 * 60
 DAILY_TRADING_TIMEOUT_SECONDS = 2 * 60 * 60
@@ -125,6 +146,7 @@ async def _run_guarded_job(
 ) -> None:
     lock = _job_guards.setdefault(job_name, asyncio.Lock())
     if lock.locked():
+        _record_job_outcome(job_name, "skipped", "previous run still active")
         logger.warning("Skipping %s because previous run is still active", job_name)
         return
 
@@ -132,9 +154,11 @@ async def _run_guarded_job(
         distributed_lock = DistributedJobLock(job_name, timeout_seconds)
         lock_state = await distributed_lock.acquire()
         if lock_state == "contended":
+            _record_job_outcome(job_name, "skipped", "another scheduler owns the lock")
             logger.warning("Skipping %s because another scheduler owns its lock", job_name)
             return
         if lock_state == "unavailable" and settings.scheduler_lock_mode == "required":
+            _record_job_outcome(job_name, "skipped", "required coordination unavailable")
             logger.error("Skipping %s because required scheduler coordination is unavailable", job_name)
             return
         if lock_state == "unavailable":
@@ -151,9 +175,13 @@ async def _run_guarded_job(
             else:
                 await guarded_runner
             elapsed = (datetime.utcnow() - started_at).total_seconds()
+            _record_job_outcome(job_name, "ok", f"completed in {elapsed:.1f}s")
             logger.info("%s completed in %.1fs", job_name, elapsed)
         except TimeoutError:
             elapsed = (datetime.utcnow() - started_at).total_seconds()
+            _record_job_outcome(
+                job_name, "timeout", f"exceeded {timeout_seconds}s after {elapsed:.1f}s"
+            )
             logger.error(
                 "%s timed out after %.1fs (limit=%ss)",
                 job_name,
@@ -162,6 +190,7 @@ async def _run_guarded_job(
             )
         except Exception as exc:
             elapsed = (datetime.utcnow() - started_at).total_seconds()
+            _record_job_outcome(job_name, "failed", f"{type(exc).__name__}: {exc}")
             logger.error(
                 "%s failed after %.1fs: %s",
                 job_name,
@@ -790,13 +819,24 @@ def get_job_status() -> dict:
                 "name": job.name,
                 "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
                 "trigger": str(job.trigger),
+                # Last observed outcome. A job that runs and silently fails, or
+                # is skipped because a lock is held, previously looked identical
+                # to one that never fired.
+                **_job_outcomes.get(job.id, {}),
             }
         )
+
+    failing = {
+        name: state
+        for name, state in _job_outcomes.items()
+        if str(state.get("last_outcome")) in {"failed", "timeout"}
+    }
 
     return {
         "running": scheduler.running,
         "jobs": jobs,
         "missed_runs": _scheduler_missed_runs,
+        "failing_jobs": failing,
     }
 
 
