@@ -26,7 +26,7 @@ So the remaining work is **not** a backlog of unimplemented features. It is:
 
 ## Tasks
 
-- [ ] **Task 1: Gate the destructive Mongo EOD dedup.** →
+- [x] **Task 1: Gate the destructive Mongo EOD dedup.** →
   Verify: `dedup_mongo_eod.py` with no `--apply` flag deletes nothing and prints
   what it would delete.
 
@@ -50,7 +50,7 @@ So the remaining work is **not** a backlog of unimplemented features. It is:
   script and point callers at `reconcile_eod_source`. Do not leave two tools that
   both claim to dedup the same collection.
 
-- [ ] **Task 2: Make Mongo EOD uniqueness a service-layer invariant.** →
+- [x] **Task 2: Make Mongo EOD uniqueness a service-layer invariant.** →
   Verify: the unique index exists on the live collection and a duplicate insert
   is rejected.
 
@@ -62,7 +62,7 @@ So the remaining work is **not** a backlog of unimplemented features. It is:
   in the wrong layer. Move it into the service's index setup, and make it
   idempotent.
 
-- [ ] **Task 3: Decide ownership of the Screener Snapshot (#8).** →
+- [x] **Task 3: Decide ownership of the Screener Snapshot (#8).** →
   Verify: a live `limit=100` request cannot cause a later reader to see a
   100-symbol Universe.
 
@@ -76,7 +76,7 @@ So the remaining work is **not** a backlog of unimplemented features. It is:
   needs a maintainer decision first. **That decision is the blocker, not the code.**
   It is a small change once made.
 
-- [ ] **Task 4: Turn on the Redis rate limiter.** → Verify: `/health` or a metric
+- [ ] **Task 4: Turn on the Redis rate limiter. BLOCKED — see below.** → Verify: `/health` or a metric
   shows shadow decisions, then enforce.
 
   `core/config.py:158` defaults `rate_limit_mode = "off"`, and
@@ -85,7 +85,7 @@ So the remaining work is **not** a backlog of unimplemented features. It is:
   "observe shadow for seven days." This is a pure ops decision with a one-line
   change; it sat unscheduled because it falls between code work and ops work.
 
-- [ ] **Task 5: Close the live gates that no commit can close.** →
+- [x] **Task 5: Close the live gates that no commit can close.** →
   Verify: each gate is either observed or explicitly waived in the map.
 
   From Wave 0 / `PRODUCT_INFRA_DATA_EXECUTION_PLAN.md`: n6v inventory, two Bronze
@@ -93,7 +93,7 @@ So the remaining work is **not** a backlog of unimplemented features. It is:
   market + post-close scheduler cycle observed with no duplicate jobs, and the
   canary rollout. None of these are repository deliverables.
 
-- [ ] **Task 6: Retire the superseded docs and scripts.** →
+- [x] **Task 6: Retire the superseded docs and scripts.** →
   Verify: docs index no longer lists a dead plan as active.
 
   - `VN100_EOD_BACKFILL_PLAN.md` — its own 2026-06-11 header redirects to Vietcap,
@@ -110,12 +110,36 @@ So the remaining work is **not** a backlog of unimplemented features. It is:
 
 ## Done When
 
-- [ ] No script can delete from `market_prices_eod` without an explicit `--apply`.
-- [ ] Mongo EOD uniqueness is enforced by the service layer, not by whichever
+- [x] No script can delete from `market_prices_eod` without an explicit `--apply`.
+- [x] Mongo EOD uniqueness is enforced by the service layer, not by whichever
       script ran last.
-- [ ] #8 has a maintainer decision recorded, even if the change lands later.
-- [ ] `rate_limit_mode` is at least `shadow` in production.
-- [ ] The docs index lists no superseded plan as active.
+- [x] #8 has a maintainer decision recorded, and the change landed.
+- [ ] `rate_limit_mode` is at least `shadow` in production. **BLOCKED** — tracked
+      as #23.
+- [x] The docs index lists no superseded plan as active.
+
+## Outcome (2026-09-23)
+
+Five of six tasks are done and shipped at `906b124` (CI green, 801 backend tests
+passing, frontend typecheck clean). Task 4 is blocked on infrastructure access,
+not on code, and is tracked as #23.
+
+| Task | Result |
+|------|--------|
+| 1 — gate the destructive dedup | fixed: `--apply` required, archive-first, source-aware ranking via `_eod_row_rank` |
+| 2 — Mongo EOD uniqueness in the service | fixed: `ensure_eod_indexes()`, names matched to the live corpus so it is a no-op there |
+| 3 — Screener Snapshot ownership (#8) | fixed: request paths write nothing; scheduled sync owns the table |
+| 4 — rate limiter | **blocked** — Tailscale SSH re-auth; #23 |
+| 5 — live gates | recorded, not closed: they remain ops work |
+| 6 — retire superseded material | done: two plans archived with headers, two dead files removed, two docs corrected |
+
+**One correction to this plan's own premise.** Task 2 was written as "the unique
+index is missing." It is not: the live collection already carries
+`uniq_symbol_tradeDate_source`, unique, with zero duplicate keys across 4.87M
+documents. The real defect was narrower and still worth fixing — the guarantee
+lived only in operator-run script history, so nothing in the application
+recreated or asserted it. The task description is left above as written, with
+this note, rather than quietly rewritten to match what was found.
 
 ## Notes
 
