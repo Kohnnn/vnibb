@@ -55,6 +55,14 @@ def upgrade() -> None:
         "prediction_markets",
         ["is_synthetic"],
     )
+    # The health endpoint probes per-source presence. Without a leading
+    # `source` index the planner falls back to a seq scan for a source that
+    # has no rows, which is the wrong shape for a health check.
+    op.create_index(
+        "ix_prediction_markets_source_only",
+        "prediction_markets",
+        ["source"],
+    )
 
     # Backfill only the sources that actually have a fixture fallback, and
     # only rows with no provider marker in `extra`. The scoping is not an
@@ -77,5 +85,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("ix_prediction_markets_source_only", table_name="prediction_markets")
     op.drop_index("ix_prediction_markets_is_synthetic", table_name="prediction_markets")
     op.drop_column("prediction_markets", "is_synthetic")

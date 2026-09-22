@@ -357,15 +357,25 @@ async def get_prediction_market_source_health(
         for source in KNOWN_PREDICTION_MARKET_SOURCES
     ]
     try:
-        market_counts = dict(
-            (
-                await db.execute(
-                    select(PredictionMarket.source, func.count(PredictionMarket.id)).group_by(
-                        PredictionMarket.source
+        # Presence, not an exact population count. `prediction_markets` holds
+        # ~13.3M rows, nearly all from one source, and `GROUP BY source` over
+        # it cannot use an index (the planner expects millions of rows per
+        # group, so it prefers a parallel seq scan) -- measured at 114-143s,
+        # which made this health endpoint time out. A bounded probe answers
+        # the only question health actually asks, at index speed.
+        market_counts = {
+            source: int(
+                (
+                    await db.execute(
+                        select(PredictionMarket.id)
+                        .where(PredictionMarket.source == source)
+                        .limit(1)
                     )
-                )
-            ).all()
-        )
+                ).first()
+                is not None
+            )
+            for source in KNOWN_PREDICTION_MARKET_SOURCES
+        }
         synthetic_counts = dict(
             (
                 await db.execute(
