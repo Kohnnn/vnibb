@@ -53,198 +53,106 @@ def _market(
 
 
 @pytest.mark.asyncio
-async def test_spread_endpoint_returns_topics(monkeypatch):
-    """The /spread endpoint returns one row per macro topic."""
-    poly = [
-        _market(
-            source="polymarket",
-            source_id="p-cpi-1",
-            question="Will CPI exceed 3.0% in July?",
-            category="economic",
-            yes_price=0.4,
-            volume=100_000,
-        ),
+async def test_spread_and_consensus_aggregate_all_matching_markets(client, test_db):
+    markets = [
+        _market(source="polymarket", source_id="p-1", question="CPI above target?", yes_price=0.2, volume=1),
+        _market(source="polymarket", source_id="p-2", question="CPI below target?", yes_price=0.8, volume=3),
+        _market(source="kalshi", source_id="k-1", question="CPI above target?", yes_price=0.5, volume=2),
+        _market(source="kalshi", source_id="k-2", question="Unrelated", yes_price=0.9, volume=9),
     ]
-    kalshi = [
-        _market(
-            source="kalshi",
-            source_id="k-cpi-1",
-            question="Will CPI exceed 3.0%?",
-            category="economic",
-            yes_price=0.45,
-            volume=80_000,
-        ),
+    invalid = _market(source="polymarket", source_id="p-invalid", question="CPI above target?", yes_price=0.2)
+    invalid.outcome_prices = ["0.2", 0.8]
+    markets.append(invalid)
+    test_db.add_all(markets)
+    await test_db.commit()
+
+    spread = (await client.get("/api/v1/prediction-markets/spread")).json()
+    cpi = next(row for row in spread["topics"] if row["topic"] == "cpi")
+    assert cpi["n_polymarket"] == 3
+    assert cpi["n_kalshi"] == 2
+    assert cpi["polymarket_consensus"] == pytest.approx(0.65)
+    assert cpi["kalshi_consensus"] == pytest.approx(0.5)
+    assert cpi["gap"] == pytest.approx(0.15)
+
+    consensus = (await client.get("/api/v1/prediction-markets/consensus", params={"query": "CPI"})).json()
+    assert consensus["n_markets"] == 4
+    assert consensus["consensus_yes_price"] == pytest.approx((0.2 + 0.8 * 3 + 0.5 * 2) / 6)
+    assert len(consensus["sources"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_alerts_select_nearest_baseline_and_rank_after_threshold(client, test_db):
+    now = datetime.now(UTC)
+    for source_id, price, previous in (("p-1", 0.6, 0.5), ("p-2", 0.9, 0.3), ("p-3", 0.51, 0.5)):
+        for captured_at, yes_price in ((now, price), (now - timedelta(hours=2), previous)):
+            test_db.add(PredictionMarketIntradaySnapshot(
+                source="polymarket", source_id=source_id, question="CPI?", category="economic",
+                yes_price=yes_price, captured_at=captured_at,
+            ))
+    test_db.add(PredictionMarketIntradaySnapshot(
+        source="polymarket", source_id="p-1", question="CPI?", category="economic",
+        yes_price=0.1, captured_at=now - timedelta(hours=3),
+    ))
+    await test_db.commit()
+    response = await client.get("/api/v1/prediction-markets/alerts", params={
+        "window_hours": 1, "min_movement_bps": 200, "limit": 1,
+    })
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+    assert response.json()["alerts"][0]["source_id"] == "p-2"
+    assert response.json()["alerts"][0]["movement"] == pytest.approx(0.6)
+
+
+@pytest.mark.asyncio
+async def test_calibration_filters_before_limit_and_cross_calibration_counts_topics(client, test_db):
+    markets = [
+        _market(source="polymarket", source_id="irrelevant", question="Weather tomorrow?", yes_price=0.9),
+        _market(source="polymarket", source_id="p-1", question="CPI rises?", yes_price=0.4, volume=3),
+        _market(source="polymarket", source_id="p-2", question="Core inflation falls?", yes_price=0.8, volume=1),
+        _market(source="kalshi", source_id="k-1", question="CPI rises?", yes_price=0.45, volume=2),
     ]
+    test_db.add_all(markets)
+    await test_db.commit()
 
-    async def fake_execute(_stmt):
-        return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: poly + kalshi))
+    calibration = (await client.get("/api/v1/prediction-markets/calibration", params={"topic": "cpi", "limit": 2})).json()
+    assert [row["source_id"] for row in calibration["markets"]] == ["p-1", "p-2"]
+    assert calibration["consensus_yes_price"] == pytest.approx(0.6)
 
-    session = SimpleNamespace(execute=fake_execute)
-    response = await router.list_prediction_market_spread(window=24, db=session)
-    assert response.window_hours == 24
-    assert {t.topic for t in response.topics} == {"cpi", "fed", "recession"}
-    cpi = next(t for t in response.topics if t.topic == "cpi")
-    assert cpi.polymarket_consensus is not None
-    assert cpi.kalshi_consensus is not None
-    assert cpi.gap is not None
-
-
-@pytest.mark.asyncio
-async def test_consensus_endpoint_weights_by_volume(monkeypatch):
-    """The /consensus endpoint returns volume-weighted consensus."""
-
-    class _Result:
-        def scalars(self):
-            return SimpleNamespace(all=lambda: [
-                _market(
-                    source="polymarket",
-                    source_id="p-1",
-                    question="Will CPI be above 3.0%?",
-                    yes_price=0.4,
-                    volume=200_000,
-                ),
-                _market(
-                    source="kalshi",
-                    source_id="k-1",
-                    question="Will CPI be above 3.0%?",
-                    yes_price=0.5,
-                    volume=100_000,
-                ),
-            ])
-
-    async def fake_execute(_stmt):
-        return _Result()
-
-    session = SimpleNamespace(execute=fake_execute)
-    response = await router.get_prediction_market_consensus(
-        query="CPI be above 3.0%", db=session
-    )
-    assert response.n_markets == 2
-    assert response.consensus_yes_price is not None
-    # Volume-weighted: (0.4*200k + 0.5*100k)/(200k+100k) ~= 0.4333
-    assert abs(response.consensus_yes_price - (0.4 * 200_000 + 0.5 * 100_000) / 300_000) < 0.001
+    cross = (await client.get("/api/v1/prediction-markets/cross-calibration")).json()
+    cpi = next(row for row in cross["topics"] if row["topic"] == "cpi")
+    assert cpi["n_sources"] == 2
+    assert {row["source"]: row["n_markets"] for row in cpi["sources"]} == {"kalshi": 1, "polymarket": 2}
+    assert {row["source"]: row["consensus_yes_price"] for row in cpi["sources"]} == pytest.approx({"kalshi": 0.45, "polymarket": 0.5})
+    assert cross["last_updated"] is not None
 
 
 @pytest.mark.asyncio
-async def test_alerts_endpoint_filters_by_min_movement():
-    """The /alerts endpoint filters by min_movement_bps threshold."""
-    now = datetime.now(UTC)
-    latest = PredictionMarketIntradaySnapshot(
-        source="polymarket",
-        source_id="p-1",
-        question="Will CPI be above 3.0%?",
-        category="economic",
-        url=None,
-        yes_price=0.5,
-        volume=None,
-        liquidity=None,
-        captured_at=now,
-    )
-    baseline = PredictionMarketIntradaySnapshot(
-        source="polymarket",
-        source_id="p-1",
-        question="Will CPI be above 3.0%?",
-        category="economic",
-        url=None,
-        yes_price=0.45,
-        volume=None,
-        liquidity=None,
-        captured_at=now - timedelta(hours=1),
-    )
+async def test_inactive_history_merges_live_and_archive_without_dropping_early_rows(client, test_db):
+    from vnibb.models.prediction_market_archive import PredictionMarketArchive
 
-    class _Result:
-        def __init__(self, rows):
-            self._rows = rows
+    live = _market(source="kalshi", source_id="live-closed", question="Closed CPI?", yes_price=0.4)
+    live.active = False
+    live.end_date = datetime(2025, 6, 1)
+    archived = _market(source="polymarket", source_id="archived-closed", question="Closed CPI?", yes_price=0.3)
+    archived.active = False
+    archived.end_date = datetime(2025, 1, 1)
+    payload = {column.name: getattr(archived, column.name) for column in PredictionMarket.__table__.columns}
+    for name in ("end_date", "created_at", "updated_at"):
+        if payload[name] is not None:
+            payload[name] = payload[name].isoformat()
+    test_db.add(live)
+    test_db.add(PredictionMarketArchive(
+        market_id=42, batch_id="historical", payload=payload, sha256="a" * 64,
+        archived_at=datetime.now(UTC), backup_sha256="b" * 64,
+    ))
+    await test_db.commit()
 
-        def scalars(self):
-            return SimpleNamespace(all=lambda: self._rows)
-
-    async def fake_execute(_stmt):
-        return _Result([latest])
-
-    # First call -> latest rows; second call -> baseline rows.
-    executed: list[list[PredictionMarketIntradaySnapshot]] = [[latest], [baseline]]
-    index = {"i": 0}
-
-    async def fake_execute_seq(_stmt):
-        result = executed[index["i"]]
-        index["i"] += 1
-        return _Result(result)
-
-    session = SimpleNamespace(execute=fake_execute_seq)
-    response = await router.list_prediction_market_alerts(
-        window=1, min_movement_bps=200, limit=10, db=session
-    )
-    # 0.5 - 0.45 = 0.05 = 500bps > 200bps -> included
-    assert response.count == 1
-    assert response.alerts[0].direction == "up"
-    assert response.alerts[0].movement == pytest.approx(0.05)
-    assert response.alerts[0].absolute_movement == pytest.approx(0.05)
-
-
-@pytest.mark.asyncio
-async def test_alerts_endpoint_uses_nearest_eligible_baseline_once():
-    now = datetime.now(UTC)
-    latest = PredictionMarketIntradaySnapshot(
-        source="polymarket",
-        source_id="p-1",
-        question="Will CPI be above 3.0%?",
-        category="economic",
-        url=None,
-        yes_price=0.6,
-        volume=None,
-        liquidity=None,
-        captured_at=now,
-    )
-    nearest = PredictionMarketIntradaySnapshot(
-        source="polymarket",
-        source_id="p-1",
-        question="Will CPI be above 3.0%?",
-        category="economic",
-        url=None,
-        yes_price=0.5,
-        volume=None,
-        liquidity=None,
-        captured_at=now - timedelta(hours=1),
-    )
-    older = PredictionMarketIntradaySnapshot(
-        source="polymarket",
-        source_id="p-1",
-        question="Will CPI be above 3.0%?",
-        category="economic",
-        url=None,
-        yes_price=0.2,
-        volume=None,
-        liquidity=None,
-        captured_at=now - timedelta(hours=2),
-    )
-
-    class _Result:
-        def __init__(self, rows):
-            self._rows = rows
-
-        def scalars(self):
-            return SimpleNamespace(all=lambda: self._rows)
-
-    results = [[latest], [nearest, older]]
-    index = 0
-
-    async def fake_execute(_stmt):
-        nonlocal index
-        result = results[index]
-        index += 1
-        return _Result(result)
-
-    response = await router.list_prediction_market_alerts(
-        window_hours=1,
-        min_movement_bps=10,
-        limit=10,
-        db=SimpleNamespace(execute=fake_execute),
-    )
-
-    assert response.count == 1
-    assert response.alerts[0].previous_yes_price == pytest.approx(0.5)
-    assert response.alerts[0].movement == pytest.approx(0.1)
+    inactive = (await client.get("/api/v1/prediction-markets", params={"active": "false", "limit": 1})).json()
+    assert [row["source_id"] for row in inactive["data"]] == ["archived-closed"]
+    all_rows = (await client.get("/api/v1/prediction-markets", params={"limit": 2})).json()
+    assert [row["source_id"] for row in all_rows["data"]] == ["archived-closed", "live-closed"]
+    active = (await client.get("/api/v1/prediction-markets", params={"active": "true"})).json()
+    assert active["data"] == []
 
 
 @pytest.mark.asyncio

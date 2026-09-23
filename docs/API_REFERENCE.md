@@ -33,6 +33,7 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 ### Equity
 - `GET /equity/historical`
 - `GET /equity/{symbol}/quote`
+
 - `GET /equity/{symbol}/profile`
 - `GET /equity/{symbol}/news`
 - `GET /equity/{symbol}/events`
@@ -57,15 +58,20 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 - `GET /equity/{symbol}/ttm` (V50)
 - `GET /equity/{symbol}/growth` (V50)
 
+Quote responses distinguish unavailable data from zero-valued prices. An invalid symbol or a provider failure without a stored quote returns `data: null` with an error; a stored fallback retains its market timestamp and reports the live-source failure. Consumers must not turn `null` into a fabricated zero trade.
+
 ### Comparison / Screener / Sector
 - `GET /comparison/performance`
 - `GET /comparison`
 - `GET /comparison/{symbols}` (path alias for symbols CSV)
 - `GET /screener/`
 - `GET /screener` (no-trailing-slash compatibility route)
+
 - `GET /sectors`
 - `GET /sectors/{sector}/stocks` (V50)
 - `GET /sectors/top-movers`
+
+Screener responses include `meta.availability`, `meta.screen_scope`, cache/fallback staleness and matched-count metadata. An unavailable provider without a verified fallback returns `data: []`, `meta.availability: "unavailable"` and an error; a successful zero-match screen remains available. Whole-Universe reads require a completed daily symbol-coverage record; symbol-specific reads may still return an unverified row.
 
 ### Market
 - `GET /market/indices`
@@ -75,7 +81,11 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 - `GET /market/top-movers`
 - `GET /market/sector-performance`
 - `GET /market/heatmap`
+- `GET /market/breadth`
+
 - `GET /market/research/rss-feed`
+
+Heatmap responses separate `price_updated_at` from `constituents_as_of`, and return `constituents_stale`, `cached` and `partial`; a fresh price does not prove the constituent partition current. A request-limited live provider response is marked partial. Breadth requires a verified screener Universe; without one it returns an error instead of treating a partial day as the whole market.
 
 ### News
 - `GET /news/feed`
@@ -130,7 +140,7 @@ Market data notes:
 - `GET /prediction-markets/estimate/macro`
 
 Prediction markets notes:
-- Returns persisted external prediction-market contracts (Polymarket, Kalshi, etc.) from the `prediction_markets` table, shaped as `{ "count": <int>, "data": [...] }`.
+- Returns persisted external prediction-market contracts (Polymarket, Kalshi, etc.) from bounded live and, for non-active reads, archived market rows, shaped as `{ "count": <int>, "data": [...] }`. The `prediction_market_archive` migration must be applied before deploying this API. Terminal-market archiving is an operator-only dry-run-by-default maintenance action; it is not an automatic API cleanup.
 - Filters: `source` (lowercase slug, e.g. `polymarket` or `kalshi`), `active` (bool), `category` (case-insensitive alias such as `economic`, `sports`, `politics`, `general`), `limit` (1-200, default 50).
 - Ordered by nearest `end_date` first (open-ended contracts last), then `id`.
 - Returns an empty `{ "count": 0, "data": [] }` (not a 500) when the table is absent, so the endpoint is safe to call before the migration is applied.

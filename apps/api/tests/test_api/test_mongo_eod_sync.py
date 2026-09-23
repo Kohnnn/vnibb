@@ -1,10 +1,4 @@
-"""Unit tests for the daily-freshness remediation (2026-06-09).
-
-Covers the new canonical-Mongo wiring:
-- mongo_eod_sync frame normalization + run loop (mocked fetcher/service)
-- MongoMarketDataService.bulk_upsert_eod_prices document shape (mocked pymongo)
-- market.py screener-universe staleness helpers
-"""
+"""Mongo EOD sync and date-coercion contracts."""
 
 from datetime import date, datetime
 
@@ -14,7 +8,6 @@ import pytest
 from vnibb.api.v1.market import (
     _coerce_to_date,
     _expected_latest_trading_day,
-    _freshest_snapshot_date,
 )
 from vnibb.services import mongo_eod_sync
 
@@ -260,17 +253,6 @@ def test_coerce_to_date_variants():
     assert _coerce_to_date("2026-06-05") == date(2026, 6, 5)
     assert _coerce_to_date(None) is None
     assert _coerce_to_date("not-a-date") is None
-
-
-def test_freshest_snapshot_date_picks_max():
-    rows = [
-        {"snapshot_date": date(2026, 6, 3)},
-        {"snapshot_date": "2026-06-05"},
-        {"snapshot_date": None},
-    ]
-    assert _freshest_snapshot_date(rows) == date(2026, 6, 5)
-    assert _freshest_snapshot_date([]) is None
-
 
 # ---------------------------------------------------------------------------
 # _dedup_eod_rows source-preference dedup

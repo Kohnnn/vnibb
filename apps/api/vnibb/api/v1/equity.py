@@ -2011,13 +2011,6 @@ async def _load_quote_from_price_cache(symbol: str) -> Optional[StockQuoteData]:
     )
 
 
-def _normalize_symbol_input(symbol: str) -> str:
-    raw = (symbol or "").strip().upper()
-    if not raw:
-        return ""
-
-    tokens = [token for token in re.split(r"[^A-Z0-9]+", raw) if token]
-    return tokens[0] if tokens else raw
 
 
 def _serialize_analysis_section(value: Any) -> Any:
@@ -4639,7 +4632,7 @@ async def get_historical_prices(
 
 
 
-@router.get("/{symbol}/quote", response_model=StandardResponse[StockQuoteData])
+@router.get("/{symbol}/quote", response_model=StandardResponse[Optional[StockQuoteData]])
 @cached(ttl=30, key_prefix="quote")
 async def get_quote(
     symbol: str,
@@ -4647,21 +4640,12 @@ async def get_quote(
     refresh: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ):
-    symbol_upper = _normalize_symbol_input(symbol)
+    symbol_upper = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{3}", symbol_upper):
-        logger.warning(f"Rejected invalid quote symbol: '{symbol}' -> '{symbol_upper}'")
+        logger.warning("Rejected invalid quote symbol: %r", symbol)
         return StandardResponse(
-            data=StockQuoteData(
-                symbol=symbol_upper or symbol.upper(),
-                price=0,
-                change=0,
-                change_pct=0,
-                high=0,
-                low=0,
-                open=0,
-                volume=0,
-                updated_at=datetime.utcnow(),
-            ),
+            data=None,
+            meta=MetaData(count=0),
             error="Invalid symbol format. Expected a 3-character ticker.",
         )
 
@@ -4671,9 +4655,8 @@ async def get_quote(
 
         Mongo only carries settled EOD bars, so this is used as a fallback when
         Postgres `StockPrice` is empty/unavailable and as a last resort before
-        the empty/mock quote — never to override a fresher intraday Postgres or
-        live value. The caller decides freshness; this just returns the latest
-        two-bar-derived quote if Mongo has data.
+        returning an unavailable quote. The caller decides freshness; this
+        returns the latest two-bar-derived quote if Mongo has data.
         """
         try:
             mongo = get_mongo_market_data_service()
@@ -4705,7 +4688,7 @@ async def get_quote(
             else None
         )
         trade_date = latest.get("tradeDate")
-        updated_at = trade_date if isinstance(trade_date, datetime) else datetime.utcnow()
+        updated_at = _coerce_meta_datetime(trade_date)
         return StockQuoteData(
             symbol=symbol_upper,
             price=latest_close,
@@ -4771,7 +4754,7 @@ async def get_quote(
             if snapshot_is_fresher and snapshot_row and snapshot_row.price is not None:
                 return _build_quote_from_screener_snapshot(snapshot_row, latest_row, previous_row)
 
-            if latest_row:
+            if latest_row and latest_close is not None:
                 return StockQuoteData(
                     symbol=symbol_upper,
                     price=latest_close,
@@ -4782,7 +4765,11 @@ async def get_quote(
                     change=db_change,
                     change_pct=round(db_change_pct, 2) if db_change_pct is not None else None,
                     volume=int(latest_row.volume) if latest_row.volume is not None else None,
-                    updated_at=datetime.utcnow(),
+                    updated_at=(
+                        datetime.combine(latest_row.time, datetime.min.time())
+                        if latest_row.time
+                        else None
+                    ),
                 )
 
             if snapshot_row and snapshot_row.price is not None:
@@ -4824,30 +4811,31 @@ async def get_quote(
         screener_quote = await _get_screener_snapshot_quote()
         if _should_prefer_screener_quote(data, screener_quote):
             data = screener_quote
+        if data.price is None:
+            raise ValueError("Quote price unavailable from provider")
         return StandardResponse(data=data, meta=MetaData(count=1))
-    except Exception as e:
+    except Exception:
+        logger.warning("Live quote failed for %s", symbol_upper, exc_info=True)
         fallback = await _get_db_quote()
         if fallback:
-            return StandardResponse(data=fallback, meta=MetaData(count=1), error=str(e))
+            return StandardResponse(
+                data=fallback,
+                meta=MetaData(count=1),
+                error="Live quote unavailable; showing stored price.",
+            )
 
         mongo_fallback = await _get_mongo_quote()
         if mongo_fallback:
-            return StandardResponse(data=mongo_fallback, meta=MetaData(count=1), error=str(e))
+            return StandardResponse(
+                data=mongo_fallback,
+                meta=MetaData(count=1),
+                error="Live quote unavailable; showing stored price.",
+            )
 
-        # Return mock/empty quote structure to keep UI alive
         return StandardResponse(
-            data=StockQuoteData(
-                symbol=symbol_upper,
-                price=0,
-                change=0,
-                change_pct=0,
-                high=0,
-                low=0,
-                open=0,
-                volume=0,
-                updated_at=datetime.utcnow(),
-            ),
-            error=str(e),
+            data=None,
+            meta=MetaData(count=0),
+            error="Quote unavailable.",
         )
 
 

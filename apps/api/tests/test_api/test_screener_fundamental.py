@@ -418,6 +418,40 @@ async def test_screener_default_skips_fundamental_enrichment(client, monkeypatch
     assert response.json()["data"][0]["symbol"] == "VNM"
 
 
+@pytest.mark.parametrize("failure", ["provider", "unexpected"])
+@pytest.mark.asyncio
+async def test_screener_outage_without_cache_is_unavailable(client, monkeypatch, failure):
+    async def failed_fetch(_params):
+        if failure == "provider":
+            return []
+        raise RuntimeError("upstream failure")
+
+    monkeypatch.setattr(screener_module.VnstockScreenerFetcher, "fetch", failed_fetch)
+
+    response = await client.get("/api/v1/screener/?use_cache=false")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"] == []
+    assert body["meta"]["availability"] == "unavailable"
+    assert body["error"]
+
+
+@pytest.mark.asyncio
+async def test_screener_valid_zero_matches_remains_available(client, monkeypatch):
+    async def fetch(_params):
+        return [_row("VNM", exchange="HOSE")]
+
+    monkeypatch.setattr(screener_module.VnstockScreenerFetcher, "fetch", fetch)
+
+    response = await client.get("/api/v1/screener/?use_cache=false&exchange=HNX")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"] == []
+    assert body["meta"]["availability"] == "available"
+    assert body["error"] is None
+
 @pytest.mark.parametrize("query", ["include_fundamental=true", "fcf_positive=true"])
 @pytest.mark.asyncio
 async def test_screener_enriches_fundamentals_when_requested(client, monkeypatch, query):
@@ -462,23 +496,58 @@ _NESTED_MOAT_BLOB = json.dumps(
 
 
 async def _seed_screener_snapshots(session, symbols: list[str]) -> None:
-    """Populate the Screener Snapshot so cache-path requests get a Candidate Set."""
-    from datetime import date as _date
+    """Commit an entire scheduled Snapshot partition for cached screens."""
+    from datetime import datetime
 
     from vnibb.models.screener import ScreenerSnapshot
+    from vnibb.models.sync_status import SyncStatus
 
-    for sym in symbols:
+    today = datetime.utcnow().date()
+    expected_symbols = sorted(set(symbols))
+    for sym in expected_symbols:
         session.add(
             ScreenerSnapshot(
                 symbol=sym,
-                snapshot_date=_date.today(),
+                snapshot_date=today,
                 exchange="HOSE",
                 price=10000.0,
                 pe=10.0,
                 source="vnstock_ratio",
             )
         )
+    session.add(
+        SyncStatus(
+            sync_type="screener_universe",
+            status="completed",
+            completed_at=datetime.utcnow(),
+            success_count=len(expected_symbols),
+            error_count=0,
+            additional_data={
+                "snapshot_date": today.isoformat(),
+                "expected_symbols": expected_symbols,
+                "expected_count": len(expected_symbols),
+            },
+        )
+    )
     await session.commit()
+
+@pytest.mark.asyncio
+async def test_screener_provider_outage_serves_cached_symbol(client, monkeypatch, test_db):
+    await _seed_screener_snapshots(test_db, ["VNM"])
+
+    async def failed_fetch(_params):
+        return []
+
+    monkeypatch.setattr(screener_module.VnstockScreenerFetcher, "fetch", failed_fetch)
+
+    response = await client.get("/api/v1/screener/?symbol=VNM&refresh=true")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [row["symbol"] for row in body["data"]] == ["VNM"]
+    assert body["meta"]["availability"] == "available"
+    assert body["meta"]["fallback"] is True
+    assert body["error"] is None
 
 
 @pytest.mark.asyncio

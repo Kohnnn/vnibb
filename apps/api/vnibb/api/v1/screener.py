@@ -150,6 +150,7 @@ def _build_screener_meta(
         candidate_count=candidate_count,
         matched_count=matched_count if matched_count is not None else len(rows),
         screen_scope="page" if page_scoped else "universe",
+        availability="available",
         fundamental_enrichment=fundamental_enrichment,
         **(discovery_meta or {}),
     )
@@ -1952,82 +1953,71 @@ async def get_screener(
             page_scoped=True,
         )
 
-    except (ProviderTimeoutError, ProviderError, ProviderRateLimitError) as e:
-        if use_cache:
-            cache_result = await cache_manager.get_screener_data(
-                symbol=symbol, source=source, allow_stale=True
-            )
-            if cache_result.hit and cache_result.data:
-                data, discovery_meta, candidate_count, matched_count, page_scoped = await _prepare_cached_screener_rows(
-                    cache_result.data,
-                    db,
-                    limit=limit,
-                    universe=universe,
-                    exchange=exchange,
-                    industry=industry,
-                    filters=filters,
-                    sort=sort,
-                    pe_min=pe_min,
-                    pe_max=pe_max,
-                    pb_min=pb_min,
-                    pb_max=pb_max,
-                    ps_min=ps_min,
-                    ps_max=ps_max,
-                    roe_min=roe_min,
-                    roa_min=roa_min,
-                    debt_to_equity_max=debt_to_equity_max,
-                    market_cap_min=market_cap_min,
-                    market_cap_max=market_cap_max,
-                    volume_min=volume_min,
-                    sort_by=sort_by,
-                    sort_order=sort_order,
-                    as_of_date=as_of_date,
-                    min_listing_age_days=min_listing_age_days,
-                    target_upside_min=target_upside_min,
-                    enrich=_enrich,
-                    fundamental_filter=_fundamental_filter,
-                    needs_fundamental_enrichment=needs_fundamental_enrichment,
-                )
-                return await _respond(
-                    data,
-                    cached=True,
-                    stale=cache_result.is_stale,
-                    fallback=True,
-                    cached_at=cache_result.cached_at,
-                    discovery_meta=discovery_meta,
-                    candidate_count=candidate_count,
-                    matched_count=matched_count,
-                    page_scoped=page_scoped,
-                )
-
-        # Final fallback: return empty results with user-friendly message
-        # This prevents 502 errors and provides better UX.
-        # An empty screen is exactly the case that must not be mistaken for
-        # "nothing matched", so it carries the degraded markers too.
-        logger.warning(f"Screener request failed, returning empty results: {e}")
-        return StandardResponse(
-            data=[],
-            meta=MetaData(
-                count=0,
-                message="No data available. Please try again later or check your connection.",
-                screen_scope="page",
-                candidate_count=0,
-                matched_count=0,
-                fundamental_enrichment=enrichment_outcome,
-            ),
-        )
-
     except Exception as e:
-        # Catch-all for unexpected errors
-        logger.error(f"Unexpected screener error: {e}")
+        if use_cache:
+            try:
+                cache_result = await cache_manager.get_screener_data(
+                    symbol=symbol, source=source, allow_stale=True
+                )
+                if cache_result.hit and cache_result.data:
+                    try:
+                        data, discovery_meta, candidate_count, matched_count, page_scoped = await _prepare_cached_screener_rows(
+                            cache_result.data,
+                            db,
+                            limit=limit,
+                            universe=universe,
+                            exchange=exchange,
+                            industry=industry,
+                            filters=filters,
+                            sort=sort,
+                            pe_min=pe_min,
+                            pe_max=pe_max,
+                            pb_min=pb_min,
+                            pb_max=pb_max,
+                            ps_min=ps_min,
+                            ps_max=ps_max,
+                            roe_min=roe_min,
+                            roa_min=roa_min,
+                            debt_to_equity_max=debt_to_equity_max,
+                            market_cap_min=market_cap_min,
+                            market_cap_max=market_cap_max,
+                            volume_min=volume_min,
+                            sort_by=sort_by,
+                            sort_order=sort_order,
+                            as_of_date=as_of_date,
+                            min_listing_age_days=min_listing_age_days,
+                            target_upside_min=target_upside_min,
+                            enrich=_enrich,
+                            fundamental_filter=_fundamental_filter,
+                            needs_fundamental_enrichment=needs_fundamental_enrichment,
+                        )
+                    except Exception:
+                        logger.exception("Screener fallback cache preparation failed")
+                    else:
+                        return await _respond(
+                            data,
+                            cached=True,
+                            stale=cache_result.is_stale,
+                            fallback=True,
+                            cached_at=cache_result.cached_at,
+                            discovery_meta=discovery_meta,
+                            candidate_count=candidate_count,
+                            matched_count=matched_count,
+                            page_scoped=page_scoped,
+                        )
+
+            except Exception:
+                logger.exception("Screener fallback cache lookup failed")
+
+        logger.warning("Screener request failed without cached data: %s", e)
         return StandardResponse(
             data=[],
+            error="Screener data is temporarily unavailable. Please try again.",
             meta=MetaData(
                 count=0,
-                message="An error occurred. Please try again.",
+                message="Screener data is temporarily unavailable. Please try again.",
+                availability="unavailable",
                 screen_scope="page",
-                candidate_count=0,
-                matched_count=0,
                 fundamental_enrichment=enrichment_outcome,
             ),
         )

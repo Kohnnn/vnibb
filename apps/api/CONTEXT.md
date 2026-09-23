@@ -30,6 +30,18 @@ _Avoid_: coverage, completeness, depth
 One symbol's screener row for one day, materialized in Postgres by the daily sync. Collectively, the Universe as the api knows it.
 _Avoid_: cache entry, cached row
 
+**Verified Universe Snapshot**:
+A day's Screener Snapshots whose symbol set matches the completed daily full-Universe run. A partial run or a collection of rows without that completion record is not a Verified Universe Snapshot, even if the rows have recent write timestamps.
+_Avoid_: complete cache, latest rows
+
+**Market Trade Date**:
+The date of the market observation represented by a price or screener row, distinct from the day it was materialized and the time it was written. Unknown provenance remains unknown; a recent write does not make an old market observation current.
+_Avoid_: refresh time, write date
+
+**Constituent Date**:
+The oldest known date among the included heatmap constituents. It can lag the freshest price date; missing constituent dates do not certify a fresh heatmap.
+_Avoid_: heatmap update time
+
 **Fundamental Snapshot**:
 One symbol's computed valuation record for one day, held in Mongo and rebuilt on its own cadence. Independent of the Screener Snapshot and carrying its own as-of date.
 _Avoid_: fundamentals cache, valuation cache

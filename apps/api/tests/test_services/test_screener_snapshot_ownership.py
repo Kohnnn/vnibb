@@ -19,6 +19,7 @@ import pytest
 from sqlalchemy import select
 
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.sync_status import SyncStatus
 from vnibb.services.cache_manager import CacheManager
 
 # The writer keys snapshots to the UTC day (`datetime.utcnow().date()`); the
@@ -165,7 +166,7 @@ async def test_freshness_tracks_trade_date_not_write_time(test_db):
     await test_db.commit()
 
     manager = CacheManager(db=test_db)
-    result = await manager.get_screener_data(allow_stale=True)
+    result = await manager.get_screener_data(symbol="VNM", allow_stale=True)
 
     assert result.hit is True
     assert result.is_stale is True
@@ -180,7 +181,107 @@ async def test_current_trade_date_is_not_reported_stale_on_a_fresh_rewrite(test_
     await test_db.commit()
 
     manager = CacheManager(db=test_db)
-    result = await manager.get_screener_data(allow_stale=True)
+    result = await manager.get_screener_data(symbol="VNM", allow_stale=True)
 
     assert result.hit is True
     assert result.is_stale is False
+
+
+def _verified_run(snapshot_date: date, symbols: list[str]) -> SyncStatus:
+    return SyncStatus(
+        sync_type="screener_universe",
+        status="completed",
+        completed_at=datetime.combine(snapshot_date, datetime.min.time()),
+        error_count=0,
+        additional_data={
+            "snapshot_date": snapshot_date.isoformat(),
+            "expected_symbols": sorted(symbols),
+            "expected_count": len(symbols),
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_partial_latest_day_uses_previous_verified_universe(test_db):
+    yesterday = TODAY - timedelta(days=1)
+    test_db.add_all([
+        _row("AAA", snapshot_date=yesterday, source="KBS", trade_date=yesterday),
+        _row("BBB", snapshot_date=yesterday, source="vnstock", trade_date=yesterday),
+        _row("AAA", source="KBS", trade_date=TODAY),
+        _verified_run(yesterday, ["AAA", "BBB"]),
+    ])
+    await test_db.commit()
+
+    result = await CacheManager(db=test_db).get_screener_data(source="KBS")
+    assert result.hit is True
+    assert {row.symbol for row in result.data} == {"AAA", "BBB"}
+    assert {row.snapshot_date for row in result.data} == {yesterday}
+    assert result.is_stale is True
+
+    symbol_result = await CacheManager(db=test_db).get_screener_data(symbol="AAA", source="KBS")
+    assert symbol_result.hit is True
+    assert symbol_result.data[0].snapshot_date == TODAY
+    assert symbol_result.is_stale is False
+
+
+@pytest.mark.asyncio
+async def test_unverified_latest_day_cannot_claim_universe_even_if_fresh(test_db):
+    test_db.add_all([_row("AAA", source="KBS", trade_date=TODAY), _row("BBB", source="KBS")])
+    await test_db.commit()
+
+    result = await CacheManager(db=test_db).get_screener_data(source="KBS")
+    assert result.hit is False
+    assert result.data is None
+
+
+@pytest.mark.asyncio
+async def test_verified_day_requires_every_expected_symbol_and_then_serves_all(test_db):
+    test_db.add_all([
+        _row("AAA", source="KBS", trade_date=TODAY),
+        _verified_run(TODAY, ["AAA", "BBB"]),
+    ])
+    await test_db.commit()
+    manager = CacheManager(db=test_db)
+    assert (await manager.get_screener_data()).hit is False
+
+    test_db.add_all([
+        _row("BBB", source="vnstock", trade_date=TODAY),
+        _row("CCC", source="live_request", trade_date=TODAY),
+    ])
+    await test_db.commit()
+    result = await manager.get_screener_data(source="KBS", allow_stale=False)
+    assert result.hit is True
+    assert {row.symbol for row in result.data} == {"AAA", "BBB"}
+    assert result.is_stale is False
+
+
+@pytest.mark.asyncio
+async def test_newer_partial_run_does_not_override_last_verified_day(test_db):
+    yesterday = TODAY - timedelta(days=1)
+    test_db.add_all([
+        _row("AAA", snapshot_date=yesterday, trade_date=yesterday),
+        _row("BBB", snapshot_date=yesterday, trade_date=yesterday),
+        _row("AAA", trade_date=TODAY),
+        _verified_run(yesterday, ["AAA", "BBB"]),
+        _verified_run(TODAY, ["AAA", "BBB"]),
+    ])
+    await test_db.commit()
+
+    result = await CacheManager(db=test_db).get_screener_data(source=None)
+    assert result.hit is True
+    assert {row.snapshot_date for row in result.data} == {yesterday}
+    assert result.is_stale is True
+
+
+@pytest.mark.asyncio
+async def test_oldest_trade_date_keeps_universe_stale(test_db):
+    test_db.add_all([
+        _row("AAA", trade_date=TODAY),
+        _row("BBB", trade_date=TODAY - timedelta(days=2)),
+        _verified_run(TODAY, ["AAA", "BBB"]),
+    ])
+    await test_db.commit()
+
+    result = await CacheManager(db=test_db).get_screener_data(source=None)
+    assert result.hit is True
+    assert result.is_stale is True

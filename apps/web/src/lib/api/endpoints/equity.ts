@@ -47,9 +47,10 @@ export interface QuoteData {
 }
 
 export interface QuoteResponse {
-    symbol: string;
-    data: QuoteData;
-    cached: boolean;
+    symbol?: string;
+    data: QuoteData | null;
+    cached?: boolean;
+    error?: string | null;
 }
 
 export async function getHistoricalPrices(

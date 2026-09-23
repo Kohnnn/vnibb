@@ -81,7 +81,7 @@ async def test_cache_freshness_prefers_trade_date(test_db: AsyncSession):
     await test_db.commit()
 
     result = await CacheManager(db=test_db).get_screener_data(
-        source="KBS", allow_stale=True
+        symbol="VNM", source="KBS", allow_stale=True
     )
 
     assert result.hit is True
@@ -102,7 +102,7 @@ async def test_cache_freshness_falls_back_for_legacy_rows(test_db: AsyncSession)
     await test_db.commit()
 
     result = await CacheManager(db=test_db).get_screener_data(
-        source="KBS", allow_stale=True
+        symbol="VNM", source="KBS", allow_stale=True
     )
 
     assert result.hit is True

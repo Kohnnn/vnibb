@@ -280,7 +280,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                         staleTime: 30 * 1000,
                     });
 
-                    if (quote.price) {
+                    if (quote.price !== null) {
                         handlePriceUpdate(symbol, quote.price);
                     }
                 } catch (error) {

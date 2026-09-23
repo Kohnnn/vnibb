@@ -14,10 +14,16 @@ Jobs:
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from vnibb.core.config import settings
+from vnibb.core.database import async_session_factory
 from vnibb.core.scheduler_lock import DistributedJobLock
+from vnibb.models.scheduler_state import SchedulerJobState, SchedulerWorkerState
 
 logger = logging.getLogger(__name__)
 
@@ -25,27 +31,111 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 _job_guards: dict[str, asyncio.Lock] = {}
 _scheduler_missed_runs = 0
-# Per-job outcome counters. `_scheduler_missed_runs` alone only counts APScheduler
-# misfires; it says nothing about a job that ran and FAILED, nor about one that
-# was silently skipped because a lock was held. That gap is why the seven-day
-# intraday outage was invisible: the job kept being scheduled and kept returning
-# without error, so nothing surfaced. Keyed by job name.
-_job_outcomes: dict[str, dict[str, object]] = {}
 
 
-def _record_job_outcome(job_name: str, outcome: str, detail: str = "") -> None:
-    """Record the most recent outcome for a job (ok / failed / timeout / skipped)."""
-    entry = _job_outcomes.setdefault(
-        job_name,
-        {"last_outcome": None, "consecutive_failures": 0, "last_detail": "", "last_at": None},
-    )
-    entry["last_outcome"] = outcome
-    entry["last_detail"] = detail[:300]
-    entry["last_at"] = datetime.utcnow().isoformat()
-    if outcome in {"failed", "timeout"}:
-        entry["consecutive_failures"] = int(entry["consecutive_failures"] or 0) + 1
-    else:
-        entry["consecutive_failures"] = 0
+def _insert_for(session, model):
+    dialect = session.get_bind().dialect.name
+    if dialect == "postgresql":
+        return pg_insert(model)
+    if dialect == "sqlite":
+        return sqlite_insert(model)
+    raise RuntimeError(f"Unsupported scheduler state dialect: {dialect}")
+
+
+async def _record_job_outcome(job_name: str, outcome: str, detail: str = "") -> None:
+    """Persist a sanitized outcome without sharing the job's transaction."""
+    observed_at = datetime.utcnow()
+    try:
+        async with asyncio.timeout(5):
+            async with async_session_factory() as session:
+                async with session.begin():
+                    insert = _insert_for(session, SchedulerJobState).values(
+                        id=job_name, last_outcome=outcome, last_detail=detail[:128],
+                        last_at=observed_at, consecutive_failures=int(outcome in {"failed", "timeout"}),
+                    )
+                    previous = SchedulerJobState.__table__
+                    await session.execute(insert.on_conflict_do_update(
+                        index_elements=["id"],
+                        set_={
+                            "last_outcome": outcome,
+                            "last_detail": detail[:128],
+                            "last_at": observed_at,
+                            "consecutive_failures": (
+                                previous.c.consecutive_failures + 1
+                                if outcome in {"failed", "timeout"} else 0
+                            ),
+                        },
+                        where=(previous.c.last_at.is_(None) | (previous.c.last_at <= observed_at)),
+                    ))
+    except Exception:
+        logger.exception("Could not persist %s scheduler outcome", job_name)
+
+
+async def _publish_scheduler_state(running: bool = True) -> None:
+    """Publish next-run times and liveness from the worker, never the API process."""
+    scheduler = get_scheduler()
+    try:
+        async with asyncio.timeout(5):
+            async with async_session_factory() as session:
+                async with session.begin():
+                    scheduled_ids = []
+                    if running:
+                        for job in scheduler.get_jobs():
+                            if job.id == "scheduler_state_heartbeat":
+                                continue
+                            scheduled_ids.append(job.id)
+                            next_run = job.next_run_time
+                            insert = _insert_for(session, SchedulerJobState).values(
+                                id=job.id, name=job.name, trigger=str(job.trigger)[:256],
+                                next_run=next_run.astimezone(UTC).replace(tzinfo=None)
+                                if next_run else None,
+                                consecutive_failures=0,
+                            )
+                            await session.execute(insert.on_conflict_do_update(
+                                index_elements=["id"],
+                                set_={"name": insert.excluded.name,
+                                      "trigger": insert.excluded.trigger,
+                                      "next_run": insert.excluded.next_run},
+                            ))
+                        await session.execute(update(SchedulerJobState).where(
+                            SchedulerJobState.id.not_in(scheduled_ids)
+                        ).values(next_run=None))
+                    heartbeat = _insert_for(session, SchedulerWorkerState).values(
+                        id=1, heartbeat_at=datetime.utcnow(), running=running,
+                        missed_runs=_scheduler_missed_runs,
+                    )
+                    await session.execute(heartbeat.on_conflict_do_update(
+                        index_elements=["id"],
+                        set_={"heartbeat_at": heartbeat.excluded.heartbeat_at,
+                              "running": heartbeat.excluded.running,
+                              "missed_runs": heartbeat.excluded.missed_runs},
+                    ))
+    except Exception:
+        logger.exception("Could not persist scheduler heartbeat")
+
+
+async def get_job_status(session) -> dict:
+    """Read the worker's durable status, including a stale heartbeat."""
+    heartbeat = await session.get(SchedulerWorkerState, 1)
+    rows = (await session.scalars(select(SchedulerJobState).order_by(SchedulerJobState.id))).all()
+    stale = (heartbeat is None or not rows or
+             (datetime.utcnow() - heartbeat.heartbeat_at).total_seconds() > 90)
+    jobs = [{
+        "id": row.id, "name": row.name, "trigger": row.trigger,
+        "next_run": row.next_run.isoformat() + "Z" if row.next_run else None,
+        "last_outcome": row.last_outcome, "last_detail": row.last_detail,
+        "last_at": row.last_at.isoformat() + "Z" if row.last_at else None,
+        "consecutive_failures": row.consecutive_failures,
+    } for row in rows]
+    return {
+        "running": bool(heartbeat and heartbeat.running and not stale),
+        "worker_status": "unavailable" if stale or not heartbeat.running else "running",
+        "worker_heartbeat": heartbeat.heartbeat_at.isoformat() + "Z" if heartbeat else None,
+        "jobs": jobs,
+        "missed_runs": heartbeat.missed_runs if heartbeat else None,
+        "failing_jobs": {row["id"]: row for row in jobs
+                         if row["last_outcome"] in {"failed", "timeout"}},
+    }
 
 DAILY_SYNC_TIMEOUT_SECONDS = 2 * 60 * 60
 DAILY_TRADING_TIMEOUT_SECONDS = 2 * 60 * 60
@@ -146,7 +236,7 @@ async def _run_guarded_job(
 ) -> None:
     lock = _job_guards.setdefault(job_name, asyncio.Lock())
     if lock.locked():
-        _record_job_outcome(job_name, "skipped", "previous run still active")
+        await _record_job_outcome(job_name, "skipped", "previous run still active")
         logger.warning("Skipping %s because previous run is still active", job_name)
         return
 
@@ -154,11 +244,11 @@ async def _run_guarded_job(
         distributed_lock = DistributedJobLock(job_name, timeout_seconds)
         lock_state = await distributed_lock.acquire()
         if lock_state == "contended":
-            _record_job_outcome(job_name, "skipped", "another scheduler owns the lock")
+            await _record_job_outcome(job_name, "skipped", "another scheduler owns the lock")
             logger.warning("Skipping %s because another scheduler owns its lock", job_name)
             return
         if lock_state == "unavailable" and settings.scheduler_lock_mode == "required":
-            _record_job_outcome(job_name, "skipped", "required coordination unavailable")
+            await _record_job_outcome(job_name, "skipped", "required coordination unavailable")
             logger.error("Skipping %s because required scheduler coordination is unavailable", job_name)
             return
         if lock_state == "unavailable":
@@ -175,11 +265,11 @@ async def _run_guarded_job(
             else:
                 await guarded_runner
             elapsed = (datetime.utcnow() - started_at).total_seconds()
-            _record_job_outcome(job_name, "ok", f"completed in {elapsed:.1f}s")
+            await _record_job_outcome(job_name, "ok", f"completed in {elapsed:.1f}s")
             logger.info("%s completed in %.1fs", job_name, elapsed)
         except TimeoutError:
             elapsed = (datetime.utcnow() - started_at).total_seconds()
-            _record_job_outcome(
+            await _record_job_outcome(
                 job_name, "timeout", f"exceeded {timeout_seconds}s after {elapsed:.1f}s"
             )
             logger.error(
@@ -188,9 +278,12 @@ async def _run_guarded_job(
                 elapsed,
                 timeout_seconds,
             )
+        except asyncio.CancelledError:
+            await _record_job_outcome(job_name, "failed", "worker cancelled")
+            raise
         except Exception as exc:
             elapsed = (datetime.utcnow() - started_at).total_seconds()
-            _record_job_outcome(job_name, "failed", f"{type(exc).__name__}: {exc}")
+            await _record_job_outcome(job_name, "failed", type(exc).__name__)
             logger.error(
                 "%s failed after %.1fs: %s",
                 job_name,
@@ -703,10 +796,17 @@ def start_scheduler():
     """Start the scheduler."""
     scheduler = get_scheduler()
     configure_scheduler()
-    scheduler.start()
-    logger.info("Scheduler started with all jobs configured")
     _maybe_populate_prediction_markets_on_startup()
     schedule_retention_cleanup()
+    scheduler.add_job(
+        _publish_scheduler_state,
+        trigger="interval", seconds=30,
+        id="scheduler_state_heartbeat", name="Scheduler heartbeat",
+        replace_existing=True, max_instances=1,
+        next_run_time=datetime.now(UTC),
+    )
+    scheduler.start()
+    logger.info("Scheduler started with all jobs configured")
 
 
 def _maybe_populate_prediction_markets_on_startup() -> None:
@@ -803,41 +903,10 @@ async def shutdown_scheduler() -> bool:
     scheduler = get_scheduler()
     if scheduler.running:
         scheduler.shutdown(wait=realtime_stopped)
+        await _publish_scheduler_state(running=False)
         logger.info("Scheduler shutdown complete")
     return realtime_stopped
 
-
-def get_job_status() -> dict:
-    """Get status of all scheduled jobs."""
-    scheduler = get_scheduler()
-
-    jobs = []
-    for job in scheduler.get_jobs():
-        jobs.append(
-            {
-                "id": job.id,
-                "name": job.name,
-                "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
-                "trigger": str(job.trigger),
-                # Last observed outcome. A job that runs and silently fails, or
-                # is skipped because a lock is held, previously looked identical
-                # to one that never fired.
-                **_job_outcomes.get(job.id, {}),
-            }
-        )
-
-    failing = {
-        name: state
-        for name, state in _job_outcomes.items()
-        if str(state.get("last_outcome")) in {"failed", "timeout"}
-    }
-
-    return {
-        "running": scheduler.running,
-        "jobs": jobs,
-        "missed_runs": _scheduler_missed_runs,
-        "failing_jobs": failing,
-    }
 
 
 def trigger_job_now(job_id: str) -> bool:

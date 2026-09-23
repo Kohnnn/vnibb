@@ -190,6 +190,10 @@ class HeatmapResponse(BaseModel):
     sectors: List[SectorGroup]
     cached: bool = False
     updated_at: Optional[str] = None
+    price_updated_at: Optional[str] = None
+    constituents_as_of: Optional[str] = None
+    constituents_stale: bool = False
+    partial: bool = False
 
 
 class IndustryBubblePoint(BaseModel):
@@ -1155,6 +1159,8 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     if hasattr(item, "model_dump"):
         payload = item.model_dump(mode="json", by_alias=False)
+    elif isinstance(item, ScreenerSnapshot):
+        payload = vars(item)
     elif isinstance(item, dict):
         payload = item
 
@@ -1235,6 +1241,11 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
             payload.get("updated_at"),
             payload.get("snapshot_date"),
             payload.get("time"),
+        ),
+        "constituent_date": _first_non_none(
+            payload.get("trade_date"),
+            payload.get("tradeDate"),
+            payload.get("snapshot_date"),
         ),
     }
 
@@ -1358,12 +1369,7 @@ async def _load_stock_metadata(symbols: List[str]) -> Dict[str, Dict[str, Option
 
 
 async def _load_latest_price_time(symbols: List[str]) -> str | None:
-    """QA-v4 D.1: Return the freshest StockPrice.time across the given
-    symbols as an ISO date string. Used by the market heatmap to surface
-    a meaningful `updated_at` even when the daily screener cron is
-    behind. The price feed (`nightly_price_backfill`) is independent of
-    `ScreenerSnapshot.snapshot_date`, so it stays current.
-    """
+    """Return the freshest daily StockPrice time among the heatmap symbols."""
     unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
     if not unique_symbols:
         return None
@@ -1655,192 +1661,30 @@ def _coerce_to_date(value: Any) -> Optional[date]:
         return None
 
 
-def _freshest_snapshot_date(rows: Any) -> Optional[date]:
-    latest: Optional[date] = None
-    for row in rows:
-        candidate = _coerce_to_date(row.get("snapshot_date"))
-        if candidate is None:
-            continue
-        if latest is None or candidate > latest:
-            latest = candidate
-    return latest
-
-
 async def _load_latest_screener_rows_from_db(limit: int = 500) -> List[dict[str, Any]]:
-    async with async_session_maker() as session:
-        ranked_snapshots = select(
-            ScreenerSnapshot.symbol.label("symbol"),
-            ScreenerSnapshot.company_name.label("company_name"),
-            ScreenerSnapshot.exchange.label("exchange"),
-            ScreenerSnapshot.industry.label("industry"),
-            ScreenerSnapshot.price.label("price"),
-            ScreenerSnapshot.volume.label("volume"),
-            ScreenerSnapshot.market_cap.label("market_cap"),
-            ScreenerSnapshot.pe.label("pe"),
-            ScreenerSnapshot.pb.label("pb"),
-            ScreenerSnapshot.ps.label("ps"),
-            ScreenerSnapshot.roe.label("roe"),
-            ScreenerSnapshot.roa.label("roa"),
-            ScreenerSnapshot.roic.label("roic"),
-            ScreenerSnapshot.revenue_growth.label("revenue_growth"),
-            ScreenerSnapshot.earnings_growth.label("earnings_growth"),
-            ScreenerSnapshot.debt_to_equity.label("debt_to_equity"),
-            ScreenerSnapshot.snapshot_date.label("snapshot_date"),
-            func.row_number()
-            .over(
-                partition_by=ScreenerSnapshot.symbol,
-                order_by=(
-                    ScreenerSnapshot.snapshot_date.desc(),
-                    ScreenerSnapshot.created_at.desc(),
-                ),
-            )
-            .label("rn"),
-        ).subquery()
-
-        rows = (
-            (
-                await session.execute(
-                    select(ranked_snapshots)
-                    .where(ranked_snapshots.c.rn == 1)
-                    .order_by(ranked_snapshots.c.market_cap.desc().nullslast())
-                    .limit(limit)
-                )
-            )
-            .mappings()
-            .all()
-        )
-
-    normalized_rows: List[dict[str, Any]] = []
-    for row in rows:
-        normalized_rows.append(
-            _normalize_screener_row(
-                {
-                    "symbol": row.get("symbol"),
-                    "company_name": row.get("company_name"),
-                    "exchange": row.get("exchange"),
-                    "industry_name": row.get("industry"),
-                    "price": row.get("price"),
-                    "volume": row.get("volume"),
-                    "market_cap": row.get("market_cap"),
-                    "pe": row.get("pe"),
-                    "pb": row.get("pb"),
-                    "ps": row.get("ps"),
-                    "roe": row.get("roe"),
-                    "roa": row.get("roa"),
-                    "roic": row.get("roic"),
-                    "revenue_growth": row.get("revenue_growth"),
-                    "earnings_growth": row.get("earnings_growth"),
-                    "debt_to_equity": row.get("debt_to_equity"),
-                    "snapshot_date": row.get("snapshot_date"),
-                }
-            )
-        )
-    normalized_rows = [row for row in normalized_rows if row.get("symbol")]
-
-    # RC-2 (2026-06-08) + staleness upgrade (2026-06-09): the canonical price
-    # corpus is Mongo `market_prices_eod`, advanced daily by the `mongo_eod_sync`
-    # scheduler job. The Postgres ScreenerSnapshot universe can fall behind (the
-    # screener cron lagging or only writing a partial set), which previously left
-    # heatmap/breadth/money-flow serving stale-but-nonempty rows because the Mongo
-    # fallback only fired when Postgres was *empty*. Now we also consult Mongo when
-    # the freshest snapshot predates the latest expected trading day. To avoid ever
-    # downgrading good data, Mongo only *replaces* the Postgres universe when its
-    # latest trade date is strictly newer.
-    snapshot_date = _freshest_snapshot_date(rows)
-    expected_day = _expected_latest_trading_day()
-    is_stale = snapshot_date is None or snapshot_date < expected_day
-
-    if not normalized_rows or is_stale:
-        try:
-            service = get_mongo_market_data_service()
-            mongo_latest = await service.get_universe_latest_trade_date()
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Mongo latest-date probe failed: %s", exc)
-            mongo_latest = None
-
-        mongo_is_fresher = mongo_latest is not None and (
-            snapshot_date is None or mongo_latest > snapshot_date
-        )
-
-        # Replace when Postgres is empty, or when Mongo genuinely carries a newer
-        # trading day than the snapshot universe we just loaded.
-        if not normalized_rows or mongo_is_fresher:
-            try:
-                mongo_universe = await service.get_universe_latest_eod(limit=limit)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.warning("Mongo universe fallback failed: %s", exc)
-                mongo_universe = []
-
-            mongo_rows: List[dict[str, Any]] = []
-            for row in mongo_universe:
-                normalized = _normalize_screener_row(
-                    {
-                        "symbol": row.get("symbol"),
-                        "price": row.get("price"),
-                        "volume": row.get("volume"),
-                        "change_pct": row.get("change_pct"),
-                    }
-                )
-                if normalized.get("symbol"):
-                    mongo_rows.append(normalized)
-
-            if mongo_rows:
-                normalized_rows = mongo_rows
-                logger.info(
-                    "Screener universe served from Mongo market_prices_eod fallback "
-                    "(%d symbols; snapshot_date=%s mongo_date=%s).",
-                    len(mongo_rows),
-                    snapshot_date,
-                    mongo_latest,
-                )
-
-    return normalized_rows
+    """Only a completed daily Universe can supply whole-market DB rows."""
+    cache_result = await CacheManager().get_screener_data(
+        symbol=None, source=None, allow_stale=True
+    )
+    if not cache_result.hit or not cache_result.data:
+        return []
+    rows = sorted(
+        cache_result.data,
+        key=lambda row: (row.market_cap is None, -(row.market_cap or 0)),
+    )[:limit]
+    return [_normalize_screener_row(row) for row in rows]
 
 
 async def _fetch_market_screener_rows(limit: int = 1500) -> List[dict[str, Any]]:
     cache_manager = CacheManager()
     screener_rows: List[dict[str, Any]] = []
 
-    try:
-        cache_result = await cache_manager.get_screener_data(
-            symbol=None,
-            source=settings.vnstock_source,
-            allow_stale=True,
-        )
-        if cache_result.data:
-            screener_rows = [_normalize_screener_row(item) for item in cache_result.data]
-    except Exception as exc:
-        logger.warning("Market breadth cache lookup failed: %s", exc)
-
-    try:
-        db_rows = await _load_latest_screener_rows_from_db(limit=limit)
-        if db_rows:
-            merged_rows = {row["symbol"]: row for row in db_rows if row.get("symbol")}
-            for row in screener_rows:
-                ticker = row.get("symbol")
-                if not ticker:
-                    continue
-                merged_rows[ticker] = {**merged_rows.get(ticker, {}), **row}
-            screener_rows = list(merged_rows.values())
-    except Exception as exc:
-        logger.warning("Market breadth DB screener fallback failed: %s", exc)
-
-    if not screener_rows:
-        params = StockScreenerParams(
-            symbol=None,
-            exchange="ALL",
-            limit=limit,
-            source=settings.vnstock_source,
-        )
-        try:
-            screener_data = await asyncio.wait_for(
-                VnstockScreenerFetcher.fetch(params),
-                timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError as exc:
-            raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
-
-        screener_rows = [_normalize_screener_row(item) for item in screener_data]
+    cache_result = await cache_manager.get_screener_data(
+        symbol=None, source=None, allow_stale=True
+    )
+    if not cache_result.hit or not cache_result.data:
+        raise RuntimeError("Verified screener Universe unavailable")
+    screener_rows = [_normalize_screener_row(item) for item in cache_result.data]
 
     screener_rows = [row for row in screener_rows if row.get("symbol")]
     symbols = [row["symbol"] for row in screener_rows]
@@ -2544,6 +2388,7 @@ async def get_heatmap_data(
         # Try cache first
         screener_data: List[ScreenerData] = []
         cached = False
+        partial = True
 
         if use_cache:
             try:
@@ -2553,7 +2398,7 @@ async def get_heatmap_data(
                     allow_stale=True,
                 )
 
-                if cache_result.data:
+                if cache_result.hit and cache_result.data:
                     freshness = "fresh" if cache_result.is_fresh else "stale"
                     logger.info(
                         "Using %s cached screener data for heatmap (%d records)",
@@ -2578,19 +2423,21 @@ async def get_heatmap_data(
                                 pe=s.pe,
                                 pb=s.pb,
                                 change_1d=_extract_snapshot_change_pct(extended_metrics),
+                                trade_date=getattr(s, "trade_date", None)
+                                or getattr(s, "snapshot_date", None),
                                 updated_at=getattr(s, "updated_at", None)
                                 or getattr(s, "snapshot_date", None),
                             )
                         )
                     cached = True
+                    partial = not cache_result.hit
             except Exception as e:
                 logger.warning(f"Cache lookup failed for heatmap: {e}")
 
         # Fetch from API if no cache
         if not screener_data:
-            # RC-2: before the slow live provider fetch, try the Postgres DB rows
-            # (which now fall back to the fresh n6v Mongo universe). This keeps the
-            # heatmap populated after-hours instead of timing out into an empty grid.
+            # Reuse the verified daily partition after hours. A live provider
+            # response is request-limited and cannot certify full coverage.
             try:
                 db_rows = await _load_latest_screener_rows_from_db(limit=limit)
             except Exception as exc:  # pragma: no cover - defensive
@@ -2598,7 +2445,8 @@ async def get_heatmap_data(
                 db_rows = []
             if db_rows:
                 screener_data = db_rows
-                logger.info("Heatmap universe served from DB/Mongo fallback (%d rows)", len(db_rows))
+                partial = len(db_rows) >= limit
+                logger.info("Heatmap served from verified screener partition (%d rows)", len(db_rows))
 
         if not screener_data:
             try:
@@ -2691,7 +2539,9 @@ async def get_heatmap_data(
                 )
 
             groups = build_heatmap_groups(refreshed_rows, group_builder)
+            normalized_rows = refreshed_rows
             cached = False
+            partial = True
 
         # Step 5: Create sector aggregations
         sectors = build_heatmap_sectors(
@@ -2700,13 +2550,19 @@ async def get_heatmap_data(
         )
         total_stocks = sum(len(s.stocks) for s in sectors)
 
-        # QA-v4 D.1: Prefer the freshest StockPrice.time across the heatmap
-        # symbols (which the daily price feed keeps current) over the
-        # screener snapshot's `updated_at` (which can be days/weeks
-        # behind when the screener cron stalls).
-        heatmap_symbols = [s.get("symbol") for s in normalized_rows if s.get("symbol")]
-        price_updated_at = await _load_latest_price_time(heatmap_symbols)
-        snapshot_updated_at = _latest_timestamp([row.get("updated_at") for row in normalized_rows])
+        # Price bars can be current while the rows supplying constituent weights are old.
+        included_symbols = {stock.symbol for sector in sectors for stock in sector.stocks}
+        included_rows = [row for row in normalized_rows if row["symbol"] in included_symbols]
+        price_updated_at = await _load_latest_price_time(list(included_symbols))
+        snapshot_updated_at = _latest_timestamp([row.get("updated_at") for row in included_rows])
+        constituent_dates = [
+            day for row in included_rows
+            if (day := _coerce_to_date(row.get("constituent_date"))) is not None
+        ]
+        constituents_as_of = (
+            min(constituent_dates)
+            if included_rows and len(constituent_dates) == len(included_rows) else None
+        )
         updated_at = price_updated_at or snapshot_updated_at
 
         return HeatmapResponse(
@@ -2716,7 +2572,14 @@ async def get_heatmap_data(
             size_metric=size_metric,
             sectors=sectors,
             cached=cached,
+            partial=partial,
             updated_at=updated_at,
+            price_updated_at=price_updated_at,
+            constituents_as_of=constituents_as_of.isoformat() if constituents_as_of else None,
+            constituents_stale=(
+                constituents_as_of < _expected_latest_trading_day()
+                if constituents_as_of else False
+            ),
         )
 
     except ProviderTimeoutError as e:
@@ -3007,7 +2870,7 @@ async def get_market_breadth() -> MarketBreadthResponse:
         )
     except Exception as exc:
         logger.warning("Market breadth fetch failed: %s", exc)
-        return MarketBreadthResponse(count=0, data=[], error=str(exc))
+        return MarketBreadthResponse(count=0, data=[], error="Verified screener Universe unavailable")
 
 
 @router.get("/earnings-season", response_model=EarningsSeasonResponse)

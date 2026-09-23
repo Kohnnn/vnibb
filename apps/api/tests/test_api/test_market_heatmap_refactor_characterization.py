@@ -5,10 +5,11 @@ These tests pin the production logic BEFORE any refactor so that
 subsequent changes can be verified for behavioural preservation.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
+from vnibb.api.v1.market import _normalize_screener_row
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.providers.vnstock.equity_screener import ScreenerData
 from vnibb.services.cache_manager import CacheResult
@@ -336,6 +337,9 @@ async def test_heatmap_smoke_shape(client, monkeypatch):
     assert payload["color_metric"] == "change_pct"  # default
     assert payload["size_metric"] == "market_cap"  # default
     assert payload["cached"] is False
+    assert payload["partial"] is True
+    assert payload["constituents_as_of"] is None
+    assert payload["constituents_stale"] is False
 
     assert len(payload["sectors"]) > 0
     sector = payload["sectors"][0]
@@ -367,3 +371,138 @@ async def test_heatmap_smoke_shape(client, monkeypatch):
     assert stock["price"] == 85.0
     assert stock["change_pct"] == 2.0
     assert stock["change"] == pytest.approx(85.0 * 2.0 / 100.0)
+
+@pytest.mark.asyncio
+async def test_heatmap_reports_oldest_included_constituent_separately_from_price(client, monkeypatch):
+    old_day = date.today() - timedelta(days=14)
+    recent_day = date.today()
+    snapshots = [
+        ScreenerSnapshot(
+            symbol=symbol,
+            snapshot_date=recent_day,
+            trade_date=snapshot_day,
+            company_name=symbol,
+            exchange="HOSE",
+            industry="Food",
+            price=100.0,
+            volume=1_000_000,
+            market_cap=150_000_000_000.0,
+            source="KBS",
+        )
+        for symbol, snapshot_day in [("VNM", old_day), ("MSN", recent_day)]
+    ]
+    monkeypatch.setattr(
+        "vnibb.api.v1.market.CacheManager.get_screener_data",
+        lambda *args, **kwargs: _async(
+            CacheResult(data=snapshots, is_stale=False, cached_at=datetime.utcnow(), hit=True)
+        ),
+    )
+    monkeypatch.setattr("vnibb.api.v1.market._load_stock_metadata", lambda _syms: _async({}))
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", lambda _syms: _async({}))
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._load_latest_price_time",
+        lambda _syms: _async(recent_day.isoformat()),
+    )
+
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 2
+    assert payload["cached"] is True
+    assert payload["partial"] is False
+    assert payload["updated_at"] == recent_day.isoformat()
+    assert payload["price_updated_at"] == recent_day.isoformat()
+    assert payload["constituents_as_of"] == old_day.isoformat()
+    assert payload["constituents_stale"] is True
+
+
+@pytest.mark.asyncio
+async def test_heatmap_db_rows_do_not_call_old_trades_current(client, monkeypatch):
+    old_day = date.today() - timedelta(days=14)
+    today = date.today()
+    monkeypatch.setattr(
+        "vnibb.api.v1.market.CacheManager.get_screener_data",
+        lambda *args, **kwargs: _async(CacheResult(data=None, is_stale=False, cached_at=None, hit=False)),
+    )
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._load_latest_screener_rows_from_db",
+        lambda **kwargs: _async([_normalize_screener_row({
+            "symbol": "VNM", "company_name": "Vinamilk", "exchange": "HOSE", "industry_name": "Food",
+            "price": 100.0, "volume": 1_000_000, "market_cap": 150_000_000_000.0,
+            "snapshot_date": today, "trade_date": old_day,
+        })]),
+    )
+    monkeypatch.setattr("vnibb.api.v1.market._load_stock_metadata", lambda _syms: _async({}))
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", lambda _syms: _async({}))
+    monkeypatch.setattr("vnibb.api.v1.market._load_latest_price_time", lambda _syms: _async(today.isoformat()))
+
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["price_updated_at"] == today.isoformat()
+    assert payload["constituents_as_of"] == old_day.isoformat()
+    assert payload["constituents_stale"] is True
+
+
+@pytest.mark.asyncio
+async def test_heatmap_current_provider_rows_keep_current_dates_without_cache(client, monkeypatch):
+    today = date.today()
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._load_latest_screener_rows_from_db",
+        lambda **kwargs: _async([]),
+    )
+    monkeypatch.setattr(
+        "vnibb.api.v1.market.VnstockScreenerFetcher.fetch",
+        lambda _params: _async([
+            ScreenerData(
+                symbol="VNM", organ_name="Vinamilk", exchange="HOSE",
+                industry_name="Food", price=100.0, volume=1_000_000,
+                market_cap=150_000_000_000.0, trade_date=today,
+            )
+        ]),
+    )
+    monkeypatch.setattr("vnibb.api.v1.market._load_stock_metadata", lambda _syms: _async({}))
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", lambda _syms: _async({}))
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._load_latest_price_time",
+        lambda _syms: _async(today.isoformat()),
+    )
+
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&use_cache=false")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["cached"] is False
+    assert payload["partial"] is True
+    assert payload["price_updated_at"] == today.isoformat()
+    assert payload["constituents_as_of"] == today.isoformat()
+    assert payload["constituents_stale"] is False
+
+
+@pytest.mark.asyncio
+async def test_unverified_screener_rows_cannot_supply_market_heatmap_or_breadth(
+    client, test_db, monkeypatch
+):
+    from vnibb.api.v1.market import _load_latest_screener_rows_from_db
+
+    test_db.add(ScreenerSnapshot(
+        symbol="VNM", snapshot_date=date.today(), trade_date=date.today(),
+        company_name="Vinamilk", exchange="HOSE", industry="Food",
+        price=100.0, volume=1_000_000, market_cap=150_000_000_000.0,
+    ))
+    await test_db.commit()
+    assert await _load_latest_screener_rows_from_db() == []
+
+    monkeypatch.setattr("vnibb.api.v1.market.VnstockScreenerFetcher.fetch", lambda _params: _async([]))
+    monkeypatch.setattr("vnibb.api.v1.market._load_stock_metadata", lambda _syms: _async({}))
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", lambda _syms: _async({}))
+    heatmap = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&use_cache=false")
+    assert heatmap.status_code == 200
+    assert heatmap.json()["count"] == 0
+    assert heatmap.json()["partial"] is True
+
+    breadth = await client.get("/api/v1/market/breadth")
+    assert breadth.status_code == 200
+    assert breadth.json()["data"] == []
+    assert breadth.json()["error"] == "Verified screener Universe unavailable"

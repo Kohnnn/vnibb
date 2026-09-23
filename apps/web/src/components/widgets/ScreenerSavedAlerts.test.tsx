@@ -1,3 +1,31 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { UseQueryResult } from '@tanstack/react-query'
+import type { ScreenerResponse } from '@/types/screener'
+import { useScreenerData } from '@/lib/queries'
+import { recordAlertActivity } from '@/lib/alertActivity'
+import { ScreenerWidget } from './ScreenerWidget'
+
+jest.mock('@/lib/queries', () => ({
+  useScreenerData: jest.fn(),
+  useVnstockSource: () => 'KBS',
+}))
+jest.mock('@/lib/alertActivity', () => ({ recordAlertActivity: jest.fn() }))
+jest.mock('@/contexts/DashboardContext', () => ({
+  useDashboard: () => ({
+    state: { dashboards: [] },
+    activeDashboard: null,
+    activeTab: null,
+    addWidget: jest.fn(),
+    createDashboard: jest.fn(),
+    createTab: jest.fn(),
+    updateWidget: jest.fn(),
+  }),
+}))
+jest.mock('@/hooks/useWidgetSymbolLink', () => ({ useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }) }))
+jest.mock('@/components/ui/WidgetContainer', () => ({ WidgetContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }))
+jest.mock('@/components/ui/WidgetMeta', () => ({ WidgetMeta: () => null }))
+jest.mock('@/components/ui/VirtualizedTable', () => ({ VirtualizedTable: () => <div>Stocks table</div> }))
+
 import type { Dashboard } from '@/types/dashboard'
 import {
   buildSavedScreenAlertId,
@@ -128,5 +156,69 @@ describe('saved screener alerts', () => {
       'desc',
       'VN30',
     )).toBe(true)
+  })
+})
+
+const mockedScreenerQuery = jest.mocked(useScreenerData)
+const mockedRecordAlertActivity = jest.mocked(recordAlertActivity)
+
+function setScan(data: ScreenerResponse) {
+  mockedScreenerQuery.mockReturnValue({
+    data,
+    error: null,
+    isLoading: false,
+    isFetching: false,
+    dataUpdatedAt: 0,
+    refetch: jest.fn(),
+  } as unknown as UseQueryResult<ScreenerResponse, Error>)
+}
+
+describe('screener availability', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  test('shows retry for an outage, but reset filters for a genuine zero-match scan', () => {
+    const refetch = jest.fn()
+    mockedScreenerQuery.mockReturnValue({
+      data: { data: [], error: 'Screener data is temporarily unavailable.', meta: { availability: 'unavailable' } },
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      dataUpdatedAt: 0,
+      refetch,
+    } as unknown as UseQueryResult<ScreenerResponse, Error>)
+
+    const widget = render(<ScreenerWidget id="screen-test" />)
+    expect(screen.getByText('Screener unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('No stocks match your filters.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }))
+    expect(refetch).toHaveBeenCalled()
+
+    setScan({ data: [], error: null, meta: { availability: 'available' } })
+    widget.rerender(<ScreenerWidget id="screen-test" />)
+    expect(screen.getByText('No stocks match your filters.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reset filters' })).toBeInTheDocument()
+  })
+
+  test('does not replace a saved-screen baseline during outage', async () => {
+    const saved = { ...savedScreen, alertEnabled: true, alertMatchSymbols: ['VNM'] }
+    const config = {
+      savedScreens: [saved],
+      activeScreenId: saved.id,
+      quickFilters: saved.quickFilters,
+      sortField: saved.sortField,
+      sortOrder: saved.sortOrder,
+      market: saved.market,
+    }
+    setScan({ data: [], error: 'Screener unavailable', meta: { availability: 'unavailable' } })
+    const widget = render(<ScreenerWidget id="screen-alert" config={config} />)
+    expect(mockedRecordAlertActivity).not.toHaveBeenCalled()
+
+    setScan({ data: [{ ticker: 'VNM' }, { ticker: 'FPT' }], meta: { availability: 'available' } })
+    widget.rerender(<ScreenerWidget id="screen-alert" config={config} />)
+    await waitFor(() => expect(mockedRecordAlertActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: 'FPT' }),
+    ))
   })
 })

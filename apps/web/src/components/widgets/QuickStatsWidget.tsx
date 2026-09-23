@@ -74,15 +74,15 @@ export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps
     const stats = [
         {
             label: 'Price',
-            value: latestQuote?.price?.toLocaleString() || latest?.close?.toLocaleString() || '-',
+            value: (latestQuote?.price ?? latest?.close)?.toLocaleString() ?? '-',
             icon: DollarSign,
             color: 'text-blue-400',
         },
         {
             label: 'Change',
             value: change !== null ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : '-',
-            icon: change && change >= 0 ? TrendingUp : TrendingDown,
-            color: change && change >= 0 ? 'text-green-400' : 'text-red-400',
+            icon: change !== null && change >= 0 ? TrendingUp : TrendingDown,
+            color: change !== null && change >= 0 ? 'text-green-400' : 'text-red-400',
         },
         {
             label: '30D High',

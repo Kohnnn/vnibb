@@ -60,6 +60,8 @@ export interface ScreenerResponse {
     meta?: {
         count?: number;
         last_data_date?: string | null;
+        availability?: 'available' | 'unavailable';
+        message?: string;
         source?: 'live' | 'cache' | 'stale_cache' | 'fallback_cache';
         cached?: boolean;
         stale?: boolean;

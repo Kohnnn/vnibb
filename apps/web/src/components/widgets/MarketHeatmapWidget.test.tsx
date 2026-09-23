@@ -108,9 +108,6 @@ jest.mock('@/components/ui/widget-states', () => ({
   WidgetError: ({ error }: { readonly error: Error }) => <div>{error.message}</div>,
 }));
 
-jest.mock('@/components/ui/WidgetMeta', () => ({
-  WidgetMeta: () => null,
-}));
 
 jest.mock('@/components/ui/ChartSizeBox', () => ({
   ChartSizeBox: ({ children }: { readonly children: (size: { readonly width: number; readonly height: number }) => ReactNode }) => (
@@ -123,7 +120,7 @@ jest.mock('html2canvas', () => jest.fn());
 const mockUseMarketHeatmap = jest.mocked(useMarketHeatmap);
 type HeatmapQueryResult = UseQueryResult<HeatmapResponse, Error>;
 
-function mockHeatmapData(): HeatmapQueryResult {
+function mockHeatmapData(overrides: Partial<HeatmapResponse> = {}): HeatmapQueryResult {
   const data: HeatmapResponse = {
     count: 1,
     group_by: 'sector',
@@ -152,6 +149,7 @@ function mockHeatmapData(): HeatmapQueryResult {
     ],
     cached: false,
     updated_at: '2026-06-24T00:00:00Z',
+    ...overrides,
   };
   let result: HeatmapQueryResult;
   const refetch: HeatmapQueryResult['refetch'] = async () => result;
@@ -226,5 +224,54 @@ describe('MarketHeatmapWidget', () => {
         expect.objectContaining({ group_by: 'hnx30', exchange: 'ALL' }),
       );
     });
+  });
+
+  it('shows stale constituent date and cached source despite a current price timestamp', () => {
+    const oldConstituents = '2026-09-10';
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({
+      updated_at: '2026-09-23T00:00:00Z',
+      price_updated_at: '2026-09-23T00:00:00Z',
+      constituents_as_of: oldConstituents,
+      constituents_stale: true,
+      cached: true,
+    }));
+    const onDataChange = jest.fn();
+    render(<MarketHeatmapWidget id="market-heatmap" onDataChange={onDataChange} />);
+
+    expect(screen.getByText('Cached')).toBeInTheDocument();
+    expect(screen.getByText(/Constituents 2026-09-10 \(stale\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Updated 2026-09-23/)).toBeInTheDocument();
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      __widgetRuntime: expect.objectContaining({
+        provenance: expect.objectContaining({ cached: true, stale: true, updatedAt: oldConstituents }),
+      }),
+    }));
+  });
+
+  it('shows known fresh constituents without a cached badge, and never calls an unknown date fresh', () => {
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({
+      constituents_as_of: '2026-09-23',
+      constituents_stale: false,
+      cached: false,
+    }));
+    const { rerender } = render(<MarketHeatmapWidget id="market-heatmap" />);
+    expect(screen.getByText(/Constituents 2026-09-23/)).toBeInTheDocument();
+    expect(screen.queryByText('Cached')).not.toBeInTheDocument();
+
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({ constituents_as_of: null }));
+    rerender(<MarketHeatmapWidget key="unknown-date" id="market-heatmap" />);
+    expect(screen.getByText(/Constituents date unknown/)).toBeInTheDocument();
+  });
+
+  it('warns when fallback rows cannot establish full-universe coverage', () => {
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({ partial: true, cached: false }));
+    const onDataChange = jest.fn();
+    render(<MarketHeatmapWidget id="market-heatmap" onDataChange={onDataChange} />);
+    expect(screen.getByText(/Partial universe/)).toBeInTheDocument();
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      __widgetRuntime: expect.objectContaining({
+        provenance: expect.objectContaining({ stale: true }),
+      }),
+    }));
   });
 });

@@ -30,6 +30,7 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
   const isLoading = breadthQuery.isLoading;
   const isFetching = breadthQuery.isFetching;
   const error = breadthQuery.error;
+  const unavailable = breadthQuery.data?.error;
   const updatedAt = breadthQuery.data?.updated_at || breadthQuery.dataUpdatedAt;
   // QA-v4 Market Breadth: 8s budget was too aggressive for cold cache and
   // caused intermittent "Loading timed out" even when the request was
@@ -95,6 +96,8 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
             <WidgetSkeleton lines={4} />
           ) : error && !hasData ? (
             <WidgetError error={error as Error} onRetry={() => breadthQuery.refetch()} />
+          ) : unavailable && !hasData ? (
+            <WidgetError title="Market breadth unavailable" error={new Error(unavailable)} onRetry={() => breadthQuery.refetch()} />
           ) : !hasData ? (
             <WidgetEmpty
               message="Breadth data not available yet"

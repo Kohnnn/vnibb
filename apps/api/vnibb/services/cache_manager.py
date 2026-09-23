@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.core.database import async_session_factory
 from vnibb.core.cache_constants import DB_CACHE_TTLS
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.sync_status import SyncStatus
 from vnibb.models.company import Company
 from vnibb.models.stock import Stock
 
@@ -134,64 +135,93 @@ class CacheManager:
             # writer never created whenever the host runs ahead of UTC.
             now = datetime.utcnow()
             today = now.date()
-            fresh_threshold = now - timedelta(minutes=self.SCREENER_TTL_MINUTES)
 
-            # RC-1 (data-quality remediation 2026-06-08): the `source` filter used to
-            # be strict. ScreenerSnapshot rows are written with source "vnstock"/
-            # "vnstock_ratio" (model default + data_pipeline), but universe widgets
-            # (heatmap/breadth) read with source=settings.vnstock_source ("KBS").
-            # A strict match returned zero rows -> cache miss -> slow live fetch ->
-            # timeout -> empty heatmap/breadth. We now treat `source` as a soft
-            # preference: try source-specific first, then fall back to
-            # source-agnostic so a label mismatch can't blank the universe.
-            async def _resolve(match_source: bool):
-                conditions = []
-                if match_source and source:
-                    conditions.append(ScreenerSnapshot.source == source)
-                if not allow_stale:
-                    conditions.append(ScreenerSnapshot.snapshot_date == today)
+            # Source labels vary across scheduled writers. Symbol reads prefer
+            # their requested label; Universe reads must include every symbol.
+            async def _resolve():
                 if symbol:
-                    conditions.append(ScreenerSnapshot.symbol == symbol.upper())
-
-                query = select(ScreenerSnapshot).where(and_(*conditions))
-
-                if allow_stale:
-                    latest_date_query = select(func.max(ScreenerSnapshot.snapshot_date))
-                    if match_source and source:
+                    conditions = [ScreenerSnapshot.symbol == symbol.upper()]
+                    if source:
+                        conditions.append(ScreenerSnapshot.source == source)
+                    latest_date_query = select(func.max(ScreenerSnapshot.snapshot_date)).where(
+                        *conditions
+                    )
+                    if not allow_stale:
                         latest_date_query = latest_date_query.where(
-                            ScreenerSnapshot.source == source
+                            ScreenerSnapshot.snapshot_date == today
                         )
-                    latest_date_result = await session.execute(latest_date_query)
-                    latest_date = latest_date_result.scalar()
-
+                    latest_date = (await session.execute(latest_date_query)).scalar()
                     if latest_date is None:
-                        return None, None  # nothing for this source scope
-
-                    # QA-v4 Heatmap: cap stale snapshots at MAX_STALE_DAYS so an
-                    # indefinitely-stuck screener cron doesn't keep poisoning every
-                    # downstream caller forever. Older than that, treat as a miss.
+                        return None, None
                     if (today - latest_date).days > self.MAX_STALE_DAYS:
                         return "stale", None
-
-                    query = query.where(ScreenerSnapshot.snapshot_date == latest_date)
-
-                result = await session.execute(query)
-                return "ok", list(result.scalars().all())
-
-            status, snapshots = await _resolve(match_source=True)
-            if (not snapshots) and source:
-                # Soft fallback: read latest snapshots regardless of source label.
-                fb_status, fb_snapshots = await _resolve(match_source=False)
-                if fb_snapshots:
-                    logger.info(
-                        "Screener source '%s' matched no rows; using source-agnostic "
-                        "snapshot fallback (%d records).",
-                        source,
-                        len(fb_snapshots),
+                    rows = await session.execute(
+                        select(ScreenerSnapshot).where(
+                            *conditions, ScreenerSnapshot.snapshot_date == latest_date
+                        )
                     )
-                    status, snapshots = fb_status, fb_snapshots
-                elif status != "stale":
-                    status = fb_status
+                    return "ok", list(rows.scalars().all())
+
+                # Rows alone cannot certify a Universe: a full-run marker must
+                # match the exact set committed for that partition.
+                oldest_day = today - timedelta(days=self.MAX_STALE_DAYS)
+                runs = await session.execute(
+                    select(SyncStatus.additional_data)
+                    .where(
+                        SyncStatus.sync_type == "screener_universe",
+                        SyncStatus.status == "completed",
+                        SyncStatus.error_count == 0,
+                        SyncStatus.completed_at >= datetime.combine(
+                            oldest_day, datetime.min.time()
+                        ),
+                    )
+                    .order_by(SyncStatus.completed_at.desc(), SyncStatus.id.desc())
+                )
+                candidates = []
+                for (metadata,) in runs:
+                    metadata = metadata or {}
+                    if not isinstance(metadata, dict):
+                        continue
+                    snapshot_date = _coerce_date(metadata.get("snapshot_date"))
+                    expected = metadata.get("expected_symbols")
+                    expected_count = metadata.get("expected_count")
+                    if (
+                        snapshot_date is None
+                        or snapshot_date > today
+                        or (not allow_stale and snapshot_date != today)
+                        or snapshot_date < oldest_day
+                        or not isinstance(expected, list)
+                        or not expected
+                        or any(not isinstance(item, str) or not item for item in expected)
+                        or type(expected_count) is not int
+                        or expected_count != len(expected)
+                    ):
+                        continue
+                    expected_symbols = set(expected)
+                    if len(expected_symbols) != len(expected):
+                        continue
+                    candidates.append((snapshot_date, expected, expected_symbols))
+
+                for snapshot_date, expected, expected_symbols in sorted(
+                    candidates, key=lambda candidate: candidate[0], reverse=True
+                ):
+                    rows = await session.execute(
+                        select(ScreenerSnapshot).where(
+                            ScreenerSnapshot.snapshot_date == snapshot_date,
+                            ScreenerSnapshot.symbol.in_(expected),
+                        )
+                    )
+                    snapshots = list(rows.scalars().all())
+                    if {row.symbol for row in snapshots} == expected_symbols:
+                        return "ok", snapshots
+
+                return None, None
+
+            status, snapshots = await _resolve()
+            if not snapshots and symbol and source:
+                # A source label mismatch must not hide an available symbol.
+                source = None
+                status, snapshots = await _resolve()
 
             if status == "stale":
                 logger.warning(
@@ -206,18 +236,14 @@ class CacheManager:
                 logger.debug(f"Cache miss for screener data (symbol={symbol}, source={source})")
                 return CacheResult(data=None, is_stale=False, cached_at=None, hit=False)
 
-            # Prefer the actual market date carried by quote history. Legacy
-            # rows predate that column, so fall back to their materialization
-            # partition rather than treating the whole corpus as unavailable
-            # during the expand/contract rollout.
-            trade_dates = [s.trade_date for s in snapshots if s.trade_date is not None]
-            latest_market_date = (
-                max(trade_dates)
-                if trade_dates
-                else max(s.snapshot_date for s in snapshots)
-            )
+            # Use the oldest constituent's market date for a Universe. Even if
+            # quotes are current, a prior-day partition is still stale.
+            market_dates = [s.trade_date or s.snapshot_date for s in snapshots]
+            market_date = max(market_dates) if symbol else min(market_dates)
             latest_created = max(s.created_at for s in snapshots)
-            is_stale = (today - latest_market_date).days > self.SCREENER_TTL_MINUTES // 1440
+            is_stale = (today - market_date).days > self.SCREENER_TTL_MINUTES // 1440
+            if not symbol and any(s.snapshot_date != today for s in snapshots):
+                is_stale = True
 
             if is_stale and not allow_stale:
                 logger.debug(f"Cache stale for screener data, age={now - latest_created}")

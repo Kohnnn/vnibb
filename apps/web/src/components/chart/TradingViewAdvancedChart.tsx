@@ -166,11 +166,12 @@ function toBusinessDayString(date: Date): string {
 }
 
 function mergeQuote(points: ChartPoint[], quote: Awaited<ReturnType<typeof getQuote>>['data'] | null): ChartPoint[] {
-  if (!quote?.price || !quote.updatedAt || points.length === 0) {
+  const updatedAt = quote?.updatedAt ?? quote?.updated_at;
+  if (quote?.price == null || !updatedAt || points.length === 0) {
     return points;
   }
 
-  const quoteTime = new Date(quote.updatedAt);
+  const quoteTime = new Date(updatedAt);
   if (Number.isNaN(quoteTime.getTime())) {
     return points;
   }

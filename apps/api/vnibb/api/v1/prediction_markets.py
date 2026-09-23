@@ -35,13 +35,14 @@ from typing import Final, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import String as SA_String
-from sqlalchemy import and_, cast, func, or_, select
+from sqlalchemy import Float, String as SA_String
+from sqlalchemy import and_, case, cast, exists, func, or_, select
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.database import get_db
 from vnibb.models.prediction_market import PredictionMarket
+from vnibb.models.prediction_market_archive import PredictionMarketArchive
 from vnibb.models.prediction_market_intraday_snapshot import (
     PredictionMarketIntradaySnapshot,
 )
@@ -298,17 +299,48 @@ async def list_prediction_markets(
         stmt = stmt.where(
             cast(PredictionMarket.extra, SA_String).like(f'%"{topic}"%')
         )
+    archive_stmt = None
+    if active is not True:
+        payload = PredictionMarketArchive.payload
+        archive_stmt = select(PredictionMarketArchive).order_by(
+            payload["end_date"].as_string().is_(None),
+            payload["end_date"].as_string().asc(),
+            PredictionMarketArchive.market_id.asc(),
+        )
+        # Archive copies may coexist with their live row before lifecycle deletion.
+        archive_stmt = archive_stmt.where(~exists(
+            select(PredictionMarket.id).where(PredictionMarket.id == PredictionMarketArchive.market_id)
+        ))
+        if source is not None:
+            archive_stmt = archive_stmt.where(payload["source"].as_string() == source)
+        if category is not None:
+            archive_stmt = archive_stmt.where(func.lower(payload["category"].as_string()).in_(category_values))
+        if search is not None:
+            archive_stmt = archive_stmt.where(or_(
+                func.lower(payload["question"].as_string()).like(like_pattern),
+                func.lower(payload["description"].as_string()).like(like_pattern),
+            ))
+        if topic is not None:
+            archive_stmt = archive_stmt.where(
+                cast(payload["extra"], SA_String).like(f'%"{topic}"%')
+            )
     try:
-        result = await db.execute(stmt.limit(limit))
+        live = (await db.execute(stmt.limit(limit))).scalars().all()
+        archived = (await db.execute(archive_stmt.limit(limit))).scalars().all() if archive_stmt is not None else []
     except (OperationalError, ProgrammingError) as error:
-        message = str(error.orig).lower()
-        if "prediction_markets" in message and (
-            "no such table" in message or "does not exist" in message
-        ):
+        if _is_missing_prediction_market_relation(error):
             return PredictionMarketsResponse(count=0, data=[])
         raise
-    rows = result.scalars().all()
-    data = [PredictionMarketRead.model_validate(row) for row in rows]
+    # Each branch is independently sorted and bounded. Merging at most 2*limit
+    # rows preserves the original order without ever loading historical corpus.
+    rows = [(market.end_date, market.id, PredictionMarketRead.model_validate(market)) for market in live]
+    rows.extend(
+        (item.end_date, archive.market_id, item)
+        for archive in archived
+        for item in [PredictionMarketRead.model_validate(archive.payload)]
+    )
+    rows.sort(key=lambda row: (row[0] is None, row[0].isoformat() if row[0] else "", row[1]))
+    data = [row[2] for row in rows[:limit]]
     return PredictionMarketsResponse(count=len(data), data=data)
 
 
@@ -338,6 +370,49 @@ def _resolve_window_hours(
             detail="window_hours and window must match when both are supplied",
         )
     return canonical if canonical is not None else legacy if legacy is not None else default
+
+
+def _snapshot_movements(model, cutoff: datetime, limit: int, *, threshold: float = 0.0, direction: str = "both", excluded: list[str] | None = None, recent: bool = False):
+    """Rank complete per-market movements in SQL before transferring result rows."""
+    latest = (
+        select(
+            model.source, model.source_id, model.question, model.category, model.url,
+            model.yes_price, model.captured_at,
+            func.row_number().over(
+                partition_by=(model.source, model.source_id),
+                order_by=(model.captured_at.desc(), model.id.desc()),
+            ).label("rn"),
+        )
+        .where(model.captured_at >= cutoff if recent else True)
+        .subquery()
+    )
+    baseline = (
+        select(
+            model.source, model.source_id, model.yes_price,
+            func.row_number().over(
+                partition_by=(model.source, model.source_id),
+                order_by=(model.captured_at.desc(), model.id.desc()),
+            ).label("rn"),
+        )
+        .where(model.captured_at <= cutoff)
+        .subquery()
+    )
+    delta = latest.c.yes_price - baseline.c.yes_price
+    stmt = select(latest.c.source, latest.c.source_id, latest.c.question,
+                  latest.c.category, latest.c.url, latest.c.yes_price,
+                  baseline.c.yes_price.label("previous_yes_price"), delta.label("movement"))
+    stmt = stmt.join(baseline, and_(
+        latest.c.source == baseline.c.source,
+        latest.c.source_id == baseline.c.source_id,
+        baseline.c.rn == 1,
+    )).where(latest.c.rn == 1, func.abs(delta) >= threshold)
+    if direction == "up":
+        stmt = stmt.where(delta > 0)
+    elif direction == "down":
+        stmt = stmt.where(delta < 0)
+    if excluded:
+        stmt = stmt.where(or_(latest.c.category.is_(None), func.lower(latest.c.category).not_in(excluded)))
+    return stmt.order_by(func.abs(delta).desc(), latest.c.source, latest.c.source_id).limit(limit)
 
 
 @router.get("/source-health", response_model=PredictionMarketSourceHealthResponse)
@@ -484,88 +559,28 @@ async def list_prediction_market_movers(
     if exclude_categories:
         excluded = [c.strip().lower() for c in exclude_categories.split(",") if c.strip()]
 
-    latest_stmt = (
-        select(
-            snapshot_model.source,
-            snapshot_model.source_id,
-            func.max(snapshot_model.captured_at).label("captured_at"),
-        )
-        .group_by(snapshot_model.source, snapshot_model.source_id)
-        .subquery()
-    )
-
     try:
-        latest_rows = (
-            await db.execute(
-                select(snapshot_model)
-                .join(
-                    latest_stmt,
-                    (latest_stmt.c.source == snapshot_model.source)
-                    & (latest_stmt.c.source_id == snapshot_model.source_id)
-                    & (latest_stmt.c.captured_at == snapshot_model.captured_at),
-                )
-                .where(snapshot_model.captured_at >= cutoff)
-            )
-        ).scalars().all()
-        baseline_rows = (
-            await db.execute(
-                select(snapshot_model)
-                .join(
-                    latest_stmt,
-                    (latest_stmt.c.source == snapshot_model.source)
-                    & (latest_stmt.c.source_id == snapshot_model.source_id),
-                )
-                .where(snapshot_model.captured_at <= cutoff)
-                .order_by(snapshot_model.captured_at.desc())
-            )
-        ).scalars().all()
+        rows = (await db.execute(_snapshot_movements(
+            snapshot_model, cutoff, limit, direction=direction, excluded=excluded, recent=True
+        ))).all()
     except (OperationalError, ProgrammingError):
         return PredictionMarketMoversResponse(window_hours=window_hours, count=0, movers=[])
 
-    by_pair = {}
-    for row in latest_rows:
-        by_pair[(row.source, row.source_id)] = (row, None)
-    for row in baseline_rows:
-        pair = by_pair.get((row.source, row.source_id))
-        if pair is not None and pair[1] is None:
-            by_pair[(row.source, row.source_id)] = (pair[0], row)
-
-    movers: list[PredictionMarketMoverRow] = []
-    for (_source, _source_id), (latest, baseline) in by_pair.items():
-        if baseline is None:
-            continue
-        delta = latest.yes_price - baseline.yes_price
-        movers.append(
-            PredictionMarketMoverRow(
-                source=latest.source,
-                source_id=latest.source_id,
-                question=latest.question,
-                category=latest.category,
-                url=latest.url,
-                yes_price=latest.yes_price,
-                previous_yes_price=baseline.yes_price,
-                movement=delta,
-                absolute_movement=delta,
-            )
+    movers = [
+        PredictionMarketMoverRow(
+            source=row.source,
+            source_id=row.source_id,
+            question=row.question,
+            category=row.category,
+            url=row.url,
+            yes_price=row.yes_price,
+            previous_yes_price=row.previous_yes_price,
+            movement=row.movement,
+            absolute_movement=row.movement,
         )
-
-    movers.sort(key=lambda row: abs(row.absolute_movement), reverse=True)
-    if direction == "up":
-        movers = [row for row in movers if row.absolute_movement > 0]
-    elif direction == "down":
-        movers = [row for row in movers if row.absolute_movement < 0]
-    if excluded:
-        movers = [
-            row
-            for row in movers
-            if not (isinstance(row.category, str) and row.category.lower() in excluded)
-        ]
-    movers = movers[:limit]
-    return PredictionMarketMoversResponse(
-        window_hours=window_hours,
-        count=len(movers),
-        movers=movers,
-    )
+        for row in rows
+    ]
+    return PredictionMarketMoversResponse(window_hours=window_hours, count=len(movers), movers=movers)
 
 
 @router.get("/calibration", response_model=PredictionMarketCalibrationResponse)
@@ -588,20 +603,19 @@ async def list_prediction_market_calibration(
         "recession": ("recession", "us recession", "global recession"),
     }
     markers = keywords[topic]
-    stmt = select(PredictionMarket).where(PredictionMarket.active.is_(True))
-    rows = (await db.execute(stmt)).scalars().all()
-    matching: list[PredictionMarket] = []
-    for market in rows:
-        haystack = f"{market.question} {market.description or ''} {market.slug or ''}".lower()
-        if any(marker in haystack for marker in markers):
-            matching.append(market)
-    matching = matching[:limit]
+    stmt = (
+        select(PredictionMarket)
+        .where(PredictionMarket.active.is_(True), _topic_matches(markers, include_slug=True))
+        .order_by(PredictionMarket.id)
+        .limit(limit)
+    )
+    matching = (await db.execute(stmt)).scalars().all()
     prices = [
         market.outcome_prices[0]
         for market in matching
         if isinstance(market.outcome_prices, list)
-        and len(market.outcome_prices) > 0
-        and isinstance(market.outcome_prices[0], (int, float))
+        and market.outcome_prices
+        and type(market.outcome_prices[0]) in (int, float)
     ]
     consensus = sum(prices) / len(prices) if prices else None
     return PredictionMarketCalibrationResponse(
@@ -645,27 +659,47 @@ _TOPIC_KEYWORDS = {
 }
 
 
-def _topic_consensus(markets: list[PredictionMarket], topic: str) -> float | None:
-    keywords = _TOPIC_KEYWORDS.get(topic, ())
-    prices: list[float] = []
-    weights: list[float] = []
-    for market in markets:
-        haystack = f"{market.question} {market.description or ''}".lower()
-        if not any(k in haystack for k in keywords):
-            continue
-        if not (
-            isinstance(market.outcome_prices, list)
-            and len(market.outcome_prices) > 0
-            and isinstance(market.outcome_prices[0], (int, float))
-        ):
-            continue
-        price = float(market.outcome_prices[0])
-        weight = float(market.volume) if isinstance(market.volume, (int, float)) else 1.0
-        prices.append(price)
-        weights.append(max(weight, 1.0))
-    if not prices:
-        return None
-    return sum(p * w for p, w in zip(prices, weights, strict=True)) / sum(weights)
+def _topic_matches(keywords: tuple[str, ...], *, include_slug: bool = False):
+    text = PredictionMarket.question + " " + func.coalesce(PredictionMarket.description, "")
+    if include_slug:
+        text = text + " " + func.coalesce(PredictionMarket.slug, "")
+    haystack = func.lower(text)
+    return or_(*(haystack.contains(keyword, autoescape=True) for keyword in keywords))
+
+
+def _topic_aggregates(db: AsyncSession):
+    """Return source-level counts and weighted topic sums, never market objects.
+
+    SQL JSON type checks preserve the old Python rule: the first price must be
+    numeric (not a string, null, object or boolean). Both dialects are used by
+    this project: PostgreSQL in production and SQLite in API fixtures.
+    """
+    price_json = PredictionMarket.outcome_prices[0]
+    dialect = db.bind.dialect.name
+    numeric = (
+        func.json_typeof(price_json) == "number"
+        if dialect == "postgresql"
+        else func.json_type(PredictionMarket.outcome_prices, "$[0]").in_(("integer", "real"))
+    )
+    price = cast(price_json.as_string(), Float)
+    weight = case((PredictionMarket.volume >= 1, PredictionMarket.volume), else_=1.0)
+    columns = [PredictionMarket.source, func.count(PredictionMarket.id).label("source_count")]
+    for topic, keywords in _TOPIC_KEYWORDS.items():
+        matches = _topic_matches(keywords)
+        valid = and_(matches, numeric)
+        columns.extend(
+            (
+                func.sum(case((matches, 1), else_=0)).label(f"{topic}_count"),
+                func.sum(case((valid, price * weight), else_=0.0)).label(f"{topic}_weighted"),
+                func.sum(case((valid, weight), else_=0.0)).label(f"{topic}_weight"),
+            )
+        )
+    return select(*columns).where(PredictionMarket.active.is_(True)).group_by(PredictionMarket.source)
+
+
+def _weighted_topic(row, topic: str) -> float | None:
+    weight = getattr(row, f"{topic}_weight")
+    return float(getattr(row, f"{topic}_weighted")) / float(weight) if weight else None
 
 
 @router.get("/spread", response_model=PredictionMarketSpreadResponse)
@@ -681,51 +715,21 @@ async def list_prediction_market_spread(
     """
     del window  # window is currently informational; reserved for snapshot diff.
     try:
-        rows = (
-            await db.execute(
-                select(PredictionMarket).where(PredictionMarket.active.is_(True))
-            )
-        ).scalars().all()
+        rows = (await db.execute(_topic_aggregates(db).where(
+            PredictionMarket.source.in_(("polymarket", "kalshi"))
+        ))).all()
     except (OperationalError, ProgrammingError):
-        return PredictionMarketSpreadResponse(
-            window_hours=24,
-            topics=[
-                PredictionMarketSpreadTopic(
-                    topic="cpi",
-                    polymarket_consensus=None,
-                    kalshi_consensus=None,
-                    gap=None,
-                    n_polymarket=0,
-                    n_kalshi=0,
-                ),
-                PredictionMarketSpreadTopic(
-                    topic="fed",
-                    polymarket_consensus=None,
-                    kalshi_consensus=None,
-                    gap=None,
-                    n_polymarket=0,
-                    n_kalshi=0,
-                ),
-                PredictionMarketSpreadTopic(
-                    topic="recession",
-                    polymarket_consensus=None,
-                    kalshi_consensus=None,
-                    gap=None,
-                    n_polymarket=0,
-                    n_kalshi=0,
-                ),
-            ],
-        )
+        rows = []
 
-    poly = [m for m in rows if m.source == "polymarket"]
-    kalshi = [m for m in rows if m.source == "kalshi"]
-
+    by_source = {row.source: row for row in rows}
     topics: list[PredictionMarketSpreadTopic] = []
-    for topic in ("cpi", "fed", "recession"):
-        poly_consensus = _topic_consensus(poly, topic)
-        kalshi_consensus = _topic_consensus(kalshi, topic)
+    for topic in _TOPIC_KEYWORDS:
+        poly = by_source.get("polymarket")
+        kalshi = by_source.get("kalshi")
+        poly_consensus = _weighted_topic(poly, topic) if poly else None
+        kalshi_consensus = _weighted_topic(kalshi, topic) if kalshi else None
         gap = (
-            (poly_consensus - kalshi_consensus)
+            poly_consensus - kalshi_consensus
             if poly_consensus is not None and kalshi_consensus is not None
             else None
         )
@@ -735,11 +739,10 @@ async def list_prediction_market_spread(
                 polymarket_consensus=poly_consensus,
                 kalshi_consensus=kalshi_consensus,
                 gap=gap,
-                n_polymarket=len(poly),
-                n_kalshi=len(kalshi),
+                n_polymarket=int(poly.source_count) if poly else 0,
+                n_kalshi=int(kalshi.source_count) if kalshi else 0,
             )
         )
-
     return PredictionMarketSpreadResponse(window_hours=24, topics=topics)
 
 
@@ -750,57 +753,51 @@ async def get_prediction_market_consensus(
 ) -> PredictionMarketConsensusResponse:
     """Volume-weighted consensus across Polymarket and Kalshi.
 
-    Substring-matches the question (case-insensitive). Returns one row per
-    source so the Deep-Dive drawer can render side-by-side prices.
+    Substring-matches the question (case-insensitive), aggregating all matching
+    rows into one result per source before transferring them to the API.
     """
+    price_json = PredictionMarket.outcome_prices[0]
+    numeric = (
+        func.json_typeof(price_json) == "number"
+        if db.bind.dialect.name == "postgresql"
+        else func.json_type(PredictionMarket.outcome_prices, "$[0]").in_(("integer", "real"))
+    )
+    price = cast(price_json.as_string(), Float)
+    weight = case((PredictionMarket.volume >= 1, PredictionMarket.volume), else_=1.0)
     try:
-        like = f"%{query.lower()}%"
-        rows = (
-            await db.execute(
-                select(PredictionMarket).where(
-                    and_(
-                        PredictionMarket.active.is_(True),
-                        func.lower(PredictionMarket.question).like(like),
-                    )
-                )
+        rows = (await db.execute(
+            select(
+                PredictionMarket.source,
+                func.count(PredictionMarket.id).label("n_markets"),
+                func.sum(case((numeric, price * weight), else_=0.0)).label("weighted"),
+                func.sum(case((numeric, weight), else_=0.0)).label("weight"),
+                func.sum(case((numeric, PredictionMarket.volume), else_=0.0)).label("volume"),
+                func.max(case((numeric, PredictionMarket.url))).label("url"),
+                func.sum(case((numeric, 1), else_=0)).label("priced_count"),
             )
-        ).scalars().all()
+            .where(PredictionMarket.active.is_(True),
+                   func.lower(PredictionMarket.question).contains(query.lower(), autoescape=True))
+            .group_by(PredictionMarket.source)
+        )).all()
     except (OperationalError, ProgrammingError):
         return PredictionMarketConsensusResponse(
-            query=query,
-            consensus_yes_price=None,
-            n_markets=0,
-            sources=[],
+            query=query, consensus_yes_price=None, n_markets=0, sources=[],
         )
 
-    sources: list[PredictionMarketConsensusSourceRow] = []
-    weights: list[float] = []
-    prices: list[float] = []
-    for market in rows:
-        if not (
-            isinstance(market.outcome_prices, list)
-            and len(market.outcome_prices) > 0
-            and isinstance(market.outcome_prices[0], (int, float))
-        ):
-            continue
-        yes_price = float(market.outcome_prices[0])
-        sources.append(
-            PredictionMarketConsensusSourceRow(
-                source=market.source,
-                yes_price=yes_price,
-                volume=market.volume if isinstance(market.volume, (int, float)) else None,
-                url=market.url,
-            )
+    total_weight = sum(float(row.weight) for row in rows)
+    sources = [
+        PredictionMarketConsensusSourceRow(
+            source=row.source,
+            yes_price=float(row.weighted) / float(row.weight) if row.weight else None,
+            volume=float(row.volume) if row.weight else None,
+            url=row.url if row.priced_count == 1 else None,
         )
-        weight = float(market.volume) if isinstance(market.volume, (int, float)) else 1.0
-        prices.append(yes_price)
-        weights.append(max(weight, 1.0))
-
-    consensus = sum(p * w for p, w in zip(prices, weights, strict=True)) / sum(weights) if prices else None
+        for row in sorted(rows, key=lambda item: item.source)
+    ]
     return PredictionMarketConsensusResponse(
         query=query,
-        consensus_yes_price=consensus,
-        n_markets=len(rows),
+        consensus_yes_price=sum(float(row.weighted) for row in rows) / total_weight if total_weight else None,
+        n_markets=sum(int(row.n_markets) for row in rows),
         sources=sources,
     )
 
@@ -824,85 +821,28 @@ async def list_prediction_market_alerts(
     cutoff = now - timedelta(hours=window_hours)
 
     try:
-        latest_stmt = (
-            select(
-                PredictionMarketIntradaySnapshot.source,
-                PredictionMarketIntradaySnapshot.source_id,
-                func.max(PredictionMarketIntradaySnapshot.captured_at).label("captured_at"),
-            )
-            .group_by(
-                PredictionMarketIntradaySnapshot.source,
-                PredictionMarketIntradaySnapshot.source_id,
-            )
-            .subquery()
-        )
-        latest_rows = (
-            await db.execute(
-                select(PredictionMarketIntradaySnapshot).join(
-                    latest_stmt,
-                    (latest_stmt.c.source == PredictionMarketIntradaySnapshot.source)
-                    & (latest_stmt.c.source_id == PredictionMarketIntradaySnapshot.source_id)
-                    & (latest_stmt.c.captured_at == PredictionMarketIntradaySnapshot.captured_at),
-                )
-            )
-        ).scalars().all()
-        baseline_rows = (
-            await db.execute(
-                select(PredictionMarketIntradaySnapshot)
-                .join(
-                    latest_stmt,
-                    (latest_stmt.c.source == PredictionMarketIntradaySnapshot.source)
-                    & (latest_stmt.c.source_id == PredictionMarketIntradaySnapshot.source_id),
-                )
-                .where(PredictionMarketIntradaySnapshot.captured_at <= cutoff)
-                .order_by(PredictionMarketIntradaySnapshot.captured_at.desc())
-            )
-        ).scalars().all()
+        rows = (await db.execute(_snapshot_movements(
+            PredictionMarketIntradaySnapshot, cutoff, limit,
+            threshold=min_movement_bps / 10_000.0,
+        ))).all()
     except (OperationalError, ProgrammingError):
         return PredictionMarketAlertsResponse(
-            window_hours=window_hours,
-            min_movement_bps=min_movement_bps,
-            count=0,
-            alerts=[],
+            window_hours=window_hours, min_movement_bps=min_movement_bps,
+            count=0, alerts=[],
         )
-
-    by_pair: dict[tuple[str, str], tuple[PredictionMarketIntradaySnapshot, PredictionMarketIntradaySnapshot | None]] = {}
-    for row in latest_rows:
-        by_pair[(row.source, row.source_id)] = (row, None)
-    for row in baseline_rows:
-        pair = by_pair.get((row.source, row.source_id))
-        if pair is not None and pair[1] is None:
-            by_pair[(row.source, row.source_id)] = (pair[0], row)
-
-    threshold = min_movement_bps / 10_000.0
-    alerts: list[PredictionMarketAlertRow] = []
-    for (_source, _source_id), (latest, baseline) in by_pair.items():
-        if baseline is None:
-            continue
-        delta = latest.yes_price - baseline.yes_price
-        if abs(delta) < threshold:
-            continue
-        alerts.append(
-            PredictionMarketAlertRow(
-                source=latest.source,
-                source_id=latest.source_id,
-                question=latest.question,
-                category=latest.category,
-                url=latest.url,
-                yes_price=latest.yes_price,
-                previous_yes_price=baseline.yes_price,
-                movement=delta,
-                absolute_movement=delta,
-                direction="up" if delta > 0 else "down",
-            )
+    alerts = [
+        PredictionMarketAlertRow(
+            source=row.source, source_id=row.source_id, question=row.question,
+            category=row.category, url=row.url, yes_price=row.yes_price,
+            previous_yes_price=row.previous_yes_price, movement=row.movement,
+            absolute_movement=row.movement,
+            direction="up" if row.movement > 0 else "down",
         )
-    alerts.sort(key=lambda row: abs(row.absolute_movement), reverse=True)
-    alerts = alerts[:limit]
+        for row in rows
+    ]
     return PredictionMarketAlertsResponse(
-        window_hours=window_hours,
-        min_movement_bps=min_movement_bps,
-        count=len(alerts),
-        alerts=alerts,
+        window_hours=window_hours, min_movement_bps=min_movement_bps,
+        count=len(alerts), alerts=alerts,
     )
 
 
@@ -973,59 +913,41 @@ async def list_prediction_market_cross_calibration(
     agreement_threshold = {"cpi": 0.05, "fed": 0.08, "recession": 0.12}
 
     try:
-        rows = (
-            await db.execute(
-                select(PredictionMarket).where(PredictionMarket.active.is_(True))
-            )
-        ).scalars().all()
+        rows = (await db.execute(_topic_aggregates(db).add_columns(
+            func.max(PredictionMarket.updated_at).label("latest_updated")
+        ))).all()
     except (OperationalError, ProgrammingError):
         return PredictionMarketCrossCalibrationResponse(topics=[], last_updated=None)
 
-    per_topic: dict[str, list[PredictionMarket]] = {"cpi": [], "fed": [], "recession": []}
-    for market in rows:
-        haystack = f"{market.question} {market.description or ''}".lower()
-        for topic, keywords in _TOPIC_KEYWORDS.items():
-            if any(k in haystack for k in keywords):
-                per_topic[topic].append(market)
-
     out_topics: list[PredictionMarketCrossCalibrationTopic] = []
-    for topic, markets in per_topic.items():
-        per_source: dict[str, list[PredictionMarket]] = {}
-        for market in markets:
-            per_source.setdefault(market.source, []).append(market)
+    for topic in _TOPIC_KEYWORDS:
         sources: list[PredictionMarketCrossCalibrationSourceRow] = []
         consensus_values: list[float] = []
-        for source_name, source_markets in sorted(per_source.items()):
-            consensus = _topic_consensus(source_markets, topic)
+        for row in sorted(rows, key=lambda item: item.source):
+            if not getattr(row, f"{topic}_count"):
+                continue
+            consensus = _weighted_topic(row, topic)
             if consensus is not None:
                 consensus_values.append(consensus)
             sources.append(
                 PredictionMarketCrossCalibrationSourceRow(
-                    source=source_name,
+                    source=row.source,
                     consensus_yes_price=consensus,
-                    n_markets=len(source_markets),
+                    n_markets=int(getattr(row, f"{topic}_count")),
                 )
             )
         n_sources = len(consensus_values)
-        spread = (
-            (max(consensus_values) - min(consensus_values))
-            if len(consensus_values) >= 2
-            else 0.0
-        )
-        sources_agree = (
-            n_sources >= 2 and spread <= agreement_threshold.get(topic, 0.1)
-        )
+        spread = max(consensus_values) - min(consensus_values) if n_sources >= 2 else 0.0
         out_topics.append(
             PredictionMarketCrossCalibrationTopic(
                 topic=topic,
                 n_sources=n_sources,
-                sources_agree=sources_agree,
+                sources_agree=n_sources >= 2 and spread <= agreement_threshold[topic],
                 sources=sources,
             )
         )
 
-    last_updated = max((row.updated_at for row in rows), default=None)
     return PredictionMarketCrossCalibrationResponse(
         topics=out_topics,
-        last_updated=last_updated,
+        last_updated=max((row.latest_updated for row in rows if row.latest_updated), default=None),
     )

@@ -63,6 +63,7 @@ from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.sync_status import SyncStatus
 from vnibb.core.retry import with_retry
 from vnibb.services.realtime_pipeline import is_vietnam_market_open
+from vnibb.services.prediction_market_retention import retention as prediction_market_retention
 from vnibb.providers.vnstock.financial_ratios import (
     FinancialRatiosQueryParams,
     VnstockFinancialRatiosFetcher,
@@ -1216,7 +1217,7 @@ class DataPipeline:
                 if normalized_exchanges:
                     stmt = stmt.where(func.upper(Stock.exchange).in_(normalized_exchanges))
                 result = await session.execute(stmt)
-                deduped_symbols = [str(row[0]).upper() for row in result.fetchall() if row[0]]
+                deduped_symbols = list(dict.fromkeys(str(row[0]).upper() for row in result.fetchall() if row[0]))
 
         if limit is not None and limit > 0:
             deduped_symbols = deduped_symbols[:limit]
@@ -1365,7 +1366,16 @@ class DataPipeline:
             )
 
         async with async_session_maker() as session:
+            if symbols is None and exchanges is None and limit is None and start_index == 0:
+                await session.execute(
+                    delete(SyncStatus).where(
+                        SyncStatus.sync_type == "screener_universe",
+                        SyncStatus.additional_data["snapshot_date"].as_string() == today.isoformat(),
+                    )
+                )
+                await session.commit()
             count = 0
+            failed_symbols = 0
             for idx in range(start_index, len(deduped_symbols)):
                 symbol = deduped_symbols[idx]
                 await self._wait_for_rate_limit("screener")
@@ -1711,6 +1721,7 @@ class DataPipeline:
                         progress["success_count"] = progress.get("success_count", 0) + 1
                         progress["stage_stats"]["screener"]["success"] += 1
                 except Exception as ratio_error:
+                    failed_symbols += 1
                     logger.debug(f"Ratio summary failed for {symbol}: {ratio_error}")
                     if progress is not None:
                         progress["error_count"] = progress.get("error_count", 0) + 1
@@ -1727,10 +1738,6 @@ class DataPipeline:
                         progress["last_index"] = idx
                         await self._checkpoint(progress, sync_id)
 
-            await session.commit()
-            for item in cache_batch:
-                cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
-                await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
 
             backfilled_rows = 0
             pending_rows = (
@@ -1903,9 +1910,35 @@ class DataPipeline:
                     backfilled_rows += 1
 
             if backfilled_rows:
-                await session.commit()
                 logger.info("Back-filled %d screener rows from financial ratios", backfilled_rows)
 
+            if (
+                symbols is None
+                and exchanges is None
+                and limit is None
+                and start_index == 0
+                and failed_symbols == 0
+                and count == len(set(deduped_symbols))
+            ):
+                session.add(
+                    SyncStatus(
+                        sync_type="screener_universe",
+                        status="completed",
+                        started_at=datetime.utcnow(),
+                        completed_at=datetime.utcnow(),
+                        success_count=count,
+                        error_count=0,
+                        additional_data={
+                            "snapshot_date": today.isoformat(),
+                            "expected_symbols": sorted(set(deduped_symbols)),
+                            "expected_count": count,
+                        },
+                    )
+                )
+            await session.commit()
+            for item in cache_batch:
+                cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
+                await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = None
                 progress["last_index"] = None
@@ -2347,6 +2380,12 @@ class DataPipeline:
             except Exception as exc:
                 logger.warning(f"Retention cleanup failed for {label}: {exc}")
 
+        try:
+            market_report = await prediction_market_retention(limit=100)
+            results["prediction_market_candidates"] = market_report["eligible_in_batch"]
+            logger.info("Terminal market retention dry-run (no deletion): %s", market_report)
+        except Exception as exc:
+            logger.warning("Terminal market retention dry-run failed: %s", exc)
         return results
 
     async def sync_company_profiles(

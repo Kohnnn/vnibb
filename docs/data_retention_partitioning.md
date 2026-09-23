@@ -38,6 +38,12 @@ If you need a blocking response:
 curl -X POST "http://localhost:8000/api/v1/data/sync/cleanup?async_mode=false&include_prices=true"
 ```
 
+### Prediction-market terminal archive (operator-only)
+
+The daily cleanup above does **not** prune `prediction_markets`. `python -m vnibb.services.prediction_market_retention --limit 100` reports a dry-run batch. Eligibility is deliberately narrow: inactive and closed, end date older than 365 days, provider-certified resolved outcome present in the market's outcomes, and no nightly or intraday snapshot references. It skips markets already archived. Batch size is capped at 100; no scheduled mass deletion is enabled.
+
+Before applying, measure eligible rows by age/source/status on the serving PostgreSQL database and prove a recent database-matched backup with an actual isolated restore. An operator supplies a private JSON receipt with `backup_path`, its `sha256`, database name, and UTC `verified_at` from the last 24 hours, then chooses a unique protected archive file path. Only after these checks, run `python -m vnibb.services.prediction_market_retention --apply --limit 100 --backup-receipt /secure/verified-backup.json --archive-file /secure/batch.json --confirm-isolated-restore`. It writes and verifies each complete row in the archive table plus an exclusive local artifact before deleting only locked eligible rows; never discard either artifact. Restore a verified batch with `python -m vnibb.services.prediction_market_retention --restore /secure/batch.json`; an already re-ingested ID fails rather than being overwritten. The receipt is an operator assertion, not independent proof of the isolated restore. No production batch has been applied or sized in this release work.
+
 ## Partitioning guidance (durable storage)
 
 Partitioning is recommended for the largest time-series tables. This reduces

@@ -435,9 +435,10 @@ export interface QuoteData {
 }
 
 export interface QuoteResponse {
-    symbol: string;
-    data: QuoteData;
-    cached: boolean;
+    symbol?: string;
+    data: QuoteData | null;
+    cached?: boolean;
+    error?: string | null;
 }
 
 export async function getQuote(symbol: string, signal?: AbortSignal): Promise<QuoteResponse> {
@@ -3657,6 +3658,10 @@ export interface HeatmapResponse {
     sectors: SectorGroup[];
     cached: boolean;
     updated_at?: string | null;
+    price_updated_at?: string | null;
+    constituents_as_of?: string | null;
+    constituents_stale?: boolean;
+    partial?: boolean;
 }
 
 export interface MarketBreadthExchangeRow {

@@ -180,17 +180,17 @@ class VnstockStockQuoteFetcher:
             result = await loop.run_in_executor(None, _fetch)
             
             if not result:
-                # Return empty quote if no data
-                empty_quote = StockQuoteData(
-                    symbol=symbol,
-                    updated_at=datetime.utcnow(),
-                )
-                return empty_quote, False
+                return StockQuoteData(symbol=symbol), False
             
             latest, prev = result
             
-            # Extract close price
-            price = float(latest.get("close") or latest.get("price") or 0)
+            # A missing close is not a zero-price trade.
+            raw_price = latest.get("close")
+            if raw_price is None:
+                raw_price = latest.get("price")
+            price = float(raw_price) if raw_price is not None else None
+            if price is None:
+                return StockQuoteData(symbol=symbol), False
             
             # Calculate prev_close and change
             prev_close = None
@@ -198,8 +198,11 @@ class VnstockStockQuoteFetcher:
             change_pct = None
             
             if prev:
-                prev_close = float(prev.get("close") or prev.get("price") or 0)
-                if prev_close > 0:
+                raw_prev_close = prev.get("close")
+                if raw_prev_close is None:
+                    raw_prev_close = prev.get("price")
+                prev_close = float(raw_prev_close) if raw_prev_close is not None else None
+                if price is not None and prev_close is not None and prev_close > 0:
                     change = price - prev_close
                     change_pct = (change / prev_close) * 100
             
@@ -216,12 +219,11 @@ class VnstockStockQuoteFetcher:
                 value=float(latest.get("value") or 0) if latest.get("value") else None,
                 updated_at=_coerce_quote_timestamp(
                     latest.get("updated_at") or latest.get("time") or latest.get("date")
-                )
-                or datetime.utcnow(),
+                ),
             )
             
             # Store in cache
-            if use_cache:
+            if use_cache and quote_data.price is not None:
                 QuoteCache.set(symbol, quote_data)
             
             return quote_data, False
@@ -232,8 +234,4 @@ class VnstockStockQuoteFetcher:
                 logger.warning(f"Stock quote rejected for invalid symbol {symbol}: {e}")
             else:
                 logger.error(f"Stock quote fetch failed for {symbol}: {e}")
-            empty_quote = StockQuoteData(
-                symbol=symbol,
-                updated_at=datetime.utcnow(),
-            )
-            return empty_quote, False
+            return StockQuoteData(symbol=symbol), False

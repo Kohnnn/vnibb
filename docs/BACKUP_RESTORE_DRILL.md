@@ -1,99 +1,42 @@
-# Backup + Restore Drill
+# Backup and off-box recovery drill
 
-Disaster-recovery evidence and the repeatable drill for the VNIBB durable stores:
-hosted PostgreSQL (`postgres`) and the n6v MongoDB `vnibb-market` corpus.
+Two different checks answer different questions. `scripts/oracle/verify-backup.sh [stamp]` checks an OCI-hosted set: SHA-256 and byte length for every manifest artifact, strict PostgreSQL scratch restore, producer TABLE DATA count against the dump TOC, nonempty restored `stocks`/`stock_prices`, and successful scratch-database/staged-dump cleanup **before** reporting `VERIFY OK`. A cleanup failure exits nonzero and names the artifact to remove. It performs no live database reads; its scratch database is random by default and an explicitly named existing database is never replaced. **It is not disaster recovery**: it depends on that host and does not prove Mongo recovery. `scripts/oracle/restore-offbox.py` consumes the **already copied** Postgres+Mongo pair on a separate workstation and starts fresh, disposable local databases. It never contacts a source database or uses the production compose stack.
 
-The drill proves a backup set is actually restorable, not just present on disk. It
-performs **no writes to any source system** and exposes **no host ports** — every
-restore target is a throwaway Docker container reachable only via `docker exec`.
+## Select an actual paired set
 
-## Artifacts
+The OCI backup producer writes `deployment/backups/<UTC stamp>/manifest.json`, `postgres-<stamp>.dump`, and `mongo-vnibb-market-<stamp>.archive.gz`. Pull the *entire* directory to an off-box host, preserving its manifest and exact filenames. Older workstation sets use `BACKUP_VERIFICATION_<stamp>.json`, `supabase-<stamp>.dump`, and `vnibb-market-<stamp>.archive.gz` in one directory. The recovery utility supports either layout; it requires matching stamp, byte length and SHA-256 for **both** artifacts. A manifest is required; a dump alone is insufficient. Protect the manifest's origin (for example, authenticate the transfer over Tailscale/SSH); checksums detect accidental corruption, not a maliciously replaced dump and manifest.
 
-Each backup set is identified by a UTC stamp (`<id>`, e.g. `20260721T181749Z`) and
-lives under `../backups` (sibling of the app repo, on a host separate from the n6v
-MongoDB host and the hosted PostgreSQL source):
-
-- `supabase-<id>.dump` — PostgreSQL custom archive (`pg_dump -Fc`, zstd level 9).
-- `vnibb-market-<id>.archive.gz` — MongoDB `mongodump --archive --gzip`.
-- `BACKUP_VERIFICATION_<id>.json` — manifest: source sizes/versions, artifact
-  SHA256, and the verification results the drill reproduces.
-
-## Running the drill
+A fresh host needs Python 3.11+, Docker daemon access, enough disk for both expanded datasets, and locally available `supabase/postgres:17.6.1.136` and `mongo:7` images. Pull the pinned images on a networked host before the drill; the utility does not pull images or access the network. On an operator-controlled workstation, if Docker access requires non-interactive sudo, it tries `sudo -n docker` rather than prompting. Do not run it on the production host or point it at production backup paths. Inspect the chosen path, then acknowledge it explicitly:
 
 ```bash
-# newest backup set
-./scripts/oracle/verify-backup.sh
-
-# a specific set
-./scripts/oracle/verify-backup.sh 20260922T133456Z
+python3 scripts/oracle/restore-offbox.py --confirm-isolated --stamp 20260729T190249Z ../backups
+# or for a current producer set:
+python3 scripts/oracle/restore-offbox.py --confirm-isolated /offbox/backups/20260922T133456Z
 ```
 
-The script, for each engine:
+The historical workstation directory contains multiple manifests, so select one with `--stamp` (the example selects the paired July 29 set). With exactly one manifest, `--stamp` may be omitted. A partial set (e.g. PostgreSQL only) is rejected, not called recovered.
 
-1. Rechecks the artifact SHA256 against the run manifest (aborts on mismatch).
-2. Starts a scratch database from the manifest-pinned image.
-3. Restores the artifact, failing on any restore error.
-4. Asserts public-table parity against the live database, then drops the scratch
-   database.
+The utility verifies bytes before creating anything, checks both images exist, assigns unpredictable per-run container names, and launches fresh throwaway PostgreSQL/Mongo containers with `--network none`, no host ports, no source-volume mount, and a read-only mount of the copied artifacts. It creates a new PostgreSQL database from `template0`, uses `pg_restore --exit-on-error --no-owner --no-privileges`, and restores Mongo with `--gzip --stopOnError` restricted to `vnibb-market.*`. It checks public-table count plus nonempty `stocks` and `stock_prices`, Mongo collection and populated-collection counts plus nonempty `market_prices_eod` and a sample document. For older verification manifests it additionally checks their recorded public-table and collection counts. A failure exits nonzero; containers are removed in `finally` even on restore failure. Do not copy the production env file or credentials into the drill.
 
-Exit code is non-zero if any restore command or parity check fails.
+The temporary PostgreSQL bootstrap password is passed through the Docker child process environment—not in Docker argv. If daemon access requires `sudo -n`, the utility preserves only `POSTGRES_PASSWORD` for that one `docker run`; without it, the database does not start. Subprocess errors report exit status/timeout only. Before success, the utility attempts removal of **both** planned containers and confirms neither remains in `docker ps -a`; any removal/confirmation failure is nonzero and suppresses `RECOVERY OK`. Thus successful recovery requires both data assertions and confirmed absence of plaintext restored containers.
 
-This replaces `scripts/restore-drill.ps1`, which was PowerShell-only and — as
-far as the repository records go — had never been executed against this
-Postgres 17 stack. A drill that only runs on one operator's platform is not a
-drill. The gotchas below are the ones it discovered and are retained here
-because they are still true.
+`RTO_seconds` measures local SHA-256 verification, container startup, both restores, and data assertions until the stores can be queried. Container cleanup is required before `RECOVERY OK`, but is not included in this measurement. It excludes off-box transfer, rebuilding application services, DNS cutover and user-visible recovery; it is **not** an end-to-end service RTO. Capture the set ID, checksums, counts, elapsed time, exit status and host/image versions in the drill record. The live verifier has a different scope and must not be counted as this result.
 
-## Engine-specific gotchas
+## Current workstation evidence and open risks
 
-- **PostgreSQL must use the Supabase image** (`supabase/postgres:17.6.1.136`), not
-  vanilla `postgres:17`. The dump references Supabase-only roles (`supabase_admin`,
-  `supabase_vault`) and extensions (`http`, `pg_stat_statements`, `pgcrypto`,
-  `supabase_vault`, `uuid-ossp`, `plpgsql`); a vanilla image errors on them.
-- **Restore into a fresh `template0` database**, not the image's preseeded
-  `postgres`. Restoring into `postgres` requires `--clean --if-exists` and then
-  emits unavoidable errors (`cannot drop schema graphql_public`, missing
-  `supabase_functions_admin` / `supabase_realtime_admin` roles) that force the
-  drill to tolerate a non-zero `pg_restore` exit — which would also hide a genuinely
-  partial restore. The drill therefore runs
-  `createdb -T template0 vnibb_restore` and
-  `pg_restore --no-owner --no-privileges`, and treats any error as a failure.
-- Restore and admin queries run as `supabase_admin`, not `postgres`.
-- The Supabase image is a ~45s two-stage boot, so readiness is polled up to 120s.
-- **Copy artifacts in as a file, not through a pipeline.** Feeding a binary dump
-  to a shell that stringifies stdin corrupts the archive; PowerShell's
-  `Get-Content |` was the original offender. `verify-backup.sh` copies the file
-  into the container and restores from the path.
-- MongoDB restores with `--drop --stopOnError` so a re-run is idempotent inside the
-  container and a truncated archive fails loudly (a partial download once restored
-  202390 documents before erroring, which `--stopOnError` surfaces immediately).
+On 2026-09-23 the **historical** workstation pair `20260729T190249Z` was restored by this independent utility in fresh `supabase/postgres:17.6.1.136` and `mongo:7` containers. Both manifest SHA-256 and byte-size checks passed; PostgreSQL restored 37 public tables, 1,742 `stocks` rows and 1,745,922 `stock_prices` rows; Mongo restored 7,964,485 documents with zero failures into 16 populated collections (largest `market_prices_eod`: 4,851,437 documents), and its sampled document was present. The final utility's verified run exited 0 with `RTO_seconds=141.1` for local verification through assertions; no recovery containers remained after its cleanup. An earlier 130.3-second run predates the final Mongo-start/cleanup fixes and is not the release proof. This proves the historical pair on this workstation, **not current RPO**. A newer `vnibb-20260922T131323Z.dump` is a lone 1.8 GB PostgreSQL dump without a matching Mongo artifact/manifest in that directory; it cannot be paired with the July Mongo archive because their timestamps and consistency points differ. Remote OCI backup state cannot be asserted from this local copy alone (Tailscale SSH currently requires interactive reauthentication).
 
-## Last verified drill
+**Encryption/key decision:** the historical plaintext files remain unchanged; an additional encrypted copy `../backups/20260729T190249Z-offbox.tar.age` (467,437,160 bytes, SHA-256 `9ba823c26683eb17964aceb6be0d23d74036d3978c9c9dcb4d03bb03d3a2b476`) was created with `age` recipient `age1lu9gvw3vvrghvzqf5fkn5rr2td86h4z0egtrs6cdgrnt3jcyj5hq0y9akg`. Decryption with the locally held identity independently reproduced the manifest and both original dump SHA-256 values, then the plaintext pair passed the fresh-target restore above. The identity currently lives at `/home/compute_01/.local/share/vnibb-recovery/identity` with mode 0600 (directory mode 0700), **outside git and outside the backup directory**. This is local encryption and decryption proof, **not independent key recovery**: losing this workstation can lose this sole key. Before treating this as disaster-resilient custody, an authorized operator must place a securely wrapped copy of the identity in a separate access-controlled secret store/offline medium, give a second authorized recovery holder access, and perform a decryption drill on a different machine. Do not upload or commit the raw identity, passwords, plaintext dumps or production `.env` files. Keep existing plaintext protected until key escrow and independent restore are proven, then retire plaintext through an approved retention process. The old off-box copies are still **unencrypted at rest**, and the new `.age` file is on this workstation only; confidentiality and geographic resiliency remain open. Restic/OCI Object Storage is not currently the working transport: bucket authorization was denied; the Tailscale workstation pull is the off-box leg.
 
-Backup set `20260922T133456Z`, run via `scripts/oracle/verify-backup.sh`:
+To recover the encrypted copy once the identity is independently available, copy the `.age` file to a fresh machine and decrypt to a private scratch directory; never place the key alongside the only encrypted backup:
 
-| Engine     | Image                          | Parity            | Result |
-| ---------- | ------------------------------ | ----------------- | ------ |
-| PostgreSQL | `supabase/postgres:17.6.1.136` | 39/39 tables      | pass   |
-| MongoDB    | `mongo:7`                      | 16/16 collections | pass   |
+```bash
+set -o pipefail
+umask 077
+mkdir -p /private/recovery-20260729 # use an operator-owned private path with adequate disk
+printf '%s  %s\n' '9ba823c26683eb17964aceb6be0d23d74036d3978c9c9dcb4d03bb03d3a2b476' '../backups/20260729T190249Z-offbox.tar.age' | sha256sum -c -
+age -d -i /secure/separate/identity ../backups/20260729T190249Z-offbox.tar.age | tar -x -C /private/recovery-20260729
+python3 scripts/oracle/restore-offbox.py --confirm-isolated /private/recovery-20260729
+```
 
-Checksum recheck: pass. `stocks` spot-check: 1753 rows.
-
-Earlier verified set `20260729T190249Z` (via the retired PowerShell script):
-37/37 tables, 16/16 collections, checksum pass.
-
-## Where the artifacts actually go
-
-Superceded note: the sets under `../backups` are still on the same host, but they
-are no longer the only copy. `scripts/oracle/vnibb-backup.sh` runs daily at 03:30
-host time, keeps the newest 7 sets, and the sets are pulled to an always-on
-workstation over Tailscale with sha256 parity — so the same-disk failure mode is
-covered. Restic is **not** the mechanism: OCI Object Storage authorization is
-denied in this tenancy, and instance-principal access only reaches the namespace,
-not bucket operations. The Tailscale pull is the off-box leg.
-
-Two failure modes remain, stated plainly:
-
-- Off-box copies are integrity-verified but have not been restored end-to-end
-  onto a fresh host. The drill restores into a scratch database on the same host.
-- Nothing encrypts the artifacts at rest.
+The extraction command assumes this specific locally created archive; do not unpack untrusted archives without inspecting member paths. Preserve provenance and verify the encrypted file SHA-256 before decryption. The utility rechecks both extracted artifacts against their manifest before starting databases.

@@ -17,6 +17,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import { formatCompactValueForUnit } from '@/lib/units';
+import { formatShortDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 interface MarketHeatmapWidgetProps {
@@ -211,6 +212,11 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
     const hasData = Boolean(treemapData && data?.sectors?.length);
     const isFallback = Boolean(error && hasData);
     const heatmapEndpoint = `/market/heatmap?group_by=${groupBy}&exchange=${exchange}&limit=500`;
+    const constituentDate = data?.constituents_as_of;
+    const constituentNote = constituentDate
+        ? `Constituents ${formatShortDate(constituentDate)}${data?.constituents_stale ? ' (stale)' : ''}`
+        : 'Constituents date unknown';
+    const freshnessNote = `${data?.partial ? 'Partial universe · ' : ''}Price ${data?.price_updated_at ? formatShortDate(data.price_updated_at) : 'date unknown'} · ${constituentNote}`;
 
     useEffect(() => {
         onDataChange?.(
@@ -219,12 +225,13 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                 apiGroup: '/market',
                 endpoint: heatmapEndpoint,
                 sourceLabel: 'Market heatmap',
-                lastDataDate: data?.updated_at || dataUpdatedAt,
-                stale: isFallback,
+                lastDataDate: constituentDate ?? null,
+                cached: Boolean(data?.cached) || isFallback,
+                stale: isFallback || Boolean(data?.constituents_stale) || Boolean(data?.partial),
                 extra: hasData ? { groupBy, exchange, groupCount: data?.sectors?.length ?? 0, endpoint: heatmapEndpoint } : undefined,
             }),
         );
-    }, [hasData, data?.updated_at, dataUpdatedAt, isFallback, groupBy, exchange, data?.sectors?.length, onDataChange, heatmapEndpoint]);
+    }, [hasData, constituentDate, data?.cached, data?.constituents_stale, data?.partial, isFallback, groupBy, exchange, data?.sectors?.length, onDataChange, heatmapEndpoint]);
 
     return (
         <WidgetContainer
@@ -397,9 +404,11 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                             </div>
                         )}
                         <WidgetMeta
-                            updatedAt={data?.updated_at || dataUpdatedAt}
+                            updatedAt={data?.price_updated_at ?? data?.updated_at ?? dataUpdatedAt}
                             isFetching={isFetching && hasData}
-                            isCached={isFallback}
+                            isCached={Boolean(data?.cached) || isFallback}
+                            isStale={isFallback && !data?.cached}
+                            note={hasData ? freshnessNote : undefined}
                             align="right"
                         />
                     </div>

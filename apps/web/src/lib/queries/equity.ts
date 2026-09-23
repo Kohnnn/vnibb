@@ -409,7 +409,10 @@ export interface StockQuoteView {
 
 export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Promise<StockQuoteView> {
     const response = await api.getQuote(symbol, signal);
-    const quoteData = response.data ?? {};
+    const quoteData = response.data;
+    if (quoteData?.price == null) {
+        throw new Error(response.error || `Quote unavailable for ${symbol}`);
+    }
     const price = quoteData.price ?? null;
     const change = quoteData.change ?? quoteData.change_1d ?? null;
     const prevClose = quoteData.prevClose ?? quoteData.prev_close ?? quoteData.reference_price ?? quoteData.ref_price ?? null;
@@ -431,7 +434,7 @@ export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Pro
         low: quoteData.low ?? quoteData.day_low ?? null,
         open: quoteData.open ?? quoteData.day_open ?? null,
         updatedAt: quoteData.updatedAt ?? quoteData.updated_at ?? null,
-        cached: response.cached,
+        cached: response.cached ?? false,
     };
 }
 

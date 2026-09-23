@@ -17,6 +17,10 @@ live in \`docs/\`.
 ## [Unreleased]
 
 ### Fixed
+- Backup verification now fails on artifact corruption, nonzero restore, missing equity history, or an existing scratch database; failed copies remove their partial staged dump without deleting a pre-existing one. An isolated off-box Postgres/Mongo restore utility verifies a paired set, representative data, and container cleanup before reporting success.
+- The API reads durable scheduler-worker outcomes across processes and returns unavailable instead of empty healthy status when its observation store fails. Prediction-market query paths are bounded; terminal-market retention is archive-first, row-locked, batch-limited, dry-run by default, and gated on an operator-verified backup/isolated restore.
+- A cached whole-market screener Universe requires a completed full-run symbol-coverage record; partial runs do not invalidate a previously complete partition. Screener provider failures without fallback are marked unavailable rather than zero matches, and quote failures no longer fabricate zero price or current timestamps.
+- Heatmap responses and widgets expose constituent and price dates separately, including stale or unknown constituent provenance and cached data labeling.
 - **Root cause of the nightly \`daily_trading\` failure: twelve unique
   constraints declared in the models were never actually created in the
   database.** Every writer using \`get_upsert_stmt\` emits \`INSERT ... ON

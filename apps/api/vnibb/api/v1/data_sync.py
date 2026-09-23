@@ -6,6 +6,7 @@ Useful for testing and on-demand data updates.
 Includes health check and seeding endpoints.
 """
 
+import asyncio
 import logging
 from datetime import date, timedelta
 from typing import Optional, List
@@ -1076,12 +1077,15 @@ async def sync_full_market(
     description="Get status of all scheduled sync jobs.",
 )
 async def get_sync_status():
-    """Get scheduler job status."""
+    """Read worker observations from the shared database, not this API process."""
+    from vnibb.core.database import async_session_factory
     from vnibb.core.scheduler import get_job_status
-    from vnibb.core.scheduler_lock import get_scheduler_lock_status
 
-    return {
-        **get_job_status(),
-        "role": settings.scheduler_role,
-        "lock": get_scheduler_lock_status(),
-    }
+    try:
+        async with asyncio.timeout(5):
+            async with async_session_factory() as session:
+                status = await get_job_status(session)
+    except Exception:
+        logger.exception("Scheduler status database unavailable")
+        raise HTTPException(status_code=503, detail="Scheduler status unavailable") from None
+    return {**status, "role": settings.scheduler_role}

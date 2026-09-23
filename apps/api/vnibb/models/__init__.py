@@ -12,7 +12,6 @@ Complete database schema for Vietnam stock market data:
 - Market news aggregation (new)
 """
 
-# Alert system models (new)
 from vnibb.models.alerts import AlertSettings, BlockTrade, InsiderAlert
 from vnibb.models.app_kv import AppKeyValue
 from vnibb.models.company import Company, Officer, Shareholder
@@ -22,17 +21,13 @@ from vnibb.models.derivatives import DerivativePrice
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.market import MarketSector, SectorPerformance, Subsidiary
 from vnibb.models.market_news import MarketNews
-
-# Existing models
 from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
 from vnibb.models.prediction_market import PredictionMarket
+from vnibb.models.prediction_market_archive import PredictionMarketArchive
+from vnibb.models.scheduler_state import SchedulerJobState, SchedulerWorkerState
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
-
-# Sync tracking model
 from vnibb.models.sync_status import SyncStatus
-
-# New models for vnstock premium integration
 from vnibb.models.technical_indicator import TechnicalIndicator
 from vnibb.models.trading import (
     FinancialRatio,
@@ -80,6 +75,7 @@ __all__ = [
     # Market News Aggregation (new)
     "MarketNews",
     "PredictionMarket",
+    "PredictionMarketArchive",
     "DerivativePrice",
     "DerivativePrice",
     # Alert System (new)
@@ -91,6 +87,8 @@ __all__ = [
     "DataQualityBreachState",
     # Sync Tracking
     "SyncStatus",
+    "SchedulerJobState",
+    "SchedulerWorkerState",
 ]
 
 

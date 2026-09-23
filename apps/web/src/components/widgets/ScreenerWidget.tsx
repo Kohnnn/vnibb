@@ -498,8 +498,9 @@ export function ScreenerWidget({
     ));
     const activeScreenAlertEnabled = Boolean(activeSavedScreen?.alertEnabled);
     const hasData = filteredData.length > 0;
+    const isScanUnavailable = Boolean(error || screenerData?.meta?.availability === 'unavailable' || screenerData?.error);
 
-    const isFallback = Boolean(error && hasData);
+    const isFallback = Boolean(error && hasData && !screenerData?.error);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
     const sourceUpdatedAt =
         getLatestTimestampValue([
@@ -564,7 +565,7 @@ export function ScreenerWidget({
     }, [activeSavedScreen?.id, activeSavedScreenIsCurrent, activeScreenAlertEnabled, refetch]);
 
     useEffect(() => {
-        if (!activeSavedScreen || !activeScreenAlertEnabled || !activeSavedScreenIsCurrent || !screenerData?.data) return;
+        if (!activeSavedScreen || !activeScreenAlertEnabled || !activeSavedScreenIsCurrent || isScanUnavailable || !screenerData?.data) return;
         const isHidden = typeof document !== 'undefined' && document.hidden;
         const isOnline = typeof navigator === 'undefined' || navigator.onLine;
         if (!canProcessScreenerAlert(isHidden, isOnline)) return;
@@ -604,7 +605,7 @@ export function ScreenerWidget({
         setCustomScreens((screens) => screens.map((screen) => screen.id === activeSavedScreen.id
             ? { ...screen, alertMatchSymbols: currentSymbols }
             : screen));
-    }, [activeSavedScreen, activeSavedScreenIsCurrent, activeScreenAlertEnabled, dataWithPassReasons, id, screenerData?.data]);
+    }, [activeSavedScreen, activeSavedScreenIsCurrent, activeScreenAlertEnabled, dataWithPassReasons, id, isScanUnavailable, screenerData?.data]);
 
     useEffect(() => {
 
@@ -751,7 +752,7 @@ export function ScreenerWidget({
         if (nextEnabled && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
             await Notification.requestPermission();
         }
-        const currentSymbols = getScreenerMatchSymbols(dataWithPassReasons);
+        const currentSymbols = !isScanUnavailable ? getScreenerMatchSymbols(dataWithPassReasons) : activeSavedScreen.alertMatchSymbols;
         setCustomScreens((screens) => screens.map((screen) => screen.id === activeSavedScreen.id
             ? {
                 ...screen,
@@ -759,7 +760,7 @@ export function ScreenerWidget({
                 alertMatchSymbols: nextEnabled ? currentSymbols : screen.alertMatchSymbols,
             }
             : screen));
-    }, [activeSavedScreen, activeSavedScreenIsCurrent, dataWithPassReasons]);
+    }, [activeSavedScreen, activeSavedScreenIsCurrent, dataWithPassReasons, isScanUnavailable]);
 
     const handleResetFilters = useCallback(() => {
         captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
@@ -982,8 +983,8 @@ export function ScreenerWidget({
                         />
                     ) : isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={8} />
-                    ) : error && !hasData ? (
-                        <WidgetError error={error as Error} onRetry={() => refetch()} />
+                    ) : isScanUnavailable && !hasData ? (
+                        <WidgetError title="Screener unavailable" error={new Error(screenerData?.error || screenerData?.meta?.message || (error as Error)?.message || 'Please try again.')} onRetry={() => refetch()} />
                     ) : filteredData.length === 0 ? (
                         <WidgetEmpty
                             message="No stocks match your filters."
@@ -1026,7 +1027,7 @@ export function ScreenerWidget({
                 <div className="z-20 flex items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] shadow-[0_-5px_15px_rgba(0,0,0,0.2)]">
                     <div className="flex items-center gap-6">
                         <div className="flex items-center gap-2">
-                            <span className="text-xs font-black text-blue-400 drop-shadow-md">{filteredData.length.toLocaleString()}</span>
+                            <span className="text-xs font-black text-blue-400 drop-shadow-md">{isScanUnavailable && !hasData ? '—' : filteredData.length.toLocaleString()}</span>
                             <span className="font-semibold tracking-tight opacity-40">Matches</span>
                         </div>
                         {market !== 'ALL' && (
