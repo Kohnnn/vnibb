@@ -234,19 +234,39 @@ const RATIO_METRIC_ALIASES: Record<string, string[]> = {
     ps: ['ps', 'ps_ratio', 'priceToSales'],
 };
 
+// A valuation multiple of zero is never a real observation: it means the provider could
+// not compute the ratio because a denominator (price, EPS, book value) was missing. The
+// API reports those periods as literal 0.0, so they must be treated as absent here or
+// every unsupported year renders as a genuine-looking 0.00.
+const ZERO_IS_ABSENT_RATIO_KEYS: Record<string, true> = {
+    pe: true,
+    pb: true,
+    ps: true,
+    peg_ratio: true,
+    ev_sales: true,
+    ev_ebitda: true,
+};
+
 function readRatioValue(row: Record<string, any>, key: string): any {
     const aliases = RATIO_METRIC_ALIASES[key] || [key];
+    const zeroIsAbsent = ZERO_IS_ABSENT_RATIO_KEYS[key] === true;
+    const usable = (value: unknown) => {
+        if (value === null || value === undefined || value === '') return false;
+        if (!zeroIsAbsent) return true;
+        const numeric = typeof value === 'number' ? value : Number(value);
+        return Number.isFinite(numeric) ? numeric !== 0 : true;
+    };
     const rowLookup = buildMetricLookup(row);
     for (const alias of aliases) {
         const value = rowLookup.get(alias) ?? rowLookup.get(normalizeMetricKey(alias));
-        if (value !== null && value !== undefined && value !== '') return value;
+        if (usable(value)) return value;
     }
     const rawData = row.raw_data || row.rawData || row.raw;
     const rawLookup = buildMetricLookup(rawData);
     if (rawLookup.size > 0) {
         for (const alias of aliases) {
             const value = rawLookup.get(alias) ?? rawLookup.get(normalizeMetricKey(alias));
-            if (value !== null && value !== undefined && value !== '') return value;
+            if (usable(value)) return value;
         }
     }
     return null;
@@ -351,11 +371,11 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             displayRows = normalizedRows.filter((row: any) => String(row.__period).toUpperCase().includes('TTM'));
         }
 
-        const columns = Array.from(
+        const allColumns = Array.from(
             new Set(displayRows.map((row: any) => row.__period).filter((p: any): p is string => Boolean(p)))
         ).sort((a: string, b: string) => periodSortKey(a) - periodSortKey(b));
 
-        let metrics: any[] = [];
+        let metrics: Array<{ key: string; label: string; isPct?: boolean }> = [];
         if (activeTab === 'ratios') {
             metrics = [
                 { key: 'pe', label: 'P/E' },
@@ -375,7 +395,24 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
                 { key: 'dividend_yield', label: 'Dividend Yield', isPct: true },
                 { key: 'payout_ratio', label: 'Payout Ratio', isPct: true },
             ];
-        } else {
+        }
+
+        // The ratio feed often reaches back further than it has data: VCI returns periods
+        // from 2012 while the first populated ratio is 2020. A leading run of columns with
+        // no value at all is noise, and it also pushes the populated columns out of the
+        // visible window. Start the table where the data starts.
+        const columns = activeTab === 'ratios'
+            ? (() => {
+                const firstPopulated = allColumns.findIndex((periodLabel: string) => {
+                    const entry = displayRows.find((row: Record<string, unknown>) => row.__period === periodLabel);
+                    if (!entry) return false;
+                    return metrics.some((metric) => readRatioValue(entry, metric.key) !== null);
+                });
+                return firstPopulated > 0 ? allColumns.slice(firstPopulated) : allColumns;
+            })()
+            : allColumns;
+
+        if (activeTab !== 'ratios') {
             const keys = STATEMENT_METRIC_KEYS[activeTab as 'income_statement' | 'balance_sheet' | 'cash_flow'];
             const labels = STATEMENT_LABELS[activeTab as 'income_statement' | 'balance_sheet' | 'cash_flow'];
 
@@ -608,7 +645,11 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
                                 footerNote={activeTab !== 'ratios' ? `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS` : undefined}
                                 valueFormatter={(value, row) => {
                                     const meta = denseRowMeta.get(row.id)
-                                    const numericValue = typeof value === 'number' ? value : Number(value)
+                                    // `null` must stay null. Number(null) is 0, and 0 is finite, so
+                                    // coercing first turned every absent ratio into a real 0.00.
+                                    const numericValue = value === null || value === undefined || value === ''
+                                        ? null
+                                        : typeof value === 'number' ? value : Number(value)
                                     if (meta?.isPct) {
                                         return formatPct(Number.isFinite(numericValue) ? numericValue : null)
                                     }

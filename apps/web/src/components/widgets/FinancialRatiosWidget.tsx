@@ -81,7 +81,20 @@ const ratioLabels: Record<string, string> = {
 
 const TABLE_YEAR_LIMIT = 20;
 const QUARTER_PERIOD_LIMIT = 40;
-const NULL_LIKE_RATIO_KEYS = new Set(['pe', 'pb', 'ps', 'peg_ratio', 'ev_sales', 'ev_ebitda']);
+// These metrics are undefined, not zero, when a denominator is missing. Providers
+// emit a literal 0 for a period they could not compute, which would otherwise
+// render as a real 0.00 multiple and feed the swing heuristic a bogus base.
+const UNDEFINED_WHEN_ZERO_RATIO_KEYS: Record<string, true> = {
+    pe: true,
+    pb: true,
+    ps: true,
+    peg_ratio: true,
+    ev_sales: true,
+    ev_ebitda: true,
+    pfcf: true,
+    p_fcf: true,
+    price_to_fcf: true,
+};
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 const RATIO_FIELD_ALIASES: Record<string, string[]> = {
     pe: ['pe', 'pe_ratio', 'priceToEarning'],
@@ -94,11 +107,14 @@ const RATIO_FIELD_ALIASES: Record<string, string[]> = {
 function readRatioMetric(entry: Record<string, unknown> | undefined, metricKey: string): number | null {
     if (!entry) return null;
     const keys = RATIO_FIELD_ALIASES[metricKey] ?? [metricKey];
+    const zeroMeansUndefined = UNDEFINED_WHEN_ZERO_RATIO_KEYS[metricKey] === true;
     for (const key of keys) {
         const value = entry[key];
         if (value === null || value === undefined || value === '') continue;
         const numeric = typeof value === 'number' ? value : Number(value);
-        if (Number.isFinite(numeric)) return numeric;
+        if (!Number.isFinite(numeric)) continue;
+        if (zeroMeansUndefined && numeric === 0) continue;
+        return numeric;
     }
     return null;
 }
@@ -133,7 +149,12 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         isFetching,
         dataUpdatedAt,
     } = useFinancialRatios(symbol, { period: apiPeriod });
-    const referencePeriodsQuery = useIncomeStatement(symbol, {
+    // The three statement widgets beside this one in "Financial Period View" render the
+    // newest `visiblePeriodLimit` periods they hold. The ratio feed reaches further back
+    // than any of them (VCI returns 2012..2025 while the statements return 2020..2025),
+    // so without this the same period selector would show a different year span in each
+    // panel. This query supplies the window to align to, not extra columns to append.
+    const statementWindowQuery = useIncomeStatement(symbol, {
         period: period === 'FY' ? 'year' : period === 'Q' ? 'quarter' : 'TTM',
         enabled: period !== 'TTM',
         limit: visiblePeriodLimit,
@@ -160,6 +181,27 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
             })
             .sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period))
     }, [rawRatios]);
+
+    // Align to the statement panels' window. Unioning the two series instead would add
+    // bare columns for every ratio year the statements do not cover, which is what made
+    // the columns look mismatched with its siblings. The union is kept as a fallback for
+    // the case where the statements are unavailable but ratios are not.
+    const alignedRatios = useMemo(() => {
+        const statementPeriods = (statementWindowQuery.data?.data || [])
+            .map((entry) => normalizeRatioPeriod(String(entry.period)))
+            // A "2026 YTD" or "TTM" roll-up has no ratio counterpart, so it can never be a
+            // ratio column. Only fiscal years and canonical quarters are real period keys.
+            .filter((value): value is string => Boolean(value) && (isCanonicalQuarterPeriod(value as string) || /^\d{4}$/.test(value as string)));
+        if (statementPeriods.length === 0) return ratios;
+
+        const statementWindow = new Set(
+            statementPeriods
+                .sort((left, right) => periodSortKey(left) - periodSortKey(right))
+                .slice(-visiblePeriodLimit)
+        );
+        const withinWindow = ratios.filter((entry) => statementWindow.has(entry.period));
+        return withinWindow.length > 0 ? withinWindow : ratios;
+    }, [ratios, statementWindowQuery.data?.data, visiblePeriodLimit]);
     const hasData = ratios.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
@@ -240,23 +282,18 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         </div>
     ) : undefined;
 
+    // Columns come from the aligned ratios alone. The statement series is a window
+    // source, not a column source, so it never adds a year the ratios table cannot fill.
     const displayPeriods = useMemo(() => {
         const periodSet = new Set<string>();
-        ratios.forEach((entry) => {
+        alignedRatios.forEach((entry) => {
             if (entry.period && (period !== 'Q' || isCanonicalQuarterPeriod(entry.period))) {
                 periodSet.add(entry.period);
             }
         });
-        (referencePeriodsQuery.data?.data || []).forEach((entry) => {
-            if (entry.period) {
-                const normalizedPeriod = normalizeRatioPeriod(String(entry.period)) ?? String(entry.period);
-                if (period !== 'Q' || isCanonicalQuarterPeriod(normalizedPeriod)) {
-                    periodSet.add(normalizedPeriod);
-                }
-            }
-        });
         return Array.from(periodSet).sort((left, right) => periodSortKey(left) - periodSortKey(right));
-    }, [period, ratios, referencePeriodsQuery.data?.data]);
+    }, [period, alignedRatios]);
+
 
     const visiblePeriods = useMemo(
         () => displayPeriods.slice(-visiblePeriodLimit),
@@ -264,8 +301,8 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
     );
 
     const ratioLookup = useMemo(
-        () => new Map(ratios.map((entry) => [entry.period, entry])),
-        [ratios]
+        () => new Map(alignedRatios.map((entry) => [entry.period, entry])),
+        [alignedRatios]
     );
 
     const tableColumns = useMemo(
@@ -443,7 +480,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                                 storageKey={`ratios:${id}:${symbol}:${period}`}
                                 footerNote={`Note: Ratio history by ${period}. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
                                 valueFormatter={(value, row) => {
-                                    if (NULL_LIKE_RATIO_KEYS.has(row.id) && typeof value === 'number' && value === 0) {
+                                    if (UNDEFINED_WHEN_ZERO_RATIO_KEYS[row.id] === true && typeof value === 'number' && value === 0) {
                                         return EMPTY_VALUE;
                                     }
                                     const isPercentMetric = percentKeys.has(row.id);

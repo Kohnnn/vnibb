@@ -135,4 +135,39 @@ describe('FinancialsWidget', () => {
     renderWithProviders(<FinancialsWidget id="fin-1" symbol="FPT" />);
     expect(screen.getByText(/network error/i)).toBeInTheDocument();
   });
+
+  // Regression: the provider returns a literal 0 for a valuation multiple it could not
+  // compute, and an absent eps/bvps/roe as null. Both must read as "no value", because a
+  // rendered 0.00 claims the company traded at zero times earnings.
+  test('renders absent and zero-valued ratios as an empty cell, never 0.00', async () => {
+    mockUseFinancialRatios.mockReturnValue(makeQueryResult({
+      symbol: 'FPT',
+      count: 3,
+      data: [
+        // Provider emitted literal zeros where a denominator was missing.
+        { period: '2021', pe: 0, pb: 0, ps: 0, eps: null, bvps: null, roe: null },
+        { period: '2022', pe: 15.2, pb: 2.4, ps: 1.1, eps: 3200, bvps: 20000, roe: 0.18 },
+        // A real zero keeps its real meaning for metrics where zero is a valid observation.
+        { period: '2023', pe: 17.0, pb: 2.9, ps: 1.3, eps: 3400, bvps: 21000, roe: 0 },
+      ],
+    }) as any);
+
+    renderWithProviders(<FinancialsWidget id="fin-1" symbol="FPT" />);
+
+    act(() => {
+      screen.getByRole('button', { name: /ratios/i }).click();
+    });
+
+    await waitFor(() => {
+      const peRow = screen.getByText(/^P\/E$/i).closest('tr');
+      expect(peRow).not.toBeNull();
+      const cells = Array.from(peRow!.querySelectorAll('td'));
+      const texts = cells.map((cell) => cell.textContent?.trim() ?? '');
+
+      // The 2021 column (first period) must be empty, not a fabricated 0.00.
+      expect(texts.some((text) => text.startsWith('0.00'))).toBe(false);
+      // The 2022 column must still show its real value.
+      expect(texts.join(' ')).toContain('15.20');
+    });
+  });
 });

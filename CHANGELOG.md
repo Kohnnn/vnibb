@@ -31,6 +31,16 @@ live in `docs/`.
   this.
 
 ### Fixed
+- Financial ratio tables no longer present absent data as real numbers. A period the
+  provider could not compute (missing price, EPS, or book value) is now shown as an empty
+  cell instead of `0.00`. Valuation multiples treat a literal `0` as absent, because a
+  company never trades at zero times earnings; metrics where zero is meaningful are
+  untouched. This affected both the Financial Ratios widget and the Ratios tab of the
+  Financials widget, where an earlier formatter coerced `null` through `Number(null)`.
+- The Financial Ratios widget's year span now matches the Income Statement, Balance Sheet,
+  and Cash Flow panels beside it in Financial Period View. It previously unioned its own
+  longer history with theirs, so one period selector showed 2012-2026 in that table and
+  2018-2026 in the other three. Leading periods with no ratio data are also trimmed.
 - Backup verification now fails on artifact corruption, nonzero restore, missing equity history, or an existing scratch database; failed copies remove their partial staged dump without deleting a pre-existing one. An isolated off-box Postgres/Mongo restore utility verifies a paired set, representative data, and container cleanup before reporting success.
 - The API reads durable scheduler-worker outcomes across processes and returns unavailable instead of empty healthy status when its observation store fails. Prediction-market query paths are bounded; terminal-market retention is archive-first, row-locked, batch-limited, dry-run by default, and gated on an operator-verified backup/isolated restore.
 - A cached whole-market screener Universe requires a completed full-run symbol-coverage record; partial runs do not invalidate a previously complete partition. Screener provider failures without fallback are marked unavailable rather than zero matches, and quote failures no longer fabricate zero price or current timestamps.
