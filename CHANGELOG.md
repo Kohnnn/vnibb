@@ -13,6 +13,23 @@ live in `docs/`.
 
 ## [Unreleased]
 
+### Deployed
+- Released to the Oracle stack on 2026-09-24. Serving revision
+  `d329dc2b2250bba00652a363684d58799939fae6`, published as
+  `ghcr.io/kohnnn/vnibb-api@sha256:49c167d79177453c2962953022f9cf0ecb072646c48c504d13b1271f49349ed3`.
+  API, MCP, and scheduler all run that same pinned digest.
+- Database reached migration head `d4c39e8a7b12`. `20260922_1745` (prediction-market
+  provenance) was already applied in the live database but unrecorded in
+  `alembic_version`, so it was stamped rather than re-run against its 14.5M-row
+  table; `20260923_0900` and `20260923_1000` then applied normally.
+- A verified paired Postgres/Mongo backup (`20260924T175056Z`) preceded migration.
+- **Operator note:** tables in the `vnibb` database were owned by `supabase_admin`
+  while the migrate/app role is `postgres`, which made any `ALTER TABLE` on an
+  existing table fail with `InsufficientPrivilege`. Ownership of the 35 affected
+  tables and 33 sequences was reassigned to `postgres`. Fresh databases built from
+  these migrations should provision the app role as the owner to avoid repeating
+  this.
+
 ### Fixed
 - Backup verification now fails on artifact corruption, nonzero restore, missing equity history, or an existing scratch database; failed copies remove their partial staged dump without deleting a pre-existing one. An isolated off-box Postgres/Mongo restore utility verifies a paired set, representative data, and container cleanup before reporting success.
 - The API reads durable scheduler-worker outcomes across processes and returns unavailable instead of empty healthy status when its observation store fails. Prediction-market query paths are bounded; terminal-market retention is archive-first, row-locked, batch-limited, dry-run by default, and gated on an operator-verified backup/isolated restore.
