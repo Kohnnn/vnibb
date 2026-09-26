@@ -52,6 +52,7 @@ const DEFAULT_MIN_H = 2;
 const BREAKPOINTS = DASHBOARD_GRID_BREAKPOINTS;
 const COLS = { lg: 24, md: 12, sm: 6, xs: 2 };
 const GRID_GAP = { lg: 6, md: 6, sm: 8, xs: 6 } as const;
+const COLLISION_SAFE_COMPACTOR = { ...noCompactor, preventCollision: true };
 
 interface DashboardGridProps {
     children: any;
@@ -256,7 +257,7 @@ export function DashboardGrid({
         },
         resizeConfig: { enabled: canEdit, handles: ['se', 'e', 's'] },
         dropConfig: { enabled: false },
-        compactor: noCompactor,
+        compactor: COLLISION_SAFE_COMPACTOR,
         margin: gridMargin,
         containerPadding: [0, 0] as [number, number],
     } satisfies Omit<ResponsiveProps, 'children'>;

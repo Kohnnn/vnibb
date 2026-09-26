@@ -26,6 +26,18 @@ describe('research notebook', () => {
     expect(readNotebookItems()).toEqual([expect.objectContaining({ id: 'nb:valid', title: 'Valid' })])
   })
 
+
+  test('reports a denied storage write instead of claiming a notebook save succeeded', () => {
+    const denied = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage denied', 'QuotaExceededError')
+    })
+    try {
+      expect(() => addNotebookItem({ kind: 'artifact', title: 'FPT table', body: '| FPT |' })).toThrow('Storage denied')
+      expect(readNotebookItems()).toEqual([])
+    } finally {
+      denied.mockRestore()
+    }
+  })
   test('deduplicates saved agent answers and preserves source references in markdown', () => {
     const input = {
       kind: 'agent_answer' as const,

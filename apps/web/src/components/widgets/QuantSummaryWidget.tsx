@@ -123,6 +123,8 @@ function averageSortino(metric: SortinoMetric | undefined): number | null {
   )
 }
 
+const EMPTY_METRICS: Record<string, unknown> = {}
+
 export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: QuantSummaryWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
@@ -134,7 +136,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
   })
   const regime = useQuantRegime(upperSymbol, { period, enabled: Boolean(upperSymbol) })
 
-  const metrics = quantQuery.data?.data?.metrics || {}
+  const metrics = quantQuery.data?.data?.metrics ?? EMPTY_METRICS
   const seasonality = metrics.seasonality as SeasonalityMetric | undefined
   const volumeDelta = metrics.volume_delta as VolumeDeltaMetric | undefined
   const sortino = metrics.sortino as SortinoMetric | undefined

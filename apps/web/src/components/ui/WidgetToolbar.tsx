@@ -102,7 +102,14 @@ export function WidgetToolbar({
     if (!isPanelOpen) return;
     const positionPanel = () => {
       const rect = compactTriggerRef.current?.getBoundingClientRect();
-      if (rect) setPanelPosition({ top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - (compactPanelRef.current?.offsetHeight ?? 0) - 8)), right: Math.max(8, window.innerWidth - rect.right) });
+      if (rect) {
+        const panelWidth = compactPanelRef.current?.offsetWidth ?? 0;
+        const maxRight = Math.max(0, window.innerWidth - panelWidth - 8);
+        setPanelPosition({
+          top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - (compactPanelRef.current?.offsetHeight ?? 0) - 8)),
+          right: Math.min(Math.max(8, window.innerWidth - rect.right), maxRight),
+        });
+      }
     };
     const closeOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
@@ -165,7 +172,7 @@ export function WidgetToolbar({
   const refresh = onRefresh && command('Refresh widget', onRefresh, <RefreshCw size={12} />);
   const agent = onCopilot && command('Open VniAgent', onCopilot, <Sparkles size={12} />);
   const settings = onSettings && (
-    <button type="button" onClick={() => { setIsPanelOpen(false); onSettings(); }} data-tour="widget-settings-trigger" title={shouldHighlightSettings ? 'TradingView settings' : 'Settings'} aria-label="Widget settings" className={shouldHighlightSettings ? `${controlClass} border border-blue-500/30 bg-blue-500/12 text-blue-300` : controlClass}>
+    <button type="button" onClick={() => { if (isCompact) compactTriggerRef.current?.focus(); setIsPanelOpen(false); onSettings(); }} data-tour="widget-settings-trigger" title={shouldHighlightSettings ? 'TradingView settings' : 'Settings'} aria-label="Widget settings" className={shouldHighlightSettings ? `${controlClass} border border-blue-500/30 bg-blue-500/12 text-blue-300` : controlClass}>
       <Settings size={12} />
     </button>
   );

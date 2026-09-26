@@ -21,6 +21,9 @@ jest.mock('@/components/settings/SettingsModal', () => ({
 jest.mock('@/contexts/WidgetGroupContext', () => ({
   useWidgetGroups: () => ({ getSharedGroups: jest.fn() }),
 }))
+jest.mock('@/contexts/GlobalMarketsSymbolContext', () => ({
+  useGlobalMarketsSymbol: () => ({ appGlobalMarketsSymbol: 'AMEX:SPY' }),
+}))
 
 jest.mock('@/lib/analytics', () => ({
   ANALYTICS_EVENTS: {

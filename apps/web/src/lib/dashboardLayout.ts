@@ -253,7 +253,6 @@ export const WIDGET_LAYOUT_BEHAVIORS: Record<WidgetType, LayoutBehavior> = {
   sector_top_movers: { preferredW: 10, preferredH: 7, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
   // Renderable-but-not-in-library types (present in the registry, absent from widgetDefinitions).
   // Values preserved from the former dead defaultWidgetLayouts block.
-  valuation_multiples: { preferredW: 4, preferredH: 6, minW: 3, minH: 5, orientation: 'vertical', expandPriority: 2 },
   ai_copilot: { preferredW: 5, preferredH: 8, minW: 4, minH: 6, orientation: 'vertical', expandPriority: 2 },
   alert_settings: { preferredW: 4, preferredH: 7, minW: 3, minH: 6, orientation: 'vertical', expandPriority: 2 },
 }

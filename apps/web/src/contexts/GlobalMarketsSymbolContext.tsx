@@ -3,6 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { useDashboard } from '@/contexts/DashboardContext';
+import { GLOBAL_MARKETS_DASHBOARD_ID, GLOBAL_SYSTEM_TEMPLATE_IDS } from '@/contexts/DashboardContext/constants';
+import type { Dashboard } from '@/types/dashboard';
 
 import {
   DEFAULT_GLOBAL_MARKETS_SYMBOL,
@@ -13,15 +15,16 @@ import {
 
 interface GlobalMarketsSymbolContextType {
   globalMarketsSymbol: string;
+  appGlobalMarketsSymbol: string;
   setGlobalMarketsSymbol: (symbol: string) => void;
+  setGlobalMarketsSymbolForDashboard: (symbol: string, dashboard: Dashboard) => void;
 }
 
 const GlobalMarketsSymbolContext = createContext<GlobalMarketsSymbolContextType | null>(null);
-const GLOBAL_MARKETS_DASHBOARD_ID = 'default-global-markets';
 
 export function GlobalMarketsSymbolProvider({ children }: { children: ReactNode }) {
-  const { state, updateDashboardRuntime } = useDashboard();
-  const [globalMarketsSymbol, setGlobalMarketsSymbolState] = useState<string>(DEFAULT_GLOBAL_MARKETS_SYMBOL);
+  const { state, activeDashboard, updateDashboardRuntime } = useDashboard();
+  const [appGlobalMarketsSymbol, setAppGlobalMarketsSymbol] = useState<string>(DEFAULT_GLOBAL_MARKETS_SYMBOL);
 
   const globalMarketsDashboard = useMemo(
     () => state.dashboards.find((dashboard) => dashboard.id === GLOBAL_MARKETS_DASHBOARD_ID) || null,
@@ -29,36 +32,55 @@ export function GlobalMarketsSymbolProvider({ children }: { children: ReactNode 
   );
 
   useEffect(() => {
-    setGlobalMarketsSymbolState(readStoredGlobalMarketsSymbol());
+    setAppGlobalMarketsSymbol(readStoredGlobalMarketsSymbol());
   }, []);
 
   useEffect(() => {
     const dashboardSymbol = normalizeGlobalMarketsSymbol(globalMarketsDashboard?.globalMarketsSymbol);
-    if (dashboardSymbol && dashboardSymbol !== globalMarketsSymbol) {
-      setGlobalMarketsSymbolState(dashboardSymbol);
-    }
-  }, [globalMarketsDashboard?.globalMarketsSymbol, globalMarketsSymbol]);
+    if (dashboardSymbol) setAppGlobalMarketsSymbol(dashboardSymbol);
+  }, [globalMarketsDashboard?.globalMarketsSymbol]);
 
   useEffect(() => {
-    writeStoredGlobalMarketsSymbol(globalMarketsSymbol);
-  }, [globalMarketsSymbol]);
+    writeStoredGlobalMarketsSymbol(appGlobalMarketsSymbol);
+  }, [appGlobalMarketsSymbol]);
 
-  const setGlobalMarketsSymbol = useCallback((symbol: string) => {
+  const scopedSymbol = activeDashboard && !GLOBAL_SYSTEM_TEMPLATE_IDS.has(activeDashboard.id)
+    ? normalizeGlobalMarketsSymbol(activeDashboard.globalMarketsSymbol) : null;
+  const globalMarketsSymbol = scopedSymbol ?? appGlobalMarketsSymbol;
+
+  const setGlobalMarketsSymbolForDashboard = useCallback((symbol: string, dashboard: Dashboard) => {
     const normalized = normalizeGlobalMarketsSymbol(symbol);
     if (!normalized) return;
 
-    setGlobalMarketsSymbolState(normalized);
+    if (!GLOBAL_SYSTEM_TEMPLATE_IDS.has(dashboard.id) && normalizeGlobalMarketsSymbol(dashboard.globalMarketsSymbol)) {
+      if (dashboard.globalMarketsSymbol !== normalized) {
+        updateDashboardRuntime(dashboard.id, { globalMarketsSymbol: normalized });
+      }
+      return;
+    }
 
+    setAppGlobalMarketsSymbol(normalized);
     if (globalMarketsDashboard?.id && globalMarketsDashboard.globalMarketsSymbol !== normalized) {
       updateDashboardRuntime(globalMarketsDashboard.id, { globalMarketsSymbol: normalized });
     }
   }, [globalMarketsDashboard, updateDashboardRuntime]);
 
+  const setGlobalMarketsSymbol = useCallback((symbol: string) => {
+    if (activeDashboard) {
+      setGlobalMarketsSymbolForDashboard(symbol, activeDashboard);
+    } else {
+      const normalized = normalizeGlobalMarketsSymbol(symbol);
+      if (normalized) setAppGlobalMarketsSymbol(normalized);
+    }
+  }, [activeDashboard, setGlobalMarketsSymbolForDashboard]);
+
   return (
     <GlobalMarketsSymbolContext.Provider
       value={{
         globalMarketsSymbol,
+        appGlobalMarketsSymbol,
         setGlobalMarketsSymbol,
+        setGlobalMarketsSymbolForDashboard,
       }}
     >
       {children}

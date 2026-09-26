@@ -76,10 +76,7 @@ export function getStarterForTemplate(templateId: string): ResearchStarter | und
   return RESEARCH_STARTERS.find((starter) => starter.templateId === templateId);
 }
 
-/**
- * The disclosure shown before a starter is applied. States the shared-ticker
- * consequence the seeded widgets actually have, so applying is never a surprise.
- */
+/** Describes ticker sharing and the detach control before widgets are added. */
 export function describeStarterDisclosure(
   starter: ResearchStarter,
   options: { sharedTickerGroups: readonly WidgetGroupId[] } = { sharedTickerGroups: [] },
@@ -87,5 +84,5 @@ export function describeStarterDisclosure(
   const shared = options.sharedTickerGroups.filter((group) => group === starter.defaultGroup);
   return shared.length
     ? `${starter.name} seeds this workspace with widgets that share the ${shared.join('/')} ticker.`
-    : `${starter.name} seeds this workspace; its widgets keep their own tickers until you link a group.`;
+    : `${starter.name} seeds this workspace with widgets following the workspace ticker. To keep one ticker in a widget, detach it from its group.`;
 }

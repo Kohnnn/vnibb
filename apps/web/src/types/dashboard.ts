@@ -24,7 +24,6 @@ export interface WidgetLayout {
 export type WidgetType =
     | 'ticker_info'
     | 'ticker_profile'
-    | 'valuation_multiples'
     | 'price_chart'
     | 'tradingview_chart'
     | 'tradingview_symbol_overview'

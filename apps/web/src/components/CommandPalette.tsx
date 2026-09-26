@@ -32,7 +32,6 @@ import {
 } from '@/lib/commandPalette';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useDashboard } from '@/contexts/DashboardContext';
-import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import { cn } from '@/lib/utils';
@@ -114,9 +113,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     updateWidget,
     updateSyncGroupSymbol,
   } = useDashboard();
-  const { setGlobalSymbol: setWidgetGroupGlobalSymbol } = useWidgetGroups();
   const { setGlobalSymbol: setLinkedGlobalSymbol } = useSymbolLink();
-  const { setGlobalMarketsSymbol } = useGlobalMarketsSymbol();
+  const { setGlobalMarketsSymbol, setGlobalMarketsSymbolForDashboard } = useGlobalMarketsSymbol();
 
   useEffect(() => {
     if (!open) return;
@@ -177,6 +175,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     setActiveTab(tab.id);
 
     return {
+      dashboard,
       dashboardId: dashboard.id,
       tabId: tab.id,
       existingWidgetId: existingWidget?.id ?? null,
@@ -204,7 +203,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     }
 
     state.dashboards
-      .filter((dashboard) => !dashboard.isDefault)
+      .filter((dashboard) => !dashboard.isDefault && dashboard.id !== defaultDashboard?.id)
       .forEach((dashboard) => {
         const item: CommandPaletteActionItem = {
           id: `workspace:${dashboard.id}`,
@@ -414,8 +413,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       description: 'Open a global asset chart widget in the Global Markets tab',
     };
     actions.set(tradingViewItem.id, () => {
-      setGlobalMarketsSymbol('NASDAQ:AAPL');
       const destination = resolveTradingViewDestination();
+      setGlobalMarketsSymbolForDashboard('NASDAQ:AAPL', destination.dashboard);
       if (destination.existingWidgetId) {
         updateWidget(destination.dashboardId, destination.tabId, destination.existingWidgetId, {
           type: 'tradingview_chart',
@@ -443,7 +442,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     router,
     setActiveDashboard,
     setActiveTab,
-    setGlobalMarketsSymbol,
+    setGlobalMarketsSymbolForDashboard,
     state.dashboards,
     updateTab,
     updateWidget,
@@ -523,7 +522,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const applyVietnamSymbol = (symbol: string) => {
     const normalizedSymbol = symbol.trim().toUpperCase();
     if (!normalizedSymbol) return;
-    setWidgetGroupGlobalSymbol(normalizedSymbol);
     setLinkedGlobalSymbol(normalizedSymbol);
     setGlobalMarketsSymbol(normalizedSymbol);
     if (activeDashboard) {
@@ -549,8 +547,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     }
 
     const tradingViewSymbol = item.tv_symbol || item.symbol;
-    setGlobalMarketsSymbol(tradingViewSymbol);
     const destination = resolveTradingViewDestination();
+    setGlobalMarketsSymbolForDashboard(tradingViewSymbol, destination.dashboard);
     if (destination.existingWidgetId) {
       updateWidget(destination.dashboardId, destination.tabId, destination.existingWidgetId, {
         type: 'tradingview_chart',

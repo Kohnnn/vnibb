@@ -1,10 +1,10 @@
 import { availableWidgetDefinitions, filterAvailableWidgetTypes } from './WidgetLibrary';
 
 describe('WidgetLibrary catalog', () => {
-  it('includes only activated Wave 12 widgets while excluding other placeholders', () => {
-    const activated = ['bank_metrics', 'valuation_band', 'cashflow_waterfall', 'technical_summary'];
+  it('exposes activated valuation charts alongside other implemented widgets', () => {
+    const activated = ['bank_metrics', 'valuation_band', 'cashflow_waterfall', 'technical_summary', 'valuation_multiples_chart'];
     expect(activated.every((type) => availableWidgetDefinitions.some((widget) => widget.type === type))).toBe(true);
-    expect(filterAvailableWidgetTypes([...activated, 'valuation_multiples_chart'] as never)).toEqual(activated);
+    expect(filterAvailableWidgetTypes(activated as never)).toEqual(activated);
   });
 
   it('includes the five activated Wave 9.6 market-analysis widgets', () => {

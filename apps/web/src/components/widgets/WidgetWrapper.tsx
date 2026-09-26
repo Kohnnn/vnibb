@@ -105,6 +105,25 @@ export interface WidgetWrapperProps {
     onCopilotClick?: (context?: Record<string, unknown>) => void;
 }
 
+type ResolvedWidgetProps = {
+    id: string;
+    symbol: string;
+    widgetGroup: WidgetGroupId;
+    onDataChange: (data: unknown) => void;
+};
+
+function withResolvedWidgetProps(children: ReactNode, props: ResolvedWidgetProps): ReactNode {
+    if (!React.isValidElement<Record<string, unknown>>(children)) return children;
+    if (children.type === React.Suspense || children.type === React.Fragment) {
+        const content = children.props.children;
+        return React.cloneElement(children, {
+            children: React.Children.map(content as ReactNode, child => withResolvedWidgetProps(child, props)),
+        });
+    }
+    if (typeof children.type === 'string') return children;
+    return React.cloneElement(children, props);
+}
+
 export function WidgetWrapper({
     id,
     title,
@@ -848,14 +867,12 @@ export function WidgetWrapper({
                                 widgetName={title}
                                 onError={(error) => logClientError(`Widget ${id} (${title}) crashed:`, error)}
                             >
-                                {React.isValidElement(children)
-                                    ? React.cloneElement(children as React.ReactElement<any>, {
-                                        id: id,
-                                        symbol: displaySymbol,
-                                        widgetGroup,
-                                        onDataChange: setInternalData,
-                                    })
-                                    : children}
+                                {withResolvedWidgetProps(children, {
+                                    id,
+                                    symbol: displaySymbol,
+                                    widgetGroup,
+                                    onDataChange: setInternalData,
+                                })}
                             </WidgetErrorBoundary>
                         </WidgetHeaderVisibilityProvider>
                     )}
@@ -874,14 +891,12 @@ export function WidgetWrapper({
                     widgetName={title}
                     onError={(error) => logClientError(`Maximized Widget ${id} (${title}) crashed:`, error)}
                 >
-                    {React.isValidElement(children)
-                        ? React.cloneElement(children as React.ReactElement<any>, {
-                            id,
-                            symbol: displaySymbol,
-                            widgetGroup,
-                            onDataChange: setInternalData
-                        })
-                        : children}
+                    {withResolvedWidgetProps(children, {
+                        id,
+                        symbol: displaySymbol,
+                        widgetGroup,
+                        onDataChange: setInternalData,
+                    })}
                 </WidgetErrorBoundary>
                 </WidgetHeaderVisibilityProvider>
             </MaximizedWidgetPortal>

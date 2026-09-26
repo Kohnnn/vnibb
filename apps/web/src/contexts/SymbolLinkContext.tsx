@@ -1,8 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
-import { DEFAULT_TICKER, normalizeTickerSymbol, readStoredTicker, writeStoredTicker } from '@/lib/defaultTicker';
-import { useDashboard } from '@/contexts/DashboardContext';
+import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 
 interface SymbolLinkContextType {
@@ -16,31 +14,8 @@ interface SymbolLinkContextType {
 const SymbolLinkContext = createContext<SymbolLinkContextType | null>(null);
 
 export function SymbolLinkProvider({ children }: { children: ReactNode }) {
-  const [globalSymbol, setGlobalSymbolState] = useState<string>(DEFAULT_TICKER);
   const [linkedWidgets, setLinkedWidgets] = useState<Set<string>>(new Set());
-  const [isLoaded, setIsLoaded] = useState(false);
-  const { activeDashboard } = useDashboard();
-  const { globalSymbol: groupGlobalSymbol, setGlobalSymbol: setGroupGlobalSymbol } = useWidgetGroups();
-  const hasWorkspaceGroups = Boolean(activeDashboard?.widgetGroups);
-
-  useEffect(() => {
-    setGlobalSymbolState(readStoredTicker());
-    setIsLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (isLoaded) writeStoredTicker(globalSymbol);
-  }, [globalSymbol, isLoaded]);
-
-  const setGlobalSymbol = useCallback((symbol: string) => {
-    const normalized = normalizeTickerSymbol(symbol);
-    if (!normalized) return;
-    if (hasWorkspaceGroups) {
-      setGroupGlobalSymbol(normalized);
-      return;
-    }
-    setGlobalSymbolState(normalized);
-  }, [hasWorkspaceGroups, setGroupGlobalSymbol]);
+  const { globalSymbol, setGlobalSymbol } = useWidgetGroups();
 
   const toggleWidgetLink = useCallback((widgetId: string) => {
     setLinkedWidgets(prev => {
@@ -60,7 +35,7 @@ export function SymbolLinkProvider({ children }: { children: ReactNode }) {
 
   return (
     <SymbolLinkContext.Provider value={{
-      globalSymbol: hasWorkspaceGroups ? groupGlobalSymbol : globalSymbol,
+      globalSymbol,
       setGlobalSymbol,
       linkedWidgets,
       toggleWidgetLink,

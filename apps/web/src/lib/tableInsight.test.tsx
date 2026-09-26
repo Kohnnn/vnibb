@@ -119,14 +119,14 @@ jest.mock('recharts', () => ({
     Area: ({ dataKey }: { readonly dataKey?: string }) => <span data-testid={`area-${dataKey}`} />,
     Bar: ({ dataKey }: { readonly dataKey?: string }) => <span data-testid={`bar-${dataKey}`} />,
     CartesianGrid: () => null,
-    ComposedChart: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
+    ComposedChart: ({ children, data }: { readonly children: ReactNode; readonly data: { period: string; [key: string]: number | string }[] }) => <div data-testid="charted-periods" data-periods={JSON.stringify(data)}>{children}</div>,
     Legend: () => null,
     Line: ({ dataKey }: { readonly dataKey?: string }) => <span data-testid={`line-${dataKey}`} />,
     ReferenceLine: () => null,
     ResponsiveContainer: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
     Tooltip: () => null,
     XAxis: () => null,
-    YAxis: () => null,
+    YAxis: ({ label }: { readonly label?: { value: string } }) => <span data-testid="chart-axis-unit">{label?.value}</span>,
 }));
 
 jest.mock('@/lib/queries', () => ({
@@ -265,12 +265,69 @@ describe('IncomeStatementWidget table selection', () => {
         fireEvent.click(screen.getByTitle('Table View'));
     }
 
-    it('charts the default revenue series and labels it before any selection', () => {
+    it('charts the default revenue and net income series before any selection', () => {
         render(<IncomeStatementWidget id="income-1" symbol="FPT" />);
         openChart();
         expect(screen.getByTestId('bar-revenue')).toBeInTheDocument();
         expect(screen.getByTestId('line-netIncome')).toBeInTheDocument();
         expect(screen.getByTestId('income-chart-focus')).toHaveTextContent('All metrics');
+        expect(JSON.parse(screen.getByTestId('charted-periods').getAttribute('data-periods')!)).toEqual([
+            expect.objectContaining({ period: '2025', revenue: 1000, netIncome: 250 }),
+        ]);
+    });
+
+    it('shows all percentage series in Margins % mode with unscaled percentage values', () => {
+        render(<IncomeStatementWidget id="income-1" symbol="FPT" />);
+        openChart();
+        fireEvent.change(screen.getByRole('combobox', { name: 'Income statement chart mode' }), { target: { value: 'margins' } });
+
+        expect(screen.getByTestId('line-grossMargin')).toBeInTheDocument();
+        expect(screen.getByTestId('line-operatingMargin')).toBeInTheDocument();
+        expect(screen.getByTestId('line-netMargin')).toBeInTheDocument();
+        expect(screen.getByTestId('chart-axis-unit')).toHaveTextContent('%');
+        expect(screen.queryByTestId('bar-revenue')).toBeNull();
+        expect(JSON.parse(screen.getByTestId('charted-periods').getAttribute('data-periods')!)).toEqual([
+            expect.objectContaining({ period: '2025', grossMargin: 40, operatingMargin: 30, netMargin: 25 }),
+        ]);
+    });
+
+    it.each([
+        ['Gross Profit', 'grossProfit', 400],
+        ['Operating Income', 'operatingIncome', 300],
+    ])('charts selected %s in financial units for the reporting period', (label, key, amount) => {
+        render(<IncomeStatementWidget id="income-1" symbol="FPT" />);
+        fireEvent.click(screen.getByRole('button', { name: `Chart ${label}` }));
+        openChart();
+
+        expect(screen.getByTestId(`line-${key}`)).toBeInTheDocument();
+        expect(screen.getByTestId('chart-axis-unit')).toHaveTextContent('VND');
+        expect(screen.queryByTestId('bar-revenue')).toBeNull();
+        expect(JSON.parse(screen.getByTestId('charted-periods').getAttribute('data-periods')!)).toEqual([
+            expect.objectContaining({ period: '2025', [key]: amount }),
+        ]);
+    });
+
+    it('keeps the sorted reporting periods and original financial values for a selected metric', () => {
+        mockUseIncomeStatement.mockReturnValue(queryResult({ symbol: 'FPT', count: 2, data: [
+            incomeRow,
+            { ...incomeRow, period: '2024FY', gross_profit: 150 },
+        ] }) as never);
+        render(<IncomeStatementWidget id="income-1" symbol="FPT" />);
+        fireEvent.click(screen.getByRole('button', { name: 'Chart Gross Profit' }));
+        openChart();
+
+        expect(screen.getByTestId('line-grossProfit')).toBeInTheDocument();
+        expect(JSON.parse(screen.getByTestId('charted-periods').getAttribute('data-periods')!)).toEqual([
+            expect.objectContaining({ period: '2024', grossProfit: 150 }),
+            expect.objectContaining({ period: '2025', grossProfit: 400 }),
+        ]);
+    });
+
+    it('preserves Sankey Flow when nothing is selected', () => {
+        render(<IncomeStatementWidget id="income-1" symbol="FPT" />);
+        openChart();
+        fireEvent.change(screen.getByRole('combobox', { name: 'Income statement chart mode' }), { target: { value: 'sankey' } });
+        expect(screen.getByTestId('income-sankey')).toBeInTheDocument();
     });
 
     it('charts only the selected metric, then restores the previous chart when cleared', () => {
@@ -304,6 +361,7 @@ describe('IncomeStatementWidget table selection', () => {
         openChart();
 
         expect(screen.getByTestId('income-chart-focus')).toHaveTextContent('Gross Profit');
+        expect(screen.getByTestId('line-grossProfit')).toBeInTheDocument();
         expect(screen.queryByTestId('bar-revenue')).toBeNull();
         expect(screen.queryByTestId('line-netIncome')).toBeNull();
     });
@@ -356,16 +414,16 @@ describe('IncomeStatementWidget table selection', () => {
         });
     });
 
-    it('charts nothing for a period row, whose contract series are the table metrics', () => {
+    it('keeps a period header sortable without changing the chart series', () => {
         render(<IncomeStatementWidget id="income-1" symbol="FPT" />);
-        // Period columns are selected from the table header (the chart itself
-        // has no period control here), which is the reported user flow.
-        fireEvent.click(screen.getByTestId('dense-col-select-2025FY'));
+        const header = screen.getByText('2025').closest('th')!;
+        fireEvent.click(header);
+        expect(header).toHaveAttribute('aria-sort', 'descending');
         openChart();
 
-        expect(screen.getByTestId('income-chart-focus')).toHaveTextContent('2025');
-        expect(screen.queryByTestId('bar-revenue')).toBeNull();
-        expect(screen.queryByTestId('line-netIncome')).toBeNull();
+        expect(screen.getByTestId('income-chart-focus')).toHaveTextContent('All metrics');
+        expect(screen.getByTestId('bar-revenue')).toBeInTheDocument();
+        expect(screen.getByTestId('line-netIncome')).toBeInTheDocument();
     });
 });
 describe('CashFlowWidget table selection', () => {
@@ -416,5 +474,69 @@ describe('CashFlowWidget table selection', () => {
         expect(screen.getByTestId('cash-flow-chart-focus')).toHaveTextContent('Free Cash Flow');
         expect(screen.getByTestId('area-freeCashFlow')).toBeInTheDocument();
         expect(screen.queryByTestId('bar-operatingCF')).toBeNull();
+    });
+
+    it('shows selected cash-flow metrics even after Waterfall was chosen', () => {
+        render(<CashFlowWidget id="cash-1" symbol="FPT" />);
+        openChart();
+        fireEvent.change(screen.getByRole('combobox', { name: 'Cash flow chart mode' }), { target: { value: 'waterfall' } });
+        expect(screen.getByTestId('cash-flow-waterfall')).toBeInTheDocument();
+        openTable();
+        fireEvent.click(screen.getByRole('button', { name: 'Chart Free Cash Flow' }));
+        openChart();
+
+        expect(screen.queryByTestId('cash-flow-waterfall')).toBeNull();
+        expect(screen.getByTestId('area-freeCashFlow')).toBeInTheDocument();
+        expect(screen.getByTestId('chart-axis-unit')).toHaveTextContent('VND');
+        expect(JSON.parse(screen.getByTestId('charted-periods').getAttribute('data-periods')!)).toEqual([
+            expect.objectContaining({ period: '2025', freeCashFlow: 500 }),
+        ]);
+        fireEvent.click(screen.getByRole('button', { name: 'Clear table selection' }));
+        expect(screen.getByTestId('cash-flow-waterfall')).toBeInTheDocument();
+    });
+
+    it('keeps sorted reporting periods and financial values for the selected waterfall metric', () => {
+        mockUseCashFlow.mockReturnValue(queryResult({ symbol: 'FPT', count: 2, data: [
+            cashFlowRow,
+            { ...cashFlowRow, period: '2024FY', free_cash_flow: -75 },
+        ] }) as never);
+        render(<CashFlowWidget id="cash-1" symbol="FPT" />);
+        fireEvent.click(screen.getByRole('button', { name: 'Chart Free Cash Flow' }));
+        openChart();
+
+        expect(screen.getByTestId('area-freeCashFlow')).toBeInTheDocument();
+        expect(JSON.parse(screen.getByTestId('charted-periods').getAttribute('data-periods')!)).toEqual([
+            expect.objectContaining({ period: '2024', freeCashFlow: -75 }),
+            expect.objectContaining({ period: '2025', freeCashFlow: 500 }),
+        ]);
+    });
+
+    it('keeps a period header sortable while the no-selection chart stays populated', () => {
+        render(<CashFlowWidget id="cash-1" symbol="FPT" />);
+        const header = screen.getByText('2025').closest('th')!;
+        fireEvent.click(header);
+        expect(header).toHaveAttribute('aria-sort', 'descending');
+        openChart();
+        expect(screen.getByTestId('cash-flow-chart-focus')).toHaveTextContent('All metrics');
+        expect(screen.getByTestId('bar-operatingCF')).toBeInTheDocument();
+        expect(screen.getByTestId('bar-investingCF')).toBeInTheDocument();
+    });
+
+    it('publishes the selected cash-flow metric with the financial runtime provenance', () => {
+        const onDataChange = jest.fn();
+        render(<CashFlowWidget id="cash-1" symbol="FPT" onDataChange={onDataChange} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Chart Free Cash Flow' }));
+        expect(onDataChange.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({
+            periods: 1,
+            tableInsight: {
+                focus: 'Free Cash Flow',
+                series: [{ key: 'freeCashFlow', label: 'Free Cash Flow', kind: 'currency' }],
+                rowKey: null,
+                columnKey: 'freeCashFlow',
+            },
+            __widgetRuntime: expect.objectContaining({ provenance: expect.objectContaining({
+                endpoint: '/equity/FPT/cash-flow?period=year',
+            }) }),
+        }));
     });
 });

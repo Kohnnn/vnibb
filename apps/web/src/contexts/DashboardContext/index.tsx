@@ -470,6 +470,7 @@ function readDashboardStorageSnapshot(): { dashboards: Dashboard[]; folders: Das
         if (version < 23) normalizedDashboards = migrateLegacyThesisConfig(normalizedDashboards);
         if (version < 24) normalizedDashboards = migrateLegacyGlobalMarketsDashboard(normalizedDashboards);
         if (version < 25) normalizedDashboards = migrateDefaultInvestorHome(normalizedDashboards);
+        if (version < 26) normalizedDashboards = migrateLegacyWidgetTypes(normalizedDashboards);
 
         const normalizedFolders = folders.some((folder) => folder.id === INITIAL_FOLDER_ID)
             ? folders as unknown as DashboardFolder[]
@@ -505,7 +506,7 @@ interface DashboardContextValue {
     // Dashboard actions
     setActiveDashboard: (id: string) => void;
     createDashboard: (data: DashboardCreate) => Dashboard;
-    exportWorkspace: (groups?: Dashboard['widgetGroups']) => WorkspaceBackup;
+    exportWorkspace: (groups?: Dashboard['widgetGroups'], linkedGlobalMarketsSymbol?: string) => WorkspaceBackup;
     restoreWorkspace: (backup: WorkspaceBackup) => void;
     updateDashboard: (id: string, updates: Partial<Dashboard>) => void;
     updateDashboardRuntime: (id: string, updates: Partial<Dashboard>) => void;
@@ -773,6 +774,12 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                     }
                     return { dashboards: d };
                 },
+                (d) => {
+                    if (migrationVersion < 26) {
+                        d = migrateLegacyWidgetTypes(d);
+                    }
+                    return { dashboards: d };
+                },
             ];
 
             let migrationChanged = false;
@@ -991,16 +998,25 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         },
     });
 
-    // Backend responses only replace matching cloud IDs, never local-only workspaces.
+    // The backend snapshot is authoritative for cloud IDs; imported and personal
+    // browser-only workspaces remain local even when absent from the response.
     useLoadFromBackend((loadedDashboards) => {
-        if (loadedDashboards.length > 0) {
-            const current = stateRef.current;
-            const cloudIds = new Set(loadedDashboards.map((dashboard) => dashboard.id));
-            dispatch({ type: 'LOAD_STATE', payload: {
-                ...current,
-                dashboards: [...current.dashboards.filter((dashboard) => !cloudIds.has(dashboard.id)), ...loadedDashboards],
-            } });
-        }
+        const current = stateRef.current;
+        const cloudIds = new Set(loadedDashboards.map((dashboard) => dashboard.id));
+        const dashboards = [
+            ...current.dashboards.filter((dashboard) => !cloudIds.has(dashboard.id) && !/^\d+$/.test(dashboard.id)),
+            ...loadedDashboards,
+        ];
+        const selectedDashboard = dashboards.find((dashboard) => dashboard.id === current.activeDashboardId)
+            ?? loadedDashboards[0] ?? dashboards[0];
+        const activeTabId = selectedDashboard?.tabs.some((tab) => tab.id === current.activeTabId)
+            ? current.activeTabId : selectedDashboard?.tabs[0]?.id ?? null;
+        dispatch({ type: 'LOAD_STATE', payload: {
+            ...current,
+            dashboards,
+            activeDashboardId: selectedDashboard?.id ?? null,
+            activeTabId,
+        } });
     }, backendSyncReady);
 
     // Computed values
@@ -1226,7 +1242,8 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const dismissMigrationNotice = useCallback(() => {
         setMigrationNotice(null);
     }, []);
-    const exportWorkspace = useCallback((groups?: Dashboard['widgetGroups']) => createWorkspaceBackup(stateRef.current, groups), []);
+    const exportWorkspace = useCallback((groups?: Dashboard['widgetGroups'], linkedGlobalMarketsSymbol?: string) =>
+        createWorkspaceBackup(stateRef.current, groups, linkedGlobalMarketsSymbol), []);
 
     const restoreWorkspace = useCallback((backup: WorkspaceBackup) => {
         if (!localStateReady || typeof window === 'undefined') throw new Error('Workspace storage is not ready yet.');

@@ -3,6 +3,7 @@
 import { useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useDashboard } from '@/contexts/DashboardContext';
+import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import { MAX_WORKSPACE_BACKUP_BYTES, parseWorkspaceBackup, previewWorkspaceBackup, WORKSPACE_BACKUP_EXCLUSIONS, type WorkspaceBackup } from '@/lib/workspaceBackup';
 import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { X } from 'lucide-react';
@@ -16,6 +17,7 @@ interface WorkspaceBackupModalProps {
 export function WorkspaceBackupModal({ isOpen, onClose }: WorkspaceBackupModalProps) {
     const { exportWorkspace, restoreWorkspace } = useDashboard();
     const { getSharedGroups } = useWidgetGroups();
+    const { appGlobalMarketsSymbol } = useGlobalMarketsSymbol();
     const [backup, setBackup] = useState<WorkspaceBackup | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [status, setStatus] = useState<string | null>(null);
@@ -28,7 +30,7 @@ export function WorkspaceBackupModal({ isOpen, onClose }: WorkspaceBackupModalPr
         setError(null);
         setStatus(null);
         try {
-            const data = exportWorkspace(getSharedGroups());
+            const data = exportWorkspace(getSharedGroups(), appGlobalMarketsSymbol);
             const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
             if (blob.size > MAX_WORKSPACE_BACKUP_BYTES) throw new Error('Workspace export exceeds the 5 MB limit.');
             const url = URL.createObjectURL(blob);

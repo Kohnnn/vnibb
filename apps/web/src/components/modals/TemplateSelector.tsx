@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { X, Activity, BarChart3, Layout, TrendingUp, Search, ChevronRight, Globe2, Sigma, Newspaper, Save, Trash2, Download, Upload, Star } from 'lucide-react';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
@@ -186,7 +186,17 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
   const [pendingStarter, setPendingStarter] = useState<{ template: DashboardTemplate; starter: ResearchStarter; disclosure: string } | null>(null);
   const [appliedStarter, setAppliedStarter] = useState<ResearchStarter | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
-  const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: open, onClose });
+  const starterTriggerRef = useRef<HTMLElement | null>(null);
+  const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: open && !pendingStarter, onClose });
+  const starterDialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: open && Boolean(pendingStarter), onClose: () => setPendingStarter(null) });
+
+  useEffect(() => {
+    if (pendingStarter || !open || !starterTriggerRef.current) return;
+    const trigger = starterTriggerRef.current;
+    starterTriggerRef.current = null;
+    const timeout = window.setTimeout(() => trigger.isConnected && trigger.focus(), 0);
+    return () => window.clearTimeout(timeout);
+  }, [pendingStarter, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -216,6 +226,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
       applyTemplate(template, undefined);
       return;
     }
+    starterTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setPendingStarter({
       template,
       starter,
@@ -339,7 +350,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
         animate={{ opacity: 1, scale: 1 }}
         onClick={(event) => event.stopPropagation()}
         role="dialog"
-        aria-modal="true"
+        aria-modal={!pendingStarter}
         aria-labelledby="template-selector-title"
         tabIndex={-1}
         className="relative z-10 w-full max-w-6xl max-h-[88vh] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-2xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col"
@@ -691,6 +702,8 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
             className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/60 p-4"
           >
             <div
+              ref={starterDialogRef}
+              tabIndex={-1}
               role="dialog"
               aria-modal="true"
               aria-labelledby="starter-disclosure-title"

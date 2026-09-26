@@ -1,5 +1,6 @@
 import { normalizeWidgetType } from '@/data/widgetDefinitions';
 import { GLOBAL_SYSTEM_TEMPLATE_IDS, INITIAL_FOLDER_ID } from '@/contexts/DashboardContext/constants';
+import { normalizeGlobalMarketsSymbol } from '@/lib/globalMarketsSymbol';
 import type { Dashboard, DashboardFolder, DashboardState, WidgetInstance } from '@/types/dashboard';
 import { DEFAULT_GROUPS, type WidgetGroupConfig, type WidgetGroupId } from '@/types/widget';
 
@@ -94,7 +95,8 @@ function validWidgetGroups(groups: unknown): boolean {
 function validateDashboard(dashboard: unknown): dashboard is Dashboard {
     if (!record(dashboard) || !onlyKeys(dashboard, ['id', 'name', 'description', 'globalMarketsSymbol', 'folderId', 'order', 'isDefault', 'showGroupLabels', 'tabs', 'syncGroups', 'widgetGroups', 'createdAt', 'updatedAt'])
         || !string(dashboard.id) || !string(dashboard.name) || !finite(dashboard.order)
-        || !optionalString(dashboard.description) || !optionalString(dashboard.folderId) || !optionalString(dashboard.globalMarketsSymbol)
+        || (dashboard.globalMarketsSymbol !== undefined && (typeof dashboard.globalMarketsSymbol !== 'string' || !normalizeGlobalMarketsSymbol(dashboard.globalMarketsSymbol)))
+        || !optionalString(dashboard.description) || !optionalString(dashboard.folderId)
         || typeof dashboard.showGroupLabels !== 'boolean' || typeof dashboard.isDefault !== 'boolean'
         || !string(dashboard.createdAt) || !Number.isFinite(Date.parse(dashboard.createdAt))
         || !string(dashboard.updatedAt) || !Number.isFinite(Date.parse(dashboard.updatedAt))
@@ -123,7 +125,10 @@ function validateBackup(value: unknown): asserts value is WorkspaceBackup {
     if (!string(value.createdAt) || !Number.isFinite(Date.parse(value.createdAt)) || !Array.isArray(value.dashboards) || !Array.isArray(value.folders)) {
         throw new Error('Invalid workspace backup metadata. No workspaces were imported.');
     }
-    if (!jsonSafe(value) || !value.dashboards.every(validateDashboard)) {
+    if (!jsonSafe(value)) {
+        throw new Error('Workspace backup contains unsafe configuration. No workspaces were imported.');
+    }
+    if (!value.dashboards.every(validateDashboard)) {
         throw new Error('Invalid dashboard or unknown widget type in workspace backup. No workspaces were imported.');
     }
     if (!value.folders.every((folder: unknown) => record(folder) && onlyKeys(folder, ['id', 'name', 'parentId', 'order', 'isExpanded'])
@@ -156,7 +161,11 @@ function cloneJson<T>(value: T): T {
     return cloned;
 }
 
-export function createWorkspaceBackup(state: DashboardState, widgetGroups: Record<WidgetGroupId, WidgetGroupConfig> = DEFAULT_GROUPS): WorkspaceBackup {
+export function createWorkspaceBackup(state: DashboardState, widgetGroups: Record<WidgetGroupId, WidgetGroupConfig> = DEFAULT_GROUPS, linkedSymbol?: string): WorkspaceBackup {
+    const effectiveSymbol = linkedSymbol === undefined ? undefined : normalizeGlobalMarketsSymbol(linkedSymbol);
+    if (linkedSymbol !== undefined && !effectiveSymbol) {
+        throw new Error('Invalid linked TradingView ticker. No data was exported.');
+    }
     for (const dashboard of state.dashboards) {
         if (GLOBAL_SYSTEM_TEMPLATE_IDS.has(dashboard.id) || dashboard.isEditable === false) continue;
         if (dashboard.tabs.some((tab) => tab.widgets.some((widget) => !jsonSafe(widget.config)))) {
@@ -166,7 +175,7 @@ export function createWorkspaceBackup(state: DashboardState, widgetGroups: Recor
     const dashboards = state.dashboards.filter((dashboard) => !GLOBAL_SYSTEM_TEMPLATE_IDS.has(dashboard.id) && dashboard.isEditable !== false)
         .map((dashboard) => ({
             id: dashboard.id, name: dashboard.name, description: dashboard.description,
-            globalMarketsSymbol: dashboard.globalMarketsSymbol, folderId: dashboard.folderId,
+            globalMarketsSymbol: dashboard.globalMarketsSymbol === undefined ? effectiveSymbol : normalizeGlobalMarketsSymbol(dashboard.globalMarketsSymbol) ?? dashboard.globalMarketsSymbol, folderId: dashboard.folderId,
             order: dashboard.order, isDefault: dashboard.isDefault,
             showGroupLabels: dashboard.showGroupLabels, tabs: dashboard.tabs, syncGroups: dashboard.syncGroups,
             widgetGroups: dashboard.widgetGroups ?? widgetGroups,

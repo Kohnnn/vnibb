@@ -121,13 +121,19 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
     }
   )
 
-  const candles = ((data?.data || []) as OHLCData[])
-    .slice()
-    .sort((a, b) => new Date(String(a.time)).getTime() - new Date(String(b.time)).getTime())
+  const history = data?.data
+  const candles = useMemo(
+    () => ((history ?? []) as OHLCData[])
+      .slice()
+      .sort((a, b) => new Date(String(a.time)).getTime() - new Date(String(b.time)).getTime()),
+    [history],
+  )
 
-  const closes = candles
-    .map((candle) => Number(candle.close))
-    .filter((close) => Number.isFinite(close) && close > 0)
+  const closes = useMemo(
+    () => candles.map((candle) => Number(candle.close))
+      .filter((close) => Number.isFinite(close) && close > 0),
+    [candles],
+  )
 
   const returns = closes.slice(1).map((close, index) => (close / closes[index]) - 1)
   const hurst = computeHurstFromPrices(closes)
@@ -178,7 +184,7 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
 
       },
     }))
-  }, [adjustmentWarning, candles, candles.length, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, dataUpdatedAt, hasData, hurst, lag1, onDataChange, period, upperSymbol])
+  }, [adjustmentWarning, candles, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, dataUpdatedAt, hasData, hurst, lag1, onDataChange, period, upperSymbol])
 
 
   if (!upperSymbol) {

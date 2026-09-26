@@ -58,7 +58,7 @@ describe('WidgetRegistry completeness', () => {
     });
 
     it('identifies placeholder entries without unregistering them', () => {
-        expect(isWidgetPlaceholder('valuation_multiples_chart')).toBe(true);
+        expect(isWidgetPlaceholder('valuation_multiples_chart')).toBe(false);
         expect(widgetRegistry.has('valuation_band')).toBe(true);
         expect(isWidgetPlaceholder('price_chart')).toBe(false);
         expect(isWidgetPlaceholder('signal_summary')).toBe(false);
@@ -88,12 +88,13 @@ describe('WidgetRegistry completeness', () => {
         }
     });
 
-    it('keeps system-default dashboards free of placeholder widgets', () => {
+    it('keeps system-default dashboards backed by renderable registered widgets', () => {
         const defaultWidgetTypes = [createMainSystemDashboard(), createGlobalMarketsDashboard()]
             .flatMap((dashboard) => dashboard.tabs)
             .flatMap((tab) => tab.widgets)
             .map((widget) => widget.type);
 
+        expect(defaultWidgetTypes.filter((type) => !widgetRegistry.has(type))).toEqual([]);
         expect(defaultWidgetTypes.filter((type) => isWidgetPlaceholder(type))).toEqual([]);
     });
 
@@ -103,7 +104,7 @@ describe('WidgetRegistry completeness', () => {
             const resolved = await widgetRegistry.get(id as never)?.lazyComponent();
             expect(isRenderableComponent(resolved?.default)).toBe(true);
         }
-        expect(isWidgetPlaceholder('valuation_multiples_chart')).toBe(true);
+        expect(isWidgetPlaceholder('valuation_multiples_chart')).toBe(false);
     });
 
     it('loads the source-transparent research notebook component', async () => {

@@ -28,15 +28,6 @@ const countDashboardWidgets = (dashboard: Dashboard): number => {
 };
 
 // ============================================================================
-// Widget Fingerprint
-// ============================================================================
-
-const widgetFingerprint = (type: string, config: unknown): string => {
-    const normalizedConfig = config && typeof config === 'object' ? config : {};
-    return `${type}:${JSON.stringify(normalizedConfig)}`;
-};
-
-// ============================================================================
 // Migrate Empty Tabs
 // ============================================================================
 
@@ -67,7 +58,6 @@ export const migrateLegacyWidgetTypes = (dashboards: Dashboard[]): Dashboard[] =
         let dashboardChanged = false;
 
         const tabs = dashboard.tabs.map((tab) => {
-            const seenCanonicalWidgets = new Set<string>();
             let changed = false;
 
             const widgets = tab.widgets.flatMap((widget) => {
@@ -77,17 +67,7 @@ export const migrateLegacyWidgetTypes = (dashboards: Dashboard[]): Dashboard[] =
                     return [];
                 }
 
-                const fingerprint = widgetFingerprint(normalizedType, widget.config);
-                const isLegacyAlias = normalizedType !== widget.type;
-
-                if (isLegacyAlias && seenCanonicalWidgets.has(fingerprint)) {
-                    changed = true;
-                    return [];
-                }
-
-                seenCanonicalWidgets.add(fingerprint);
-
-                if (!isLegacyAlias) {
+                if (normalizedType === widget.type) {
                     return [widget];
                 }
 

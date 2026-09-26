@@ -106,7 +106,7 @@ export interface DashboardContextValue {
     localStateReady: boolean;
     setActiveDashboard: (id: string) => void;
     createDashboard: (data: DashboardCreate) => Dashboard;
-    exportWorkspace: (groups?: Dashboard['widgetGroups']) => WorkspaceBackup;
+    exportWorkspace: (groups?: Dashboard['widgetGroups'], linkedGlobalMarketsSymbol?: string) => WorkspaceBackup;
     restoreWorkspace: (backup: WorkspaceBackup) => void;
     updateDashboard: (id: string, updates: Partial<Dashboard>) => void;
     updateDashboardRuntime: (id: string, updates: Partial<Dashboard>) => void;

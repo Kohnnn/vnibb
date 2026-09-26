@@ -26,7 +26,6 @@ import {
 import { useDashboard } from '@/contexts/DashboardContext';
 import { GLOBAL_SYSTEM_TEMPLATE_IDS } from '@/contexts/DashboardContext/constants';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
-import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import {
   findMatchingWidgetTarget,
@@ -265,7 +264,6 @@ function useArtifactDestination(): ArtifactPlacementStore {
 
 export function CopilotArtifactPanel({ artifacts, responseMeta, surface = 'sidebar' }: CopilotArtifactPanelProps) {
   const { state, addWidget, setActiveDashboard, setActiveTab } = useDashboard();
-  const { globalSymbol, setGlobalSymbol } = useSymbolLink();
   const artifactKey = useMemo(() => artifacts.map((artifact) => artifact.id).join('|'), [artifacts]);
   const responseId = responseMeta?.responseId;
   const { promotedWidgets, restored, recordPromotion } = usePromotedWidgets(responseId);
@@ -302,8 +300,6 @@ export function CopilotArtifactPanel({ artifacts, responseMeta, surface = 'sideb
           addWidget={addWidget}
           setActiveDashboard={setActiveDashboard}
           setActiveTab={setActiveTab}
-          globalSymbol={globalSymbol}
-          setGlobalSymbol={setGlobalSymbol}
           promotedWidgets={promotedWidgets}
           restoredPromotions={restored}
           onWidgetPromoted={recordPromotion}
@@ -324,8 +320,6 @@ interface ArtifactCardProps {
   addWidget: ReturnType<typeof useDashboard>['addWidget'];
   setActiveDashboard: ReturnType<typeof useDashboard>['setActiveDashboard'];
   setActiveTab: ReturnType<typeof useDashboard>['setActiveTab'];
-  globalSymbol: string;
-  setGlobalSymbol: ReturnType<typeof useSymbolLink>['setGlobalSymbol'];
   promotedWidgets: PromotedWidget[];
   restoredPromotions: { widgetId: string; provenance: ArtifactWidgetProvenance }[];
   onWidgetPromoted: (promotion: PromotedWidget) => void;
@@ -341,8 +335,6 @@ function ArtifactCard({
   addWidget,
   setActiveDashboard,
   setActiveTab,
-  globalSymbol,
-  setGlobalSymbol,
   promotedWidgets,
   restoredPromotions,
   onWidgetPromoted,
@@ -377,19 +369,10 @@ function ArtifactCard({
     ?? destinations.find((item) => item.dashboardId === state.activeDashboardId && item.tabId === state.activeTabId)
     ?? destinations[0];
   const [placementStatus, setPlacementStatus] = useState<string | null>(null);
-  const [pendingSymbol, setPendingSymbol] = useState<{ dashboardId: string; symbol: string } | null>(null);
-
-  useEffect(() => {
-    if (!pendingSymbol || state.activeDashboardId !== pendingSymbol.dashboardId) return;
-    if (globalSymbol === pendingSymbol.symbol) {
-      setPendingSymbol(null);
-      return;
-    }
-    setGlobalSymbol(pendingSymbol.symbol);
-  }, [globalSymbol, pendingSymbol, setGlobalSymbol, state.activeDashboardId]);
   const [ratingStatus, setRatingStatus] = useState<'liked' | 'disliked' | undefined>(undefined)
   const [pendingRating, setPendingRating] = useState<'liked' | 'disliked' | null>(null)
   const [savedArtifacts, setSavedArtifacts] = useState<Record<string, true>>({})
+  const [notebookError, setNotebookError] = useState<string | null>(null)
 
   // Promotions of this response, newest first: live ones for this session, plus
   // what the durable provenance index says about widgets from earlier sessions.
@@ -457,9 +440,6 @@ function ArtifactCard({
 
   const handleJumpToWidget = async () => {
     if (!existingTarget) return;
-    if (intent?.symbol) {
-      setPendingSymbol({ dashboardId: existingTarget.dashboardId, symbol: intent.symbol });
-    }
     focusDashboardWidget(existingTarget, setActiveDashboard, setActiveTab)
     await recordOutcome('executed', 'Jumped to widget from artifact')
   }
@@ -486,7 +466,7 @@ function ArtifactCard({
       tabId: destination.tabId,
       config: {
         ...intent.config,
-        ...(intent.symbol ? { symbol: intent.symbol } : {}),
+        ...(intent.symbol ? { symbol: intent.symbol, tickerScope: 'override' } : {}),
         ...buildArtifactProvenance(provenance),
       },
       layout: {
@@ -518,7 +498,6 @@ function ArtifactCard({
       } catch {
         // The widget's own config marker already carries the provenance.
       }
-      if (intent.symbol) setPendingSymbol({ dashboardId: destination.dashboardId, symbol: intent.symbol });
       focusDashboardWidget({ ...destination, widgetId: widget.id }, setActiveDashboard, setActiveTab)
       setPlacementStatus(`Added ${intent.label} to ${destination.label}.`)
       await recordOutcome('executed', `Created ${intent.label} in ${destination.label}`)
@@ -532,30 +511,33 @@ function ArtifactCard({
     if (artifact.type !== 'table') return
     const symbol = intent?.symbol
       ?? artifact.rows.map((row) => row.symbol).find((value): value is string => typeof value === 'string' && Boolean(value))
-    addNotebookItem({
-      kind: 'artifact',
-      title: artifact.title || artifact.id,
-      body: artifactNotebookBody(artifact),
-      symbol,
-      tags: ['copilot artifact'],
-      artifact: {
-        artifactId: artifact.id,
-        responseId: responseMeta?.responseId,
-        artifactType: artifact.type,
-      },
-      dedupeKey: notebookDedupeKey,
-      provenance: {
-        sourceLabel: 'VniAgent artifact',
-        apiGroup: '/copilot',
-        endpoint: '/api/v1/copilot/chat/stream',
-        symbol: intent?.symbol,
-        localOnly: true,
-        capturedAt: new Date().toISOString(),
-      },
-    })
-    // The notebook write is synchronous, so the state already reflects the
-    // dedupe: a second save of the same artifact adds nothing.
-    setSavedArtifacts((current) => ({ ...current, [notebookDedupeKey]: true }))
+    try {
+      addNotebookItem({
+        kind: 'artifact',
+        title: artifact.title || artifact.id,
+        body: artifactNotebookBody(artifact),
+        symbol,
+        tags: ['copilot artifact'],
+        artifact: {
+          artifactId: artifact.id,
+          responseId: responseMeta?.responseId,
+          artifactType: artifact.type,
+        },
+        dedupeKey: notebookDedupeKey,
+        provenance: {
+          sourceLabel: 'VniAgent artifact',
+          apiGroup: '/copilot',
+          endpoint: '/api/v1/copilot/chat/stream',
+          symbol: intent?.symbol,
+          localOnly: true,
+          capturedAt: new Date().toISOString(),
+        },
+      })
+      setNotebookError(null)
+      setSavedArtifacts((current) => ({ ...current, [notebookDedupeKey]: true }))
+    } catch {
+      setNotebookError('Could not save table to research notebook. Check browser storage and try again.')
+    }
   }
 
   return (
@@ -600,17 +582,18 @@ function ArtifactCard({
                   {savedArtifacts[notebookDedupeKey] ? 'Saved to research notebook' : 'Save table to research notebook'}
                 </button>
               )}
+              {notebookError && <p role="status" className="text-[10px] text-rose-300">{notebookError}</p>}
               {intent && (
                 <div className="flex flex-wrap justify-end gap-2">
                   {existingTarget && (
                     <button
                       type="button"
                       onClick={() => { void handleJumpToWidget() }}
-                      title={intent.symbol ? `Open ${intent.symbol}; updates the destination workspace ticker for linked widgets` : `Open ${intent.label}`}
+                      title={`Open ${intent.label} without changing the destination workspace ticker`}
                       className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-500/20"
                     >
                       <ExternalLink size={11} />
-                      Open {intent.symbol ? `${intent.symbol} ` : ''}{intent.label}
+                      Open {intent.label}
                     </button>
                   )}
                   {destination && (
@@ -632,7 +615,7 @@ function ArtifactCard({
                         </select>
                       </label>
                       <p className="max-w-64 text-right text-[10px] text-[var(--text-muted)]">
-                        {intent.symbol ? `Uses ${intent.symbol} as the destination workspace ticker and updates its linked widgets. ` : ''}
+                        {intent.symbol ? `Keeps ${intent.symbol} on this widget only; the destination workspace ticker and other widgets stay unchanged. ` : ''}
                         Adds a live widget without replacing the destination layout.
                       </p>
                       <button

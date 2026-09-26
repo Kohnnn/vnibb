@@ -748,6 +748,7 @@ export function Sidebar({
                                 });
                                 onCollapsedChange?.(nextCollapsed);
                             }}
+                            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                             className="p-1 rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                         >
                             {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}

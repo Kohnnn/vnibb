@@ -17,10 +17,10 @@ live in \`docs/\`.
 ## [Unreleased]
 
 ### Added
-- Personal workspace JSON backup with multi-tab layouts, widget configuration, nested folders, and isolated ticker-group snapshots. Imports preview their contents and restore as new local copies without replacing existing dashboards or sending imported layouts to the backend.
-- Copilot chart/table actions can target a named personal dashboard and tab, including from a system dashboard. Symbol-bearing actions disclose their shared-ticker effect before confirmation.
-- Ticker scope is explicit and reversible: a widget shows whether its ticker is shared with its group or kept locally, can be detached without leaving the group, and can rejoin with one action that adopts the group's current ticker.
-- Statement tables are selectable: choosing a metric charts exactly that series and labels what is charted, and the choice rides along in the existing widget-to-copilot payload.
+- Personal workspace JSON backup with multi-tab layouts, widget configuration, nested folders, isolated ticker-group snapshots and linked TradingView ticker snapshots. Imports preview contents and restore as local copies without replacing existing dashboards or syncing them to the backend.
+- Copilot chart/table actions can target a named personal dashboard and tab, including from a system dashboard. Promoted widgets with a source ticker retain it locally without mutating the shared workspace ticker.
+- Ticker scope is explicit and reversible: a widget shows whether its ticker is shared with its group or kept locally, can be detached without leaving the group, and can rejoin by adopting the group's current ticker.
+- Statement tables support chartable metric selection with labeled series; period headers retain sortable columns. Active metric context reaches the copilot through the widget runtime payload.
 - Purpose-bound research starters pair a template with its VniAgent prompt. Applying one discloses how its widgets handle tickers and primes the agent through the same seam the onboarding walkthrough uses.
 - Copilot artifact placement remembers the chosen dashboard/tab for the rest of the response and across reloads, records artifact provenance inside the created widget, and can save a table artifact to the research notebook once.
 
@@ -43,11 +43,14 @@ live in \`docs/\`.
 
 ### Fixed
 - Narrow widget headers move controls into an accessible compact panel; overflow menus escape card clipping and support keyboard navigation. Chart timeframe/type controls now agree across the header, chart body, and saved configuration.
-- Responsive viewing, empty-state hints, zoom/container changes, and edit-mode toggles no longer rewrite authored desktop widget geometry. Explicit desktop pointer/keyboard edits remain supported; narrow layouts are view-only.
-- Restored workspace ticker groups stay scoped to their copies. Deep links wait for local hydration and the requested dashboard before applying a ticker, preserving the original workspace ticker.
-- Maximized widgets mount a single live editor; the grid cell keeps only a placeholder, so a persisted edit while maximized is no longer duplicated or dropped by a second instance.
-- Imported workspaces normalize retired widget type aliases to canonical ids, so widgets saved before the type migration resolve instead of rendering "Widget not found".
-- Statement widgets keep their table/chart and period controls reachable on a dashboard. The dashboard renders widget chrome from the wrapper, which suppressed the widgets' own header, so those controls were absent from the running app; they now live in the widget body. Selecting a metric or period also no longer renders an empty cash-flow chart.
+- Responsive viewing, empty-state hints, zoom/container changes, and edit-mode toggles do not rewrite authored desktop widget geometry; collision-safe manual resizing preserves other widgets' positions. Narrow layouts remain view-only.
+- Restored workspace ticker groups and linked TradingView ticker stay scoped to their copies. Deep links wait for local hydration and the requested dashboard before applying a ticker.
+- Maximized widgets mount one live editor; header-specific actions remain available in the widget container while the shared shell suppresses duplicate headers.
+- Saved Overview tabs using the retired \`valuation_multiples\` ID migrate to the registered Valuation Multiples Chart without losing the widget's ID or layout.
+- Statement widgets keep table/chart and period controls reachable on the dashboard. The dashboard suppresses duplicate inner headers; controls live in the body or a reachable action row. Selected metrics render matching series rather than empty charts.
+- Valuation aliases now migrate every saved widget instance, including same-config duplicates at different positions; an empty ratio-history response no longer loops when the widget reports its runtime state.
+- Copilot global-ticker actions update the linked widget group as well as the workspace header; TradingView command actions target the destination dashboard ticker without changing the source workspace. Cloud reconciliation selects a surviving dashboard and tab if the active remote layout disappears.
+- Drawdown Deep Dive, Hurst Market Structure, Dividend Ladder and Quant Summary now keep empty/loading-derived runtime dependencies stable, so a linked widget can publish status without triggering a parent/child render loop.
 
 - Financial ratio tables no longer present absent data as real numbers. A period the
   provider could not compute (missing price, EPS, or book value) is now shown as an empty

@@ -418,15 +418,15 @@ Widget library UX rules:
 
 ### Local Workspace Backup
 
-Use **Backup workspaces** in the sidebar to download personal dashboard configuration, including tabs, authored layouts, widget configuration, folders and ticker-group snapshots. This is distinct from single-layout template export; it does not flatten tabs.
+Use **Backup workspaces** in the sidebar to download personal dashboard configuration, including tabs, authored layouts, widget configuration, folders, global/A–D ticker groups, and the profile-linked TradingView ticker for dashboards without their own saved ticker. This is distinct from single-layout template export; it does not flatten tabs.
 
-Restore accepts the versioned `vnibb-personal-workspace` JSON format up to 5 MB, validates it, previews names/counts, and imports fresh local copies only after confirmation. Existing dashboards remain unchanged. Imported IDs are excluded from backend synchronization; their global/A–D ticker groups are scoped independently. Retired widget type aliases are normalized to canonical ids during import so restored widgets resolve in the registry. Invalid versions, unknown widgets, impossible geometry, unsafe configuration and storage failures are reported rather than silently dropping content.
+Restore accepts the versioned `vnibb-personal-workspace` JSON format up to 5 MB, validates it, previews names/counts, and imports fresh local copies only after confirmation. Existing dashboards remain unchanged. Imported IDs are excluded from backend synchronization; their ticker groups and linked TradingView ticker are scoped independently of system layouts. Retired widget type aliases are normalized to canonical ids during import so restored widgets resolve in the registry. Invalid versions, unknown widgets, impossible geometry, unsafe configuration and storage failures are reported rather than silently dropping content.
 
 System/admin layouts, authentication, settings, saved templates and unrelated browser storage are not exported. Widget configuration and user-entered content are included; review a backup before sharing. Known credential keys are rejected, but the backup is not an encrypted vault or a complete browser-profile backup. Notes or artifacts stored outside widget configuration are outside this export.
 
 ### Artifact Placement
 
-Copilot artifact actions list named editable personal dashboard/tab destinations and exclude managed system dashboards. The final action states the widget/destination and any shared-ticker change. Existing templates remain the way to create a personal research starter; no second gallery or OpenBB service is required.
+Copilot artifact actions list named editable personal dashboard/tab destinations and exclude managed system dashboards. A promoted widget with a source ticker keeps that ticker locally without changing the workspace ticker. Existing templates remain the way to create a personal research starter; no second gallery or OpenBB service is required.
 
 Copilot artifact placement remembers the destination chosen for one artifact as the default for the rest of that response and across reloads, writes artifact provenance into the created widget's config so a promoted widget stays identifiable, and can save a table artifact to the research notebook with a dedupe key.
 
@@ -438,7 +438,7 @@ A widget's ticker either follows its group or is kept locally. The widget header
 
 ### Table Selection
 
-Dense financial tables expose selectable metric rows and period columns. A metric selection charts exactly that series and shows the selection label in the chart header; a period selection marks that period. Selection is view state and is never persisted into widget config. The active selection is included in the widget's existing runtime payload so the copilot can target it.
+Dense financial tables expose selectable metric rows and sortable period columns. A supported metric selection charts that series and shows its label in the chart header; clicking a period column continues sorting the table rather than claiming an unchartable period series. Selection is view state and is never persisted into widget config. The active metric selection is included in the widget's runtime payload so the copilot can target it.
 
 ### Research Starters
 
@@ -446,7 +446,7 @@ A starter binds one template to its VniAgent prompt. Applying a starter-bound te
 
 ### Widget Chrome Placement
 
-Widget chrome (view toggles, parameters, period controls) must render inside the widget body. The dashboard wraps widget children in a header-suppressing provider, so a control placed only in the widget's own container header is unreachable in the running app even though it renders in a component test.
+Widget chrome (view toggles, parameters, period controls) must remain accessible when the dashboard suppresses a widget's duplicate header. Header-only actions are surfaced in a compact action row inside the widget container; hide neither those controls nor the chart/table body when collapsed or maximized.
 
 ## Data Quality / Empty States
 

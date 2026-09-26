@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { useHistoricalPrices } from '@/lib/queries'
 import type { OHLCData } from '@/lib/chartUtils'
@@ -30,6 +30,7 @@ interface DrawdownEpisode {
   daysToTrough: number
   daysToRecovery?: number
 }
+const EMPTY_CANDLES: OHLCData[] = []
 
 function formatPct(value: number): string {
   if (!Number.isFinite(value)) return '-'
@@ -127,14 +128,17 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
     }
   )
 
-  const candles = ((data?.data || []) as OHLCData[])
-    .slice()
-    .sort((a, b) => new Date(String(a.time)).getTime() - new Date(String(b.time)).getTime())
-
-  const drawdown = computeDrawdown(candles)
+  const historicalCandles = data?.data as OHLCData[] | undefined
+  const candles = useMemo(
+    () => historicalCandles?.length
+      ? [...historicalCandles].sort((a, b) => new Date(String(a.time)).getTime() - new Date(String(b.time)).getTime())
+      : EMPTY_CANDLES,
+    [historicalCandles],
+  )
+  const drawdown = useMemo(() => computeDrawdown(candles), [candles])
   const hasData = drawdown.length > 30
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
-  const episodes = computeEpisodes(drawdown)
+  const episodes = useMemo(() => computeEpisodes(drawdown), [drawdown])
   const currentDrawdown = drawdown[drawdown.length - 1]?.drawdownPct ?? 0
   const maxDrawdown = episodes.reduce((min, episode) => Math.min(min, episode.depthPct), 0)
   const avgRecovery = averageRecoveryDays(episodes)
@@ -142,16 +146,15 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
   const recent = drawdown.slice(-22)
   const magnitude = Math.abs(Math.min(...recent.map((point) => point.drawdownPct), -1))
   const adjustmentWarning = data?.meta?.adjustment_warning ?? null
+  const lastDataDate = candles.at(-1)?.time ?? dataUpdatedAt
 
   useEffect(() => {
-
     onDataChange?.(buildWidgetRuntime({
       empty: !hasData,
       apiGroup: '/equity',
       endpoint: `/equity/historical?symbol=${upperSymbol}&start_date=${getQuantPeriodStartDate(period)}&adjustment_mode=adjusted`,
       sourceLabel: 'Historical prices',
-      lastDataDate: candles.at(-1)?.time ?? dataUpdatedAt,
-
+      lastDataDate,
       adjustmentMode: 'adjusted',
       derived: true,
       extra: {
@@ -166,7 +169,7 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
 
       },
     }))
-  }, [adjustmentWarning, candles, candles.length, currentDrawdown, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, dataUpdatedAt, drawdown.length, episodes.length, hasData, maxDrawdown, onDataChange, period, upperSymbol])
+  }, [adjustmentWarning, currentDrawdown, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, drawdown.length, episodes.length, hasData, lastDataDate, maxDrawdown, onDataChange, period, upperSymbol])
 
 
   if (!upperSymbol) {

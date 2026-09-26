@@ -125,7 +125,10 @@ describe('personal workspace backup', () => {
     it('rejects proto-polluting config, unexpected secrets and embedded system dashboards', () => {
         const backup = createWorkspaceBackup(original);
         const polluted = JSON.stringify(backup).replace('"indicators"', '"__proto__":{"polluted":true},"indicators"');
-        expect(() => parseWorkspaceBackup(polluted)).toThrow(/Invalid dashboard/);
+        expect(() => parseWorkspaceBackup(polluted)).toThrow(/unsafe configuration/);
+        const credential = JSON.parse(JSON.stringify(backup));
+        credential.dashboards[0].tabs[0].widgets[0].config.apiKey = 'secret';
+        expect(() => parseWorkspaceBackup(JSON.stringify(credential))).toThrow(/unsafe configuration/);
         expect({}).not.toHaveProperty('polluted');
         expect(() => parseWorkspaceBackup(JSON.stringify({ ...backup, apiKey: 'secret' }))).toThrow(/format/);
         expect(() => parseWorkspaceBackup(JSON.stringify({ ...backup, dashboards: original.dashboards }))).toThrow(/Invalid dashboard/);
@@ -140,11 +143,37 @@ describe('personal workspace backup', () => {
         expect(restored.dashboards[2].widgetGroups).not.toBe(groups);
     });
 
+    it('exports the effective linked TradingView ticker for every unscoped personal dashboard without rewriting widget config', () => {
+        const personal = {
+            ...original.dashboards[1],
+            tabs: [{ ...original.dashboards[1].tabs[0], widgets: [{
+                ...original.dashboards[1].tabs[0].widgets[0], type: 'tradingview_chart' as const,
+                config: { symbol: 'AMEX:SPY', useLinkedSymbol: true },
+            }] }],
+        };
+        const second = { ...personal, id: '102', name: 'Other desk', globalMarketsSymbol: 'nasdaq:msft' };
+        const state = { ...original, dashboards: [original.dashboards[0], personal, second] };
+        const backup = parseWorkspaceBackup(JSON.stringify(createWorkspaceBackup(state, DEFAULT_GROUPS, ' nasdaq:aapl ')));
+        let counter = 0;
+        const imported = importWorkspaceBackup(state, backup, () => `unique-${++counter}`);
+        expect(backup.dashboards.map((dashboard) => dashboard.globalMarketsSymbol)).toEqual(['NASDAQ:AAPL', 'NASDAQ:MSFT']);
+        expect(backup.dashboards[0].tabs[0].widgets[0].config).toEqual({ symbol: 'AMEX:SPY', useLinkedSymbol: true });
+        expect(imported.dashboards.slice(state.dashboards.length).map((dashboard) => dashboard.globalMarketsSymbol)).toEqual(['NASDAQ:AAPL', 'NASDAQ:MSFT']);
+        expect(state.dashboards[1].globalMarketsSymbol).toBeUndefined();
+    });
+
+    it('rejects invalid TradingView ticker snapshots rather than restoring a broken linked chart', () => {
+        const backup = createWorkspaceBackup(original);
+        backup.dashboards[0].globalMarketsSymbol = 'SPY';
+        expect(() => parseWorkspaceBackup(JSON.stringify(backup))).toThrow(/Invalid dashboard/);
+        expect(() => createWorkspaceBackup(original, DEFAULT_GROUPS, 'SPY')).toThrow(/TradingView/);
+    });
+
     it('rejects credential-bearing config and impossible authored geometry', () => {
         const backup = createWorkspaceBackup(original);
         const widget = backup.dashboards[0].tabs[0].widgets[0];
         widget.config = { nested: { accessToken: 'secret' } };
-        expect(() => parseWorkspaceBackup(JSON.stringify(backup))).toThrow(/Invalid dashboard/);
+        expect(() => parseWorkspaceBackup(JSON.stringify(backup))).toThrow(/unsafe configuration/);
         widget.config = {};
         for (const layout of [{ x: -1, w: 8 }, { x: 20, w: 8 }, { x: 1, w: 0 }, { x: 1.5, w: 8 }]) {
             widget.layout = { ...widget.layout, ...layout };

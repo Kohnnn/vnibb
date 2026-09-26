@@ -1495,6 +1495,7 @@ const WIDGET_LIBRARY_SECTION_OVERRIDES: Partial<Record<WidgetType, WidgetLibrary
 };
 
 const LEGACY_WIDGET_TYPE_ALIASES = {
+    valuation_multiples: 'valuation_multiples_chart',
     company_profile: 'ticker_profile',
     financials: 'unified_financials',
     institutional_ownership: 'major_shareholders',

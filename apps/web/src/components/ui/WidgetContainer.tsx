@@ -91,6 +91,11 @@ export function WidgetContainer({
           showLinkToggle={showLinkToggle}
         />
       )}
+      {shouldHideHeader && headerActions && (
+        <div className="flex shrink-0 items-center justify-end gap-2 overflow-x-auto border-b border-[var(--border-color)] px-2 py-1" aria-label={`${title} controls`}>
+          {headerActions}
+        </div>
+      )}
       <div className={cn(
         "min-h-0 flex-1",
         shouldHideHeader ? "overflow-visible" : "overflow-auto scrollbar-hide",

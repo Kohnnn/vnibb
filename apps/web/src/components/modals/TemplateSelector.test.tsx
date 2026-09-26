@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TemplateSelector } from './TemplateSelector';
 import { getStarterForTemplate } from '@/lib/researchStarters';
@@ -39,6 +39,8 @@ describe('TemplateSelector', () => {
   beforeEach(() => {
     window.localStorage.clear();
   });
+
+  afterEach(() => jest.restoreAllMocks());
 
   it('keeps the dialog content on a higher layer than the backdrop', () => {
     render(
@@ -164,7 +166,6 @@ describe('TemplateSelector', () => {
     expect(onSelectTemplate).not.toHaveBeenCalled();
     const disclosure = screen.getByRole('dialog', { name: starter?.name ?? '' });
     expect(disclosure).toHaveTextContent(starter?.purpose ?? '');
-    expect(disclosure).toHaveTextContent('keep their own tickers until you link a group');
 
     await user.click(within(disclosure).getByRole('button', { name: new RegExp(`apply ${template.name}`, 'i') }));
 
@@ -172,6 +173,48 @@ describe('TemplateSelector', () => {
     expect(onStarterPromptRequest).toHaveBeenCalledWith(starter?.promptKey);
     expect(onSelectTemplate).toHaveBeenCalledWith(template);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps keyboard focus in starter confirmation and returns to its trigger after Cancel', async () => {
+    jest.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => ({ length: 1 }) as DOMRectList);
+    const user = userEvent.setup();
+    const template = fundamentalTemplate();
+    render(<TemplateSelector open onClose={jest.fn()} onSelectTemplate={jest.fn()} />);
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Dashboard Templates' })).toContainElement(document.activeElement as HTMLElement | null));
+
+    const trigger = within(findTemplateCard(template.name)).getByRole('button', { name: /use template/i });
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    const confirmation = screen.getByRole('dialog', { name: getStarterForTemplate(template.id)?.name });
+    const cancel = within(confirmation).getByRole('button', { name: 'Cancel' });
+    const apply = within(confirmation).getByRole('button', { name: `Apply ${template.name}` });
+
+    await waitFor(() => expect(cancel).toHaveFocus());
+    await user.tab();
+    expect(apply).toHaveFocus();
+    await user.tab();
+    expect(cancel).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(confirmation).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('allows applying a starter by keyboard from within the confirmation', async () => {
+    jest.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => ({ length: 1 }) as DOMRectList);
+    const user = userEvent.setup();
+    const template = fundamentalTemplate();
+    const onSelectTemplate = jest.fn();
+    render(<TemplateSelector open onClose={jest.fn()} onSelectTemplate={onSelectTemplate} />);
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Dashboard Templates' })).toContainElement(document.activeElement as HTMLElement | null));
+
+    const trigger = within(findTemplateCard(template.name)).getByRole('button', { name: /use template/i });
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(within(screen.getByRole('dialog', { name: getStarterForTemplate(template.id)?.name })).getByRole('button', { name: 'Cancel' })).toHaveFocus());
+    await user.tab();
+    await user.keyboard('{Enter}');
+
+    expect(onSelectTemplate).toHaveBeenCalledWith(template);
   });
 
   it('leaves the copilot untouched when the applied template has no starter', async () => {

@@ -118,16 +118,12 @@ function readRaw(): NotebookItem[] {
 }
 
 function write(items: NotebookItem[]) {
-  if (typeof window === 'undefined') return
+  if (typeof window === 'undefined') throw new Error('Research notebook storage is unavailable')
   const next = items.slice(0, MAX_ITEMS)
   try {
     window.localStorage.setItem(RESEARCH_NOTEBOOK_KEY, JSON.stringify(next))
   } catch {
-    try {
-      window.localStorage.setItem(RESEARCH_NOTEBOOK_KEY, JSON.stringify(next.slice(0, Math.floor(MAX_ITEMS / 2))))
-    } catch {
-      // best-effort
-    }
+    window.localStorage.setItem(RESEARCH_NOTEBOOK_KEY, JSON.stringify(next.slice(0, Math.floor(MAX_ITEMS / 2))))
   }
   window.dispatchEvent(new CustomEvent(RESEARCH_NOTEBOOK_EVENT))
 }

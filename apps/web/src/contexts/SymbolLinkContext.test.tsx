@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { SymbolLinkProvider, useSymbolLink } from './SymbolLinkContext';
-import { WidgetGroupProvider } from './WidgetGroupContext';
+import { WidgetGroupProvider, useWidgetGroups } from './WidgetGroupContext';
 import { DEFAULT_GROUPS, type WidgetGroupConfig, type WidgetGroupId } from '@/types/widget';
 import { GLOBAL_SYMBOL_STORAGE_KEY } from '@/lib/defaultTicker';
 
@@ -32,6 +32,11 @@ function LinkedTicker() {
   </>;
 }
 
+function SharedGroupTicker() {
+  const { getSymbolForGroup } = useWidgetGroups();
+  return <output aria-label="Shared group ticker">{getSymbolForGroup('global')}</output>;
+}
+
 function WorkspaceHarness({ startScoped = false }: { startScoped?: boolean }) {
   const [scoped, setScoped] = useState(startScoped);
   const [groups, setGroups] = useState<Groups>({ ...DEFAULT_GROUPS, global: { ...DEFAULT_GROUPS.global, symbol: 'FPT' } });
@@ -44,7 +49,7 @@ function WorkspaceHarness({ startScoped = false }: { startScoped?: boolean }) {
     <button onClick={() => setScoped(value => !value)}>Switch workspace</button>
     <button onClick={() => setMounted(value => !value)}>Toggle providers</button>
     <TestDashboardProvider value={dashboardScope}>
-      {mounted && <WidgetGroupProvider><SymbolLinkProvider><LinkedTicker /></SymbolLinkProvider></WidgetGroupProvider>}
+      {mounted && <WidgetGroupProvider><SymbolLinkProvider><LinkedTicker /><SharedGroupTicker /></SymbolLinkProvider></WidgetGroupProvider>}
     </TestDashboardProvider>
   </>;
 }
@@ -78,4 +83,17 @@ test('mounting directly in a restored workspace leaves the stored original ticke
   fireEvent.click(screen.getByRole('button', { name: 'Change linked ticker' }));
   expect(screen.getByLabelText('Linked ticker')).toHaveTextContent('HPG');
   expect(window.localStorage.getItem(GLOBAL_SYMBOL_STORAGE_KEY)).toBe('HPG');
+});
+
+test('global symbol actions change the ticker displayed by linked widgets in ordinary and scoped workspaces', () => {
+  render(<WorkspaceHarness />);
+  fireEvent.click(screen.getByRole('button', { name: 'Change linked ticker' }));
+  expect(screen.getByLabelText('Linked ticker')).toHaveTextContent('HPG');
+  expect(screen.getByLabelText('Shared group ticker')).toHaveTextContent('HPG');
+  fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
+  expect(screen.getByLabelText('Shared group ticker')).toHaveTextContent('FPT');
+  fireEvent.click(screen.getByRole('button', { name: 'Change linked ticker' }));
+  expect(screen.getByLabelText('Shared group ticker')).toHaveTextContent('HPG');
+  fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
+  expect(screen.getByLabelText('Shared group ticker')).toHaveTextContent('HPG');
 });

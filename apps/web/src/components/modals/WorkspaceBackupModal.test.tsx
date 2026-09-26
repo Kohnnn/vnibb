@@ -5,6 +5,9 @@ import { createWorkspaceBackup } from '@/lib/workspaceBackup';
 
 jest.mock('@/contexts/DashboardContext', () => ({ useDashboard: jest.fn() }));
 jest.mock('@/contexts/WidgetGroupContext', () => ({ useWidgetGroups: () => ({ getSharedGroups: jest.fn() }) }));
+jest.mock('@/contexts/GlobalMarketsSymbolContext', () => ({
+    useGlobalMarketsSymbol: () => ({ appGlobalMarketsSymbol: 'AMEX:SPY' }),
+}));
 const mockUseDashboard = jest.mocked(useDashboard);
 const backup = createWorkspaceBackup({
     folders: [], activeDashboardId: null, activeTabId: null,

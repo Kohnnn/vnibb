@@ -73,11 +73,7 @@ const labels: Record<string, string> = {
 const TABLE_YEAR_LIMIT = 20;
 const QUARTER_PERIOD_LIMIT = 40;
 
-/**
- * Table metric ids are snake_case while the chart series are camelCase, so a
- * row selection must be translated before it reaches the shared contract.
- * Metrics absent here are not chartable and a selection of one charts nothing.
- */
+/** Only rows with a corresponding chart series offer metric selection. */
 const CHARTED_SERIES_BY_METRIC: Record<string, string> = {
     revenue: 'revenue',
     gross_profit: 'grossProfit',
@@ -218,10 +214,11 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
         () => seriesFromSelection(insightSeries, selection),
         [insightSeries, selection]
     );
-    const selectMetric = useCallback(
-        (key: string) => setSelection((current) => toggleSelection(current, { kind: 'column', key })),
-        []
+    const chartInsight = useMemo(
+        () => buildTableInsightContext({ selection, columns: insightSeries }),
+        [selection, insightSeries]
     );
+    const chartLabel = describeSelection(selection, insightSeries);
     const clearSelection = useCallback(() => setSelection(null), []);
 
     useEffect(() => {
@@ -243,16 +240,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                     : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length, insightSeries, selection]);
-    // A metric selection is a series selection: the shared contract charts a
-    // single series only for a `column` selection whose key is a series key, so
-    // the table's snake_case metric id is translated to its camelCase series key
-    // here and stored in that form. Period selection is not offered in this
-    // widget, so `row` never appears in the selection.
-    const chartColumns = seriesFromSelection(insightSeries, selection);
-    const chartInsight = buildTableInsightContext({ selection, columns: insightSeries });
-    const chartLabel = describeSelection(selection, insightSeries);
-
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length, chartInsight]);
     const attachSelection = useCallback(
         (row: DenseTableRow): DenseTableRow => {
             // Only metrics this widget actually charts are selectable; the rest
@@ -380,7 +368,6 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             showTrend={false}
             maxYears={tableColumns.length || 1}
             selectedColumnKey={selection?.kind === 'column' ? selection.key : null}
-            onColumnSelect={selectMetric}
             onSelectionClear={clearSelection}
             storageKey={`income:${id}:${symbol}:${period}`}
             footerNote={unitNote}
@@ -395,16 +382,11 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
 
     const sankeyModel = useMemo(() => buildIncomeSankeyModel(displayItems), [displayItems]);
     const [chartType, setChartType] = useState<'overview' | 'margins' | 'sankey'>('overview');
-    const chartedSeries = chartColumns.filter((entry) => entry.kind !== 'text');
-    const isPercentSeries = chartedSeries.length > 0 && chartedSeries.every((entry) => entry.kind === 'percent');
-    // Which chart panes may draw. A selection that maps to no chartable series
-    // draws nothing rather than borrowing another metric's series; only the
-    // no-selection case falls back to the widget's default panes.
-    const panes = {
-        over: chartedSeries.length === 0 ? !selection : chartedSeries.some((entry) => entry.kind === 'currency'),
-        fcf: chartedSeries.some((entry) => entry.kind === 'percent'),
-    };
-    const effectiveChartType = selection && selection.kind === 'column' ? (isPercentSeries ? 'margins' : 'overview') : chartType;
+    const isPercentSeries = selection && activeSeries.length > 0 && activeSeries.every((entry) => entry.kind === 'percent');
+    const effectiveChartType = selection ? (isPercentSeries ? 'margins' : 'overview') : chartType;
+    const chartedSeries = selection
+        ? activeSeries
+        : activeSeries.filter((entry) => effectiveChartType === 'margins' ? entry.kind === 'percent' : entry.kind === 'currency');
     const xAxisInterval = useMemo(
         () => (chartData.length > 12 ? Math.max(1, Math.ceil(chartData.length / 8)) - 1 : 0),
         [chartData.length]
@@ -467,7 +449,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                     ) : (
                     <ChartMountGuard className="h-full" minHeight={120}>
                         <ResponsiveContainer width="100%" height="100%" minWidth={240} minHeight={120}>
-                            {panes.over ? (
+                            {effectiveChartType === 'overview' ? (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                                     <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
@@ -487,14 +469,20 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                         }}
                                         itemStyle={{ padding: '0px' }}
                                     />
-                                    {(panes.over && chartedSeries.some((entry) => entry.key === 'revenue')) ? (
+                                    {chartedSeries.some((entry) => entry.key === 'revenue') ? (
                                         <Bar dataKey="revenue" name="Revenue" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                                    ) : null}
+                                    {selection && chartedSeries.some((entry) => entry.key === 'grossProfit') ? (
+                                        <Line type="monotone" dataKey="grossProfit" name="Gross Profit" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                                    ) : null}
+                                    {selection && chartedSeries.some((entry) => entry.key === 'operatingIncome') ? (
+                                        <Line type="monotone" dataKey="operatingIncome" name="Operating Income" stroke="#a855f7" strokeWidth={2} dot={{ r: 3 }} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'netIncome') ? (
                                         <Line type="monotone" dataKey="netIncome" name="Net Income" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
                                     ) : null}
                                 </ComposedChart>
-                            ) : panes.fcf ? (
+                            ) : effectiveChartType === 'margins' ? (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                                     <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
@@ -514,6 +502,9 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                     {chartedSeries.some((entry) => entry.key === 'grossMargin') ? (
                                         <Line type="monotone" dataKey="grossMargin" name="Gross %" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} />
+                                    ) : null}
+                                    {chartedSeries.some((entry) => entry.key === 'operatingMargin') ? (
+                                        <Line type="monotone" dataKey="operatingMargin" name="Operating %" stroke="#a855f7" strokeWidth={2} dot={{ r: 2 }} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'netMargin') ? (
                                         <Line type="monotone" dataKey="netMargin" name="Net %" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />

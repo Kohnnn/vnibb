@@ -265,6 +265,22 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
         [insightSeries, selection]
     );
 
+    const chartInsight = useMemo(
+        () => buildTableInsightContext({ selection, columns: insightSeries }),
+        [selection, insightSeries]
+    );
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            apiGroup: '/equity',
+            empty: !hasData,
+            endpoint: `/equity/${symbol}/cash-flow?period=${apiPeriod}`,
+            sourceLabel: 'Cash flow',
+            lastDataDate: dataUpdatedAt,
+            stale: isFallback,
+            extra: hasData ? { periods: displayItems.length, tableInsight: chartInsight } : undefined,
+        }));
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length, chartInsight]);
     // A metric selection is a series selection: the shared contract charts one
     // series only for a `column` selection whose key is a series key. Table row
     // ids are the raw statement metric names while the chart series are
@@ -366,7 +382,6 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
             initialScrollPosition="end"
             storageKey={`cash-flow:${id}:${symbol}:${period}`}
             selectedColumnKey={selection?.kind === 'column' ? selection.key : null}
-            onColumnSelect={selectColumn}
             onSelectionClear={clearSelection}
             footerNote={unitNote}
             valueFormatter={(value) =>
@@ -442,7 +457,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                     </select>
                 </div>
                 <div className="flex-1 min-h-[132px]">
-                    {chartType === 'waterfall' ? (
+                    {effectiveChartType === 'waterfall' ? (
                         waterfallModel ? (
                             <CashFlowWaterfallChart
                                 model={waterfallModel}

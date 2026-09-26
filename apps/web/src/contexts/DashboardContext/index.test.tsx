@@ -51,6 +51,7 @@ function DashboardStateProbe() {
       <output data-testid="dashboard-count">{state.dashboards.length}</output>
       <output data-testid="widget-types">{state.dashboards.flatMap((dashboard) => dashboard.tabs.flatMap((tab) => tab.widgets.map((widget) => widget.type))).join(',')}</output>
       <output data-testid="active-dashboard">{state.activeDashboardId}</output>
+      <output data-testid="active-tab">{state.activeTabId}</output>
       <output data-testid="folder-names">{state.folders.map((folder) => folder.name).join(',')}</output>
       <output data-testid="sync-groups">{state.dashboards.flatMap((dashboard) => dashboard.syncGroups.map((group) => `${group.id}:${group.name}:${group.color}:${group.currentSymbol}`)).join(',')}</output>
       <output data-testid="storage-notice">{migrationNotice?.message || ''}</output>
@@ -58,6 +59,7 @@ function DashboardStateProbe() {
       <output data-testid="backend-sync-enabled">{String(backendSync.enabled)}</output>
       <button onClick={() => createDashboard({ name: 'Unsaved dashboard' })}>create dashboard</button>
       <button onClick={() => { setActiveDashboard(customDashboard.id); setActiveTab('saved-tab'); }}>open saved tab</button>
+      <button onClick={() => { setActiveDashboard('42'); setActiveTab('removed-tab'); }}>open removed cloud tab</button>
     </>
   );
 }
@@ -132,6 +134,47 @@ describe('DashboardProvider backend sync flag', () => {
 
     expect(screen.getByTestId('dashboards')).toHaveTextContent(/dash-/);
   });
+
+  it('moves the active selection to a surviving cloud dashboard when its cached dashboard is deleted', async () => {
+    (config as { backendSyncEnabled: boolean }).backendSyncEnabled = true;
+    const removed = { ...customDashboard, id: '42', tabs: [{ id: 'removed-tab', name: 'Removed', order: 0, widgets: [] }] };
+    const surviving = { ...customDashboard, id: '43', tabs: [{ id: 'surviving-tab', name: 'Surviving', order: 0, widgets: [] }] };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([removed, surviving]));
+    window.localStorage.setItem(FOLDERS_KEY, JSON.stringify([]));
+    window.localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_STORAGE_VERSION);
+    window.localStorage.setItem(MIGRATION_VERSION_KEY, String(CURRENT_MIGRATION_VERSION));
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('dashboards')).toHaveTextContent('42:Restored custom dashboard'));
+    fireEvent.click(screen.getByRole('button', { name: 'open removed cloud tab' }));
+    expect(screen.getByTestId('active-dashboard')).toHaveTextContent('42');
+    expect(screen.getByTestId('active-tab')).toHaveTextContent('removed-tab');
+    const onLoad = jest.mocked(useLoadFromBackend).mock.calls.at(-1)?.[0];
+    act(() => onLoad?.([surviving]));
+
+    expect(screen.getByTestId('active-dashboard')).toHaveTextContent('43');
+    expect(screen.getByTestId('active-tab')).toHaveTextContent('surviving-tab');
+  });
+  it('drops deleted cloud dashboards without losing local imported workspaces', async () => {
+    (config as { backendSyncEnabled: boolean }).backendSyncEnabled = true;
+    const surviving = { ...customDashboard, id: '43', name: 'Surviving cloud' };
+    const removed = { ...customDashboard, id: '42', name: 'Deleted cloud' };
+    const imported = { ...customDashboard, id: 'import-copy', name: 'Imported local' };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([removed, surviving, imported]));
+    window.localStorage.setItem(FOLDERS_KEY, JSON.stringify([]));
+    window.localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_STORAGE_VERSION);
+    window.localStorage.setItem(MIGRATION_VERSION_KEY, String(CURRENT_MIGRATION_VERSION));
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('dashboards')).toHaveTextContent('42:Deleted cloud'));
+    const onLoad = jest.mocked(useLoadFromBackend).mock.calls.at(-1)?.[0];
+    act(() => onLoad?.([surviving]));
+
+    expect(screen.getByTestId('dashboards')).not.toHaveTextContent('42:Deleted cloud');
+    expect(screen.getByTestId('dashboards')).toHaveTextContent('43:Surviving cloud');
+    expect(screen.getByTestId('dashboards')).toHaveTextContent('import-copy:Imported local');
+  });
+
 });
 
 describe('DashboardProvider published templates', () => {
@@ -326,6 +369,38 @@ describe('DashboardProvider browser persistence', () => {
     await waitFor(() => expect(screen.getByTestId('dashboards')).toHaveTextContent(hiddenWidgetDashboard.id));
     expect(screen.getByTestId('storage-notice')).not.toHaveTextContent('Dashboard storage was corrupted and has been reset');
     expect(screen.getByTestId('widget-types')).toHaveTextContent('rs_ranking,market_heatmap,dividend_ladder,ai_copilot');
+  });
+
+  it('retains distinct legacy and canonical valuation widgets during the v26 migration', async () => {
+    const legacy = {
+      id: 'valuation-legacy-1',
+      tabId: 'overview-legacy',
+      type: 'valuation_multiples',
+      syncGroupId: 1,
+      config: {},
+      layout: { i: 'valuation-legacy-1', x: 0, y: 9, w: 8, h: 6 },
+    };
+    const canonical = {
+      ...legacy,
+      id: 'valuation-canonical-2',
+      type: 'valuation_multiples_chart',
+      syncGroupId: 2,
+      layout: { i: 'valuation-canonical-2', x: 8, y: 9, w: 8, h: 6 },
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([{
+      ...customDashboard,
+      tabs: [{ id: 'overview-legacy', name: 'Overview', order: 0, widgets: [canonical, legacy] }],
+    }]));
+    window.localStorage.setItem(MIGRATION_VERSION_KEY, '25');
+
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('widget-types')).toHaveTextContent('valuation_multiples_chart,valuation_multiples_chart'));
+    const restored = storedDashboards().find((dashboard) => dashboard.id === customDashboard.id)?.tabs[0].widgets;
+    expect(restored).toEqual([
+      canonical,
+      { ...legacy, type: 'valuation_multiples_chart' },
+    ]);
   });
 
   it('loads a valid legacy migration on initial load', async () => {

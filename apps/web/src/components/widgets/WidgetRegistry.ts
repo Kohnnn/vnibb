@@ -393,7 +393,7 @@ registerWidget('tradingview_company_profile', () => import('./TradingViewWidgets
 registerWidget('tradingview_top_stories', () => import('./TradingViewWidgets').then((m) => ({ default: (m as Record<string, ComponentType<any>>).TradingViewTopStories })), 'news', ['tradingview', 'top', 'stories']);
 registerWidget('tradingview_economic_calendar', () => import('./TradingViewWidgets').then((m) => ({ default: (m as Record<string, ComponentType<any>>).TradingViewEconomicCalendar })), 'calendar', ['tradingview', 'economic', 'calendar']);
 registerWidget('tradingview_economic_map', () => import('./TradingViewWidgets').then((m) => ({ default: (m as Record<string, ComponentType<any>>).TradingViewEconomicMap })), 'global_markets', ['tradingview', 'economic', 'map']);
-registerWidget('valuation_multiples_chart', placeholderLoader('valuation_multiples_chart'), 'charting', ['valuation', 'multiples']);
+registerWidget('valuation_multiples_chart', lazyNamed(() => import('./ValuationMultiplesChartWidget'), 'ValuationMultiplesChartWidget'), 'charting', ['valuation', 'multiples']);
 registerWidget('valuation_band', lazyNamed(() => import('./ValuationBandWidget'), 'ValuationBandWidget'), 'charting', ['valuation', 'band']);
 registerWidget('volume_profile', () => import('./VolumeProfileWidget'), 'charting', ['volume', 'profile']);
 registerWidget('vwap_bands', () => import('./VWAPBandsWidget'), 'charting', ['vwap', 'bands']);

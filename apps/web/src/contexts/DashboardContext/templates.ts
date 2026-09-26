@@ -45,7 +45,7 @@ const OVERVIEW_TEMPLATE: TemplateWidget[] = [
     { type: 'ticker_info', syncGroupId: 1, config: {}, layout: { x: 0, y: 0, w: 8, h: 3, minW: 6, minH: 2 } },
     { type: 'price_chart', syncGroupId: 1, config: { timeframe: '1Y', chartType: 'candle' }, layout: { x: 8, y: 0, w: 16, h: 7, minW: 8, minH: 4 } },
     { type: 'key_metrics', syncGroupId: 1, config: {}, layout: { x: 0, y: 3, w: 8, h: 6, minW: 6, minH: 4 } },
-    { type: 'valuation_multiples', syncGroupId: 1, config: {}, layout: { x: 0, y: 9, w: 8, h: 6, minW: 6, minH: 4 } },
+    { type: 'valuation_multiples_chart', syncGroupId: 1, config: {}, layout: { x: 0, y: 9, w: 8, h: 6, minW: 6, minH: 4 } },
     { type: 'ticker_profile', syncGroupId: 1, config: {}, layout: { x: 8, y: 7, w: 8, h: 8, minW: 6, minH: 4 } },
     { type: 'news_feed', syncGroupId: 1, config: {}, layout: { x: 16, y: 7, w: 8, h: 8, minW: 6, minH: 4 } },
 ];
