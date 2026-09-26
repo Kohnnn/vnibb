@@ -19,10 +19,19 @@ export interface TickerScope {
 export const GROUP_TICKER_SCOPE: TickerScope = { mode: 'group', symbol: null };
 
 /** Reads the persisted scope from a widget config, tolerating legacy shapes. */
-export function readTickerScope(config: Record<string, unknown> | undefined): TickerScope {
+export function readTickerScope(config: Record<string, unknown> | undefined, isTradingViewSymbol = false): TickerScope {
   const mode = config?.tickerScope;
   if (mode === 'override') {
-    const symbol = normalizeTickerSymbol(config?.symbol as string | undefined);
+    const rawSymbol = config?.symbol;
+    if (isTradingViewSymbol) {
+      if (typeof rawSymbol !== 'string') return GROUP_TICKER_SCOPE;
+      const candidate = rawSymbol.trim().toUpperCase();
+      const exchangeSymbol = /^[A-Z0-9._-]{2,20}:[A-Z0-9._-]{1,40}$/.test(candidate);
+      const localSymbol = /^[A-Z0-9]{3}$/.test(candidate);
+      return exchangeSymbol || localSymbol ? { mode: 'override', symbol: candidate } : GROUP_TICKER_SCOPE;
+    }
+    if (typeof rawSymbol === 'string' && rawSymbol.includes(':')) return GROUP_TICKER_SCOPE;
+    const symbol = normalizeTickerSymbol(rawSymbol as string | undefined);
     return symbol ? { mode: 'override', symbol } : GROUP_TICKER_SCOPE;
   }
   return GROUP_TICKER_SCOPE;
@@ -38,19 +47,6 @@ export function resolveWidgetSymbol(scope: TickerScope, groupSymbol: string | nu
 }
 
 
-/**
- * Whether switching the group a widget belongs to should rewrite its ticker.
- * Only `group`-mode widgets adopt; an override keeps its own ticker.
- */
-export function shouldAdoptOnGroupChange(
-  scope: TickerScope,
-  nextGroupSymbol: string | null | undefined,
-  currentSymbol: string,
-): boolean {
-  if (scope.mode !== 'group') return false;
-  const next = normalizeTickerSymbol(nextGroupSymbol ?? undefined);
-  return Boolean(next) && next !== normalizeTickerSymbol(currentSymbol);
-}
 
 export function describeTickerScope(mode: TickerScopeMode, groupName: string): string {
   return mode === 'override'

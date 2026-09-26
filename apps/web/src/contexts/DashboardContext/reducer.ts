@@ -191,11 +191,17 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
                     d.id === action.payload.dashboardId
                         ? {
                             ...d,
-                            tabs: d.tabs.map((t) =>
-                                t.id === action.payload.tabId
-                                    ? { ...t, widgets: [...t.widgets, action.payload.widget] }
-                                    : t
-                            ),
+                            tabs: d.tabs.map((t) => {
+                                if (t.id !== action.payload.tabId) return t;
+                                const widget = action.payload.widget;
+                                const y = Number.isFinite(widget.layout.y)
+                                    ? widget.layout.y
+                                    : t.widgets.reduce((bottom, existing) => Math.max(bottom, existing.layout.y + existing.layout.h), 0);
+                                return {
+                                    ...t,
+                                    widgets: [...t.widgets, y === widget.layout.y ? widget : { ...widget, layout: { ...widget.layout, y } }],
+                                };
+                            }),
                             updatedAt: new Date().toISOString(),
                         }
                         : d

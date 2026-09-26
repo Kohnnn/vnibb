@@ -2,7 +2,8 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
     Download,
     FileJson,
@@ -48,7 +49,6 @@ import {
     GROUP_TICKER_SCOPE,
     readTickerScope,
     resolveWidgetSymbol,
-    shouldAdoptOnGroupChange,
     type TickerScope,
     type TickerScopeMode,
 } from '@/lib/widgetScope';
@@ -166,6 +166,21 @@ export function WidgetWrapper({
     const [internalData, setInternalData] = useState<any>(widgetData);
     const [isContentVisible, setIsContentVisible] = useState(false);
     const contentHostRef = useRef<HTMLDivElement | null>(null);
+    const [widgetHost] = useState<HTMLDivElement | null>(() => {
+        if (typeof document === 'undefined') return null;
+        const host = document.createElement('div');
+        host.className = 'h-full';
+        return host;
+    });
+    const maximizedContentRef = useRef<HTMLDivElement | null>(null);
+    useLayoutEffect(() => {
+        if (!widgetHost) return;
+        const target = isMaximized ? maximizedContentRef.current : contentHostRef.current;
+        if (target && !isCollapsed && isContentVisible) target.appendChild(widgetHost);
+        return () => {
+            if (widgetHost.parentNode) widgetHost.remove();
+        };
+    }, [isMaximized, widgetHost, isCollapsed, isContentVisible]);
     const currentDashboard = state.dashboards.find((dashboard) => dashboard.id === dashboardId) || null;
     const currentTab = currentDashboard?.tabs.find((tab) => tab.id === tabId) || null;
     const currentWidget = currentTab?.widgets.find((widget) => widget.id === id) || null;
@@ -269,7 +284,7 @@ export function WidgetWrapper({
 
 
     // Get current group details if assigned
-    const configuredScope = readTickerScope(currentWidget?.config);
+    const configuredScope = readTickerScope(currentWidget?.config, isTradingViewWidget(widgetType) && usesTradingViewWidgetSymbol(widgetType));
     const [tickerScope, setTickerScope] = useState<TickerScope>(configuredScope);
     const isTradingViewLinkedWidget = Boolean(
         currentWidget &&
@@ -286,10 +301,10 @@ export function WidgetWrapper({
         ? { mode: 'override', symbol: tickerOverride }
         : tickerScope;
     // The widget shows its own ticker when detached, otherwise its group's.
-    // TradingView charts keep showing the symbol the workspace seeded them with.
+    // A local TradingView ticker takes precedence over the workspace symbol.
     const scopedSymbol = resolveWidgetSymbol(effectiveScope, groupSymbol);
     const displaySymbol = isTradingViewWidget(widgetType)
-        ? (symbol || scopedSymbol)
+        ? (scopeMode === 'override' ? scopedSymbol : symbol || scopedSymbol)
         : scopedSymbol;
     const usesExternalTradingViewSymbol =
         isTradingViewWidget(widgetType) &&
@@ -472,19 +487,7 @@ export function WidgetWrapper({
             next_group: newGroup,
         });
         setWidgetGroup(newGroup);
-        // Persist to dashboard state
         updateWidget(dashboardId, tabId, id, { widgetGroup: newGroup });
-
-        // A detached widget keeps its own ticker when it changes group; a
-        // following widget adopts the new group's ticker. TradingView linked
-        // charts are a separate rule: switching group never rewrites them.
-        if (isTradingViewLinkedWidget) return;
-
-        const newSymbol = getSymbolForGroup(newGroup);
-        if (!newSymbol) return;
-        if (!shouldAdoptOnGroupChange(effectiveScope, newSymbol, displaySymbol)) return;
-
-        onSymbolChange?.(newSymbol);
     };
 
 
@@ -496,6 +499,9 @@ export function WidgetWrapper({
                 ...currentWidget?.config,
                 tickerScope: nextScope.mode,
                 symbol: resolveWidgetSymbol(nextScope, groupSymbol),
+                ...(isTradingViewWidget(widgetType) && usesTradingViewWidgetSymbol(widgetType)
+                    ? { useLinkedSymbol: nextScope.mode === 'group' }
+                    : {}),
             },
         });
     };
@@ -522,10 +528,6 @@ export function WidgetWrapper({
         });
         clearWidgetTickerOverride(id);
         persistTickerScope(GROUP_TICKER_SCOPE);
-        if (!groupSymbol) return;
-        if (isTradingViewLinkedWidget) return;
-        if (!shouldAdoptOnGroupChange(GROUP_TICKER_SCOPE, groupSymbol, displaySymbol)) return;
-        onSymbolChange?.(groupSymbol);
     };
 
     const handleTickerSelect = (newSymbol: string) => {
@@ -534,6 +536,11 @@ export function WidgetWrapper({
                 previous_symbol: displaySymbol,
                 next_symbol: newSymbol,
             });
+            if (isTradingViewWidget(widgetType) && usesTradingViewWidgetSymbol(widgetType) && scopeMode === 'override') {
+                setWidgetTickerOverride(id, newSymbol);
+                persistTickerScope({ mode: 'override', symbol: newSymbol });
+                return;
+            }
             if (isTradingViewLinkedWidget && currentWidget) {
                 updateWidget(dashboardId, tabId, id, {
                     config: {
@@ -861,21 +868,7 @@ export function WidgetWrapper({
                                 <WidgetSkeleton lines={4} />
                             </div>
                         </div>
-                    ) : (
-                        <WidgetHeaderVisibilityProvider hideHeader>
-                            <WidgetErrorBoundary
-                                widgetName={title}
-                                onError={(error) => logClientError(`Widget ${id} (${title}) crashed:`, error)}
-                            >
-                                {withResolvedWidgetProps(children, {
-                                    id,
-                                    symbol: displaySymbol,
-                                    widgetGroup,
-                                    onDataChange: setInternalData,
-                                })}
-                            </WidgetErrorBoundary>
-                        </WidgetHeaderVisibilityProvider>
-                    )}
+                    ) : null}
                 </div>
 
             </div>
@@ -885,21 +878,15 @@ export function WidgetWrapper({
                 isOpen={isMaximized}
                 onClose={() => setIsMaximized(false)}
                 title={`${displaySymbol ? `${displaySymbol} - ` : ''}${title}`}
-            >
+                contentRef={maximizedContentRef}
+            />
+            {widgetHost && isContentVisible && !isCollapsed && createPortal(
                 <WidgetHeaderVisibilityProvider hideHeader>
-                <WidgetErrorBoundary
-                    widgetName={title}
-                    onError={(error) => logClientError(`Maximized Widget ${id} (${title}) crashed:`, error)}
-                >
-                    {withResolvedWidgetProps(children, {
-                        id,
-                        symbol: displaySymbol,
-                        widgetGroup,
-                        onDataChange: setInternalData,
-                    })}
-                </WidgetErrorBoundary>
-                </WidgetHeaderVisibilityProvider>
-            </MaximizedWidgetPortal>
+                    <WidgetErrorBoundary widgetName={title} onError={(error) => logClientError(`Widget ${id} (${title}) crashed:`, error)}>
+                        {withResolvedWidgetProps(children, { id, symbol: displaySymbol, widgetGroup, onDataChange: setInternalData })}
+                    </WidgetErrorBoundary>
+                </WidgetHeaderVisibilityProvider>, widgetHost
+            )}
         </>
     );
 }

@@ -8,14 +8,16 @@ interface MaximizedWidgetPortalProps {
     isOpen: boolean;
     onClose: () => void;
     title: string;
-    children: ReactNode;
+    contentRef?: React.Ref<HTMLDivElement>;
+    children?: ReactNode;
 }
 
 export function MaximizedWidgetPortal({
     isOpen,
     onClose,
     title,
-    children
+    children,
+    contentRef,
 }: MaximizedWidgetPortalProps) {
     const [mounted, setMounted] = useState(false);
     const [isAnimating, setIsAnimating] = useState(false);
@@ -129,7 +131,7 @@ export function MaximizedWidgetPortal({
                     matches the grid widget content host (WidgetWrapper) so
                     maximized widgets keep a consistent inset now that
                     WidgetContainer no longer self-pads. */}
-                <div className="min-h-0 flex-1 overflow-auto p-2 sm:p-2.5">
+                <div ref={contentRef} className="min-h-0 flex-1 overflow-auto p-2 sm:p-2.5">
                     {children}
                 </div>
             </div>

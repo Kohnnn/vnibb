@@ -40,14 +40,15 @@ live in `docs/`.
 
 ### Fixed
 - Narrow widget headers move controls into an accessible compact panel; overflow menus escape card clipping and support keyboard navigation. Chart timeframe/type controls now agree across the header, chart body, and saved configuration.
-- Responsive viewing, empty-state hints, zoom/container changes, and edit-mode toggles do not rewrite authored desktop widget geometry; collision-safe manual resizing preserves other widgets' positions. Narrow layouts remain view-only.
-- Restored workspace ticker groups and linked TradingView ticker stay scoped to their copies. Deep links wait for local hydration and the requested dashboard before applying a ticker.
-- Maximized widgets mount one live editor; header-specific actions remain available in the widget container while the shared shell suppresses duplicate headers.
+- Responsive viewing, empty-state hints, zoom/container changes, and edit-mode toggles do not rewrite authored desktop widget geometry; collision-safe manual resizing preserves other widgets' positions. Narrow layouts remain view-only. Widgets added at the bottom now receive finite coordinates before storage, so reload and backup cannot reject the dashboard.
+- Restored workspace ticker groups and linked TradingView ticker stay scoped to their copies. Following a group no longer changes the Global ticker; a locally detached TradingView symbol stays detached across ticker changes and reload. Deep links wait for local hydration and the requested dashboard before applying a ticker.
+- Maximized widgets keep one live editor and retain unsaved in-memory drafts across maximize/restore; header-specific actions remain available in the widget container while the shared shell suppresses duplicate headers.
 - Saved Overview tabs using the retired `valuation_multiples` ID migrate to the registered Valuation Multiples Chart without losing the widget's ID or layout.
 - Statement widgets keep table/chart and period controls reachable on the dashboard. The dashboard suppresses duplicate inner headers; controls live in the body or a reachable action row. Selected metrics render matching series rather than empty charts.
 - Valuation aliases now migrate every saved widget instance, including same-config duplicates at different positions; an empty ratio-history response no longer loops when the widget reports its runtime state.
 - Copilot global-ticker actions update the linked widget group as well as the workspace header; TradingView command actions target the destination dashboard ticker without changing the source workspace. Cloud reconciliation selects a surviving dashboard and tab if the active remote layout disappears.
 - Drawdown Deep Dive, Hurst Market Structure, Dividend Ladder and Quant Summary now keep empty/loading-derived runtime dependencies stable, so a linked widget can publish status without triggering a parent/child render loop.
+- Income Statement now opens wide financial tables at their newest periods like Balance Sheet and Cash Flow, while preserving horizontally scrollable older years and the sticky metric column.
 
 - Financial ratio tables no longer present absent data as real numbers. A period the
   provider could not compute (missing price, EPS, or book value) is now shown as an empty

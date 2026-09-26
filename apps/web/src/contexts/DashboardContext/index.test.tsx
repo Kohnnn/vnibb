@@ -262,6 +262,50 @@ describe('DashboardProvider browser persistence', () => {
     jest.restoreAllMocks();
   });
 
+  it('reloads bottom-placed widgets without changing authored dashboard geometry or config', async () => {
+    const existing = {
+      ...customDashboard,
+      tabs: [{ id: 'saved-tab', name: 'Saved tab', order: 0, widgets: [
+        { id: 'existing-one', type: 'notes' as const, tabId: 'saved-tab', config: { text: 'keep me' }, layout: { i: 'existing-one', x: 4, y: 3, w: 8, h: 5 } },
+        { id: 'existing-two', type: 'price_chart' as const, tabId: 'saved-tab', config: { symbol: 'FPT' }, layout: { i: 'existing-two', x: 12, y: 20, w: 10, h: 7 } },
+      ] }],
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([existing]));
+
+    function PlacementProbe() {
+      const { addWidget, state, migrationNotice } = useDashboard();
+      const saved = state.dashboards.find((dashboard) => dashboard.id === existing.id);
+      return <>
+        <output data-testid="saved-widget-count">{saved?.tabs[0]?.widgets.length ?? 0}</output>
+        <output data-testid="saved-widgets">{JSON.stringify(saved?.tabs[0]?.widgets ?? [])}</output>
+        <output data-testid="storage-notice">{migrationNotice?.message || ''}</output>
+        <button onClick={() => {
+          addWidget(existing.id, 'saved-tab', { type: 'notes', tabId: 'saved-tab', config: { text: 'first' }, layout: { x: 0, y: Infinity, w: 6, h: 6 } });
+          addWidget(existing.id, 'saved-tab', { type: 'notes', tabId: 'saved-tab', config: { text: 'second' }, layout: { x: 10, y: Infinity, w: 6, h: 6 } });
+          addWidget(existing.id, 'saved-tab', { type: 'notes', tabId: 'saved-tab', config: { text: 'authored' }, layout: { x: 2, y: 1, w: 4, h: 3 } });
+        }}>add widgets</button>
+      </>;
+    }
+
+    const { unmount } = render(<DashboardProvider><PlacementProbe /></DashboardProvider>);
+    await waitFor(() => expect(screen.getByTestId('saved-widget-count')).toHaveTextContent('2'));
+    fireEvent.click(screen.getByRole('button', { name: 'add widgets' }));
+    await waitFor(() => expect(screen.getByTestId('saved-widget-count')).toHaveTextContent('5'));
+    const saved = storedDashboards().find((dashboard) => dashboard.id === existing.id);
+    expect(saved?.tabs[0].widgets.slice(0, 2)).toEqual(existing.tabs[0].widgets);
+    expect(saved?.tabs[0].widgets.slice(2).map((widget) => ({ config: widget.config, x: widget.layout.x, y: widget.layout.y, w: widget.layout.w, h: widget.layout.h }))).toEqual([
+      { config: { text: 'first' }, x: 0, y: 27, w: 6, h: 6 },
+      { config: { text: 'second' }, x: 10, y: 33, w: 6, h: 6 },
+      { config: { text: 'authored' }, x: 2, y: 1, w: 4, h: 3 },
+    ]);
+
+    unmount();
+    render(<DashboardProvider><PlacementProbe /></DashboardProvider>);
+    await waitFor(() => expect(screen.getByTestId('saved-widget-count')).toHaveTextContent('5'));
+    expect(screen.getByTestId('storage-notice')).toHaveTextContent('');
+    expect(JSON.parse(screen.getByTestId('saved-widgets').textContent ?? '[]')).toEqual(saved?.tabs[0].widgets);
+  });
+
   it('preserves the active tab for each dashboard during atomic persistence', async () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify([{
       ...customDashboard,

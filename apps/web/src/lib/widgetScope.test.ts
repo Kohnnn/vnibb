@@ -27,3 +27,22 @@ describe('resolveWidgetSymbol default (no scope, no override)', () => {
     expect(resolveWidgetSymbol(readTickerScope({ tickerScope: 'override' }), '')).toBe('');
   });
 });
+
+describe('restored TradingView ticker scope', () => {
+  it('preserves an exchange-qualified symbol for a detached TradingView chart', () => {
+    expect(readTickerScope({ tickerScope: 'override', symbol: 'NASDAQ:AAPL', useLinkedSymbol: false }, true))
+      .toEqual({ mode: 'override', symbol: 'NASDAQ:AAPL' });
+  });
+
+  it('does not treat an exchange symbol as a Vietnamese ticker for ordinary widgets', () => {
+    expect(readTickerScope({ tickerScope: 'override', symbol: 'NASDAQ:AAPL' }))
+      .toEqual({ mode: 'group', symbol: null });
+    expect(readTickerScope({ tickerScope: 'override', symbol: 'TVC:DXY' }))
+      .toEqual({ mode: 'group', symbol: null });
+  });
+
+  it('rejects unsafe TradingView symbol strings', () => {
+    expect(readTickerScope({ tickerScope: 'override', symbol: 'NASDAQ:AAPL?script=<svg>' }, true))
+      .toEqual({ mode: 'group', symbol: null });
+  });
+});

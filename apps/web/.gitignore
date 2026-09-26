@@ -11,6 +11,8 @@ pnpm-debug.log*
 out/
 build/
 dist/
+public/sw.js
+public/workbox-*.js
 
 # Environment
 .env

@@ -367,6 +367,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             sortable
             showTrend={false}
             maxYears={tableColumns.length || 1}
+            initialScrollPosition="end"
             selectedColumnKey={selection?.kind === 'column' ? selection.key : null}
             onSelectionClear={clearSelection}
             storageKey={`income:${id}:${symbol}:${period}`}
