@@ -148,6 +148,10 @@ evidence rather than permitting it. Do not add real providers by appending
 `:unknown`. Absent or empty configuration denies all real-source export, which is
 the intended default; only the synthetic fixture bypasses the gate.
 
+No real provider is sanctioned for export by this verification record. The
+allow-list syntax and deny behavior are verified; provider-specific grants still
+require documented permission and the exact supplier tag from retained records.
+
 ### Claims that stay unverified without a live corpus
 
 Everything below is out of scope for repository verification and must not be
@@ -160,10 +164,14 @@ treated as proven by the fixture or by the test suite:
 - **Real provider rights.** External export has been verified against a configured
   allow-list in a local environment. Whether any given real provider's terms permit
   display or export is a data-rights decision made outside this codebase.
-- **Authenticated browser interaction.** The Matrix widget has been observed to
-  mount, expose its scope controls and open a saved snapshot reference, but the
-  in-browser inspector, narrow-layout and keyboard paths were not driven end to end
-  against a live Supabase session.
+- **Live end-user integration.** Chromium exercised fixture inspector tabs,
+  keyboard navigation, Escape focus restoration and the 390px modal sheet. The
+  manual-copy fallback was also exercised with the Clipboard API absent, using
+  a saved controlled snapshot, server-formatted reference text, stub authentication
+  and intercepted API responses: its read-only textarea selected all 835 characters
+  on focus and contained references rather than displayed financial values.
+  Neither fixture nor replay proves an end-to-end live Supabase session, production
+  database access or permission to export a real provider's data.
 
 ## Prediction-Market Family
 
@@ -218,6 +226,7 @@ Manifold        ──┘   prediction_markets (DB table, source-agnostic)
                               ▼
         MacroCalibrationWidget (cached 600s) with confidence pills
         CrossSourceCalibrationWidget (per-source probability bars)
+```
 
 Conventions:
 

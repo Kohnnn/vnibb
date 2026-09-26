@@ -23,16 +23,35 @@ Canonical decimal strings and one server-formatted display drive cells, previews
 - [x] **External MCP handoff:** read-only tools resolve the same snapshot/selection using per-request authenticated user identity, never a token in tool arguments. Preserve existing shared-bearer market tools but do not let that token grant Matrix access. Verify through official Python MCP `ClientSession` HTTP transport with owner/other-user/revoked cases. No claim of universal hosted-client OAuth interoperability. External data export requires explicit source-rights policy; default-deny unapproved real provider sources.
   Observed: official Python SDK `ClientSession` over streamable HTTP at `/mcp`. Owner call resolves and returns the frozen typed packet (canonical `metric.display`, not a text-serialized number). 17 tools exposed, zero mutating. Other user → "Matrix selection not found"; shared deployment bearer → "Matrix requires a verified user JWT over HTTP; shared bearer and stdio cannot authorize it"; unauthenticated transport → 401. Source-rights gate denies unapproved suppliers, including configured `family:unknown` deny sentinels.
 - [x] **Integration validation:** run focused Jest/pytest contracts, TypeScript/lint and project gate after module integration. Fix actual regressions without overwriting sibling-session changes; record unrelated blockers separately with evidence.
-  Observed: `pnpm run ci:gate` on the integrated branch — Frontend Lint ok (0 errors), Frontend Typecheck ok, Frontend Changelog Generation/Check ok, Frontend Build ok (168s); Matrix API 63/63 and web 8/8. Two unrelated blockers recorded under "Open blockers" below; no Matrix-owned failure remains.
+  Observed: the integrated resplit branch passed all nine `pnpm run ci:gate` steps (frontend lint, typecheck, changelog generation/check, build, tests; backend Ruff, compile, tests). Backend result: 970 passed, 1 skipped, 3 warnings. Earlier focused Matrix runs: API 63/63 and web 8/8. The two historical gate failures below are resolved.
 - [x] **Runtime proof:** run actual local API/database and registered browser widget; capture desktop/narrow inspector behavior, selection/copy/review and real persisted snapshot retrieval. Exercise actual MCP transport and VniAgent context admission with no paid provider call. Distinguish controlled seeded serving observations from live corpus and actual model generation.
-  Observed: real uvicorn API on the smoke database (8 synthetic MXA–MXH issuers, two fiscal years, four sector families) and a real Chromium session against the running Next dev server. Every number above comes from controlled seeded serving rows, not the live corpus, and no LLM provider was called. Limitation: the desktop/narrow inspector interaction and the copy fallback were captured from the widget's registered mount and unit coverage, not a scripted end-to-end click-through, because the dashboard's own first-run overlay intercepts synthetic clicks.
-- [ ] **Delivery evidence:** update existing docs/changelog and map tickets with implemented interfaces, observed checks, runtime proof and exact deployment/auth/data-rights prerequisites. Remove throwaway verification scaffolding. Do not close product release gates based on fixture-only or test-only proof.
-  In progress: verification scaffolding removed (`apps/web/matrix-smoke-local.cjs`, `apps/web/src/app/matrix-harness/page.tsx`). Remaining: changelog entry, canonical doc, and the two blockers below.
+  Observed: real uvicorn API on the smoke database (8 controlled MXA–MXH issuers, two fiscal years, four sector families); no LLM provider called. Scripted Chromium fixture interaction exercised Result/Evidence/Basis/Review, arrows, Space selection, Enter inspection, Escape closure and focus restoration to cell `0:0`. At 390px the inspector was a fixed 374×828 modal sheet inset 8px; selection survived resizing. These are synthetic-fixture UI observations, not production evidence.
+  Manual-copy fallback was subsequently exercised in Chromium with the application-realm Clipboard API removed: the read-only textarea appeared and selected all 835 characters on focus. Snapshot/result references were present; displayed financial values were absent. This used a saved controlled non-synthetic snapshot, the actual server `_request_text` formatter, stub authentication and intercepted API responses because the local API was no longer running. It proves the browser fallback, not live authentication/database integration.
+- [x] **Delivery evidence:** existing Matrix changelog entry and canonical widget documentation cover implementation and deployment/auth/source-rights prerequisites. Local repository verification is complete; production and product release gates remain open. Temporary in-repository verification scaffolding was removed. Evidence is mapped to #42; fixture/replay proof does not close the full-loop release gate.
 
-## Open blockers (not Matrix-owned)
+## Resolved gate failures and integration boundary
 
-1. `apps/web/src/data/changelog.generated.ts` is tracked, but the CI gate regenerates it and then requires the regenerated bytes to equal the bytes it read at gate start, so "Frontend Changelog Check" fails on a clean checkout unless the committed file already equals its own regenerated output. Commit the regenerated file (+48/−4 vs HEAD).
-2. `src/components/widgets/GarchVolatilityWidget.test.tsx` → "renders the polymarket widget empty state from the DB-backed API" fails only with this branch's working tree applied (passes 14/14 at clean HEAD). Cause: `PredictionMarketSource.tsx:132` changed the empty copy from `` `No ${title} markets available` `` to `` `No data · ${title}` `` while the assertion still expects `No Polymarket markets available`. Update the assertion or restore the copy.
+1. Tracked `apps/web/src/data/changelog.generated.ts` was regenerated; the final gate passed generation and byte-consistency checks.
+2. Prediction-market empty-state copy and its consuming test no longer fail the final gate. This is a prediction-market concern, not a Matrix evidence feature.
+
+The inspected resplit history separated Matrix (`8160773`), prediction-market services (`a60fe2e`) and backup (`ae1ae7e`), with shared plumbing (`2e1447e`) and workspace integration (`3fdc802`). The workspace commit still includes non-Matrix files; do not treat the entire branch as a Matrix-only patch. Concurrent sessions changed branches during verification; review immutable commits and use separate worktrees rather than switching a shared checkout.
+
+### Remote PR checks
+
+[PR #61](https://github.com/Kohnnn/vnibb/pull/61) is the existing delivery PR.
+The local gate above is not a claim that hosted checks passed. In GitHub Actions
+run `36256058406`, all three Python-dependent jobs stopped during dependency
+installation: public PyPI could not resolve `vnstock>=4.0.4,<4.1`. The vendor index
+lists vnstock 4.0.8/4.0.9, but only vnai 2.6.2, outside the current `>=2.4.0,<2.5`
+constraint. Adding an extra index alone is not a validated repair. Provider-runtime
+migration and package-source trust require separate verification; do not bypass
+the failure or claim a clean public-index install from an existing local venv.
+
+The configured `vnibb-web` Vercel preview passed. The separate `vnibb` project
+failed for missing `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL`; its preview
+environment contains no variables. Neither deployment settings nor provider
+dependency constraints were changed as part of this Matrix documentation handoff.
+
 
 ## Shared interfaces and file ownership
 
