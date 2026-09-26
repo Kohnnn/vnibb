@@ -113,7 +113,7 @@ const GLOBAL_MARKETS_SCREENER_TEMPLATE: TemplateWidget[] = [
 ];
 
 const GLOBAL_MARKETS_CRYPTO_TEMPLATE: TemplateWidget[] = [
-    { type: 'tradingview_ticker_tape', syncGroupId: 1, config: { symbolsPreset: 'crypto_majors' }, layout: { x: 0, y: 0, w: 24, h: 4, minW: 12, minH: 3 } },
+    { type: 'tradingview_ticker_tape', syncGroupId: 1, config: { symbols: ['BINANCE:BTCUSDT', 'BINANCE:ETHUSDT', 'BINANCE:SOLUSDT', 'BINANCE:BNBUSDT', 'BINANCE:XRPUSDT'] }, layout: { x: 0, y: 0, w: 24, h: 4, minW: 12, minH: 3 } },
     { type: 'tradingview_crypto_market', syncGroupId: 1, config: { market: 'crypto', screener_type: 'crypto_mkt' }, layout: { x: 0, y: 4, w: 14, h: 14, minW: 8, minH: 8 } },
     { type: 'tradingview_chart', syncGroupId: 1, config: { symbol: 'BINANCE:BTCUSDT', useLinkedSymbol: false, allow_symbol_change: false }, layout: { x: 14, y: 4, w: 10, h: 14, minW: 8, minH: 8 } },
     { type: 'tradingview_crypto_heatmap', syncGroupId: 1, config: {}, layout: { x: 0, y: 18, w: 24, h: 10, minW: 12, minH: 8 } },
