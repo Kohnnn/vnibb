@@ -12,20 +12,23 @@ interface PeriodToggleProps {
   onChange: (period: ExtendedPeriod) => void;
   compact?: boolean;
   options?: ExtendedPeriod[];
+  label?: string;
 }
 
-const PERIODS: Period[] = ['FY', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM'];
 const EXTENDED_PERIODS: ExtendedPeriod[] = ['FY', 'Q', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM'];
 
-function PeriodToggleComponent({ value, onChange, compact = false, options = EXTENDED_PERIODS }: PeriodToggleProps) {
+function PeriodToggleComponent({ value, onChange, compact = false, options = EXTENDED_PERIODS, label = 'Financial period' }: PeriodToggleProps) {
   return (
-    <div className={cn(
-        "flex bg-[var(--bg-tertiary)] rounded-md p-0.5 border border-[var(--border-color)]",
+    <div role="group" aria-label={label} className={cn(
+        "flex max-w-full overflow-x-auto bg-[var(--bg-tertiary)] rounded-md p-0.5 border border-[var(--border-color)]",
         compact ? "gap-0.5" : "gap-1"
     )}>
       {options.map(period => (
         <button
           key={period}
+          type="button"
+          aria-pressed={value === period}
+          title={period === 'FY' ? 'Full financial year' : period === 'Q' ? 'Quarterly' : period === 'TTM' ? 'Trailing twelve months' : `Quarter ${period.slice(1)}`}
           onClick={() => {
             captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
               control_type: 'period_toggle',
@@ -36,7 +39,7 @@ function PeriodToggleComponent({ value, onChange, compact = false, options = EXT
             onChange(period)
           }}
           className={cn(
-            "rounded font-bold transition-all uppercase",
+            "shrink-0 rounded font-bold transition-all uppercase focus-visible:outline-2 focus-visible:outline-blue-400 focus-visible:outline-offset-1",
             compact ? "px-1.5 py-0.5 text-[9px]" : "px-2.5 py-1 text-[10px]",
             value === period
               ? "bg-blue-600 text-white shadow-sm"

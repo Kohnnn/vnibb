@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Responsive } from 'react-grid-layout';
-import type { Layout } from 'react-grid-layout';
+import { Responsive, noCompactor } from 'react-grid-layout';
+import type { Layout, ResponsiveProps } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import { DASHBOARD_GRID_BREAKPOINTS } from '@/lib/responsive';
-import { autoFitGridItems, compactGridItems } from '@/lib/dashboardLayout';
+import { autoFitGridItems } from '@/lib/dashboardLayout';
 import { useResizeNudge } from '@/hooks/useResizeNudge';
 // Note: react-resizable styles are bundled with react-grid-layout, no separate import needed
 
@@ -57,6 +57,7 @@ interface DashboardGridProps {
     children: any;
     layouts: LayoutItem[];
     onLayoutChange?: (layout: LayoutItem[]) => void;
+    onEditableChange?: (canEdit: boolean) => void;
     isEditing?: boolean;
     /** Row height in grid units (px). Defaults to 40, the canonical value. */
     rowHeight?: number;
@@ -66,6 +67,7 @@ export function DashboardGrid({
     children,
     layouts,
     onLayoutChange,
+    onEditableChange,
     isEditing = false,
     rowHeight = 40,
 }: DashboardGridProps) {
@@ -197,19 +199,13 @@ export function DashboardGrid({
 
     const [currentBreakpoint, setCurrentBreakpoint] = useState('lg');
 
-    const handleLayoutChange = useCallback(
-        (currentLayout: Layout, allLayouts: Partial<Record<string, Layout>>) => {
-            if (!onLayoutChange) return;
-
-            // Only the `lg` layout is persisted. `md`/`sm`/`xs` are derived
-            // (view-only) from `lg`, so we never write tablet/phone edits back —
-            // this removes the previous `x*2`/`w*2` round-trip that corrupted the
-            // stored layout on repeated tablet edits.
-            if (currentBreakpoint === 'lg' && allLayouts.lg) {
-                onLayoutChange(allLayouts.lg as unknown as LayoutItem[]);
+    const persistInteraction = useCallback(
+        (nextLayout: Layout) => {
+            if (isEditing && currentBreakpoint === 'lg' && width >= BREAKPOINTS.lg) {
+                onLayoutChange?.(nextLayout as LayoutItem[]);
             }
         },
-        [currentBreakpoint, onLayoutChange]
+        [currentBreakpoint, isEditing, onLayoutChange, width]
     );
 
     const handleBreakpointChange = useCallback((breakpoint: string) => {
@@ -222,78 +218,27 @@ export function DashboardGrid({
     // Editing is only allowed at `lg`, the single persisted layout. At md/sm/xs
     // the layout is derived (view-only), so drag/resize is disabled there to
     // avoid implying edits that won't be saved.
-    const canEdit = isEditing && currentBreakpoint === 'lg';
-    const draggableHandle = canEdit ? '.widget-drag-handle' : undefined;
+    const canEdit = isEditing && currentBreakpoint === 'lg' && width >= BREAKPOINTS.lg;
+    useEffect(() => {
+        onEditableChange?.(canEdit);
+        return () => onEditableChange?.(false);
+    }, [canEdit, onEditableChange]);
 
     // Nudge container-measuring embeds (Recharts/TradingView) to re-measure after
     // breakpoint/layout/width changes. Shared with DashboardClient via useResizeNudge.
     useResizeNudge([currentBreakpoint, layouts, rowHeight, width], 120);
 
-    const effectiveLayouts = useMemo(() => {
-        if (canEdit) return responsiveLayouts;
-
-        // For the static (non-editing) view, vertically compact each breakpoint
-        // so any authored vertical gaps collapse and widgets fit together with
-        // no blank rows. Edit mode is left untouched (RGL handles compaction
-        // there) so drag/resize keeps its familiar reflow.
-        const compactStatic = (items: LayoutItem[] | undefined, cols: number): LayoutItem[] => {
-            const packed = compactGridItems(
-                (items || []).map((item) => ({
-                    type: item.type,
-                    __i: item.i,
-                    __maxW: item.maxW,
-                    __maxH: item.maxH,
-                    layout: {
-                        x: item.x,
-                        y: item.y,
-                        w: item.w,
-                        h: item.h,
-                        minW: item.minW,
-                        minH: item.minH,
-                        maxW: item.maxW,
-                        maxH: item.maxH,
-                    },
-                })),
-                cols,
-            );
-            return packed.map((p) => {
-                const wrapper = p as typeof p & { __i: string; __maxW?: number; __maxH?: number };
-                return {
-                    i: wrapper.__i,
-                    x: p.layout.x,
-                    y: p.layout.y,
-                    w: p.layout.w,
-                    h: p.layout.h,
-                    minW: p.layout.minW,
-                    minH: p.layout.minH,
-                    maxW: wrapper.__maxW,
-                    maxH: wrapper.__maxH,
-                    static: true,
-                };
-            });
-        };
-
-        return {
-            lg: compactStatic(responsiveLayouts.lg, COLS.lg),
-            md: compactStatic(responsiveLayouts.md, COLS.md),
-            sm: compactStatic(responsiveLayouts.sm, COLS.sm),
-            xs: compactStatic(responsiveLayouts.xs, COLS.xs),
-        };
+    // View-only layouts retain the authored desktop coordinates, including deliberate
+    // gaps. Responsive projections are disposable and never become saved geometry.
+    const effectiveLayouts = useMemo(() => canEdit ? responsiveLayouts : {
+        lg: responsiveLayouts.lg.map(item => ({ ...item, static: true })),
+        md: responsiveLayouts.md.map(item => ({ ...item, static: true })),
+        sm: responsiveLayouts.sm.map(item => ({ ...item, static: true })),
+        xs: responsiveLayouts.xs.map(item => ({ ...item, static: true })),
     }, [canEdit, responsiveLayouts]);
 
-    // All extra props that may not be in the type definitions
-    //
-    // compactType decision: while the user is editing we keep `'vertical'`
-    // to give the familiar drag-and-drop reflow. For non-editable / static
-    // system dashboards we disable compaction (compactType=null). Without
-    // this, an empty widget runtime hint shrinking a cell would cascade
-    // through the whole tab via vertical compaction, producing the
-    // "widgets collide / blank top-left when zooming" behaviour.
-    //
-    // preventCollision is left at the RGL default (false) regardless of
-    // edit mode. Setting it to true on static layouts caused widgets that
-    // momentarily overlapped during breakpoint transitions to refuse to
-    // render, which felt like the dashboard was breaking on resize.
+    // Disable passive compaction in both modes: only a deliberate drag/resize or
+    // the workspace's explicit auto-fit action may rewrite authored geometry.
     const gridProps = {
         className: 'layout',
         layouts: effectiveLayouts,
@@ -301,22 +246,23 @@ export function DashboardGrid({
         cols: COLS,
         rowHeight,
         width,
-        onLayoutChange: handleLayoutChange,
         onBreakpointChange: handleBreakpointChange,
-        draggableHandle,
-        isDraggable: canEdit,
-        isResizable: canEdit,
-        resizeHandles: canEdit ? ['se', 'e', 's'] : undefined,
-        isDroppable: false,
-        compactType: (canEdit ? 'vertical' : null) as 'vertical' | null,
-        preventCollision: false,
+        onDragStop: persistInteraction,
+        onResizeStop: persistInteraction,
+        dragConfig: {
+            enabled: canEdit,
+            handle: '.widget-drag-handle',
+            cancel: 'button, input, select, textarea, a, [role="dialog"], [data-dropdown-menu-content]',
+        },
+        resizeConfig: { enabled: canEdit, handles: ['se', 'e', 's'] },
+        dropConfig: { enabled: false },
+        compactor: noCompactor,
         margin: gridMargin,
         containerPadding: [0, 0] as [number, number],
-        useCSSTransforms: true,
-    };
+    } satisfies Omit<ResponsiveProps, 'children'>;
 
     return (
-        <div ref={containerRef} className="dashboard-grid w-full">
+        <div ref={containerRef} data-grid-editable={canEdit} className="dashboard-grid w-full">
             <Responsive {...gridProps}>
                 {children as any}
             </Responsive>

@@ -202,6 +202,7 @@ describe('autoFitGridItems responsive derivation', () => {
       for (const item of out) {
         expect(item.layout.w).toBeLessThanOrEqual(cols);
         expect(item.layout.x + item.layout.w).toBeLessThanOrEqual(cols);
+        expect(item.layout.minW).toBeLessThanOrEqual(item.layout.w);
       }
     });
   }
@@ -220,6 +221,13 @@ describe('autoFitGridItems responsive derivation', () => {
       expect(item.layout.x).toBeGreaterThanOrEqual(0);
       expect(item.layout.y).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  it('does not rewrite the desktop geometry while projecting phone and tablet sizes', () => {
+    const authored = baseItems.map(item => ({ ...item, layout: { ...item.layout } }));
+    autoFitGridItems(baseItems, 2);
+    autoFitGridItems(baseItems, 12);
+    expect(baseItems).toEqual(authored);
   });
 });
 
