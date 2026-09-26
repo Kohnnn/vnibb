@@ -81,6 +81,9 @@ const ratioLabels: Record<string, string> = {
 
 const TABLE_YEAR_LIMIT = 20;
 const QUARTER_PERIOD_LIMIT = 40;
+// A current-year YTD column may exist only in the statement reference. Without
+// a matching ratio period its cells remain empty instead of borrowing FY values.
+const YTD_PERIOD_REGEX = /^\d{4} YTD$/;
 // These metrics are undefined, not zero, when a denominator is missing. Providers
 // emit a literal 0 for a period they could not compute, which would otherwise
 // render as a real 0.00 multiple and feed the swing heuristic a bogus base.
@@ -95,7 +98,21 @@ const UNDEFINED_WHEN_ZERO_RATIO_KEYS: Record<string, true> = {
     p_fcf: true,
     price_to_fcf: true,
 };
+
+/**
+ * Statement periods this widget is expected to mirror as columns: fiscal years, canonical
+ * quarters, and the current-year YTD roll-up. TTM closes a twelve-month window and is a
+ * display mode of its own, so it never names a reference column.
+ */
+function readStatementReferencePeriod(raw: unknown): string | null {
+    const normalized = normalizeRatioPeriod(typeof raw === 'string' ? raw : null);
+    if (!normalized) return null;
+    if (isCanonicalQuarterPeriod(normalized) || /^\d{4}$/.test(normalized)) return normalized;
+    return YTD_PERIOD_REGEX.test(normalized) ? normalized : null;
+}
+
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
+
 const RATIO_FIELD_ALIASES: Record<string, string[]> = {
     pe: ['pe', 'pe_ratio', 'priceToEarning'],
     pb: ['pb', 'pb_ratio', 'priceToBook'],
@@ -149,13 +166,11 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         isFetching,
         dataUpdatedAt,
     } = useFinancialRatios(symbol, { period: apiPeriod });
-    // The three statement widgets beside this one in "Financial Period View" render the
-    // newest `visiblePeriodLimit` periods they hold. The ratio feed reaches further back
-    // than any of them (VCI returns 2012..2025 while the statements return 2020..2025),
-    // so without this the same period selector would show a different year span in each
-    // panel. This query supplies the window to align to, not extra columns to append.
-    const statementWindowQuery = useIncomeStatement(symbol, {
-        period: period === 'FY' ? 'year' : period === 'Q' ? 'quarter' : 'TTM',
+    // Request the same period and limit as the adjacent statement widget: on
+    // some provider responses the available fiscal years vary with the limit.
+    // This feed supplies headings only; ratio rows supply all metric values.
+    const statementReferenceQuery = useIncomeStatement(symbol, {
+        period: period === 'Q' ? 'quarter' : 'year',
         enabled: period !== 'TTM',
         limit: visiblePeriodLimit,
     });
@@ -182,26 +197,24 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
             .sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period))
     }, [rawRatios]);
 
-    // Align to the statement panels' window. Unioning the two series instead would add
-    // bare columns for every ratio year the statements do not cover, which is what made
-    // the columns look mismatched with its siblings. The union is kept as a fallback for
-    // the case where the statements are unavailable but ratios are not.
-    const alignedRatios = useMemo(() => {
-        const statementPeriods = (statementWindowQuery.data?.data || [])
-            .map((entry) => normalizeRatioPeriod(String(entry.period)))
-            // A "2026 YTD" or "TTM" roll-up has no ratio counterpart, so it can never be a
-            // ratio column. Only fiscal years and canonical quarters are real period keys.
-            .filter((value): value is string => Boolean(value) && (isCanonicalQuarterPeriod(value as string) || /^\d{4}$/.test(value as string)));
-        if (statementPeriods.length === 0) return ratios;
+    // Columns are exactly the statement panels' window, so the same period selector shows
+    // the same headings in every panel — including "2026 YTD", which the ratio feed cannot
+    // fill and therefore renders as empty cells. The ratio feed is a value lookup for those
+    // headings and only becomes the period source when the reference series is unavailable.
+    const displayPeriods = useMemo(() => {
+        const referencePeriods = (statementReferenceQuery.data?.data || [])
+            .map((entry) => readStatementReferencePeriod(entry.period))
+            .filter((value): value is string => Boolean(value))
+            .sort((left, right) => periodSortKey(left) - periodSortKey(right));
+        if (referencePeriods.length === 0) {
+            return ratios.map((entry) => entry.period);
+        }
 
-        const statementWindow = new Set(
-            statementPeriods
-                .sort((left, right) => periodSortKey(left) - periodSortKey(right))
-                .slice(-visiblePeriodLimit)
-        );
-        const withinWindow = ratios.filter((entry) => statementWindow.has(entry.period));
-        return withinWindow.length > 0 ? withinWindow : ratios;
-    }, [ratios, statementWindowQuery.data?.data, visiblePeriodLimit]);
+        return referencePeriods
+            .slice(-visiblePeriodLimit)
+            .filter((periodValue) => period !== 'Q' || isCanonicalQuarterPeriod(periodValue));
+    }, [period, ratios, statementReferenceQuery.data?.data, visiblePeriodLimit]);
+
     const hasData = ratios.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
@@ -219,6 +232,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
             }),
         );
     }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, ratios.length]);
+
     const categoryMetrics = {
         valuation: ['pe', 'pb', 'ps', 'ev_sales', 'ev_ebitda', 'peg_ratio'],
         liquidity: ['current_ratio', 'quick_ratio', 'cash_ratio'],
@@ -282,27 +296,16 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         </div>
     ) : undefined;
 
-    // Columns come from the aligned ratios alone. The statement series is a window
-    // source, not a column source, so it never adds a year the ratios table cannot fill.
-    const displayPeriods = useMemo(() => {
-        const periodSet = new Set<string>();
-        alignedRatios.forEach((entry) => {
-            if (entry.period && (period !== 'Q' || isCanonicalQuarterPeriod(entry.period))) {
-                periodSet.add(entry.period);
-            }
-        });
-        return Array.from(periodSet).sort((left, right) => periodSortKey(left) - periodSortKey(right));
-    }, [period, alignedRatios]);
-
-
+    // `displayPeriods` is already ordered and windowed, so the tail slice only guards a
+    // limit smaller than the window the reference query was asked for.
     const visiblePeriods = useMemo(
         () => displayPeriods.slice(-visiblePeriodLimit),
         [displayPeriods, visiblePeriodLimit]
     );
 
     const ratioLookup = useMemo(
-        () => new Map(alignedRatios.map((entry) => [entry.period, entry])),
-        [alignedRatios]
+        () => new Map(ratios.map((entry) => [entry.period, entry])),
+        [ratios]
     );
 
     const tableColumns = useMemo(
@@ -322,6 +325,8 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
     const tableRows = useMemo<DenseTableRow[]>(() => {
         const rows: DenseTableRow[] = [];
 
+        // A "2026 YTD" column has no ratio row of its own, so its cells stay empty rather
+        // than borrowing the closed year's values and inventing a fiscal year.
         const hasMetricData = (metricKey: string) =>
             visiblePeriods.some((periodValue) => {
                 const entry = ratioLookup.get(periodValue);
@@ -376,6 +381,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
 
         const addSwingWarnings = (metricKey: 'ps' | 'ev_sales', label: string) => {
             const values = visiblePeriods
+                .filter((periodValue) => ratioLookup.has(periodValue))
                 .map((periodValue) => ({ period: periodValue, value: readRatioMetric(ratioLookup.get(periodValue) as Record<string, unknown> | undefined, metricKey) }))
                 .filter((item): item is { period: string; value: number } => typeof item.value === 'number' && Number.isFinite(item.value) && item.value > 0);
             for (let index = 1; index < values.length; index += 1) {

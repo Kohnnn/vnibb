@@ -38,6 +38,8 @@ import { useResizeNudge } from '@/hooks/useResizeNudge';
 import { CURRENT_RELEASE } from '@/lib/version';
 import { analyzeDashboardTab } from '@/lib/dashboardIntelligence';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
+import { MATRIX_FOLLOWUP_EVENT, readMatrixFollowupDraft, type MatrixFollowupDraft } from '@/lib/matrixHandoff';
+import { useAuth } from '@/contexts/AuthContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import {
@@ -142,6 +144,7 @@ function DashboardContent() {
     const { globalSymbol: stockGlobalSymbol, setGlobalSymbol: setStockGlobalSymbol } = useSymbolLink();
     const { globalMarketsSymbol, setGlobalMarketsSymbol } = useGlobalMarketsSymbol();
     const { config: unitConfig, setUnit } = useUnit();
+    const { user } = useAuth();
 
     const [isEditing, setIsEditing] = useState(false);
     const [isWidgetLibraryOpen, setIsWidgetLibraryOpen] = useState(false);
@@ -153,6 +156,9 @@ function DashboardContent() {
     const [copilotPromptLibraryRequestId, setCopilotPromptLibraryRequestId] = useState(0);
     const [copilotStarterPrompt, setCopilotStarterPrompt] = useState<'analyze' | 'technical' | undefined>(undefined);
     const [copilotStarterPromptRequestId, setCopilotStarterPromptRequestId] = useState(0);
+    const [matrixDraft, setMatrixDraft] = useState<MatrixFollowupDraft | null>(null);
+    const consumeMatrixDraft = useCallback(() => setMatrixDraft(null), []);
+    const matrixDraftOwnerRef = useRef(user?.id);
     const [sidebarWidth, setSidebarWidth] = useState(LEFT_SIDEBAR_DEFAULT_WIDTH);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [rightSidebarWidth, setRightSidebarWidth] = useState(RIGHT_SIDEBAR_DEFAULT_WIDTH);
@@ -374,6 +380,30 @@ function DashboardContent() {
             widget_type_key: typeof contextData?.widgetTypeKey === 'string' ? contextData.widgetTypeKey : undefined,
         });
     }, [activeDashboard?.id, activeTab?.id, activeTab?.name, stockGlobalSymbol]);
+
+    useEffect(() => {
+        const stageMatrixDraft = (event: Event) => {
+            const draft = readMatrixFollowupDraft((event as CustomEvent<unknown>).detail);
+            if (!draft) return;
+            setMatrixDraft(draft);
+            setShowAICopilot(true);
+        };
+        const revokeDraft = (event: Event) => {
+            const snapshotId = (event as CustomEvent<{ snapshot_id?: string }>).detail?.snapshot_id;
+            setMatrixDraft((draft) => draft?.selection.snapshot_id === snapshotId ? null : draft);
+        };
+        window.addEventListener(MATRIX_FOLLOWUP_EVENT, stageMatrixDraft);
+        window.addEventListener('vnibb:matrix-revoked', revokeDraft);
+        return () => {
+            window.removeEventListener(MATRIX_FOLLOWUP_EVENT, stageMatrixDraft);
+            window.removeEventListener('vnibb:matrix-revoked', revokeDraft);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (matrixDraftOwnerRef.current !== user?.id) setMatrixDraft(null);
+        matrixDraftOwnerRef.current = user?.id;
+    }, [user?.id]);
 
     const handleOpenGlobalPrompts = useCallback(() => {
         openCopilot('global_prompts');
@@ -1132,8 +1162,8 @@ function DashboardContent() {
             // Carry the widget type so DashboardGrid's responsive derivation can
             // resolve each widget's size contract (min/preferred W/H, orientation).
             type: w.type,
-            minW: w.layout.minW ?? 4,
-            minH: w.layout.minH ?? 3,
+            minW: w.layout.minW ?? getWidgetDefaultLayout(w.type).w,
+            minH: w.layout.minH ?? getWidgetDefaultLayout(w.type).h,
         }));
     }, [activeTab?.widgets]);
 
@@ -1556,6 +1586,8 @@ function DashboardContent() {
                                         promptLibraryRequestId={copilotPromptLibraryRequestId}
                                         starterPrompt={copilotStarterPrompt}
                                         starterPromptRequestId={copilotStarterPromptRequestId}
+                                        matrixDraft={matrixDraft}
+                                        onMatrixDraftConsumed={consumeMatrixDraft}
                                     />
                                 </RightSidebar>
                             </div>
@@ -1580,6 +1612,8 @@ function DashboardContent() {
                                 promptLibraryRequestId={copilotPromptLibraryRequestId}
                                 starterPrompt={copilotStarterPrompt}
                                 starterPromptRequestId={copilotStarterPromptRequestId}
+                                matrixDraft={matrixDraft}
+                                onMatrixDraftConsumed={consumeMatrixDraft}
                             />
                         </RightSidebar>
                     ) : null}

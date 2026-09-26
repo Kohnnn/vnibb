@@ -3,40 +3,30 @@
 import { Layers } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { usePredictionMarketConsensus } from './usePredictionMarketConsensus';
+import { formatProb } from './PredictionMarketSource';
 
-/**
- * Consensus Odds widget.
- *
- * Multi-source readout: pulls Polymarket + Kalshi active markets through
- * the shared ``usePredictionMarketConsensus`` hook (Phase 8) and renders
- * side-by-side comparisons. Used to spot agreement / disagreement between
- * regulated (Kalshi) and offshore (Polymarket) platforms.
- *
- * The widget description advertises "AI sentiment" — that hook is
- * intentionally deferred (see plan Phase 8). For now the comparison is
- * pure source-vs-source.
- */
 
 export function ConsensusOddsWidget() {
     const state = usePredictionMarketConsensus({ limit: 30 });
 
     if (state.kind === 'loading') {
-        return <WidgetLoading message="Building consensus signal..." />;
+        return <WidgetLoading message="Loading related market prices..." />;
     }
     if (state.kind === 'error') {
-        return <WidgetError title="Consensus unavailable" error={state.error} onRetry={state.refresh} />;
+        return <WidgetError title="Related markets unavailable" error={state.error} onRetry={state.refresh} />;
     }
     if (state.rows.length === 0) {
         return (
             <WidgetEmpty
-                message="No consensus data"
-                detail="Neither Polymarket nor Kalshi returned any active markets."
+                message="No data"
+                detail="No fresh, genuine markets are available from Polymarket or Kalshi."
                 icon={<Layers size={18} />}
             />
         );
     }
     return (
         <div className="flex h-full flex-col gap-2 overflow-auto p-1">
+            <p className="text-[11px] text-[var(--text-muted)]">Individual reported prices from a bounded catalogue. Different questions are not equivalent contracts or a consensus.</p>
             {state.rows.slice(0, 12).map((row) => (
                 <a
                     key={`${row.source}:${row.sourceId}`}
@@ -52,7 +42,7 @@ export function ConsensusOddsWidget() {
                         {row.question}
                     </h3>
                     <div className="mt-1 text-[var(--text-secondary)]">
-                        Yes probability {Math.round(row.yesPrice * 100)}%
+                        {row.outcomeLabel} {row.yesPrice === null ? 'No data' : formatProb(row.yesPrice)}
                     </div>
                 </a>
             ))}

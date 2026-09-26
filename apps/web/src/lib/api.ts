@@ -3,6 +3,7 @@
 import { env } from './env';
 import { isSupabaseConfigured, supabase } from './supabase';
 import type { AISettings } from './aiSettings';
+import type { MatrixSelection } from '@/types/matrix';
 
 const LOCALHOST_OR_LOOPBACK_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i
 const SSLIP_HOST_RE = /^[0-9]+(?:[.-][0-9]+){3}\.sslip\.io$/i
@@ -115,7 +116,7 @@ export class RateLimitError extends APIError {
  * - Provides structured error responses
  * - Supports abort signals from calling code
  */
-async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
+export async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
     const { params, timeout = 30000, signal, auth = 'none', ...fetchOptions } = options;
 
     let url = `${API_BASE_URL}${endpoint}`;
@@ -2744,6 +2745,7 @@ export interface CopilotHistoryMessage {
 export interface CopilotStreamRequest {
     message: string;
     context?: WidgetContext | null;
+    matrix_selection?: MatrixSelection;
     history: CopilotHistoryMessage[];
     settings?: AISettings;
 }
@@ -3409,6 +3411,9 @@ export async function openCopilotChatStream(
     });
 
     const token = await getAuthorizationToken();
+    if (request.matrix_selection && !token) {
+        throw new APIError('Sign in to send a Matrix selection.', 401, 'Unauthorized');
+    }
     if (token) {
         headers.set('Authorization', `Bearer ${token}`);
     }

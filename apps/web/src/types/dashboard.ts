@@ -22,6 +22,7 @@ export interface WidgetLayout {
 // ============================================================================
 
 export type WidgetType =
+    | 'research_matrix'
     | 'ticker_info'
     | 'ticker_profile'
     | 'valuation_multiples'

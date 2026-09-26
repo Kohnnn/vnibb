@@ -2,7 +2,8 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { withInjectedWidgetProps } from './widgetChildProps';
 import {
     Download,
     FileJson,
@@ -687,6 +688,7 @@ export function WidgetWrapper({
                         ? getColorForGroup(widgetGroup)
                         : undefined
                 }}
+                data-widget-id={id}
             >
                 <WidgetToolbar
                     title={title}
@@ -896,14 +898,12 @@ export function WidgetWrapper({
                                 widgetName={title}
                                 onError={(error) => logClientError(`Widget ${id} (${title}) crashed:`, error)}
                             >
-                                {React.isValidElement(children)
-                                    ? React.cloneElement(children as React.ReactElement<any>, {
-                                        id: id,
-                                        symbol: displaySymbol,
-                                        widgetGroup,
-                                        onDataChange: setInternalData,
-                                    })
-                                    : children}
+                                {withInjectedWidgetProps(children, {
+                                    id: id,
+                                    symbol: displaySymbol,
+                                    widgetGroup,
+                                    onDataChange: setInternalData,
+                                })}
                             </WidgetErrorBoundary>
                         </WidgetHeaderVisibilityProvider>
                     )}
@@ -921,13 +921,11 @@ export function WidgetWrapper({
                     widgetName={title}
                     onError={(error) => logClientError(`Maximized Widget ${id} (${title}) crashed:`, error)}
                 >
-                    {React.isValidElement(children)
-                        ? React.cloneElement(children as React.ReactElement<any>, {
-                            symbol: displaySymbol,
-                            widgetGroup,
-                            onDataChange: setInternalData
-                        })
-                        : children}
+                    {withInjectedWidgetProps(children, {
+                        symbol: displaySymbol,
+                        widgetGroup,
+                        onDataChange: setInternalData,
+                    })}
                 </WidgetErrorBoundary>
             </MaximizedWidgetPortal>
         </>

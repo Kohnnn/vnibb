@@ -5,14 +5,8 @@ import { Layers } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { API_BASE_URL } from '@/lib/api';
 import { ProbabilityBar, colorblindClass } from './prediction-market-ui';
+import { formatProb } from './PredictionMarketSource';
 
-/**
- * Cross-Source Calibration.
- *
- * Phase 10 (rebuilt): one row per topic with three source columns. Each
- * source column has a probability bar and a label; above the row a
- * colourblind-safe pill renders "Sources agree" or "Sources diverge".
- */
 
 type Topic = 'cpi' | 'fed' | 'recession';
 
@@ -24,7 +18,6 @@ type CrossSource = {
 
 type CrossTopic = {
     readonly topic: Topic;
-    readonly n_sources: number;
     readonly sources_agree: boolean;
     readonly sources: readonly CrossSource[];
 };
@@ -52,7 +45,9 @@ function parseTopics(value: unknown): { topics: CrossTopic[]; lastUpdated: strin
             sources.push({
                 source: sourceRow.source,
                 consensus_yes_price:
-                    typeof sourceRow.consensus_yes_price === 'number'
+                    typeof sourceRow.consensus_yes_price === 'number' && Number.isFinite(sourceRow.consensus_yes_price)
+                        && sourceRow.consensus_yes_price >= 0 && sourceRow.consensus_yes_price <= 1
+                        && typeof sourceRow.n_markets === 'number' && sourceRow.n_markets > 0
                         ? sourceRow.consensus_yes_price
                         : null,
                 n_markets: typeof sourceRow.n_markets === 'number' ? sourceRow.n_markets : 0,
@@ -60,7 +55,6 @@ function parseTopics(value: unknown): { topics: CrossTopic[]; lastUpdated: strin
         }
         topics.push({
             topic: row.topic,
-            n_sources: typeof row.n_sources === 'number' ? row.n_sources : 0,
             sources_agree: row.sources_agree === true,
             sources,
         });
@@ -122,7 +116,11 @@ export function CrossSourceCalibrationWidget() {
     }
     return (
         <div className="flex h-full flex-col gap-3 p-1">
-            {state.topics.map((topic) => (
+            <p className="text-[11px] text-[var(--text-muted)]">Topic averages from a bounded catalogue; matching topics do not establish equivalent contracts.</p>
+            {state.topics.map((topic) => {
+                const pricedSources = topic.sources.filter((row) => row.consensus_yes_price !== null);
+                const comparable = pricedSources.length >= 2;
+                return (
                 <div
                     key={topic.topic}
                     className="flex flex-col gap-2 rounded-lg border border-default bg-[var(--bg-tertiary)] p-3"
@@ -131,12 +129,12 @@ export function CrossSourceCalibrationWidget() {
                         <span className="text-blue-300">{topicLabel(topic.topic)}</span>
                         <span
                             className={`rounded-full border px-2 py-0.5 ${
-                                topic.sources_agree
+                                !comparable ? 'border-default text-[var(--text-muted)]' : topic.sources_agree
                                     ? `border-emerald-500/40 ${colorblindClass('positive')}`
                                     : `border-amber-500/40 ${colorblindClass('warning')}`
                             }`}
                         >
-                            {topic.sources_agree ? 'Sources agree' : 'Sources diverge'}
+                            {!comparable ? (pricedSources.length === 0 ? 'No data' : 'Insufficient sources') : topic.sources_agree ? 'Source averages align' : 'Source averages differ'}
                         </span>
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -149,21 +147,21 @@ export function CrossSourceCalibrationWidget() {
                                     <span>{row.source}</span>
                                     <span>{row.n_markets} mkts</span>
                                 </div>
-                                <ProbabilityBar
-                                    value={row.consensus_yes_price ?? 0}
-                                    showLabels
-                                    height={6}
-                                />
+                                {row.consensus_yes_price === null ? <span className="text-xs text-[var(--text-muted)]">No data</span> : <>
+                                    <ProbabilityBar value={row.consensus_yes_price} height={6} />
+                                    <span className="text-xs">Reported average {formatProb(row.consensus_yes_price)}</span>
+                                </>}
                             </div>
                         ))}
-                        {topic.n_sources < 2 && (
+                        {!comparable && (
                             <div className="col-span-full text-[10px] text-[var(--text-muted)]">
-                                Only {topic.n_sources} source tagged this topic.
+                                At least two sources with priced markets are needed for comparison.
                             </div>
                         )}
                     </div>
                 </div>
-            ))}
+                );
+            })}
         </div>
     );
 }
