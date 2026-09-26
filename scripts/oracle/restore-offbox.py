@@ -41,7 +41,15 @@ def load_set(directory, requested_stamp=None):
     require(isinstance(stamp, str) and STAMP.fullmatch(stamp), "invalid backup stamp")
     require(requested_stamp is None or requested_stamp == stamp, "requested stamp differs from manifest")
     if isinstance(manifest["artifacts"], dict):
-        artifacts = [{"name": name, **details} for name, details in manifest["artifacts"].items()]
+        # Older OCI producers included manifest.json while writing that very file.
+        # Its recorded checksum describes an intermediate version, not the final
+        # manifest. Ignore only this self-entry; both data artifacts below must
+        # still match their recorded sizes and SHA-256 digests.
+        artifacts = [
+            {"name": name, **details}
+            for name, details in manifest["artifacts"].items()
+            if name != "manifest.json"
+        ]
         require(manifest.get("mongo", {}).get("included") is True, "manifest does not confirm Mongo inclusion")
         pg_tables = None  # TOC TABLE DATA count is not a public-table count.
         mongo_collections = None
@@ -85,12 +93,40 @@ def run(command, *, capture=False, timeout=None, environment=None):
 def remove_containers(docker, names):
     failures = []
     for name in reversed(names):
-        removal = subprocess.run(docker + ["rm", "-f", name], capture_output=True, text=True)
+        removal = subprocess.run(docker + ["rm", "-f", "-v", name], capture_output=True, text=True)
         remaining = subprocess.run(docker + ["ps", "-a", "--filter", f"name=^/{name}$",
                                            "--format", "{{.Names}}"], capture_output=True, text=True)
         if remaining.returncode or remaining.stdout.strip() or (removal.returncode and remaining.stderr):
             failures.append(name)
     require(not failures, "could not confirm removal of recovery containers: " + ", ".join(failures))
+
+
+def report_failed_containers(docker, names, password):
+    for name in names:
+        try:
+            state = subprocess.run(docker + ["inspect", "--format",
+                                             "status={{.State.Status}} exit={{.State.ExitCode}} "
+                                             "oom={{.State.OOMKilled}} error={{.State.Error}}", name],
+                                   capture_output=True, text=True)
+            if state.returncode:
+                continue  # A container may not have been created yet.
+            state_summary = state.stdout.strip().replace(password, "<REDACTED>")
+            if re.search(r"password|secret|token|credential|authorization|api_key|private_key", state_summary,
+                         re.IGNORECASE):
+                state_summary = "<REDACTED: credential-bearing container state>"
+            print(f"{name}: {state_summary}", file=sys.stderr)
+            logs = subprocess.run(docker + ["logs", "--tail", "60", name],
+                                  capture_output=True, text=True)
+            if logs.returncode:
+                print(f"{name}: unable to read container logs", file=sys.stderr)
+                continue
+            for line in (logs.stdout + logs.stderr).splitlines():
+                if re.search(r"password|secret|token|credential|authorization|api_key|private_key", line,
+                             re.IGNORECASE):
+                    line = "<REDACTED: credential-bearing log line>"
+                print(f"{name}: {line.replace(password, '<REDACTED>')}", file=sys.stderr)
+        except OSError:
+            print(f"{name}: unable to inspect container failure", file=sys.stderr)
 
 
 def main():
@@ -131,11 +167,14 @@ def main():
         # Pass the value through Docker's child environment, never through argv or logged argv.
         pg_environment = os.environ.copy()
         pg_environment["POSTGRES_PASSWORD"] = postgres_password
-        execute("run", "-d", "--rm", "--network", "none", "--name", pg,
+        execute("run", "-d", "--network", "none", "--name", pg,
                 "--mount", mounted, "-e", "POSTGRES_PASSWORD", PG_IMAGE,
                 capture=True, environment=pg_environment)
         for _ in range(120):
-            if subprocess.run(docker + ["exec", pg, "pg_isready", "-U", "supabase_admin", "-d", "postgres"],
+            # PostgreSQL's temporary bootstrap server accepts Unix sockets only.
+            # TCP readiness selects the final postmaster, not bootstrap's short-lived one.
+            if subprocess.run(docker + ["exec", pg, "pg_isready", "-h", "127.0.0.1",
+                                        "-U", "supabase_admin", "-d", "postgres"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
                 break
             time.sleep(1)
@@ -155,7 +194,7 @@ def main():
         if expected_tables is not None:
             require(tables == expected_tables, f"Postgres table count mismatch: {tables} != {expected_tables}")
         print(f"PostgreSQL OK: {tables} public tables, {stocks} stocks, {prices} stock_prices", flush=True)
-        execute("run", "-d", "--rm", "--network", "none", "--name", mongo,
+        execute("run", "-d", "--network", "none", "--name", mongo,
                 "--mount", mounted, MONGO_IMAGE, capture=True)
         for _ in range(120):
             if subprocess.run(docker + ["exec", mongo, "mongosh", "--quiet", "--eval",
@@ -187,6 +226,9 @@ def main():
               f"{mongo_result['populated']} populated, largest={mongo_result['largest']['name']} "
               f"({mongo_result['largest']['count']} documents), sampled document present", flush=True)
         restore_seconds = time.monotonic() - started
+    except BaseException:
+        report_failed_containers(docker, created, postgres_password)
+        raise
     finally:
         remove_containers(docker, created)
     print(f"RECOVERY OK: set={stamp} RTO_seconds={restore_seconds:.1f} "
