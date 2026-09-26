@@ -24,6 +24,7 @@ import type {
     TabCreate,
     WidgetCreate,
 } from '@/types/dashboard';
+import { createWorkspaceBackup, importWorkspaceBackup, type WorkspaceBackup } from '@/lib/workspaceBackup';
 
 // Re-export everything from submodules for backward compatibility
 export * from './types';
@@ -500,9 +501,12 @@ function readDashboardStorageSnapshot(): { dashboards: Dashboard[]; folders: Das
 
 interface DashboardContextValue {
     state: DashboardState;
+    localStateReady: boolean;
     // Dashboard actions
     setActiveDashboard: (id: string) => void;
     createDashboard: (data: DashboardCreate) => Dashboard;
+    exportWorkspace: (groups?: Dashboard['widgetGroups']) => WorkspaceBackup;
+    restoreWorkspace: (backup: WorkspaceBackup) => void;
     updateDashboard: (id: string, updates: Partial<Dashboard>) => void;
     updateDashboardRuntime: (id: string, updates: Partial<Dashboard>) => void;
     deleteDashboard: (id: string) => void;
@@ -987,10 +991,15 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         },
     });
 
-    // Backend load hook
+    // Backend responses only replace matching cloud IDs, never local-only workspaces.
     useLoadFromBackend((loadedDashboards) => {
         if (loadedDashboards.length > 0) {
-            dispatch({ type: 'LOAD_STATE', payload: { dashboards: loadedDashboards, folders: state.folders, activeDashboardId: state.activeDashboardId, activeTabId: state.activeTabId } });
+            const current = stateRef.current;
+            const cloudIds = new Set(loadedDashboards.map((dashboard) => dashboard.id));
+            dispatch({ type: 'LOAD_STATE', payload: {
+                ...current,
+                dashboards: [...current.dashboards.filter((dashboard) => !cloudIds.has(dashboard.id)), ...loadedDashboards],
+            } });
         }
     }, backendSyncReady);
 
@@ -1217,9 +1226,26 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const dismissMigrationNotice = useCallback(() => {
         setMigrationNotice(null);
     }, []);
+    const exportWorkspace = useCallback((groups?: Dashboard['widgetGroups']) => createWorkspaceBackup(stateRef.current, groups), []);
+
+    const restoreWorkspace = useCallback((backup: WorkspaceBackup) => {
+        if (!localStateReady || typeof window === 'undefined') throw new Error('Workspace storage is not ready yet.');
+        const next = importWorkspaceBackup(stateRef.current, backup);
+        const serialized = serializeDashboardStorage(next);
+        if (!serialized || !persistDashboardStorage(next)) {
+            throw new Error('Could not save imported workspaces in this browser. Nothing was imported.');
+        }
+        stateRef.current = next;
+        persistedStateRef.current = JSON.stringify(serialized);
+        skipNextPersistenceRef.current = true;
+        dispatch({ type: 'LOAD_STATE', payload: next });
+    }, [localStateReady]);
 
     const contextValue: DashboardContextValue = {
         state,
+        localStateReady,
+        exportWorkspace,
+        restoreWorkspace,
         setActiveDashboard,
         createDashboard,
         updateDashboard,

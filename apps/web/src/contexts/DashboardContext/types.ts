@@ -14,6 +14,7 @@ import type {
     WidgetConfig,
     WidgetLayout,
 } from '@/types/dashboard';
+import type { WorkspaceBackup } from '@/lib/workspaceBackup';
 
 // Re-export from dashboard types
 export {
@@ -102,8 +103,11 @@ export interface DashboardMigrationNotice {
 
 export interface DashboardContextValue {
     state: DashboardState;
+    localStateReady: boolean;
     setActiveDashboard: (id: string) => void;
     createDashboard: (data: DashboardCreate) => Dashboard;
+    exportWorkspace: (groups?: Dashboard['widgetGroups']) => WorkspaceBackup;
+    restoreWorkspace: (backup: WorkspaceBackup) => void;
     updateDashboard: (id: string, updates: Partial<Dashboard>) => void;
     updateDashboardRuntime: (id: string, updates: Partial<Dashboard>) => void;
     deleteDashboard: (id: string) => void;

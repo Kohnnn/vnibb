@@ -106,6 +106,22 @@ describe('useDashboardSync', () => {
     expect(mockCreateDashboard).not.toHaveBeenCalled();
   });
 
+  it('never creates, updates or deletes imported local-only dashboards', async () => {
+    const onSuccess = jest.fn();
+    const imported = dashboard('import-fresh-id');
+    const view = render(<SyncProbe dashboardState={state([imported])} onSuccess={onSuccess} />);
+    await waitFor(() => expect(mockProbeBackendReadiness).toHaveBeenCalled());
+    await act(async () => { jest.advanceTimersByTime(2000); });
+    view.rerender(<SyncProbe dashboardState={state([{ ...imported, name: 'Edited locally' }])} onSuccess={onSuccess} />);
+    await act(async () => { jest.advanceTimersByTime(2000); });
+    view.rerender(<SyncProbe dashboardState={state([])} onSuccess={onSuccess} />);
+    await act(async () => { jest.advanceTimersByTime(2000); });
+    expect(mockCreateDashboard).not.toHaveBeenCalled();
+    expect(mockUpdateDashboard).not.toHaveBeenCalled();
+    expect(api.deleteDashboard).not.toHaveBeenCalled();
+    expect(onSuccess).toHaveBeenLastCalledWith('local');
+  });
+
   it('reconciles a created dashboard with edits made while creation was pending', async () => {
     const onSuccess = jest.fn();
     const onDashboardIdReconciled = jest.fn();
