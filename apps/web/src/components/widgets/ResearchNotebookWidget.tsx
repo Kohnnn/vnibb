@@ -31,6 +31,7 @@ const KIND_LABEL: Record<NotebookItem['kind'], string> = {
   widget_snapshot: 'Widget',
   agent_answer: 'VniAgent',
   note: 'Note',
+  artifact: 'Artifact',
 };
 
 function ResearchNotebookWidgetComponent({ id, widgetId, onRemove, onDataChange, widgetGroup }: ResearchNotebookWidgetProps) {
