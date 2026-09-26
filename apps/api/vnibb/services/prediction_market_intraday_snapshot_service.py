@@ -1,51 +1,23 @@
-"""Intraday micro-snapshot service for prediction markets.
-
-Phase 8: writes a 15-minute-cadence micro-snapshot of every active
-prediction market into ``prediction_market_intraday_snapshots``. Retention
-is 7 days (much shorter than the nightly snapshot's 30 days) and enforced
-in-line by this service.
-
-Differences vs. ``prediction_market_snapshot_service``:
-
-* Cadence is 15 min, not daily.
-* 7-day retention (was 30 days for nightly).
-* Returns a small dataclass instead of a bare count, so the scheduler can
-  log throughput + first-failure trace.
-* Wraps the DB write in a single ``retry_once`` so a dropped connection
-  doesn't lose the whole batch (a single batch of 10k markets can be
-  ~3-5 s; we want one re-try, not the whole job failing).
-* Reads and writes in key-ordered batches. ``prediction_markets`` holds
-  ~13 M rows (~9 GB); loading every active row into Python before writing
-  reached 1.9 GB of anonymous heap and OOM-killed the scheduler against
-  its 2 GiB cgroup limit every 15 minutes. Batching bounds peak memory to
-  one batch regardless of table growth.
-"""
+"""Bounded intraday prediction-market measurements with independent retention."""
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
-from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vnibb.models.prediction_market import PredictionMarket
-from vnibb.models.prediction_market_intraday_snapshot import (
-    PredictionMarketIntradaySnapshot,
-)
-
+from vnibb.models.prediction_market_intraday_snapshot import PredictionMarketIntradaySnapshot
+from vnibb.services.prediction_market_snapshot_service import write_snapshot_bucket
 
 logger = logging.getLogger(__name__)
 
-
 INTRADAY_SNAPSHOT_RETENTION_DAYS = 7
-
-# Markets are paged this many at a time. Sized so one batch's ORM instances
-# plus its insert stay well inside the scheduler's 2 GiB cgroup limit even
-# when every column is populated.
-INTRADAY_SNAPSHOT_BATCH_SIZE = 2000
-
+INTRADAY_SNAPSHOT_PRUNE_BATCH_SIZE = 1000
+INTRADAY_SNAPSHOT_PRUNE_MAX_BATCH_SIZE = 2000
+INTRADAY_SNAPSHOT_PRUNE_MAX_SECONDS = 240.0
 
 @dataclass(slots=True, frozen=True)
 class IntradaySnapshotResult:
@@ -65,149 +37,135 @@ class IntradaySnapshotResult:
         }
 
 
-async def _write_once(
-    session: AsyncSession, rows: list[PredictionMarketIntradaySnapshot]
-) -> None:
-    session.add_all(rows)
-    await session.commit()
+@dataclass(slots=True, frozen=True)
+class IntradaySnapshotPruneResult:
+    """Rows removed, batches committed and cutoff for one bounded sweep."""
 
+    rows_deleted: int
+    batches_deleted: int
+    cutoff: str
+    truncated: bool
 
-async def _retry_once(
-    coro_factory, *, label: str
-):
-    """Run ``coro_factory()``; on OperationalError, log and try once more."""
-    try:
-        return await coro_factory(), False
-    except (OperationalError, DBAPIError) as exc:
-        logger.warning(
-            "%s hit transient DB error %s; retrying once", label, exc.__class__.__name__
-        )
-        return await coro_factory(), True
-
-
-def _build_rows(now) -> list[PredictionMarketIntradaySnapshot]:
-    """Build an empty row scaffold from currently-active markets.
-
-    Kept as a closure-free function so it is easy to test.
-    """
-    return [
-        PredictionMarketIntradaySnapshot(
-            market_id=market.id,
-            source=market.source,
-            source_id=market.source_id,
-            category=market.category,
-            question=market.question,
-            url=market.url,
-            yes_price=0.0,
-            volume=market.volume if isinstance(market.volume, (int, float)) else None,
-            liquidity=market.liquidity if isinstance(market.liquidity, (int, float)) else None,
-            captured_at=now,
-            extra={"raw_outcome_prices": market.outcome_prices, "raw_outcomes": market.outcomes},
-        )
-        for market in []  # populated by the caller
-    ]
+    def as_log_dict(self) -> dict[str, int | bool | str]:
+        return {
+            "rows_deleted": self.rows_deleted,
+            "batches_deleted": self.batches_deleted,
+            "cutoff": self.cutoff,
+            "truncated": self.truncated,
+        }
 
 
 async def snapshot_active_prediction_markets_intraday(
     session: AsyncSession,
 ) -> IntradaySnapshotResult:
-    """Snapshot every active market into a fresh intraday row.
+    """Write one genuine bounded measurement per market and 15-minute bucket."""
+    now = datetime.now(UTC)
+    bucket = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+    written, seen = await write_snapshot_bucket(
+        session, PredictionMarketIntradaySnapshot, now, bucket
+    )
+    return IntradaySnapshotResult(
+        rows_written=written,
+        markets_seen=seen,
+        was_inserted=written > 0,
+        retried=False,
+    )
 
-    Markets are read and written in key-ordered batches rather than loaded
-    wholesale. The table holds ~13 M rows (~9 GB) and almost all of them are
-    active, so the previous ``scalars().all()`` reached 1.9 GB of anonymous
-    heap and the kernel OOM-killed the scheduler against its 2 GiB cgroup
-    limit on every 15-minute tick. Paging by primary key keeps peak memory
-    at one batch no matter how large the table grows, and makes the run
-    resumable: a batch that fails retries from its own cursor.
+def _prune_batch_size() -> int:
+    """Clamp the configured batch size into the enforced bound."""
+    configured = INTRADAY_SNAPSHOT_PRUNE_BATCH_SIZE
+    if not isinstance(configured, int) or configured < 1:
+        logger.warning(
+            "invalid intraday prune batch size %r; using %s",
+            configured,
+            INTRADAY_SNAPSHOT_PRUNE_MAX_BATCH_SIZE,
+        )
+        return INTRADAY_SNAPSHOT_PRUNE_MAX_BATCH_SIZE
+    return min(configured, INTRADAY_SNAPSHOT_PRUNE_MAX_BATCH_SIZE)
+
+
+async def prune_intraday_snapshots(
+    session: AsyncSession,
+    *,
+    now=None,
+    retention_days: int | None = None,
+    batch_size: int | None = None,
+    max_seconds: float | None = None,
+    monotonic=None,
+) -> IntradaySnapshotPruneResult:
+    """Remove snapshots strictly older than one fixed seven-day cutoff.
+
+    Each committed delete selects at most ``batch_size`` expired IDs using the
+    captured_at index. Later ticks reselect remaining rows after interruption.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import timedelta
+    from time import monotonic as _monotonic
 
-    now = datetime.now(timezone.utc)
+    clock = monotonic or _monotonic
+    now = now or datetime.now(UTC)
+    days = INTRADAY_SNAPSHOT_RETENTION_DAYS if retention_days is None else retention_days
+    limit = _prune_batch_size() if batch_size is None else max(1, batch_size)
+    limit = min(limit, INTRADAY_SNAPSHOT_PRUNE_MAX_BATCH_SIZE)
+    budget = INTRADAY_SNAPSHOT_PRUNE_MAX_SECONDS if max_seconds is None else max_seconds
+    cutoff = now - timedelta(days=days)
+    started = clock()
 
-    markets_seen = 0
-    rows_written = 0
-    retried = False
-    batches_written = 0
-    cursor: int | None = None
+    rows_deleted = 0
+    batches_deleted = 0
+    truncated = False
 
     while True:
-        stmt = (
-            select(PredictionMarket)
-            .where(PredictionMarket.active.is_(True))
-            .order_by(PredictionMarket.id)
-            .limit(INTRADAY_SNAPSHOT_BATCH_SIZE)
+        expired = (
+            select(PredictionMarketIntradaySnapshot.id)
+            .where(PredictionMarketIntradaySnapshot.captured_at < cutoff)
+            .order_by(PredictionMarketIntradaySnapshot.captured_at)
+            .limit(limit)
+        ).scalar_subquery()
+        statement = (
+            delete(PredictionMarketIntradaySnapshot)
+            .where(PredictionMarketIntradaySnapshot.id.in_(expired))
+            .returning(PredictionMarketIntradaySnapshot.id)
         )
-        if cursor is not None:
-            stmt = stmt.where(PredictionMarket.id > cursor)
+        try:
+            deleted = len((await session.execute(statement)).scalars().all())
+            await session.commit()
+        except BaseException:
+            await session.rollback()
+            raise
 
-        markets = list((await session.execute(stmt)).scalars().all())
-        if not markets:
+        rows_deleted += deleted
+        if deleted:
+            batches_deleted += 1
+
+        # A short batch means no expired rows are left, so the sweep stops
+        # here: steady state costs exactly one probe per tick.
+        if deleted < limit:
+            break
+        if clock() - started >= budget:
+            truncated = True
+            logger.warning(
+                "intraday snapshot prune stopped after %.1fs budget: "
+                "rows=%s batches=%s cutoff=%s",
+                budget,
+                rows_deleted,
+                batches_deleted,
+                cutoff.isoformat(),
+            )
             break
 
-        markets_seen += len(markets)
-        cursor = markets[-1].id
-
-        rows: list[PredictionMarketIntradaySnapshot] = []
-        for market in markets:
-            yes_price = 0.0
-            if isinstance(market.outcome_prices, list) and len(market.outcome_prices) > 0:
-                first = market.outcome_prices[0]
-                if isinstance(first, (int, float)):
-                    yes_price = float(first)
-            rows.append(
-                PredictionMarketIntradaySnapshot(
-                    market_id=market.id,
-                    source=market.source,
-                    source_id=market.source_id,
-                    category=market.category,
-                    question=market.question,
-                    url=market.url,
-                    yes_price=yes_price,
-                    volume=market.volume if isinstance(market.volume, (int, float)) else None,
-                    liquidity=market.liquidity if isinstance(market.liquidity, (int, float)) else None,
-                    captured_at=now,
-                    extra={
-                        "raw_outcome_prices": market.outcome_prices,
-                        "raw_outcomes": market.outcomes,
-                    },
-                )
-            )
-
-        async def _commit(batch: list[PredictionMarketIntradaySnapshot] = rows):
-            return await _write_once(session, batch)
-
-        _, batch_retried = await _retry_once(
-            _commit, label="intraday_snapshot_write"
-        )
-        retried = retried or batch_retried
-        rows_written += len(rows)
-        batches_written += 1
-
-        # Release the identity map so the session does not retain every
-        # batch's ORM instances for the life of the run -- the exact leak
-        # that made the single-shot version grow without bound.
-        session.expunge_all()
-
-    # Retention housekeeping: keep at most INTRADAY_SNAPSHOT_RETENTION_DAYS.
-    cutoff = now - timedelta(days=INTRADAY_SNAPSHOT_RETENTION_DAYS)
-    await session.execute(
-        delete(PredictionMarketIntradaySnapshot).where(
-            PredictionMarketIntradaySnapshot.captured_at < cutoff
-        )
-    )
-    await session.commit()
-
     logger.info(
-        "intraday snapshot complete: markets=%s rows=%s batches=%s",
-        markets_seen,
-        rows_written,
-        batches_written,
+        "intraday snapshot prune complete: rows=%s batches=%s cutoff=%s truncated=%s",
+        rows_deleted,
+        batches_deleted,
+        cutoff.isoformat(),
+        truncated,
     )
 
-    return IntradaySnapshotResult(
-        rows_written=rows_written,
-        markets_seen=markets_seen,
-        was_inserted=rows_written > 0,
-        retried=retried,
+    return IntradaySnapshotPruneResult(
+        rows_deleted=rows_deleted,
+        batches_deleted=batches_deleted,
+        cutoff=cutoff.isoformat(),
+        truncated=truncated,
     )
+
+
