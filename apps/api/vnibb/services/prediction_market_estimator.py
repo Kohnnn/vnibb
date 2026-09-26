@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -35,8 +35,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.cache import coerce_estimator_payload, estimation_cache
 from vnibb.models.prediction_market import PredictionMarket
+from vnibb.services.prediction_market_policy import active_market_candidates, observed_yes_price
 from vnibb.services.prediction_market_service import category_taxonomy  # noqa: F401
-
 
 # ---------------------------------------------------------------------------
 # Keyword matchers
@@ -140,7 +140,7 @@ def _weighted_percentile(samples: list[float], weights: list[float], percentile:
     """Linear-interpolated weighted percentile. `percentile` in [0, 1]."""
     if not samples:
         return 0.0
-    pairs = sorted(zip(samples, weights))
+    pairs = sorted(zip(samples, weights, strict=False))
     total_weight = sum(weight for _, weight in pairs)
     if total_weight <= 0:
         return float(pairs[len(pairs) // 2][0])
@@ -167,8 +167,9 @@ def _weighted_percentile(samples: list[float], weights: list[float], percentile:
 
 
 async def _load_active_markets(db: AsyncSession) -> list[PredictionMarket]:
-    result = await db.execute(select(PredictionMarket).where(PredictionMarket.active.is_(True)))
-    return list(result.scalars().all())
+    market = active_market_candidates(datetime.now(UTC))
+    result = await db.execute(select(market))
+    return [row for row in result.scalars().all() if observed_yes_price(row) is not None]
 
 
 async def estimate_cpi(db: AsyncSession) -> dict[str, Any]:
@@ -180,7 +181,7 @@ async def estimate_cpi(db: AsyncSession) -> dict[str, Any]:
     which produced a distribution centred on the contract wording, not on
     the implied CPI estimate.
     """
-    cache_key = "prediction-markets:estimate:cpi"
+    cache_key = "prediction-markets:estimate:eligible:cpi"
 
     async def loader() -> dict[str, Any]:
         markets = await _load_active_markets(db)
@@ -253,7 +254,7 @@ def _confidence_score(n_markets: int, total_liquidity: float) -> float:
 
 async def estimate_fed(db: AsyncSession) -> dict[str, Any]:
     """Estimate the next four FOMC-meeting probabilities (cut/hold/hike)."""
-    cache_key = "prediction-markets:estimate:fed"
+    cache_key = "prediction-markets:estimate:eligible:fed"
 
     async def loader() -> dict[str, Any]:
         markets = await _load_active_markets(db)
@@ -341,7 +342,7 @@ def _infer_terminal_rate(bucket: dict[str, float]) -> float:
 
 async def estimate_recession(db: AsyncSession) -> dict[str, Any]:
     """Estimate year-ahead US recession probability from contracts."""
-    cache_key = "prediction-markets:estimate:recession"
+    cache_key = "prediction-markets:estimate:eligible:recession"
     current_year = datetime.utcnow().year
 
     async def loader() -> dict[str, Any]:
@@ -399,7 +400,7 @@ async def estimate_recession(db: AsyncSession) -> dict[str, Any]:
 
 async def estimate_macro_composite(db: AsyncSession) -> dict[str, Any]:
     """Composite of CPI + Fed + Recession + SPX closes."""
-    cache_key = "prediction-markets:estimate:macro"
+    cache_key = "prediction-markets:estimate:eligible:macro"
 
     async def loader() -> dict[str, Any]:
         cpi = await estimate_cpi(db)

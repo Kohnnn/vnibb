@@ -2,18 +2,166 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Final, TypedDict
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, Json, TypeAdapter
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.models.prediction_market import PredictionMarket
+from vnibb.services.prediction_market_policy import (
+    MAX_CATALOGUE_RELATION_BYTES,
+    MAX_INGEST_MARKETS,
+    MAX_MARKET_EXTRA_BYTES,
+    MAX_MARKET_OUTCOMES,
+    MAX_MARKET_PAYLOAD_BYTES,
+    MAX_MARKET_TEXT_BYTES,
+    MAX_SOURCE_MARKETS,
+    is_kalshi_combo,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class PredictionMarketAdmissionError(RuntimeError):
+    """A provider batch cannot safely be admitted to the catalogue."""
+
+
+def bounded_market_limit(limit: int) -> int:
+    if limit < 1:
+        raise ValueError("prediction market fetch limit must be positive")
+    return min(limit, MAX_INGEST_MARKETS)
+
+
+def _valid_market_size(values: PredictionMarketValues) -> bool:
+    outcomes = values.get("outcomes", [])
+    prices = values.get("outcome_prices", [])
+    return (
+        all(len(str(values.get(field) or "").encode("utf-8")) <= MAX_MARKET_TEXT_BYTES
+            for field in ("source_id", "question", "slug", "description", "category", "url"))
+        and len(values.get("source_id", "")) <= 128
+        and len(values.get("slug") or "") <= 255
+        and len(values.get("category") or "") <= 100
+        and len(outcomes) <= MAX_MARKET_OUTCOMES
+        and len(prices) <= MAX_MARKET_OUTCOMES
+        and len(json.dumps(outcomes).encode("utf-8")) <= MAX_MARKET_TEXT_BYTES
+        and len(json.dumps(prices).encode("utf-8")) <= MAX_MARKET_TEXT_BYTES
+        and len(json.dumps(values.get("extra", {})).encode("utf-8")) <= MAX_MARKET_EXTRA_BYTES
+    )
+
+
+def _is_live_market(values: PredictionMarketValues, now: datetime) -> bool:
+    end_date = values.get("end_date")
+    if end_date is not None:
+        end_date = end_date.replace(tzinfo=UTC) if end_date.tzinfo is None else end_date.astimezone(UTC)
+    return values.get("active") is True and values.get("closed") is False and (end_date is None or end_date > now)
+
+async def _catalogue_storage_bytes(session: AsyncSession, dialect_name: str) -> int:
+    if dialect_name == "postgresql":
+        return (await session.execute(
+            text("SELECT pg_total_relation_size('prediction_markets'::regclass)")
+        )).scalar_one()
+    pages = (await session.execute(text("PRAGMA page_count"))).scalar_one()
+    page_size = (await session.execute(text("PRAGMA page_size"))).scalar_one()
+    return pages * page_size
+
+
+async def persist_prediction_markets(session: AsyncSession, values: list[PredictionMarketValues]) -> int:
+    """Refresh real IDs and admit bounded new IDs while storage has headroom.
+
+    PostgreSQL preflight serializes all ingests and reserves at least 256 KiB
+    of relation growth per mutation, including MVCC churn and index writes.
+    A full relation refuses every mutation; a full source still refreshes IDs.
+    """
+    if len(values) > MAX_INGEST_MARKETS:
+        raise PredictionMarketAdmissionError("prediction market ingest batch exceeds limit")
+    if not values:
+        return 0
+    values = list({(row["source"], row["source_id"]): row for row in values}.values())
+    dialect_name = session.get_bind().dialect.name
+    if dialect_name not in {"postgresql", "sqlite"}:
+        raise UnsupportedPredictionMarketDialectError(dialect_name)
+    for row in values:
+        if row["source"] == "kalshi" and is_kalshi_combo(row["source_id"], row.get("slug")):
+            raise PredictionMarketAdmissionError(f"Kalshi combo market {row['source_id']} is not admissible")
+        if not _valid_market_size(row):
+            raise PredictionMarketAdmissionError(f"{row.get('source')} market {row.get('source_id')} exceeds field size limit")
+    try:
+        if dialect_name == "postgresql":
+            await session.execute(text("SELECT pg_advisory_xact_lock(943416618)"))
+        else:
+            try:
+                await session.execute(text("BEGIN IMMEDIATE"))
+            except OperationalError as exc:
+                if "cannot start a transaction within a transaction" not in str(exc):
+                    raise
+                # Preserve the caller's transaction while taking its writer lock.
+                await session.execute(text("UPDATE prediction_markets SET id=id WHERE id=-1"))
+        relation_bytes = await _catalogue_storage_bytes(session, dialect_name)
+        reserve = len(values) * 256 * 1024
+        if relation_bytes + reserve > MAX_CATALOGUE_RELATION_BYTES:
+            raise PredictionMarketAdmissionError(
+                f"Catalogue storage ceiling: relation {relation_bytes} bytes plus {reserve} byte reserve "
+                f"exceeds {MAX_CATALOGUE_RELATION_BYTES}; no markets mutated"
+            )
+
+        by_source: dict[str, set[str]] = {}
+        for row in values:
+            by_source.setdefault(row["source"], set()).add(row["source_id"])
+        existing: set[tuple[str, str]] = set()
+        for source, ids in by_source.items():
+            matches = await session.execute(
+                select(PredictionMarket.source_id).where(
+                    PredictionMarket.source == source, PredictionMarket.source_id.in_(ids)
+                )
+            )
+            existing.update((source, source_id) for source_id in matches.scalars())
+
+        now = datetime.now(UTC)
+        new_rows = [
+            row for row in values
+            if (row["source"], row["source_id"]) not in existing
+            and _is_live_market(row, now)
+        ]
+
+        available: dict[str, int] = {}
+        for source in {row["source"] for row in new_rows}:
+            source_rows = await session.execute(
+                select(PredictionMarket.id).where(
+                    PredictionMarket.source == source,
+                    text("(source <> 'kalshi' OR source_id NOT LIKE 'KXMV%')")
+                ).limit(MAX_SOURCE_MARKETS + 1)
+            )
+            available[source] = max(0, MAX_SOURCE_MARKETS - len(source_rows.scalars().all()))
+
+        admitted: set[tuple[str, str]] = set()
+        for row in new_rows:
+            source, source_id = row["source"], row["source_id"]
+            if (source, source_id) not in admitted and available.get(source, 0) > 0:
+                admitted.add((source, source_id))
+                available[source] -= 1
+        accepted = [row for row in values if (row["source"], row["source_id"]) in existing | admitted]
+        rejected = len(values) - len(accepted)
+        for row in accepted:
+            await session.execute(_upsert_prediction_market(row, dialect_name))
+        await session.commit()
+        if rejected:
+            raise PredictionMarketAdmissionError(
+                f"Catalogue admission blocked for {rejected} new markets (storage/source cap); refreshed {len(accepted)} existing markets"
+            )
+        return len(accepted)
+    except BaseException:
+        await session.rollback()
+        raise
 
 GAMMA_BASE_URL: Final = "https://gamma-api.polymarket.com"
 
@@ -259,13 +407,15 @@ async def fetch_polymarket_gamma_markets(
     client: httpx.AsyncClient,
     limit: int,
 ) -> list[GammaMarketPayload]:
-    """Fetch active Gamma markets from Polymarket's public REST API."""
+    """Fetch a bounded active Gamma market page from Polymarket."""
     response = await client.get(
         "/markets",
-        params={"active": "true", "closed": "false", "limit": limit},
+        params={"active": "true", "closed": "false", "limit": bounded_market_limit(limit)},
     )
     response.raise_for_status()
-    return _GAMMA_MARKETS.validate_json(response.content)
+    if len(response.content) > MAX_MARKET_PAYLOAD_BYTES:
+        raise PredictionMarketAdmissionError("Polymarket response exceeds ingest byte limit")
+    return _GAMMA_MARKETS.validate_json(response.content)[:MAX_INGEST_MARKETS]
 
 
 async def ingest_polymarket_gamma_markets(
@@ -275,14 +425,10 @@ async def ingest_polymarket_gamma_markets(
 ) -> int:
     """Fetch, normalize, and upsert Polymarket Gamma markets into the DB."""
     payloads = await fetch_polymarket_gamma_markets(client, limit)
-    count = 0
-    dialect_name = session.get_bind().dialect.name
-    for payload in payloads:
-        market = normalize_gamma_market(payload)
-        await session.execute(_upsert_prediction_market(market.to_values(), dialect_name))
-        count += 1
-    await session.commit()
-    return count
+    return await persist_prediction_markets(
+        session,
+        [normalize_gamma_market(payload).to_values() for payload in payloads],
+    )
 
 
 async def ingest_polymarket_gamma_markets_with_default_client(

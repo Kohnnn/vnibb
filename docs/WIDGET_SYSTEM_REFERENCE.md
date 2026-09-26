@@ -58,24 +58,137 @@ Legacy aliases such as `company_profile`, `financials`, `institutional_ownership
 - `world_news_sources`: source registry audit surface with homepage, feed, geography, tier, region, category, and language metadata
 - `polymarket` (expanded): canonical taxonomy now covers `economic | sports | politics | general`, so Pop Culture / Crypto / politics markets render instead of being silently dropped
 - `kalshi`: Kalshi CFTC-regulated public-market ingestion rendered through the shared `PredictionMarketSource` factory
-- `election_odds`: side-by-side Polymarket vs Kalshi politics composite with a consensus readout
+- `election_odds`: individual election contracts and priced-market coverage, not pooled odds across unrelated races
 - `prediction_movers`: top markets by |signed Δ probability| between the latest and windowed baseline snapshots; sub-24h windows use intraday snapshots and longer windows use nightly snapshots (24h default)
 - `macro_calibration`: four-tile summary of the `/estimate/{cpi,fed,recession,macro}` outputs
-- `consensus_odds`: multi-source readout aggregating Polymarket and Kalshi rows on the same question
+- `consensus_odds`: individual source contracts with their actual first-outcome label; absent prices are unavailable, not zero
 - **`prediction_market_lifecycle`**: see the section below
+- `research_matrix`: see "Matrix" below
+
+## Matrix
+
+`research_matrix` (library name **Matrix**, category `analysis`, layout `24×16`,
+min `8×10`) renders frozen company-by-question research. A Matrix is an explicit
+**Create** action over an anchor company and an editable peer shortlist (2–10) at a
+common fiscal year, with a common-quarter override, evaluated against one of four
+curated sector playbooks: non-financial quality, banks, insurers, securities.
+
+Reading the grid is always read-only. Changing density, filter, sort, pinned
+company, column width or open inspector never executes research and never calls a
+provider; only **Create** starts a job. Browser persistence stores view preferences
+and snapshot references only — never protected values.
+
+Result identity binds entity, research dimension, scope/snapshot and result
+revision, not row and column coordinates, so re-orienting the grid cannot change
+what a result means. One canonical decimal `value` and one server-formatted
+`display` drive the cell, its preview, the evidence inspector, the copied selection
+and any exported artifact; a percentage is never re-parsed or re-rendered into a
+different sign, scale or currency. A shared reporting period does not imply a shared
+reporting basis, so mismatched basis renders as `non_comparable` rather than being
+silently compared.
+
+Each cell exposes a Result / Evidence / Basis / Review inspector. Evidence resolves
+to exact serving records with locators, and derived values name their formula and
+original observations instead of reading as independent corroboration. Sector
+metrics that a stored record cannot support report `unavailable`; they are never
+substituted with a generic proxy.
+
+Snapshots are owner-bound and immutable in the existing PostgreSQL `app_kv` store,
+one key per snapshot, with append-only revision-bound review events and separate
+revocation. Snapshot IDs are references, not grants: every open or handoff rechecks
+ownership and revocation, and cross-owner or revoked references disclose nothing.
+
+### Handoff
+
+Two scoped follow-up paths consume the same `{snapshot_id, result_ids}` selection
+through one server-side resolution service; neither accepts browser-supplied values
+as authority.
+
+- **VniAgent** — the widget stages a human-reviewed draft from selected result IDs.
+  Send submits the typed selection, the server reauthorizes it and rebuilds the
+  frozen context. The request text carries references only and never a displayed
+  value, and it performs no latest-data symbol inference. Reserved server context
+  keys are rejected if a client tries to supply them.
+- **External MCP** — read-only `get_matrix_selection` resolves the same selection
+  from the per-request authenticated user identity, never from a token in tool
+  arguments. The shared deployment bearer and stdio transports cannot authorize
+  Matrix. External export additionally requires an explicit source-rights policy
+  that default-denies unapproved providers; an allow-list entry ending in
+  `:unknown` is a deny sentinel, not a grant.
+
+Limits: no PDF/OCR ingestion, custom column authoring, scheduled refresh,
+autonomous per-cell execution, Office or Tick-and-Tie verification, or new provider
+router. Matrix is a companion to the existing MCP-first workflow, not a second chat
+application, truth store or research coordinator.
+
+### Deployment prerequisites
+
+Matrix needs two things present on the target environment before it is usable;
+neither is satisfied by a code deploy alone.
+
+1. **A verified end-user identity provider.** Matrix derives `owner` from a real
+   Supabase session (`useAuth` → `user.provider === 'supabase'` → `user.id`). The
+   API rejects anonymous callers on every owner-scoped route, so an environment
+   without configured Supabase credentials renders the widget but cannot create or
+   open an owned snapshot. The synthetic fixture remains available without signing in.
+2. **The `app_kv` store on the target database.** Snapshots are one `app_kv` row per
+   snapshot, plus ownership-index, review-event and revocation keys. A database
+   without that table cannot persist a snapshot at all.
+
+### Source-rights configuration
+
+`MATRIX_EXPORT_ALLOWED_SOURCES` is an operator-supplied, comma-separated allow-list
+of real provider sources, each written as `store.relation:supplier` — for example
+`stored.sql.income_statements:<real supplier tag>`. Matching is verbatim, so the
+supplier tag must be the one the stored records actually carry.
+
+An entry ending in `:unknown` is a **deny sentinel**, never a grant: it is dropped
+before grant matching, so configuring `family:unknown` denies unknown-supplier
+evidence rather than permitting it. Do not add real providers by appending
+`:unknown`. Absent or empty configuration denies all real-source export, which is
+the intended default; only the synthetic fixture bypasses the gate.
+
+No real provider is sanctioned for export by this verification record. The
+allow-list syntax and deny behavior are verified; provider-specific grants still
+require documented permission and the exact supplier tag from retained records.
+
+### Claims that stay unverified without a live corpus
+
+Everything below is out of scope for repository verification and must not be
+treated as proven by the fixture or by the test suite:
+
+- **Live-corpus coverage.** Playbook eligibility, peer selection and period
+  availability have been exercised against controlled seeded serving rows, not the
+  production corpus. Real coverage, including where a sector metric legitimately
+  reports `unavailable`, remains unproven.
+- **Real provider rights.** External export has been verified against a configured
+  allow-list in a local environment. Whether any given real provider's terms permit
+  display or export is a data-rights decision made outside this codebase.
+- **Live end-user integration.** Chromium exercised fixture inspector tabs,
+  keyboard navigation, Escape focus restoration and the 390px modal sheet. The
+  manual-copy fallback was also exercised with the Clipboard API absent, using
+  a saved controlled snapshot, server-formatted reference text, stub authentication
+  and intercepted API responses: its read-only textarea selected all 835 characters
+  on focus and contained references rather than displayed financial values.
+  Neither fixture nor replay proves an end-to-end live Supabase session, production
+  database access or permission to export a real provider's data.
 
 ## Prediction-Market Family
 
-Phase 7 added a vertical prediction-market surface from ingestion to quant
-dashboards. Phase 8 (this doc's update) hardens the family, adds an
-intraday micro-snapshot job, and ships four new widgets (Alerts, Drift,
-Pulse, Deep-Dive drawer) plus three new read endpoints. Phase v2.x
-populates the snapshot tables on every cold boot via the one-shot
-`populate_prediction_markets_now` scheduler job, broadens the election
-filter into a topic-driven regex, ships resilient retries + offline seed
-fixtures for PredictIt / Limitless / Manifold, and adds a full UX
-overhaul (shared primitives in
-`apps/web/src/components/widgets/prediction-market-ui/`).
+The family retains Polymarket, Kalshi, PredictIt, Limitless, and Manifold listings.
+Current displays use a bounded, genuine, fresh catalogue; unavailable providers
+remain visible as **No data**, with loading and request failures distinguished.
+Historical fixtures are never presented as current odds. Collection and snapshot
+cadences are unchanged by the depth-first drawer improvements.
+
+Select **Analyse** to open full contract context: provider timestamps, close time,
+all position-aligned outcomes, description/resolution terms, and source links.
+The 1d/7d/30d controls show recorded first-outcome observations, observed change
+in percentage points, high/low, sample count, and actual coverage timestamps.
+Fewer than two distinct observations means insufficient history, not a flat trend.
+Cumulative volume is never summed; Kalshi contract counts/open interest and
+other provider units remain distinct. Related text matches are not equivalent
+contracts or a defensible consensus.
 
 The data flow:
 
@@ -108,11 +221,12 @@ Manifold        ──┘   prediction_markets (DB table, source-agnostic)
                               ▼
         nightly snapshot job → prediction_market_snapshots (30-day retention)
         intraday micro-snapshot job (15-min cadence, 7-day retention)
-        one-shot backfill on first boot → 7d × 2 snapshots/day if table < 100 rows
+        no fabricated backfill or production fixture fallback
                               │
                               ▼
         MacroCalibrationWidget (cached 600s) with confidence pills
         CrossSourceCalibrationWidget (per-source probability bars)
+```
 
 Conventions:
 
@@ -143,10 +257,9 @@ so the schema is source-agnostic and the read endpoint can blend across all of t
 Phase 9 adds PredictIt and Limitless. Phase 10 adds Manifold. Each phase's ingest is
 wrapped in a `try / except` at the scheduler layer so one source going down does not
 poison the others (only the affected source's count is missing from the log line).
-Phase v2.x layers in `prediction_market_http.fetch_json_with_retry` for retries +
-content-type validation and a fallback `prediction_market_seed` path that reads
-checked-in JSON fixtures (`apps/api/vnibb/services/seed_fixtures/*`) when the live
-APIs return 429 / non-JSON.
+Provider failures do not manufacture fixture odds. Source-health counts cover
+the bounded current catalogue, not the provider universe; stored snapshot health
+does not establish price availability or live provider connectivity.
 
 ### Cross-Source Calibration widget (Phase 10)
 
@@ -155,6 +268,9 @@ sources (Polymarket, Kalshi, PredictIt, Limitless, Manifold where tagged). The w
 shows three tiles (CPI / Fed / Recession) with one row per source and a
 `sources_agree` indicator (green when the spread between min and max consensus is
 below a per-topic threshold — 5pp CPI / 8pp Fed / 12pp Recession — otherwise amber).
+With fewer than two priced sources, the widget reports insufficient source data,
+not agreement or divergence. Topic-level aggregates do not establish equivalent
+contract terms; inspect the underlying questions and resolution criteria.
 - Snapshot retention is 30 days; anything older is removed by the
   ingestion-time housekeeping pass.
 - Estimator results are cached in-process for 600 s (`vnibb.core.cache`).

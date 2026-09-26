@@ -168,6 +168,7 @@ function runDevCompletenessCheck() {
 // ============================================================================
 
 // --- Core Data ---
+registerWidget('research_matrix', () => import('./MatrixWidget'), 'analysis', ['matrix', 'research', 'evidence', 'snapshot', 'sector', 'peers']);
 registerWidget('ticker_info', () => import('./TickerInfoWidget'), 'core_data', ['ticker', 'info']);
 registerWidget(
   'key_metrics',

@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -39,10 +40,7 @@ class PredictionMarket(Base):
     outcomes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     outcome_prices: Mapped[list[float]] = mapped_column(JSON, nullable=False, default=list)
     extra: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
-    # Provenance. Fixture-seeded rows are synthetic and must never be mistaken
-    # for live provider data: the ingest path falls back to a checked-in
-    # fixture whenever the live fetch fails or returns nothing, and without
-    # this flag a provider outage was indistinguishable from success.
+    # Explicit offline fixtures are synthetic; live ingestion never falls back to them.
     is_synthetic: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false", index=True
     )
@@ -57,4 +55,14 @@ class PredictionMarket(Base):
         UniqueConstraint("source", "source_id", name="uq_prediction_markets_source_id"),
         Index("ix_prediction_markets_source_active", "source", "active"),
         Index("ix_prediction_markets_end_date", "end_date"),
+        Index(
+            "ix_prediction_markets_source_updated_at_id", "source", text("updated_at DESC"), "id",
+            postgresql_where=text("source <> 'kalshi' OR source_id NOT LIKE 'KXMV%'"),
+            sqlite_where=text("source <> 'kalshi' OR source_id NOT LIKE 'KXMV%'"),
+        ),
+        Index(
+            "ix_prediction_markets_noncombo_source_id", "source", "id",
+            postgresql_where=text("source <> 'kalshi' OR source_id NOT LIKE 'KXMV%'"),
+            sqlite_where=text("source <> 'kalshi' OR source_id NOT LIKE 'KXMV%'"),
+        ),
     )

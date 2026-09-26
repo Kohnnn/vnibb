@@ -22,10 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field, Json, TypeAdapter
 from vnibb.services.prediction_market_http import fetch_json_with_retry
 from vnibb.services.prediction_market_service import (
     NormalizedPredictionMarket,
-    PredictionMarketValues,
+    bounded_market_limit,
     category_taxonomy,
-    _upsert_prediction_market,
+    persist_prediction_markets,
 )
+from vnibb.services.prediction_market_policy import MAX_INGEST_MARKETS
 
 
 PREDICTIT_BASE_URL: Final = "https://www.predictit.org/api"
@@ -115,16 +116,16 @@ async def fetch_predictit_markets(
     """Fetch all active PredictIt markets via the resilient JSON fetcher."""
     body = await fetch_json_with_retry(
         client, source="predictit", url="/markets",
-        params={"limit": limit, "active": "true"},
+        params={"limit": bounded_market_limit(limit), "active": "true"},
     )
     rows: list[PredictItMarketPayload]
     if isinstance(body, dict) and isinstance(body.get("markets"), list):
-        rows = _PREDICTIT_MARKETS.validate_python(body["markets"])
+        rows = _PREDICTIT_MARKETS.validate_python(body["markets"][:MAX_INGEST_MARKETS])
     elif isinstance(body, list):
-        rows = _PREDICTIT_MARKETS.validate_python(body)
+        rows = _PREDICTIT_MARKETS.validate_python(body[:MAX_INGEST_MARKETS])
     else:
         rows = []
-    return rows
+    return rows[:MAX_INGEST_MARKETS]
 
 
 async def ingest_predictit_markets(
@@ -134,17 +135,9 @@ async def ingest_predictit_markets(
 ) -> int:
     """Fetch, normalize, and upsert PredictIt markets into the DB."""
     payloads = await fetch_predictit_markets(client, limit)
-    count = 0
-    dialect_name = session.get_bind().dialect.name
-    for payload in payloads:
-        market = normalize_predictit_market(payload)
-        if market is None:
-            continue
-        values: PredictionMarketValues = market.to_values()
-        await session.execute(_upsert_prediction_market(values, dialect_name))
-        count += 1
-    await session.commit()
-    return count
+    values = [market.to_values() for payload in payloads
+              if (market := normalize_predictit_market(payload)) is not None]
+    return await persist_prediction_markets(session, values)
 
 
 async def ingest_predictit_markets_with_default_client(

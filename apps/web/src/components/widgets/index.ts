@@ -132,6 +132,7 @@ export { ResearchBrowserWidget } from './ResearchBrowserWidget';
 // === AI Widgets ===
 export { AIAnalysisWidget } from './AIAnalysisWidget';
 export { AICopilotWidget } from './AICopilotWidget';
+export { MatrixWidget } from './MatrixWidget';
 export { TechnicalSnapshotWidget } from './TechnicalSnapshotWidget';
 export { SignalSummaryWidget } from './SignalSummaryWidget';
 export { InsiderDealTimelineWidget } from './InsiderDealTimelineWidget';

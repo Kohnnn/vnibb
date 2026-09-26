@@ -2,17 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { API_BASE_URL } from '@/lib/api';
+import { parsePredictionMarketPayload } from './PredictionMarketSource';
 
-/**
- * Multi-source prediction-market consensus hook.
- *
- * Phase 8: shared by ``ConsensusOddsWidget`` and the ``PredictionMarketDrawer``
- * so both call sites can dedupe over Polymarket + Kalshi without re-fetching.
- *
- * Returns the merged list of unique markets across all configured sources,
- * each annotated with its source and YES price. Volume-weighted consensus is
- * computed on the consumer side.
- */
 
 export type ConsensusSource = 'polymarket' | 'kalshi';
 
@@ -20,7 +11,8 @@ export interface ConsensusMarket {
     readonly source: ConsensusSource;
     readonly sourceId: string;
     readonly question: string;
-    readonly yesPrice: number;
+    readonly yesPrice: number | null;
+    readonly outcomeLabel: string;
     readonly volume: number | null;
     readonly url: string | null;
 }
@@ -30,44 +22,17 @@ type LoadState =
     | { readonly kind: 'error'; readonly error: Error }
     | { readonly kind: 'ready'; readonly rows: readonly ConsensusMarket[] };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function parseMarkets(source: ConsensusSource, value: unknown): ConsensusMarket[] {
-    if (!isRecord(value)) return [];
-    const data = Array.isArray(value.data)
-        ? value.data
-        : Array.isArray(value.markets)
-            ? value.markets
-            : [];
-    const out: ConsensusMarket[] = [];
-    for (const row of data) {
-        if (!isRecord(row) || typeof row.question !== 'string') continue;
-        const pricesRaw = Array.isArray(row.outcome_prices)
-            ? row.outcome_prices
-            : Array.isArray((row as Record<string, unknown>).outcomePrices)
-                ? ((row as Record<string, unknown>).outcomePrices as unknown[])
-                : [];
-        const yesPrice =
-            Array.isArray(pricesRaw) && pricesRaw.length > 0 && typeof pricesRaw[0] === 'number'
-                ? (pricesRaw[0] as number)
-                : 0;
-        out.push({
-            source,
-            sourceId:
-                typeof row.source_id === 'string'
-                    ? row.source_id
-                    : typeof (row as Record<string, unknown>).sourceId === 'string'
-                        ? String((row as Record<string, unknown>).sourceId)
-                        : row.question,
-            question: row.question,
-            yesPrice,
-            volume: typeof row.volume === 'number' ? row.volume : null,
-            url: typeof row.url === 'string' ? row.url : null,
-        });
-    }
-    return out;
+    return parsePredictionMarketPayload(value).markets.map((market) => ({
+        source,
+        sourceId: market.sourceId,
+        question: market.question,
+        yesPrice: market.prices[0] ?? null,
+        outcomeLabel: market.outcomes[0] ?? 'First outcome',
+        volume: market.volume,
+        url: market.url,
+    }));
 }
 
 export interface UsePredictionMarketConsensusArgs {

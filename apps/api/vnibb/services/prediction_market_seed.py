@@ -1,24 +1,9 @@
-"""Offline seed path for prediction-market ingest.
-
-The public PredictIt, Limitless, and Manifold APIs are occasionally
-unreachable from the OCI host (rate-limited, captive-portal redirects,
-gRPC weirdness). When that happens, ``ingest_*_with_default_client``
-already raises so the scheduler's per-source ``try/except`` keeps the
-rest of the pipeline alive. But the read endpoints then return empty
-lists and the widgets render "no markets available".
-
-This module closes that gap by upserting rows from a checked-in JSON
-snapshot. The fixtures are committed under
-``apps/api/vnibb/services/seed_fixtures/{predictit,limitless,manifold}_markets.json``
-and refreshed periodically. Each ``seed_*_from_json`` call is idempotent
-(re-uses the same upsert key as the live ingestion).
-"""
+"""Explicit offline fixture seeding; never a production provider fallback."""
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any, Final
 
@@ -27,9 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.services.prediction_market_service import (
     NormalizedPredictionMarket,
     PredictionMarketValues,
-    _upsert_prediction_market,
     category_taxonomy,
+    persist_prediction_markets,
 )
+from vnibb.services.prediction_market_policy import MAX_INGEST_MARKETS, MAX_MARKET_PAYLOAD_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -128,122 +114,47 @@ async def _seed_from_fixture(
     fixture_name: str,
     normaliser,
     *,
-    allow_empty_fixture: bool = True,
+    path: str | None = None,
 ) -> int:
-    path = SEED_FIXTURE_DIR / fixture_name
-    if not path.exists():
-        if allow_empty_fixture:
-            logger.info("Seed fixture %s absent; skipping", path)
-            return 0
-        raise FileNotFoundError(path)
+    fixture = Path(path) if path else SEED_FIXTURE_DIR / fixture_name
+    if not fixture.exists():
+        logger.warning("Seed fixture %s absent; skipping", fixture)
+        return 0
+    if fixture.stat().st_size > MAX_MARKET_PAYLOAD_BYTES:
+        raise ValueError(f"Seed fixture {fixture} exceeds ingest byte limit")
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(fixture.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        logger.warning("Seed fixture %s is not valid JSON: %s", path, exc)
+        logger.warning("Seed fixture %s is not valid JSON: %s", fixture, exc)
         return 0
     if not isinstance(payload, list):
-        logger.warning("Seed fixture %s top-level must be a list", path)
+        logger.warning("Seed fixture %s top-level must be a list", fixture)
         return 0
-
-    dialect_name = session.get_bind().dialect.name
-    count = 0
-    for row in payload:
+    values: list[PredictionMarketValues] = []
+    for row in payload[:MAX_INGEST_MARKETS]:
         if not isinstance(row, dict):
             continue
         market = normaliser(row)
         if market is None:
             continue
-        values: PredictionMarketValues = market.to_values()
-        # Fixture rows are synthetic: the caller only reaches this path after a
-        # live ingest failed or returned nothing. Stamp the provenance so a
-        # provider outage cannot masquerade as fresh data.
-        values["is_synthetic"] = True
-        await session.execute(_upsert_prediction_market(values, dialect_name))
-        count += 1
-    await session.commit()
-    logger.info("Seeded %d markets from %s", count, path)
+        value = market.to_values()
+        value["is_synthetic"] = True
+        values.append(value)
+    count = await persist_prediction_markets(session, values)
+    logger.info("Seeded %d synthetic markets from %s", count, fixture)
     return count
 
 
 async def seed_predictit_from_fixture(session: AsyncSession, *, path: str | None = None) -> int:
-    """Upsert PredictIt markets from a checked-in JSON fixture."""
-    if path:
-        # Honor an explicit override (used by ad-hoc seed scripts).
-        original = SEED_FIXTURE_DIR / "predictit_markets.json"
-        os.environ.setdefault("PREDICTIT_SEED_PATH_OVERRIDE", path)
-        try:
-            with open(path, encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except FileNotFoundError:
-            logger.warning("Explicit PredictIt seed path %s missing", path)
-            return 0
-        count = 0
-        dialect_name = session.get_bind().dialect.name
-        for row in payload if isinstance(payload, list) else []:
-            market = _normalise_predictit_row(row)
-            if market is None:
-                continue
-            values = market.to_values()
-            values["is_synthetic"] = True
-            await session.execute(_upsert_prediction_market(values, dialect_name))
-            count += 1
-        await session.commit()
-        logger.info("Seeded %d PredictIt markets from %s", count, path)
-        return count
-    return await _seed_from_fixture(
-        session, "predictit_markets.json", _normalise_predictit_row
-    )
+    """Import explicitly requested offline PredictIt fixture data."""
+    return await _seed_from_fixture(session, "predictit_markets.json", _normalise_predictit_row, path=path)
 
 
 async def seed_limitless_from_fixture(session: AsyncSession, *, path: str | None = None) -> int:
-    """Upsert Limitless markets from a checked-in JSON fixture."""
-    if path:
-        try:
-            with open(path, encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except FileNotFoundError:
-            logger.warning("Explicit Limitless seed path %s missing", path)
-            return 0
-        count = 0
-        dialect_name = session.get_bind().dialect.name
-        for row in payload if isinstance(payload, list) else []:
-            market = _normalise_limitless_row(row)
-            if market is None:
-                continue
-            values = market.to_values()
-            values["is_synthetic"] = True
-            await session.execute(_upsert_prediction_market(values, dialect_name))
-            count += 1
-        await session.commit()
-        logger.info("Seeded %d Limitless markets from %s", count, path)
-        return count
-    return await _seed_from_fixture(
-        session, "limitless_markets.json", _normalise_limitless_row
-    )
+    """Import explicitly requested offline Limitless fixture data."""
+    return await _seed_from_fixture(session, "limitless_markets.json", _normalise_limitless_row, path=path)
 
 
 async def seed_manifold_from_fixture(session: AsyncSession, *, path: str | None = None) -> int:
-    """Upsert Manifold markets from a checked-in JSON fixture."""
-    if path:
-        try:
-            with open(path, encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except FileNotFoundError:
-            logger.warning("Explicit Manifold seed path %s missing", path)
-            return 0
-        count = 0
-        dialect_name = session.get_bind().dialect.name
-        for row in payload if isinstance(payload, list) else []:
-            market = _normalise_manifold_row(row)
-            if market is None:
-                continue
-            values = market.to_values()
-            values["is_synthetic"] = True
-            await session.execute(_upsert_prediction_market(values, dialect_name))
-            count += 1
-        await session.commit()
-        logger.info("Seeded %d Manifold markets from %s", count, path)
-        return count
-    return await _seed_from_fixture(
-        session, "manifold_markets.json", _normalise_manifold_row
-    )
+    """Import explicitly requested offline Manifold fixture data."""
+    return await _seed_from_fixture(session, "manifold_markets.json", _normalise_manifold_row, path=path)

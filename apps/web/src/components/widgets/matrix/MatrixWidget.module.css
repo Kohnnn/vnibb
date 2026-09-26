@@ -1,0 +1,91 @@
+.root {
+  height: 100%;
+  overflow: auto;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 12px;
+  --matrix-border: var(--border-color, #334155);
+  --matrix-accent: #b98932;
+}
+.root :global(button), .root :global(input), .root :global(select), .root :global(textarea) { font: inherit; }
+.root :global(button), .root :global(select), .root :global(input:not([type='checkbox']):not([type='range'])) { min-height: 34px; border: 1px solid var(--matrix-border); border-radius: 3px; padding: 5px 9px; background: var(--bg-secondary); color: var(--text-primary); }
+.root :global(button) { cursor: pointer; }
+.root :global(button:disabled) { opacity: .45; cursor: not-allowed; }
+.root :global(button:hover:not(:disabled)) { border-color: var(--matrix-accent); }
+.root :global(button:focus-visible), .root :global(input:focus-visible), .root :global(select:focus-visible), .root :global(summary:focus-visible), .root :global(textarea:focus-visible) { outline: 2px solid var(--matrix-accent); outline-offset: 2px; }
+.root :global(h2) { font-size: 22px; line-height: 1.2; margin: 0; letter-spacing: -.03em; }
+.root :global(h3) { font-size: 15px; margin: 0; }
+.root :global(p) { margin: 6px 0; }
+.root :global(label) { display: flex; flex-direction: column; gap: 3px; }
+.root :global(summary) { cursor: pointer; padding: 7px 0; font-weight: 600; }
+.root :global(.matrix-eyebrow) { display: block; color: var(--text-muted); font-size: 10px; letter-spacing: .13em; margin-bottom: 4px; }
+.root :global(.matrix-muted), .root :global(.matrix-keyboard) { color: var(--text-muted); font-size: 11px; }
+.root :global(.matrix-topline), .root :global(.matrix-toolbar), .root :global(.matrix-fields), .root :global(.matrix-selection), .root :global(.matrix-provenance) { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.root :global(.matrix-topline) { justify-content: space-between; padding-bottom: 12px; }
+.root :global(.matrix-fields) { align-items: flex-end; margin: 8px 0; }
+.root :global(.matrix-wide) { flex: 1; min-width: 180px; }
+.root :global(.matrix-scope) { border-top: 1px solid var(--matrix-border); border-bottom: 1px solid var(--matrix-border); padding: 4px 0 10px; }
+.root :global(.matrix-primary) { background: var(--matrix-accent); color: #16130c; font-weight: 700; border-color: var(--matrix-accent); }
+.root :global(.matrix-notice) { border-left: 2px solid var(--matrix-accent); padding: 5px 9px; background: color-mix(in srgb, var(--matrix-accent) 8%, transparent); }
+.root :global(.matrix-error) { color: var(--error, #ef7676); border: 1px solid currentColor; padding: 8px; }
+.root :global(.matrix-status) { padding: 8px; }
+.root :global(.matrix-empty) { padding: 32px 16px; text-align: center; color: var(--text-secondary); max-width: 600px; margin: auto; }
+.root :global(.matrix-provenance) { margin-top: 12px; padding: 8px 0; font-size: 10px; border-bottom: 1px solid var(--matrix-border); }
+.root :global(.matrix-synthetic) { color: var(--matrix-accent); }
+.root :global(.matrix-toolbar) { padding: 10px 0; align-items: end; }
+.root :global(.matrix-toolbar details) { position: relative; }
+.root :global(.matrix-toolbar details[open]) { border: 1px solid var(--matrix-border); padding: 6px; }
+.root :global(.matrix-toolbar details label) { flex-direction: row; padding: 3px; }
+.root :global(.matrix-selection) { padding: 8px; background: var(--bg-secondary); border-block: 1px solid var(--matrix-border); }
+.root :global(.matrix-workspace) { display: flex; align-items: stretch; min-height: 220px; }
+.root :global(.matrix-grid) { overflow: auto; min-width: 0; flex: 1; max-height: 640px; }
+.root :global(table) { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; table-layout: fixed; }
+.root :global(th), .root :global(td) { border-right: 1px solid var(--matrix-border); border-bottom: 1px solid var(--matrix-border); text-align: left; vertical-align: top; }
+.root :global(thead th) { position: sticky; top: 0; z-index: 2; background: var(--bg-secondary); padding: 8px; }
+.root :global(.matrix-company) { position: sticky; left: 0; z-index: 1; width: 160px; min-width: 160px; max-width: 160px; background: var(--bg-primary); padding: 10px; border-left: 1px solid var(--matrix-border); }
+.root :global(thead .matrix-company) { z-index: 3; background: var(--bg-secondary); }
+.root :global(.matrix-company strong), .root :global(.matrix-company span) { display: block; overflow-wrap: anywhere; }
+.root :global(.matrix-company span) { font-size: 10px; color: var(--text-muted); font-weight: 400; margin: 4px 0; }
+.root :global(.matrix-dimension) { width: 100%; border: 0; text-align: left; font-weight: 600; }
+.root :global(.matrix-dimension small) { display: block; font-weight: 400; color: var(--text-muted); }
+.root :global(input[type='range']) { width: 100%; height: 15px; accent-color: var(--matrix-accent); }
+.root :global(input[type='checkbox']) { accent-color: var(--matrix-accent); }
+.root :global(td) { position: relative; padding: 6px; max-width: 640px; overflow-wrap: anywhere; }
+.root :global(.matrix-select-cell) { position: absolute; right: 7px; top: 9px; z-index: 1; padding: 4px; }
+.root :global(.matrix-cell) { display: block; width: 100%; height: 100%; min-height: 95px; text-align: left; border: 0; background: transparent; padding: 6px; }
+.root :global(.matrix-selected) { background: color-mix(in srgb, var(--matrix-accent) 13%, transparent); box-shadow: inset 0 0 0 1px var(--matrix-accent); }
+.root :global(.matrix-state) { display: inline-block; font-size: 9px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); padding-right: 20px; }
+.root :global(.matrix-state-supported) { color: var(--success, #4ba882); }
+.root :global(.matrix-state-denied), .root :global(.matrix-state-failed) { color: var(--error, #ef7676); }
+.root :global(.matrix-result dl) { margin: 7px 0; }
+.root :global(.matrix-result dl div) { margin-bottom: 7px; }
+.root :global(dt) { color: var(--text-muted); font-weight: 400; font-size: 10px; }
+.root :global(dd) { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.root :global(.matrix-result dd) { font-weight: 600; font-size: 13px; }
+.root :global(.matrix-kind) { display: inline-block; font-size: 10px; border: 1px solid var(--matrix-border); padding: 1px 5px; margin: 3px 3px 0 0; }
+.root :global(.matrix-density-compact .matrix-cell) { min-height: 55px; padding: 3px; }
+.root :global(.matrix-density-compact .matrix-result dl div) { margin-bottom: 2px; }
+.root :global(.matrix-density-expanded .matrix-cell) { padding: 12px; }
+.root :global(.matrix-clamp) { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.root :global(.matrix-inspector) { width: 340px; min-width: 280px; max-width: 42%; border: 1px solid var(--matrix-border); padding: 12px; background: var(--bg-primary); max-height: 640px; overflow: auto; }
+.root :global(.matrix-inspector header) { display: flex; justify-content: space-between; gap: 8px; }
+.root :global(.matrix-tabs) { display: flex; gap: 3px; border-bottom: 1px solid var(--matrix-border); padding: 8px 0; }
+.root :global(.matrix-tabs button[aria-selected='true']) { color: var(--matrix-accent); border-color: var(--matrix-accent); }
+.root :global(.matrix-inspector-body) { padding-top: 10px; overflow-wrap: anywhere; }
+.root :global(.matrix-inspector-body ul) { padding-left: 16px; list-style: disc; }
+.root :global(.matrix-evidence) { padding: 10px 0; border-bottom: 1px solid var(--matrix-border); }
+.root :global(.matrix-evidence dl div) { margin: 5px 0; }
+.root :global(.matrix-limitations), .root :global(.matrix-revoke) { margin-top: 10px; overflow-wrap: anywhere; }
+.root :global(.matrix-revoke) { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text-muted); }
+.root :global(.matrix-fallback) { margin-top: 12px; }
+.root :global(textarea) { min-height: 200px; padding: 10px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--matrix-border); }
+@media (max-width: 767px) {
+  .root { padding: 8px; }
+  .root :global(.matrix-inspector) { position: fixed; inset: 8px; z-index: 10000; width: auto; max-width: none; max-height: none; min-width: 0; box-shadow: 0 0 0 100vmax #0009; }
+  .root :global(.matrix-fields label), .root :global(.matrix-toolbar label) { flex: 1; min-width: 130px; }
+  .root :global(.matrix-company) { min-width: 120px; max-width: 120px; width: 120px; }
+  .root :global(button), .root :global(select) { min-height: 40px; }
+  .root :global(.matrix-select-cell) { padding: 8px; }
+}

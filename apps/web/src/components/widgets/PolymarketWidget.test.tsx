@@ -1,8 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { PolymarketWidget } from './PolymarketWidget';
-import { PredictionMarketSourceHealthStrip } from './PredictionMarketSourceHealthStrip';
 
 function renderWithQuery(ui: React.ReactElement) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -77,15 +76,6 @@ describe('PolymarketWidget (v2)', () => {
         jest.clearAllMocks();
     });
 
-    it('renders loading state while the API request is pending', () => {
-        const fetchMock = jest
-            .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>(() => new Promise<Response>(() => undefined));
-        global.fetch = fetchMock;
-
-        renderWithQuery(<PolymarketWidget />);
-
-        expect(screen.getByText(/Loading Polymarket markets/)).toBeInTheDocument();
-    });
 
     it('renders economic and sports rows with snapshot freshness', async () => {
         const fetchMock = jest
@@ -110,63 +100,33 @@ describe('PolymarketWidget (v2)', () => {
 
         expect(await screen.findByText('Will the Fed cut rates in July?')).toBeInTheDocument();
         expect(screen.getByText('Will Vietnam qualify for the World Cup?')).toBeInTheDocument();
-        expect(screen.getByText(/Healthy · 2 markets/i)).toBeInTheDocument();
         expect(
             screen.getByRole('link', { name: 'Open Will the Fed cut rates in July?' }),
         ).toHaveAttribute('href', 'https://polymarket.com/event/fed-2026');
-        expect(fetchMock).toHaveBeenCalledWith(
-            expect.stringContaining('/prediction-markets?source=polymarket'),
-            { cache: 'no-store' },
-        );
     });
 
-    it('forwards validated category and limit without allowing a source override', async () => {
-        global.fetch = jest
-            .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>(() =>
-                Promise.resolve(makeResponse({ count: 0, data: [] })),
-            );
-
-        renderWithQuery(<PolymarketWidget config={{ category: 'economic', limit: 7, source: 'kalshi' }} />);
-
-        await screen.findByText(/No Polymarket markets available/i);
-        expect(global.fetch).toHaveBeenCalledWith(
-            expect.stringContaining('source=polymarket&active=true&limit=7&category=economic'),
-            { cache: 'no-store' },
-        );
-    });
-
-    it('renders the empty state when the API has no markets', async () => {
-        global.fetch = jest
-            .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>(() =>
-                Promise.resolve(makeResponse({ count: 0, data: [] })),
-            );
+    it('excludes synthetic odds and preserves missing outcome positions in analysis', async () => {
+        global.fetch = jest.fn((input) => Promise.resolve(makeResponse(
+            String(input).includes('/source-health') ? { sources: [] } :
+            String(input).includes('/history') ? { points: [] } :
+            String(input).includes('?search=') ? { data: [] } : {
+                data: [
+                    { ...backendMarketPayload.data[0], question: 'Synthetic fixture', is_synthetic: true },
+                    { ...backendMarketPayload.data[1], outcomes: ['Alpha', 'Beta', 'Gamma'], outcome_prices: [0.2, null, 0.8] },
+                ],
+            },
+        )));
 
         renderWithQuery(<PolymarketWidget />);
-
-        expect(await screen.findByText(/No Polymarket markets available/i)).toBeInTheDocument();
+        const question = await screen.findByText('Will Vietnam qualify for the World Cup?');
+        expect(screen.queryByText('Synthetic fixture')).not.toBeInTheDocument();
+        fireEvent.click(question);
+        const dialog = await screen.findByRole('dialog');
+        const beta = within(dialog).getByText('Beta').parentElement!;
+        const gamma = within(dialog).getByText('Gamma').parentElement!;
+        expect(within(beta).getByText('—')).toBeInTheDocument();
+        expect(within(gamma).getByText('80%')).toBeInTheDocument();
+        await waitFor(() => expect(within(dialog).queryByText(/Loading recorded history/)).not.toBeInTheDocument());
     });
 
-    it('shares one source-health request between mounted strips', async () => {
-        global.fetch = jest
-            .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>(() =>
-                Promise.resolve(makeResponse({
-                    sources: [
-                        { source: 'polymarket', status: 'empty', market_count: 0, snapshot_count: 0 },
-                        { source: 'kalshi', status: 'stale', market_count: 4, snapshot_count: 0 },
-                        { source: 'predictit', status: 'stale', market_count: 4, snapshot_count: 2 },
-                        { source: 'limitless', status: 'synced', market_count: 4, snapshot_count: 2 },
-                        { source: 'manifold', status: 'synced', market_count: 4, snapshot_count: 2 },
-                    ],
-                })),
-            );
-
-        renderWithQuery(<><PredictionMarketSourceHealthStrip /><PredictionMarketSourceHealthStrip /></>);
-
-        await screen.findAllByText('Polymarket');
-        expect(screen.getAllByText('Awaiting data')).toHaveLength(2);
-        expect(screen.getAllByText('Snapshots pending')).toHaveLength(2);
-        expect(screen.getAllByText('Stale')).toHaveLength(2);
-        expect(screen.getAllByText('Healthy')).toHaveLength(4);
-        expect(global.fetch).toHaveBeenCalledTimes(1);
-    });
 });

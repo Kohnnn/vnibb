@@ -26,14 +26,8 @@ export interface SourceWidgetProps {
     readonly config?: Record<string, unknown>;
 }
 
-type Selection = {
-    readonly source: string;
-    readonly sourceId: string;
-    readonly question: string;
-};
-
 export function SourceWidget({ source, title, config }: SourceWidgetProps) {
-    const [selection, setSelection] = useState<Selection | null>(null);
+    const [selection, setSelection] = useState<PredictionMarketRow | null>(null);
     const category = config?.category;
     const limit = config?.limit;
     const categoryValue = category === 'all' || category === 'economic' || category === 'sports' || category === 'politics' || category === 'crypto' || category === 'general'
@@ -42,13 +36,6 @@ export function SourceWidget({ source, title, config }: SourceWidgetProps) {
     const limitValue = typeof limit === 'number' && Number.isInteger(limit) && limit > 0 && limit <= 100
         ? limit
         : undefined;
-    const handleSelect = (row: PredictionMarketRow) => {
-        setSelection({
-            source: row.source,
-            sourceId: row.sourceId,
-            question: row.question,
-        });
-    };
     return (
         <>
             <PredictionMarketSourceWidget
@@ -56,12 +43,14 @@ export function SourceWidget({ source, title, config }: SourceWidgetProps) {
                 title={title}
                 category={categoryValue}
                 limit={limitValue}
-                onSelect={handleSelect}
+                onSelect={setSelection}
             />
             <PredictionMarketDrawer
                 source={selection?.source ?? null}
                 sourceId={selection?.sourceId ?? null}
                 question={selection?.question ?? null}
+                market={selection}
+                key={selection ? `${selection.source}:${selection.sourceId}` : 'closed'}
                 open={selection !== null}
                 onClose={() => setSelection(null)}
             />

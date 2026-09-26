@@ -11,19 +11,24 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from vnibb.core.database import Base
+
+def _intraday_bucket_default(context) -> datetime:
+    captured_at = context.get_current_parameters()["captured_at"]
+    return captured_at.replace(
+        minute=(captured_at.minute // 15) * 15, second=0, microsecond=0,
+    )
 
 
 class PredictionMarketIntradaySnapshot(Base):
     """Per-market intraday snapshot row.
 
-    Cadence is 15 minutes (see ``PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES``)
-    but the ``captured_at`` field is the source of truth, not the wall clock.
-    Retention is bounded by the intraday snapshot service itself (default 7
-    days) and enforced by ``prediction_market_intraday_snapshot_service``.
+    Cadence is 15 minutes (see ``PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES``).
+    ``captured_at`` records actual measurement time; ``bucket_at`` enforces
+    the cadence. Retention is handled by the independent prune job.
     """
 
     __tablename__ = "prediction_market_intraday_snapshots"
@@ -45,6 +50,14 @@ class PredictionMarketIntradaySnapshot(Base):
         nullable=False,
         index=True,
         default=datetime.utcnow,
+    )
+    bucket_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_intraday_bucket_default,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("source", "source_id", "bucket_at", name="uq_prediction_market_intraday_bucket"),
+        Index("ix_prediction_market_intraday_snapshots_bucket_at", "bucket_at"),
     )
 
 
