@@ -12,12 +12,13 @@
  * shared global store.
  */
 
+'use client'
 import { provenanceToMarkdown, type ExportProvenance } from '@/lib/exportWidget'
 
 export const RESEARCH_NOTEBOOK_KEY = 'vnibb-research-notebook'
 export const RESEARCH_NOTEBOOK_EVENT = 'vnibb:research-notebook:changed'
 
-export type NotebookItemKind = 'news' | 'widget_snapshot' | 'agent_answer' | 'note'
+export type NotebookItemKind = 'news' | 'widget_snapshot' | 'agent_answer' | 'note' | 'artifact'
 
 export interface NotebookSource {
   id?: string
@@ -36,6 +37,14 @@ export interface NotebookAgentMeta {
   model?: string
 }
 
+export interface NotebookArtifactMeta {
+  /** Artifact id from the copilot response (e.g. `price_trend_chart`). */
+  artifactId?: string
+  /** Response the artifact came from, when the surface knows it. */
+  responseId?: string
+  artifactType?: string
+}
+
 export interface NotebookItem {
   id: string
   kind: NotebookItemKind
@@ -45,13 +54,14 @@ export interface NotebookItem {
   tags?: string[]
   sources?: NotebookSource[]
   agent?: NotebookAgentMeta
+  artifact?: NotebookArtifactMeta
   dedupeKey?: string
   provenance?: Partial<ExportProvenance>
   createdAt: string
 }
 
 const MAX_ITEMS = 200
-const NOTEBOOK_KINDS: NotebookItemKind[] = ['news', 'widget_snapshot', 'agent_answer', 'note']
+const NOTEBOOK_KINDS: NotebookItemKind[] = ['news', 'widget_snapshot', 'agent_answer', 'note', 'artifact']
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -76,6 +86,9 @@ function normalizeItem(value: unknown): NotebookItem | null {
     }))
     : undefined
   const agent = isRecord(value.agent) ? { provider: text(value.agent.provider), model: text(value.agent.model) } : undefined
+  const artifact = isRecord(value.artifact)
+    ? { artifactId: text(value.artifact.artifactId), responseId: text(value.artifact.responseId), artifactType: text(value.artifact.artifactType) }
+    : undefined
   return {
     id,
     kind: kind as NotebookItemKind,
@@ -85,6 +98,7 @@ function normalizeItem(value: unknown): NotebookItem | null {
     tags: Array.isArray(value.tags) ? value.tags.filter((tag): tag is string => typeof tag === 'string') : undefined,
     sources,
     agent,
+    artifact,
     dedupeKey: text(value.dedupeKey),
     provenance: isRecord(value.provenance) ? value.provenance : undefined,
     createdAt,
@@ -152,11 +166,26 @@ export function clearNotebook(): void {
   window.dispatchEvent(new CustomEvent(RESEARCH_NOTEBOOK_EVENT))
 }
 
+/**
+ * Stable dedupe key for an artifact saved into the notebook. Artifacts reuse
+ * semantic ids across responses, so the response identity is part of the key
+ * (falling back to the artifact title) — saving the same table twice is a no-op.
+ */
+export function artifactNotebookDedupeKey(input: {
+  artifactId: string
+  responseId?: string
+  artifactTitle?: string
+}): string {
+  const response = input.responseId || input.artifactTitle || 'unknown-response'
+  return `vniagent-artifact:${response}:${input.artifactId}`
+}
+
 const KIND_LABEL: Record<NotebookItemKind, string> = {
   news: 'News',
   widget_snapshot: 'Widget snapshot',
   agent_answer: 'VniAgent answer',
   note: 'Note',
+  artifact: 'VniAgent artifact',
 }
 
 /**
@@ -209,6 +238,16 @@ export function notebookToMarkdown(items: NotebookItem[], title = 'VNIBB Researc
         ].filter(Boolean).join(', ')
         lines.push(`- ${label}${details ? ` (${details})` : ''}${links ? ` — ${links}` : ''}`)
       })
+      lines.push('')
+    }
+    if (item.artifact?.artifactId || item.artifact?.responseId) {
+      lines.push(
+        `Artifact: ${[
+          item.artifact.artifactId,
+          item.artifact.artifactType,
+          item.artifact.responseId ? `response ${item.artifact.responseId}` : null,
+        ].filter(Boolean).join(' · ')}`,
+      )
       lines.push('')
     }
     if (item.provenance) {

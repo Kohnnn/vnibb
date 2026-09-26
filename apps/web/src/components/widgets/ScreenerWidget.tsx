@@ -366,9 +366,18 @@ export function ScreenerWidget({
         setActiveScreenId((current) => current === persistedActiveScreenId ? current : persistedActiveScreenId);
     }, [persistedActiveScreenId]);
 
+    // `search` is the live typing buffer and stays authoritative while the user
+    // types. The persisted value is adopted only when the widget instance
+    // changes (dashboard / tab / widget id), never on ordinary config echoes:
+    // the store round-trip is slower than typing, so re-adopting it would
+    // duplicate and drop in-flight keystrokes.
+    const searchInstanceRef = useRef<string | null>(null);
     useEffect(() => {
-        setSearch((current) => current === persistedSearch ? current : persistedSearch);
-    }, [persistedSearch]);
+        const instanceKey = `${widgetLocation?.dashboardId ?? ''}\u0000${widgetLocation?.tabId ?? ''}\u0000${id}`;
+        if (instanceKey === searchInstanceRef.current) return;
+        searchInstanceRef.current = instanceKey;
+        setSearch(persistedSearch);
+    }, [id, widgetLocation?.dashboardId, widgetLocation?.tabId, persistedSearch]);
 
     useEffect(() => {
         setMarket((current) => current === persistedMarket ? current : persistedMarket);
@@ -853,7 +862,6 @@ export function ScreenerWidget({
                     </div>
 
                     <MarketToggle value={market} onChange={setMarket} />
-
                     <div className="flex rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
                         <button
                             onClick={() => {

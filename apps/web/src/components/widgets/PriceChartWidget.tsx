@@ -9,40 +9,26 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useFinancialRatios, useProfile, useScreenerData } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { latestByFinancialPeriod } from '@/lib/financialPeriods';
+import { TradingViewAdvancedChart } from '@/components/chart/TradingViewAdvancedChart';
 import {
-  TradingViewAdvancedChart,
-  type AdvancedChartMode,
-  type AdvancedChartTimeframe,
-} from '@/components/chart/TradingViewAdvancedChart';
+  PRICE_CHART_TIMEFRAME_OPTIONS,
+  PRICE_CHART_MODE_OPTIONS,
+  normalizePriceChartTimeframe,
+  normalizePriceChartMode,
+} from '@/lib/priceChartControls';
 import { formatDividendYield, formatPercent, formatRatio, normalizeDividendYield } from '@/lib/formatters';
 import type { FinancialRatioData } from '@/types/equity';
 import type { ScreenerData } from '@/types/screener';
 import { firstFinite } from './utils';
 
-const TIMEFRAME_OPTIONS: readonly AdvancedChartTimeframe[] = [
-  '1D',
-  '5D',
-  '1M',
-  '3M',
-  '6M',
-  '1Y',
-  '3Y',
-  '5Y',
-  'MAX',
-  'YTD',
-];
-
-const CHART_MODE_OPTIONS: Array<{ value: AdvancedChartMode; label: string; icon: typeof BarChart3 }> = [
-  { value: 'candles', label: 'Candles', icon: BarChart3 },
-  { value: 'line', label: 'Line', icon: ChartLine },
-  { value: 'area', label: 'Area', icon: ChartArea },
-];
+const CHART_MODE_ICONS = { candles: BarChart3, line: ChartLine, area: ChartArea };
 
 interface PriceChartWidgetProps {
   id: string;
   symbol: string;
   timeframe?: string;
   config?: Record<string, unknown>;
+  onConfigChange?: (updates: Record<string, unknown>) => void;
   onRemove?: () => void;
   onDataChange?: (data: WidgetDataPayload) => void;
 }
@@ -54,13 +40,7 @@ interface SnapshotMetric {
   dividendYield: number | null;
 }
 
-function normalizeChartTimeframe(value: string | undefined): AdvancedChartTimeframe {
-  return TIMEFRAME_OPTIONS.includes((value || '') as AdvancedChartTimeframe)
-    ? (value as AdvancedChartTimeframe)
-    : '1Y';
-}
-
-export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onRemove, onDataChange }: PriceChartWidgetProps) {
+export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfigChange, onRemove, onDataChange }: PriceChartWidgetProps) {
   const { data: profileData } = useProfile(symbol, !!symbol);
   const {
     data: screenerData,
@@ -76,14 +56,32 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onRemov
   // source as Key Metrics.
   const { data: ratiosTtmData } = useFinancialRatios(symbol, { period: 'TTM', enabled: Boolean(symbol) });
 
-  const [selectedTimeframe, setSelectedTimeframe] = useState<AdvancedChartTimeframe>(
-    normalizeChartTimeframe(typeof config?.timeframe === 'string' ? config.timeframe : timeframe)
-  );
-  const [chartMode, setChartMode] = useState<AdvancedChartMode>('candles');
-  const [compareInput, setCompareInput] = useState(
-    typeof config?.compareSymbol === 'string' ? config.compareSymbol.toUpperCase() : ''
-  );
+  const configuredTimeframe = normalizePriceChartTimeframe(config?.timeframe ?? timeframe);
+  const configuredMode = normalizePriceChartMode(config?.chartType);
+  const configuredCompareSymbol = typeof config?.compareSymbol === 'string' ? config.compareSymbol.toUpperCase() : '';
+  const [localControls, setLocalControls] = useState({
+    timeframe: configuredTimeframe,
+    chartType: configuredMode,
+    compareSymbol: configuredCompareSymbol,
+  });
+  const [previousConfig, setPreviousConfig] = useState({
+    timeframe: configuredTimeframe,
+    chartType: configuredMode,
+    compareSymbol: configuredCompareSymbol,
+  });
+  if (previousConfig.timeframe !== configuredTimeframe || previousConfig.chartType !== configuredMode || previousConfig.compareSymbol !== configuredCompareSymbol) {
+    const controls = { timeframe: configuredTimeframe, chartType: configuredMode, compareSymbol: configuredCompareSymbol };
+    setPreviousConfig(controls);
+    setLocalControls(controls);
+  }
+  const selectedTimeframe = localControls.timeframe;
+  const chartMode = localControls.chartType;
+  const compareInput = localControls.compareSymbol;
   const compareSymbol = compareInput.trim().toUpperCase();
+  const updateControls = (updates: Partial<typeof localControls>) => {
+    setLocalControls(current => ({ ...current, ...updates }));
+    onConfigChange?.(updates);
+  };
 
   const exchange = profileData?.data?.exchange;
   const metrics = screenerData?.data?.[0] as ScreenerData | undefined;
@@ -138,32 +136,35 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onRemov
       <div className="flex h-full flex-col bg-[var(--bg-primary)]">
         <div className="border-b border-[var(--border-subtle)] px-3 py-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <div className="flex items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5">
-                {TIMEFRAME_OPTIONS.map((option) => (
+            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2.5">
+              <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5" role="group" aria-label="Chart timeframe">
+                {PRICE_CHART_TIMEFRAME_OPTIONS.map((option) => (
                   <button
-                    key={option}
+                    key={option.value}
                     type="button"
-                    onClick={() => setSelectedTimeframe(option)}
+                    onClick={() => updateControls({ timeframe: option.value })}
+                    aria-pressed={selectedTimeframe === option.value}
                     className={`rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
-                      selectedTimeframe === option
+                      selectedTimeframe === option.value
                         ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
                         : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     }`}
                   >
-                    {option}
+                    {option.label}
                   </button>
                 ))}
               </div>
 
-              <div className="flex items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5">
-                {CHART_MODE_OPTIONS.map((option) => {
-                  const Icon = option.icon;
+              <div className="flex flex-wrap items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5" role="group" aria-label="Chart mode">
+                {PRICE_CHART_MODE_OPTIONS.map((option) => {
+                  const Icon = CHART_MODE_ICONS[option.value];
                   return (
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setChartMode(option.value)}
+                      onClick={() => updateControls({ chartType: option.value })}
+                      aria-label={option.label}
+                      aria-pressed={chartMode === option.value}
                       className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
                         chartMode === option.value
                           ? 'bg-sky-500/15 text-sky-200'
@@ -193,7 +194,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onRemov
                 <span className="hidden lg:inline">Compare</span>
                 <input
                   value={compareInput}
-                  onChange={(event) => setCompareInput(event.target.value.toUpperCase())}
+                  onChange={(event) => updateControls({ compareSymbol: event.target.value.toUpperCase() })}
                   placeholder="Ticker"
                   className="w-16 bg-transparent font-mono text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
                   aria-label="Compare ticker"
@@ -201,7 +202,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onRemov
                 {compareInput ? (
                   <button
                     type="button"
-                    onClick={() => setCompareInput('')}
+                    onClick={() => updateControls({ compareSymbol: '' })}
                     className="rounded px-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     aria-label="Clear compare ticker"
                   >

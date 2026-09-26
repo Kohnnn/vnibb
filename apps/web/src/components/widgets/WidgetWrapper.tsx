@@ -9,16 +9,10 @@ import {
     FileSpreadsheet,
     Image,
     Copy,
-    Maximize2,
     Minimize2,
-    X,
     Settings,
     Move,
-    Sparkles,
-    Users,
-    Check,
     MoreHorizontal,
-    RefreshCw
 } from 'lucide-react';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
@@ -26,6 +20,7 @@ import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { WidgetGroupId } from '@/types/widget';
 import type { WidgetType } from '@/types/dashboard';
 import { TickerCombobox } from './TickerCombobox';
+import { WidgetGroupSelector } from './WidgetGroupSelector';
 import {
     WidgetParameterDropdown,
     WidgetMultiSelectDropdown,
@@ -49,6 +44,14 @@ import {
     DropdownMenuSubContent
 } from '@/components/ui/dropdown-menu';
 import { isTradingViewWidget, usesTradingViewWidgetSymbol } from '@/lib/tradingViewWidgets';
+import {
+    GROUP_TICKER_SCOPE,
+    readTickerScope,
+    resolveWidgetSymbol,
+    shouldAdoptOnGroupChange,
+    type TickerScope,
+    type TickerScopeMode,
+} from '@/lib/widgetScope';
 import { getWidgetLayoutInsight } from '@/lib/dashboardIntelligence';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
@@ -56,14 +59,9 @@ import { exportToCSV, exportToJSON, exportToPNG, type ExportProvenance } from '@
 import { WidgetHealthChip } from '@/components/ui/WidgetHealthChip';
 import { deriveWidgetHealth } from '@/lib/widgetHealth';
 import { getWidgetExportData } from '@/lib/widgetRuntime';
-interface WidgetRuntimeLayoutHint {
-    compactHeight?: number;
-    empty?: boolean;
-}
 
 interface WidgetRuntimePayload {
     __widgetRuntime?: {
-        layoutHint?: WidgetRuntimeLayoutHint;
         provenance?: Partial<ExportProvenance>;
         exportData?: unknown;
     };
@@ -131,9 +129,17 @@ export function WidgetWrapper({
     onCopilotClick,
     isCollapsed: initialCollapsed = false,
 }: WidgetWrapperProps) {
-    const { state, addWidget, cloneWidget, updateWidget, updateWidgetRuntime } = useDashboard();
+    const { state, addWidget, cloneWidget, updateWidget } = useDashboard();
     const { setGlobalMarketsSymbol } = useGlobalMarketsSymbol();
-    const { getColorForGroup, getSymbolForGroup, groups, setGroupSymbol } = useWidgetGroups();
+    const {
+        getColorForGroup,
+        getSymbolForGroup,
+        groups,
+        setGroupSymbol,
+        tickerOverrideFor,
+        setWidgetTickerOverride,
+        clearWidgetTickerOverride,
+    } = useWidgetGroups();
     const [isMaximized, setIsMaximized] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(initialCollapsed);
     const [isTickerDropdownOpen, setIsTickerDropdownOpen] = useState(false);
@@ -141,10 +147,6 @@ export function WidgetWrapper({
     const [internalData, setInternalData] = useState<any>(widgetData);
     const [isContentVisible, setIsContentVisible] = useState(false);
     const contentHostRef = useRef<HTMLDivElement | null>(null);
-    const baseWidgetHeightRef = useRef<number | null>(null);
-    const autoCompactHeightRef = useRef<number | null>(null);
-    const lastObservedHeightRef = useRef<number | null>(null);
-    const runtimeWidgetIdRef = useRef<string | null>(null);
     const currentDashboard = state.dashboards.find((dashboard) => dashboard.id === dashboardId) || null;
     const currentTab = currentDashboard?.tabs.find((tab) => tab.id === tabId) || null;
     const currentWidget = currentTab?.widgets.find((widget) => widget.id === id) || null;
@@ -166,29 +168,6 @@ export function WidgetWrapper({
         if (widgetData) setInternalData(widgetData);
     }, [widgetData]);
 
-    useEffect(() => {
-        if (!currentWidget) {
-            return;
-        }
-
-        if (runtimeWidgetIdRef.current !== currentWidget.id) {
-            runtimeWidgetIdRef.current = currentWidget.id;
-            baseWidgetHeightRef.current = currentWidget.layout.h;
-            autoCompactHeightRef.current = null;
-            lastObservedHeightRef.current = currentWidget.layout.h;
-            return;
-        }
-
-        const currentHeight = currentWidget.layout.h;
-        const lastObservedHeight = lastObservedHeightRef.current;
-        const wasAutoCompactHeight = autoCompactHeightRef.current !== null && lastObservedHeight === autoCompactHeightRef.current;
-
-        if (lastObservedHeight !== currentHeight && !wasAutoCompactHeight) {
-            baseWidgetHeightRef.current = currentHeight;
-        }
-
-        lastObservedHeightRef.current = currentHeight;
-    }, [currentWidget]);
 
     useEffect(() => {
         setIsCollapsed(initialCollapsed);
@@ -269,95 +248,30 @@ export function WidgetWrapper({
         };
     }, [isCollapsed, isContentVisible, isMaximized, shouldEagerMount]);
 
-    useEffect(() => {
-        if (!currentWidget) {
-            return;
-        }
-
-        const layoutHint = (internalData as WidgetRuntimePayload | null)?.__widgetRuntime?.layoutHint;
-        if (!layoutHint) {
-            return;
-        }
-
-        // Auto-compaction is intentionally disabled for non-editable system
-        // dashboards. Shrinking an empty cell mid-render makes neighbours
-        // re-pack via react-grid-layout's vertical compaction, which produces
-        // visible "blank top-left" / "widgets colliding on zoom" behaviour
-        // that is hard for users to recover from. We still expose the hint to
-        // the runtime so editable dashboards can opt back in.
-        const dashboardIsStatic = currentDashboard?.isEditable === false;
-        if (dashboardIsStatic) {
-            return;
-        }
-
-        const baseHeight = baseWidgetHeightRef.current ?? currentWidget.layout.h;
-        // Never let the auto-compact height fall below the widget's declared
-        // minH (or 5 grid rows, whichever is greater) so the toolbar always
-        // remains visible even when the inner content reports empty.
-        const declaredMinH = currentWidget.layout.minH ?? 2;
-        const safeFloor = Math.max(declaredMinH, 5);
-        const compactHeight = Math.max(
-            layoutHint.compactHeight ?? declaredMinH,
-            safeFloor,
-        );
-        const currentHeight = currentWidget.layout.h;
-
-        if (layoutHint.empty) {
-            if (currentHeight <= compactHeight) {
-                autoCompactHeightRef.current = compactHeight;
-                return;
-            }
-
-            autoCompactHeightRef.current = compactHeight;
-            lastObservedHeightRef.current = compactHeight;
-
-            updateWidgetRuntime(dashboardId, tabId, id, {
-                layout: {
-                    ...currentWidget.layout,
-                    h: compactHeight,
-                },
-            });
-            return;
-        }
-
-        const wasAutoCompacted = autoCompactHeightRef.current !== null && currentHeight === autoCompactHeightRef.current;
-        if (!wasAutoCompacted) {
-            return;
-        }
-
-        autoCompactHeightRef.current = null;
-
-        if (baseHeight === currentHeight) {
-            return;
-        }
-
-        lastObservedHeightRef.current = baseHeight;
-
-        updateWidgetRuntime(dashboardId, tabId, id, {
-            layout: {
-                ...currentWidget.layout,
-                h: baseHeight,
-            },
-        });
-    }, [currentWidget, currentDashboard?.isEditable, dashboardId, id, internalData, tabId, updateWidgetRuntime]);
 
     // Get current group details if assigned
-    const effectiveSymbol = getSymbolForGroup(widgetGroup);
+    const configuredScope = readTickerScope(currentWidget?.config);
+    const [tickerScope, setTickerScope] = useState<TickerScope>(configuredScope);
     const isTradingViewLinkedWidget = Boolean(
         currentWidget &&
         isTradingViewWidget(widgetType) &&
         usesTradingViewWidgetSymbol(widgetType) &&
         currentWidget.config?.useLinkedSymbol !== false
     );
-    // Priority: 
-    // 1. Specific group symbol (A, B, C, D) if not global
-    // 2. Legacy sync symbol (if provided via prop)
-    // 3. Global group symbol
+    const groupSymbol = getSymbolForGroup(widgetGroup);
+    const tickerOverride = tickerOverrideFor(id);
+    // A persisted override is authoritative over the in-memory scope: it means
+    // the user detached this widget, so it keeps its own ticker until reset.
+    const scopeMode: TickerScopeMode = tickerOverride ? 'override' : tickerScope.mode;
+    const effectiveScope: TickerScope = tickerOverride
+        ? { mode: 'override', symbol: tickerOverride }
+        : tickerScope;
+    // The widget shows its own ticker when detached, otherwise its group's.
+    // TradingView charts keep showing the symbol the workspace seeded them with.
+    const scopedSymbol = resolveWidgetSymbol(effectiveScope, groupSymbol);
     const displaySymbol = isTradingViewWidget(widgetType)
-        ? (symbol || effectiveSymbol)
-        : (widgetGroup !== 'global')
-            ? effectiveSymbol
-            : (symbol || effectiveSymbol);
+        ? (symbol || scopedSymbol)
+        : scopedSymbol;
     const usesExternalTradingViewSymbol =
         isTradingViewWidget(widgetType) &&
         usesTradingViewWidgetSymbol(widgetType) &&
@@ -531,9 +445,6 @@ export function WidgetWrapper({
         });
     };
 
-    const handleSyncClick = () => {
-        // Legacy sync logic removed in favor of Phase 2 groups
-    };
 
 
     const handleGroupChange = (newGroup: WidgetGroupId) => {
@@ -545,15 +456,57 @@ export function WidgetWrapper({
         // Persist to dashboard state
         updateWidget(dashboardId, tabId, id, { widgetGroup: newGroup });
 
-        // If joining a new group, update local symbol if needed
+        // A detached widget keeps its own ticker when it changes group; a
+        // following widget adopts the new group's ticker. TradingView linked
+        // charts are a separate rule: switching group never rewrites them.
+        if (isTradingViewLinkedWidget) return;
+
         const newSymbol = getSymbolForGroup(newGroup);
         if (!newSymbol) return;
+        if (!shouldAdoptOnGroupChange(effectiveScope, newSymbol, displaySymbol)) return;
 
-        if (isTradingViewLinkedWidget) {
-            return;
-        }
+        onSymbolChange?.(newSymbol);
+    };
 
-        if (onSymbolChange) onSymbolChange(newSymbol);
+
+    /** Persist a widget's ticker scope into its config. */
+    const persistTickerScope = (nextScope: TickerScope) => {
+        setTickerScope(nextScope);
+        updateWidget(dashboardId, tabId, id, {
+            config: {
+                ...currentWidget?.config,
+                tickerScope: nextScope.mode,
+                symbol: resolveWidgetSymbol(nextScope, groupSymbol),
+            },
+        });
+    };
+
+    /** Detach: the widget keeps the ticker it shows right now as its own. */
+    const handleDetachTicker = () => {
+        if (scopeMode === 'override' || !displaySymbol) return;
+        trackWidgetAction('ticker_scope_change', {
+            previous_scope: scopeMode,
+            next_scope: 'override',
+            scope_group: widgetGroup,
+        });
+        setWidgetTickerOverride(id, displaySymbol);
+        persistTickerScope({ mode: 'override', symbol: displaySymbol });
+    };
+
+    /** Reset: drop the widget's own ticker and follow the group again. */
+    const handleFollowGroupTicker = () => {
+        if (scopeMode !== 'override') return;
+        trackWidgetAction('ticker_scope_change', {
+            previous_scope: scopeMode,
+            next_scope: 'group',
+            scope_group: widgetGroup,
+        });
+        clearWidgetTickerOverride(id);
+        persistTickerScope(GROUP_TICKER_SCOPE);
+        if (!groupSymbol) return;
+        if (isTradingViewLinkedWidget) return;
+        if (!shouldAdoptOnGroupChange(GROUP_TICKER_SCOPE, groupSymbol, displaySymbol)) return;
+        onSymbolChange?.(groupSymbol);
     };
 
     const handleTickerSelect = (newSymbol: string) => {
@@ -677,8 +630,7 @@ export function WidgetWrapper({
             {/* Normal widget - dim when maximized */}
             <div
                 className={cn(
-                    "widget-card-premium h-full flex flex-col",
-                    widgetType === 'tradingview_ticker_tag' ? 'overflow-visible' : 'overflow-hidden',
+                    "widget-card-premium h-full min-h-0 flex flex-col overflow-visible",
                     isEditing ? 'ring-2 ring-blue-500/40' : '',
                     isMaximized ? 'opacity-0 pointer-events-none' : ''
                 )}
@@ -698,42 +650,17 @@ export function WidgetWrapper({
                     onSymbolChange={() => setIsTickerDropdownOpen(true)}
                     showGroupSelector={showGroupLabels}
                     groupSelector={
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <button
-                                    className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)] transition-colors"
-                                    style={{
-                                        borderLeft: `2px solid ${getColorForGroup(widgetGroup)}`
-                                    }}
-                                    title={`Widget Group: ${groups[widgetGroup]?.name || 'Global'}`}
-                                >
-                                    <Users
-                                        size={12}
-                                        className={
-                                            widgetGroup !== 'global'
-                                                ? 'text-[var(--text-primary)]'
-                                                : 'text-[var(--text-muted)]'
-                                        }
-                                    />
-                                </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent className="min-w-[120px]">
-                                {Object.entries(groups).map(([id, config]) => (
-                                    <DropdownMenuItem
-                                        key={id}
-                                        onClick={() => handleGroupChange(id as WidgetGroupId)}
-                                        className="flex cursor-pointer items-center gap-2 text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]"
-                                    >
-                                        <div
-                                            className="w-2 h-2 rounded-full"
-                                            style={{ backgroundColor: config.color }}
-                                        />
-                                        <span className="flex-1">{config.name}</span>
-                                        {widgetGroup === id && <Check size={12} className="text-blue-500" />}
-                                    </DropdownMenuItem>
-                                ))}
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                        <WidgetGroupSelector
+                            widgetGroup={widgetGroup}
+                            groups={groups}
+                            getColorForGroup={getColorForGroup}
+                            getSymbolForGroup={getSymbolForGroup}
+                            currentSymbol={displaySymbol}
+                            onGroupChange={handleGroupChange}
+                            scopeMode={scopeMode}
+                            onDetachTicker={handleDetachTicker}
+                            onFollowGroupTicker={handleFollowGroupTicker}
+                        />
                     }
                     tickerSelector={
                         <div className="relative flex items-center min-w-[68px]">
@@ -759,7 +686,7 @@ export function WidgetWrapper({
                         </div>
                     }
                     parameters={
-                        <div className="flex items-center gap-1">
+                        <div className="flex flex-wrap items-center gap-1">
                             {trackedParameters.map((param) => (
                                 <WidgetParameterDropdown key={param.id} parameter={param} />
                             ))}
@@ -775,6 +702,31 @@ export function WidgetWrapper({
                             ))}
                         </div>
                     }
+                    compactParameters={trackedParameters.length > 0 || trackedMultiSelectParams.length > 0 ? (
+                        <>
+                            {trackedParameters.map(parameter => (
+                                <label key={parameter.id} className="flex min-w-0 flex-col gap-1 text-xs text-[var(--text-secondary)]">
+                                    {parameter.label}
+                                    <select value={parameter.currentValue} onChange={event => parameter.onChange(event.target.value)} className="max-w-full rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1 text-[var(--text-primary)]">
+                                        {parameter.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                    </select>
+                                </label>
+                            ))}
+                            {trackedMultiSelectParams.map(parameter => (
+                                <fieldset key={parameter.id} className="w-full text-xs text-[var(--text-secondary)]">
+                                    <legend className="mb-1">{parameter.label}</legend>
+                                    <div className="flex flex-wrap gap-2">
+                                        {parameter.options.map(option => (
+                                            <label key={option.value} className="flex items-center gap-1">
+                                                <input type="checkbox" checked={parameter.currentValues.includes(option.value)} onChange={event => parameter.onChange(event.target.checked ? [...parameter.currentValues, option.value] : parameter.currentValues.filter(value => value !== option.value))} />
+                                                {option.label}
+                                            </label>
+                                        ))}
+                                    </div>
+                                </fieldset>
+                            ))}
+                        </>
+                    ) : undefined}
                     isMaximized={isMaximized}
                     onMaximize={handleMaximize}
                     onRefresh={onRefresh ? () => {
@@ -797,7 +749,7 @@ export function WidgetWrapper({
                     actions={
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <button className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors">
+                                <button type="button" aria-label={`Widget actions for ${title}`} className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors">
                                     <MoreHorizontal size={11} />
                                 </button>
                             </DropdownMenuTrigger>
@@ -876,8 +828,8 @@ export function WidgetWrapper({
 
 
                 {/* Content */}
-                <div id={id} ref={contentHostRef} className="relative flex-1 overflow-auto bg-[var(--bg-secondary)] p-2 sm:p-2.5">
-                    {isCollapsed ? (
+                <div id={id} ref={contentHostRef} className="relative min-h-0 flex-1 overflow-auto rounded-b-lg bg-[var(--bg-secondary)] p-2 sm:p-2.5">
+                    {isMaximized ? null : isCollapsed ? (
                         <div className="flex h-full items-center justify-center text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
                             Collapsed
                         </div>
@@ -917,18 +869,21 @@ export function WidgetWrapper({
                 onClose={() => setIsMaximized(false)}
                 title={`${displaySymbol ? `${displaySymbol} - ` : ''}${title}`}
             >
+                <WidgetHeaderVisibilityProvider hideHeader>
                 <WidgetErrorBoundary
                     widgetName={title}
                     onError={(error) => logClientError(`Maximized Widget ${id} (${title}) crashed:`, error)}
                 >
                     {React.isValidElement(children)
                         ? React.cloneElement(children as React.ReactElement<any>, {
+                            id,
                             symbol: displaySymbol,
                             widgetGroup,
                             onDataChange: setInternalData
                         })
                         : children}
                 </WidgetErrorBoundary>
+                </WidgetHeaderVisibilityProvider>
             </MaximizedWidgetPortal>
         </>
     );

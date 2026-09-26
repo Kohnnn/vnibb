@@ -18,6 +18,10 @@ jest.mock('@/components/settings/SettingsModal', () => ({
   SettingsModal: () => null,
 }))
 
+jest.mock('@/contexts/WidgetGroupContext', () => ({
+  useWidgetGroups: () => ({ getSharedGroups: jest.fn() }),
+}))
+
 jest.mock('@/lib/analytics', () => ({
   ANALYTICS_EVENTS: {
     settingsOpened: 'settings_opened',
@@ -73,6 +77,7 @@ function renderSidebarWithDashboards(dashboards: readonly [Dashboard, Dashboard]
   }
 
   mockUseDashboard.mockReturnValue({
+    localStateReady: true,
     state: {
       dashboards: [...dashboards],
       folders: emptyFolders,
@@ -81,6 +86,8 @@ function renderSidebarWithDashboards(dashboards: readonly [Dashboard, Dashboard]
     },
     setActiveDashboard: jest.fn(),
     createDashboard: () => firstDashboard,
+    exportWorkspace: jest.fn(),
+    restoreWorkspace: jest.fn(),
     updateDashboard: jest.fn(),
     updateDashboardRuntime: jest.fn(),
     deleteDashboard: jest.fn(),
@@ -135,6 +142,18 @@ describe('Sidebar context menu accessibility', () => {
       return 1
     }
     window.cancelAnimationFrame = jest.fn()
+  })
+
+  test('opens backup restore without changing the active workspace', () => {
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+    fireEvent.click(screen.getByRole('button', { name: 'Backup workspaces' }))
+    expect(screen.getByRole('dialog', { name: 'Backup and restore workspaces' })).toBeInTheDocument()
+    expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Close backup dialog' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   test('renders workspace actions inside a menu with menuitem children', () => {

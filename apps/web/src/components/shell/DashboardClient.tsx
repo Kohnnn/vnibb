@@ -12,8 +12,6 @@ import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { WidgetWrapper, widgetRegistry } from '@/components/widgets';
 import { DashboardSkeleton } from '@/components/shell/DashboardSkeleton';
 import {
-    TIMEFRAME_OPTIONS,
-    CHART_TYPE_OPTIONS,
     PERIOD_OPTIONS,
     DATA_SOURCE_OPTIONS,
     INDICATOR_OPTIONS,
@@ -31,10 +29,12 @@ import {
     autoFitGridItems,
     findNextAvailableLayout,
     getWidgetDefaultLayout,
-    hasLayoutCoordinatesChanged
+    hasLayoutCoordinatesChanged,
+    layoutsOverlap
 } from '@/lib/dashboardLayout';
 import { LEFT_SIDEBAR_HIDE_BELOW, AI_COPILOT_OVERLAY_BELOW_WIDTH, AI_COPILOT_OVERLAY_BELOW_HEIGHT } from '@/lib/responsive';
 import { useResizeNudge } from '@/hooks/useResizeNudge';
+import { PRICE_CHART_TIMEFRAME_OPTIONS, PRICE_CHART_MODE_OPTIONS, normalizePriceChartTimeframe, normalizePriceChartMode } from '@/lib/priceChartControls';
 import { CURRENT_RELEASE } from '@/lib/version';
 import { analyzeDashboardTab } from '@/lib/dashboardIntelligence';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
@@ -57,13 +57,15 @@ import {
     type OnboardingGoalId,
 } from '@/lib/userPreferences';
 import type { WidgetInstance, WidgetType, WidgetConfig, Dashboard } from '@/types/dashboard';
+import type { WidgetGroupId } from '@/types/widget';
 import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '@/types/dashboard-templates';
+import { getStarterForTemplate, type StarterPromptKey } from '@/lib/researchStarters';
 import { AlertCircle, Grid3X3, PlusCircle, RefreshCw, Shield, X } from 'lucide-react';
 
 const WidgetLibrary = dynamic(() => import('@/components/widgets').then((m) => ({ default: m.WidgetLibrary as unknown as React.ComponentType<{ isOpen: boolean; onClose: () => void }> })), { ssr: false });
 const WidgetSettingsModal = dynamic(() => import('@/components/modals').then((m) => ({ default: m.WidgetSettingsModal })), { ssr: false });
 const AppsLibrary = dynamic(() => import('@/components/modals').then((m) => ({ default: m.AppsLibrary })), { ssr: false });
-const TemplateSelector = dynamic(() => import('@/components/modals').then((m) => ({ default: m.TemplateSelector as unknown as React.ComponentType<{ open: boolean; onClose: () => void; onSelectTemplate: (template: DashboardTemplate) => void; currentDashboard: Dashboard | null; currentSymbol: string }> })), { ssr: false });
+const TemplateSelector = dynamic(() => import('@/components/modals').then((m) => ({ default: m.TemplateSelector as unknown as React.ComponentType<{ open: boolean; onClose: () => void; onSelectTemplate: (template: DashboardTemplate) => void; onStarterPromptRequest?: (promptKey: StarterPromptKey) => void; sharedTickerGroups?: readonly WidgetGroupId[]; currentDashboard: Dashboard | null; currentSymbol: string }> })), { ssr: false });
 const AICopilot = dynamic(() => import('@/components/ui/AICopilot').then((m) => ({ default: m.AICopilot })), { ssr: false });
 const OnboardingWalkthrough = dynamic(() => import('@/components/onboarding/OnboardingWalkthrough').then((m) => ({ default: m.OnboardingWalkthrough as unknown as React.ComponentType<{ open: boolean; currentSymbol: string; onSkip: () => void; onGoalSelect: (goalId: OnboardingGoalId, symbol?: string) => boolean; onComplete: (goalId: OnboardingGoalId, openVniAgent?: boolean) => void }> })), { ssr: false });
 
@@ -117,9 +119,15 @@ const ADMIN_MANAGED_SYSTEM_IDS = new Set([
     GLOBAL_MARKETS_DASHBOARD_ID,
 ]);
 
+// Template seeds carry no widgetGroup, so an applied template dashboard
+// genuinely shares no ticker group. Kept module-level so the identity is
+// stable across renders.
+const EMPTY_SHARED_TICKER_GROUPS: readonly WidgetGroupId[] = [];
+
 function DashboardContent() {
     const {
         state,
+        localStateReady,
         activeDashboard,
         activeTab,
         setActiveTab,
@@ -144,6 +152,7 @@ function DashboardContent() {
     const { config: unitConfig, setUnit } = useUnit();
 
     const [isEditing, setIsEditing] = useState(false);
+    const [isGridEditable, setIsGridEditable] = useState(false);
     const [isWidgetLibraryOpen, setIsWidgetLibraryOpen] = useState(false);
     const [isAppsLibraryOpen, setIsAppsLibraryOpen] = useState(false);
     const [isTemplateSelectorOpen, setIsTemplateSelectorOpen] = useState(false);
@@ -471,7 +480,7 @@ function DashboardContent() {
     );
     const dashboardIds = useMemo(() => state.dashboards.map((d) => d.id), [state.dashboards]);
     useUrlSync({
-        ready: mounted,
+        ready: mounted && localStateReady,
         activeDashboardId: activeDashboard?.id ?? null,
         activeTabId: activeTab?.id ?? null,
         symbol: stockGlobalSymbol,
@@ -607,6 +616,9 @@ function DashboardContent() {
         };
 
         const handleKeyboardNavigation = (event: KeyboardEvent) => {
+            if (event.defaultPrevented) return;
+            const target = event.target instanceof HTMLElement ? event.target : null;
+            if (target?.closest('[role="menu"], [role="dialog"]')) return;
             if (event.key === 'Escape') {
                 setIsWidgetLibraryOpen(false);
                 setIsAppsLibraryOpen(false);
@@ -637,28 +649,11 @@ function DashboardContent() {
                 }
             }
 
-            if (!event.metaKey && !event.ctrlKey && !event.altKey) {
-                if (event.key === 'Tab' && activeTab?.widgets?.length) {
-                    const focusableWidgets = Array.from(
-                        document.querySelectorAll<HTMLElement>('[data-widget-focus="true"]')
-                    );
-                    if (!focusableWidgets.length) return;
-
-                    event.preventDefault();
-                    const currentIndex = focusableWidgets.findIndex((node) => node === document.activeElement);
-                    const direction = event.shiftKey ? -1 : 1;
-                    const fallbackIndex = event.shiftKey ? focusableWidgets.length - 1 : 0;
-                    const nextIndex = currentIndex === -1
-                        ? fallbackIndex
-                        : (currentIndex + direction + focusableWidgets.length) % focusableWidgets.length;
-                    focusableWidgets[nextIndex]?.focus();
-                }
-            }
         };
 
         window.addEventListener('keydown', handleKeyboardNavigation);
         return () => window.removeEventListener('keydown', handleKeyboardNavigation);
-    }, [activeDashboard?.tabs, activeTab?.widgets, mounted, setActiveTab]);
+    }, [activeDashboard?.tabs, mounted, setActiveTab]);
 
     const handleLayoutChange = useCallback((newLayout: LayoutItem[]) => {
         if (!activeDashboard || !activeTab) return;
@@ -701,14 +696,12 @@ function DashboardContent() {
     // keyboard-accessible alternative to the pointer-only `.widget-drag-handle`.
     const handleWidgetLayoutKeyDown = useCallback(
         (event: React.KeyboardEvent<HTMLDivElement>, widgetId: string) => {
-            if (!isEditing || !canEditCurrentDashboard) return;
+            if (!isEditing || !canEditCurrentDashboard || !isGridEditable) return;
             if (!activeDashboard || !activeTab) return;
             const arrowKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
             if (!arrowKeys.includes(event.key)) return;
-            // Don't hijack arrows while typing in an input inside the widget.
-            const target = event.target as HTMLElement;
-            if (target && target !== event.currentTarget && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
-            if (target && target.isContentEditable) return;
+            // Nested controls own their arrow keys; layout shortcuts apply only to the panel.
+            if (event.target !== event.currentTarget) return;
 
             const widget = activeTab.widgets.find((w) => w.id === widgetId);
             if (!widget) return;
@@ -734,13 +727,14 @@ function DashboardContent() {
             }
 
             if (next.x === x && next.y === y && next.w === w && next.h === h) return;
+            if (activeTab.widgets.some((other) => other.id !== widgetId && layoutsOverlap(next, other.layout))) return;
 
             const updatedWidgets = activeTab.widgets.map((wgt) =>
                 wgt.id === widgetId ? { ...wgt, layout: { ...wgt.layout, ...next } } : wgt
             );
             updateTabLayout(activeDashboard.id, activeTab.id, updatedWidgets);
         },
-        [isEditing, canEditCurrentDashboard, activeDashboard, activeTab, updateTabLayout]
+        [isEditing, canEditCurrentDashboard, isGridEditable, activeDashboard, activeTab, updateTabLayout]
     );
 
     const handleEditToggle = useCallback(() => {
@@ -951,6 +945,14 @@ function DashboardContent() {
             setActiveTab(tab.id);
             setIsTemplateSelectorOpen(false);
             setIsAppsLibraryOpen(false);
+            // Starter-bound templates prime VniAgent with the starter's prompt
+            // through the same seam the onboarding walkthrough uses.
+            const starter = getStarterForTemplate(template.id);
+            if (starter) {
+                setCopilotStarterPrompt(starter.promptKey);
+                setCopilotStarterPromptRequestId((current) => current + 1);
+                window.requestAnimationFrame(() => openCopilot('research_starter'));
+            }
             setTemplateApplyStatus({ message: `Created '${dashboard.name}' from ${template.name}.`, tone: 'success' });
             captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
                 source: 'template_selector_auto_workspace',
@@ -968,7 +970,17 @@ function DashboardContent() {
                 tone: 'warning',
             });
         }
-    }, [applyTemplateToDashboard, createDashboard, createTab, setActiveDashboard, setActiveTab]);
+    }, [applyTemplateToDashboard, createDashboard, createTab, openCopilot, setActiveDashboard, setActiveTab]);
+
+    /**
+     * The template picker owns the starter decision (purpose + disclosure) and
+     * hands the prompt key back here, so the copilot seam stays in one place.
+     */
+    const handleStarterPromptRequest = useCallback((promptKey: StarterPromptKey) => {
+        setCopilotStarterPrompt(promptKey);
+        setCopilotStarterPromptRequestId((current) => current + 1);
+        window.requestAnimationFrame(() => openCopilot('research_starter'));
+    }, [openCopilot]);
 
     const handleOnboardingGoalSelect = useCallback((goalId: OnboardingGoalId, symbol?: string): boolean => {
         if (goalId === 'scan_market') {
@@ -1051,6 +1063,14 @@ function DashboardContent() {
                 config: widget.config || {},
             });
         });
+        // A starter-bound layout primes VniAgent the moment it lands, so the
+        // analyst can continue in the agent instead of re-typing the intent.
+        const starter = getStarterForTemplate(template.id);
+        if (starter) {
+            setCopilotStarterPrompt(starter.promptKey);
+            setCopilotStarterPromptRequestId((current) => current + 1);
+            window.requestAnimationFrame(() => openCopilot('research_starter'));
+        }
         setTemplateApplyStatus({ message: `Applied ${template.name} template.`, tone: 'success' });
         captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
             source: 'empty_tab_seed',
@@ -1061,7 +1081,7 @@ function DashboardContent() {
             tab_id: activeTab.id,
             widget_count: template.widgets.length,
         });
-    }, [activeDashboard, activeTab, addWidget, applyTemplateToDashboard, canEditCurrentDashboard, createDashboard, createTab, setActiveDashboard, setActiveTab]);
+    }, [activeDashboard, activeTab, addWidget, applyTemplateToDashboard, canEditCurrentDashboard, createDashboard, createTab, openCopilot, setActiveDashboard, setActiveTab]);
 
     const handleCreateWorkspace = useCallback(() => {
         const dashboard = createDashboard({ name: 'Workspace 1' });
@@ -1153,15 +1173,15 @@ function DashboardContent() {
                     {
                         id: 'timeframe',
                         label: 'Period',
-                        currentValue: (config.timeframe as string) || '1Y',
-                        options: TIMEFRAME_OPTIONS,
+                        currentValue: normalizePriceChartTimeframe(config.timeframe),
+                        options: [...PRICE_CHART_TIMEFRAME_OPTIONS],
                         onChange: (v) => onConfigChange('timeframe', v)
                     },
                     {
                         id: 'chartType',
                         label: 'Type',
-                        currentValue: (config.chartType as string) || 'candle',
-                        options: CHART_TYPE_OPTIONS,
+                        currentValue: normalizePriceChartMode(config.chartType),
+                        options: [...PRICE_CHART_MODE_OPTIONS],
                         onChange: (v) => onConfigChange('chartType', v)
                     }
                 ];
@@ -1389,7 +1409,8 @@ function DashboardContent() {
                                 <ResponsiveDashboardGrid
                                     layouts={memoizedLayouts}
                                     onLayoutChange={handleLayoutChange}
-                                    isEditing={isEditing}
+                                    isEditing={isEditing && canEditCurrentDashboard}
+                                    onEditableChange={setIsGridEditable}
                                     rowHeight={40}
                                 >
                                     {activeTab.widgets.map((widget) => {
@@ -1420,8 +1441,8 @@ function DashboardContent() {
                                                 data-widget-type={widgetType}
                                                 data-widget-symbol={widgetSymbol}
                                                 tabIndex={0}
-                                                role={isEditing && canEditCurrentDashboard ? 'application' : undefined}
-                                                aria-label={isEditing && canEditCurrentDashboard
+                                                role={isGridEditable ? 'application' : undefined}
+                                                aria-label={isGridEditable
                                                     ? `${widgetTitle} — arrow keys move, Shift+arrow resizes`
                                                     : undefined}
                                                 onKeyDown={(event) => handleWidgetLayoutKeyDown(event, widget.id)}
@@ -1434,9 +1455,9 @@ function DashboardContent() {
                                                     tabId={activeTab.id}
                                                     dashboardId={activeDashboard.id}
                                                     widgetGroup={widget.widgetGroup}
-                                                    isEditing={isEditing}
+                                                    isEditing={isGridEditable}
                                                     isCollapsed={Boolean(widget.config?.collapsed)}
-                                                    onRemove={!canEditCurrentDashboard || !isEditing
+                                                    onRemove={!isGridEditable
                                                         ? undefined
                                                         : () => deleteWidget(activeDashboard.id, activeTab.id, widget.id)}
                                                     onSymbolChange={handleSymbolChange}
@@ -1455,6 +1476,9 @@ function DashboardContent() {
                                                                 id={widget.id}
                                                                 symbol={widgetSymbol}
                                                                 config={widget.config}
+                                                                onConfigChange={widgetType === 'price_chart' && canEditCurrentDashboard
+                                                                    ? (patch: Record<string, unknown>) => updateWidget(activeDashboard.id, activeTab.id, widget.id, { config: { ...widget.config, ...patch } })
+                                                                    : undefined}
                                                                 initialSymbols={Array.isArray(widget.config?.initialSymbols) ? widget.config.initialSymbols as string[] : undefined}
                                                             />
                                                         </Suspense>
@@ -1601,6 +1625,10 @@ function DashboardContent() {
                 open={isTemplateSelectorOpen}
                 onClose={() => setIsTemplateSelectorOpen(false)}
                 onSelectTemplate={handleApplyTemplate}
+                onStarterPromptRequest={handleStarterPromptRequest}
+                // applyTemplateToDashboard seeds template widgets without a
+                // widgetGroup, so the applied workspace shares no ticker group.
+                sharedTickerGroups={EMPTY_SHARED_TICKER_GROUPS}
                 currentDashboard={activeDashboard ?? null}
                 currentSymbol={stockGlobalSymbol}
             />

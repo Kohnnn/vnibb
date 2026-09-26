@@ -28,6 +28,7 @@ import {
     AppWindow,
     MessageSquareText,
     Lock,
+    Archive,
 } from 'lucide-react';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useDashboard } from '@/contexts/DashboardContext';
@@ -35,6 +36,7 @@ import { cn } from '@/lib/utils';
 import type { Dashboard, DashboardFolder } from '@/types/dashboard';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { CURRENT_RELEASE, WHATS_NEW_REOPEN_EVENT } from '@/lib/version';
+import { WorkspaceBackupModal } from '@/components/modals/WorkspaceBackupModal';
 
 const COLLAPSED_SIDEBAR_WIDTH = 56;
 
@@ -63,6 +65,7 @@ export function Sidebar({
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [workspaceBackupOpen, setWorkspaceBackupOpen] = useState(false);
     const [showMoveSubmenu, setShowMoveSubmenu] = useState(false);
     const createMenuRef = useRef<HTMLDivElement | null>(null);
     const contextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -885,6 +888,11 @@ export function Sidebar({
 
                 {/* Footer with Settings and Version */}
                 <div className="px-2 py-1 border-t border-[var(--border-color)] shrink-0">
+                    <button type="button" onClick={() => setWorkspaceBackupOpen(true)} title="Backup and restore workspaces"
+                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]">
+                        <Archive size={14} className="shrink-0" />
+                        {!collapsed && <span>Backup workspaces</span>}
+                    </button>
                     <button
                         onClick={() => setSettingsOpen(true)}
                         className={`
@@ -918,6 +926,7 @@ export function Sidebar({
             </aside>
 
             <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+            <WorkspaceBackupModal isOpen={workspaceBackupOpen} onClose={() => setWorkspaceBackupOpen(false)} />
 
 
             {/* Context Menu */}

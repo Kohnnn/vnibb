@@ -342,7 +342,7 @@ function inferOrientation(layout: CompactableLayoutItem['layout']): LayoutOrient
 function resolveLayoutBehavior(item: CompactableLayoutItem, cols: number): ResolvedLayoutBehavior {
   const explicit = item.type ? WIDGET_LAYOUT_BEHAVIORS[item.type as WidgetType] : undefined
   const inferredOrientation = explicit?.orientation ?? inferOrientation(item.layout)
-  const minW = Math.max(item.layout.minW ?? explicit?.minW ?? FALLBACK_BEHAVIOR.minW, explicit?.minW ?? 1)
+  const minW = Math.min(cols, Math.max(item.layout.minW ?? explicit?.minW ?? FALLBACK_BEHAVIOR.minW, explicit?.minW ?? 1))
   const minH = Math.max(item.layout.minH ?? explicit?.minH ?? FALLBACK_BEHAVIOR.minH, explicit?.minH ?? 1)
 
   const preferredWBase = explicit?.preferredW ?? item.layout.w ?? FALLBACK_BEHAVIOR.preferredW

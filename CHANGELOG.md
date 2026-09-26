@@ -13,6 +13,14 @@ live in `docs/`.
 
 ## [Unreleased]
 
+### Added
+- Personal workspace JSON backup with multi-tab layouts, widget configuration, nested folders, and isolated ticker-group snapshots. Imports preview their contents and restore as new local copies without replacing existing dashboards or sending imported layouts to the backend.
+- Copilot chart/table actions can target a named personal dashboard and tab, including from a system dashboard. Symbol-bearing actions disclose their shared-ticker effect before confirmation.
+- Ticker scope is explicit and reversible: a widget shows whether its ticker is shared with its group or kept locally, can be detached without leaving the group, and can rejoin with one action that adopts the group's current ticker.
+- Statement tables are selectable: choosing a metric charts exactly that series and labels what is charted, and the choice rides along in the existing widget-to-copilot payload.
+- Purpose-bound research starters pair a template with its VniAgent prompt. Applying one discloses how its widgets handle tickers and primes the agent through the same seam the onboarding walkthrough uses.
+- Copilot artifact placement remembers the chosen dashboard/tab for the rest of the response and across reloads, records artifact provenance inside the created widget, and can save a table artifact to the research notebook once.
+
 ### Deployed
 - Released to the Oracle stack on 2026-09-24. Serving revision
   `d329dc2b2250bba00652a363684d58799939fae6`, published as
@@ -31,6 +39,13 @@ live in `docs/`.
   this.
 
 ### Fixed
+- Narrow widget headers move controls into an accessible compact panel; overflow menus escape card clipping and support keyboard navigation. Chart timeframe/type controls now agree across the header, chart body, and saved configuration.
+- Responsive viewing, empty-state hints, zoom/container changes, and edit-mode toggles no longer rewrite authored desktop widget geometry. Explicit desktop pointer/keyboard edits remain supported; narrow layouts are view-only.
+- Restored workspace ticker groups stay scoped to their copies. Deep links wait for local hydration and the requested dashboard before applying a ticker, preserving the original workspace ticker.
+- Maximized widgets mount a single live editor; the grid cell keeps only a placeholder, so a persisted edit while maximized is no longer duplicated or dropped by a second instance.
+- Imported workspaces normalize retired widget type aliases to canonical ids, so widgets saved before the type migration resolve instead of rendering "Widget not found".
+- Statement widgets keep their table/chart and period controls reachable on a dashboard. The dashboard renders widget chrome from the wrapper, which suppressed the widgets' own header, so those controls were absent from the running app; they now live in the widget body. Selecting a metric or period also no longer renders an empty cash-flow chart.
+
 - Financial ratio tables no longer present absent data as real numbers. A period the
   provider could not compute (missing price, EPS, or book value) is now shown as an empty
   cell instead of `0.00`. Valuation multiples treat a literal `0` as absent, because a

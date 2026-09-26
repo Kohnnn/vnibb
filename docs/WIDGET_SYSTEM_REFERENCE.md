@@ -285,7 +285,7 @@ The generator (`src/contexts/__generators__/systemLayoutPayloads.gen.test.ts`) m
 
 - Base widget sizes are for autofit and initial placement.
 - Manual resizing should not be blocked by stale `maxW` / `maxH` caps.
-- Runtime auto-compact behavior should only shrink genuinely empty widgets and should not override manual resize after data is present.
+- Runtime empty-state hints do not persist geometry changes. Authored desktop sizes and gaps survive loading, empty/error states, responsive viewing, and maximize/restore; only explicit desktop layout actions save geometry.
 - Dense table and list widgets should prefer wrapping and scrolling over fixed truncation where practical.
 
 Recent resize/runtime cleanup covered these widgets in particular:
@@ -412,6 +412,41 @@ Widget library UX rules:
 - Low-resolution layouts should treat VniAgent as an overlay sooner to protect workspace width.
 - Header and tab-strip controls should collapse or simplify earlier instead of forcing horizontal crowding.
 - Recoverable widget/runtime failures should surface in UI state first; production builds should avoid noisy browser-console logging for handled widget errors, export failures, and local fallback paths.
+- Widget headers measure available space. Narrow headers retain the title/maximize action and expose remaining controls in a keyboard-accessible panel; menus render outside card clipping and return focus to their trigger.
+- Desktop-only layout editing applies to both pointer and keyboard. Native Tab navigation reaches widget controls; arrow layout shortcuts apply only to the focused widget panel, never a nested control.
+- The Price Chart header and body use the same timeframe/mode domain and persist edits on personal dashboards. Supported modes are candles, line and area; legacy saved values are normalized when read.
+
+### Local Workspace Backup
+
+Use **Backup workspaces** in the sidebar to download personal dashboard configuration, including tabs, authored layouts, widget configuration, folders and ticker-group snapshots. This is distinct from single-layout template export; it does not flatten tabs.
+
+Restore accepts the versioned `vnibb-personal-workspace` JSON format up to 5 MB, validates it, previews names/counts, and imports fresh local copies only after confirmation. Existing dashboards remain unchanged. Imported IDs are excluded from backend synchronization; their global/A–D ticker groups are scoped independently. Retired widget type aliases are normalized to canonical ids during import so restored widgets resolve in the registry. Invalid versions, unknown widgets, impossible geometry, unsafe configuration and storage failures are reported rather than silently dropping content.
+
+System/admin layouts, authentication, settings, saved templates and unrelated browser storage are not exported. Widget configuration and user-entered content are included; review a backup before sharing. Known credential keys are rejected, but the backup is not an encrypted vault or a complete browser-profile backup. Notes or artifacts stored outside widget configuration are outside this export.
+
+### Artifact Placement
+
+Copilot artifact actions list named editable personal dashboard/tab destinations and exclude managed system dashboards. The final action states the widget/destination and any shared-ticker change. Existing templates remain the way to create a personal research starter; no second gallery or OpenBB service is required.
+
+Copilot artifact placement remembers the destination chosen for one artifact as the default for the rest of that response and across reloads, writes artifact provenance into the created widget's config so a promoted widget stays identifiable, and can save a table artifact to the research notebook with a dedupe key.
+
+A promoted widget carries `config.copilotArtifactProvenance` (`artifactId`, `responseId`, `artifactType`, `artifactTitle`, `dashboardId`, `tabId`, `destination`, `createdAt`), which travels with a workspace export. The destination memory lives in `localStorage['vnibb-copilot-artifact-placement']` and the widget-id-keyed badge index in `localStorage['vnibb-copilot-artifact-provenance']`; neither is device-portable, so a restored workspace on another browser is identifiable by the widget's own config marker but does not re-render the card badge.
+
+### Linked Ticker Scope
+
+A widget's ticker either follows its group or is kept locally. The widget header states which, and switching groups never rewrites a local ticker; "Follow <Group>" returns the widget to the group and adopts the group's *current* ticker. Widgets whose provider links are fixed (the TradingView embeds) never adopt a new ticker on a group change. Ticker scope and period scope are separate channels.
+
+### Table Selection
+
+Dense financial tables expose selectable metric rows and period columns. A metric selection charts exactly that series and shows the selection label in the chart header; a period selection marks that period. Selection is view state and is never persisted into widget config. The active selection is included in the widget's existing runtime payload so the copilot can target it.
+
+### Research Starters
+
+A starter binds one template to its VniAgent prompt. Applying a starter-bound template shows its purpose and how its widgets handle tickers, seeds the workspace, and primes the agent through the same channel the onboarding walkthrough uses. Templates remain the composition mechanism; there is no second gallery.
+
+### Widget Chrome Placement
+
+Widget chrome (view toggles, parameters, period controls) must render inside the widget body. The dashboard wraps widget children in a header-suppressing provider, so a control placed only in the widget's own container header is unreachable in the running app even though it renders in a component test.
 
 ## Data Quality / Empty States
 

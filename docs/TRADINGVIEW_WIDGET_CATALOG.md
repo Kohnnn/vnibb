@@ -48,7 +48,7 @@ Source of truth:
 - `Market Overview` and `Market Data` now support TradingView-compatible preset builders for tabs and symbol groups, including cross-asset macro and Vietnam/regional risk presets, while advanced JSON still supports fully custom payloads.
 - `Fundamental Data` now exposes a friendlier `Financial Panel` preset selector such as `Overview`, `Valuation`, `Profitability`, `Growth`, `Balance Sheet`, and `Cash Flow`, with manual `fieldGroups` and `columns` editors still available.
 - Symbol-bearing TradingView widgets now support an app-level `Sync With Global Markets Symbol` option so linked chart and company-detail widgets can follow the same TradingView/global-market ticker across dashboards without changing the VNIBB stock-symbol flow.
-- The shared TradingView/global-market default symbol is `NASDAQ:VFS`.
+- The shared TradingView/global-market default symbol is `AMEX:SPY`. (`NASDAQ:VFS` is a retired default: it is still recognised as a legacy value but normalises to `null`, so a stale config falls back to `AMEX:SPY`.)
 - On the admin-managed `Global Markets` system dashboard, widget settings are read-only until Admin Mode is enabled. After edits, use `Save Draft` or `Publish Global` from the floating admin controls to ship them.
 - Dark mode is the default across TradingView widgets today. Light mode is still available per widget, and a future app-level theme pass can promote that into a global TradingView theme preference.
 - Symbol-bearing TradingView widgets still keep a widget-local symbol in config, but linked TradingView widgets now resolve from the dedicated shared Global Markets symbol channel.
@@ -59,7 +59,8 @@ Source of truth:
 Implemented alongside this catalog:
 
 - grouped TradingView settings UI
-- TradingView/global-markets shared symbol channel with `NASDAQ:VFS` default
+- TradingView/global-markets shared symbol channel with `AMEX:SPY` default
+- the Global Markets crypto template no longer passes a `symbolsPreset` that nothing reads; the ticker tape uses the widget's `symbols` config, so the documented preset must match what the renderer actually consumes
 - admin-managed Global Markets widget settings and publish flow
 - corrected web-component loader host and key config fixes for previously failing widgets
 

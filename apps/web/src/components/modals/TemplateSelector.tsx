@@ -15,14 +15,32 @@ import {
 } from '@/lib/customTemplates';
 import { recommendTemplates, recordTemplateUse, type RecommendedTemplate } from '@/lib/templateRecommender';
 import type { Dashboard } from '@/types/dashboard';
+import type { WidgetGroupId } from '@/types/widget';
 import { cn } from '@/lib/utils';
 import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  describeStarterDisclosure,
+  getStarterForTemplate,
+  type ResearchStarter,
+  type StarterPromptKey,
+} from '@/lib/researchStarters';
 
 interface TemplateSelectorProps {
   open: boolean;
   onClose: () => void;
   onSelectTemplate: (template: DashboardTemplate) => void;
+  /**
+   * Primes VniAgent with the applied starter's prompt. DashboardClient owns
+   * the copilot seam (setCopilotStarterPrompt + request-id bump + openCopilot).
+   */
+  onStarterPromptRequest?: (promptKey: StarterPromptKey) => void;
+  /**
+   * Ticker groups the dashboard produced by `onSelectTemplate` actually
+   * shares. Templates seed widgets without a widgetGroup, so callers pass an
+   * empty list unless they genuinely assign groups.
+   */
+  sharedTickerGroups?: readonly WidgetGroupId[];
   /** When provided, the modal shows a "Save current dashboard as template" CTA. */
   currentDashboard?: Dashboard | null;
   /** Used to bias the recommender toward symbol-relevant templates. */
@@ -96,6 +114,18 @@ function getWidgetIconClass(widgetType: string): { tone: string; label: string }
   return { tone: 'bg-slate-500/20 text-slate-200 border-slate-500/40', label: 'W' };
 }
 
+function getTemplateStarter(template: DashboardTemplate): ResearchStarter | undefined {
+  // Custom saved layouts are keyed by their own ids and never carry a starter.
+  return template.id.startsWith('custom-') ? undefined : getStarterForTemplate(template.id);
+}
+
+function getStarterDisclosure(
+  starter: ResearchStarter | undefined,
+  sharedTickerGroups: readonly WidgetGroupId[],
+): string | null {
+  return starter ? describeStarterDisclosure(starter, { sharedTickerGroups }) : null;
+}
+
 function TemplateLayoutPreview({ template }: { template: DashboardTemplate }) {
   const maxY = Math.max(...template.widgets.map((widget) => widget.layout.y + widget.layout.h), 1);
   const visibleWidgets = template.widgets.slice(0, 12);
@@ -142,7 +172,7 @@ function TemplateLayoutPreview({ template }: { template: DashboardTemplate }) {
   );
 }
 
-function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDashboard, currentSymbol }: TemplateSelectorProps) {
+function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterPromptRequest, sharedTickerGroups, currentDashboard, currentSymbol }: TemplateSelectorProps) {
   const [selectedCategory, setSelectedCategory] = useState<DashboardTemplateCategory | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [customTemplates, setCustomTemplates] = useState<CustomDashboardTemplate[]>([]);
@@ -151,6 +181,10 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
   const [saveName, setSaveName] = useState('');
   const [saveCategory, setSaveCategory] = useState<DashboardTemplateCategory>('market');
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Discloses what applying a starter-bound template does the moment the user
+  // asks for it, so the consequence is read before the workspace is replaced.
+  const [pendingStarter, setPendingStarter] = useState<{ template: DashboardTemplate; starter: ResearchStarter; disclosure: string } | null>(null);
+  const [appliedStarter, setAppliedStarter] = useState<ResearchStarter | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: open, onClose });
 
@@ -161,12 +195,38 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
     });
     setCustomTemplates(loadCustomTemplates());
     setRecommendations(recommendTemplates({ currentSymbol: currentSymbol ?? null, limit: 4 }));
+    // Stale confirmations must not survive a close/reopen of the modal.
+    setPendingStarter(null);
+    setAppliedStarter(null);
   }, [open, currentSymbol]);
 
-  const handleApplyTemplate = (template: DashboardTemplate) => {
+  const applyTemplate = (template: DashboardTemplate, starter: ResearchStarter | undefined) => {
     recordTemplateUse(template, currentSymbol ?? null);
     onSelectTemplate(template);
+    if (starter) {
+      setAppliedStarter(starter);
+      onStarterPromptRequest?.(starter.promptKey);
+    }
     onClose();
+  };
+
+  const handleApplyTemplate = (template: DashboardTemplate) => {
+    const starter = getTemplateStarter(template);
+    if (!starter) {
+      applyTemplate(template, undefined);
+      return;
+    }
+    setPendingStarter({
+      template,
+      starter,
+      disclosure: getStarterDisclosure(starter, sharedTickerGroups ?? []) as string,
+    });
+  };
+
+  const handleConfirmStarter = () => {
+    if (!pendingStarter) return;
+    setPendingStarter(null);
+    applyTemplate(pendingStarter.template, pendingStarter.starter);
   };
 
   const handleSaveCurrent = () => {
@@ -302,6 +362,22 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Applied confirmation: the starter's purpose and its real ticker-group
+            consequence stay visible in the modal that launched it. */}
+        {appliedStarter ? (
+          <div className="border-b border-[var(--border-default)] bg-blue-500/10 px-5 py-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-200">
+              Starter applied · {appliedStarter.name}
+            </p>
+            <p className="mt-1 text-[11px] font-semibold text-blue-100">
+              {getStarterDisclosure(appliedStarter, sharedTickerGroups ?? [])}
+            </p>
+            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+              VniAgent is primed with this starter&apos;s prompt for {appliedStarter.name.toLowerCase()}.
+            </p>
+          </div>
+        ) : null}
 
         {/* Category Filter */}
         <div className="space-y-3 border-b border-[var(--border-default)] bg-[var(--bg-surface)]/70 p-4">
@@ -499,6 +575,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                 {recommendations.map(({ template, reason }) => {
                   const categoryLabel = DASHBOARD_TEMPLATE_CATEGORIES.find((c) => c.id === template.category)?.label || template.category;
+                  const starter = getTemplateStarter(template);
                   return (
                     <article
                       key={`rec-${template.id}`}
@@ -517,6 +594,9 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
                         {template.name}
                       </h3>
                       <p className="mt-1 line-clamp-2 text-[11px] text-[var(--text-muted)]">{template.description}</p>
+                      {starter ? (
+                        <p className="mt-2 text-[11px] font-semibold leading-relaxed text-amber-200/90">{starter.purpose}</p>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => handleApplyTemplate(template)}
@@ -534,6 +614,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {filteredTemplates.map(template => {
               const categoryLabel = DASHBOARD_TEMPLATE_CATEGORIES.find((category) => category.id === template.category)?.label || template.category;
+              const starter = getTemplateStarter(template);
               return (
                 <article
                   key={template.id}
@@ -555,6 +636,11 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
                   <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
                     {template.description}
                   </p>
+                  {starter ? (
+                    <p className="mt-2 text-[11px] font-semibold leading-relaxed text-blue-200/90">
+                      {starter.purpose}
+                    </p>
+                  ) : null}
 
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {template.widgets.slice(0, 5).map((widget) => (
@@ -594,6 +680,55 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
           )}
         </div>
       </motion.div>
+
+      {/* Pre-apply disclosure: shown before the current workspace is replaced. */}
+      <AnimatePresence>
+        {pendingStarter ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/60 p-4"
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="starter-disclosure-title"
+              className="w-full max-w-lg rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 shadow-[0_24px_80px_rgba(15,23,42,0.45)]"
+            >
+              <h3
+                id="starter-disclosure-title"
+                className="text-sm font-black uppercase tracking-tight text-[var(--text-primary)]"
+              >
+                {pendingStarter.starter.name}
+              </h3>
+              <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">
+                {pendingStarter.starter.purpose}
+              </p>
+              <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">
+                {pendingStarter.disclosure}
+              </p>
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPendingStarter(null)}
+                  className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmStarter}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white transition-colors hover:bg-blue-500"
+                >
+                  Apply {pendingStarter.template.name}
+                  <ChevronRight size={13} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }

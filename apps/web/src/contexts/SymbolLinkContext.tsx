@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import { DEFAULT_TICKER, normalizeTickerSymbol, readStoredTicker, writeStoredTicker } from '@/lib/defaultTicker';
+import { useDashboard } from '@/contexts/DashboardContext';
+import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 
 interface SymbolLinkContextType {
   globalSymbol: string;
@@ -16,20 +18,29 @@ const SymbolLinkContext = createContext<SymbolLinkContextType | null>(null);
 export function SymbolLinkProvider({ children }: { children: ReactNode }) {
   const [globalSymbol, setGlobalSymbolState] = useState<string>(DEFAULT_TICKER);
   const [linkedWidgets, setLinkedWidgets] = useState<Set<string>>(new Set());
+  const [isLoaded, setIsLoaded] = useState(false);
+  const { activeDashboard } = useDashboard();
+  const { globalSymbol: groupGlobalSymbol, setGlobalSymbol: setGroupGlobalSymbol } = useWidgetGroups();
+  const hasWorkspaceGroups = Boolean(activeDashboard?.widgetGroups);
 
   useEffect(() => {
     setGlobalSymbolState(readStoredTicker());
+    setIsLoaded(true);
   }, []);
 
   useEffect(() => {
-    writeStoredTicker(globalSymbol);
-  }, [globalSymbol]);
+    if (isLoaded) writeStoredTicker(globalSymbol);
+  }, [globalSymbol, isLoaded]);
 
   const setGlobalSymbol = useCallback((symbol: string) => {
     const normalized = normalizeTickerSymbol(symbol);
     if (!normalized) return;
+    if (hasWorkspaceGroups) {
+      setGroupGlobalSymbol(normalized);
+      return;
+    }
     setGlobalSymbolState(normalized);
-  }, []);
+  }, [hasWorkspaceGroups, setGroupGlobalSymbol]);
 
   const toggleWidgetLink = useCallback((widgetId: string) => {
     setLinkedWidgets(prev => {
@@ -49,7 +60,7 @@ export function SymbolLinkProvider({ children }: { children: ReactNode }) {
 
   return (
     <SymbolLinkContext.Provider value={{
-      globalSymbol,
+      globalSymbol: hasWorkspaceGroups ? groupGlobalSymbol : globalSymbol,
       setGlobalSymbol,
       linkedWidgets,
       toggleWidgetLink,
