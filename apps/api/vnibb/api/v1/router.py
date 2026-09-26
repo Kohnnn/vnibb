@@ -24,6 +24,7 @@ from vnibb.api.v1.health import router as health_router
 from vnibb.api.v1.insider import router as insider_router
 from vnibb.api.v1.listing import router as listing_router
 from vnibb.api.v1.market import router as market_router
+from vnibb.api.v1.matrix import router as matrix_router
 from vnibb.api.v1.microstructure import router as microstructure_router
 from vnibb.api.v1.news import router as news_router
 from vnibb.api.v1.prediction_markets import router as prediction_markets_router
@@ -40,6 +41,8 @@ from vnibb.api.v1.websocket import router as websocket_router
 
 # Main v1 router
 api_router = APIRouter()
+
+api_router.include_router(matrix_router, prefix="/matrix", tags=["Matrix"])
 
 # Mount sub-routers
 api_router.include_router(

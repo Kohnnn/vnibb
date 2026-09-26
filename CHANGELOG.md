@@ -30,17 +30,85 @@ live in `docs/`.
   these migrations should provision the app role as the owner to avoid repeating
   this.
 
+### Added
+- **Matrix** (`research_matrix`) — frozen company-by-question research. A registered
+  dashboard widget compares an anchor company with an editable peer shortlist over
+  four curated sector playbooks (non-financial, banks, insurers, securities) at a
+  common fiscal year, with a common-quarter override. Supported dimensions carry
+  frozen typed values, exact serving-record evidence and explicit limitations;
+  unsupported sector metrics report `unavailable` rather than being mapped to a
+  misleading generic proxy, and mismatched reporting basis reports `non_comparable`.
+  One canonical decimal value and one server-formatted `display` drive the cell,
+  preview, evidence inspector and copied selection, so a percentage can never be
+  re-rendered with a different sign or scale. Snapshots are owner-bound and
+  immutable in the existing `app_kv` store, with append-only revision-bound review
+  and separate revocation; browser persistence holds view preferences and snapshot
+  references only, never protected values. View operations execute no research.
+- **Evidence inspector and scoped handoff.** Each cell opens its exact evidence with
+  basis, scope and review state, and can be carried into a scoped follow-up. The
+  VniAgent path sends a typed `{snapshot_id, result_ids}` selection whose context the
+  server rebuilds and reauthorizes; the request text carries references only. The
+  external MCP path exposes a read-only `get_matrix_selection` tool that resolves the
+  same selection from the per-request authenticated user identity, refuses the shared
+  deployment bearer, and is subject to an explicit source-rights policy that denies
+  unapproved providers (including configured `family:unknown`), so snapshot
+  references are never bearer grants.
+
 ### Fixed
+- Prediction-market analysis now exposes full contract terms/outcomes and
+  1d/7d/30d recorded history, with observed percentage-point changes, ranges,
+  sample counts and actual coverage. Intraday and nightly observations are
+  merged without fabricated gaps; the drawer escapes transformed widget grids.
+- All five prediction providers remain visible. Synthetic/stale catalogue rows
+  no longer masquerade as current odds; missing price vectors are not 0%, and
+  zero-source calibration no longer claims divergence. Reads share a bounded
+  fresh catalogue; descriptions, source units and timestamps retain provenance.
+  Verification: 32 API regressions and 18 frontend regressions passed; real-data
+  browser smoke exercised drawer rendering, history-window changes, and Escape.
+  Full frontend typecheck is blocked by unrelated Matrix test fixtures missing
+  `CopilotResponseMeta.mode` and `latencyMs` in `AICopilot.matrix.test.tsx`.
+- Prediction-market catalogue growth is now bounded. The Kalshi cursor sweep
+  stops at a hard ingest budget instead of paging the whole corpus, and a new
+  daily retention job deletes catalogue rows no provider has refreshed within
+  the retention horizon — rows the bounded read path can never return. Retention
+  walks the stale end through a new `(updated_at, id)` index and never touches
+  synthetic provenance, archived referents, or terminal rows owned by the
+  archiving retention. On the live node the catalogue went from 14.7 M rows and
+  12.3 GB of heap to 2.5 M rows and 1.3 GB, with host root usage falling from
+  74 G to 58 G. Verification: 6 new retention tests plus a Kalshi budget
+  regression, all passing; the production batch walk measured 3.26 ms for 5,000
+  rows versus 112 s for the naive count.
+- Prediction-market ingestion excludes Kalshi multivariate combos and enforces
+  bounded batches, payloads, per-source catalogue admission and relation-size
+  ceilings. Both snapshot cadences select a fresh, real, capped universe;
+  interval keys and serialized writes prevent retries or changing selections
+  from exceeding bucket limits. Daily and intraday retention run independently.
+  Random historical backfill and production fixture fallback no longer create
+  fabricated observations. Index migration supports bounded catalogue reads.
+- OCI backup container-space probes now support BusyBox as well as GNU `df`,
+  and reject stopped containers before starting a dump.
 - Financial ratio tables no longer present absent data as real numbers. A period the
   provider could not compute (missing price, EPS, or book value) is now shown as an empty
   cell instead of `0.00`. Valuation multiples treat a literal `0` as absent, because a
   company never trades at zero times earnings; metrics where zero is meaningful are
   untouched. This affected both the Financial Ratios widget and the Ratios tab of the
   Financials widget, where an earlier formatter coerced `null` through `Number(null)`.
-- The Financial Ratios widget's year span now matches the Income Statement, Balance Sheet,
-  and Cash Flow panels beside it in Financial Period View. It previously unioned its own
-  longer history with theirs, so one period selector showed 2012-2026 in that table and
-  2018-2026 in the other three. Leading periods with no ratio data are also trimmed.
+- Financial Period View aligns both the standalone Financial Ratios widget and the
+  Financials Ratios tab to the adjacent statement panels' fiscal-period window.
+  Older ratio-only years are excluded, and a statement-only current-year YTD
+  period remains visible with empty ratio cells. If the statement feed is
+  unavailable, both views retain their available ratio periods.
+- Synthetic YTD and TTM statements now preserve missing quarterly metrics as
+  unknown instead of summing them as zero. Income and cash-flow snapshots sum
+  only their own fields, and a reported zero remains zero only when every
+  contributing quarter reported a value.
+- Prediction-market intraday retention now runs independently of the 15-minute
+  snapshot writer. It deletes only rows older than seven days in bounded,
+  resumable transactions; ingest timeout no longer strands the cleanup step.
+  The OCI backup producer checks available space before dumping, streams
+  PostgreSQL once, and removes incomplete sets without pruning prior backups.
+  The off-box restore accepts historical manifests that self-listed
+  `manifest.json` while still verifying both data artifacts by hash.
 - Backup verification now fails on artifact corruption, nonzero restore, missing equity history, or an existing scratch database; failed copies remove their partial staged dump without deleting a pre-existing one. An isolated off-box Postgres/Mongo restore utility verifies a paired set, representative data, and container cleanup before reporting success.
 - The API reads durable scheduler-worker outcomes across processes and returns unavailable instead of empty healthy status when its observation store fails. Prediction-market query paths are bounded; terminal-market retention is archive-first, row-locked, batch-limited, dry-run by default, and gated on an operator-verified backup/isolated restore.
 - A cached whole-market screener Universe requires a completed full-run symbol-coverage record; partial runs do not invalidate a previously complete partition. Screener provider failures without fallback are marked unavailable rather than zero matches, and quote failures no longer fabricate zero price or current timestamps.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import logging
 import re
@@ -10,11 +11,14 @@ from datetime import date, datetime
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
+from mcp.types import ToolAnnotations
 from sqlalchemy import select
 
+from vnibb.core.auth import User, get_current_user
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, check_database_connection
 from vnibb.core.logging_config import setup_logging
@@ -25,6 +29,7 @@ from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.services.ai_context_service import AIContextService, sanitize_context_value
+from vnibb.services.matrix_service import require_matrix_export_rights, resolve_matrix_selection
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
 logger = logging.getLogger(__name__)
@@ -41,7 +46,8 @@ Guardrails:
   tools: `get_eod_price_history`, `get_premium_dataset`, `get_intraday_trades`, `get_price_depth`.
   Call `list_premium_datasets` to discover allowlisted dataset names.
 - This server is intentionally read-only. It does not expose admin, write, delete, backfill, or schema-mutation tools.
-- User-owned and operationally sensitive tables are intentionally excluded.
+- User-owned tables are excluded from generic queries. Matrix selections require the owner's
+  verified Supabase JWT on each HTTP request and explicit source export rights.
 - Include freshness and source notes when summarizing data for downstream agents.
 """.strip()
 
@@ -977,6 +983,41 @@ def database_collection_audit(collection: str, symbol: str | None = None) -> str
     )
 
 
+def _matrix_request_user(ctx: Context) -> User:
+    try:
+        request = ctx.request_context.request
+    except ValueError:
+        request = None
+    user = getattr(request.state, "matrix_user", None) if isinstance(request, Request) else None
+    if not isinstance(user, User) or user.provider != "supabase":
+        raise ToolError("Matrix requires a verified user JWT over HTTP; shared bearer and stdio cannot authorize it")
+    return user
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+async def get_matrix_selection(
+    snapshot_id: str, result_ids: list[str], ctx: Context
+) -> dict[str, Any]:
+    """Read the caller's frozen Matrix selection and evidence, subject to source export rights."""
+    user = _matrix_request_user(ctx)
+    try:
+        async with async_session_maker() as db:
+            packet = await resolve_matrix_selection(
+                db, user.id, {"snapshot_id": snapshot_id, "result_ids": result_ids}
+            )
+            require_matrix_export_rights(packet)
+            return packet
+    except HTTPException as exc:
+        message = {
+            403: "Matrix source export is not permitted",
+            404: "Matrix selection not found",
+            422: "Invalid Matrix selection",
+        }.get(exc.status_code, "Matrix selection unavailable")
+        raise ToolError(message) from None
+    except Exception:
+        raise ToolError("Matrix selection unavailable") from None
+
+
 @mcp.tool()
 def list_supported_collections() -> dict[str, Any]:
     """List the VNIBB database tables intentionally exposed by the read-only VNIBB MCP."""
@@ -1443,22 +1484,30 @@ def create_http_app() -> FastAPI:
     )
 
     @app.middleware("http")
-    async def _shared_token_guard(request: Request, call_next):
+    async def _request_auth_guard(request: Request, call_next):
+        request.state.matrix_user = None
         if request.url.path == "/health":
             return await call_next(request)
 
         expected = settings.vnibb_mcp_shared_bearer_token
-        if not expected:
+        received = request.headers.get("authorization", "")
+        if expected and hmac.compare_digest(received.encode(), f"Bearer {expected}".encode()):
             return await call_next(request)
 
-        received = request.headers.get("authorization", "")
-        if received != f"Bearer {expected}":
+        if received:
+            try:
+                request.state.matrix_user = await get_current_user(received)
+            except HTTPException:
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": True, "message": "Missing or invalid VNIBB MCP bearer token"},
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+        elif expected:
             return JSONResponse(
                 status_code=401,
-                content={
-                    "error": True,
-                    "message": "Missing or invalid VNIBB MCP bearer token",
-                },
+                content={"error": True, "message": "Missing or invalid VNIBB MCP bearer token"},
+                headers={"WWW-Authenticate": "Bearer"},
             )
 
         return await call_next(request)
