@@ -22,6 +22,18 @@ live in `docs/`.
 - Copilot artifact placement remembers the chosen dashboard/tab for the rest of the response and across reloads, records artifact provenance inside the created widget, and can save a table artifact to the research notebook once.
 
 ### Deployed
+- Released the integrated Workspace and Matrix build on 2026-09-27. Merge
+  revision `7c9274e6a060615484832b9838804eb53eb4cc9b` passed all four hosted
+  CI jobs. OCI API, MCP and scheduler run the same ARM64 image
+  `ghcr.io/kohnnn/vnibb-api@sha256:b5b2ab435ff1c3bd290adadd4a67a4a6dcadb7ac8824521bca8bd694bb6c6af8`;
+  PostgreSQL is at migration `b7312f0c4e88`. Canonical `vnibb-web` Vercel
+  production serves deployment `dpl_ExuTux8bnpvoTFtoiNVw5eQggF5q`. A fresh
+  paired Postgres/Mongo backup `20260927T133058Z` passed on-host scratch and
+  isolated off-box restores before migration. Production Matrix peer/period
+  preparation reads retained real FPT/CMG observations; anonymous snapshot
+  history returns 401 and supplier export remains denied without explicit
+  rights. A real end-user snapshot/LLM handoff, physical touch and human
+  product approval are not claimed; see the dated acceptance ledger.
 - Released to the Oracle stack on 2026-09-24. Serving revision
   `d329dc2b2250bba00652a363684d58799939fae6`, published as
   `ghcr.io/kohnnn/vnibb-api@sha256:49c167d79177453c2962953022f9cf0ecb072646c48c504d13b1271f49349ed3`.
