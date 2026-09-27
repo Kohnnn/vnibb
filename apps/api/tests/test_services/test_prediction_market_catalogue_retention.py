@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select
+
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.models.prediction_market_archive import PredictionMarketArchive
 from vnibb.services import prediction_market_catalogue_retention as svc
@@ -110,6 +111,42 @@ async def test_keeps_rows_that_are_not_debris(test_db) -> None:
     assert archived.id in survivors, "the archive referent must survive"
     assert keeper.id in survivors, "the fresh row must survive"
     assert await _count(test_db) == 3
+
+@pytest.mark.asyncio
+async def test_terminal_unarchived_market_waits_for_archive_first_retention(test_db) -> None:
+    stale = float(MARKET_RETENTION.days) + 10
+    terminal = _market(10, age_days=stale, active=False, closed=True)
+    archived = _market(11, age_days=stale)
+    synthetic = _market(12, age_days=stale, is_synthetic=True)
+    test_db.add_all([terminal, archived, synthetic])
+    await test_db.commit()
+    test_db.add(
+        PredictionMarketArchive(
+            market_id=archived.id,
+            batch_id="batch-terminal-regression",
+            payload={},
+            sha256="0" * 64,
+            archived_at=NOW.replace(tzinfo=None),
+            backup_sha256="1" * 64,
+        )
+    )
+    await test_db.commit()
+
+    assert await svc.has_catalogue_debris(test_db, now=NOW) is False
+
+    nonterminal = _market(13, age_days=stale, active=False, closed=False)
+    test_db.add(nonterminal)
+    await test_db.commit()
+
+    assert await svc.has_catalogue_debris(test_db, now=NOW) is True
+    preview = await svc.purge_catalogue_debris(test_db, now=NOW)
+    assert preview["candidates"] == 1
+    assert preview["deleted"] == 0
+
+    receipt = await svc.purge_catalogue_debris(test_db, now=NOW, apply=True)
+    assert receipt["candidates"] == 1
+    assert receipt["deleted"] == 1
+    assert await _remaining_ids(test_db) == {terminal.id, archived.id, synthetic.id}
 
 
 @pytest.mark.asyncio

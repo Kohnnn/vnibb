@@ -196,11 +196,17 @@ class MatrixPlaybook(MatrixModel):
     dimensions: list[MatrixDimension]
 
 
+class MatrixAvailablePeriods(MatrixModel):
+    year: list[str]
+    quarter: list[str]
+
+
 class MatrixPreparation(MatrixModel):
     anchor_symbol: str
     playbook_id: str
     symbols: list[str]
     peer_basis: str
     periods: list[str]
+    periods_by_symbol: dict[Symbol, MatrixAvailablePeriods]
     period_type: PeriodType
     limitations: list[str]

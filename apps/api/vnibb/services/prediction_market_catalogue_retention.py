@@ -5,8 +5,8 @@ as Kalshi mint short-dated contracts continuously, so the table accumulates
 write-once rows that no read path can ever return: reads only consider rows
 refreshed within ``MARKET_FRESHNESS`` inside ``SNAPSHOT_SOURCE_LIMIT`` per source.
 
-This job deletes the complement — rows a provider has not refreshed for
-``MARKET_RETENTION`` — which is unreadable by construction.
+This job deletes stale nonterminal rows a provider has not refreshed for
+``MARKET_RETENTION``; terminal rows require separate archive-first handling.
 
 The sweep deliberately walks the stale end with ``ORDER BY updated_at, id`` and
 a ``LIMIT`` instead of counting the complement first. Measuring on production
@@ -18,8 +18,8 @@ drain a large backlog over several runs.
 
 Rows that retention cannot safely drop are deliberately kept:
 
-* terminal, resolved contracts are owned by ``prediction_market_retention``,
-  which archives before deleting and requires an operator receipt;
+* inactive, closed contracts are owned by ``prediction_market_retention``,
+  which archives eligible resolved contracts before deleting with an operator receipt;
 * rows referenced by archived snapshots are kept so history stays explainable;
 * synthetic fixture rows are provenance, not debris.
 
@@ -48,13 +48,14 @@ logger = logging.getLogger(__name__)
 
 
 def _debris_predicate(cutoff: datetime):
-    """Stale, unarchived, non-synthetic catalogue rows (no explicit ordering)."""
+    """Stale, nonterminal, unarchived, non-synthetic catalogue rows."""
     archive_owner = select(PredictionMarketArchive.market_id).where(
         PredictionMarketArchive.market_id == PredictionMarket.id
     )
     return (
         PredictionMarket.updated_at < cutoff,
         PredictionMarket.is_synthetic.is_(False),
+        not_(PredictionMarket.active.is_(False) & PredictionMarket.closed.is_(True)),
         not_(archive_owner.exists()),
     )
 

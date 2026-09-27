@@ -25,7 +25,7 @@ beforeEach(() => {
   mockUpdateWidget.mockClear();
   jest.spyOn(matrixApi, 'playbooks').mockResolvedValue([{ playbook_id: 'nonfinancial', label: 'Nonfinancial', description: 'Stored classification required.', definition_revision: 'definition-1', dimensions: snapshot.dimensions }]);
   jest.spyOn(matrixApi, 'fixture').mockResolvedValue(snapshot);
-  jest.spyOn(matrixApi, 'prepare').mockResolvedValue({ anchor_symbol: 'FPT', playbook_id: 'nonfinancial', symbols: ['FPT', 'CMG'], peer_basis: 'Same stored industry', periods: ['2025'], period_type: 'year', limitations: [] });
+  jest.spyOn(matrixApi, 'prepare').mockResolvedValue({ anchor_symbol: 'FPT', playbook_id: 'nonfinancial', symbols: ['FPT', 'CMG'], peer_basis: 'Same stored industry', periods: ['2025'], periods_by_symbol: { FPT: { year: ['2025'], quarter: ['2025-Q2'] }, CMG: { year: ['2025'], quarter: ['2025-Q2'] } }, period_type: 'year', limitations: [] });
   jest.spyOn(matrixApi, 'create').mockResolvedValue({ ...snapshot, synthetic: false });
   jest.spyOn(matrixApi, 'evidence').mockResolvedValue([]);
   jest.spyOn(matrixApi, 'selection');
@@ -50,6 +50,77 @@ it('keeps result selection stable when filtering and never creates research thro
   const persisted = mockUpdateWidget.mock.calls.at(-1)?.[3].config.matrixView;
   expect(persisted).not.toHaveProperty('cells');
   expect(JSON.stringify(persisted)).not.toContain('9,007,199');
+});
+
+it('offers latest common year on shortlist edits and independent common quarters', async () => {
+  mockUser = { id: 'owner-a', provider: 'supabase' };
+  jest.spyOn(matrixApi, 'prepare').mockResolvedValue({
+    anchor_symbol: 'FPT', playbook_id: 'nonfinancial', symbols: ['FPT', 'CMG', 'ABC'], peer_basis: 'Same stored industry',
+    periods: ['2024'], period_type: 'year', limitations: [], periods_by_symbol: {
+      FPT: { year: ['2025', '2024'], quarter: ['2025-Q2', '2025-Q1'] },
+      CMG: { year: ['2025', '2024'], quarter: ['2025-Q2', '2025-Q1'] },
+      ABC: { year: ['2024'], quarter: ['2025-Q1'] },
+    },
+  });
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  await waitFor(() => expect(screen.getByLabelText('Year')).toHaveValue('2024'));
+  fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, CMG' } });
+  expect(screen.getByLabelText('Year')).toHaveValue('2025');
+  expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Create snapshot' }));
+  await waitFor(() => expect(matrixApi.create).toHaveBeenCalledWith(expect.objectContaining({ symbols: ['FPT', 'CMG'], period: '2025', period_type: 'year' })));
+  fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, CMG, ABC' } });
+  fireEvent.change(screen.getByLabelText('Period basis'), { target: { value: 'quarter' } });
+  expect(screen.getByLabelText('Year')).toHaveValue('2025');
+  expect(screen.getByLabelText('Quarter')).toHaveValue('2025-Q1');
+  expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Create snapshot' }));
+  await waitFor(() => expect(matrixApi.create).toHaveBeenLastCalledWith(expect.objectContaining({ symbols: ['FPT', 'CMG', 'ABC'], period: '2025-Q1', period_type: 'quarter' })));
+  expect(matrixApi.prepare).toHaveBeenCalledTimes(1);
+});
+
+it('retains a selected common period on shortlist edits and never offers absent periods', async () => {
+  mockUser = { id: 'owner-a', provider: 'supabase' };
+  jest.spyOn(matrixApi, 'prepare').mockResolvedValue({
+    anchor_symbol: 'FPT', playbook_id: 'nonfinancial', symbols: ['FPT', 'CMG', 'ABC'], peer_basis: 'Same stored industry',
+    periods: ['2024', '2023'], period_type: 'year', limitations: [], periods_by_symbol: {
+      FPT: { year: ['2025', '2024', '2023'], quarter: ['2025-Q2', '2025-Q1'] },
+      CMG: { year: ['2025', '2024', '2023'], quarter: ['2025-Q2', '2025-Q1'] },
+      ABC: { year: ['2024', '2023'], quarter: ['2025-Q1'] },
+    },
+  });
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  await waitFor(() => expect(screen.getByLabelText('Year')).toHaveValue('2024'));
+  fireEvent.change(screen.getByLabelText('Year'), { target: { value: '2023' } });
+  fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, CMG' } });
+  expect(screen.getByLabelText('Year')).toHaveValue('2023');
+  fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, XYZ' } });
+  expect(screen.getByLabelText('Year')).toHaveValue('');
+  expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeDisabled();
+  expect(matrixApi.prepare).toHaveBeenCalledTimes(1);
+});
+
+it('enables a stored common quarter when no annual year is shared', async () => {
+  mockUser = { id: 'owner-a', provider: 'supabase' };
+  jest.spyOn(matrixApi, 'prepare').mockResolvedValue({
+    anchor_symbol: 'FPT', playbook_id: 'nonfinancial', symbols: ['FPT', 'CMG'], peer_basis: 'Same stored industry',
+    periods: [], period_type: 'year', limitations: [], periods_by_symbol: {
+      FPT: { year: ['2025'], quarter: ['2025-Q2', '2025-Q1'] },
+      CMG: { year: ['2024'], quarter: ['2025-Q1'] },
+    },
+  });
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  await waitFor(() => expect(screen.getByLabelText('Year')).toHaveValue(''));
+  expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Period basis'), { target: { value: 'quarter' } });
+  expect(screen.getByLabelText('Year')).toHaveValue('2025');
+  expect(screen.getByLabelText('Quarter')).toHaveValue('2025-Q1');
+  expect(screen.queryByRole('option', { name: 'Q2' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Create snapshot' }));
+  await waitFor(() => expect(matrixApi.create).toHaveBeenCalledWith(expect.objectContaining({ period: '2025-Q1', period_type: 'quarter' })));
 });
 
 it('drops a pending owned snapshot when the authenticated account changes', async () => {

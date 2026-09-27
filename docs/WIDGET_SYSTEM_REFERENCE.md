@@ -67,11 +67,14 @@ Legacy aliases such as `company_profile`, `financials`, `institutional_ownership
 
 ## Matrix
 
-`research_matrix` (library name **Matrix**, category `analysis`, layout `24×16`,
-min `8×10`) renders frozen company-by-question research. A Matrix is an explicit
-**Create** action over an anchor company and an editable peer shortlist (2–10) at a
-common fiscal year, with a common-quarter override, evaluated against one of four
-curated sector playbooks: non-financial quality, banks, insurers, securities.
+`research_matrix` (library name **Research Matrix**, category `analysis`, layout
+`24×16`, min `8×10`) renders frozen company-by-question research. A Matrix is an
+explicit **Create** action over an anchor company and an editable peer shortlist
+(2–10) at a common fiscal year, with a common-quarter override, evaluated against
+one of four curated sector playbooks: non-financial quality, banks, insurers,
+securities. The explicit preparation response lists available years and quarters
+per proposed symbol; editing the shortlist recomputes only their common periods,
+without executing research.
 
 Reading the grid is always read-only. Changing density, filter, sort, pinned
 company, column width or open inspector never executes research and never calls a

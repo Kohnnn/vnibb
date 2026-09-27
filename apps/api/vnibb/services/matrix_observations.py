@@ -9,7 +9,7 @@ from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from uuid import NAMESPACE_URL, uuid5
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.stock import Stock, StockPrice
@@ -284,17 +284,19 @@ async def prepare_matrix(db, anchor_symbol: str) -> dict:
         classification = normalized_classification(anchor.industry or anchor.sector)
         peers = [stock for stock in peers if normalized_classification(stock.industry or stock.sector) == classification]
     symbols = [anchor_symbol, *(stock.symbol for stock in peers[:9])]
-    rows = (await db.execute(select(IncomeStatement.symbol, IncomeStatement.fiscal_year).where(IncomeStatement.symbol.in_(symbols), IncomeStatement.period_type == "year", IncomeStatement.fiscal_year.between(2000, datetime.now(UTC).year), or_(IncomeStatement.net_income.is_not(None), IncomeStatement.revenue.is_not(None))).distinct())).all()
-    periods_by_symbol = {symbol: set() for symbol in symbols}
+    rows = (await db.execute(select(IncomeStatement.symbol, IncomeStatement.period_type, IncomeStatement.fiscal_year, IncomeStatement.fiscal_quarter).where(IncomeStatement.symbol.in_(symbols), IncomeStatement.fiscal_year.between(2000, datetime.now(UTC).year), or_(IncomeStatement.period_type == "year", and_(IncomeStatement.period_type == "quarter", IncomeStatement.fiscal_quarter.between(1, 4))), or_(IncomeStatement.net_income.is_not(None), IncomeStatement.revenue.is_not(None))).distinct())).all()
+    available = {symbol: {"year": set(), "quarter": set()} for symbol in symbols}
     for row in rows:
-        periods_by_symbol[row.symbol].add(str(row.fiscal_year))
-    periods = sorted(set.intersection(*periods_by_symbol.values()), reverse=True)
+        period = str(row.fiscal_year) if row.period_type == "year" else f"{row.fiscal_year}-Q{row.fiscal_quarter}"
+        available[row.symbol][row.period_type].add(period)
+    periods = sorted(set.intersection(*(item["year"] for item in available.values())), reverse=True)
+    periods_by_symbol = {symbol: {basis: sorted(periods, reverse=True) for basis, periods in item.items()} for symbol, item in available.items()}
     limits = ["Peer proposals use stored classifications, not exchange membership; confirm the shortlist before creating.", "Common periods establish retained income-row overlap, not complete metric or audit comparability."]
     if len(symbols) < 2:
         limits.append("Fewer than two classified companies are stored; snapshot creation requires 2–10 companies.")
     if not periods:
-        limits.append("No common annual income period exists across this proposed shortlist; adjust the shortlist or choose an explicit period with unavailable cells.")
-    return {"anchor_symbol": anchor_symbol, "playbook_id": family, "symbols": symbols, "peer_basis": "Same stored sector family and insurer subtype; nonfinancial peers also share the stored industry label; alphabetical order, never exchange fallback.", "periods": periods, "period_type": "year", "limitations": limits}
+        limits.append("The initial proposed shortlist has no common annual income period; adjust the shortlist or choose an explicit period with unavailable cells.")
+    return {"anchor_symbol": anchor_symbol, "playbook_id": family, "symbols": symbols, "peer_basis": "Same stored sector family and insurer subtype; nonfinancial peers also share the stored industry label; alphabetical order, never exchange fallback.", "periods": periods, "periods_by_symbol": periods_by_symbol, "period_type": "year", "limitations": limits}
 
 
 async def _load_rows(db, symbols: list[str], year: int, quarter: int | None, period_type: str) -> dict:

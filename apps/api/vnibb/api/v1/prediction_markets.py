@@ -834,11 +834,12 @@ async def get_prediction_market_history(
     days: int = Query(default=30, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
 ) -> PredictionMarketHistoryResponse:
-    """Per-market YES-price time series for the deep-dive drawer.
+    """Return retained observations rather than inferring odds from today's quote.
 
-    Combines retained nightly and 15-minute observations without interpolation.
-    Each indexed per-market query is bounded before materializing rows; intraday
-    observations take precedence when both jobs captured the same timestamp.
+    Nightly and intraday records are written only for genuine eligible markets.
+    A catalogue row may lose its price vector or be pruned before its recorded
+    observations expire; an existing synthetic catalogue row remains excluded.
+    Intraday observations take precedence at duplicate timestamps.
     """
     now = datetime.now(UTC)
     cutoff = now - timedelta(days=days)
@@ -849,16 +850,16 @@ async def get_prediction_market_history(
             (PredictionMarketIntradaySnapshot, 7 * 24 * 4),
         ):
             rows = (await db.execute(
-                select(model).join(PredictionMarket, and_(
-                    model.source == PredictionMarket.source,
-                    model.source_id == PredictionMarket.source_id,
-                )).where(
+                select(model).where(
                     model.source == source,
                     model.source_id == source_id,
                     model.captured_at >= cutoff,
-                    PredictionMarket.is_synthetic.is_(False),
-                    _observed_price_sql(PredictionMarket, db)[1],
                     model.yes_price.is_not(None),
+                    ~exists(select(PredictionMarket.id).where(
+                        PredictionMarket.source == model.source,
+                        PredictionMarket.source_id == model.source_id,
+                        PredictionMarket.is_synthetic.is_(True),
+                    )),
                 ).order_by(model.captured_at.desc()).limit(row_limit)
             )).scalars().all()
             for row in rows:

@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import delete
 
 from vnibb.api.v1 import prediction_markets as router
 from vnibb.models.prediction_market import PredictionMarket
@@ -199,6 +200,57 @@ async def test_history_preserves_observed_zero_and_timestamps_without_filling_ga
     assert [point["yes_price"] for point in short.json()["points"]] == [0.2, 0.0]
     missing = await client.get("/api/v1/prediction-markets/kalshi/missing/history")
     assert missing.json()["points"] == []
+
+
+@pytest.mark.asyncio
+async def test_recorded_history_survives_missing_current_price_and_pruned_catalogue(client, test_db):
+    now = datetime.now(UTC).replace(microsecond=0)
+    market = _market(source="kalshi", source_id="retained", question="Recorded first outcome?", yes_price=0.8)
+    synthetic = _market(source="kalshi", source_id="synthetic", question="Synthetic?", yes_price=0.3)
+    synthetic.is_synthetic = True
+    test_db.add_all([market, synthetic])
+    await test_db.flush()
+    recorded = (
+        (PredictionMarketSnapshot, now - timedelta(days=29), 0.1, 10),
+        (PredictionMarketSnapshot, now - timedelta(days=6), 0.2, 20),
+        (PredictionMarketIntradaySnapshot, now - timedelta(hours=20), 0.3, 30),
+        (PredictionMarketIntradaySnapshot, now - timedelta(hours=1), 0.4, 40),
+    )
+    for model, captured_at, price, volume in recorded:
+        test_db.add(model(
+            market_id=market.id, source="kalshi", source_id="retained",
+            question="Recorded first outcome?", yes_price=price,
+            volume=volume, captured_at=captured_at,
+        ))
+    test_db.add(PredictionMarketSnapshot(
+        market_id=synthetic.id, source="kalshi", source_id="synthetic",
+        question="Synthetic?", yes_price=0.3, captured_at=now - timedelta(hours=2),
+    ))
+    market.outcome_prices = []
+    await test_db.commit()
+
+    async def check_recorded_history():
+        for days, expected in ((1, recorded[2:]), (7, recorded[1:]), (30, recorded)):
+            response = await client.get(
+                "/api/v1/prediction-markets/kalshi/retained/history", params={"days": days},
+            )
+            assert response.status_code == 200
+            body = response.json()
+            assert body["source"] == "kalshi"
+            assert body["source_id"] == "retained"
+            assert body["question"] == "Recorded first outcome?"
+            assert [
+                (datetime.fromisoformat(point["captured_at"]).replace(tzinfo=UTC),
+                 point["yes_price"], point["volume"])
+                for point in body["points"]
+            ] == [(captured_at, price, volume) for _, captured_at, price, volume in expected]
+
+    await check_recorded_history()
+    await test_db.execute(delete(PredictionMarket).where(PredictionMarket.id == market.id))
+    await test_db.commit()
+    await check_recorded_history()
+    synthetic_response = await client.get("/api/v1/prediction-markets/kalshi/synthetic/history")
+    assert synthetic_response.json()["points"] == []
 
 
 @pytest.mark.asyncio

@@ -101,6 +101,7 @@ export interface MatrixPreparation {
   symbols: string[];
   peer_basis: string;
   periods: string[];
+  periods_by_symbol: Record<string, { year: string[]; quarter: string[] }>;
   period_type: 'year';
   limitations: string[];
 }

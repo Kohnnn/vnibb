@@ -65,6 +65,7 @@ live in \`docs/\`.
   unapproved providers (including configured \`family:unknown\`), so snapshot
   references are never bearer grants.
 - Research Matrix is available in the Investor's Widget Library under AI & Research; adding it to a personal tab keeps the existing 24-column workspace geometry and the Matrix snapshot authorization model.
+- Matrix preparation exposes available fiscal years and quarters for each proposed company; editing the peer shortlist recalculates common periods locally without starting new research or requiring annual rows to see a shared quarter.
 
 ### Fixed
 - Narrow widget headers move controls into an accessible compact panel; overflow menus escape card clipping and support keyboard navigation. Chart timeframe/type controls now agree across the header, chart body, and saved configuration.
@@ -79,6 +80,8 @@ live in \`docs/\`.
 - Income Statement now opens wide financial tables at their newest periods like Balance Sheet and Cash Flow, while preserving horizontally scrollable older years and the sticky metric column.
 - The 13 registered Widgets previously routed through placeholders now load their existing named implementations. Income Sankey keeps incomplete and loss-making flows unavailable rather than drawing positive ribbons; quantitative and global-market surfaces distinguish missing coverage from observed zero.
 - API installs in CI, the release image, and the documented local setup use SHA-256-constrained VNStock publisher wheels with PyPI for unrelated dependencies. The impossible direct \`vnai<2.5\` pin was removed; free-tier startup and optional premium installation retain their existing contracts.
+- Ratio TTM views no longer inherit cached FY statement columns after a period switch. Income Sankey quarter selection respects the chosen Q1–Q4 rather than always charting the latest quarter; intraday Volume Delta no longer labels five-minute samples as a 20-day cumulative total.
+- Nightly prediction-market cleanup jobs now await their guarded tasks. Automatic stale-catalogue deletion excludes unarchived terminal contracts reserved for archive-first retention; retained genuine 1d/7d/30d observations remain available even if today's quote vector disappears or the catalogue row is pruned.
 
 - Prediction-market analysis now exposes full contract terms/outcomes and
   1d/7d/30d recorded history, with observed percentage-point changes, ranges,

@@ -939,13 +939,16 @@ def schedule_retention_cleanup() -> None:
         else:
             logger.info("Retention cleanup found nothing to remove")
 
-    scheduler = get_scheduler()
-    scheduler.add_job(
-        lambda: _run_guarded_job(
+    async def guarded_retention_cleanup() -> None:
+        await _run_guarded_job(
             "retention_cleanup",
             _run,
             RETENTION_CLEANUP_TIMEOUT_SECONDS,
-        ),
+        )
+
+    scheduler = get_scheduler()
+    scheduler.add_job(
+        guarded_retention_cleanup,
         trigger=CronTrigger(hour=19, minute=10, timezone="UTC"),
         id="retention_cleanup",
         name="Retention cleanup (daily 19:10 UTC)",
@@ -986,13 +989,16 @@ def schedule_prediction_market_catalogue_retention() -> None:
                 break
         logger.info("prediction_market_catalogue_retention removed rows: %s", total)
 
-    scheduler = get_scheduler()
-    scheduler.add_job(
-        lambda: _run_guarded_job(
+    async def guarded_prediction_market_catalogue_retention() -> None:
+        await _run_guarded_job(
             "prediction_market_catalogue_retention",
             _run,
             PREDICTION_MARKET_CATALOGUE_RETENTION_TIMEOUT_SECONDS,
-        ),
+        )
+
+    scheduler = get_scheduler()
+    scheduler.add_job(
+        guarded_prediction_market_catalogue_retention,
         trigger=CronTrigger(hour=19, minute=40, timezone="UTC"),
         id="prediction_market_catalogue_retention",
         name="Prediction market catalogue retention (daily 19:40 UTC)",

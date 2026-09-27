@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useFinancialRatios, useIncomeStatement } from '@/lib/queries';
 import { FinancialRatiosWidget } from '@/components/widgets/FinancialRatiosWidget';
 import { UnitProvider } from '@/contexts/UnitContext';
@@ -9,7 +9,7 @@ jest.mock('@/lib/queries', () => ({
 }));
 
 jest.mock('@/components/ui/WidgetContainer', () => ({
-  WidgetContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  WidgetContainer: ({ children, headerActions }: { children: React.ReactNode; headerActions?: React.ReactNode }) => <div>{headerActions}{children}</div>,
 }));
 
 jest.mock('@/components/ui/WidgetMeta', () => ({
@@ -161,5 +161,23 @@ describe('FinancialRatiosWidget period columns', () => {
     expect(labels).toContain('2020');
     expect(labels).toContain('2025');
     expect(mockUseIncomeStatement).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'year', enabled: true }));
+  });
+
+  test('shows TTM ratios after switching from FY with cached annual statement headings', async () => {
+    mockUseFinancialRatios.mockImplementation((_symbol, options) => queryResult(
+      options?.period === 'TTM'
+        ? { symbol: 'FPT', count: 1, data: [{ period: 'TTM-2026', pe: 22.75 }] }
+        : ratiosResponse,
+    ));
+
+    renderWidget();
+    expect(headerLabels()).toContain('2025');
+
+    fireEvent.click(screen.getByRole('button', { name: 'TTM' }));
+
+    await waitFor(() => expect(headerLabels()).toContain('TTM 2026'));
+    expect(rowValues(screen.getByText(/^P\/E$/i))).toContain('22.75');
+    expect(screen.queryByText('No renderable ratio metrics for FPT')).not.toBeInTheDocument();
+    expect(mockUseIncomeStatement).toHaveBeenCalledWith('FPT', expect.objectContaining({ enabled: false }));
   });
 });

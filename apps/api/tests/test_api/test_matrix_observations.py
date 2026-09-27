@@ -2,6 +2,11 @@ from datetime import datetime
 from decimal import Decimal
 
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+
+from vnibb.api.v1.matrix import router
+from vnibb.core.database import get_db
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.stock import Stock
 from vnibb.models.trading import FinancialRatio
@@ -170,6 +175,46 @@ async def test_peers_exclude_unrelated_same_exchange_and_intersect_years(test_db
         prepared = await prepare_matrix(test_db, "MXA")
         assert prepared["symbols"] == ["MXA", "MXB"]
         assert prepared["periods"] == ["2023"]
+    finally:
+        await test_db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_prepare_exposes_per_symbol_years_and_independent_quarters(test_db):
+    try:
+        for index, (symbol, years, quarters) in enumerate((
+            ("MXA", (2024, 2025), (1, 2)),
+            ("MXB", (2024, 2025), (1,)),
+            ("MXC", (2024,), (1,)),
+        )):
+            test_db.add(Stock(id=990001 + index, symbol=symbol, industry="Software", is_active=1))
+            for year in years:
+                row = statement(IncomeStatement, year=year, revenue=100)
+                row.id, row.symbol = 991000 + index * 100 + year, symbol
+                test_db.add(row)
+            for quarter in quarters:
+                row = statement(IncomeStatement, year=2025, quarter=quarter, net_income=10)
+                row.id, row.symbol = 992000 + index * 100 + quarter, symbol
+                test_db.add(row)
+        await test_db.flush()
+        app = FastAPI()
+        app.include_router(router, prefix="/matrix")
+
+        async def database():
+            yield test_db
+
+        app.dependency_overrides[get_db] = database
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://matrix.test") as client:
+            response = await client.get("/matrix/prepare", params={"anchor_symbol": "MXA"})
+        assert response.status_code == 200
+        prepared = response.json()
+        assert prepared["symbols"] == ["MXA", "MXB", "MXC"]
+        assert prepared["periods"] == ["2024"]
+        assert prepared["periods_by_symbol"] == {
+            "MXA": {"year": ["2025", "2024"], "quarter": ["2025-Q2", "2025-Q1"]},
+            "MXB": {"year": ["2025", "2024"], "quarter": ["2025-Q1"]},
+            "MXC": {"year": ["2024"], "quarter": ["2025-Q1"]},
+        }
     finally:
         await test_db.rollback()
 

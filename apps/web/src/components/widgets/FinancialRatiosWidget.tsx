@@ -202,6 +202,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
     // fill and therefore renders as empty cells. The ratio feed is a value lookup for those
     // headings and only becomes the period source when the reference series is unavailable.
     const displayPeriods = useMemo(() => {
+        if (period === 'TTM') return ratios.map((entry) => entry.period);
         const referencePeriods = (statementReferenceQuery.data?.data || [])
             .map((entry) => readStatementReferencePeriod(entry.period))
             .filter((value): value is string => Boolean(value))

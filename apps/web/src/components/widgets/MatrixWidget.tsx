@@ -22,6 +22,12 @@ export { MatrixWidget };
 
 export default MatrixWidget;
 
+function commonPeriods(preparation: MatrixPreparation | null, symbols: string[], basis: 'year' | 'quarter'): string[] {
+  if (!preparation || symbols.length < 2) return [];
+  const first = preparation.periods_by_symbol[symbols[0]]?.[basis] ?? [];
+  return first.filter((period) => symbols.every((symbol) => preparation.periods_by_symbol[symbol]?.[basis].includes(period))).sort().reverse();
+}
+
 function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { owner: string | null }) {
   const { state, updateWidget } = useDashboard();
   const location = useMemo(() => {
@@ -37,9 +43,9 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
   const [preparation, setPreparation] = useState<MatrixPreparation | null>(null);
   const [playbooks, setPlaybooks] = useState<MatrixPlaybook[]>([]);
   const [playbook, setPlaybook] = useState('');
-  const [period, setPeriod] = useState('');
+  const [selectedYear, setSelectedYear] = useState('');
   const [periodType, setPeriodType] = useState<'year' | 'quarter'>('year');
-  const [quarter, setQuarter] = useState('1');
+  const [selectedQuarter, setSelectedQuarter] = useState('');
   const [snapshot, setSnapshot] = useState<MatrixSnapshot | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [inspected, setInspected] = useState<{ dimension: MatrixDimension; resultId?: string } | null>(null);
@@ -118,7 +124,7 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
   const prepare = () => run(async () => {
     const result = await matrixApi.prepare(anchor.trim().toUpperCase());
     if (!mounted.current) return;
-    setPreparation(result); setSymbols(result.symbols.join(', ')); setPlaybook(result.playbook_id); setPeriod(result.periods[0] ?? ''); setPeriodType('year');
+    setPreparation(result); setSymbols(result.symbols.join(', ')); setPlaybook(result.playbook_id); setSelectedYear(''); setSelectedQuarter(''); setPeriodType('year');
   });
   const entities = useMemo(() => {
     const query = view.filter.toLocaleLowerCase();
@@ -132,7 +138,13 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
   const cellIndex = useMemo(() => new Map(snapshot?.cells.map((cell) => [`${cell.entity_id}:${cell.dimension_id}`, cell]) ?? []), [snapshot]);
   const requestedSymbols = symbols.toUpperCase().split(/[\s,;]+/).filter(Boolean);
   const validScope = requestedSymbols.length >= 2 && requestedSymbols.length <= 10 && new Set(requestedSymbols).size === requestedSymbols.length && requestedSymbols.includes(anchor.trim().toUpperCase());
-  const canCreate = !!owner && !!preparation && !!period && !!playbook && validScope && !busy;
+  const annualPeriods = commonPeriods(preparation, requestedSymbols, 'year');
+  const quarterPeriods = commonPeriods(preparation, requestedSymbols, 'quarter');
+  const years = periodType === 'year' ? annualPeriods : [...new Set(quarterPeriods.map((item) => item.slice(0, 4)))];
+  const period = years.includes(selectedYear) ? selectedYear : years[0] ?? '';
+  const quarters = quarterPeriods.filter((item) => item.startsWith(`${period}-Q`));
+  const quarter = quarters.includes(selectedQuarter) ? selectedQuarter : quarters[0] ?? '';
+  const canCreate = !!owner && !!preparation && !!period && !!playbook && validScope && !busy && (periodType === 'year' || !!quarter);
   const toggleCell = (resultId: string) => setSelected((previous) => {
     const next = new Set(previous);
     if (next.has(resultId)) next.delete(resultId); else if (next.size < 120) next.add(resultId);
@@ -178,7 +190,7 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
     <details className="matrix-scope" open={!snapshot}><summary>Research scope <span className="matrix-muted">· explicit creation only</span></summary>
       <div className="matrix-fields"><label>Anchor company<input value={anchor} maxLength={12} onChange={(event) => { setAnchor(event.target.value.toUpperCase()); setPreparation(null); }} /></label><button disabled={busy || !anchor.trim()} type="button" onClick={prepare}>Prepare peer scope</button><label className="matrix-wide">Companies · maximum 10<input value={symbols} onChange={(event) => setSymbols(event.target.value)} aria-describedby="matrix-peer-basis" /></label></div>
       <p id="matrix-peer-basis" className="matrix-muted">{preparation?.peer_basis || 'Prepare to preselect stored sector peers. You can edit the company list before creating.'}</p>
-      <div className="matrix-fields"><label>Sector playbook<select value={playbook} onChange={(event) => setPlaybook(event.target.value)}><option value="">Choose a playbook</option>{playbooks.map((item) => <option key={item.playbook_id} value={item.playbook_id}>{item.label}</option>)}</select></label><label>Period basis<select value={periodType} onChange={(event) => setPeriodType(event.target.value as 'year' | 'quarter')}><option value="year">Common financial year</option><option value="quarter">Quarter</option></select></label><label>Year<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="">No common year selected</option>{preparation?.periods.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>{periodType === 'quarter' && <label>Quarter<select value={quarter} onChange={(event) => setQuarter(event.target.value)}>{['1', '2', '3', '4'].map((q) => <option key={q} value={q}>Q{q}</option>)}</select></label>}<button className="matrix-primary" type="button" disabled={!canCreate} onClick={() => openSnapshot(() => matrixApi.create({ anchor_symbol: anchor.trim().toUpperCase(), symbols: requestedSymbols, playbook_id: playbook, period: periodType === 'quarter' ? `${period}-Q${quarter}` : period, period_type: periodType }))}>Create snapshot</button></div>
+      <div className="matrix-fields"><label>Sector playbook<select value={playbook} onChange={(event) => setPlaybook(event.target.value)}><option value="">Choose a playbook</option>{playbooks.map((item) => <option key={item.playbook_id} value={item.playbook_id}>{item.label}</option>)}</select></label><label>Period basis<select value={periodType} onChange={(event) => setPeriodType(event.target.value as 'year' | 'quarter')}><option value="year">Common financial year</option><option value="quarter">Quarter</option></select></label><label>Year<select value={period} onChange={(event) => { setSelectedYear(event.target.value); setSelectedQuarter(''); }}><option value="">No common year selected</option>{years.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>{periodType === 'quarter' && <label>Quarter<select value={quarter} onChange={(event) => setSelectedQuarter(event.target.value)}><option value="">No common quarter selected</option>{quarters.map((item) => <option key={item} value={item}>Q{item.slice(-1)}</option>)}</select></label>}<button className="matrix-primary" type="button" disabled={!canCreate} onClick={() => openSnapshot(() => matrixApi.create({ anchor_symbol: anchor.trim().toUpperCase(), symbols: requestedSymbols, playbook_id: playbook, period: periodType === 'quarter' ? quarter : period, period_type: periodType }))}>Create snapshot</button></div>
       <p className="matrix-muted">{playbooks.find((item) => item.playbook_id === playbook)?.description || 'Sector-specific questions; eligibility is checked against stored company classification.'}</p>
       {preparation?.playbook_id && playbook !== preparation.playbook_id && <p className="matrix-notice">This differs from the anchor’s suggested playbook. Ineligible companies will not be presented as comparable.</p>}
       {preparation?.limitations.map((limit) => <p key={limit} className="matrix-notice">{limit}</p>)}
