@@ -80,6 +80,7 @@ live in \`docs/\`.
 - Matrix preparation exposes available fiscal years and quarters for proposed companies; a bounded read-only lookup checks edited 2–10-company shortlists before Create, including eligible peers beyond the initial nine suggestions. A shared quarter does not require annual rows.
 
 ### Fixed
+- Global Markets ticker tape now uses TradingView's iframe embed for live quotes and price changes; unavailable embeds show an explicit Retry/Open in TradingView error instead of a local symbol-only marquee.
 - Narrow widget headers move controls into an accessible compact panel; overflow menus escape card clipping and support keyboard navigation. Chart timeframe/type controls now agree across the header, chart body, and saved configuration.
 - Responsive viewing, empty-state hints, zoom/container changes, and edit-mode toggles do not rewrite authored desktop widget geometry; collision-safe manual resizing preserves other widgets' positions. Narrow layouts remain view-only. Widgets added at the bottom now receive finite coordinates before storage, so reload and backup cannot reject the dashboard.
 - Restored workspace ticker groups and linked TradingView ticker stay scoped to their copies. Following a group no longer changes the Global ticker; a locally detached TradingView symbol stays detached across ticker changes and reload. Deep links wait for local hydration and the requested dashboard before applying a ticker.
