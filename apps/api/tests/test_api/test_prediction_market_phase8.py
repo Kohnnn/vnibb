@@ -11,10 +11,9 @@ Covers:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 
 import pytest
-
+from sqlalchemy import delete
 from vnibb.api.v1 import prediction_markets as router
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.models.prediction_market_intraday_snapshot import (
@@ -81,9 +80,50 @@ async def test_spread_and_consensus_aggregate_all_matching_markets(client, test_
 
 
 @pytest.mark.asyncio
+async def test_multichoice_zero_price_counts_but_malformed_vectors_do_not(client, test_db):
+    zero = _market(source="polymarket", source_id="zero", question="CPI rises?", yes_price=0)
+    zero.outcomes = ["Yes", "No", "Other"]
+    zero.outcome_prices = [0, 0, 1]
+    eighty = _market(source="polymarket", source_id="eighty", question="CPI falls?", yes_price=0.8)
+    invalid_tail = _market(source="polymarket", source_id="tail", question="CPI changes?", yes_price=0.9)
+    invalid_tail.outcome_prices = [0.9, 0.1, "invalid"]
+    invalid_range = _market(source="polymarket", source_id="range", question="CPI stabilizes?", yes_price=0.9)
+    invalid_range.outcome_prices = [0.9, 0.1, 1.1]
+    missing = _market(source="polymarket", source_id="missing", question="CPI flat?", yes_price=0.9)
+    missing.outcome_prices = []
+    all_zero = _market(source="polymarket", source_id="all-zero", question="CPI unchanged?", yes_price=0)
+    all_zero.outcome_prices = [0, 0, 0]
+    invalid_null = _market(source="polymarket", source_id="null", question="CPI threshold?", yes_price=0.9)
+    invalid_null.outcome_prices = [0.9, 0.1, None]
+    invalid_bool = _market(source="polymarket", source_id="bool", question="CPI ceiling?", yes_price=0.9)
+    invalid_bool.outcome_prices = [0.9, 0.1, True]
+    oversized = _market(source="polymarket", source_id="oversized", question="CPI overshoots?", yes_price=0.9)
+    oversized.outcome_prices = [0.9] + [0.1] * 32
+    kalshi = _market(source="kalshi", source_id="k-zero", question="CPI rises?", yes_price=0)
+    kalshi.outcome_prices = [0, 1]
+    test_db.add_all([zero, eighty, invalid_tail, invalid_range, invalid_null, invalid_bool, all_zero, oversized, missing, kalshi])
+    await test_db.commit()
+
+    consensus = (await client.get("/api/v1/prediction-markets/consensus", params={"query": "CPI"})).json()
+    assert consensus["consensus_yes_price"] == pytest.approx(0.8 / 3)
+    assert next(source for source in consensus["sources"] if source["source"] == "polymarket")["yes_price"] == pytest.approx(0.4)
+
+    spread = (await client.get("/api/v1/prediction-markets/spread")).json()
+    cpi_spread = next(topic for topic in spread["topics"] if topic["topic"] == "cpi")
+    assert cpi_spread["polymarket_consensus"] == pytest.approx(0.4)
+    assert cpi_spread["kalshi_consensus"] == 0
+    assert cpi_spread["gap"] == pytest.approx(0.4)
+
+    cross = (await client.get("/api/v1/prediction-markets/cross-calibration")).json()
+    cpi_cross = next(topic for topic in cross["topics"] if topic["topic"] == "cpi")
+    assert {source["source"]: source["consensus_yes_price"] for source in cpi_cross["sources"]} == pytest.approx({"polymarket": 0.4, "kalshi": 0})
+
+
+@pytest.mark.asyncio
 async def test_alerts_select_nearest_baseline_and_rank_after_threshold(client, test_db):
     now = datetime.now(UTC)
     for source_id, price, previous in (("p-1", 0.6, 0.5), ("p-2", 0.9, 0.3), ("p-3", 0.51, 0.5)):
+        test_db.add(_market(source="polymarket", source_id=source_id, question="CPI?", yes_price=price))
         for captured_at, yes_price in ((now, price), (now - timedelta(hours=2), previous)):
             test_db.add(PredictionMarketIntradaySnapshot(
                 source="polymarket", source_id=source_id, question="CPI?", category="economic",
@@ -115,8 +155,8 @@ async def test_calibration_filters_before_limit_and_cross_calibration_counts_top
     await test_db.commit()
 
     calibration = (await client.get("/api/v1/prediction-markets/calibration", params={"topic": "cpi", "limit": 2})).json()
-    assert [row["source_id"] for row in calibration["markets"]] == ["p-1", "p-2"]
-    assert calibration["consensus_yes_price"] == pytest.approx(0.6)
+    assert [row["source_id"] for row in calibration["markets"]] == ["k-1", "p-2"]
+    assert calibration["consensus_yes_price"] == pytest.approx(0.625)
 
     cross = (await client.get("/api/v1/prediction-markets/cross-calibration")).json()
     cpi = next(row for row in cross["topics"] if row["topic"] == "cpi")
@@ -136,6 +176,7 @@ async def test_inactive_history_merges_live_and_archive_without_dropping_early_r
     archived = _market(source="polymarket", source_id="archived-closed", question="Closed CPI?", yes_price=0.3)
     archived.active = False
     archived.end_date = datetime(2025, 1, 1)
+    archived.is_synthetic = False
     payload = {column.name: getattr(archived, column.name) for column in PredictionMarket.__table__.columns}
     for name in ("end_date", "created_at", "updated_at"):
         if payload[name] is not None:
@@ -150,9 +191,44 @@ async def test_inactive_history_merges_live_and_archive_without_dropping_early_r
     inactive = (await client.get("/api/v1/prediction-markets", params={"active": "false", "limit": 1})).json()
     assert [row["source_id"] for row in inactive["data"]] == ["archived-closed"]
     all_rows = (await client.get("/api/v1/prediction-markets", params={"limit": 2})).json()
-    assert [row["source_id"] for row in all_rows["data"]] == ["archived-closed", "live-closed"]
+    assert all_rows["data"] == []
     active = (await client.get("/api/v1/prediction-markets", params={"active": "true"})).json()
     assert active["data"] == []
+
+
+@pytest.mark.asyncio
+async def test_inactive_limit_orders_live_rows_by_end_date_before_limiting(client, test_db):
+    late_end = _market(source="polymarket", source_id="late-end", question="Closed CPI?", yes_price=0.4)
+    late_end.active = False
+    late_end.end_date = datetime(2026, 6, 1, tzinfo=UTC)
+    late_end.updated_at = datetime(2026, 5, 1, tzinfo=UTC)
+    early_end = _market(source="kalshi", source_id="early-end", question="Closed CPI?", yes_price=0.2)
+    early_end.active = False
+    early_end.end_date = datetime(2025, 6, 1, tzinfo=UTC)
+    early_end.updated_at = datetime(2025, 5, 1, tzinfo=UTC)
+    test_db.add_all([late_end, early_end])
+    await test_db.commit()
+
+    response = await client.get("/api/v1/prediction-markets", params={"active": "false", "limit": 1})
+    assert response.status_code == 200
+    assert [row["source_id"] for row in response.json()["data"]] == ["early-end"]
+
+
+@pytest.mark.asyncio
+async def test_current_limit_keeps_updated_recency_order(client, test_db):
+    now = datetime.now(UTC)
+    recent = _market(source="polymarket", source_id="recent", question="CPI tomorrow?", yes_price=0.8)
+    recent.updated_at = now
+    recent.end_date = now + timedelta(days=30)
+    older = _market(source="polymarket", source_id="older", question="CPI tomorrow?", yes_price=0.4)
+    older.updated_at = now - timedelta(hours=1)
+    older.end_date = now + timedelta(days=1)
+    test_db.add_all([older, recent])
+    await test_db.commit()
+
+    response = await client.get("/api/v1/prediction-markets", params={"limit": 1})
+    assert response.status_code == 200
+    assert [row["source_id"] for row in response.json()["data"]] == ["recent"]
 
 
 @pytest.mark.asyncio
@@ -172,56 +248,219 @@ async def test_alerts_accepts_window_hours_and_legacy_window_with_conflict_rejec
 
 
 @pytest.mark.asyncio
-async def test_history_endpoint_returns_time_series():
-    """The /history endpoint returns one row per snapshot."""
-    now = datetime.now(UTC)
-
-    class _Result:
-        def __init__(self, rows):
-            self._rows = rows
-
-        def scalars(self):
-            return SimpleNamespace(all=lambda: self._rows)
-
-    rows = [
-        PredictionMarketSnapshot(
-            market_id=1,
-            source="polymarket",
-            source_id="p-1",
-            category="economic",
-            question="Will CPI be above 3.0%?",
-            url=None,
-            yes_price=0.4,
-            volume=None,
-            liquidity=None,
-            extra={},
-            captured_at=now,
-        ),
-        PredictionMarketSnapshot(
-            market_id=1,
-            source="polymarket",
-            source_id="p-1",
-            category="economic",
-            question="Will CPI be above 3.0%?",
-            url=None,
-            yes_price=0.42,
-            volume=None,
-            liquidity=None,
-            extra={},
-            captured_at=now,
-        ),
+async def test_history_preserves_observed_zero_and_timestamps_without_filling_gaps(client, test_db):
+    now = datetime.now(UTC).replace(microsecond=0)
+    test_db.add(_market(source="kalshi", source_id="observed", question="CPI?", yes_price=0))
+    test_db.add(_market(source="kalshi", source_id="missing", question="CPI?"))
+    for captured_at, price in ((now - timedelta(days=3), 0.4), (now, 0.0)):
+        test_db.add(PredictionMarketSnapshot(
+            source="kalshi", source_id="observed", question="CPI?",
+            yes_price=price, captured_at=captured_at,
+        ))
+    for captured_at, price in ((now - timedelta(hours=1), 0.2), (now, 0.0)):
+        test_db.add(PredictionMarketIntradaySnapshot(
+            source="kalshi", source_id="observed", question="CPI?",
+            yes_price=price, captured_at=captured_at,
+        ))
+    await test_db.commit()
+    response = await client.get("/api/v1/prediction-markets/kalshi/observed/history")
+    assert response.status_code == 200
+    points = response.json()["points"]
+    assert [point["yes_price"] for point in points] == [0.4, 0.2, 0.0]
+    assert [datetime.fromisoformat(point["captured_at"]).replace(tzinfo=UTC) for point in points] == [
+        now - timedelta(days=3), now - timedelta(hours=1), now,
     ]
+    short = await client.get("/api/v1/prediction-markets/kalshi/observed/history", params={"days": 1})
+    assert [point["yes_price"] for point in short.json()["points"]] == [0.2, 0.0]
+    missing = await client.get("/api/v1/prediction-markets/kalshi/missing/history")
+    assert missing.json()["points"] == []
 
-    async def fake_execute(_stmt):
-        return _Result(rows)
 
-    session = SimpleNamespace(execute=fake_execute)
-    response = await router.get_prediction_market_history(
-        source="polymarket",
-        source_id="p-1",
-        days=30,
-        db=session,
+@pytest.mark.asyncio
+async def test_recorded_history_survives_missing_current_price_and_pruned_catalogue(client, test_db):
+    now = datetime.now(UTC).replace(microsecond=0)
+    market = _market(source="kalshi", source_id="retained", question="Recorded first outcome?", yes_price=0.8)
+    synthetic = _market(source="kalshi", source_id="synthetic", question="Synthetic?", yes_price=0.3)
+    synthetic.is_synthetic = True
+    test_db.add_all([market, synthetic])
+    await test_db.flush()
+    recorded = (
+        (PredictionMarketSnapshot, now - timedelta(days=29), 0.1, 10),
+        (PredictionMarketSnapshot, now - timedelta(days=6), 0.2, 20),
+        (PredictionMarketIntradaySnapshot, now - timedelta(hours=20), 0.3, 30),
+        (PredictionMarketIntradaySnapshot, now - timedelta(hours=1), 0.4, 40),
     )
-    assert len(response.points) == 2
-    assert response.points[0].yes_price == 0.4
-    assert response.points[1].yes_price == 0.42
+    for model, captured_at, price, volume in recorded:
+        test_db.add(model(
+            market_id=market.id, source="kalshi", source_id="retained",
+            question="Recorded first outcome?", yes_price=price,
+            volume=volume, captured_at=captured_at,
+        ))
+    test_db.add(PredictionMarketSnapshot(
+        market_id=synthetic.id, source="kalshi", source_id="synthetic",
+        question="Synthetic?", yes_price=0.3, captured_at=now - timedelta(hours=2),
+    ))
+    market.outcome_prices = []
+    await test_db.commit()
+
+    async def check_recorded_history():
+        for days, expected in ((1, recorded[2:]), (7, recorded[1:]), (30, recorded)):
+            response = await client.get(
+                "/api/v1/prediction-markets/kalshi/retained/history", params={"days": days},
+            )
+            assert response.status_code == 200
+            body = response.json()
+            assert body["source"] == "kalshi"
+            assert body["source_id"] == "retained"
+            assert body["question"] == "Recorded first outcome?"
+            assert [
+                (datetime.fromisoformat(point["captured_at"]).replace(tzinfo=UTC),
+                 point["yes_price"], point["volume"])
+                for point in body["points"]
+            ] == [(captured_at, price, volume) for _, captured_at, price, volume in expected]
+
+    await check_recorded_history()
+    await test_db.execute(delete(PredictionMarket).where(PredictionMarket.id == market.id))
+    await test_db.commit()
+    await check_recorded_history()
+    synthetic_response = await client.get("/api/v1/prediction-markets/kalshi/synthetic/history")
+    assert synthetic_response.json()["points"] == []
+
+
+@pytest.mark.asyncio
+async def test_current_reads_share_genuine_fresh_eligibility(client, test_db):
+    from vnibb.services.prediction_market_estimator import _load_active_markets
+
+    now = datetime.now(UTC)
+    genuine = _market(source="polymarket", source_id="live", question="CPI above 3%?", yes_price=0.4)
+    genuine.description = "Resolves from the official release."
+    genuine.extra = {"canonical_topics": ["macro"]}
+    rows = [genuine]
+    for source_id, changes in (
+        ("fixture", {"is_synthetic": True}),
+        ("stale", {"updated_at": now - timedelta(hours=25)}),
+        ("expired", {"end_date": now - timedelta(seconds=1)}),
+        ("closed", {"closed": True}),
+        ("inactive", {"active": False}),
+    ):
+        row = _market(source="polymarket", source_id=source_id, question="CPI above 3%?", yes_price=0.9)
+        for key, value in changes.items():
+            setattr(row, key, value)
+        rows.append(row)
+    rows.append(_market(source="kalshi", source_id="KXMV-COMBO", question="CPI above 3%?"))
+    test_db.add_all(rows)
+    await test_db.commit()
+    catalogue = (await client.get("/api/v1/prediction-markets")).json()
+    assert [row["source_id"] for row in catalogue["data"]] == ["live"]
+    assert catalogue["data"][0]["description"] == genuine.description
+    assert catalogue["data"][0]["extra"] == genuine.extra
+    detail = await client.get("/api/v1/prediction-markets/polymarket/live")
+    assert detail.json()["outcome_prices"] == [0.4, 0.6]
+    assert (await client.get("/api/v1/prediction-markets/polymarket/fixture")).status_code == 404
+    calibration = (await client.get("/api/v1/prediction-markets/calibration")).json()
+    assert calibration["n_markets"] == 1
+    assert calibration["consensus_yes_price"] == 0.4
+    consensus = (await client.get("/api/v1/prediction-markets/consensus", params={"query": "CPI"})).json()
+    assert consensus["n_markets"] == 1
+    assert consensus["consensus_yes_price"] == 0.4
+    assert consensus["sources"][0]["volume"] is None
+    cross = (await client.get("/api/v1/prediction-markets/cross-calibration")).json()
+    assert cross["topics"][0]["sources"][0]["n_markets"] == 1
+    assert [row.source_id for row in await _load_active_markets(test_db)] == ["live"]
+
+
+@pytest.mark.asyncio
+async def test_all_sources_without_fresh_genuine_rows_report_no_live_data(client, test_db):
+    for source in router.KNOWN_PREDICTION_MARKET_SOURCES:
+        fixture = _market(source=source, source_id="fixture", question="CPI?")
+        fixture.is_synthetic = True
+        stale = _market(source=source, source_id="stale", question="CPI?")
+        stale.updated_at = datetime.now(UTC) - timedelta(days=2)
+        test_db.add_all([fixture, stale])
+    await test_db.commit()
+    rows = (await client.get("/api/v1/prediction-markets/source-health")).json()["sources"]
+    assert {row["source"] for row in rows} == set(router.KNOWN_PREDICTION_MARKET_SOURCES)
+    assert all(row["status"] == "empty" and row["live_market_count"] == 0 for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_candidates_bound_each_source_before_analysis_filters(client, test_db, monkeypatch):
+    from vnibb.services import prediction_market_policy as policy
+    from vnibb.services.prediction_market_estimator import _load_active_markets
+
+    monkeypatch.setattr(policy, "SNAPSHOT_SOURCE_LIMIT", 2)
+    now = datetime.now(UTC)
+    for source in ("kalshi", "polymarket"):
+        for index, question in enumerate(("CPI old?", "CPI recent?", "Weather recent?")):
+            row = _market(source=source, source_id=str(index), question=question)
+            row.updated_at = now - timedelta(minutes=3 - index)
+            test_db.add(row)
+    await test_db.commit()
+    rows = await _load_active_markets(test_db)
+    assert {(row.source, row.source_id) for row in rows} == {
+        (source, source_id) for source in ("kalshi", "polymarket") for source_id in ("1", "2")
+    }
+    calibration = (await client.get("/api/v1/prediction-markets/calibration", params={"limit": 1})).json()
+    assert calibration["n_markets"] == 1
+    assert calibration["markets"][0]["source_id"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_missing_price_vector_is_not_zero_probability(client, test_db):
+    from vnibb.services.prediction_market_estimator import _load_active_markets
+
+    missing = _market(source="kalshi", source_id="missing-price", question="CPI?", volume=1000)
+    missing.outcome_prices = [0, 0]
+    zero = _market(source="kalshi", source_id="observed-zero", question="CPI?", yes_price=0, volume=1)
+    test_db.add_all([missing, zero])
+    await test_db.commit()
+    consensus = (await client.get("/api/v1/prediction-markets/consensus", params={"query": "CPI"})).json()
+    assert consensus["consensus_yes_price"] == 0
+    assert consensus["sources"][0]["volume"] == 1
+    assert [row.source_id for row in await _load_active_markets(test_db)] == ["observed-zero"]
+
+
+@pytest.mark.asyncio
+async def test_consensus_missing_quotes_have_no_observed_volume(client, test_db):
+    missing = _market(source="kalshi", source_id="missing", question="CPI missing?", volume=100)
+    missing.outcome_prices = [0, 0]
+    malformed = _market(source="kalshi", source_id="malformed", question="CPI malformed?", volume=200)
+    malformed.outcome_prices = [0.4, None]
+    test_db.add_all([missing, malformed])
+    await test_db.commit()
+
+    response = (await client.get("/api/v1/prediction-markets/consensus", params={"query": "CPI"})).json()
+    assert response["n_markets"] == 2
+    assert response["consensus_yes_price"] is None
+    assert response["sources"][0]["yes_price"] is None
+    assert response["sources"][0]["volume"] is None
+
+
+@pytest.mark.asyncio
+async def test_consensus_null_observed_volume_excludes_invalid_quotes(client, test_db):
+    observed = _market(source="polymarket", source_id="observed", question="CPI observed?", yes_price=0.6)
+    missing = _market(source="polymarket", source_id="missing", question="CPI missing?", volume=100)
+    missing.outcome_prices = [0, 0]
+    test_db.add_all([observed, missing])
+    await test_db.commit()
+
+    response = (await client.get("/api/v1/prediction-markets/consensus", params={"query": "CPI"})).json()
+    assert response["n_markets"] == 2
+    assert response["consensus_yes_price"] == pytest.approx(0.6)
+    assert response["sources"][0]["yes_price"] == pytest.approx(0.6)
+    assert response["sources"][0]["volume"] is None
+
+
+@pytest.mark.asyncio
+async def test_consensus_observed_zero_volume_remains_zero(client, test_db):
+    observed = _market(source="kalshi", source_id="observed", question="CPI observed?", yes_price=0, volume=0)
+    missing = _market(source="kalshi", source_id="missing", question="CPI missing?", volume=100)
+    missing.outcome_prices = [0, 0]
+    test_db.add_all([observed, missing])
+    await test_db.commit()
+
+    response = (await client.get("/api/v1/prediction-markets/consensus", params={"query": "CPI"})).json()
+    assert response["n_markets"] == 2
+    assert response["consensus_yes_price"] == 0
+    assert response["sources"][0]["yes_price"] == 0
+    assert response["sources"][0]["volume"] == 0

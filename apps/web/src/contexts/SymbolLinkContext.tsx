@@ -1,7 +1,7 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
-import { DEFAULT_TICKER, normalizeTickerSymbol, readStoredTicker, writeStoredTicker } from '@/lib/defaultTicker';
+import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 
 interface SymbolLinkContextType {
   globalSymbol: string;
@@ -14,22 +14,8 @@ interface SymbolLinkContextType {
 const SymbolLinkContext = createContext<SymbolLinkContextType | null>(null);
 
 export function SymbolLinkProvider({ children }: { children: ReactNode }) {
-  const [globalSymbol, setGlobalSymbolState] = useState<string>(DEFAULT_TICKER);
   const [linkedWidgets, setLinkedWidgets] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    setGlobalSymbolState(readStoredTicker());
-  }, []);
-
-  useEffect(() => {
-    writeStoredTicker(globalSymbol);
-  }, [globalSymbol]);
-
-  const setGlobalSymbol = useCallback((symbol: string) => {
-    const normalized = normalizeTickerSymbol(symbol);
-    if (!normalized) return;
-    setGlobalSymbolState(normalized);
-  }, []);
+  const { globalSymbol, setGlobalSymbol } = useWidgetGroups();
 
   const toggleWidgetLink = useCallback((widgetId: string) => {
     setLinkedWidgets(prev => {

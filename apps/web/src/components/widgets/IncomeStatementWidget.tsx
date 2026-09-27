@@ -1,7 +1,7 @@
 // Income Statement Widget - Revenue, Profit, Margins with Chart View
 'use client';
 
-import { useState, useMemo, useEffect, memo } from 'react';
+import { useState, useMemo, useEffect, useCallback, memo } from 'react';
 import { TrendingUp, Table, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIncomeStatement } from '@/lib/queries';
@@ -39,6 +39,7 @@ import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, ty
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { buildIncomeSankeyModel } from '@/lib/financialVisualizations';
 import { IncomeSankeyChart } from '@/components/widgets/charts/IncomeSankeyChart';
+import { buildTableInsightContext, describeSelection, seriesFromSelection, toggleSelection, type ChartableColumn, type TableSelection } from '@/lib/tableInsight';
 
 interface IncomeStatementWidgetProps {
     id: string;
@@ -71,6 +72,14 @@ const labels: Record<string, string> = {
 
 const TABLE_YEAR_LIMIT = 20;
 const QUARTER_PERIOD_LIMIT = 40;
+
+/** Only rows with a corresponding chart series offer metric selection. */
+const CHARTED_SERIES_BY_METRIC: Record<string, string> = {
+    revenue: 'revenue',
+    gross_profit: 'grossProfit',
+    operating_income: 'operatingIncome',
+    net_income: 'netIncome',
+};
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
 function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemove, onDataChange }: IncomeStatementWidgetProps) {
@@ -79,6 +88,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
         config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
             ? (config.defaultPeriod as 'Q' | 'TTM')
             : 'FY';
+
     const { period, setPeriod } = usePeriodState({
         widgetId: id || 'income_statement',
         defaultPeriod,
@@ -87,6 +97,11 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
     });
     const showPeriodToggle = config?.hidePeriodToggle !== true;
     const [viewMode, setViewMode] = useState<ViewMode>('table');
+    // Table selection is deliberately local component state: it is a transient
+    // reading aid, not persisted widget config. Persisted config keys
+    // (periodSyncGroup / defaultPeriod / hidePeriodToggle) and the period
+    // behaviour are untouched by selection.
+    const [selection, setSelection] = useState<TableSelection | null>(null);
     const { config: unitConfig } = useUnit();
     
     const apiPeriod = period === 'FY' ? 'year' : period === 'Q' ? 'quarter' : period;
@@ -116,20 +131,6 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
     const hasData = displayItems.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
-
-    useEffect(() => {
-        onDataChange?.(
-            buildWidgetRuntime({
-                empty: !hasData,
-                apiGroup: '/equity',
-                endpoint: `/equity/${symbol}/income-statement?period=${apiPeriod}`,
-                sourceLabel: 'Income statement',
-                lastDataDate: dataUpdatedAt,
-                stale: isFallback,
-                extra: hasData ? { periods: displayItems.length } : undefined,
-            }),
-        );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
 
     const chartData = useMemo(() => {
         if (!displayItems.length) return [];
@@ -187,7 +188,74 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             })),
         [displayItems, periodMode, visiblePeriodLimit]
     );
+    // The metric series the chart can plot, in the order the chart draws them.
+    // `isPeriod` on the period columns keeps selectableSeries from ever
+    // treating a year column as a series.
+    const insightSeries = useMemo<ChartableColumn[]>(
+        () => [
+            { key: 'revenue', label: 'Revenue', kind: 'currency' },
+            { key: 'grossProfit', label: 'Gross Profit', kind: 'currency' },
+            { key: 'operatingIncome', label: 'Operating Income', kind: 'currency' },
+            { key: 'netIncome', label: 'Net Income', kind: 'currency' },
+            { key: 'grossMargin', label: 'Gross Margin %', kind: 'percent' },
+            { key: 'operatingMargin', label: 'Operating Margin %', kind: 'percent' },
+            { key: 'netMargin', label: 'Net Margin %', kind: 'percent' },
+            ...tableColumns.map((column) => ({
+                key: column.key,
+                label: column.label,
+                kind: 'number' as const,
+                isPeriod: true,
+            })),
+        ],
+        [tableColumns]
+    );
 
+    const activeSeries = useMemo(
+        () => seriesFromSelection(insightSeries, selection),
+        [insightSeries, selection]
+    );
+    const chartInsight = useMemo(
+        () => buildTableInsightContext({ selection, columns: insightSeries }),
+        [selection, insightSeries]
+    );
+    const chartLabel = describeSelection(selection, insightSeries);
+    const clearSelection = useCallback(() => setSelection(null), []);
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                apiGroup: '/equity',
+                empty: !hasData,
+                endpoint: `/equity/${symbol}/income-statement?period=${apiPeriod}`,
+                sourceLabel: 'Income statement',
+                lastDataDate: dataUpdatedAt,
+                stale: isFallback,
+                extra: hasData
+                    ? {
+                        periods: displayItems.length,
+                        // Same channel the widget already publishes on; the
+                        // selection rides along so the copilot can target it.
+                        tableInsight: chartInsight,
+                    }
+                    : undefined,
+            }),
+        );
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length, chartInsight]);
+    const attachSelection = useCallback(
+        (row: DenseTableRow): DenseTableRow => {
+            // Only metrics this widget actually charts are selectable; the rest
+            // would select something the chart cannot draw.
+            const seriesKey = CHARTED_SERIES_BY_METRIC[row.id];
+            if (!seriesKey) return row;
+            return {
+                ...row,
+                selectable: true,
+                selected: selection?.kind === 'column' && selection.key === seriesKey,
+                onSelect: () => setSelection((current) => toggleSelection(current, { kind: 'column', key: seriesKey })),
+            };
+        },
+        [selection]
+    );
     const tableRows = useMemo<DenseTableRow[]>(() => {
         const rowValue = (entry: (typeof items)[number], metricKey: string): number | null | undefined => {
             if (metricKey === 'pre_tax_profit') return entry.pre_tax_profit ?? entry.profit_before_tax;
@@ -225,7 +293,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 values: {},
                 isGroup: true,
             },
-            ...coreMetrics.map((metricKey) => ({
+            ...coreMetrics.map((metricKey) => attachSelection({
                 id: metricKey,
                 label: labels[metricKey] || metricKey,
                 parentId: 'group:profitability',
@@ -243,7 +311,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 values: {},
                 isGroup: true,
             },
-            ...expenseMetrics.map((metricKey) => ({
+            ...expenseMetrics.map((metricKey) => attachSelection({
                 id: metricKey,
                 label: labels[metricKey] || metricKey,
                 parentId: 'group:expenses',
@@ -261,7 +329,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 values: {},
                 isGroup: true,
             },
-            {
+            attachSelection({
                 id: 'eps',
                 label: labels.eps,
                 parentId: 'group:per-share',
@@ -272,9 +340,9 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                         convertFinancialValueForUnit(entry.eps, unitConfig, entry.period),
                     ])
                 ),
-            },
+            }),
             ...(hasAnyMetricData('eps_diluted')
-                ? [{
+                ? [attachSelection({
                     id: 'eps_diluted',
                     label: labels.eps_diluted,
                     parentId: 'group:per-share',
@@ -285,12 +353,12 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                             convertFinancialValueForUnit(entry.eps_diluted, unitConfig, entry.period),
                         ])
                     ),
-                }]
+                })]
                 : []),
         ];
 
         return rows;
-    }, [displayItems, tableColumns, unitConfig, visiblePeriodLimit]);
+    }, [displayItems, tableColumns, unitConfig, visiblePeriodLimit, attachSelection]);
 
     const renderTable = () => (
         <DenseFinancialTable
@@ -300,6 +368,8 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             showTrend={false}
             maxYears={tableColumns.length || 1}
             initialScrollPosition="end"
+            selectedColumnKey={selection?.kind === 'column' ? selection.key : null}
+            onSelectionClear={clearSelection}
             storageKey={`income:${id}:${symbol}:${period}`}
             footerNote={unitNote}
             valueFormatter={(value, row) => {
@@ -313,6 +383,11 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
 
     const sankeyModel = useMemo(() => buildIncomeSankeyModel(displayItems), [displayItems]);
     const [chartType, setChartType] = useState<'overview' | 'margins' | 'sankey'>('overview');
+    const isPercentSeries = selection && activeSeries.length > 0 && activeSeries.every((entry) => entry.kind === 'percent');
+    const effectiveChartType = selection ? (isPercentSeries ? 'margins' : 'overview') : chartType;
+    const chartedSeries = selection
+        ? activeSeries
+        : activeSeries.filter((entry) => effectiveChartType === 'margins' ? entry.kind === 'percent' : entry.kind === 'currency');
     const xAxisInterval = useMemo(
         () => (chartData.length > 12 ? Math.max(1, Math.ceil(chartData.length / 8)) - 1 : 0),
         [chartData.length]
@@ -330,12 +405,31 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
 
         return (
                 <div className="h-full flex flex-col gap-1">
-                <div className="flex justify-end px-1 pt-0.5">
+                <div className="flex items-center justify-between gap-2 px-1 pt-0.5">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                        <span
+                            data-testid="income-chart-focus"
+                            className="truncate text-[10px] font-bold uppercase tracking-tighter text-[var(--text-secondary)]"
+                            title={chartLabel}
+                        >
+                            {chartLabel}
+                        </span>
+                        {selection ? (
+                            <button
+                                type="button"
+                                onClick={clearSelection}
+                                aria-label="Clear table selection"
+                                className="shrink-0 rounded border border-[var(--border-color)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tighter text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
+                            >
+                                Clear
+                            </button>
+                        ) : null}
+                    </div>
                     <select
-                        value={chartType}
-                        onChange={(e) => setChartType(e.target.value as any)}
+                        value={effectiveChartType}
+                        onChange={(e) => setChartType(e.target.value as 'overview' | 'margins' | 'sankey')}
                         aria-label="Income statement chart mode"
-                        className="bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
+                        className="shrink-0 bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
                     >
                         <option value="overview">Revenue & Profit</option>
                         <option value="margins">Margins %</option>
@@ -344,7 +438,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 </div>
 
                 <div className="flex-1 min-h-[132px]">
-                    {chartType === 'sankey' ? (
+                    {effectiveChartType === 'sankey' ? (
                         sankeyModel ? (
                             <IncomeSankeyChart
                                 model={sankeyModel}
@@ -356,7 +450,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                     ) : (
                     <ChartMountGuard className="h-full" minHeight={120}>
                         <ResponsiveContainer width="100%" height="100%" minWidth={240} minHeight={120}>
-                            {chartType === 'overview' ? (
+                            {effectiveChartType === 'overview' ? (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                                     <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
@@ -376,11 +470,20 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                         }}
                                         itemStyle={{ padding: '0px' }}
                                     />
-                                    <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                                    <Bar dataKey="revenue" name="Revenue" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-                                    <Line type="monotone" dataKey="netIncome" name="Net Income" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                                    {chartedSeries.some((entry) => entry.key === 'revenue') ? (
+                                        <Bar dataKey="revenue" name="Revenue" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                                    ) : null}
+                                    {selection && chartedSeries.some((entry) => entry.key === 'grossProfit') ? (
+                                        <Line type="monotone" dataKey="grossProfit" name="Gross Profit" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                                    ) : null}
+                                    {selection && chartedSeries.some((entry) => entry.key === 'operatingIncome') ? (
+                                        <Line type="monotone" dataKey="operatingIncome" name="Operating Income" stroke="#a855f7" strokeWidth={2} dot={{ r: 3 }} />
+                                    ) : null}
+                                    {chartedSeries.some((entry) => entry.key === 'netIncome') ? (
+                                        <Line type="monotone" dataKey="netIncome" name="Net Income" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                                    ) : null}
                                 </ComposedChart>
-                            ) : (
+                            ) : effectiveChartType === 'margins' ? (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                                     <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
@@ -395,14 +498,23 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                         contentStyle={{
                                             backgroundColor: 'var(--bg-tooltip)',
                                             border: '1px solid var(--border-default)',
-                                            borderRadius: '8px',
-                                            fontSize: '11px',
                                         }}
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                                    <Line type="monotone" dataKey="grossMargin" name="Gross %" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} />
-                                    <Line type="monotone" dataKey="netMargin" name="Net %" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
+                                    {chartedSeries.some((entry) => entry.key === 'grossMargin') ? (
+                                        <Line type="monotone" dataKey="grossMargin" name="Gross %" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} />
+                                    ) : null}
+                                    {chartedSeries.some((entry) => entry.key === 'operatingMargin') ? (
+                                        <Line type="monotone" dataKey="operatingMargin" name="Operating %" stroke="#a855f7" strokeWidth={2} dot={{ r: 2 }} />
+                                    ) : null}
+                                    {chartedSeries.some((entry) => entry.key === 'netMargin') ? (
+                                        <Line type="monotone" dataKey="netMargin" name="Net %" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
+                                    ) : null}
                                 </ComposedChart>
+                            ) : (
+                                <div className="flex h-full items-center justify-center px-2 text-center text-[10px] text-[var(--text-muted)]">
+                                    No charted series for this selection
+                                </div>
                             )}
                         </ResponsiveContainer>
                     </ChartMountGuard>
@@ -412,37 +524,6 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
         );
     };
 
-    const headerActions = (
-        <div className="flex items-center gap-1.5 mr-1">
-            <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-color)]">
-                <button
-                    onClick={() => setViewMode('table')}
-                    className={cn(
-                        "p-1 rounded transition-all",
-                        viewMode === 'table'
-                            ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
-                            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                    )}
-                    title="Table View"
-                >
-                    <Table size={12} />
-                </button>
-                <button
-                    onClick={() => setViewMode('chart')}
-                    className={cn(
-                        "p-1 rounded transition-all",
-                        viewMode === 'chart'
-                            ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
-                            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                    )}
-                    title="Chart View"
-                >
-                    <BarChart3 size={12} />
-                </button>
-            </div>
-            {showPeriodToggle ? <PeriodToggle value={period} onChange={setPeriod} compact options={[...STATEMENT_PERIOD_OPTIONS]} /> : null}
-        </div>
-    );
 
     return (
         <WidgetContainer
@@ -451,14 +532,53 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             onRefresh={() => refetch()}
             onClose={onRemove}
             isLoading={isLoading && !hasData}
-            headerActions={headerActions}
             noPadding
             widgetId={id}
             showLinkToggle
             exportData={displayItems}
         >
             <div className="h-full flex flex-col px-2 py-1.5">
-                <div className="pb-1 border-b border-[var(--border-subtle)]">
+                {/* The dashboard wraps widget children in a header-suppressing
+                    provider, so the container header never renders on a
+                    dashboard. View controls therefore live in the body: they
+                    own the widget's own viewMode/period state and must stay
+                    reachable wherever the widget is rendered. */}
+                <div className="flex items-center justify-between gap-2 pb-1 border-b border-[var(--border-subtle)]">
+                    <div className="flex items-center gap-1.5">
+                        <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-color)]">
+                            <button
+                                type="button"
+                                onClick={() => setViewMode('table')}
+                                aria-pressed={viewMode === 'table'}
+                                className={cn(
+                                    "p-1 rounded transition-all",
+                                    viewMode === 'table'
+                                        ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                                        : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                                )}
+                                title="Table View"
+                                aria-label="Table View"
+                            >
+                                <Table size={12} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setViewMode('chart')}
+                                aria-pressed={viewMode === 'chart'}
+                                className={cn(
+                                    "p-1 rounded transition-all",
+                                    viewMode === 'chart'
+                                        ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                                        : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                                )}
+                                title="Chart View"
+                                aria-label="Chart View"
+                            >
+                                <BarChart3 size={12} />
+                            </button>
+                        </div>
+                        {showPeriodToggle ? <PeriodToggle value={period} onChange={setPeriod} compact options={[...STATEMENT_PERIOD_OPTIONS]} /> : null}
+                    </div>
                     <WidgetMeta
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}

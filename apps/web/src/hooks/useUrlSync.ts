@@ -22,6 +22,7 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
+import { normalizeTickerSymbol } from '@/lib/defaultTicker';
 
 interface UseUrlSyncParams {
   /** Whether the host has mounted + context state has been restored. */
@@ -83,6 +84,7 @@ export function useUrlSync({
   // URL change (deep-link restore or popstate), so we don't immediately
   // overwrite the URL we just read from.
   const suppressWriteRef = useRef(false);
+  const pendingSymbolRef = useRef<{ dashboardId: string | null; symbol: string; applied: boolean } | null>(null);
 
   const applyFromSearch = useCallback(
     (search: string) => {
@@ -90,6 +92,7 @@ export function useUrlSync({
       const urlDashboard = params.get(PARAM_DASHBOARD);
       const urlTab = params.get(PARAM_TAB);
       const urlSymbol = params.get(PARAM_SYMBOL);
+      pendingSymbolRef.current = null;
 
       let applied = false;
 
@@ -113,10 +116,13 @@ export function useUrlSync({
         applied = true;
       }
 
-      if (urlSymbol) {
-        const normalized = urlSymbol.trim().toUpperCase();
-        if (normalized && normalized !== symbol.toUpperCase()) {
-          applySymbol(normalized);
+      const normalized = normalizeTickerSymbol(urlSymbol);
+      if (normalized) {
+        const targetDashboardId = resolvedDashboard ?? activeDashboardId;
+        if (targetDashboardId !== activeDashboardId || normalized !== symbol.toUpperCase()) {
+          const scopeIsActive = targetDashboardId === activeDashboardId;
+          pendingSymbolRef.current = { dashboardId: targetDashboardId, symbol: normalized, applied: scopeIsActive };
+          if (scopeIsActive) applySymbol(normalized);
           applied = true;
         }
       }
@@ -152,19 +158,33 @@ export function useUrlSync({
 
   // Browser back/forward.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!ready || typeof window === 'undefined') return;
     const handlePopState = () => {
       suppressWriteRef.current = true;
       applyFromSearch(window.location.search);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [applyFromSearch]);
+  }, [ready, applyFromSearch]);
+
+  useEffect(() => {
+    const pending = pendingSymbolRef.current;
+    if (!ready || !pending || activeDashboardId !== pending.dashboardId) return;
+    if (symbol.toUpperCase() === pending.symbol) {
+      pendingSymbolRef.current = null;
+      return;
+    }
+    if (!pending.applied) {
+      pending.applied = true;
+      applySymbol(pending.symbol);
+    }
+  }, [ready, activeDashboardId, symbol, applySymbol]);
 
   // Write current state into the URL when it changes.
   useEffect(() => {
     if (!ready || !hasRestoredRef.current) return;
     if (typeof window === 'undefined') return;
+    if (pendingSymbolRef.current) return;
 
     if (suppressWriteRef.current) {
       suppressWriteRef.current = false;

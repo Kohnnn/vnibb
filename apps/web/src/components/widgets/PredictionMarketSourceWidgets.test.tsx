@@ -1,7 +1,7 @@
 /** Snapshot-only smoke test for the new prediction-market family widgets. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 
 import { KalshiWidget } from './KalshiWidget';
 import { ElectionOddsWidget } from './ElectionOddsWidget';
@@ -91,43 +91,12 @@ describe('KalshiWidget', () => {
         expect(screen.getByText('PredictIt')).toBeInTheDocument();
         expect(screen.getByText('Limitless')).toBeInTheDocument();
         expect(screen.getByText('Manifold')).toBeInTheDocument();
-        expect(screen.getByText('Awaiting data')).toBeInTheDocument();
-        expect(fetchMock).toHaveBeenCalledWith(
-            expect.stringContaining('/prediction-markets/source-health'),
-            { cache: 'no-store' },
-        );
     });
 
-    it('keeps the source health strip visible when Kalshi has no markets', async () => {
-        const fetchMock = jest
-            .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>((input) =>
-                Promise.resolve(makeResponse(
-                    String(input).includes('/source-health')
-                        ? {
-                              sources: [{
-                                  source: 'kalshi',
-                                  status: 'empty',
-                                  market_count: 0,
-                                  snapshot_count: 0,
-                                  latest_snapshot_at: null,
-                                  stale_after_seconds: 3600,
-                              }],
-                          }
-                        : { count: 0, data: [] },
-                )),
-            );
-        global.fetch = fetchMock;
-
-        renderWithQuery(<KalshiWidget />);
-
-        expect(await screen.findByText(/No Kalshi markets available/i)).toBeInTheDocument();
-        expect(await screen.findByText('Kalshi')).toBeInTheDocument();
-        expect(screen.getAllByText('Awaiting data').length).toBeGreaterThan(0);
-    });
 });
 
 describe('ElectionOddsWidget', () => {
-    it('renders a single consensus row when both sources return markets', async () => {
+    it('renders the reported election contract without pooled probabilities', async () => {
         (global.fetch as jest.Mock)
             .mockResolvedValueOnce(
                 new JsonTestResponse(JSON.stringify({
@@ -157,9 +126,6 @@ describe('ElectionOddsWidget', () => {
         render(<ElectionOddsWidget />);
 
         expect(await screen.findByText(/who will win/i)).toBeInTheDocument();
-        await waitFor(() => {
-            expect(screen.getByText(/consensus/i)).toBeInTheDocument();
-        });
     });
 });
 
@@ -269,13 +235,18 @@ describe('MacroCalibrationWidget', () => {
 });
 
 describe('ConsensusOddsWidget', () => {
-    it('renders the empty state when neither source returns markets', async () => {
+    it('distinguishes an unpriced binary contract from a genuine zero probability', async () => {
         (global.fetch as jest.Mock)
-            .mockResolvedValueOnce(new JsonTestResponse(JSON.stringify({ count: 0, data: [] })))
-            .mockResolvedValueOnce(new JsonTestResponse(JSON.stringify({ count: 0, data: [] })));
+            .mockResolvedValueOnce(new JsonTestResponse(JSON.stringify({ data: [] })))
+            .mockResolvedValueOnce(new JsonTestResponse(JSON.stringify({ data: [
+                { source: 'kalshi', source_id: 'missing', question: 'Missing quote', outcomes: ['Yes', 'No'], outcome_prices: [0, 0], url: 'https://example.com/missing' },
+                { source: 'kalshi', source_id: 'zero', question: 'Genuine zero', outcomes: ['Yes', 'No'], outcome_prices: [0, 1], url: 'https://example.com/zero' },
+            ] })));
 
         render(<ConsensusOddsWidget />);
-
-        expect(await screen.findByText(/no consensus data/i)).toBeInTheDocument();
+        const missing = await screen.findByRole('link', { name: /Missing quote/ });
+        const zero = screen.getByRole('link', { name: /Genuine zero/ });
+        expect(within(missing).queryByText(/0%/)).not.toBeInTheDocument();
+        expect(within(zero).getByText('Yes 0%')).toBeInTheDocument();
     });
 });

@@ -173,17 +173,6 @@ def _build_ytd_snapshot(
     if not quarters:
         return None
 
-    def _safe_number(value: float | None) -> float:
-        if value is None:
-            return 0
-        try:
-            number = float(value)
-        except (TypeError, ValueError):
-            return 0
-        if math.isnan(number) or math.isinf(number):
-            return 0
-        return number
-
     def _sanitize_optional(value: float | None) -> float | None:
         if value is None:
             return None
@@ -203,37 +192,38 @@ def _build_ytd_snapshot(
         updated_at=latest.updated_at or datetime.utcnow(),
     )
 
-    if statement_type in ["income", "cashflow"]:
-        metrics = [
-            "revenue",
-            "cost_of_revenue",
-            "gross_profit",
-            "operating_income",
-            "net_income",
-            "ebitda",
-            "pre_tax_profit",
-            "tax_expense",
-            "interest_expense",
-            "depreciation",
-            "operating_cash_flow",
-            "investing_cash_flow",
-            "financing_cash_flow",
-            "free_cash_flow",
-            "net_change_in_cash",
-            "capex",
-            "dividends_paid",
-            "stock_repurchased",
-            "debt_repayment",
-        ]
-        for metric in metrics:
-            total = sum(_safe_number(getattr(row, metric)) for row in quarters)
+    if statement_type == "income":
+        metrics = (
+            "revenue", "cost_of_revenue", "gross_profit", "operating_income",
+            "net_income", "ebitda", "pre_tax_profit", "tax_expense",
+            "interest_expense", "depreciation",
+        )
+    elif statement_type == "cashflow":
+        metrics = (
+            "operating_cash_flow", "investing_cash_flow", "financing_cash_flow",
+            "free_cash_flow", "net_change_in_cash", "capex", "dividends_paid",
+            "stock_repurchased", "debt_repayment",
+        )
+    else:
+        metrics = ()
+
+    for metric in metrics:
+        values = (_sanitize_optional(getattr(row, metric)) for row in quarters)
+        total = 0.0
+        complete = True
+        for value in values:
+            if value is None:
+                complete = False
+                break
+            total += value
+        if complete:
             setattr(ytd_data, metric, total)
 
-        if statement_type == "income":
-            ytd_data.profit_before_tax = ytd_data.pre_tax_profit
-        if statement_type == "cashflow":
-            ytd_data.net_cash_flow = ytd_data.net_change_in_cash
-            ytd_data.capital_expenditure = ytd_data.capex
+    if statement_type == "income":
+        ytd_data.profit_before_tax = ytd_data.pre_tax_profit
+    elif statement_type == "cashflow":
+        ytd_data.net_cash_flow = ytd_data.net_change_in_cash
+        ytd_data.capital_expenditure = ytd_data.capex
     elif statement_type == "balance":
         ytd_data.total_assets = _sanitize_optional(latest.total_assets)
         ytd_data.total_liabilities = _sanitize_optional(latest.total_liabilities)
@@ -419,17 +409,6 @@ async def calculate_ttm(symbol: str, statement_type: str) -> list[FinancialState
         logger.warning(f"Not enough quarterly data for TTM calculation for {symbol}")
         return quarters  # Return whatever we have or empty
 
-    def _safe_number(value: float | None) -> float:
-        if value is None:
-            return 0
-        try:
-            number = float(value)
-        except (TypeError, ValueError):
-            return 0
-        if math.isnan(number) or math.isinf(number):
-            return 0
-        return number
-
     def _sanitize_optional(value: float | None) -> float | None:
         if value is None:
             return None
@@ -449,41 +428,40 @@ async def calculate_ttm(symbol: str, statement_type: str) -> list[FinancialState
         updated_at=quarters[0].updated_at,
     )
 
-    # Sum metrics for Income Statement and Cash Flow
-    if statement_type in ["income", "cashflow"]:
-        metrics = [
-            "revenue",
-            "cost_of_revenue",
-            "gross_profit",
-            "operating_income",
-            "net_income",
-            "ebitda",
-            "pre_tax_profit",
-            "tax_expense",
-            "interest_expense",
-            "depreciation",
-            "operating_cash_flow",
-            "investing_cash_flow",
-            "financing_cash_flow",
-            "free_cash_flow",
-            "net_change_in_cash",
-            "capex",
-            "dividends_paid",
-            "stock_repurchased",
-            "debt_repayment",
-        ]
-        for metric in metrics:
-            total = sum(_safe_number(getattr(q, metric)) for q in quarters)
+    # Flow metrics belong to one statement type only. A zero is a real result only
+    # when every contributing quarter reports a value (including a real zero).
+    if statement_type == "income":
+        metrics = (
+            "revenue", "cost_of_revenue", "gross_profit", "operating_income",
+            "net_income", "ebitda", "pre_tax_profit", "tax_expense",
+            "interest_expense", "depreciation",
+        )
+    elif statement_type == "cashflow":
+        metrics = (
+            "operating_cash_flow", "investing_cash_flow", "financing_cash_flow",
+            "free_cash_flow", "net_change_in_cash", "capex", "dividends_paid",
+            "stock_repurchased", "debt_repayment",
+        )
+    else:
+        metrics = ()
+
+    for metric in metrics:
+        total = 0.0
+        for quarter in quarters:
+            value = _sanitize_optional(getattr(quarter, metric))
+            if value is None:
+                break
+            total += value
+        else:
             setattr(ttm_data, metric, total)
 
-        if statement_type == "income":
-            ttm_data.profit_before_tax = ttm_data.pre_tax_profit
-        if statement_type == "cashflow":
-            ttm_data.net_cash_flow = ttm_data.net_change_in_cash
-            ttm_data.capital_expenditure = ttm_data.capex
-
-    # For Balance Sheet, we usually take the most recent quarter instead of summing
+    if statement_type == "income":
+        ttm_data.profit_before_tax = ttm_data.pre_tax_profit
+    elif statement_type == "cashflow":
+        ttm_data.net_cash_flow = ttm_data.net_change_in_cash
+        ttm_data.capital_expenditure = ttm_data.capex
     elif statement_type == "balance":
+        # Balance sheets are point-in-time snapshots, not summed flows.
         most_recent = quarters[0]
         ttm_data.total_assets = _sanitize_optional(most_recent.total_assets)
         ttm_data.total_liabilities = _sanitize_optional(most_recent.total_liabilities)

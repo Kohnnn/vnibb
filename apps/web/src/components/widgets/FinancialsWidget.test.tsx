@@ -170,4 +170,104 @@ describe('FinancialsWidget', () => {
       expect(texts.join(' ')).toContain('15.20');
     });
   });
+
+  // Regression: in "Financial Period View" the Ratios tab must show the same periods as the
+  // statement tabs beside it. The ratio feed reaches back to 2012 while the statements start
+  // at 2018, and before the alignment the Ratios tab rendered those extra years, so it and
+  // its sibling statement widgets disagreed on which columns the row covered.
+  test('uses the statement window as the ratio headers and keeps real valuations', async () => {
+    mockUseFinancialRatios.mockReturnValue(makeQueryResult({
+      symbol: 'VCI',
+      count: 3,
+      data: [
+        // Ratio-only years the statements never report: the leading one is the empty
+        // pre-history the old code used to widen the table with, the trailing one is a
+        // period beyond the statement window.
+        { period: '2012', pe: null, pb: 1.1 },
+        { period: '2018', pe: 12.5, pb: 2.4, roe: 0.18 },
+        { period: '2025', pe: 22.0, pb: 3.6, roe: 0.21 },
+      ],
+    }) as any);
+    const completeWindow = makeQueryResult({
+      symbol: 'VCI',
+      count: 3,
+      data: [
+        { period: '2018', revenue: 1, net_income: 1 },
+        { period: '2025', revenue: 1, net_income: 1 },
+        { period: '2026 YTD', revenue: 1, net_income: 1 },
+      ],
+    });
+    const longRequestWindow = makeQueryResult({
+      symbol: 'VCI', count: 1, data: [{ period: '2025', revenue: 1, net_income: 1 }],
+    });
+    // The live provider returns a shorter period span for limit=80 than limit=20.
+    mockUseIncomeStatement.mockImplementation((_symbol, options) =>
+      (options?.limit === 20 ? completeWindow : longRequestWindow) as any
+    );
+
+    renderWithProviders(<FinancialsWidget id="fin-1" symbol="VCI" />);
+
+    act(() => {
+      screen.getByRole('button', { name: /ratios/i }).click();
+    });
+
+    const headerRow = await screen.findByText(/^P\/E$/i).then((cell) =>
+      cell.closest('table')!.querySelector('thead tr')!
+    );
+    const headers = Array.from(headerRow.querySelectorAll('th')).map((th) => th.textContent?.trim() ?? '');
+
+    // Headers are the statement window: the ratio-only 2012 column is gone, and the
+    // statement-only 2026 YTD is present even though no ratio row exists for it. Before the
+    // alignment the table keyed off the ratio feed alone and rendered 2012/2018/2025.
+    // ("2026 (YTD)" is the shared statement-period label format, not a raw period key.)
+    expect(headers).toEqual(['Metric', '2018', '2025', '2026 (YTD)']);
+    expect(mockUseIncomeStatement).toHaveBeenCalledWith('VCI', expect.objectContaining({ limit: 20, enabled: true }));
+
+    const rowCells = (label: RegExp) => {
+      const row = screen.getByText(label).closest('tr')!;
+      // The first cell is the row's own label; period cells follow it, so header index N
+      // lines up with cell N - 1. Indexing off the label cell would shift every value.
+      return new Map(
+        Array.from(row.querySelectorAll('td')).slice(1).map((cell, index) => [headers[index + 1], cell.textContent?.trim() ?? ''])
+      );
+    };
+
+    // Real valuations survive for the periods the ratio feed covers, and the period it does
+    // not cover renders the absent marker rather than a fabricated 0.00.
+    expect(rowCells(/^P\/E$/i).get('2018')).toContain('12.50');
+    expect(rowCells(/^P\/E$/i).get('2025')).toContain('22.00');
+    expect(rowCells(/^P\/B$/i).get('2025')).toContain('3.60');
+    expect(rowCells(/^P\/E$/i).get('2026 (YTD)')).toBe('—');
+    expect(rowCells(/^P\/B$/i).get('2026 (YTD)')).toBe('—');
+  });
+
+  // The statement reference is optional: when that API is unavailable the Ratios tab must
+  // still render the ratio columns it does have rather than collapsing to an empty table.
+  test('falls back to ratio columns when the statement reference is unavailable', async () => {
+    mockUseFinancialRatios.mockReturnValue(makeQueryResult({
+      symbol: 'VCI',
+      count: 2,
+      data: [
+        { period: '2018', pe: 12.5, pb: 2.4 },
+        { period: '2019', pe: 14.0, pb: 2.6 },
+      ],
+    }) as any);
+    mockUseIncomeStatement.mockReturnValue(makeQueryResult({
+      symbol: 'VCI',
+      count: 0,
+      data: [],
+    }) as any);
+
+    renderWithProviders(<FinancialsWidget id="fin-1" symbol="VCI" />);
+
+    act(() => {
+      screen.getByRole('button', { name: /ratios/i }).click();
+    });
+
+    await waitFor(() => {
+      const headerRow = screen.getByText(/^P\/E$/i).closest('table')!.querySelector('thead tr')!;
+      const headers = Array.from(headerRow.querySelectorAll('th')).map((th) => th.textContent?.trim() ?? '');
+      expect(headers).toEqual(['Metric', '2018', '2019']);
+    });
+  });
 });

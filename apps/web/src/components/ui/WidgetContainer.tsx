@@ -70,10 +70,10 @@ export function WidgetContainer({
 
   return (
     <div className={cn(
-      "h-full flex flex-col",
+      "widget-container h-full min-h-0 flex flex-col",
       "bg-secondary rounded-lg",
       "border border-default",
-      "overflow-hidden",
+      shouldHideHeader ? "overflow-visible" : "overflow-hidden",
       className
     )}>
       {!shouldHideHeader && (
@@ -91,13 +91,14 @@ export function WidgetContainer({
           showLinkToggle={showLinkToggle}
         />
       )}
+      {shouldHideHeader && headerActions && (
+        <div className="flex shrink-0 items-center justify-end gap-2 overflow-x-auto border-b border-[var(--border-color)] px-2 py-1" aria-label={`${title} controls`}>
+          {headerActions}
+        </div>
+      )}
       <div className={cn(
-        "flex-1 overflow-auto scrollbar-hide min-h-0",
-        // NOTE: outer padding is supplied by WidgetWrapper's content host
-        // (`p-2 sm:p-2.5`), which wraps every widget. WidgetContainer therefore
-        // does NOT add its own default padding — doing so double-padded the body.
-        // `noPadding` is kept for backwards-compat but is now a no-op for the
-        // default case; pass `bodyClassName` for any widget-specific insets.
+        "min-h-0 flex-1",
+        shouldHideHeader ? "overflow-visible" : "overflow-auto scrollbar-hide",
         bodyClassName
       )}>
         {children}

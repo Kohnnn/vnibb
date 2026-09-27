@@ -76,6 +76,7 @@ const FALLBACK_BEHAVIOR: LayoutBehavior = {
 }
 
 export const WIDGET_LAYOUT_BEHAVIORS: Record<WidgetType, LayoutBehavior> = {
+  research_matrix: { preferredW: 24, preferredH: 16, minW: 8, minH: 10, orientation: 'horizontal', expandPriority: 6 },
   screener: { preferredW: 16, preferredH: 10, minW: 12, minH: 8, orientation: 'horizontal', expandPriority: 6 },
   ticker_info: { preferredW: 8, preferredH: 6, minW: 5, minH: 4, orientation: 'balanced', expandPriority: 2 },
   valuation_band: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
@@ -253,7 +254,6 @@ export const WIDGET_LAYOUT_BEHAVIORS: Record<WidgetType, LayoutBehavior> = {
   sector_top_movers: { preferredW: 10, preferredH: 7, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
   // Renderable-but-not-in-library types (present in the registry, absent from widgetDefinitions).
   // Values preserved from the former dead defaultWidgetLayouts block.
-  valuation_multiples: { preferredW: 4, preferredH: 6, minW: 3, minH: 5, orientation: 'vertical', expandPriority: 2 },
   ai_copilot: { preferredW: 5, preferredH: 8, minW: 4, minH: 6, orientation: 'vertical', expandPriority: 2 },
   alert_settings: { preferredW: 4, preferredH: 7, minW: 3, minH: 6, orientation: 'vertical', expandPriority: 2 },
 }
@@ -296,6 +296,27 @@ export function layoutsOverlap(
   b: { x: number; y: number; w: number; h: number }
 ) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
+export function findAvailableLayoutPosition(
+  items: ReadonlyArray<LayoutCoordinates>,
+  size: Pick<LayoutCoordinates, 'w' | 'h'>,
+  cols = 24
+): { x: number; y: number } {
+  const w = Math.min(size.w, cols)
+  const bottom = items.reduce((max, item) =>
+    Number.isFinite(item.y) && Number.isFinite(item.h) ? Math.max(max, item.y + item.h) : max, 0)
+  const candidate = { x: 0, y: 0, w, h: size.h }
+
+  for (let y = 0; y <= bottom; y += 1) {
+    candidate.y = y
+    for (let x = 0; x <= cols - w; x += 1) {
+      candidate.x = x
+      if (!items.some((item) => layoutsOverlap(candidate, item))) return { x, y }
+    }
+  }
+
+  return { x: 0, y: bottom }
 }
 
 export function findNextAvailableLayout<T extends CompactableLayoutItem>(
@@ -342,7 +363,7 @@ function inferOrientation(layout: CompactableLayoutItem['layout']): LayoutOrient
 function resolveLayoutBehavior(item: CompactableLayoutItem, cols: number): ResolvedLayoutBehavior {
   const explicit = item.type ? WIDGET_LAYOUT_BEHAVIORS[item.type as WidgetType] : undefined
   const inferredOrientation = explicit?.orientation ?? inferOrientation(item.layout)
-  const minW = Math.max(item.layout.minW ?? explicit?.minW ?? FALLBACK_BEHAVIOR.minW, explicit?.minW ?? 1)
+  const minW = Math.min(cols, Math.max(item.layout.minW ?? explicit?.minW ?? FALLBACK_BEHAVIOR.minW, explicit?.minW ?? 1))
   const minH = Math.max(item.layout.minH ?? explicit?.minH ?? FALLBACK_BEHAVIOR.minH, explicit?.minH ?? 1)
 
   const preferredWBase = explicit?.preferredW ?? item.layout.w ?? FALLBACK_BEHAVIOR.preferredW

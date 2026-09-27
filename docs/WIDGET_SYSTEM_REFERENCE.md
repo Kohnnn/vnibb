@@ -58,24 +58,144 @@ Legacy aliases such as `company_profile`, `financials`, `institutional_ownership
 - `world_news_sources`: source registry audit surface with homepage, feed, geography, tier, region, category, and language metadata
 - `polymarket` (expanded): canonical taxonomy now covers `economic | sports | politics | general`, so Pop Culture / Crypto / politics markets render instead of being silently dropped
 - `kalshi`: Kalshi CFTC-regulated public-market ingestion rendered through the shared `PredictionMarketSource` factory
-- `election_odds`: side-by-side Polymarket vs Kalshi politics composite with a consensus readout
+- `election_odds`: individual election contracts and priced-market coverage, not pooled odds across unrelated races
 - `prediction_movers`: top markets by |signed Δ probability| between the latest and windowed baseline snapshots; sub-24h windows use intraday snapshots and longer windows use nightly snapshots (24h default)
 - `macro_calibration`: four-tile summary of the `/estimate/{cpi,fed,recession,macro}` outputs
-- `consensus_odds`: multi-source readout aggregating Polymarket and Kalshi rows on the same question
+- `consensus_odds`: individual source contracts with their actual first-outcome label; absent prices are unavailable, not zero
 - **`prediction_market_lifecycle`**: see the section below
+- `research_matrix`: see "Matrix" below
+
+## Matrix
+
+`research_matrix` (library name **Research Matrix**, category `analysis`, layout
+`24×16`, min `8×10`) renders frozen company-by-question research. A Matrix is an
+explicit **Create** action over an anchor company and an editable peer shortlist
+(2–10) at a common fiscal year, with a common-quarter override, evaluated against
+one of four curated sector playbooks: non-financial quality, banks, insurers,
+securities. The explicit preparation response lists available years and quarters
+per proposed symbol; editing a 2–10-company shortlist requests a bounded,
+read-only `/matrix/periods` lookup for those active, same-playbook companies
+and recomputes only their common periods. Neither lookup executes research or
+calls a provider.
+
+Reading the grid is always read-only. Changing density, filter, sort, pinned
+company, column width or open inspector never executes research and never calls a
+provider; only **Create** starts a job. Browser persistence stores view preferences
+and snapshot references only — never protected values.
+
+Result identity binds entity, research dimension, scope/snapshot and result
+revision, not row and column coordinates, so re-orienting the grid cannot change
+what a result means. One canonical decimal `value` and one server-formatted
+`display` drive the cell, its preview, the evidence inspector, the copied selection
+and any exported artifact; a percentage is never re-parsed or re-rendered into a
+different sign, scale or currency. A shared reporting period does not imply a shared
+reporting basis, so mismatched basis renders as `non_comparable` rather than being
+silently compared.
+
+Each cell exposes a Result / Evidence / Basis / Review inspector. Evidence resolves
+to exact serving records with locators, and derived values name their formula and
+original observations instead of reading as independent corroboration. Sector
+metrics that a stored record cannot support report `unavailable`; they are never
+substituted with a generic proxy.
+
+Snapshots are owner-bound and immutable in the existing PostgreSQL `app_kv` store,
+one key per snapshot, with append-only revision-bound review events and separate
+revocation. Snapshot IDs are references, not grants: every open or handoff rechecks
+ownership and revocation, and cross-owner or revoked references disclose nothing.
+
+### Handoff
+
+Two scoped follow-up paths consume the same `{snapshot_id, result_ids}` selection
+through one server-side resolution service; neither accepts browser-supplied values
+as authority.
+
+- **VniAgent** — the widget stages a human-reviewed draft from selected result IDs.
+  Send submits the typed selection, the server reauthorizes it and rebuilds the
+  frozen context. The request text carries references only and never a displayed
+  value, and it performs no latest-data symbol inference. Reserved server context
+  keys are rejected if a client tries to supply them.
+- **External MCP** — read-only `get_matrix_selection` resolves the same selection
+  from the per-request authenticated user identity, never from a token in tool
+  arguments. A user JWT authorizes only that Matrix tool; it cannot enumerate or
+  call the existing market/premium tools, resources or prompts. Those retain the
+  shared deployment bearer. The shared bearer and stdio transports cannot
+  authorize Matrix. External export additionally requires explicit source rights
+  and default-denies unapproved suppliers.
+
+Limits: no PDF/OCR ingestion, custom column authoring, scheduled refresh,
+autonomous per-cell execution, Office or Tick-and-Tie verification, or new provider
+router. Matrix is a companion to the existing MCP-first workflow, not a second chat
+application, truth store or research coordinator.
+
+### Deployment prerequisites
+
+Matrix needs two things present on the target environment before it is usable;
+neither is satisfied by a code deploy alone.
+
+1. **A verified end-user identity provider.** Matrix derives `owner` from a real
+   Supabase session (`useAuth` → `user.provider === 'supabase'` → `user.id`). The
+   API rejects anonymous callers on every owner-scoped route, so an environment
+   without configured Supabase credentials renders the widget but cannot create or
+   open an owned snapshot. The synthetic fixture remains available without signing in.
+2. **The `app_kv` store on the target database.** Snapshots are one `app_kv` row per
+   snapshot, plus ownership-index, review-event and revocation keys. A database
+   without that table cannot persist a snapshot at all.
+
+### Source-rights configuration
+
+`MATRIX_EXPORT_ALLOWED_SOURCES` is an operator-supplied, comma-separated allow-list
+of individually attributable supplier sources, each written as
+`store.relation:supplier`. Matching is exact. Bare `stored.sql.*` labels and the
+suffixes `:unknown`, `:vnstock` and `:vnstock_ratio` **never grant export**, even
+when configured: existing financial ingestion labels mixed VCI/KBS observations
+with those generic tags and does not retain per-field supplier attribution.
+Derived results require every original observation to be eligible; a generic
+input cannot be laundered through a formula. Absent or empty configuration denies
+all real-source export. Only the clearly synthetic fixture bypasses the gate.
+
+No real provider is sanctioned for export by this verification record. Test-only
+`matrix_seed` proves exact attributed-source matching, not a production license.
+Future real grants require retained per-field supplier provenance and documented
+display/export permission; this is not achieved by allowlisting historical
+`vnstock` rows.
+
+### Claims that stay unverified without a live corpus
+
+Everything below is out of scope for repository verification and must not be
+treated as proven by the fixture or by the test suite:
+
+- **Live-corpus coverage.** Playbook eligibility, peer selection and period
+  availability have been exercised against controlled seeded serving rows, not the
+  production corpus. Real coverage, including where a sector metric legitimately
+  reports `unavailable`, remains unproven.
+- **Real provider rights.** External export has been verified against a configured
+  allow-list in a local environment. Whether any given real provider's terms permit
+  display or export is a data-rights decision made outside this codebase.
+- **Live end-user integration.** Chromium exercised fixture inspector tabs,
+  keyboard navigation, Escape focus restoration and the 390px modal sheet. The
+  manual-copy fallback was also exercised with the Clipboard API absent, using
+  a saved controlled snapshot, server-formatted reference text, stub authentication
+  and intercepted API responses: its read-only textarea selected all 835 characters
+  on focus and contained references rather than displayed financial values.
+  Neither fixture nor replay proves an end-to-end live Supabase session, production
+  database access or permission to export a real provider's data.
 
 ## Prediction-Market Family
 
-Phase 7 added a vertical prediction-market surface from ingestion to quant
-dashboards. Phase 8 (this doc's update) hardens the family, adds an
-intraday micro-snapshot job, and ships four new widgets (Alerts, Drift,
-Pulse, Deep-Dive drawer) plus three new read endpoints. Phase v2.x
-populates the snapshot tables on every cold boot via the one-shot
-`populate_prediction_markets_now` scheduler job, broadens the election
-filter into a topic-driven regex, ships resilient retries + offline seed
-fixtures for PredictIt / Limitless / Manifold, and adds a full UX
-overhaul (shared primitives in
-`apps/web/src/components/widgets/prediction-market-ui/`).
+The family retains Polymarket, Kalshi, PredictIt, Limitless, and Manifold listings.
+Current displays use a bounded, genuine, fresh catalogue; unavailable providers
+remain visible as **No data**, with loading and request failures distinguished.
+Historical fixtures are never presented as current odds. Collection and snapshot
+cadences are unchanged by the depth-first drawer improvements.
+
+Select **Analyse** to open full contract context: provider timestamps, close time,
+all position-aligned outcomes, description/resolution terms, and source links.
+The 1d/7d/30d controls show recorded first-outcome observations, observed change
+in percentage points, high/low, sample count, and actual coverage timestamps.
+Fewer than two distinct observations means insufficient history, not a flat trend.
+Cumulative volume is never summed; Kalshi contract counts/open interest and
+other provider units remain distinct. Related text matches are not equivalent
+contracts or a defensible consensus.
 
 The data flow:
 
@@ -108,11 +228,12 @@ Manifold        ──┘   prediction_markets (DB table, source-agnostic)
                               ▼
         nightly snapshot job → prediction_market_snapshots (30-day retention)
         intraday micro-snapshot job (15-min cadence, 7-day retention)
-        one-shot backfill on first boot → 7d × 2 snapshots/day if table < 100 rows
+        no fabricated backfill or production fixture fallback
                               │
                               ▼
         MacroCalibrationWidget (cached 600s) with confidence pills
         CrossSourceCalibrationWidget (per-source probability bars)
+```
 
 Conventions:
 
@@ -143,10 +264,9 @@ so the schema is source-agnostic and the read endpoint can blend across all of t
 Phase 9 adds PredictIt and Limitless. Phase 10 adds Manifold. Each phase's ingest is
 wrapped in a `try / except` at the scheduler layer so one source going down does not
 poison the others (only the affected source's count is missing from the log line).
-Phase v2.x layers in `prediction_market_http.fetch_json_with_retry` for retries +
-content-type validation and a fallback `prediction_market_seed` path that reads
-checked-in JSON fixtures (`apps/api/vnibb/services/seed_fixtures/*`) when the live
-APIs return 429 / non-JSON.
+Provider failures do not manufacture fixture odds. Source-health counts cover
+the bounded current catalogue, not the provider universe; stored snapshot health
+does not establish price availability or live provider connectivity.
 
 ### Cross-Source Calibration widget (Phase 10)
 
@@ -155,6 +275,9 @@ sources (Polymarket, Kalshi, PredictIt, Limitless, Manifold where tagged). The w
 shows three tiles (CPI / Fed / Recession) with one row per source and a
 `sources_agree` indicator (green when the spread between min and max consensus is
 below a per-topic threshold — 5pp CPI / 8pp Fed / 12pp Recession — otherwise amber).
+With fewer than two priced sources, the widget reports insufficient source data,
+not agreement or divergence. Topic-level aggregates do not establish equivalent
+contract terms; inspect the underlying questions and resolution criteria.
 - Snapshot retention is 30 days; anything older is removed by the
   ingestion-time housekeeping pass.
 - Estimator results are cached in-process for 600 s (`vnibb.core.cache`).
@@ -285,7 +408,7 @@ The generator (`src/contexts/__generators__/systemLayoutPayloads.gen.test.ts`) m
 
 - Base widget sizes are for autofit and initial placement.
 - Manual resizing should not be blocked by stale `maxW` / `maxH` caps.
-- Runtime auto-compact behavior should only shrink genuinely empty widgets and should not override manual resize after data is present.
+- Runtime empty-state hints do not persist geometry changes. Authored desktop sizes and gaps survive loading, empty/error states, responsive viewing, and maximize/restore; only explicit desktop layout actions save geometry.
 - Dense table and list widgets should prefer wrapping and scrolling over fixed truncation where practical.
 
 Recent resize/runtime cleanup covered these widgets in particular:
@@ -412,6 +535,41 @@ Widget library UX rules:
 - Low-resolution layouts should treat VniAgent as an overlay sooner to protect workspace width.
 - Header and tab-strip controls should collapse or simplify earlier instead of forcing horizontal crowding.
 - Recoverable widget/runtime failures should surface in UI state first; production builds should avoid noisy browser-console logging for handled widget errors, export failures, and local fallback paths.
+- Widget headers measure available space. Narrow headers retain the title/maximize action and expose remaining controls in a keyboard-accessible panel; menus render outside card clipping and return focus to their trigger.
+- Desktop-only layout editing applies to both pointer and keyboard. Native Tab navigation reaches widget controls; arrow layout shortcuts apply only to the focused widget panel, never a nested control.
+- The Price Chart header and body use the same timeframe/mode domain and persist edits on personal dashboards. Supported modes are candles, line and area; legacy saved values are normalized when read.
+
+### Local Workspace Backup
+
+Use **Backup workspaces** in the sidebar to download personal dashboard configuration, including tabs, authored layouts, widget configuration, folders, global/A–D ticker groups, and the profile-linked TradingView ticker for dashboards without their own saved ticker. This is distinct from single-layout template export; it does not flatten tabs.
+
+Restore accepts the versioned `vnibb-personal-workspace` JSON format up to 5 MB, validates it, previews names/counts, and imports fresh local copies only after confirmation. Existing dashboards remain unchanged. Imported IDs are excluded from backend synchronization; their ticker groups and linked TradingView ticker are scoped independently of system layouts. Retired widget type aliases are normalized to canonical ids during import so restored widgets resolve in the registry. Invalid versions, unknown widgets, impossible geometry, unsafe configuration and storage failures are reported rather than silently dropping content.
+
+System/admin layouts, authentication, settings, saved templates and unrelated browser storage are not exported. Widget configuration and user-entered content are included; review a backup before sharing. Known credential keys are rejected, but the backup is not an encrypted vault or a complete browser-profile backup. Notes or artifacts stored outside widget configuration are outside this export.
+
+### Artifact Placement
+
+Copilot artifact actions list named editable personal dashboard/tab destinations and exclude managed system dashboards. A promoted widget with a source ticker keeps that ticker locally without changing the workspace ticker. Existing templates remain the way to create a personal research starter; no second gallery or OpenBB service is required.
+
+Copilot artifact placement remembers the destination chosen for one artifact as the default for the rest of that response and across reloads, writes artifact provenance into the created widget's config so a promoted widget stays identifiable, and can save a table artifact to the research notebook with a dedupe key.
+
+A promoted widget carries `config.copilotArtifactProvenance` (`artifactId`, `responseId`, `artifactType`, `artifactTitle`, `dashboardId`, `tabId`, `destination`, `createdAt`), which travels with a workspace export. The destination memory lives in `localStorage['vnibb-copilot-artifact-placement']` and the widget-id-keyed badge index in `localStorage['vnibb-copilot-artifact-provenance']`; neither is device-portable, so a restored workspace on another browser is identifiable by the widget's own config marker but does not re-render the card badge.
+
+### Linked Ticker Scope
+
+A widget's ticker either follows its group or is kept locally. The widget header states which, and switching groups never rewrites a local ticker; "Follow <Group>" returns the widget to the group and adopts the group's *current* ticker. Widgets whose provider links are fixed (the TradingView embeds) never adopt a new ticker on a group change. Ticker scope and period scope are separate channels.
+
+### Table Selection
+
+Dense financial tables expose selectable metric rows and sortable period columns. A supported metric selection charts that series and shows its label in the chart header; clicking a period column continues sorting the table rather than claiming an unchartable period series. Selection is view state and is never persisted into widget config. The active metric selection is included in the widget's runtime payload so the copilot can target it.
+
+### Research Starters
+
+A starter binds one template to its VniAgent prompt. Applying a starter-bound template shows its purpose and how its widgets handle tickers, seeds the workspace, and primes the agent through the same channel the onboarding walkthrough uses. Templates remain the composition mechanism; there is no second gallery.
+
+### Widget Chrome Placement
+
+Widget chrome (view toggles, parameters, period controls) must remain accessible when the dashboard suppresses a widget's duplicate header. Header-only actions are surfaced in a compact action row inside the widget container; hide neither those controls nor the chart/table body when collapsed or maximized.
 
 ## Data Quality / Empty States
 

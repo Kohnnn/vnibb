@@ -12,6 +12,8 @@ import { formatTimestamp } from '@/lib/format';
 import { formatPercent, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 
+const EMPTY_DIVIDENDS: DividendRecord[] = [];
+
 interface DividendLadderWidgetProps {
   id: string;
   symbol: string;
@@ -62,7 +64,7 @@ export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: Div
     dataUpdatedAt,
   } = useDividends(symbol, Boolean(symbol));
 
-  const dividends = data?.data ?? [];
+  const dividends = data?.data?.length ? data.data : EMPTY_DIVIDENDS;
 
   const events = useMemo(() => {
     const all: DividendEvent[] = [];

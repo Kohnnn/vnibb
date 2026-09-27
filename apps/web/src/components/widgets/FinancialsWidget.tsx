@@ -17,6 +17,7 @@ import { Sparkline } from '@/components/ui/Sparkline';
 import { useUnit } from '@/contexts/UnitContext';
 import {
     formatFinancialPeriodLabel,
+    isCanonicalQuarterPeriod,
     matchesFinancialQuarterSelection,
     normalizeFinancialPeriod,
     periodSortKey,
@@ -29,6 +30,18 @@ import {
     resolveUnitScale,
     convertFinancialValueForUnit,
 } from '@/lib/units';
+
+// Ratio columns follow the adjacent statements' fiscal-period window. Ratio-only
+// years are excluded; statement-only periods remain with empty ratio cells.
+// If the statement reference is unavailable, keep the ratio feed's periods.
+function buildStatementAlignedPeriods(
+    ratioPeriods: string[],
+    statementPeriods: string[]
+): string[] {
+    if (statementPeriods.length === 0) return ratioPeriods;
+
+    return Array.from(new Set(statementPeriods)).sort((a, b) => periodSortKey(a) - periodSortKey(b));
+}
 
 type FinancialTab = 'balance_sheet' | 'income_statement' | 'cash_flow' | 'ratios';
 
@@ -43,6 +56,11 @@ interface FinancialsWidgetProps {
 // Per-share metrics (EPS/BVPS/DPS) are absolute VND-per-share values and must NOT be
 // divided by the table-wide billions scale. Without this, e.g. EPS ~2000 VND / 1e9 -> 0.00.
 const PER_SHARE_METRIC_KEYS = new Set<string>(['eps', 'bvps', 'dps', 'book_value_per_share']);
+
+// The statement tabs beside this widget in "Financial Period View" render the newest
+// TABLE_YEAR_LIMIT periods they hold (see IncomeStatementWidget). The ratio window is
+// capped at the same number so the two panels cannot disagree on the span's length.
+const TABLE_YEAR_LIMIT = 20;
 
 const STATEMENT_METRIC_KEYS: Record<'income_statement' | 'balance_sheet' | 'cash_flow', string[]> = {
     income_statement: [
@@ -299,6 +317,15 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     const requestLimit = 80;
     const incomeQuery = useIncomeStatement(symbol, { period: requestPeriod, limit: requestLimit, enabled: activeTab === 'income_statement' });
     const balanceQuery = useBalanceSheet(symbol, { period: requestPeriod, limit: requestLimit, enabled: activeTab === 'balance_sheet' });
+    // The statement panels beside this widget request 20 fiscal periods. The provider
+    // returns a different history for limit=80, so use their exact query for the FY
+    // Ratios reference rather than the longer request used by this widget's own tabs.
+    const ratiosReferenceQuery = useIncomeStatement(symbol, {
+        period: requestPeriod,
+        limit: TABLE_YEAR_LIMIT,
+        enabled: activeTab === 'ratios' && periodMode === 'year',
+    });
+
     const cashFlowQuery = useCashFlow(symbol, { period: requestPeriod, limit: requestLimit, enabled: activeTab === 'cash_flow' });
     const ratiosQuery = useFinancialRatios(symbol, { period: requestPeriod, enabled: activeTab === 'ratios' });
 
@@ -408,7 +435,31 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
                     if (!entry) return false;
                     return metrics.some((metric) => readRatioValue(entry, metric.key) !== null);
                 });
-                return firstPopulated > 0 ? allColumns.slice(firstPopulated) : allColumns;
+                const ratioColumns = firstPopulated > 0 ? allColumns.slice(firstPopulated) : allColumns;
+                if (periodMode !== 'year') return ratioColumns;
+
+                // The window is the fiscal years the statement tabs display, newest last.
+                const statementPeriods = (ratiosReferenceQuery.data?.data || [])
+                    // Some provider payloads carry the year under a legacy key, so read the
+                    // same fallbacks the statement tabs use. `IncomeStatementData` types
+                    // only `period`, so the row crosses into `Record` at this boundary to
+                    // reach the provider's legacy keys.
+                    .map((row) => {
+                        const record = row as unknown as Record<string, unknown>;
+                        const rawPeriod =
+                            record?.period
+                            ?? record?.fiscal_year
+                            ?? record?.fiscalYear
+                            ?? record?.year
+                            ?? record?.yearReport;
+                        return normalizeFinancialPeriod(typeof rawPeriod === 'string' ? rawPeriod : null);
+                    })
+                    .filter((periodValue): periodValue is string => Boolean(periodValue))
+                    // Keep the newest periods, matching the statement tabs' window.
+                    .sort((a, b) => periodSortKey(b) - periodSortKey(a))
+                    .slice(0, TABLE_YEAR_LIMIT);
+
+                return buildStatementAlignedPeriods(ratioColumns, statementPeriods);
             })()
             : allColumns;
 
@@ -452,7 +503,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
                 return { label: m.label, isPct: m.isPct, metricKey: m.key, values };
             })
         };
-    }, [activeQuery?.data, activeTab, periodMode, period, unitConfig]);
+    }, [activeQuery?.data, ratiosReferenceQuery.data?.data, activeTab, periodMode, period, unitConfig]);
 
     const hasData = Boolean(tableData && tableData.periods.length > 0);
     const isFallback = Boolean(activeQuery?.error && hasData);

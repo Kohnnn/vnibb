@@ -21,10 +21,11 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from vnibb.services.prediction_market_http import fetch_json_with_retry
 from vnibb.services.prediction_market_service import (
     NormalizedPredictionMarket,
-    PredictionMarketValues,
+    bounded_market_limit,
     category_taxonomy,
-    _upsert_prediction_market,
+    persist_prediction_markets,
 )
+from vnibb.services.prediction_market_policy import MAX_INGEST_MARKETS
 
 
 MANIFOLD_BASE_URL: Final = "https://api.manifold.markets/v0"
@@ -96,16 +97,15 @@ async def fetch_manifold_markets(
     """Fetch active Manifold markets via the resilient JSON fetcher."""
     body = await fetch_json_with_retry(
         client, source="manifold", url="/markets",
-        params={"limit": limit, "filter": "open"},
+        params={"limit": bounded_market_limit(limit), "filter": "open"},
     )
-    rows: list[ManifoldMarketPayload]
     if isinstance(body, list):
-        rows = _MANIFOLD_MARKETS.validate_python(body)
+        rows = _MANIFOLD_MARKETS.validate_python(body[:MAX_INGEST_MARKETS])
     elif isinstance(body, dict) and isinstance(body.get("markets"), list):
-        rows = _MANIFOLD_MARKETS.validate_python(body["markets"])
+        rows = _MANIFOLD_MARKETS.validate_python(body["markets"][:MAX_INGEST_MARKETS])
     else:
         rows = []
-    return rows
+    return rows[:MAX_INGEST_MARKETS]
 
 
 async def ingest_manifold_markets(
@@ -115,17 +115,9 @@ async def ingest_manifold_markets(
 ) -> int:
     """Fetch, normalize, and upsert Manifold markets into the DB."""
     payloads = await fetch_manifold_markets(client, limit)
-    count = 0
-    dialect_name = session.get_bind().dialect.name
-    for payload in payloads:
-        market = normalize_manifold_market(payload)
-        if market is None:
-            continue
-        values: PredictionMarketValues = market.to_values()
-        await session.execute(_upsert_prediction_market(values, dialect_name))
-        count += 1
-    await session.commit()
-    return count
+    values = [market.to_values() for payload in payloads
+              if (market := normalize_manifold_market(payload)) is not None]
+    return await persist_prediction_markets(session, values)
 
 
 async def ingest_manifold_markets_with_default_client(

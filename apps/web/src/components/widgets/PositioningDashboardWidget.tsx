@@ -1,16 +1,23 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { useQueries } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueries, type UseQueryResult } from '@tanstack/react-query'
 import { Users } from 'lucide-react'
 import { useSymbolsByGroup } from '@/lib/queries'
 import * as api from '@/lib/api'
 import type { TransactionFlowResponse } from '@/types/equity'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
-import { WidgetEmpty } from '@/components/ui/widget-states'
+import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink'
+import { useDashboardWidget } from '@/hooks/useDashboardWidget'
+import { useWidgetGroups } from '@/contexts/WidgetGroupContext'
+import { readTickerScope } from '@/lib/widgetScope'
+import type { WidgetGroupId } from '@/types/widget'
 
 interface PositioningDashboardWidgetProps {
+  id: string
+  widgetGroup?: WidgetGroupId
   symbol?: string
   onSymbolClick?: (symbol: string) => void
   onDataChange?: (data: WidgetDataPayload) => void
@@ -38,7 +45,7 @@ function sumScope(points: TransactionFlowResponse['data']['data'], key: keyof (t
   let seen = false
   for (const point of points) {
     const raw = point[key]
-    const value = typeof raw === 'number' ? raw : Number(raw)
+    const value = raw === null || raw === undefined ? NaN : typeof raw === 'number' ? raw : Number(raw)
     if (Number.isFinite(value)) {
       sum += value
       seen = true
@@ -67,18 +74,28 @@ function fmtNet(value: number | null): string {
   return `${sign}${scaled}`
 }
 
-export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: PositioningDashboardWidgetProps) {
+export function PositioningDashboardWidget({ id, symbol, widgetGroup, onSymbolClick, onDataChange }: PositioningDashboardWidgetProps) {
+  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetId: id, widgetType: 'positioning_dashboard', symbol })
+  const { tickerOverrideFor } = useWidgetGroups()
+  const widgetLocation = useDashboardWidget(id)
+  const isDetached = Boolean(tickerOverrideFor(id)) || readTickerScope(widgetLocation?.widget.config).mode === 'override'
+  const selectSymbol = onSymbolClick ?? (isDetached ? undefined : setLinkedSymbol)
   const [group, setGroup] = useState<UniverseGroup>('VN30')
   const [windowDays, setWindowDays] = useState<WindowDays>(5)
 
-  const { data: universe, isLoading: universeLoading } = useSymbolsByGroup(group)
+  const { data: universe, isLoading: universeLoading, error: universeError, refetch: refetchUniverse } = useSymbolsByGroup(group)
 
   const symbols = useMemo(
     () => (universe?.data || []).map((row) => row.symbol).filter(Boolean).slice(0, MAX_SYMBOLS),
     [universe],
   )
 
-  const flowQueries = useQueries({
+  const combineFlows = useCallback((queries: UseQueryResult<TransactionFlowResponse>[]) => ({
+    queries,
+    data: queries.map((query) => query.data),
+  }), [])
+
+  const { queries: flowQueries, data: flowData } = useQueries({
     queries: symbols.map((sym) => ({
       queryKey: ['transactionFlow', sym, windowDays] as const,
       queryFn: () => api.getTransactionFlow(sym, { days: windowDays }),
@@ -86,14 +103,16 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
       staleTime: 5 * 60 * 1000,
       gcTime: 15 * 60 * 1000,
     })),
+    combine: combineFlows,
   })
 
   const isLoading = universeLoading || flowQueries.some((q) => q.isLoading)
   const isFetching = flowQueries.some((q) => q.isFetching)
+  const failedFlow = flowQueries.find((query) => query.error)?.error
 
   const rows = useMemo<PositioningRow[]>(() => {
     return symbols.map((sym, index) => {
-      const points = flowQueries[index]?.data?.data?.data || []
+      const points = flowData[index]?.data?.data || []
       const foreignNet = sumScope(points, 'foreign_net_value')
       const proprietaryNet = sumScope(points, 'proprietary_net_value')
       const domesticNet = sumScope(points, 'domestic_net_value')
@@ -101,7 +120,7 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
       const hasData = foreignNet !== null || proprietaryNet !== null || domesticNet !== null
       return { symbol: sym, foreignNet, proprietaryNet, domesticNet, totalNet, hasData }
     })
-  }, [symbols, flowQueries])
+  }, [symbols, flowData])
 
   const sortedRows = useMemo(
     () =>
@@ -113,30 +132,36 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
     [rows],
   )
 
-  const withData = sortedRows.filter((r) => r.hasData)
+  const withData = useMemo(() => sortedRows.filter((r) => r.hasData), [sortedRows])
+  const payload = useMemo(() => ({
+    __widgetRuntime: {
+      layoutHint: { empty: !withData.length, compactHeight: 6 },
+      provenance: {
+        sourceLabel: 'Investor-bucket flow',
+        apiGroup: '/equity',
+        endpoint: '/equity/{symbol}/transaction-flow',
+      },
+    },
+    rows: withData.map((r) => ({
+      symbol: r.symbol,
+      foreign_net: r.foreignNet,
+      proprietary_net: r.proprietaryNet,
+      domestic_net: r.domesticNet,
+      total_net: r.totalNet,
+      window_days: windowDays,
+    })),
+  }), [withData, windowDays])
+  const lastEmitted = useRef<typeof payload | null>(null)
 
   useEffect(() => {
-    onDataChange?.({
-      __widgetRuntime: {
-        layoutHint: { empty: !withData.length, compactHeight: 6 },
-        provenance: {
-          sourceLabel: 'Investor-bucket flow',
-          apiGroup: '/equity',
-          endpoint: '/equity/{symbol}/transaction-flow',
-        },
-      },
-      rows: withData.map((r) => ({
-        symbol: r.symbol,
-        foreign_net: r.foreignNet,
-        proprietary_net: r.proprietaryNet,
-        domestic_net: r.domesticNet,
-        total_net: r.totalNet,
-        window_days: windowDays,
-      })),
-    })
-  }, [withData, onDataChange, windowDays])
+    if (!onDataChange || lastEmitted.current === payload) return
+    lastEmitted.current = payload
+    onDataChange(payload)
+  }, [payload, onDataChange])
 
   if (isLoading && !withData.length) return <WidgetSkeleton />
+  if (universeError && !universe) return <WidgetError error={universeError} onRetry={() => refetchUniverse()} />
+  if (failedFlow && !withData.length) return <WidgetError error={failedFlow} onRetry={() => { flowQueries.forEach((query) => { if (query.error) void query.refetch() }) }} />
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -207,13 +232,15 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
                   className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-tertiary)]/30"
                 >
                   <td className="px-1 py-1">
-                    <button
-                      type="button"
-                      onClick={() => onSymbolClick?.(row.symbol)}
-                      className="font-bold text-[var(--accent-blue)] hover:underline"
-                    >
-                      {row.symbol}
-                    </button>
+                    {selectSymbol ? (
+                      <button
+                        type="button"
+                        onClick={() => selectSymbol(row.symbol)}
+                        className="font-bold text-[var(--accent-blue)] hover:underline"
+                      >
+                        {row.symbol}
+                      </button>
+                    ) : <span title="Ticker local to this widget; use its ticker selector to change it">{row.symbol}</span>}
                   </td>
                   <td className={`px-1 py-1 text-right font-semibold ${tone(row.foreignNet)}`}>{fmtNet(row.foreignNet)}</td>
                   <td className={`px-1 py-1 text-right ${tone(row.proprietaryNet)}`}>{fmtNet(row.proprietaryNet)}</td>
@@ -223,6 +250,13 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {failedFlow && (
+        <div className="flex items-center justify-between gap-2 px-1 text-[10px] text-amber-300" role="alert">
+          <span>Some flow data is unavailable: {failedFlow.message}</span>
+          <button type="button" onClick={() => { flowQueries.forEach((query) => { if (query.error) void query.refetch() }) }}>Retry</button>
         </div>
       )}
 

@@ -1,4 +1,5 @@
-import { render } from '@testing-library/react';
+import React, { useState } from 'react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import { __resolveDashboardSlug as resolveDashboardSlug, useUrlSync } from '@/hooks/useUrlSync';
 
@@ -65,8 +66,75 @@ describe('useUrlSync deep-link restore', () => {
     // Then: the original URL still drives the requested dashboard, tab, and symbol.
     expect(applyDashboard).toHaveBeenCalledWith('custom-dashboard');
     expect(applyTab).toHaveBeenCalledWith('custom-tab');
+    expect(applySymbol).not.toHaveBeenCalled();
+    rerender(
+      <UrlSyncHarness
+        {...initialProps}
+        activeDashboardId="custom-dashboard"
+        activeTabId="custom-tab"
+        dashboardIds={['default-dashboard', 'custom-dashboard']}
+        tabIdsByDashboard={{ 'custom-dashboard': ['custom-tab'] }}
+      />,
+    );
     expect(applySymbol).toHaveBeenCalledWith('VCI');
   });
+});
+
+function ScopedUrlHarness() {
+  const [dashboard, setDashboard] = useState('original');
+  const [symbols, setSymbols] = useState({ original: 'VCB', imported: 'VCI' });
+  const symbol = symbols[dashboard as keyof typeof symbols];
+  useUrlSync({
+    ready: true,
+    activeDashboardId: dashboard,
+    activeTabId: `${dashboard}-tab`,
+    symbol,
+    dashboardIds: ['original', 'imported'],
+    getTabIds: id => [`${id}-tab`],
+    applyDashboard: setDashboard,
+    applyTab: () => {},
+    applySymbol: next => setSymbols(previous => ({ ...previous, [dashboard]: next })),
+  });
+  return <>
+    <output aria-label="Original ticker">{symbols.original}</output>
+    <output aria-label="Imported ticker">{symbols.imported}</output>
+    <output aria-label="Active workspace">{dashboard}</output>
+    <button onClick={() => setDashboard('original')}>Return to original</button>
+  </>;
+}
+
+test('deep links apply the ticker only after entering its workspace and preserve the departing ticker', () => {
+  window.history.replaceState(null, '', '/dashboard?dashboard=imported&symbol=FPT');
+  render(<ScopedUrlHarness />);
+  expect(screen.getByLabelText('Original ticker')).toHaveTextContent('VCB');
+  expect(screen.getByLabelText('Imported ticker')).toHaveTextContent('FPT');
+  expect(screen.getByLabelText('Active workspace')).toHaveTextContent('imported');
+  expect(new URLSearchParams(window.location.search).get('symbol')).toBe('FPT');
+  fireEvent.click(screen.getByRole('button', { name: 'Return to original' }));
+  expect(new URLSearchParams(window.location.search).get('symbol')).toBe('VCB');
+
+  act(() => {
+    window.history.replaceState(null, '', '/dashboard?dashboard=imported&symbol=HPG');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  expect(screen.getByLabelText('Original ticker')).toHaveTextContent('VCB');
+  expect(screen.getByLabelText('Imported ticker')).toHaveTextContent('HPG');
+  act(() => {
+    window.history.replaceState(null, '', '/dashboard?dashboard=original&symbol=ACB');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  expect(screen.getByLabelText('Original ticker')).toHaveTextContent('ACB');
+  expect(screen.getByLabelText('Imported ticker')).toHaveTextContent('HPG');
+  expect(new URLSearchParams(window.location.search).get('symbol')).toBe('ACB');
+  act(() => {
+    window.history.replaceState(null, '', '/dashboard?dashboard=imported&symbol=FPT');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    window.history.replaceState(null, '', '/dashboard?dashboard=imported&symbol=MSN');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  expect(screen.getByLabelText('Original ticker')).toHaveTextContent('ACB');
+  expect(screen.getByLabelText('Imported ticker')).toHaveTextContent('MSN');
+  expect(new URLSearchParams(window.location.search).get('symbol')).toBe('MSN');
 });
 
 describe('resolveDashboardSlug', () => {

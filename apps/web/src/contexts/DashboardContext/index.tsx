@@ -24,6 +24,7 @@ import type {
     TabCreate,
     WidgetCreate,
 } from '@/types/dashboard';
+import { createWorkspaceBackup, importWorkspaceBackup, type WorkspaceBackup } from '@/lib/workspaceBackup';
 
 // Re-export everything from submodules for backward compatibility
 export * from './types';
@@ -264,7 +265,7 @@ import { dispatchOnboardingMeaningfulAction, findPreferredDashboardId, findPrefe
 import { useDashboardSync, useLoadFromBackend } from '@/lib/useDashboardSync';
 import { config } from '@/lib/config';
 import { normalizeWidgetType } from '@/data/widgetDefinitions';
-import { autoFitGridItems, compactGridItems, findNextAvailableLayout, getWidgetDefaultLayout, layoutsOverlap, preserveTemplateGridItems } from '@/lib/dashboardLayout';
+import { autoFitGridItems, compactGridItems, findAvailableLayoutPosition, findNextAvailableLayout, getWidgetDefaultLayout, layoutsOverlap, preserveTemplateGridItems } from '@/lib/dashboardLayout';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { getPublishedSystemDashboardTemplates } from '@/lib/api';
 
@@ -469,6 +470,7 @@ function readDashboardStorageSnapshot(): { dashboards: Dashboard[]; folders: Das
         if (version < 23) normalizedDashboards = migrateLegacyThesisConfig(normalizedDashboards);
         if (version < 24) normalizedDashboards = migrateLegacyGlobalMarketsDashboard(normalizedDashboards);
         if (version < 25) normalizedDashboards = migrateDefaultInvestorHome(normalizedDashboards);
+        if (version < 26) normalizedDashboards = migrateLegacyWidgetTypes(normalizedDashboards);
 
         const normalizedFolders = folders.some((folder) => folder.id === INITIAL_FOLDER_ID)
             ? folders as unknown as DashboardFolder[]
@@ -500,9 +502,12 @@ function readDashboardStorageSnapshot(): { dashboards: Dashboard[]; folders: Das
 
 interface DashboardContextValue {
     state: DashboardState;
+    localStateReady: boolean;
     // Dashboard actions
     setActiveDashboard: (id: string) => void;
     createDashboard: (data: DashboardCreate) => Dashboard;
+    exportWorkspace: (groups?: Dashboard['widgetGroups'], linkedGlobalMarketsSymbol?: string) => WorkspaceBackup;
+    restoreWorkspace: (backup: WorkspaceBackup) => void;
     updateDashboard: (id: string, updates: Partial<Dashboard>) => void;
     updateDashboardRuntime: (id: string, updates: Partial<Dashboard>) => void;
     deleteDashboard: (id: string) => void;
@@ -769,6 +774,12 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                     }
                     return { dashboards: d };
                 },
+                (d) => {
+                    if (migrationVersion < 26) {
+                        d = migrateLegacyWidgetTypes(d);
+                    }
+                    return { dashboards: d };
+                },
             ];
 
             let migrationChanged = false;
@@ -987,11 +998,25 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         },
     });
 
-    // Backend load hook
+    // The backend snapshot is authoritative for cloud IDs; imported and personal
+    // browser-only workspaces remain local even when absent from the response.
     useLoadFromBackend((loadedDashboards) => {
-        if (loadedDashboards.length > 0) {
-            dispatch({ type: 'LOAD_STATE', payload: { dashboards: loadedDashboards, folders: state.folders, activeDashboardId: state.activeDashboardId, activeTabId: state.activeTabId } });
-        }
+        const current = stateRef.current;
+        const cloudIds = new Set(loadedDashboards.map((dashboard) => dashboard.id));
+        const dashboards = [
+            ...current.dashboards.filter((dashboard) => !cloudIds.has(dashboard.id) && !/^\d+$/.test(dashboard.id)),
+            ...loadedDashboards,
+        ];
+        const selectedDashboard = dashboards.find((dashboard) => dashboard.id === current.activeDashboardId)
+            ?? loadedDashboards[0] ?? dashboards[0];
+        const activeTabId = selectedDashboard?.tabs.some((tab) => tab.id === current.activeTabId)
+            ? current.activeTabId : selectedDashboard?.tabs[0]?.id ?? null;
+        dispatch({ type: 'LOAD_STATE', payload: {
+            ...current,
+            dashboards,
+            activeDashboardId: selectedDashboard?.id ?? null,
+            activeTabId,
+        } });
     }, backendSyncReady);
 
     // Computed values
@@ -1162,15 +1187,17 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         const tab = dashboard?.tabs.find((t) => t.id === tabId);
         const widget = tab?.widgets.find((w) => w.id === widgetId);
         if (!widget) return null;
+        const cloneWidth = Math.min(widget.layout.w, 24);
+        const position = findAvailableLayoutPosition(tab!.widgets.map(({ layout }) => layout), { w: cloneWidth, h: widget.layout.h });
 
         const clonedWidget: WidgetInstance = {
             ...widget,
             id: generateId(),
             layout: {
                 ...widget.layout,
+                w: cloneWidth,
                 i: generateId(),
-                x: widget.layout.x + 2,
-                y: widget.layout.y + 2,
+                ...position,
             },
         };
         dispatch({ type: 'ADD_WIDGET', payload: { dashboardId, tabId, widget: clonedWidget } });
@@ -1217,9 +1244,27 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const dismissMigrationNotice = useCallback(() => {
         setMigrationNotice(null);
     }, []);
+    const exportWorkspace = useCallback((groups?: Dashboard['widgetGroups'], linkedGlobalMarketsSymbol?: string) =>
+        createWorkspaceBackup(stateRef.current, groups, linkedGlobalMarketsSymbol), []);
+
+    const restoreWorkspace = useCallback((backup: WorkspaceBackup) => {
+        if (!localStateReady || typeof window === 'undefined') throw new Error('Workspace storage is not ready yet.');
+        const next = importWorkspaceBackup(stateRef.current, backup);
+        const serialized = serializeDashboardStorage(next);
+        if (!serialized || !persistDashboardStorage(next)) {
+            throw new Error('Could not save imported workspaces in this browser. Nothing was imported.');
+        }
+        stateRef.current = next;
+        persistedStateRef.current = JSON.stringify(serialized);
+        skipNextPersistenceRef.current = true;
+        dispatch({ type: 'LOAD_STATE', payload: next });
+    }, [localStateReady]);
 
     const contextValue: DashboardContextValue = {
         state,
+        localStateReady,
+        exportWorkspace,
+        restoreWorkspace,
         setActiveDashboard,
         createDashboard,
         updateDashboard,

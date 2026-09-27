@@ -366,9 +366,36 @@ export function ScreenerWidget({
         setActiveScreenId((current) => current === persistedActiveScreenId ? current : persistedActiveScreenId);
     }, [persistedActiveScreenId]);
 
+    const searchInstanceKey = `${widgetLocation?.dashboardId ?? ''}\u0000${widgetLocation?.tabId ?? ''}\u0000${id}`;
+    const searchSyncRef = useRef({
+        instanceKey: searchInstanceKey,
+        persistedSearch,
+        localSearches: new Set<string>(),
+        externalSearch: null as string | null,
+    });
+    const searchInstanceChanged = searchSyncRef.current.instanceKey !== searchInstanceKey;
+    const persistedSearchChanged = searchSyncRef.current.persistedSearch !== persistedSearch;
+    const shouldAdoptPersistedSearch = searchInstanceChanged
+        || (persistedSearchChanged && !searchSyncRef.current.localSearches.has(persistedSearch));
+
     useEffect(() => {
-        setSearch((current) => current === persistedSearch ? current : persistedSearch);
-    }, [persistedSearch]);
+        if (!searchInstanceChanged && !persistedSearchChanged) return;
+        searchSyncRef.current.instanceKey = searchInstanceKey;
+        searchSyncRef.current.persistedSearch = persistedSearch;
+        if (shouldAdoptPersistedSearch) {
+            if (searchInstanceChanged) searchSyncRef.current.localSearches.clear();
+            searchSyncRef.current.externalSearch = persistedSearch;
+            setSearch(persistedSearch);
+        } else if (persistedSearch === search) {
+            searchSyncRef.current.localSearches.clear();
+        }
+    }, [persistedSearch, persistedSearchChanged, search, searchInstanceChanged, searchInstanceKey, shouldAdoptPersistedSearch]);
+
+    const changeSearch = (nextSearch: string) => {
+        searchSyncRef.current.localSearches.add(nextSearch);
+        searchSyncRef.current.externalSearch = null;
+        setSearch(nextSearch);
+    };
 
     useEffect(() => {
         setMarket((current) => current === persistedMarket ? current : persistedMarket);
@@ -412,6 +439,7 @@ export function ScreenerWidget({
     const sort = useMemo(() => `${sortField}:${sortOrder}`, [sortField, sortOrder]);
 
     useEffect(() => {
+        if (shouldAdoptPersistedSearch || (searchSyncRef.current.externalSearch !== null && search !== searchSyncRef.current.externalSearch)) return;
         if (!widgetLocation) return;
 
         const currentConfig = widgetLocation.widget.config || {};
@@ -445,7 +473,7 @@ export function ScreenerWidget({
         }
 
         updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, { config: nextConfig });
-    }, [activeColumnIds, activeFilters, activeScreenId, advancedFilterGroup, customScreens, id, market, search, sortField, sortOrder, updateWidget, viewMode, widgetLocation]);
+    }, [activeColumnIds, activeFilters, activeScreenId, advancedFilterGroup, customScreens, id, market, search, shouldAdoptPersistedSearch, sortField, sortOrder, updateWidget, viewMode, widgetLocation]);
 
     const {
         data: screenerData,
@@ -771,7 +799,7 @@ export function ScreenerWidget({
         });
         setActiveFilters([]);
         setAdvancedFilterGroup(createEmptyFilterGroup());
-        setSearch('');
+        changeSearch('');
         setActiveScreenId('all');
         setSortField(DEFAULT_SORT_FIELD);
         setSortOrder(DEFAULT_SORT_ORDER);
@@ -845,7 +873,7 @@ export function ScreenerWidget({
                         <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--text-muted)]" />
                         <input
                             value={search}
-                            onChange={(event) => setSearch(event.target.value)}
+                            onChange={(event) => changeSearch(event.target.value)}
                             placeholder="Quick search..."
                             aria-label="Filter screener results"
                             className="h-8 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] pl-8 pr-3 text-[11px] text-[var(--text-primary)] outline-none transition-all placeholder:text-[var(--text-muted)] focus:border-blue-500/50"
@@ -853,7 +881,6 @@ export function ScreenerWidget({
                     </div>
 
                     <MarketToggle value={market} onChange={setMarket} />
-
                     <div className="flex rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
                         <button
                             onClick={() => {

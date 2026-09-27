@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { Check, Plus, RotateCcw, Sparkles, X } from 'lucide-react';
 
 import { useDashboard } from '@/contexts/DashboardContext';
-import { useSymbolLink } from '@/contexts/SymbolLinkContext';
+import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import { submitCopilotOutcome, type CopilotActionSuggestion, type CopilotResponseMeta } from '@/lib/api';
 import type { WidgetType } from '@/types/dashboard';
@@ -22,7 +22,7 @@ function resolveWidgetType(action: CopilotActionSuggestion): WidgetType | null {
 
 export function CopilotActionPanel({ actions, responseMeta, surface = 'sidebar' }: CopilotActionPanelProps) {
   const { activeDashboard, activeTab, addWidget } = useDashboard();
-  const { globalSymbol, setGlobalSymbol } = useSymbolLink();
+  const { globalSymbol, setGlobalSymbol } = useWidgetGroups();
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [executedActionIds, setExecutedActionIds] = useState<Record<string, string>>({});
 

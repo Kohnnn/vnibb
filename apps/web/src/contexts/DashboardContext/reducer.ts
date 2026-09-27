@@ -1,7 +1,7 @@
 // Dashboard Reducer - extracted from DashboardContext.tsx
 
 import type { DashboardState, DashboardAction } from './types';
-import { autoFitGridItems, compactGridItems, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import { autoFitGridItems, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { isEditableDashboardId, canEditDashboard } from './helpers';
 import {
     SYSTEM_DASHBOARD_IDS,
@@ -191,11 +191,17 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
                     d.id === action.payload.dashboardId
                         ? {
                             ...d,
-                            tabs: d.tabs.map((t) =>
-                                t.id === action.payload.tabId
-                                    ? { ...t, widgets: [...t.widgets, action.payload.widget] }
-                                    : t
-                            ),
+                            tabs: d.tabs.map((t) => {
+                                if (t.id !== action.payload.tabId) return t;
+                                const widget = action.payload.widget;
+                                const y = Number.isFinite(widget.layout.y)
+                                    ? widget.layout.y
+                                    : t.widgets.reduce((bottom, existing) => Math.max(bottom, existing.layout.y + existing.layout.h), 0);
+                                return {
+                                    ...t,
+                                    widgets: [...t.widgets, y === widget.layout.y ? widget : { ...widget, layout: { ...widget.layout, y } }],
+                                };
+                            }),
                             updatedAt: new Date().toISOString(),
                         }
                         : d
@@ -239,25 +245,18 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
                     d.id === action.payload.dashboardId
                         ? {
                             ...d,
-                            tabs: d.tabs.map((t) => {
-                                if (t.id !== action.payload.tabId) {
-                                    return t;
-                                }
-
-                                const nextWidgets = t.widgets.map((w) =>
-                                    w.id === action.payload.widgetId
-                                        ? { ...w, ...action.payload.updates }
-                                        : w
-                                );
-
-                                return {
-                                    ...t,
-                                    widgets: action.payload.updates.layout
-                                        ? compactGridItems(nextWidgets)
-                                        : nextWidgets,
-                                };
-                            }),
-                            updatedAt: new Date().toISOString(),
+                            tabs: d.tabs.map((t) =>
+                                t.id === action.payload.tabId
+                                    ? {
+                                        ...t,
+                                        widgets: t.widgets.map((w) =>
+                                            w.id === action.payload.widgetId
+                                                ? { ...w, ...action.payload.updates, layout: w.layout }
+                                                : w
+                                        ),
+                                    }
+                                    : t
+                            ),
                         }
                         : d
                 ),

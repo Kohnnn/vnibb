@@ -10,10 +10,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from vnibb.core.database import Base
+
+def _daily_bucket_default(context) -> datetime:
+    captured_at = context.get_current_parameters()["captured_at"]
+    return captured_at.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 class PredictionMarketSnapshot(Base):
@@ -43,4 +47,12 @@ class PredictionMarketSnapshot(Base):
         nullable=False,
         index=True,
         default=datetime.utcnow,
+    )
+    bucket_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_daily_bucket_default,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("source", "source_id", "bucket_at", name="uq_prediction_market_snapshot_bucket"),
+        Index("ix_prediction_market_snapshots_bucket_at", "bucket_at"),
     )

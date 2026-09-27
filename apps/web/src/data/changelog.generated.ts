@@ -16,6 +16,14 @@ live in \`docs/\`.
 
 ## [Unreleased]
 
+### Added
+- Personal workspace JSON backup with multi-tab layouts, widget configuration, nested folders, isolated ticker-group snapshots and linked TradingView ticker snapshots. Imports preview contents and restore as local copies without replacing existing dashboards or syncing them to the backend.
+- Copilot chart/table actions can target a named personal dashboard and tab, including from a system dashboard. Promoted widgets with a source ticker retain it locally without mutating the shared workspace ticker.
+- Ticker scope is explicit and reversible: a widget shows whether its ticker is shared with its group or kept locally, can be detached without leaving the group, and can rejoin by adopting the group's current ticker.
+- Statement tables support chartable metric selection with labeled series; period headers retain sortable columns. Active metric context reaches the copilot through the widget runtime payload.
+- Purpose-bound research starters pair a template with its VniAgent prompt. Applying one discloses how its widgets handle tickers and primes the agent through the same seam the onboarding walkthrough uses.
+- Copilot artifact placement remembers the chosen dashboard/tab for the rest of the response and across reloads, records artifact provenance inside the created widget, and can save a table artifact to the research notebook once.
+
 ### Deployed
 - Released to the Oracle stack on 2026-09-24. Serving revision
   \`d329dc2b2250bba00652a363684d58799939fae6\`, published as
@@ -33,17 +41,109 @@ live in \`docs/\`.
   these migrations should provision the app role as the owner to avoid repeating
   this.
 
+### Added
+- **Matrix** (\`research_matrix\`) — frozen company-by-question research. A registered
+  dashboard widget compares an anchor company with an editable peer shortlist over
+  four curated sector playbooks (non-financial, banks, insurers, securities) at a
+  common fiscal year, with a common-quarter override. Supported dimensions carry
+  frozen typed values, exact serving-record evidence and explicit limitations;
+  unsupported sector metrics report \`unavailable\` rather than being mapped to a
+  misleading generic proxy, and mismatched reporting basis reports \`non_comparable\`.
+  One canonical decimal value and one server-formatted \`display\` drive the cell,
+  preview, evidence inspector and copied selection, so a percentage can never be
+  re-rendered with a different sign or scale. Snapshots are owner-bound and
+  immutable in the existing \`app_kv\` store, with append-only revision-bound review
+  and separate revocation; browser persistence holds view preferences and snapshot
+  references only, never protected values. View operations execute no research.
+- **Evidence inspector and scoped handoff.** Each cell opens its exact evidence with
+  basis, scope and review state, and can be carried into a scoped follow-up. The
+  VniAgent path sends a typed \`{snapshot_id, result_ids}\` selection whose context the
+  server rebuilds and reauthorizes; the request text carries references only. The
+  external MCP path exposes a read-only \`get_matrix_selection\` tool that resolves the
+  same selection from the per-request authenticated user identity, refuses the shared
+  deployment bearer, and is subject to an explicit source-rights policy that denies
+  unapproved providers (including configured \`family:unknown\`), so snapshot
+  references are never bearer grants.
+- Research Matrix is available in the Investor's Widget Library under AI & Research; adding it to a personal tab keeps the existing 24-column workspace geometry and the Matrix snapshot authorization model.
+- Matrix preparation exposes available fiscal years and quarters for proposed companies; a bounded read-only lookup checks edited 2–10-company shortlists before Create, including eligible peers beyond the initial nine suggestions. A shared quarter does not require annual rows.
+
 ### Fixed
+- Narrow widget headers move controls into an accessible compact panel; overflow menus escape card clipping and support keyboard navigation. Chart timeframe/type controls now agree across the header, chart body, and saved configuration.
+- Responsive viewing, empty-state hints, zoom/container changes, and edit-mode toggles do not rewrite authored desktop widget geometry; collision-safe manual resizing preserves other widgets' positions. Narrow layouts remain view-only. Widgets added at the bottom now receive finite coordinates before storage, so reload and backup cannot reject the dashboard.
+- Restored workspace ticker groups and linked TradingView ticker stay scoped to their copies. Following a group no longer changes the Global ticker; a locally detached TradingView symbol stays detached across ticker changes and reload. Deep links wait for local hydration and the requested dashboard before applying a ticker.
+- Maximized widgets keep one live editor and retain unsaved in-memory drafts across maximize/restore; header-specific actions remain available in the widget container while the shared shell suppresses duplicate headers.
+- Saved Overview tabs using the retired \`valuation_multiples\` ID migrate to the registered Valuation Multiples Chart without losing the widget's ID or layout.
+- Statement widgets keep table/chart and period controls reachable on the dashboard. The dashboard suppresses duplicate inner headers; controls live in the body or a reachable action row. Selected metrics render matching series rather than empty charts.
+- Valuation aliases now migrate every saved widget instance, including same-config duplicates at different positions; an empty ratio-history response no longer loops when the widget reports its runtime state.
+- Copilot global-ticker actions update the linked widget group as well as the workspace header; TradingView command actions target the destination dashboard ticker without changing the source workspace. Cloud reconciliation selects a surviving dashboard and tab if the active remote layout disappears.
+- Drawdown Deep Dive, Hurst Market Structure, Dividend Ladder and Quant Summary now keep empty/loading-derived runtime dependencies stable, so a linked widget can publish status without triggering a parent/child render loop.
+- Income Statement now opens wide financial tables at their newest periods like Balance Sheet and Cash Flow, while preserving horizontally scrollable older years and the sticky metric column.
+- The 13 registered Widgets previously routed through placeholders now load their existing named implementations. Income Sankey keeps incomplete and loss-making flows unavailable rather than drawing positive ribbons; quantitative and global-market surfaces distinguish missing coverage from observed zero.
+- API installs in CI, the release image, and the documented local setup use SHA-256-constrained VNStock publisher wheels with PyPI for unrelated dependencies. The impossible direct \`vnai<2.5\` pin was removed; free-tier startup and optional premium installation retain their existing contracts.
+- Alembic and application sync sessions convert PostgreSQL URL scheme prefixes to the declared \`psycopg2\` driver rather than relying on SQLAlchemy's implicit \`psycopg\` default; password contents are preserved.
+- Ratio TTM views no longer inherit cached FY statement columns after a period switch. Income Sankey quarter selection respects the chosen Q1–Q4 rather than always charting the latest quarter; intraday Volume Delta no longer labels five-minute samples as a 20-day cumulative total.
+- Nightly prediction-market cleanup jobs now await their guarded tasks. Automatic stale-catalogue deletion excludes unarchived terminal contracts reserved for archive-first retention; retained genuine 1d/7d/30d observations remain available even if today's quote vector disappears or the catalogue row is pruned.
+- Reviewed Matrix follow-ups keep references in the typed selection instead of the editable question; oversized questions fail visibly rather than being silently truncated. Authorized Matrix chat streams and denials use \`no-store\`.
+- Inactive prediction-market lists apply end-date ordering before limiting results. Probability aggregates validate every outcome, retaining genuine first-outcome zero prices in multi-outcome markets while excluding malformed vectors.
+- MCP user JWTs authorize only owner-scoped Matrix selection; existing market and premium tools still require the shared deployment bearer. Matrix export refuses generic \`vnstock\`/\`vnstock_ratio\`, bare relation, and unknown supplier tags even when configured; explicit test-only supplier tags do not grant real-provider rights.
+- Snapshot inserts reject unobserved probability vectors instead of recording false 0% history while retaining genuine zero quotes. Consensus volume stays unavailable when no priced market contributed observed volume; invalid concurrent stale-market indexes are rebuilt rather than marked applied.
+- Snapshot writers page past recent markets without observed quotes within the bounded source catalogue, so unpriced Kalshi rows cannot displace an older fresh genuine 0% quote from daily or intraday history.
+- PostgreSQL bucket triggers derive UTC day/15-minute buckets from captured timestamps for both old and new snapshot writers, so migration-before-image deployment and image-only rollback do not break old writes.
+- Workspace duplicates choose bounded collision-free coordinates; detached TradingView symbols remain exchange-qualified and update when settings change. Newly activated native ticker controls navigate within their linked scope, external Screener searches synchronize across tabs, and VniAgent Open matches the artifact ticker before focusing a widget.
+- A remote Screener clear no longer revives the initial empty search as a stale local echo; detached widget tickers reconcile saved Settings values even if the widget was unmounted when they changed.
+
+- Prediction-market analysis now exposes full contract terms/outcomes and
+  1d/7d/30d recorded history, with observed percentage-point changes, ranges,
+  sample counts and actual coverage. Intraday and nightly observations are
+  merged without fabricated gaps; the drawer escapes transformed widget grids.
+- All five prediction providers remain visible. Synthetic/stale catalogue rows
+  no longer masquerade as current odds; missing price vectors are not 0%, and
+  zero-source calibration no longer claims divergence. Reads share a bounded
+  fresh catalogue; descriptions, source units and timestamps retain provenance.
+  Verification: 32 API regressions and 18 frontend regressions passed; real-data
+  browser smoke exercised drawer rendering, history-window changes, and Escape.
+- Prediction-market catalogue growth is now bounded. The Kalshi cursor sweep
+  stops at a hard ingest budget instead of paging the whole corpus, and a new
+  daily retention job deletes catalogue rows no provider has refreshed within
+  the retention horizon — rows the bounded read path can never return. Retention
+  walks the stale end through a new \`(updated_at, id)\` index and never touches
+  synthetic provenance, archived referents, or terminal rows owned by the
+  archiving retention. On the live node the catalogue went from 14.7 M rows and
+  12.3 GB of heap to 2.5 M rows and 1.3 GB, with host root usage falling from
+  74 G to 58 G. Verification: 6 new retention tests plus a Kalshi budget
+  regression, all passing; the production batch walk measured 3.26 ms for 5,000
+  rows versus 112 s for the naive count.
+- Prediction-market ingestion excludes Kalshi multivariate combos and enforces
+  bounded batches, payloads, per-source catalogue admission and relation-size
+  ceilings. Both snapshot cadences select a fresh, real, capped universe;
+  interval keys and serialized writes prevent retries or changing selections
+  from exceeding bucket limits. Daily and intraday retention run independently.
+  Random historical backfill and production fixture fallback no longer create
+  fabricated observations. Index migration supports bounded catalogue reads.
+- OCI backup container-space probes now support BusyBox as well as GNU \`df\`,
+  and reject stopped containers before starting a dump.
 - Financial ratio tables no longer present absent data as real numbers. A period the
   provider could not compute (missing price, EPS, or book value) is now shown as an empty
   cell instead of \`0.00\`. Valuation multiples treat a literal \`0\` as absent, because a
   company never trades at zero times earnings; metrics where zero is meaningful are
   untouched. This affected both the Financial Ratios widget and the Ratios tab of the
   Financials widget, where an earlier formatter coerced \`null\` through \`Number(null)\`.
-- The Financial Ratios widget's year span now matches the Income Statement, Balance Sheet,
-  and Cash Flow panels beside it in Financial Period View. It previously unioned its own
-  longer history with theirs, so one period selector showed 2012-2026 in that table and
-  2018-2026 in the other three. Leading periods with no ratio data are also trimmed.
+- Financial Period View aligns both the standalone Financial Ratios widget and the
+  Financials Ratios tab to the adjacent statement panels' fiscal-period window.
+  Older ratio-only years are excluded, and a statement-only current-year YTD
+  period remains visible with empty ratio cells. If the statement feed is
+  unavailable, both views retain their available ratio periods.
+- Synthetic YTD and TTM statements now preserve missing quarterly metrics as
+  unknown instead of summing them as zero. Income and cash-flow snapshots sum
+  only their own fields, and a reported zero remains zero only when every
+  contributing quarter reported a value.
+- Prediction-market intraday retention now runs independently of the 15-minute
+  snapshot writer. It deletes only rows older than seven days in bounded,
+  resumable transactions; ingest timeout no longer strands the cleanup step.
+  The OCI backup producer checks available space before dumping, streams
+  PostgreSQL once, and removes incomplete sets without pruning prior backups.
+  The off-box restore accepts historical manifests that self-listed
+  \`manifest.json\` while still verifying both data artifacts by hash.
 - Backup verification now fails on artifact corruption, nonzero restore, missing equity history, or an existing scratch database; failed copies remove their partial staged dump without deleting a pre-existing one. An isolated off-box Postgres/Mongo restore utility verifies a paired set, representative data, and container cleanup before reporting success.
 - The API reads durable scheduler-worker outcomes across processes and returns unavailable instead of empty healthy status when its observation store fails. Prediction-market query paths are bounded; terminal-market retention is archive-first, row-locked, batch-limited, dry-run by default, and gated on an operator-verified backup/isolated restore.
 - A cached whole-market screener Universe requires a completed full-run symbol-coverage record; partial runs do not invalidate a previously complete partition. Screener provider failures without fallback are marked unavailable rather than zero matches, and quote failures no longer fabricate zero price or current timestamps.

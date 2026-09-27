@@ -51,6 +51,7 @@ function DashboardStateProbe() {
       <output data-testid="dashboard-count">{state.dashboards.length}</output>
       <output data-testid="widget-types">{state.dashboards.flatMap((dashboard) => dashboard.tabs.flatMap((tab) => tab.widgets.map((widget) => widget.type))).join(',')}</output>
       <output data-testid="active-dashboard">{state.activeDashboardId}</output>
+      <output data-testid="active-tab">{state.activeTabId}</output>
       <output data-testid="folder-names">{state.folders.map((folder) => folder.name).join(',')}</output>
       <output data-testid="sync-groups">{state.dashboards.flatMap((dashboard) => dashboard.syncGroups.map((group) => `${group.id}:${group.name}:${group.color}:${group.currentSymbol}`)).join(',')}</output>
       <output data-testid="storage-notice">{migrationNotice?.message || ''}</output>
@@ -58,6 +59,7 @@ function DashboardStateProbe() {
       <output data-testid="backend-sync-enabled">{String(backendSync.enabled)}</output>
       <button onClick={() => createDashboard({ name: 'Unsaved dashboard' })}>create dashboard</button>
       <button onClick={() => { setActiveDashboard(customDashboard.id); setActiveTab('saved-tab'); }}>open saved tab</button>
+      <button onClick={() => { setActiveDashboard('42'); setActiveTab('removed-tab'); }}>open removed cloud tab</button>
     </>
   );
 }
@@ -132,6 +134,47 @@ describe('DashboardProvider backend sync flag', () => {
 
     expect(screen.getByTestId('dashboards')).toHaveTextContent(/dash-/);
   });
+
+  it('moves the active selection to a surviving cloud dashboard when its cached dashboard is deleted', async () => {
+    (config as { backendSyncEnabled: boolean }).backendSyncEnabled = true;
+    const removed = { ...customDashboard, id: '42', tabs: [{ id: 'removed-tab', name: 'Removed', order: 0, widgets: [] }] };
+    const surviving = { ...customDashboard, id: '43', tabs: [{ id: 'surviving-tab', name: 'Surviving', order: 0, widgets: [] }] };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([removed, surviving]));
+    window.localStorage.setItem(FOLDERS_KEY, JSON.stringify([]));
+    window.localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_STORAGE_VERSION);
+    window.localStorage.setItem(MIGRATION_VERSION_KEY, String(CURRENT_MIGRATION_VERSION));
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('dashboards')).toHaveTextContent('42:Restored custom dashboard'));
+    fireEvent.click(screen.getByRole('button', { name: 'open removed cloud tab' }));
+    expect(screen.getByTestId('active-dashboard')).toHaveTextContent('42');
+    expect(screen.getByTestId('active-tab')).toHaveTextContent('removed-tab');
+    const onLoad = jest.mocked(useLoadFromBackend).mock.calls.at(-1)?.[0];
+    act(() => onLoad?.([surviving]));
+
+    expect(screen.getByTestId('active-dashboard')).toHaveTextContent('43');
+    expect(screen.getByTestId('active-tab')).toHaveTextContent('surviving-tab');
+  });
+  it('drops deleted cloud dashboards without losing local imported workspaces', async () => {
+    (config as { backendSyncEnabled: boolean }).backendSyncEnabled = true;
+    const surviving = { ...customDashboard, id: '43', name: 'Surviving cloud' };
+    const removed = { ...customDashboard, id: '42', name: 'Deleted cloud' };
+    const imported = { ...customDashboard, id: 'import-copy', name: 'Imported local' };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([removed, surviving, imported]));
+    window.localStorage.setItem(FOLDERS_KEY, JSON.stringify([]));
+    window.localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_STORAGE_VERSION);
+    window.localStorage.setItem(MIGRATION_VERSION_KEY, String(CURRENT_MIGRATION_VERSION));
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('dashboards')).toHaveTextContent('42:Deleted cloud'));
+    const onLoad = jest.mocked(useLoadFromBackend).mock.calls.at(-1)?.[0];
+    act(() => onLoad?.([surviving]));
+
+    expect(screen.getByTestId('dashboards')).not.toHaveTextContent('42:Deleted cloud');
+    expect(screen.getByTestId('dashboards')).toHaveTextContent('43:Surviving cloud');
+    expect(screen.getByTestId('dashboards')).toHaveTextContent('import-copy:Imported local');
+  });
+
 });
 
 describe('DashboardProvider published templates', () => {
@@ -217,6 +260,95 @@ describe('DashboardProvider browser persistence', () => {
   afterEach(() => {
     jest.useRealTimers();
     jest.restoreAllMocks();
+  });
+
+  it('reloads bottom-placed widgets without changing authored dashboard geometry or config', async () => {
+    const existing = {
+      ...customDashboard,
+      tabs: [{ id: 'saved-tab', name: 'Saved tab', order: 0, widgets: [
+        { id: 'existing-one', type: 'notes' as const, tabId: 'saved-tab', config: { text: 'keep me' }, layout: { i: 'existing-one', x: 4, y: 3, w: 8, h: 5 } },
+        { id: 'existing-two', type: 'price_chart' as const, tabId: 'saved-tab', config: { symbol: 'FPT' }, layout: { i: 'existing-two', x: 12, y: 20, w: 10, h: 7 } },
+      ] }],
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([existing]));
+
+    function PlacementProbe() {
+      const { addWidget, state, migrationNotice } = useDashboard();
+      const saved = state.dashboards.find((dashboard) => dashboard.id === existing.id);
+      return <>
+        <output data-testid="saved-widget-count">{saved?.tabs[0]?.widgets.length ?? 0}</output>
+        <output data-testid="saved-widgets">{JSON.stringify(saved?.tabs[0]?.widgets ?? [])}</output>
+        <output data-testid="storage-notice">{migrationNotice?.message || ''}</output>
+        <button onClick={() => {
+          addWidget(existing.id, 'saved-tab', { type: 'notes', tabId: 'saved-tab', config: { text: 'first' }, layout: { x: 0, y: Infinity, w: 6, h: 6 } });
+          addWidget(existing.id, 'saved-tab', { type: 'notes', tabId: 'saved-tab', config: { text: 'second' }, layout: { x: 10, y: Infinity, w: 6, h: 6 } });
+          addWidget(existing.id, 'saved-tab', { type: 'notes', tabId: 'saved-tab', config: { text: 'authored' }, layout: { x: 2, y: 1, w: 4, h: 3 } });
+        }}>add widgets</button>
+      </>;
+    }
+
+    const { unmount } = render(<DashboardProvider><PlacementProbe /></DashboardProvider>);
+    await waitFor(() => expect(screen.getByTestId('saved-widget-count')).toHaveTextContent('2'));
+    fireEvent.click(screen.getByRole('button', { name: 'add widgets' }));
+    await waitFor(() => expect(screen.getByTestId('saved-widget-count')).toHaveTextContent('5'));
+    const saved = storedDashboards().find((dashboard) => dashboard.id === existing.id);
+    expect(saved?.tabs[0].widgets.slice(0, 2)).toEqual(existing.tabs[0].widgets);
+    expect(saved?.tabs[0].widgets.slice(2).map((widget) => ({ config: widget.config, x: widget.layout.x, y: widget.layout.y, w: widget.layout.w, h: widget.layout.h }))).toEqual([
+      { config: { text: 'first' }, x: 0, y: 27, w: 6, h: 6 },
+      { config: { text: 'second' }, x: 10, y: 33, w: 6, h: 6 },
+      { config: { text: 'authored' }, x: 2, y: 1, w: 4, h: 3 },
+    ]);
+
+    unmount();
+    render(<DashboardProvider><PlacementProbe /></DashboardProvider>);
+    await waitFor(() => expect(screen.getByTestId('saved-widget-count')).toHaveTextContent('5'));
+    expect(screen.getByTestId('storage-notice')).toHaveTextContent('');
+    expect(JSON.parse(screen.getByTestId('saved-widgets').textContent ?? '[]')).toEqual(saved?.tabs[0].widgets);
+  });
+
+  it.each([
+    ['an occupied offset', [
+      { id: 'source', type: 'notes' as const, tabId: 'saved-tab', config: { text: 'original' }, layout: { i: 'source', x: 0, y: 0, w: 8, h: 6 } },
+      { id: 'neighbor', type: 'notes' as const, tabId: 'saved-tab', config: {}, layout: { i: 'neighbor', x: 8, y: 0, w: 8, h: 6 } },
+      { id: 'occupied', type: 'notes' as const, tabId: 'saved-tab', config: {}, layout: { i: 'occupied', x: 0, y: 6, w: 24, h: 6 } },
+    ]],
+    ['the right edge', [
+      { id: 'source', type: 'notes' as const, tabId: 'saved-tab', config: { text: 'original' }, layout: { i: 'source', x: 16, y: 0, w: 8, h: 6 } },
+      { id: 'occupied', type: 'notes' as const, tabId: 'saved-tab', config: {}, layout: { i: 'occupied', x: 0, y: 6, w: 24, h: 6 } },
+    ]],
+  ])('duplicates a widget at %s without moving authored widgets or overlapping', async (_scenario, widgets) => {
+    const dashboard = { ...customDashboard, tabs: [{ id: 'saved-tab', name: 'Saved tab', order: 0, widgets }] };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([dashboard]));
+    let clonedLayout: typeof widgets[number]['layout'] | undefined;
+
+    function DuplicateProbe() {
+      const { cloneWidget, state } = useDashboard();
+      const saved = state.dashboards.find((item) => item.id === dashboard.id)?.tabs[0].widgets ?? [];
+      return <>
+        <output data-testid="duplicates">{JSON.stringify(saved)}</output>
+        <button onClick={() => { clonedLayout = cloneWidget(dashboard.id, 'saved-tab', 'source')?.layout; }}>duplicate</button>
+      </>;
+    }
+
+    render(<DashboardProvider><DuplicateProbe /></DashboardProvider>);
+    await waitFor(() => expect(JSON.parse(screen.getByTestId('duplicates').textContent ?? '[]')).toHaveLength(widgets.length));
+    fireEvent.click(screen.getByRole('button', { name: 'duplicate' }));
+
+    const saved = JSON.parse(screen.getByTestId('duplicates').textContent ?? '[]') as typeof widgets;
+    const clone = saved.at(-1)!;
+    expect(saved.slice(0, -1)).toEqual(widgets);
+    expect(clone.id).not.toBe('source');
+    expect(clone.config).toEqual(widgets[0].config);
+    expect(clone.layout).toEqual(clonedLayout);
+    expect(clone.layout.w).toBe(widgets[0].layout.w);
+    expect(clone.layout.h).toBe(widgets[0].layout.h);
+    expect(Number.isFinite(clone.layout.x) && Number.isFinite(clone.layout.y)).toBe(true);
+    expect(clone.layout.x).toBeGreaterThanOrEqual(0);
+    expect(clone.layout.x + clone.layout.w).toBeLessThanOrEqual(24);
+    for (const widget of widgets) {
+      expect(clone.layout.x < widget.layout.x + widget.layout.w && clone.layout.x + clone.layout.w > widget.layout.x && clone.layout.y < widget.layout.y + widget.layout.h && clone.layout.y + clone.layout.h > widget.layout.y).toBe(false);
+    }
+    expect(storedDashboards().find((item) => item.id === dashboard.id)?.tabs[0].widgets).toEqual(saved);
   });
 
   it('preserves the active tab for each dashboard during atomic persistence', async () => {
@@ -326,6 +458,38 @@ describe('DashboardProvider browser persistence', () => {
     await waitFor(() => expect(screen.getByTestId('dashboards')).toHaveTextContent(hiddenWidgetDashboard.id));
     expect(screen.getByTestId('storage-notice')).not.toHaveTextContent('Dashboard storage was corrupted and has been reset');
     expect(screen.getByTestId('widget-types')).toHaveTextContent('rs_ranking,market_heatmap,dividend_ladder,ai_copilot');
+  });
+
+  it('retains distinct legacy and canonical valuation widgets during the v26 migration', async () => {
+    const legacy = {
+      id: 'valuation-legacy-1',
+      tabId: 'overview-legacy',
+      type: 'valuation_multiples',
+      syncGroupId: 1,
+      config: {},
+      layout: { i: 'valuation-legacy-1', x: 0, y: 9, w: 8, h: 6 },
+    };
+    const canonical = {
+      ...legacy,
+      id: 'valuation-canonical-2',
+      type: 'valuation_multiples_chart',
+      syncGroupId: 2,
+      layout: { i: 'valuation-canonical-2', x: 8, y: 9, w: 8, h: 6 },
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([{
+      ...customDashboard,
+      tabs: [{ id: 'overview-legacy', name: 'Overview', order: 0, widgets: [canonical, legacy] }],
+    }]));
+    window.localStorage.setItem(MIGRATION_VERSION_KEY, '25');
+
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('widget-types')).toHaveTextContent('valuation_multiples_chart,valuation_multiples_chart'));
+    const restored = storedDashboards().find((dashboard) => dashboard.id === customDashboard.id)?.tabs[0].widgets;
+    expect(restored).toEqual([
+      canonical,
+      { ...legacy, type: 'valuation_multiples_chart' },
+    ]);
   });
 
   it('loads a valid legacy migration on initial load', async () => {

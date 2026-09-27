@@ -20,6 +20,7 @@ import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import { formatFinancialPeriodLabel } from '@/lib/financialPeriods';
 import { cn } from '@/lib/utils';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import type { RatioHistoryPoint } from '@/types/equity';
 
 interface ValuationMultiplesChartWidgetProps {
   id: string;
@@ -35,6 +36,8 @@ const SERIES = [
   { key: 'ev_ebitda', label: 'EV/EBITDA', color: '#f97316' },
   { key: 'ev_sales', label: 'EV/Sales', color: '#e11d48' },
 ];
+
+const EMPTY_ROWS: RatioHistoryPoint[] = [];
 
 export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChange }: ValuationMultiplesChartWidgetProps) {
   const [visibleSeries, setVisibleSeries] = useState<Record<string, boolean>>({})
@@ -56,7 +59,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
     enabled: !!symbol,
   });
 
-  const rows = data?.data || [];
+  const rows = data?.data ?? EMPTY_ROWS;
   const hasData = rows.length > 0;
   const isFallback = Boolean(error && hasData);
 

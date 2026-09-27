@@ -273,6 +273,130 @@ Routine API and MCP restarts do not run migrations, download installers, or inst
 
 See [oracle_rollback_plan.md](./oracle_rollback_plan.md) for the exact rollback sequence.
 
+### 2026-09-26 capacity incident handoff
+
+**Update, 2026-09-26:** the operator chose snapshot cleanup instead of volume
+expansion. With the scheduler stopped, both prediction snapshot tables had no
+referencing foreign keys or user triggers. An authorized `TRUNCATE` of only
+`prediction_market_intraday_snapshots` and `prediction_market_snapshots`
+(`CONTINUE IDENTITY RESTRICT`, no cascade) reduced them from 115,951,763,456 and
+1,582,907,392 bytes to 48 KiB and 40 KiB. Both tables were verified empty; root
+usage fell from 182 GiB to 72 GiB, with 121 GiB available. The market catalogue,
+equity data and verified off-host pair were untouched. Online snapshot history
+after the September 24 backup was discarded with this cleanup. The scheduler
+remains paused pending deployment and smoke proof of bounded writers. The
+expansion-only handoff below records the earlier decision, now superseded.
+
+The portable backup producer passed 42 script regressions and then completed
+paired set `20260926T053513Z` on the host (PostgreSQL 1,292 MiB, Mongo 375 MiB).
+Mongo's stopped container was restarted after disk recovery; API readiness and
+PostgreSQL/Mongo container health were verified. Although the transfer command
+timed out during renewed SSH authorization, independent local byte-count and
+SHA-256 checks verified both complete artifacts: PostgreSQL 1,355,316,151 bytes
+and Mongo 393,300,936 bytes. The fresh off-host pair and the older restored pair
+are both retained. The new pair passed isolated restore with exit 0 and
+`RECOVERY OK` in 376.0 seconds: 42 public tables, 1,754 stocks, 1,748,069 prices;
+7,983,753 Mongo documents, zero failures and 16 populated collections. Both
+recovery containers were removed before success.
+
+Local PostgreSQL smoke proved the new migration's historical UTC bucket
+backfill, unchanged measurement timestamps, repeat upgrade, duplicate bucket
+rejection, concurrent writer serialization, capacity refusal and independent
+pruning. These proofs do not mean the new image is deployed. Tailscale SSH
+authorization expired before rollout; scheduler and backup cron remain paused.
+
+Final local release gate passed all nine steps: 611 frontend tests and 896
+backend tests passed, one backend test skipped; frontend lint/typecheck/build,
+changed-lines Ruff and backend compile passed. One earlier full-suite capacity
+test failure did not recur in the scoped/prefix checks or either subsequent
+complete backend run; no storage guard was weakened to obtain a pass.
+
+All nine CI gates passed (896 backend tests passed, one skipped). The frozen
+release context is `/tmp/vnibb-bounded-release-20260926`; `source-manifest.json`
+records its exact SHA-256 and base commit. Revision
+`20fa4c392e22a42b2d150de22989bb2331a98adb+workspace.1d2ed1c1dca42ecd`
+explicitly identifies uncommitted workspace content, not a committed release.
+The ARM image is published at
+`ghcr.io/kohnnn/vnibb-api@sha256:731f2845278e3c8d61de6689fb19e729ea1ca48826ba92adb74ad98ef6704d6d`.
+The clean build could not obtain pinned `vnstock` from PyPI, so this code-only
+release preserves dependencies from production digest `sha256:49c167d79177453c2962953022f9cf0ecb072646c48c504d13b1271f49349ed3`.
+An actual ARM container imported the new module from `/app/vnibb`, reported the
+expected revision, and exposed limits 5,000 / 1,000 / 4,294,967,296 bytes.
+`release-manifest.json` and `Dockerfile.release` in the frozen context record
+the reproducible inputs. After renewed SSH authorization, this exact digest
+was deployed to API, MCP and scheduler with the runtime Compose override intact.
+Migration head is `a926b4d87501`; all three application containers and both
+databases reported healthy with zero restarts. Backup cron was restored at
+`/etc/cron.d/vnibb-backup`; production root has 120 GiB free.
+
+Production smoke ingested 20 live Kalshi markets, wrote 120 genuine daily and
+intraday snapshots, and repeated both writes with zero duplicates. Startup
+population brought the bucket to 1,000 Kalshi plus 100 Polymarket rows. The
+09:30 UTC scheduled intraday capture wrote 1,100 rows in 0.4 seconds, while its
+independent prune completed successfully. Daily prune was exercised directly;
+its scheduled cadence is 10:45 UTC. Combined snapshot allocation measured
+1,904 KiB after the scheduled run, not the previous 108 GiB. Public `/ready`
+returned true. PredictIt 403, Limitless 404 and Manifold 400 remain explicit
+provider failures; they do not prevent the working sources from refreshing.
+
+A separately prepared candidate (not the deployed digest recorded above) is
+`ghcr.io/kohnnn/vnibb-api@sha256:1bef9b2e40fdbd38aae7ffa019129e86b518c3bae3283c68ffad0ba7ad12734c`,
+revision `workspace-275585246b26fc436831273cb1517e912688f7ea43cecb4ddf76906fc2a9ab43`.
+Its provenance and verification manifest is
+`/tmp/vnibb-prediction-release-manifest.json`. It uses the same pinned production
+dependency base, installs the current application with `--no-deps`, and passed
+an actual ARM64 appuser import/revision/source-digest smoke including real
+`vnstock 4.0.4` and migration `a926b4d87501`. That candidate is not the image
+selected for the verified rollout above; always use the live container digest
+and `/health/` revision rather than candidate naming to identify production.
+
+The 200 GB boot volume filled; PostgreSQL could not start and Redis AOF writes
+failed with `ENOSPC`. Reclaiming unused build caches and an off-host-verified
+backup duplicate restored API readiness. The intraday prediction snapshot table
+was approximately 108 GB; ordinary row deletion does not immediately reclaim
+that allocation from the filesystem. A separate repository's self-hosted
+Actions runner also consumed several GB rebuilding images during recovery.
+
+Intentional pauses, pending the operator-selected storage expansion:
+
+- `vnibb-scheduler` is stopped; scheduled market updates are not running.
+- Backup cron is preserved at `/root/vnibb-backup.cron.paused-disk-20260925`,
+  outside `/etc/cron.d`. The guarded producer is installed at
+  `/usr/local/sbin/vnibb-backup.sh`; it refused on real available disk before
+  creating a set. Its previous version is retained at
+  `/root/vnibb-backup.sh.pre-disk-preflight-20260926`.
+- `actions.runner.Kitkitkittt-vietcap_datalake.cloud-01-vietcap-datalake.service`
+  is stopped and disabled; do not re-enable on the production disk without a
+  build-space budget. Its in-flight BuildKit container was paused, not deleted.
+
+The paired `20260924T175056Z` set is retained on the workstation at
+`../backups/20260924T175056Z`; both payload byte counts and SHA-256 values match
+the transferred manifest. Its on-host duplicate was removed with approval.
+The isolated restore completed on 2026-09-26 with exit 0: 39 public PostgreSQL
+tables, 1,753 stocks, 1,748,069 price rows; MongoDB restored 7,983,753 documents
+with zero failures into 16 populated collections. Local verification through
+restore assertions took 2,860.5 seconds; both recovery containers were removed.
+See `BACKUP_RESTORE_DRILL.md` for artifact hashes and image versions. The
+PostgreSQL TOC's 87 TABLE DATA entries are not the public-table count.
+
+OCI instance-principal authentication succeeds but listing boot-volume
+attachments returns `NotAuthorizedOrNotFound`. Expand the boot volume for
+`instance-20260312-1441` in `ap-singapore-1` using an authorized OCI identity,
+then rescan and grow the guest partition/filesystem and verify `lsblk`/`df`.
+Only after measured headroom covers a new paired backup plus its safety reserve
+should backup cron and the reviewed scheduler release resume. Keep the API
+serving during the pause; HTTP readiness alone does not prove jobs are running.
+
+Validation on 2026-09-26: `env PYTHON=/tmp/vnibb-verify/bin/python pnpm run ci:gate`
+passed all nine steps, including frontend lint/typecheck/build/tests and backend
+Ruff/compile/tests (870 passed, one skipped). The two revised backup sizing
+boundary tests passed separately. A real SQL-session retention smoke deleted
+expired rows over two budget-bounded invocations and preserved both current
+rows. Production backup preflight exited nonzero before dumping: required
+17,984,371,922 bytes versus 11,728,355,328 available. The installed producer's
+SHA-256 matches the repository source. These checks do not mean the backend
+retention release is deployed or storage has been expanded.
+
 ## 7. Maintenance
 
 ### Patch cadence

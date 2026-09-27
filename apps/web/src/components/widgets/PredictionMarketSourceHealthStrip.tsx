@@ -20,6 +20,8 @@ export type SourceHealthRow = {
     readonly snapshotCount: number | null;
     readonly latestSnapshotAt: string | null;
     readonly staleAfterSeconds: number | null;
+    readonly liveMarketCount: number | null;
+    readonly syntheticMarketCount: number | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -43,6 +45,8 @@ function emptyRow(source: PredictionMarketSource, label: string): SourceHealthRo
         snapshotCount: 0,
         latestSnapshotAt: null,
         staleAfterSeconds: null,
+        liveMarketCount: 0,
+        syntheticMarketCount: 0,
     };
 }
 
@@ -64,6 +68,8 @@ function parseHealthRow(value: unknown): SourceHealthRow | null {
         snapshotCount: parseNumber(value.snapshot_count) ?? parseNumber(value.snapshotCount),
         latestSnapshotAt: parseString(value.latest_snapshot_at) ?? parseString(value.latestSnapshotAt),
         staleAfterSeconds: parseNumber(value.stale_after_seconds) ?? parseNumber(value.staleAfterSeconds),
+        liveMarketCount: parseNumber(value.live_market_count),
+        syntheticMarketCount: parseNumber(value.synthetic_market_count),
     };
 }
 
@@ -78,27 +84,28 @@ function parseSourceHealth(value: unknown): readonly SourceHealthRow[] {
 }
 
 export function sourceHealthStatusLabel(row: SourceHealthRow): string {
-    const marketCount = row.marketCount ?? 0;
-    const snapshotCount = row.snapshotCount ?? 0;
-    if (row.status === 'empty' && marketCount === 0) return 'Awaiting data';
-    if (row.status === 'stale' && marketCount > 0 && snapshotCount === 0) return 'Snapshots pending';
-    if (row.status === 'stale') return 'Stale';
+    if (row.status === 'error') return 'Error';
+    if (row.status === 'loading') return 'Checking';
+    const liveCount = row.liveMarketCount ?? Math.max(0, (row.marketCount ?? 0) - (row.syntheticMarketCount ?? 0));
+    if (liveCount === 0 || row.status === 'empty' || row.status === 'no_data') return 'No data';
     if (row.status === 'synced' || row.status === 'healthy') return 'Healthy';
+    if (row.status === 'stale') return 'Stale';
     return 'Unknown';
 }
 
 function chipClass(row: SourceHealthRow): string {
     const label = sourceHealthStatusLabel(row);
     if (label === 'Healthy') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
-    if (label === 'Stale' || label === 'Snapshots pending') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+    if (label === 'Stale' || label === 'Error') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
     return 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)]';
 }
 
 function countLabel(row: SourceHealthRow): string {
-    const marketCount = row.marketCount ?? 0;
+    const marketCount = row.liveMarketCount ?? row.marketCount ?? 0;
     const snapshotCount = row.snapshotCount ?? 0;
-    if (snapshotCount === 0) return 'No snapshots yet';
-    return `${marketCount} markets · ${snapshotCount} snapshots`;
+    if (row.status === 'error') return 'Source health request failed; availability is unknown';
+    if (sourceHealthStatusLabel(row) === 'No data') return 'No fresh, genuine markets available; historical and synthetic records are not current odds';
+    return `${marketCount} current markets · ${snapshotCount} recorded snapshots`;
 }
 
 async function fetchSourceHealth(): Promise<readonly SourceHealthRow[]> {
@@ -119,23 +126,11 @@ export function usePredictionMarketSourceHealth() {
 }
 
 export function PredictionMarketSourceHealthStrip() {
-    const { data: rows, isPending, isError } = usePredictionMarketSourceHealth();
-
-    if (isPending) {
-        return (
-            <div role="status" aria-live="polite" className="rounded-lg border border-dashed border-default bg-[var(--bg-tertiary)] px-2 py-1.5 text-[11px] text-[var(--text-muted)]">
-                Checking source health...
-            </div>
-        );
-    }
-
-    if (isError || !rows) {
-        return (
-            <div role="status" aria-live="polite" className="rounded-lg border border-dashed border-default bg-[var(--bg-tertiary)] px-2 py-1.5 text-[11px] text-[var(--text-muted)]">
-                Source health unavailable
-            </div>
-        );
-    }
+    const { data, isPending, isError } = usePredictionMarketSourceHealth();
+    const rows = SOURCE_HEALTH_SOURCES.map((config) => {
+        const row = data?.find((item) => item.source === config.source) ?? emptyRow(config.source, config.label);
+        return isPending || isError ? { ...row, status: isError ? 'error' : 'loading' } : row;
+    });
 
     return (
         <section

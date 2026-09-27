@@ -21,6 +21,10 @@ export interface DenseTableRow {
   indent?: number
   isGroup?: boolean
   parentId?: string
+  /** Metric rows can be selected; group headers cannot. */
+  selectable?: boolean
+  selected?: boolean
+  onSelect?: () => void
 }
 
 interface DenseFinancialTableProps {
@@ -39,6 +43,11 @@ interface DenseFinancialTableProps {
     row: DenseTableRow,
     columnKey: string
   ) => string
+  /** Period column key that is currently charted, if any. */
+  selectedColumnKey?: string | null
+  onColumnSelect?: (columnKey: string) => void
+  /** Clears any row/column selection. */
+  onSelectionClear?: () => void
 }
 
 type SortDirection = 'asc' | 'desc'
@@ -98,6 +107,9 @@ export function DenseFinancialTable({
   storageKey,
   footerNote,
   valueFormatter,
+  selectedColumnKey,
+  onColumnSelect,
+  onSelectionClear,
 }: DenseFinancialTableProps) {
   const visibleColumns = useMemo(() => columns.slice(0, Math.max(1, maxYears)), [columns, maxYears])
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -297,30 +309,45 @@ export function DenseFinancialTable({
 
   return (
     <div className={cn('w-full', className)}>
-      <div ref={scrollRef} className="overflow-auto">
+      <div
+        ref={scrollRef}
+        className="overflow-auto"
+        role="listbox"
+        aria-label="Financial statement rows"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') onSelectionClear?.()
+        }}
+      >
       <table className="data-table financial-dense freeze-first-col min-w-max w-full border-separate border-spacing-0 text-[10px] text-left leading-4" style={{ minWidth: `${tableMinWidth}px` }}>
         <thead className="sticky top-0 z-10 bg-[var(--bg-primary)] text-[var(--text-muted)]">
           <tr className="border-b border-[var(--border-color)]">
             <th className="px-2 py-1 font-bold uppercase tracking-tighter" style={{ minWidth: `${metricColumnWidth}px`, width: `${metricColumnWidth}px` }}>Metric</th>
             {visibleColumns.map((column) => {
               const isActiveSort = sortKey === column.key
+              const chartable = Boolean(onColumnSelect)
+              const isSelectedColumn = chartable && selectedColumnKey === column.key
               return (
                 <th
                   key={column.key}
+                  data-testid={chartable ? `dense-col-select-${column.key}` : undefined}
                   className={cn(
                     'px-2 py-1 font-bold',
                     column.align === 'left' ? 'text-left' : 'text-right',
-                    sortable ? 'cursor-pointer select-none hover:text-[var(--text-primary)]' : ''
+                    sortable ? 'cursor-pointer select-none hover:text-[var(--text-primary)]' : '',
+                    chartable && isSelectedColumn ? 'text-blue-400' : '',
+                    chartable ? 'focus-visible:outline-2 focus-visible:outline-blue-400' : ''
                   )}
                   style={column.width ? { minWidth: column.width, width: column.width } : { minWidth: `${yearColumnWidth}px`, width: `${yearColumnWidth}px` }}
                   aria-sort={isActiveSort ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                  tabIndex={sortable ? 0 : undefined}
-                  onClick={() => onSort(column.key)}
+                  aria-pressed={chartable ? isSelectedColumn : undefined}
+                  aria-label={chartable ? `Chart ${column.label}` : undefined}
+                  tabIndex={sortable || chartable ? 0 : undefined}
+                  onClick={() => (chartable ? onColumnSelect?.(column.key) : onSort(column.key))}
                   onKeyDown={(event) => {
-                    if (!sortable) return
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault()
-                      onSort(column.key)
+                      if (chartable) onColumnSelect?.(column.key)
+                      else if (sortable) onSort(column.key)
                     }
                   }}
                 >
@@ -349,11 +376,14 @@ export function DenseFinancialTable({
               <Fragment key={row.id}>
                 <tr
                   key={row.id}
+                  role={row.selectable ? 'option' : undefined}
+                  aria-selected={row.selectable ? row.selected === true : undefined}
                   className={cn(
                     'h-6 border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-hover)]',
                     rowIndex % 2 === 1 && !row.isGroup ? 'bg-[var(--bg-secondary)]/25' : '',
                     row.isGroup ? 'section-header-row bg-[var(--bg-surface)] font-semibold' : '',
-                    isEmphasisRow(row) && !row.isGroup ? 'border-t border-[var(--border-default)] bg-[var(--bg-surface)]/55 font-semibold' : ''
+                    isEmphasisRow(row) && !row.isGroup ? 'border-t border-[var(--border-default)] bg-[var(--bg-surface)]/55 font-semibold' : '',
+                    row.selected ? 'bg-blue-500/10 ring-1 ring-inset ring-blue-400/60' : ''
                   )}
                 >
                   <td
@@ -378,6 +408,27 @@ export function DenseFinancialTable({
                           <span>{row.label}</span>
                         </span>
                       )
+                    ) : row.selectable ? (
+                      <button
+                        type="button"
+                        data-testid={`dense-row-select-${row.id}`}
+                        className={cn(
+                          'flex w-full items-center justify-between gap-2 text-left hover:text-[var(--text-primary)]',
+                          row.selected ? 'font-semibold text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'
+                        )}
+                        aria-pressed={row.selected === true}
+                        aria-label={`Chart ${row.label}`}
+                        onClick={() => row.onSelect?.()}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            row.onSelect?.()
+                          }
+                        }}
+                      >
+                        <span>{row.label}</span>
+                        <span className="text-[10px] text-[var(--text-muted)]">{row.selected ? 'Showing' : 'Chart'}</span>
+                      </button>
                     ) : (
                       <button
                         type="button"

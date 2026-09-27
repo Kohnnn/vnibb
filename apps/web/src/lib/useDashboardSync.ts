@@ -9,6 +9,7 @@ import type { Dashboard, DashboardCreate, DashboardState } from '@/types/dashboa
 // Debounce delay for auto-save (ms)
 const SYNC_DEBOUNCE_MS = 2000;
 const LOCAL_DASHBOARD_ID_PREFIX = 'dash-';
+const IMPORTED_DASHBOARD_ID_PREFIX = 'import-';
 
 interface BackendDashboardRecord {
     id: number | string;
@@ -148,6 +149,7 @@ export function useDashboardSync(
             let cloudSynced = false;
 
             for (const previousDashboard of previousDashboards.current) {
+                if (previousDashboard.id.startsWith(IMPORTED_DASHBOARD_ID_PREFIX)) continue;
                 const dashboardId = parseNumericDashboardId(previousDashboard.id);
                 if (!dashboardId || currentDashboardIds.has(previousDashboard.id)) {
                     continue;
@@ -159,6 +161,7 @@ export function useDashboardSync(
             }
 
             for (const dashboard of dashboards) {
+                if (dashboard.id.startsWith(IMPORTED_DASHBOARD_ID_PREFIX)) continue;
                 const dashboardId = parseNumericDashboardId(dashboard.id);
 
                 // Skip PATCH until the create round-trip assigns a numeric ID.

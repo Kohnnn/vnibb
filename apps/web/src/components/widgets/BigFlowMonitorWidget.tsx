@@ -7,8 +7,15 @@ import { formatTimestamp } from '@/lib/format'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink'
+import { useDashboardWidget } from '@/hooks/useDashboardWidget'
+import { useWidgetGroups } from '@/contexts/WidgetGroupContext'
+import { readTickerScope } from '@/lib/widgetScope'
+import type { WidgetGroupId } from '@/types/widget'
 
 interface BigFlowMonitorWidgetProps {
+  id: string
+  widgetGroup?: WidgetGroupId
   symbol?: string
   onSymbolClick?: (symbol: string) => void
   onDataChange?: (data: WidgetDataPayload) => void
@@ -34,7 +41,12 @@ function fmtValue(value: number | null | undefined): string {
   return abs.toFixed(0)
 }
 
-export function BigFlowMonitorWidget({ symbol, onSymbolClick, onDataChange }: BigFlowMonitorWidgetProps) {
+export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, onDataChange }: BigFlowMonitorWidgetProps) {
+  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetId: id, widgetType: 'big_flow_monitor', symbol })
+  const { tickerOverrideFor } = useWidgetGroups()
+  const widgetLocation = useDashboardWidget(id)
+  const isDetached = Boolean(tickerOverrideFor(id)) || readTickerScope(widgetLocation?.widget.config).mode === 'override'
+  const selectSymbol = onSymbolClick ?? (isDetached ? undefined : setLinkedSymbol)
   const [threshold, setThreshold] = useState<Threshold>(10)
   const [scope, setScope] = useState<ScopeFilter>('all')
 
@@ -178,13 +190,15 @@ export function BigFlowMonitorWidget({ symbol, onSymbolClick, onDataChange }: Bi
               {trades.map((trade) => (
                 <tr key={trade.id} className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-tertiary)]/30">
                   <td className="px-1 py-1">
-                    <button
-                      type="button"
-                      onClick={() => onSymbolClick?.(trade.symbol)}
-                      className={`font-bold hover:underline ${trade.symbol === symbol ? 'text-cyan-300' : 'text-[var(--accent-blue)]'}`}
-                    >
-                      {trade.symbol}
-                    </button>
+                    {selectSymbol ? (
+                      <button
+                        type="button"
+                        onClick={() => selectSymbol(trade.symbol)}
+                        className={`font-bold hover:underline ${trade.symbol === symbol ? 'text-cyan-300' : 'text-[var(--accent-blue)]'}`}
+                      >
+                        {trade.symbol}
+                      </button>
+                    ) : <span title="Ticker local to this widget; use its ticker selector to change it">{trade.symbol}</span>}
                   </td>
                   <td className={`px-1 py-1 font-semibold ${trade.side === 'BUY' ? 'text-emerald-400' : trade.side === 'SELL' ? 'text-red-400' : 'text-[var(--text-muted)]'}`}>
                     {trade.side || '—'}

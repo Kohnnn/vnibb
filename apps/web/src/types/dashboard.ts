@@ -22,9 +22,9 @@ export interface WidgetLayout {
 // ============================================================================
 
 export type WidgetType =
+    | 'research_matrix'
     | 'ticker_info'
     | 'ticker_profile'
-    | 'valuation_multiples'
     | 'price_chart'
     | 'tradingview_chart'
     | 'tradingview_symbol_overview'
@@ -211,7 +211,7 @@ export interface WidgetConfig {
     [key: string]: unknown;
 }
 
-import { WidgetGroupId } from './widget';
+import { WidgetGroupId, WidgetGroupConfig } from './widget';
 
 export interface WidgetInstance {
     id: string;
@@ -283,6 +283,7 @@ export interface Dashboard {
     showGroupLabels: boolean; // Controls visibility of sync badges on widgets
     tabs: DashboardTab[];
     syncGroups: WidgetSyncGroup[];
+    widgetGroups?: Record<WidgetGroupId, WidgetGroupConfig>;
     createdAt: string;
     updatedAt: string;
 }

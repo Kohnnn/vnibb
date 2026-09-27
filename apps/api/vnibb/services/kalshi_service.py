@@ -17,14 +17,29 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from vnibb.services.prediction_market_policy import (
+    MAX_INGEST_MARKETS,
+    MAX_MARKET_PAYLOAD_BYTES,
+    is_kalshi_combo,
+)
 from vnibb.services.prediction_market_service import (
-    UnsupportedPredictionMarketDialectError,
+    PredictionMarketAdmissionError,
+    bounded_market_limit,
     category_taxonomy,
+    persist_prediction_markets,
 )
 
 KALSHI_BASE_URL: Final = "https://api.elections.kalshi.com/trade-api/v2"
-KALSHI_MAX_PAGES: Final = 10
+# Kalshi exposes no bounded-query filter that matches our read contract, so a
+# cursor sweep would page through the entire multi-hundred-thousand contract
+# corpus and write every one of them. Reads only ever consider the freshest
+# ``SNAPSHOT_SOURCE_LIMIT`` markets per source, so the ingest substitutes a
+# hard page bound well below the corpus size. Two pages of 200 is enough to
+# cover the observable active set at the read horizon; the budget below is the
+# ceiling that keeps a single cycle from ever approaching the full corpus.
+KALSHI_MAX_PAGES: Final = 2
 KALSHI_PAGE_LIMIT: Final = 200
+KALSHI_INGEST_BUDGET: Final = 400
 
 
 class KalshiMarketPayload(BaseModel):
@@ -45,6 +60,9 @@ class KalshiMarketPayload(BaseModel):
     subtitle: str | None = None
     category: str | None = None
     tags: list[str] | None = None
+    mve_collection_ticker: str | None = None
+    mve_selected_legs: list[Any] | None = None
+    market_type: str | None = None
     status: str = Field(default="open")
     yes_bid: float | None = None
     yes_ask: float | None = None
@@ -162,28 +180,36 @@ async def fetch_kalshi_markets(
     *,
     max_pages: int = KALSHI_MAX_PAGES,
 ) -> list[KalshiMarketPayload]:
-    """Fetch active Kalshi markets. Returns the parsed market list.
+    """Fetch the nearest-expiring active Kalshi markets.
 
-    Paginated cursor loop — Kalshi's first page can carry 200 markets but
-    the active corpus is regularly 300+ across all categories. We loop
-    until ``cursor`` is null/empty or ``max_pages`` is reached so a single
-    ingest cycle captures the entire active set.
+    Paginated cursor loop bounded by ``KALSHI_INGEST_BUDGET``. The sweep stops
+    at that budget rather than following ``cursor`` to exhaustion, because the
+    read path only serves the freshest markets per source and the full Kalshi
+    corpus is far larger than anything the product can display.
     """
     import asyncio as _asyncio
 
+    budget = min(max_pages * KALSHI_PAGE_LIMIT, KALSHI_INGEST_BUDGET, MAX_INGEST_MARKETS)
     rows: list[KalshiMarketPayload] = []
     cursor: str | None = None
-    for _ in range(max_pages):
-        params: dict[str, Any] = {"status": "open", "limit": min(limit, KALSHI_PAGE_LIMIT)}
+    for _ in range(min(max_pages, KALSHI_MAX_PAGES)):
+        params: dict[str, Any] = {
+            "status": "open", "mve_filter": "exclude",
+            "limit": min(bounded_market_limit(limit), KALSHI_PAGE_LIMIT, budget - len(rows)),
+        }
         if cursor:
             params["cursor"] = cursor
         response = await client.get("/markets", params=params)
         response.raise_for_status()
+        if len(response.content) > MAX_MARKET_PAYLOAD_BYTES:
+            raise PredictionMarketAdmissionError("Kalshi response exceeds ingest byte limit")
         body = response.json()
         page_rows = body.get("markets", []) if isinstance(body, dict) else body
         if not page_rows:
             break
-        rows.extend(_KALSHI_MARKETS.validate_python(page_rows))
+        rows.extend(_KALSHI_MARKETS.validate_python(page_rows[:budget - len(rows)]))
+        if len(rows) >= budget:
+            break
         if not isinstance(body, dict):
             break
         cursor = (
@@ -207,25 +233,20 @@ async def ingest_kalshi_markets(
     *,
     max_pages: int = KALSHI_MAX_PAGES,
 ) -> int:
-    """Fetch, normalize, and upsert Kalshi markets into the DB.
-
-    Returns the count of markets written. Reuses the same polymarket
-    on_conflict_do_update strategy by calling the helper directly.
-    """
-    from vnibb.services.prediction_market_service import _upsert_prediction_market
-
-    payloads = await fetch_kalshi_markets(client, limit, max_pages=max_pages)
-    dialect_name = session.get_bind().dialect.name
-    count = 0
-    for payload in payloads:
-        market = normalize_kalshi_market(payload)
-        try:
-            await session.execute(_upsert_prediction_market(market.to_values(), dialect_name))
-        except UnsupportedPredictionMarketDialectError:
-            raise
-        count += 1
-    await session.commit()
-    return count
+    """Fetch real open noncombo Kalshi contracts and persist bounded rows."""
+    payloads = await fetch_kalshi_markets(client, limit, max_pages=min(max_pages, KALSHI_MAX_PAGES))
+    values = [
+        normalize_kalshi_market(payload).to_values()
+        for payload in payloads
+        if payload.status in {"open", "active"}
+        and not is_kalshi_combo(
+            payload.ticker, payload.event_ticker,
+            mve_collection_ticker=payload.mve_collection_ticker,
+            mve_selected_legs=payload.mve_selected_legs,
+            market_type=payload.market_type,
+        )
+    ]
+    return await persist_prediction_markets(session, values)
 
 
 async def ingest_kalshi_markets_with_default_client(

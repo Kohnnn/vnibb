@@ -82,6 +82,27 @@ function calculateVolumeDelta(candles: OHLCData[]): VolumeDeltaPoint[] {
     })
 }
 
+function aggregateMicroBars(bars: Array<{ time: string; delta: number; cumulative_delta: number }>): VolumeDeltaPoint[] {
+  const days = new Map<string, VolumeDeltaPoint>()
+  for (const bar of bars) {
+    const time = bar.time.slice(0, 10)
+    const existing = days.get(time)
+    if (existing) {
+      existing.delta += Number(bar.delta) || 0
+      existing.cumulativeDelta = Number(bar.cumulative_delta) || 0
+    } else {
+      days.set(time, {
+        time,
+        close: 0,
+        delta: Number(bar.delta) || 0,
+        cumulativeDelta: Number(bar.cumulative_delta) || 0,
+        closePosition: 0.5,
+      })
+    }
+  }
+  return [...days.values()]
+}
+
 function calculateMonthlyAverageDelta(points: VolumeDeltaPoint[]): MonthlyDelta[] {
   const monthly = new Map<number, { sum: number; count: number }>()
 
@@ -176,23 +197,14 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
   const candles = (data?.data || []) as OHLCData[]
   const microBars = microstructure?.data?.deep_trades?.bars || []
   const hasMicroData = microBars.length > 0
-  const deltaSeries = hasMicroData
-    ? microBars.map((bar) => ({
-        time: bar.time,
-        close: 0,
-        delta: Number(bar.delta) || 0,
-        cumulativeDelta: Number(bar.cumulative_delta) || 0,
-        closePosition: 0.5,
-      }))
-    : calculateVolumeDelta(candles)
+  const deltaSeries = hasMicroData ? aggregateMicroBars(microBars) : calculateVolumeDelta(candles)
   const hasData = hasMicroData ? deltaSeries.length > 0 : deltaSeries.length > 30
   const isFallback = Boolean((error || microError || !hasMicroData) && hasData)
   const primaryLoading = isMicroLoading || (!hasMicroData && isLoading)
   const { timedOut, resetTimeout } = useLoadingTimeout(primaryLoading && !hasData, { timeoutMs: 8_000 })
 
   const lastPoint = deltaSeries[deltaSeries.length - 1]
-  const rollingDelta = deltaSeries
-    .slice(-LOOKBACK_DAYS)
+  const rollingDelta = (hasMicroData ? deltaSeries : deltaSeries.slice(-LOOKBACK_DAYS))
     .reduce((sum, point) => sum + point.delta, 0)
   const divergence = hasMicroData
     ? {
@@ -272,7 +284,7 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
                 </div>
               </div>
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-                <div className="text-[var(--text-muted)] uppercase tracking-widest">20D Cum</div>
+                <div className="text-[var(--text-muted)] uppercase tracking-widest">{hasMicroData ? 'Loaded Cum' : '20D Cum'}</div>
                 <div className={`font-mono ${rollingDelta >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
                   {rollingDelta >= 0 ? '+' : ''}
                   {formatCompact(rollingDelta)}
