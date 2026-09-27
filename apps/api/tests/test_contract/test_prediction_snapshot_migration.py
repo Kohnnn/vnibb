@@ -31,7 +31,7 @@ def test_bucket_migration_accepts_legacy_and_new_writers_and_downgrades():
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
 
-    url = postgres_contract_database_url().replace("+asyncpg", "+psycopg")
+    url = postgres_contract_database_url().replace("+asyncpg", "+psycopg2")
     engine = create_engine(url)
     schema = f"snapshot_migration_{uuid4().hex}"
     try:
