@@ -2,13 +2,13 @@
 
 import { createPortal } from 'react-dom';
 import { Minimize2 } from 'lucide-react';
-import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
+import { useEffect, useState, useCallback, useRef, type ReactNode, type RefObject } from 'react';
 
 interface MaximizedWidgetPortalProps {
     isOpen: boolean;
     onClose: () => void;
     title: string;
-    contentRef?: React.Ref<HTMLDivElement>;
+    contentRef?: RefObject<HTMLDivElement | null>;
     children?: ReactNode;
 }
 

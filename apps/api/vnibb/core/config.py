@@ -604,14 +604,9 @@ class Settings(BaseSettings):
 
     @property
     def sync_database_url(self) -> str:
-        """Get sync database URL for Alembic (replaces asyncpg with psycopg2).
-
-        Uses a regex anchored to the URL scheme prefix so a password containing
-        the literal string ``+asyncpg`` is not corrupted by substring replacement.
-        """
-        if self.database_url_sync:
-            return self.database_url_sync
-        return re.sub(r"^postgresql\+asyncpg://", "postgresql://", self.database_url)
+        """Select the declared psycopg2 sync driver without changing URL credentials."""
+        url = self.database_url_sync or self.database_url
+        return re.sub(r"^postgresql(?:\+asyncpg)?://", "postgresql+psycopg2://", url)
 
     @property
     def is_production(self) -> bool:

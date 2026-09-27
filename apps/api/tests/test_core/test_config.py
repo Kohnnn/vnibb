@@ -27,27 +27,22 @@ def settings_factory(monkeypatch):
 
 
 class TestSyncDatabaseUrl:
-    """The sync_database_url property must:
-    1. Replace the URL *scheme* ``postgresql+asyncpg://`` → ``postgresql://``.
-    2. NOT mangle passwords containing the literal ``+asyncpg`` substring.
-    3. Pass through an already-sync URL unchanged.
-    4. Honor an explicit ``database_url_sync`` override.
-    """
+    """Application sync sessions use the installed psycopg2 DBAPI."""
 
     def test_replaces_asyncpg_scheme_prefix(self, settings_factory):
         s = settings_factory(database_url="postgresql+asyncpg://user:pw@host:5432/db")
-        assert s.sync_database_url == "postgresql://user:pw@host:5432/db"
+        assert s.sync_database_url == "postgresql+psycopg2://user:pw@host:5432/db"
 
     def test_password_containing_plus_asyncpg_is_not_corrupted(self, settings_factory):
         # Regression: previous str.replace() implementation corrupted this.
         s = settings_factory(
             database_url="postgresql+asyncpg://user:secret+asyncpg+chars@host:5432/db"
         )
-        assert s.sync_database_url == "postgresql://user:secret+asyncpg+chars@host:5432/db"
+        assert s.sync_database_url == "postgresql+psycopg2://user:secret+asyncpg+chars@host:5432/db"
 
     def test_already_sync_url_passes_through(self, settings_factory):
         s = settings_factory(database_url="postgresql://user:pw@host:5432/db")
-        assert s.sync_database_url == "postgresql://user:pw@host:5432/db"
+        assert s.sync_database_url == "postgresql+psycopg2://user:pw@host:5432/db"
 
     def test_explicit_database_url_sync_overrides_derived(self, settings_factory):
         s = settings_factory(
