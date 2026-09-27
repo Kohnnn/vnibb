@@ -9,6 +9,7 @@ from vnibb.core.database import get_db
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.stock import Stock
 from vnibb.models.trading import FinancialRatio
+from vnibb.services import matrix_service
 from vnibb.services.matrix_observations import (
     ObservationBuilder,
     build_matrix_fixture,
@@ -17,7 +18,6 @@ from vnibb.services.matrix_observations import (
     display_decimal,
     prepare_matrix,
 )
-from vnibb.services import matrix_service
 from vnibb.services.matrix_playbooks import classify_sector
 
 CAPTURED = "2025-01-01T00:00:00+00:00"

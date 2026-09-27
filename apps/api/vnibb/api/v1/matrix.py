@@ -9,9 +9,9 @@ from vnibb.schemas.matrix import (
     MatrixEvidence,
     MatrixPlaybook,
     MatrixPreparation,
-    MatrixSelectedPeriods,
     MatrixResearchRequest,
     MatrixReview,
+    MatrixSelectedPeriods,
     MatrixSelection,
     MatrixSnapshot,
 )
