@@ -52,6 +52,113 @@ async def test_legacy_multivariate_rows_do_not_consume_real_kalshi_slots(test_db
 
 
 @pytest.mark.asyncio
+async def test_stale_catalogue_does_not_exhaust_fresh_market_slots(test_db, monkeypatch):
+    monkeypatch.setattr(service, "MAX_SOURCE_MARKETS", 2)
+    now = datetime.now(UTC)
+    historical = [
+        market("KXOLD-1", updated_at=now - timedelta(hours=25)),
+        market("KXOLD-2", end_date=now - timedelta(days=1)),
+        market("KXOLD-3", closed=True),
+        market("KXOLD-4", active=False),
+        market("KXOLD-5", is_synthetic=True),
+        market("KXMVECROSSCATEGORY-6"),
+    ]
+    test_db.add_all(PredictionMarket(**row) for row in historical)
+    await test_db.commit()
+
+    assert await service.persist_prediction_markets(test_db, [market("KXNEW-1")]) == 1
+    assert await service.persist_prediction_markets(test_db, [market("KXNEW-2")]) == 1
+    with pytest.raises(service.PredictionMarketAdmissionError, match="blocked for 1 new markets.*refreshed 1"):
+        await service.persist_prediction_markets(test_db, [
+            market("KXNEW-3"), market("KXNEW-1", question="Refreshed market"),
+        ])
+    rows = (await test_db.execute(select(PredictionMarket))).scalars().all()
+    assert len(rows) == len(historical) + 2
+    assert {row.source_id for row in rows} == {row["source_id"] for row in historical} | {"KXNEW-1", "KXNEW-2"}
+    assert next(row for row in rows if row.source_id == "KXNEW-1").question == "Refreshed market"
+
+
+@pytest.mark.asyncio
+async def test_stale_existing_refresh_claims_fresh_slot_before_new_ids(test_db, monkeypatch):
+    monkeypatch.setattr(service, "MAX_SOURCE_MARKETS", 2)
+    test_db.add(PredictionMarket(**market("KXOLD-1", updated_at=datetime.now(UTC) - timedelta(hours=25))))
+    await test_db.commit()
+    await service.persist_prediction_markets(test_db, [market("KXNEW-1")])
+
+    with pytest.raises(service.PredictionMarketAdmissionError, match="blocked for 1 new markets.*refreshed 1"):
+        await service.persist_prediction_markets(test_db, [
+            market("KXOLD-1", question="Fresh again"), market("KXNEW-2"),
+        ])
+    rows = (await test_db.execute(select(PredictionMarket))).scalars().all()
+    assert {row.source_id for row in rows} == {"KXOLD-1", "KXNEW-1"}
+    assert next(row for row in rows if row.source_id == "KXOLD-1").question == "Fresh again"
+
+
+@pytest.mark.asyncio
+async def test_existing_refresh_and_multiple_new_ids_stop_at_exact_fresh_cap(test_db, monkeypatch):
+    monkeypatch.setattr(service, "MAX_SOURCE_MARKETS", 2)
+    test_db.add(PredictionMarket(**market("KXOLD", updated_at=datetime.now(UTC) - timedelta(hours=25))))
+    await test_db.commit()
+
+    with pytest.raises(service.PredictionMarketAdmissionError, match="blocked for 1 new markets.*refreshed 2"):
+        await service.persist_prediction_markets(test_db, [
+            market("KXOLD", question="Refreshed"), market("KXNEW-1"), market("KXNEW-2"),
+        ])
+    rows = (await test_db.execute(select(PredictionMarket))).scalars().all()
+    assert {row.source_id for row in rows} == {"KXOLD", "KXNEW-1"}
+    assert next(row for row in rows if row.source_id == "KXOLD").question == "Refreshed"
+
+
+@pytest.mark.asyncio
+async def test_promoted_synthetic_and_missing_timestamp_consume_live_slots(test_db, monkeypatch):
+    monkeypatch.setattr(service, "MAX_SOURCE_MARKETS", 2)
+    test_db.add(PredictionMarket(**market("KXFIXTURE", is_synthetic=True)))
+    await test_db.commit()
+    with pytest.raises(service.PredictionMarketAdmissionError, match="blocked for 1 new markets.*refreshed 2"):
+        await service.persist_prediction_markets(test_db, [
+            market("KXFIXTURE", is_synthetic=False),
+            market("KXNEW-1", updated_at=None),
+            market("KXNEW-2"),
+        ])
+    rows = (await test_db.execute(select(PredictionMarket))).scalars().all()
+    assert {row.source_id for row in rows} == {"KXFIXTURE", "KXNEW-1"}
+    assert all(row.updated_at is not None for row in rows)
+    assert {row.source_id for row in rows if row.is_synthetic is False} == {"KXFIXTURE", "KXNEW-1"}
+
+
+@pytest.mark.asyncio
+async def test_unrefreshed_new_market_does_not_take_a_live_slot(test_db, monkeypatch):
+    monkeypatch.setattr(service, "MAX_SOURCE_MARKETS", 1)
+    with pytest.raises(service.PredictionMarketAdmissionError, match="blocked for 1 new markets"):
+        await service.persist_prediction_markets(test_db, [
+            market("KXSTALE", updated_at=datetime.now(UTC) - timedelta(hours=25)),
+        ])
+    assert await service.persist_prediction_markets(test_db, [market("KXLIVE")]) == 1
+    assert (await test_db.execute(select(PredictionMarket.source_id))).scalars().all() == ["KXLIVE"]
+
+
+@pytest.mark.asyncio
+async def test_full_source_rejects_existing_promotion_but_refreshes_live_market(test_db, monkeypatch):
+    monkeypatch.setattr(service, "MAX_SOURCE_MARKETS", 1)
+    test_db.add(PredictionMarket(**market("KXSTALE", updated_at=datetime.now(UTC) - timedelta(hours=25))))
+    await test_db.commit()
+    await service.persist_prediction_markets(test_db, [market("KXLIVE")])
+
+    with pytest.raises(service.PredictionMarketAdmissionError, match="blocked for 1 markets.*refreshed 1"):
+        await service.persist_prediction_markets(test_db, [
+            market("KXSTALE", question="Promotion denied"), market("KXLIVE", question="Refresh kept"),
+        ])
+    rows = (await test_db.execute(select(PredictionMarket))).scalars().all()
+    assert len(rows) == 2
+    assert next(row for row in rows if row.source_id == "KXSTALE").question == "Will the policy rate rise?"
+    assert next(row for row in rows if row.source_id == "KXLIVE").question == "Refresh kept"
+    eligible = (await test_db.execute(select(PredictionMarket.source_id).where(
+        *snapshot_eligibility(datetime.now(UTC))
+    ))).scalars().all()
+    assert eligible == ["KXLIVE"]
+
+
+@pytest.mark.asyncio
 async def test_file_sqlite_concurrent_ingests_respect_source_cap(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "MAX_SOURCE_MARKETS", 1)
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'admission.db'}")

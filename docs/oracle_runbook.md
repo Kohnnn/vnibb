@@ -350,6 +350,35 @@ an actual ARM64 appuser import/revision/source-digest smoke including real
 selected for the verified rollout above; always use the live container digest
 and `/health/` revision rather than candidate naming to identify production.
 
+**2026-09-27 fresh-cap follow-up (historical observation):** Kalshi filled
+the historical 10,000-row source quota, refusing new markets. The follow-up
+code counts only fresh eligible contracts toward that quota while retaining
+older catalogue history; the independent 16 GiB physical guard remains.
+At that session, 52 prediction tests and a full backend run (976 passed,
+one skipped) passed. The existing `(source, updated_at DESC, id)` partial
+index served the fresh-cap query without a new migration; catalogue-retention
+index migration `b7312f0c4e88` applied during the earlier cutover.
+
+The recorded ARM64 follow-up image was
+`ghcr.io/kohnnn/vnibb-api@sha256:6f560d3d6cdda1f631907a44c206f2e30aa3cb30572d2cd5a8b542609de13968`
+(revision `d3a6fdf1b6856cc9238deef6fb15cffe667655a3961f870c8764f9fa0acf0675`),
+with source/dependency manifest `/tmp/vnibb-fresh-cap-release-manifest.json`.
+The earlier session recorded runtime verification and a scheduled ingest of
+400 Kalshi and 100 Polymarket markets, with 400 recently created non-combo
+Kalshi rows and approximately 66.8 MB combined snapshot allocation. Its
+rollback environment copy was
+`deployment/env.oracle.pre-fresh-cap-20260927T141447Z` on the host. These are
+historical observations, not a current production pin; the other three
+providers had explicit upstream 403/404/400 failures.
+
+**Current-serving check (2026-09-27 19:14 UTC):** `/api/v1/health/detailed`
+reported revision `7c9274e6a060615484832b9838804eb53eb4cc9b`; API, MCP and
+scheduler were healthy on digest
+`ghcr.io/kohnnn/vnibb-api@sha256:b5b2ab435ff1c3bd290adadd4a67a4a6dcadb7ac8824521bca8bd694bb6c6af8`.
+The fresh-cap image above is therefore not currently serving. Do not treat
+the candidate manifest or previous smoke as proof of a live fresh-cap rollout;
+verify the container pin, migration head and actual ingestion after deployment.
+
 The 200 GB boot volume filled; PostgreSQL could not start and Redis AOF writes
 failed with `ENOSPC`. Reclaiming unused build caches and an off-host-verified
 backup duplicate restored API readiness. The intraday prediction snapshot table

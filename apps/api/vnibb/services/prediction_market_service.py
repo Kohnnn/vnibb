@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.services.prediction_market_policy import (
+    MARKET_FRESHNESS,
     MAX_CATALOGUE_RELATION_BYTES,
     MAX_INGEST_MARKETS,
     MAX_MARKET_EXTRA_BYTES,
@@ -27,6 +28,7 @@ from vnibb.services.prediction_market_policy import (
     MAX_MARKET_TEXT_BYTES,
     MAX_SOURCE_MARKETS,
     is_kalshi_combo,
+    snapshot_eligibility,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,14 @@ def _is_live_market(values: PredictionMarketValues, now: datetime) -> bool:
         end_date = end_date.replace(tzinfo=UTC) if end_date.tzinfo is None else end_date.astimezone(UTC)
     return values.get("active") is True and values.get("closed") is False and (end_date is None or end_date > now)
 
+def _counts_toward_source_cap(values: PredictionMarketValues, now: datetime) -> bool:
+    if values.get("is_synthetic") is True:
+        return False
+    updated_at = values.get("updated_at")
+    if updated_at is not None:
+        updated_at = updated_at.replace(tzinfo=UTC) if updated_at.tzinfo is None else updated_at.astimezone(UTC)
+    return (updated_at is None or updated_at >= now - MARKET_FRESHNESS) and _is_live_market(values, now)
+
 async def _catalogue_storage_bytes(session: AsyncSession, dialect_name: str) -> int:
     if dialect_name == "postgresql":
         return (await session.execute(
@@ -76,7 +86,7 @@ async def _catalogue_storage_bytes(session: AsyncSession, dialect_name: str) -> 
 
 
 async def persist_prediction_markets(session: AsyncSession, values: list[PredictionMarketValues]) -> int:
-    """Refresh real IDs and admit bounded new IDs while storage has headroom.
+    """Refresh IDs and admit new live IDs below each source's fresh-market cap.
 
     PostgreSQL preflight serializes all ingests and reserves at least 256 KiB
     of relation growth per mutation, including MVCC churn and index writes.
@@ -127,36 +137,71 @@ async def persist_prediction_markets(session: AsyncSession, values: list[Predict
             existing.update((source, source_id) for source_id in matches.scalars())
 
         now = datetime.now(UTC)
-        new_rows = [
-            row for row in values
+        values = [({**row, "updated_at": now.replace(tzinfo=None)} if row.get("updated_at") is None else row)
+                  for row in values]
+        incoming_eligible = {
+            (row["source"], row["source_id"])
+            for row in values if _counts_toward_source_cap(row, now)
+        }
+        new_rows = {
+            (row["source"], row["source_id"]) for row in values
             if (row["source"], row["source_id"]) not in existing
             and _is_live_market(row, now)
-        ]
+            and (row.get("is_synthetic") is True or (row["source"], row["source_id"]) in incoming_eligible)
+        }
 
         available: dict[str, int] = {}
-        for source in {row["source"] for row in new_rows}:
+        previously_counted: set[tuple[str, str]] = set()
+        for source in {source for source, _ in incoming_eligible}:
             source_rows = await session.execute(
                 select(PredictionMarket.id).where(
                     PredictionMarket.source == source,
-                    text("(source <> 'kalshi' OR source_id NOT LIKE 'KXMV%')")
-                ).limit(MAX_SOURCE_MARKETS + 1)
+                    *snapshot_eligibility(now),
+                    text("(source <> 'kalshi' OR source_id NOT LIKE 'KXMV%')"),
+                ).order_by(PredictionMarket.updated_at.desc(), PredictionMarket.id.asc())
+                .limit(MAX_SOURCE_MARKETS + 1)
             )
-            available[source] = max(0, MAX_SOURCE_MARKETS - len(source_rows.scalars().all()))
+            counted = len(source_rows.scalars().all())
+            old_eligible = (await session.execute(
+                select(PredictionMarket.source_id).where(
+                    PredictionMarket.source == source,
+                    PredictionMarket.source_id.in_(by_source[source]),
+                    *snapshot_eligibility(now),
+                )
+            )).scalars().all()
+            previously_counted.update((source, source_id) for source_id in old_eligible)
+            # A cap+1 scan proves overflow, not the total; never infer spare slots.
+            available[source] = (
+                max(0, MAX_SOURCE_MARKETS - counted
+                    + len({(source, source_id) for source_id in old_eligible} - incoming_eligible))
+                if counted <= MAX_SOURCE_MARKETS else 0
+            )
 
         admitted: set[tuple[str, str]] = set()
-        for row in new_rows:
-            source, source_id = row["source"], row["source_id"]
-            if (source, source_id) not in admitted and available.get(source, 0) > 0:
-                admitted.add((source, source_id))
-                available[source] -= 1
-        accepted = [row for row in values if (row["source"], row["source_id"]) in existing | admitted]
+        rejected_promotions = 0
+        for row in values:
+            key = row["source"], row["source_id"]
+            if key in existing and key not in incoming_eligible:
+                admitted.add(key)
+            elif key in previously_counted:
+                admitted.add(key)
+            elif key in incoming_eligible:
+                if available[row["source"]] > 0:
+                    admitted.add(key)
+                    available[row["source"]] -= 1
+                elif key in existing:
+                    rejected_promotions += 1
+            elif key in new_rows:
+                admitted.add(key)
+        accepted = [row for row in values if (row["source"], row["source_id"]) in admitted]
         rejected = len(values) - len(accepted)
         for row in accepted:
             await session.execute(_upsert_prediction_market(row, dialect_name))
         await session.commit()
         if rejected:
             raise PredictionMarketAdmissionError(
-                f"Catalogue admission blocked for {rejected} new markets (storage/source cap); refreshed {len(accepted)} existing markets"
+                f"Catalogue admission blocked for {rejected} {'markets' if rejected_promotions else 'new markets'} "
+                f"(storage/source cap); refreshed {len(accepted)} existing markets"
             )
         return len(accepted)
     except BaseException:

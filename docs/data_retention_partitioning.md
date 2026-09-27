@@ -34,8 +34,10 @@ above do not disable them.
   and metadata defensively. Legacy combo catalogue rows are preserved but do
   not enter snapshots or consume normal-market admission slots.
 - Each provider batch is limited to 1,000 records, with bounded response and
-  stored field sizes. Admission stops at 10,000 non-combo catalogue records per
-  source; existing records can still refresh while physical headroom permits.
+  stored field sizes. At most 10,000 fresh, real, open, unexpired non-combo
+  markets per source count against the admission quota; older catalogue rows
+  remain as history and are handled separately by bounded retention. The
+  independent physical storage ceiling still limits the entire catalogue.
 - PostgreSQL catalogue mutations serialize under an advisory transaction lock.
   A 16 GiB relation ceiling, including indexes/TOAST, reserves 256 KiB per
   distinct mutation before either insert or update. Insufficient headroom fails
@@ -85,8 +87,9 @@ successful ingest to reach cleanup:
 
 - Live ingestion accepts at most 1,000 records per call, with bounded response
   and field sizes. Kalshi requests `mve_filter=exclude` and rejects multivariate
-  combo records defensively. Each source admits at most 10,000 non-combo
-  catalogue rows; existing IDs can still refresh at that row cap.
+  combo records defensively. Each source admits at most 10,000 fresh, real,
+  active, nonclosed, unexpired non-combo markets; older catalogue rows remain
+  stored but do not consume fresh admission slots.
 - PostgreSQL catalogue mutations serialize with an advisory transaction lock.
   At the 16 GiB relation ceiling, including a conservative per-mutation reserve,
   all mutations fail closed. Legacy combo rows remain stored but do not consume
