@@ -10,7 +10,6 @@ from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.api.v1 import data_sync
 from vnibb.core import database, scheduler
 from vnibb.models.scheduler_state import SchedulerWorkerState

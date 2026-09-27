@@ -12,7 +12,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select
-
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.models.prediction_market_archive import PredictionMarketArchive
 from vnibb.services import prediction_market_catalogue_retention as svc

@@ -4,7 +4,6 @@ from decimal import Decimal
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-
 from vnibb.api.v1.matrix import router
 from vnibb.core.database import get_db
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
