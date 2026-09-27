@@ -8,6 +8,7 @@ NOTE: Sets ALEMBIC_RUNNING=true to prevent async engine creation in database.py
 """
 
 import os
+import re
 
 # CRITICAL: Set this BEFORE any app imports to prevent async engine creation
 os.environ["ALEMBIC_RUNNING"] = "true"
@@ -29,10 +30,9 @@ def get_sync_database_url() -> str:
     if not db_url:
         raise ValueError("DATABASE_URL or DATABASE_URL_SYNC must be set")
     
-    # Remove asyncpg if present (use sync driver)
-    db_url = db_url.replace("+asyncpg", "")
-    
-    return db_url
+    # SQLAlchemy's default PostgreSQL DBAPI can vary by version; migrations
+    # use the sync driver declared in pyproject.toml, not asyncpg or psycopg 3.
+    return re.sub(r"^postgresql(?:\+asyncpg)?://", "postgresql+psycopg2://", db_url)
 
 
 # Now safe to import app modules (ALEMBIC_RUNNING is already set)
