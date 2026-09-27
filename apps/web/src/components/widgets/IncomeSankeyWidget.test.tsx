@@ -77,6 +77,68 @@ describe('income_sankey saved dashboard widget', () => {
     expect(incomeQuery).toHaveBeenLastCalledWith('FPT', { period: 'Q' });
   });
 
+  it('charts the selected quarter rather than the latest quarter in the response', async () => {
+    showIncome([
+      { ...row, period: 'Q1-2025', revenue: 700, cost_of_revenue: 400, gross_profit: 300, operating_income: 200, pre_tax_profit: 180, net_income: 150 },
+      { ...row, period: '2025Q4', revenue: 3000, cost_of_revenue: 1700, gross_profit: 1300, operating_income: 900, pre_tax_profit: 850, net_income: 800 },
+    ]);
+    await screen.findByRole('region', { name: 'Income Sankey' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Q1' }));
+
+    expect(screen.getByText('Q1 2025', { exact: false })).toBeInTheDocument();
+    expect(screen.getAllByText('700.00')).toHaveLength(2);
+    expect(screen.queryByText('3,000.00')).not.toBeInTheDocument();
+  });
+
+  it('switches selected quarters and keeps Q showing the latest quarterly flow', async () => {
+    showIncome([
+      { ...row, period: 'Q1-2025', revenue: 700, cost_of_revenue: 400, gross_profit: 300, operating_income: 200, pre_tax_profit: 180, net_income: 150 },
+      { ...row, period: 'Q4-2025', revenue: 900, cost_of_revenue: 500, gross_profit: 400, operating_income: 300, pre_tax_profit: 280, net_income: 250 },
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Q1' }));
+    expect(screen.getAllByText('700.00')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Q4' }));
+    expect(screen.getAllByText('900.00')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Q' }));
+    expect(screen.getByText('900.00')).toBeInTheDocument();
+  });
+
+  it('preserves a trailing-twelve-month flow when TTM is selected', async () => {
+    showIncome([{ ...row, period: 'TTM-2025', revenue: 800, cost_of_revenue: 450, gross_profit: 350, operating_income: 250, pre_tax_profit: 230, net_income: 200 }]);
+    fireEvent.click(screen.getByRole('button', { name: 'TTM' }));
+
+    expect(screen.getAllByText('800.00')).toHaveLength(2);
+    expect(screen.getByText('TTM 2025', { exact: false })).toBeInTheDocument();
+  });
+
+  it('reports an unavailable selected quarter rather than charting a different usable quarter', async () => {
+    const onDataChange = showIncome([
+      { ...row, period: 'Q1-2025', revenue: 700 },
+      { ...row, period: 'Q4-2025', revenue: 900 },
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Q2' }));
+
+    expect(await screen.findByText('No flow visualization available for FPT')).toBeInTheDocument();
+    expect(screen.queryByText('900.00')).not.toBeInTheDocument();
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      __widgetRuntime: expect.objectContaining({ layoutHint: expect.objectContaining({ empty: true }) }),
+    }));
+  });
+
+  it('does not replace a loss in the selected quarter with a profitable quarter', async () => {
+    showIncome([
+      { ...row, period: 'Q1-2025', net_income: -25 },
+      { ...row, period: 'Q4-2025', revenue: 900 },
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Q1' }));
+
+    expect(await screen.findByText('No flow visualization available for FPT')).toBeInTheDocument();
+    expect(screen.queryByText('900.00')).not.toBeInTheDocument();
+  });
+
   it('shows cached flow while a refresh fails instead of replacing it with an error', async () => {
     const onDataChange = showIncome([row], new Error('Offline'));
     expect((await screen.findByRole('region', { name: 'Income Sankey' })).querySelectorAll('svg[viewBox="0 0 1120 420"] path').length).toBeGreaterThan(0);

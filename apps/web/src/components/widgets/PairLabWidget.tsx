@@ -190,7 +190,8 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
         <PairBackendPanel
           notDeployed={backendNotDeployed}
           payload={backendPayload}
-          error={backendState?.status === 'ok' ? backendState.error : null}
+          error={backendQuery.error || (backendState?.status === 'ok' ? backendState.error : null)}
+          onRetry={() => { void backendQuery.refetch() }}
         />
       )}
 
@@ -306,10 +307,12 @@ function PairBackendPanel({
   notDeployed,
   payload,
   error,
+  onRetry,
 }: {
   notDeployed: boolean
   payload: PairDiagnosticsPayload | null
-  error?: string | null
+  error?: Error | string | null
+  onRetry: () => void
 }) {
   if (notDeployed) {
     return (
@@ -322,7 +325,12 @@ function PairBackendPanel({
   if (error || !payload) {
     return (
       <div className="mx-1 mb-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 px-2 py-1 text-[9px] leading-3 text-[var(--text-muted)]">
-        {error || 'Computing OLS hedge ratio…'}
+        {error ? (
+          <>
+            <span>OLS diagnostics failed: {error instanceof Error ? error.message : error}</span>
+            <button type="button" onClick={onRetry} className="ml-2 text-blue-300 underline hover:text-blue-200">Retry OLS</button>
+          </>
+        ) : 'Computing OLS hedge ratio…'}
       </div>
     )
   }

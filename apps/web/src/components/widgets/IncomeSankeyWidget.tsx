@@ -11,7 +11,7 @@ import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { useIncomeStatement } from '@/lib/queries';
-import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, matchesFinancialQuarterSelection, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { buildIncomeSankeyModel } from '@/lib/financialVisualizations';
@@ -40,11 +40,13 @@ function IncomeSankeyWidgetComponent({ id, symbol, onRemove, onDataChange }: Inc
       .sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
     [data?.data],
   );
+  const selectedQuarter = period === 'Q1' || period === 'Q2' || period === 'Q3' || period === 'Q4' ? period : null;
   const displayItems = useMemo(
     () => periodMode === 'quarter'
-      ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
+      ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period) &&
+        (period === 'Q' || (selectedQuarter !== null && matchesFinancialQuarterSelection(item.period, selectedQuarter))))
       : orderedItems,
-    [orderedItems, periodMode],
+    [orderedItems, periodMode, period, selectedQuarter],
   );
   const hasData = displayItems.length > 0;
 

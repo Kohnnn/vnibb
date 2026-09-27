@@ -76,6 +76,7 @@ const FALLBACK_BEHAVIOR: LayoutBehavior = {
 }
 
 export const WIDGET_LAYOUT_BEHAVIORS: Record<WidgetType, LayoutBehavior> = {
+  research_matrix: { preferredW: 24, preferredH: 16, minW: 8, minH: 10, orientation: 'horizontal', expandPriority: 6 },
   screener: { preferredW: 16, preferredH: 10, minW: 12, minH: 8, orientation: 'horizontal', expandPriority: 6 },
   ticker_info: { preferredW: 8, preferredH: 6, minW: 5, minH: 4, orientation: 'balanced', expandPriority: 2 },
   valuation_band: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },

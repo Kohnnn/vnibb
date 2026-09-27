@@ -14,6 +14,8 @@ from typing import Any, Final
 
 import httpx
 
+from vnibb.services.prediction_market_policy import MAX_MARKET_PAYLOAD_BYTES
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,6 +60,10 @@ async def fetch_json_with_retry(
                 await asyncio.sleep(retry_after)
                 continue
             response.raise_for_status()
+            if len(response.content) > MAX_MARKET_PAYLOAD_BYTES:
+                raise PredictionMarketFetchError(
+                    source, response.status_code, "response exceeds ingest byte limit"
+                )
             content_type = response.headers.get("content-type", "").lower()
             if "json" not in content_type and "text/plain" not in content_type:
                 raise PredictionMarketFetchError(

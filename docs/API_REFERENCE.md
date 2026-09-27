@@ -131,6 +131,7 @@ Market data notes:
 - `GET /prediction-markets/alerts?window_hours=1&min_movement_bps=200&limit=20`
 - `GET /prediction-markets/consensus?query=...`
 - `GET /prediction-markets/spread?window=24`
+- `GET /prediction-markets/{source}/{source_id}` — exact fresh, genuine contract metadata; 404 when ineligible or absent.
 - `GET /prediction-markets/{source}/{source_id}/history?days=30`
 - `GET /prediction-markets/cross-calibration` (Phase 10) returns per-topic consensus across all sources and a `sources_agree` flag.
 - `GET /prediction-markets/calibration?topic=cpi|fed|recession`
@@ -142,14 +143,14 @@ Market data notes:
 Prediction markets notes:
 - Returns persisted external prediction-market contracts (Polymarket, Kalshi, etc.) from bounded live and, for non-active reads, archived market rows, shaped as `{ "count": <int>, "data": [...] }`. The `prediction_market_archive` migration must be applied before deploying this API. Terminal-market archiving is an operator-only dry-run-by-default maintenance action; it is not an automatic API cleanup.
 - Filters: `source` (lowercase slug, e.g. `polymarket` or `kalshi`), `active` (bool), `category` (case-insensitive alias such as `economic`, `sports`, `politics`, `general`), `limit` (1-200, default 50).
-- Ordered by nearest `end_date` first (open-ended contracts last), then `id`.
+- Current catalogue and analysis reads use at most 1,000 freshest eligible contracts per source before search/topic/category filters: genuine, active, unclosed, unexpired, updated within 24 hours. Results and aggregate counts describe this bounded subset, not the full provider universe. Current lists order by update descending, then ID; inactive/archive lists retain end-date ordering.
 - Returns an empty `{ "count": 0, "data": [] }` (not a 500) when the table is absent, so the endpoint is safe to call before the migration is applied.
-- `/source-health` returns market and snapshot counts plus `synced | stale | empty` status for every known source. Missing prediction tables return empty rows during bootstrap; other database failures return 503.
-- `/movers` returns markets ranked by the magnitude of the signed YES-probability delta. Windows below 24 hours use intraday snapshots; longer windows use nightly snapshots. `movement` is the canonical signed delta; `absolute_movement` remains a signed compatibility alias. `window` remains a compatibility alias for `window_hours`; conflicting values return 422.
+- `/source-health` keeps all five sources and returns bounded eligible `market_count`/`live_market_count`, associated snapshot counts, and `synced | stale | empty`. Synthetic counts are separate provenance, never current availability. `synced` describes stored snapshots, not successful live provider connectivity or valid prices. Missing tables return empty bootstrap rows; other database failures return 503.
+- `/movers` ranks absolute probability movement. Windows below 24 hours use intraday snapshots; longer windows use nightly snapshots. `movement` is signed; `absolute_movement` is its magnitude. `window` remains an alias for `window_hours`; conflicting values return 422.
 - `/alerts` returns intraday alerts above `min_movement_bps`. It uses the same `movement`, `absolute_movement`, `window_hours`, and legacy `window` compatibility contract as `/movers`.
 - `/consensus?query=...` returns per-source YES prices plus a volume-weighted consensus.
 - `/spread` returns Polymarket vs Kalshi consensus on the maintained macro topics with the gap.
-- `/history?days=30` returns the YES-price time series for a single market.
+- `/history?days=30` returns recorded first-outcome probabilities (legacy field `yes_price`), merging at most 90 daily and 672 intraday records with intraday precedence at duplicate timestamps. No interpolation, gap-filling, or synthetic history; invalid current price vectors suppress observations. Historic snapshots lack their original outcome vectors, so older zero observations cannot independently prove valid zero versus missing provider data.
 - `/cross-calibration` (Phase 10) returns per-topic consensus across all sources and a `sources_agree` flag.
 - `/calibration?topic=...` returns the markets tagged to a maintained topic→tags mapping together with their latest consensus probability and 7-day trail.
 - `/estimate/{cpi,fed,recession,macro}` returns the odds-to-estimate quant output. Each endpoint caches its result for 600 seconds; the `macro` endpoint is a composite of the other three plus Polymarket S&P-500 closes. Phase 8 adds a `confidence` field (0-1) to each estimator output.

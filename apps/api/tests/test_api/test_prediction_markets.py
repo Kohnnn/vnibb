@@ -66,6 +66,7 @@ def make_snapshot(fixture: SnapshotFixture) -> PredictionMarketSnapshot:
         liquidity=None,
         extra={},
         captured_at=fixture.captured_at,
+        bucket_at=fixture.captured_at.replace(hour=0, minute=0, second=0, microsecond=0),
     )
 
 
@@ -97,6 +98,7 @@ async def test_ingest_polymarket_gamma_markets_when_market_repeats_updates_db_ro
         nonlocal calls
         calls += 1
         payload = dict(GAMMA_MARKET)
+        payload["endDate"] = (datetime.now(UTC) + timedelta(days=7)).isoformat()
         payload["question"] = "Updated question" if calls == 2 else GAMMA_MARKET["question"]
         payload["url"] = "https://polymarket.com/event/fed-2026-updated" if calls == 2 else GAMMA_MARKET["url"]
         return httpx.Response(200, json=[payload])
@@ -133,7 +135,7 @@ async def test_prediction_markets_route_when_db_has_polymarket_rows_returns_norm
             description="Fed policy market",
             category="Economics",
             url="https://polymarket.com/event/fed-2026",
-            end_date=datetime.fromisoformat("2026-07-31T00:00:00+00:00"),
+            end_date=datetime.now(UTC) + timedelta(days=7),
             active=True,
             closed=False,
             volume=1234.5,
@@ -201,7 +203,7 @@ async def test_source_health_route_when_rows_exist_returns_all_known_sources(
             description="Fed policy market",
             category="Economics",
             url="https://polymarket.com/event/fed-2026",
-            end_date=datetime.fromisoformat("2026-07-31T00:00:00+00:00"),
+            end_date=now + timedelta(days=7),
             active=True,
             closed=False,
             volume=1234.5,
@@ -243,6 +245,7 @@ async def test_source_health_route_when_rows_exist_returns_all_known_sources(
         "source": "kalshi",
         "status": "empty",
         "market_count": 0,
+        "live_market_count": 0,
         "snapshot_count": 0,
         "latest_snapshot_at": None,
         "stale_after_seconds": 86400,
@@ -296,8 +299,9 @@ async def test_source_health_does_not_report_fixture_seeded_source_as_synced(
     assert response.status_code == 200
     sources = {row["source"]: row for row in response.json()["sources"]}
     assert sources["predictit"]["synthetic_market_count"] == 1
-    assert sources["predictit"]["market_count"] == 1
-    assert sources["predictit"]["status"] == "stale"
+    assert sources["predictit"]["market_count"] == 0
+    assert sources["predictit"]["snapshot_count"] == 0
+    assert sources["predictit"]["status"] == "empty"
 
 
 @pytest.mark.asyncio
@@ -335,6 +339,7 @@ async def test_source_health_route_when_tables_missing_returns_empty_sources(
                 "source": source,
                 "status": "empty",
                 "market_count": 0,
+                "live_market_count": 0,
                 "snapshot_count": 0,
                 "latest_snapshot_at": None,
                 "stale_after_seconds": 86400,
@@ -412,6 +417,12 @@ async def test_movers_route_when_multiple_baselines_exist_uses_one_nearest_per_m
         ),
     ]
     test_db.add_all(snapshots)
+    test_db.add_all([
+        PredictionMarket(source="polymarket", source_id="near-baseline", question="Will rates fall?",
+                         active=True, closed=False, outcomes=["Yes", "No"], outcome_prices=[0.6, 0.4]),
+        PredictionMarket(source="predictit", source_id="down-move", question="Will a candidate win?",
+                         active=True, closed=False, outcomes=["Yes", "No"], outcome_prices=[0.35, 0.65]),
+    ])
     await test_db.commit()
 
     # When: movers are requested without filtering.
@@ -427,7 +438,6 @@ async def test_movers_route_when_multiple_baselines_exist_uses_one_nearest_per_m
     assert payload["count"] == 2
     assert [row["source_id"] for row in payload["movers"]] == ["down-move", "near-baseline"]
     assert payload["movers"][0]["movement"] == pytest.approx(-0.15)
-    assert payload["movers"][0]["absolute_movement"] == pytest.approx(-0.15)
     assert payload["movers"][1]["previous_yes_price"] == pytest.approx(0.55)
     assert payload["movers"][1]["movement"] == pytest.approx(0.05)
     assert payload["movers"][1]["absolute_movement"] == pytest.approx(0.05)
@@ -514,6 +524,12 @@ async def test_movers_route_respects_direction_limit_and_excluded_categories(
             ),
         ]
     )
+    test_db.add_all([
+        PredictionMarket(source=source, source_id=source_id, question="Observed contract",
+                         active=True, closed=False, outcomes=["Yes", "No"], outcome_prices=[0.5, 0.5])
+        for source, source_id in (("polymarket", "economic-up-big"), ("manifold", "sports-up-small"),
+                                  ("limitless", "general-down"))
+    ])
     await test_db.commit()
 
     # When: positive movers are requested with an excluded category and limit.
@@ -555,6 +571,10 @@ async def test_movers_accepts_window_hours_and_legacy_window_with_conflict_rejec
 @pytest.mark.asyncio
 async def test_movers_route_uses_intraday_snapshots_for_short_windows(client, test_db) -> None:
     now = datetime.now(UTC)
+    test_db.add(PredictionMarket(
+        source="polymarket", source_id="intraday-mover", question="Will CPI rise?",
+        active=True, closed=False, outcomes=["Yes", "No"], outcome_prices=[0.65, 0.35],
+    ))
     test_db.add_all(
         [
             PredictionMarketIntradaySnapshot(

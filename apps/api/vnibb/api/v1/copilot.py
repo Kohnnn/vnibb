@@ -10,10 +10,15 @@ Provides:
 import json
 from typing import Any, Literal
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, Header, UploadFile
+from pydantic import BaseModel, model_validator
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
+from vnibb.core.auth import get_current_user
+from vnibb.core.database import async_session_maker
+from vnibb.schemas.matrix import MatrixSelection
+from vnibb.services.matrix_copilot_context import build_matrix_copilot_context
+from vnibb.services.matrix_service import resolve_matrix_selection, require_matrix_export_rights
 from vnibb.services.ai_context_service import ai_context_service
 from vnibb.services.ai_document_service import ai_document_service
 from vnibb.services.ai_model_catalog_service import ai_model_catalog_service
@@ -79,9 +84,15 @@ class ChatStreamRequest(BaseModel):
     """Request for streaming chat."""
 
     message: str
+
+
     context: WidgetContext | None = None
     history: list[Message] = []
     settings: CopilotRequestSettings | None = None
+    matrix_selection: MatrixSelection | None = None
+
+
+RESERVED_SERVER_CONTEXT_KEYS = ("matrix_selection", "source_catalog")
 
 
 class ChatRequest(BaseModel):
@@ -89,6 +100,15 @@ class ChatRequest(BaseModel):
 
     messages: list[Message]
     context: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_client_context(self):
+        reserved = [key for key in RESERVED_SERVER_CONTEXT_KEYS if key in (self.context or {})]
+        if reserved:
+            raise ValueError(
+                f"Server-owned context keys cannot be supplied by clients: {', '.join(reserved)}"
+            )
+        return self
 
 
 class AskRequest(BaseModel):
@@ -173,13 +193,24 @@ class OutcomeResponse(BaseModel):
 
 
 @router.post("/chat/stream", summary="Stream chat response via SSE")
-async def chat_stream(request: ChatStreamRequest):
+async def chat_stream(
+    request: ChatStreamRequest, authorization: str | None = Header(default=None)
+):
     """
     Stream a chat response using Server-Sent Events (SSE).
 
     Returns chunks in format: data: {"chunk": "text"}\n\n
     Final message: data: {"done": true}\n\n
     """
+    matrix_context = None
+    if request.matrix_selection is not None:
+        user = await get_current_user(authorization)
+        async with async_session_maker() as db:
+            packet = await resolve_matrix_selection(
+                db, user.id, request.matrix_selection.model_dump(mode="json")
+            )
+        require_matrix_export_rights(packet)
+        matrix_context = build_matrix_copilot_context(packet)
 
     async def generate():
         try:
@@ -195,15 +226,22 @@ async def chat_stream(request: ChatStreamRequest):
                     runtime_config.get("provider")
                 )
                 request_settings["model"] = str(runtime_config.get("model") or "").strip()
+            if matrix_context is not None:
+                request_settings["webSearch"] = False
+                request_settings["enableWorkflowOutputs"] = False
             context_message = (
-                "Building VNIBB MCP runtime context"
-                if vnibb_mcp_client_service.is_enabled
-                else "Building VNIBB database runtime context"
+                "Using authorized frozen Matrix selection"
+                if matrix_context is not None
+                else (
+                    "Building VNIBB MCP runtime context"
+                    if vnibb_mcp_client_service.is_enabled
+                    else "Building VNIBB database runtime context"
+                )
             )
             yield f"data: {json.dumps({'reasoning': {'eventType': 'INFO', 'message': context_message}})}\n\n"
 
             context_dict = {}
-            if request.context:
+            if request.context and matrix_context is None:
                 context_dict = {
                     "widgetType": request.context.widgetType,
                     "widgetTypeKey": request.context.widgetTypeKey,
@@ -218,12 +256,15 @@ async def chat_stream(request: ChatStreamRequest):
             messages = [{"role": m.role, "content": m.content} for m in request.history]
             messages.append({"role": "user", "content": request.message})
 
-            runtime_context = await ai_context_service.build_runtime_context(
-                message=request.message,
-                history=messages,
-                client_context=context_dict,
-                prefer_database_data=_resolve_prefer_database_data(request.settings),
-            )
+            if matrix_context is not None:
+                runtime_context = matrix_context
+            else:
+                runtime_context = await ai_context_service.build_runtime_context(
+                    message=request.message,
+                    history=messages,
+                    client_context=context_dict,
+                    prefer_database_data=_resolve_prefer_database_data(request.settings),
+                )
             yield f"data: {json.dumps({'reasoning': {'eventType': 'SUCCESS', 'message': 'Runtime context ready', 'details': {'symbolCount': len(runtime_context.get('market_context') or []), 'sourceCount': len(runtime_context.get('source_catalog') or [])}}})}\n\n"
 
             # Stream from LLM
@@ -235,7 +276,8 @@ async def chat_stream(request: ChatStreamRequest):
                 yield f"data: {json.dumps(event)}\n\n"
 
         except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            error = "Matrix response unavailable" if matrix_context is not None else str(e)
+            yield f"data: {json.dumps({'error': error})}\n\n"
 
     return StreamingResponse(
         generate(),

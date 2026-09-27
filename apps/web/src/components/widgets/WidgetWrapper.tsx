@@ -4,6 +4,7 @@
 
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { withInjectedWidgetProps } from './widgetChildProps';
 import {
     Download,
     FileJson,
@@ -121,7 +122,7 @@ function withResolvedWidgetProps(children: ReactNode, props: ResolvedWidgetProps
         });
     }
     if (typeof children.type === 'string') return children;
-    return React.cloneElement(children, props);
+    return withInjectedWidgetProps(children, props);
 }
 
 export function WidgetWrapper({
@@ -665,6 +666,7 @@ export function WidgetWrapper({
                         ? getColorForGroup(widgetGroup)
                         : undefined
                 }}
+                data-widget-id={id}
             >
                 <WidgetToolbar
                     title={title}

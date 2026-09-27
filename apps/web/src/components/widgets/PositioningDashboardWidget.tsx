@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { useQueries } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueries, type UseQueryResult } from '@tanstack/react-query'
 import { Users } from 'lucide-react'
 import { useSymbolsByGroup } from '@/lib/queries'
 import * as api from '@/lib/api'
@@ -38,7 +38,7 @@ function sumScope(points: TransactionFlowResponse['data']['data'], key: keyof (t
   let seen = false
   for (const point of points) {
     const raw = point[key]
-    const value = typeof raw === 'number' ? raw : Number(raw)
+    const value = raw === null || raw === undefined ? NaN : typeof raw === 'number' ? raw : Number(raw)
     if (Number.isFinite(value)) {
       sum += value
       seen = true
@@ -78,7 +78,12 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
     [universe],
   )
 
-  const flowQueries = useQueries({
+  const combineFlows = useCallback((queries: UseQueryResult<TransactionFlowResponse>[]) => ({
+    queries,
+    data: queries.map((query) => query.data),
+  }), [])
+
+  const { queries: flowQueries, data: flowData } = useQueries({
     queries: symbols.map((sym) => ({
       queryKey: ['transactionFlow', sym, windowDays] as const,
       queryFn: () => api.getTransactionFlow(sym, { days: windowDays }),
@@ -86,6 +91,7 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
       staleTime: 5 * 60 * 1000,
       gcTime: 15 * 60 * 1000,
     })),
+    combine: combineFlows,
   })
 
   const isLoading = universeLoading || flowQueries.some((q) => q.isLoading)
@@ -94,7 +100,7 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
 
   const rows = useMemo<PositioningRow[]>(() => {
     return symbols.map((sym, index) => {
-      const points = flowQueries[index]?.data?.data?.data || []
+      const points = flowData[index]?.data?.data || []
       const foreignNet = sumScope(points, 'foreign_net_value')
       const proprietaryNet = sumScope(points, 'proprietary_net_value')
       const domesticNet = sumScope(points, 'domestic_net_value')
@@ -102,7 +108,7 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
       const hasData = foreignNet !== null || proprietaryNet !== null || domesticNet !== null
       return { symbol: sym, foreignNet, proprietaryNet, domesticNet, totalNet, hasData }
     })
-  }, [symbols, flowQueries])
+  }, [symbols, flowData])
 
   const sortedRows = useMemo(
     () =>
@@ -114,28 +120,32 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
     [rows],
   )
 
-  const withData = sortedRows.filter((r) => r.hasData)
+  const withData = useMemo(() => sortedRows.filter((r) => r.hasData), [sortedRows])
+  const payload = useMemo(() => ({
+    __widgetRuntime: {
+      layoutHint: { empty: !withData.length, compactHeight: 6 },
+      provenance: {
+        sourceLabel: 'Investor-bucket flow',
+        apiGroup: '/equity',
+        endpoint: '/equity/{symbol}/transaction-flow',
+      },
+    },
+    rows: withData.map((r) => ({
+      symbol: r.symbol,
+      foreign_net: r.foreignNet,
+      proprietary_net: r.proprietaryNet,
+      domestic_net: r.domesticNet,
+      total_net: r.totalNet,
+      window_days: windowDays,
+    })),
+  }), [withData, windowDays])
+  const lastEmitted = useRef<typeof payload | null>(null)
 
   useEffect(() => {
-    onDataChange?.({
-      __widgetRuntime: {
-        layoutHint: { empty: !withData.length, compactHeight: 6 },
-        provenance: {
-          sourceLabel: 'Investor-bucket flow',
-          apiGroup: '/equity',
-          endpoint: '/equity/{symbol}/transaction-flow',
-        },
-      },
-      rows: withData.map((r) => ({
-        symbol: r.symbol,
-        foreign_net: r.foreignNet,
-        proprietary_net: r.proprietaryNet,
-        domestic_net: r.domesticNet,
-        total_net: r.totalNet,
-        window_days: windowDays,
-      })),
-    })
-  }, [withData, onDataChange, windowDays])
+    if (!onDataChange || lastEmitted.current === payload) return
+    lastEmitted.current = payload
+    onDataChange(payload)
+  }, [payload, onDataChange])
 
   if (isLoading && !withData.length) return <WidgetSkeleton />
   if (universeError && !universe) return <WidgetError error={universeError} onRetry={() => refetchUniverse()} />

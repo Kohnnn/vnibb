@@ -35,8 +35,8 @@ from typing import Final, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import Float, String as SA_String
-from sqlalchemy import and_, case, cast, exists, func, or_, select
+from sqlalchemy import Float, and_, case, cast, exists, func, or_, select
+from sqlalchemy import String as SA_String
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,6 +52,11 @@ from vnibb.services.prediction_market_estimator import (
     estimate_fed,
     estimate_macro_composite,
     estimate_recession,
+)
+from vnibb.services.prediction_market_policy import (
+    active_market_candidates,
+    observed_yes_price,
+    snapshot_eligibility,
 )
 
 router = APIRouter()
@@ -86,6 +91,8 @@ class PredictionMarketRead(BaseModel):
     outcomes: list[str]
     outcome_prices: list[float]
     updated_at: datetime
+    extra: dict | None = None
+    is_synthetic: bool = False
 
 
 class PredictionMarketsResponse(BaseModel):
@@ -125,6 +132,7 @@ class PredictionMarketSourceHealthRow(BaseModel):
     source: str
     status: Literal["synced", "stale", "empty"]
     market_count: int
+    live_market_count: int = 0
     snapshot_count: int
     latest_snapshot_at: datetime | None
     stale_after_seconds: int
@@ -254,7 +262,7 @@ class PredictionMarketCrossCalibrationResponse(BaseModel):
 @router.get("", response_model=PredictionMarketsResponse)
 async def list_prediction_markets(
     source: str | None = Query(default=None, pattern=r"^[a-z][a-z0-9_-]{1,31}$"),
-    active: bool | None = Query(default=None),
+    active: bool | None = Query(default=True),
     # Category alias mapping. Frontend widgets send friendly names; we map
     # Gamma/Kalshi freeform categories into canonical buckets.
     category: str | None = Query(default=None, pattern=r"^[a-z][a-z0-9_-]{1,31}$"),
@@ -269,26 +277,25 @@ async def list_prediction_markets(
     db: AsyncSession = Depends(get_db),
 ) -> PredictionMarketsResponse:
     """Return persisted prediction markets from the database."""
-    stmt = select(PredictionMarket).order_by(
-        PredictionMarket.end_date.is_(None),
-        PredictionMarket.end_date.asc(),
-        PredictionMarket.id.asc(),
+    market = PredictionMarket if active is False else active_market_candidates(
+        datetime.now(UTC), (source,) if source else KNOWN_PREDICTION_MARKET_SOURCES
     )
+    stmt = select(market).order_by(market.updated_at.desc(), market.id.asc())
     if source is not None:
-        stmt = stmt.where(PredictionMarket.source == source)
-    if active is not None:
-        stmt = stmt.where(PredictionMarket.active.is_(active))
+        stmt = stmt.where(market.source == source)
+    if active is False:
+        stmt = stmt.where(market.active.is_(False), market.is_synthetic.is_(False))
     if category is not None:
         category_values = {
             "economic": ("economic", "economics"),
         }.get(category, (category,))
-        stmt = stmt.where(func.lower(PredictionMarket.category).in_(category_values))
+        stmt = stmt.where(func.lower(market.category).in_(category_values))
     if search is not None:
         like_pattern = f"%{search.lower()}%"
         stmt = stmt.where(
             or_(
-                func.lower(PredictionMarket.question).like(like_pattern),
-                func.lower(PredictionMarket.description).like(like_pattern),
+                func.lower(market.question).like(like_pattern),
+                func.lower(market.description).like(like_pattern),
             )
         )
     if topic is not None:
@@ -297,10 +304,10 @@ async def list_prediction_markets(
         # so a LIKE over ``"<topic>"`` matches either a single-element list
         # or the topic within a longer list.
         stmt = stmt.where(
-            cast(PredictionMarket.extra, SA_String).like(f'%"{topic}"%')
+            cast(market.extra, SA_String).like(f'%"{topic}"%')
         )
     archive_stmt = None
-    if active is not True:
+    if active is False:
         payload = PredictionMarketArchive.payload
         archive_stmt = select(PredictionMarketArchive).order_by(
             payload["end_date"].as_string().is_(None),
@@ -326,6 +333,9 @@ async def list_prediction_markets(
             )
     try:
         live = (await db.execute(stmt.limit(limit))).scalars().all()
+        if archive_stmt is None:
+            data = [PredictionMarketRead.model_validate(row) for row in live]
+            return PredictionMarketsResponse(count=len(data), data=data)
         archived = (await db.execute(archive_stmt.limit(limit))).scalars().all() if archive_stmt is not None else []
     except (OperationalError, ProgrammingError) as error:
         if _is_missing_prediction_market_relation(error):
@@ -374,6 +384,11 @@ def _resolve_window_hours(
 
 def _snapshot_movements(model, cutoff: datetime, limit: int, *, threshold: float = 0.0, direction: str = "both", excluded: list[str] | None = None, recent: bool = False):
     """Rank complete per-market movements in SQL before transferring result rows."""
+    market = active_market_candidates(datetime.now(UTC))
+    eligible = select(market.source, market.source_id).cte("eligible_markets")
+    eligible_snapshot = exists(select(1).where(
+        eligible.c.source == model.source, eligible.c.source_id == model.source_id,
+    ))
     latest = (
         select(
             model.source, model.source_id, model.question, model.category, model.url,
@@ -383,7 +398,7 @@ def _snapshot_movements(model, cutoff: datetime, limit: int, *, threshold: float
                 order_by=(model.captured_at.desc(), model.id.desc()),
             ).label("rn"),
         )
-        .where(model.captured_at >= cutoff if recent else True)
+        .where(eligible_snapshot, model.captured_at >= cutoff if recent else True)
         .subquery()
     )
     baseline = (
@@ -394,7 +409,7 @@ def _snapshot_movements(model, cutoff: datetime, limit: int, *, threshold: float
                 order_by=(model.captured_at.desc(), model.id.desc()),
             ).label("rn"),
         )
-        .where(model.captured_at <= cutoff)
+        .where(eligible_snapshot, model.captured_at <= cutoff)
         .subquery()
     )
     delta = latest.c.yes_price - baseline.c.yes_price
@@ -432,25 +447,21 @@ async def get_prediction_market_source_health(
         for source in KNOWN_PREDICTION_MARKET_SOURCES
     ]
     try:
-        # Presence, not an exact population count. `prediction_markets` holds
-        # ~13.3M rows, nearly all from one source, and `GROUP BY source` over
-        # it cannot use an index (the planner expects millions of rows per
-        # group, so it prefers a parallel seq scan) -- measured at 114-143s,
-        # which made this health endpoint time out. A bounded probe answers
-        # the only question health actually asks, at index speed.
-        market_counts = {
-            source: int(
-                (
-                    await db.execute(
-                        select(PredictionMarket.id)
-                        .where(PredictionMarket.source == source)
-                        .limit(1)
-                    )
-                ).first()
-                is not None
-            )
-            for source in KNOWN_PREDICTION_MARKET_SOURCES
-        }
+        market_counts = {}
+        snapshot_stats = {}
+        for source in KNOWN_PREDICTION_MARKET_SOURCES:
+            market = active_market_candidates(now, (source,))
+            market_counts[source] = int((await db.execute(
+                select(func.count(market.id))
+            )).scalar_one())
+            snapshots = select(
+                func.count(PredictionMarketSnapshot.id),
+                func.max(PredictionMarketSnapshot.captured_at),
+            ).join(market, and_(
+                PredictionMarketSnapshot.source == market.source,
+                PredictionMarketSnapshot.source_id == market.source_id,
+            )).where(PredictionMarketSnapshot.captured_at >= now - timedelta(days=30))
+            snapshot_stats[source] = (await db.execute(snapshots)).one()
         synthetic_counts = dict(
             (
                 await db.execute(
@@ -460,32 +471,6 @@ async def get_prediction_market_source_health(
                 )
             ).all()
         )
-        # Same shape as above, same problem: 2.23M snapshot rows, and the
-        # aggregate's count was only ever used to decide `empty` vs `stale`.
-        # Fetch the latest timestamp per source (indexed, cheap) and derive
-        # presence from it, rather than grouping the whole table.
-        snapshot_stats = {
-            source: (
-                int(
-                    (
-                        await db.execute(
-                            select(PredictionMarketSnapshot.id)
-                            .where(PredictionMarketSnapshot.source == source)
-                            .limit(1)
-                        )
-                    ).first()
-                    is not None
-                ),
-                (
-                    await db.execute(
-                        select(func.max(PredictionMarketSnapshot.captured_at)).where(
-                            PredictionMarketSnapshot.source == source
-                        )
-                    )
-                ).scalar(),
-            )
-            for source in KNOWN_PREDICTION_MARKET_SOURCES
-        }
     except (OperationalError, ProgrammingError) as error:
         if _is_missing_prediction_market_relation(error):
             return PredictionMarketSourceHealthResponse(sources=empty_rows)
@@ -500,24 +485,20 @@ async def get_prediction_market_source_health(
         synthetic_market_count = int(synthetic_counts.get(source, 0))
         snapshot_count, latest_snapshot_at = snapshot_stats.get(source, (0, None))
         status: Literal["synced", "stale", "empty"] = "empty"
-        if market_count > 0 or snapshot_count > 0:
+        if market_count > 0:
             status = "stale"
-        if latest_snapshot_at is not None:
+        if market_count > 0 and latest_snapshot_at is not None:
             latest = latest_snapshot_at
             if latest.tzinfo is None:
                 latest = latest.replace(tzinfo=UTC)
             if now - latest <= timedelta(seconds=PREDICTION_MARKET_STALE_AFTER_SECONDS):
                 status = "synced"
-        # A source whose rows are entirely fixture-derived is not synced no
-        # matter how fresh its snapshot looks: the ingest fell back, which
-        # means the provider did not deliver.
-        if market_count > 0 and synthetic_market_count >= market_count:
-            status = "stale"
         sources.append(
             PredictionMarketSourceHealthRow(
                 source=source,
                 status=status,
                 market_count=market_count,
+                live_market_count=market_count,
                 snapshot_count=int(snapshot_count),
                 latest_snapshot_at=latest_snapshot_at,
                 stale_after_seconds=PREDICTION_MARKET_STALE_AFTER_SECONDS,
@@ -576,7 +557,7 @@ async def list_prediction_market_movers(
             yes_price=row.yes_price,
             previous_yes_price=row.previous_yes_price,
             movement=row.movement,
-            absolute_movement=row.movement,
+            absolute_movement=abs(row.movement),
         )
         for row in rows
     ]
@@ -603,26 +584,21 @@ async def list_prediction_market_calibration(
         "recession": ("recession", "us recession", "global recession"),
     }
     markers = keywords[topic]
+    market = active_market_candidates(datetime.now(UTC))
     stmt = (
-        select(PredictionMarket)
-        .where(PredictionMarket.active.is_(True), _topic_matches(markers, include_slug=True))
-        .order_by(PredictionMarket.id)
+        select(market)
+        .where(_topic_matches(markers, include_slug=True, market=market))
+        .order_by(market.updated_at.desc(), market.id.asc())
         .limit(limit)
     )
     matching = (await db.execute(stmt)).scalars().all()
-    prices = [
-        market.outcome_prices[0]
-        for market in matching
-        if isinstance(market.outcome_prices, list)
-        and market.outcome_prices
-        and type(market.outcome_prices[0]) in (int, float)
-    ]
+    prices = [price for market in matching if (price := observed_yes_price(market)) is not None]
     consensus = sum(prices) / len(prices) if prices else None
     return PredictionMarketCalibrationResponse(
         topic=topic,
         consensus_yes_price=consensus,
         n_markets=len(matching),
-        last_updated=matching[0].updated_at if matching else None,
+        last_updated=max((market.updated_at for market in matching), default=None),
         markets=[PredictionMarketRead.model_validate(market) for market in matching],
     )
 
@@ -659,12 +635,27 @@ _TOPIC_KEYWORDS = {
 }
 
 
-def _topic_matches(keywords: tuple[str, ...], *, include_slug: bool = False):
-    text = PredictionMarket.question + " " + func.coalesce(PredictionMarket.description, "")
+def _topic_matches(keywords: tuple[str, ...], *, include_slug: bool = False, market=PredictionMarket):
+    text = market.question + " " + func.coalesce(market.description, "")
     if include_slug:
-        text = text + " " + func.coalesce(PredictionMarket.slug, "")
+        text = text + " " + func.coalesce(market.slug, "")
     haystack = func.lower(text)
     return or_(*(haystack.contains(keyword, autoescape=True) for keyword in keywords))
+
+
+def _observed_price_sql(market, db: AsyncSession):
+    prices = []
+    for index in (0, 1):
+        value = market.outcome_prices[index]
+        numeric = (
+            func.json_typeof(value) == "number"
+            if db.bind.dialect.name == "postgresql"
+            else func.json_type(market.outcome_prices, f"$[{index}]").in_(("integer", "real"))
+        )
+        prices.append(case((numeric, cast(value.as_string(), Float))))
+    first, second = prices
+    valid = and_(first.between(0, 1), or_(first > 0, second > 0))
+    return first, valid
 
 
 def _topic_aggregates(db: AsyncSession):
@@ -674,18 +665,13 @@ def _topic_aggregates(db: AsyncSession):
     numeric (not a string, null, object or boolean). Both dialects are used by
     this project: PostgreSQL in production and SQLite in API fixtures.
     """
-    price_json = PredictionMarket.outcome_prices[0]
-    dialect = db.bind.dialect.name
-    numeric = (
-        func.json_typeof(price_json) == "number"
-        if dialect == "postgresql"
-        else func.json_type(PredictionMarket.outcome_prices, "$[0]").in_(("integer", "real"))
-    )
-    price = cast(price_json.as_string(), Float)
-    weight = case((PredictionMarket.volume >= 1, PredictionMarket.volume), else_=1.0)
-    columns = [PredictionMarket.source, func.count(PredictionMarket.id).label("source_count")]
+    market = active_market_candidates(datetime.now(UTC))
+    price, numeric = _observed_price_sql(market, db)
+    weight = case((market.volume >= 1, market.volume), else_=1.0)
+    columns = [market.source, func.count(market.id).label("source_count"),
+               func.max(market.updated_at).label("latest_updated")]
     for topic, keywords in _TOPIC_KEYWORDS.items():
-        matches = _topic_matches(keywords)
+        matches = _topic_matches(keywords, market=market)
         valid = and_(matches, numeric)
         columns.extend(
             (
@@ -694,7 +680,7 @@ def _topic_aggregates(db: AsyncSession):
                 func.sum(case((valid, weight), else_=0.0)).label(f"{topic}_weight"),
             )
         )
-    return select(*columns).where(PredictionMarket.active.is_(True)).group_by(PredictionMarket.source)
+    return select(*columns).group_by(market.source)
 
 
 def _weighted_topic(row, topic: str) -> float | None:
@@ -715,9 +701,7 @@ async def list_prediction_market_spread(
     """
     del window  # window is currently informational; reserved for snapshot diff.
     try:
-        rows = (await db.execute(_topic_aggregates(db).where(
-            PredictionMarket.source.in_(("polymarket", "kalshi"))
-        ))).all()
+        rows = (await db.execute(_topic_aggregates(db))).all()
     except (OperationalError, ProgrammingError):
         rows = []
 
@@ -756,28 +740,22 @@ async def get_prediction_market_consensus(
     Substring-matches the question (case-insensitive), aggregating all matching
     rows into one result per source before transferring them to the API.
     """
-    price_json = PredictionMarket.outcome_prices[0]
-    numeric = (
-        func.json_typeof(price_json) == "number"
-        if db.bind.dialect.name == "postgresql"
-        else func.json_type(PredictionMarket.outcome_prices, "$[0]").in_(("integer", "real"))
-    )
-    price = cast(price_json.as_string(), Float)
-    weight = case((PredictionMarket.volume >= 1, PredictionMarket.volume), else_=1.0)
+    market = active_market_candidates(datetime.now(UTC))
+    price, numeric = _observed_price_sql(market, db)
+    weight = case((market.volume >= 1, market.volume), else_=1.0)
     try:
         rows = (await db.execute(
             select(
-                PredictionMarket.source,
-                func.count(PredictionMarket.id).label("n_markets"),
+                market.source,
+                func.count(market.id).label("n_markets"),
                 func.sum(case((numeric, price * weight), else_=0.0)).label("weighted"),
                 func.sum(case((numeric, weight), else_=0.0)).label("weight"),
-                func.sum(case((numeric, PredictionMarket.volume), else_=0.0)).label("volume"),
-                func.max(case((numeric, PredictionMarket.url))).label("url"),
+                func.sum(case((numeric, market.volume), else_=0.0)).label("volume"),
+                func.max(case((numeric, market.url))).label("url"),
                 func.sum(case((numeric, 1), else_=0)).label("priced_count"),
             )
-            .where(PredictionMarket.active.is_(True),
-                   func.lower(PredictionMarket.question).contains(query.lower(), autoescape=True))
-            .group_by(PredictionMarket.source)
+            .where(func.lower(market.question).contains(query.lower(), autoescape=True))
+            .group_by(market.source)
         )).all()
     except (OperationalError, ProgrammingError):
         return PredictionMarketConsensusResponse(
@@ -789,7 +767,7 @@ async def get_prediction_market_consensus(
         PredictionMarketConsensusSourceRow(
             source=row.source,
             yes_price=float(row.weighted) / float(row.weight) if row.weight else None,
-            volume=float(row.volume) if row.weight else None,
+            volume=float(row.volume) if row.volume is not None else None,
             url=row.url if row.priced_count == 1 else None,
         )
         for row in sorted(rows, key=lambda item: item.source)
@@ -835,7 +813,7 @@ async def list_prediction_market_alerts(
             source=row.source, source_id=row.source_id, question=row.question,
             category=row.category, url=row.url, yes_price=row.yes_price,
             previous_yes_price=row.previous_yes_price, movement=row.movement,
-            absolute_movement=row.movement,
+            absolute_movement=abs(row.movement),
             direction="up" if row.movement > 0 else "down",
         )
         for row in rows
@@ -858,25 +836,34 @@ async def get_prediction_market_history(
 ) -> PredictionMarketHistoryResponse:
     """Per-market YES-price time series for the deep-dive drawer.
 
-    Reads from the nightly snapshot table (30-day retention by default).
-    If the market has no rows (e.g. it was just ingested), returns an
-    empty ``points`` list so the drawer renders an empty state instead of
-    500ing.
+    Combines retained nightly and 15-minute observations without interpolation.
+    Each indexed per-market query is bounded before materializing rows; intraday
+    observations take precedence when both jobs captured the same timestamp.
     """
     now = datetime.now(UTC)
     cutoff = now - timedelta(days=days)
     try:
-        rows = (
-            await db.execute(
-                select(PredictionMarketSnapshot)
-                .where(
-                    PredictionMarketSnapshot.source == source,
-                    PredictionMarketSnapshot.source_id == source_id,
-                    PredictionMarketSnapshot.captured_at >= cutoff,
-                )
-                .order_by(PredictionMarketSnapshot.captured_at.asc())
-            )
-        ).scalars().all()
+        observations = {}
+        for model, row_limit in (
+            (PredictionMarketSnapshot, 90),
+            (PredictionMarketIntradaySnapshot, 7 * 24 * 4),
+        ):
+            rows = (await db.execute(
+                select(model).join(PredictionMarket, and_(
+                    model.source == PredictionMarket.source,
+                    model.source_id == PredictionMarket.source_id,
+                )).where(
+                    model.source == source,
+                    model.source_id == source_id,
+                    model.captured_at >= cutoff,
+                    PredictionMarket.is_synthetic.is_(False),
+                    _observed_price_sql(PredictionMarket, db)[1],
+                    model.yes_price.is_not(None),
+                ).order_by(model.captured_at.desc()).limit(row_limit)
+            )).scalars().all()
+            for row in rows:
+                observations[row.captured_at] = row
+        rows = [observations[at] for at in sorted(observations)]
     except (OperationalError, ProgrammingError):
         raise HTTPException(status_code=503, detail="snapshot table unavailable") from None
 
@@ -913,9 +900,7 @@ async def list_prediction_market_cross_calibration(
     agreement_threshold = {"cpi": 0.05, "fed": 0.08, "recession": 0.12}
 
     try:
-        rows = (await db.execute(_topic_aggregates(db).add_columns(
-            func.max(PredictionMarket.updated_at).label("latest_updated")
-        ))).all()
+        rows = (await db.execute(_topic_aggregates(db))).all()
     except (OperationalError, ProgrammingError):
         return PredictionMarketCrossCalibrationResponse(topics=[], last_updated=None)
 
@@ -951,3 +936,19 @@ async def list_prediction_market_cross_calibration(
         topics=out_topics,
         last_updated=max((row.latest_updated for row in rows if row.latest_updated), default=None),
     )
+
+
+@router.get("/{source}/{source_id}", response_model=PredictionMarketRead)
+async def get_prediction_market_detail(
+    source: str = Path(..., pattern=r"^[a-z][a-z0-9_-]{1,31}$"),
+    source_id: str = Path(..., min_length=1, max_length=128),
+    db: AsyncSession = Depends(get_db),
+) -> PredictionMarketRead:
+    market = (await db.execute(select(PredictionMarket).where(
+        PredictionMarket.source == source,
+        PredictionMarket.source_id == source_id,
+        *snapshot_eligibility(datetime.now(UTC)),
+    ).limit(1))).scalar_one_or_none()
+    if market is None:
+        raise HTTPException(status_code=404, detail="Current market data unavailable")
+    return PredictionMarketRead.model_validate(market)

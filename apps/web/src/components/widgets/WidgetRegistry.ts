@@ -21,16 +21,13 @@ export interface WidgetProps {
   [key: string]: unknown;
 }
 
-type WidgetLoader = (() => Promise<{ default: ComponentType<any> }>) & {
-  isPlaceholder?: boolean;
-};
+type WidgetLoader = () => Promise<{ default: ComponentType<any> }>;
 
 export interface RegistryEntry {
   lazyComponent: WidgetLoader;
   component: React.LazyExoticComponent<ComponentType<any>>;
   category: WidgetCategory;
   keywords?: string[];
-  isPlaceholder: boolean;
 }
 
 export type WidgetCategory =
@@ -62,7 +59,6 @@ function registerWidget(
     component: React.lazy(loader),
     category,
     keywords,
-    isPlaceholder: loader.isPlaceholder === true,
   });
 }
 
@@ -74,9 +70,6 @@ export function isWidgetRegistered(type: WidgetType): boolean {
   return widgetRegistry.has(type);
 }
 
-export function isWidgetPlaceholder(type: WidgetType): boolean {
-  return widgetRegistry.get(type)?.isPlaceholder === true;
-}
 
 /**
  * Lazy helper that adapts the named-export convention some widgets use.
@@ -145,6 +138,7 @@ function runDevCompletenessCheck() {
 // ============================================================================
 
 // --- Core Data ---
+registerWidget('research_matrix', () => import('./MatrixWidget'), 'analysis', ['matrix', 'research', 'evidence', 'snapshot', 'sector', 'peers']);
 registerWidget('ticker_info', () => import('./TickerInfoWidget'), 'core_data', ['ticker', 'info']);
 registerWidget(
   'key_metrics',

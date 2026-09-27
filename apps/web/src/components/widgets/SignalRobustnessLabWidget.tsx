@@ -20,25 +20,23 @@ interface SignalRobustnessLabWidgetProps {
   onDataChange?: (data: WidgetDataPayload) => void
 }
 
-// Candidate signal metrics that exist on the screener row.
+// Candidate signal metrics returned by /screener/.
 const SIGNAL_FIELDS = [
-  { key: 'rs_rating', label: 'RS Rating', defaultThreshold: 80, comparator: 'gte' as const },
-  { key: 'perf_1m', label: '1M return %', defaultThreshold: 0, comparator: 'gte' as const },
-  { key: 'roe', label: 'ROE %', defaultThreshold: 15, comparator: 'gte' as const },
   { key: 'pe', label: 'P/E', defaultThreshold: 15, comparator: 'lte' as const },
+  { key: 'roe', label: 'ROE %', defaultThreshold: 15, comparator: 'gte' as const },
+  { key: 'perf_1m', label: '1M return %', defaultThreshold: 0, comparator: 'gte' as const },
 ] as const
 
 type SignalKey = (typeof SIGNAL_FIELDS)[number]['key']
 
-// Forward-return columns used as the (coarse, descriptive) edge read.
+// Realized return columns returned by /screener/.
 const RETURN_FIELDS: Array<{ key: keyof ScreenerData; label: string }> = [
   { key: 'perf_1m', label: '1M' },
-  { key: 'perf_3m', label: '3M' },
-  { key: 'perf_6m', label: '6M' },
 ]
 
 function num(row: ScreenerData, key: string): number | null {
   const raw = (row as Record<string, unknown>)[key]
+  if (typeof raw !== 'number' && (typeof raw !== 'string' || !raw.trim())) return null
   const value = typeof raw === 'number' ? raw : Number(raw)
   return Number.isFinite(value) ? value : null
 }
@@ -49,9 +47,9 @@ function avg(values: number[]): number | null {
 }
 
 export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: SignalRobustnessLabWidgetProps) {
-  const [signalKey, setSignalKey] = useState<SignalKey>('rs_rating')
-  const [comparator, setComparator] = useState<'gte' | 'lte'>('gte')
-  const [threshold, setThreshold] = useState<number>(80)
+  const [signalKey, setSignalKey] = useState<SignalKey>('pe')
+  const [comparator, setComparator] = useState<'gte' | 'lte'>('lte')
+  const [threshold, setThreshold] = useState<number>(15)
 
   const { data, isLoading, error, refetch, isFetching } = useScreenerData({ limit: 300 })
 
@@ -105,7 +103,6 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
           symbol: r.ticker || r.symbol || '',
           signal: num(r, signalKey),
           perf1m: num(r, 'perf_1m'),
-          perf3m: num(r, 'perf_3m'),
         }))
         .filter((r) => r.symbol)
         .sort((a, b) => (b.signal ?? 0) - (a.signal ?? 0))
@@ -315,7 +312,6 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
               <th className="px-1 py-1 text-left">Symbol</th>
               <th className="px-1 py-1 text-right">{signalLabel}</th>
               <th className="px-1 py-1 text-right">1M</th>
-              <th className="px-1 py-1 text-right">3M</th>
             </tr>
           </thead>
           <tbody>
@@ -335,9 +331,6 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
                 </td>
                 <td className={`px-1 py-1 text-right ${(row.perf1m ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                   {row.perf1m === null ? '—' : `${row.perf1m.toFixed(1)}%`}
-                </td>
-                <td className={`px-1 py-1 text-right ${(row.perf3m ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {row.perf3m === null ? '—' : `${row.perf3m.toFixed(1)}%`}
                 </td>
               </tr>
             ))}
@@ -368,7 +361,6 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
                   pass: evaluation.passCount,
                   pass_rate_pct: evaluation.passRate,
                   edge_1m_pct: evaluation.returnReads.find((r) => r.label === '1M')?.edge ?? null,
-                  edge_3m_pct: evaluation.returnReads.find((r) => r.label === '3M')?.edge ?? null,
                   period_sign_agreement: robustness.foldStability.evaluableFolds
                     ? `${robustness.foldStability.signAgreement}/${robustness.foldStability.evaluableFolds}`
                     : null,
@@ -378,7 +370,9 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
             : null
         }
         onApply={(config) => {
-          if (typeof config.signalKey === 'string') setSignalKey(config.signalKey as SignalKey)
+          if (typeof config.signalKey === 'string' && SIGNAL_FIELDS.some((field) => field.key === config.signalKey)) {
+            setSignalKey(config.signalKey as SignalKey)
+          }
           if (config.comparator === 'gte' || config.comparator === 'lte') setComparator(config.comparator)
           if (typeof config.threshold === 'number') setThreshold(config.threshold)
         }}

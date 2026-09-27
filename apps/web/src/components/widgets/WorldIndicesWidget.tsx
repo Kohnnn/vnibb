@@ -51,7 +51,9 @@ export function WorldIndicesWidget({ onDataChange }: { onDataChange?: (data: Wid
                     <WidgetEmpty message="No world index data available" icon={<Globe size={18} />} />
                 ) : (
                     rows.map((row, index) => {
-                        const isUp = (row.change_pct || 0) >= 0;
+                        const change = row.change_pct;
+                        const isUp = change != null && change > 0;
+                        const isDown = change != null && change < 0;
                         return (
                             <div
                                 key={`${row.symbol}-${index}`}
@@ -65,9 +67,9 @@ export function WorldIndicesWidget({ onDataChange }: { onDataChange?: (data: Wid
                                 </div>
                                 <div className="text-right">
                                     <div className="text-xs font-mono text-[var(--text-primary)]">{formatValue(row.value)}</div>
-                                    <div className={`text-[11px] flex items-center justify-end gap-1 ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                                        {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                        {isUp ? '+' : ''}{(row.change_pct || 0).toFixed(2)}%
+                                    <div className={`text-[11px] flex items-center justify-end gap-1 ${isUp ? 'text-green-400' : isDown ? 'text-red-400' : 'text-[var(--text-muted)]'}`}>
+                                        {isUp ? <TrendingUp size={10} /> : isDown ? <TrendingDown size={10} /> : null}
+                                        {change == null ? '--' : `${isUp ? '+' : ''}${change.toFixed(2)}%`}
                                     </div>
                                 </div>
                             </div>

@@ -38,7 +38,7 @@ export interface PredictionMarketRow {
     readonly question: string;
     readonly category: PredictionMarketCategory | string;
     readonly outcomes: readonly string[];
-    readonly prices: readonly number[];
+    readonly prices: readonly (number | null)[];
     readonly volume: number | null;
     readonly liquidity: number | null;
     readonly endDate: string | null;
@@ -46,6 +46,9 @@ export interface PredictionMarketRow {
     readonly active: boolean;
     readonly lastSyncedAt: string | null;
     readonly deltaSinceOpen?: number | null;
+    readonly description?: string | null;
+    readonly extra?: Readonly<Record<string, unknown>>;
+    readonly closed?: boolean;
 }
 
 export interface PredictionMarketFreshness {
@@ -74,17 +77,17 @@ function parseNumber(value: unknown): number | null {
 
 function parseStringArray(value: unknown): readonly string[] {
     return Array.isArray(value)
-        ? value.filter((item): item is string => typeof item === 'string')
+        ? value.map((item, index) => typeof item === 'string' ? item : `Outcome ${index + 1}`)
         : [];
 }
 
-function parseNumberArray(value: unknown): readonly number[] {
-    return Array.isArray(value)
-        ? value.filter((item): item is number => typeof item === 'number' && Number.isFinite(item))
-        : [];
+function parseNumberArray(value: unknown): readonly (number | null)[] {
+    if (!Array.isArray(value)) return [];
+    if (value.length === 2 && value.every((item) => item === 0)) return [null, null];
+    return value.map((item) => typeof item === 'number' && Number.isFinite(item) && item >= 0 && item <= 1 ? item : null);
 }
 
-function parsePayload(value: unknown): PredictionMarketPayload {
+export function parsePredictionMarketPayload(value: unknown): PredictionMarketPayload {
     if (!isRecord(value)) {
         throw new Error('Invalid prediction-market API response');
     }
@@ -94,7 +97,7 @@ function parsePayload(value: unknown): PredictionMarketPayload {
         return {
             markets: (value.markets as unknown[])
                 .map((row): PredictionMarketRow | null => {
-                    if (!isRecord(row) || typeof row.question !== 'string') return null;
+                    if (!isRecord(row) || typeof row.question !== 'string' || row.is_synthetic === true) return null;
                     const source =
                         typeof row.source === 'string' ? row.source : 'unknown';
                     const sourceId =
@@ -134,6 +137,9 @@ function parsePayload(value: unknown): PredictionMarketPayload {
                         url: typeof row.url === 'string' ? row.url : null,
                         active: typeof row.active === 'boolean' ? row.active : true,
                         lastSyncedAt,
+                        description: typeof row.description === 'string' ? row.description : null,
+                        extra: isRecord(row.extra) ? row.extra : {},
+                        closed: row.closed === true,
                     };
                 })
                 .filter((row): row is PredictionMarketRow => row !== null),
@@ -152,7 +158,7 @@ function parsePayload(value: unknown): PredictionMarketPayload {
     if (Array.isArray(value.data)) {
         const markets = (value.data as unknown[])
             .map((row): PredictionMarketRow | null => {
-                if (!isRecord(row) || typeof row.question !== 'string') return null;
+                if (!isRecord(row) || typeof row.question !== 'string' || row.is_synthetic === true) return null;
                 return {
                     source: typeof row.source === 'string' ? row.source : 'unknown',
                     sourceId:
@@ -175,6 +181,9 @@ function parsePayload(value: unknown): PredictionMarketPayload {
                                 : null,
                     url: typeof row.url === 'string' ? row.url : null,
                     active: typeof row.active === 'boolean' ? row.active : true,
+                    description: typeof row.description === 'string' ? row.description : null,
+                    extra: isRecord(row.extra) ? row.extra : {},
+                    closed: row.closed === true,
                     lastSyncedAt:
                         typeof row.updated_at === 'string'
                             ? row.updated_at
@@ -213,7 +222,7 @@ export interface PredictionMarketSourceWidgetProps {
 type SortKey = 'yes' | 'volume' | 'endDate';
 
 const SORT_OPTIONS: ReadonlyArray<{ readonly key: SortKey; readonly label: string }> = [
-    { key: 'yes', label: 'YES%' },
+    { key: 'yes', label: 'Probability' },
     { key: 'volume', label: 'Volume' },
     { key: 'endDate', label: 'Ending' },
 ];
@@ -254,7 +263,7 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
             if (!response.ok) {
                 throw new Error(`${source} API returned ${response.status}`);
             }
-            setState({ kind: 'ready', payload: parsePayload(await response.json()) });
+            setState({ kind: 'ready', payload: parsePredictionMarketPayload(await response.json()) });
         } catch (error: unknown) {
             setState({
                 kind: 'error',
@@ -295,16 +304,14 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
         return sorted;
     }, [state, search, sortKey, sortDirection]);
 
-    if (state.kind === 'loading') {
-        return <WidgetLoading message={`Loading ${title} markets...`} />;
-    }
-    if (state.kind === 'error') {
+    if (state.kind !== 'ready') {
         return (
-            <WidgetError
-                title={`${title} data unavailable`}
-                error={state.error}
-                onRetry={() => void refresh()}
-            />
+            <div className="flex h-full flex-col gap-3 p-1">
+                <PredictionMarketSourceHealthStrip />
+                {state.kind === 'loading' ? <WidgetLoading message={`Loading ${title} markets...`} /> : (
+                    <WidgetError title={`${title} data unavailable`} error={state.error} onRetry={() => void refresh()} />
+                )}
+            </div>
         );
     }
     if (state.payload.markets.length === 0) {
@@ -313,7 +320,7 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
                 <PredictionMarketSourceHealthStrip />
                 <WidgetEmpty
                     message={emptyMessage ?? `No ${title} markets available`}
-                    detail={`The database has no active ${title.toLowerCase()} markets yet.`}
+                    detail="No fresh, live markets are available for this selection. Historical or synthetic records are not current odds."
                     icon={props.emptyIcon ?? <BarChart3 size={18} />}
                 />
             </div>
@@ -404,11 +411,13 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
                     const handleClick = props.onSelect
                         ? () => props.onSelect?.(market)
                         : undefined;
-                    const yesPrice = market.prices[0];
+                    const yesIndex = market.outcomes.findIndex((outcome) => outcome.toLowerCase() === 'yes');
+                    const yesPrice = yesIndex >= 0 ? market.prices[yesIndex] : null;
                     return (
                         <PredictionMarketContextMenu
                             key={`${market.source}:${market.sourceId}`}
                             market={market}
+                            onOpenDrawer={handleClick}
                         >
                             <article
                                 className={`rounded-lg border border-default bg-[var(--bg-tertiary)] p-3 transition-colors hover:bg-[var(--bg-hover)] ${
@@ -463,15 +472,20 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
                                     <ProbabilityBar
                                         value={yesPrice}
                                         height={6}
-                                        showLabels
-                                        delta={market.deltaSinceOpen ?? null}
                                     />
                                 )}
-                                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-4">
-                                    <span>Yes {formatProb(yesPrice)}</span>
-                                    <span>No {formatProb(market.prices[1])}</span>
-                                    <span>Vol {formatMoney(market.volume)}</span>
-                                    <span>Liq {formatMoney(market.liquidity)}</span>
+                                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--text-secondary)]">
+                                    {market.outcomes.slice(0, 2).map((outcome, index) => (
+                                        <span key={`${outcome}:${index}`}>{outcome} {formatProb(market.prices[index])}</span>
+                                    ))}
+                                    {market.outcomes.length > 2 && <span>+{market.outcomes.length - 2} outcomes</span>}
+                                    <span>Vol {formatMarketAmount(market.volume, market.source, 'volume')}</span>
+                                    <span>{market.source === 'kalshi' ? 'Open interest' : 'Liq'} {formatMarketAmount(market.liquidity, market.source, 'liquidity')}</span>
+                                </div>
+                                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--text-muted)]">
+                                    <span>Updated {formatMarketTime(market.lastSyncedAt)} · Closes {formatMarketTime(market.endDate)}</span>
+                                    <span>Latest reported prices · bounded catalogue</span>
+                                    {props.onSelect && <span className="font-semibold text-blue-300">Analyse →</span>}
                                 </div>
                             </article>
                         </PredictionMarketContextMenu>
@@ -482,18 +496,27 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
     );
 }
 
-function formatProb(value: number | undefined): string {
-    return typeof value === 'number' ? `${Math.round(value * 100)}%` : '—';
+export function formatProb(value: number | null | undefined): string {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
+        ? `${(value * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`
+        : '—';
 }
 
-function formatMoney(value: number | null): string {
-    if (value === null) return '—';
-    return new Intl.NumberFormat('en-US', {
-        notation: 'compact',
-        maximumFractionDigits: 1,
-        style: 'currency',
-        currency: 'USD',
-    }).format(value);
+export function formatMarketTime(value: string | null | undefined): string {
+    if (!value) return 'Not provided';
+    const timestamp = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`;
+    if (!Number.isFinite(Date.parse(timestamp))) return 'Not provided';
+    return new Date(timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'long' });
+}
+
+export function formatMarketAmount(value: number | null, source: string, metric: 'volume' | 'liquidity'): string {
+    if (value === null || !Number.isFinite(value)) return '—';
+    const amount = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+    if (source === 'kalshi') return `${amount.format(value)} contracts`;
+    if (source === 'polymarket') return `$${amount.format(value)}`;
+    if (source === 'manifold') return `${amount.format(value)} mana`;
+    if (source === 'predictit' && metric === 'volume') return `${amount.format(value)} shares`;
+    return `${amount.format(value)} provider units`;
 }
 
 export { SortButton };

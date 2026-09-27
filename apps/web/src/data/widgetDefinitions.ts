@@ -1015,6 +1015,16 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['notebook', 'research', 'evidence', 'pin', 'sources', 'export', 'markdown', 'notes']
     },
     {
+        type: 'research_matrix',
+        name: 'Research Matrix',
+        description: 'Compare companies against frozen, source-linked research questions and inspect the underlying evidence',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 24, h: 16, minW: 8, minH: 10 },
+        recommended: true,
+        searchKeywords: ['matrix', 'research', 'evidence', 'comparison', 'peers', 'snapshot']
+    },
+    {
         type: 'market_lab',
         name: 'Market Lab',
         description: 'Descriptive return, risk, tail, and seasonality statistics derived locally from adjusted EOD history',
@@ -1471,6 +1481,7 @@ const WIDGET_LIBRARY_SECTION_OVERRIDES: Partial<Record<WidgetType, WidgetLibrary
     derivatives_price_history: 'global_markets',
     peer_comparison: 'ai_research',
     comparison_analysis: 'ai_research',
+    research_matrix: 'ai_research',
     ai_analysis: 'ai_research',
     research_browser: 'ai_research',
     analyst_estimates: 'ai_research',

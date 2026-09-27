@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
     X,
     Send,
@@ -70,6 +70,9 @@ import {
     type VniAgentRunSource,
 } from '@/lib/vniagentRunLedger';
 
+import { MATRIX_FOLLOWUP_EVENT, readMatrixFollowupDraft, type MatrixFollowupDraft } from '@/lib/matrixHandoff';
+import type { MatrixSelection } from '@/types/matrix';
+import { useAuth } from '@/contexts/AuthContext';
 interface Message {
     id: string;
     role: 'user' | 'assistant';
@@ -82,6 +85,7 @@ interface Message {
     responseMeta?: CopilotResponseMeta;
     feedbackVote?: 'up' | 'down';
     timestamp: Date;
+    memoryOnly?: boolean;
 }
 
 interface PersistedMessage {
@@ -108,6 +112,8 @@ interface AICopilotProps {
     promptLibraryRequestId?: number;
     starterPrompt?: 'analyze' | 'technical';
     starterPromptRequestId?: number;
+    matrixDraft?: MatrixFollowupDraft | null;
+    onMatrixDraftConsumed?: () => void;
 }
 
 interface ConnectedWidgetSummary {
@@ -456,7 +462,11 @@ export function AICopilot({
     promptLibraryRequestId = 0,
     starterPrompt,
     starterPromptRequestId = 0,
+    matrixDraft,
+    onMatrixDraftConsumed,
 }: AICopilotProps) {
+    const { user } = useAuth();
+    const matrixOwnerRef = useRef(user?.id);
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -472,6 +482,29 @@ export function AICopilot({
     const [recentSessions, setRecentSessions] = useState<VniAgentSessionArchive[]>([]);
     const [runLedger, setRunLedger] = useState<VniAgentRunEntry[]>([]);
     const [isRunLedgerOpen, setIsRunLedgerOpen] = useState(false);
+    const [matrixSelection, setMatrixSelection] = useState<MatrixSelection | null>(null);
+    const [memoryOnly, setMemoryOnly] = useState(false);
+    const memoryOnlyRef = useRef(false);
+    const requestGenerationRef = useRef(0);
+    const requestControllerRef = useRef<AbortController | null>(null);
+    const cancelActiveRequest = useCallback(() => {
+        requestGenerationRef.current += 1;
+        requestControllerRef.current?.abort();
+        requestControllerRef.current = null;
+        setIsLoading(false);
+        setCurrentStatus(null);
+        setResponseStatus('');
+    }, []);
+    const clearMatrixContext = useCallback(() => {
+        cancelActiveRequest();
+        memoryOnlyRef.current = false;
+        setMemoryOnly(false);
+        setMatrixSelection(null);
+        setInput('');
+        setMessages([]);
+        setShowDetails({});
+        setSavedNotebookMessageIds({});
+    }, [cancelActiveRequest]);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -480,9 +513,10 @@ export function AICopilot({
     const lastStarterPromptRequestIdRef = useRef(0);
 
     // Data fetching for context
-    const { data: profile } = useProfile(currentSymbol);
-    const { data: quote } = useStockQuote(currentSymbol);
-    const { data: ratios } = useFinancialRatios(currentSymbol);
+    const useLiveContext = !memoryOnly && !matrixDraft;
+    const { data: profile } = useProfile(currentSymbol, useLiveContext);
+    const { data: quote } = useStockQuote(currentSymbol, useLiveContext);
+    const { data: ratios } = useFinancialRatios(currentSymbol, { enabled: useLiveContext });
 
     const activeTabKey = useMemo(() => normalizeTabKey(activeTabName), [activeTabName]);
     const activeWidgetKey = useMemo(() => normalizeWidgetKey(widgetContext), [widgetContext]);
@@ -521,6 +555,8 @@ export function AICopilot({
     }, [messages]);
 
     useEffect(() => {
+        if (memoryOnlyRef.current) return;
+        cancelActiveRequest();
         if (typeof window === 'undefined') return;
         try {
             const raw = window.sessionStorage.getItem(sessionKey);
@@ -533,7 +569,7 @@ export function AICopilot({
         } catch {
             setMessages([]);
         }
-    }, [sessionKey]);
+    }, [sessionKey, cancelActiveRequest]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -543,6 +579,7 @@ export function AICopilot({
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
+        if (memoryOnlyRef.current || messages.some((message) => message.memoryOnly)) return;
         try {
             const limited = messages.slice(-40).map(toPersistedMessage);
             window.sessionStorage.setItem(sessionKey, JSON.stringify(limited));
@@ -637,6 +674,7 @@ export function AICopilot({
     }, [aiSettings.mode]);
 
     useEffect(() => {
+        if (memoryOnlyRef.current) return;
         if (!isOpen) return;
         if (!widgetContext) {
             contextualStarterKeyRef.current = null;
@@ -656,10 +694,66 @@ export function AICopilot({
         ]);
     }, [activeTabName, currentSymbol, isOpen, messages.length, sessionKey, widgetContext]);
 
+    const stageMatrixDraft = useCallback((draft: MatrixFollowupDraft) => {
+        cancelActiveRequest();
+        memoryOnlyRef.current = true;
+        setMemoryOnly(true);
+        setMatrixSelection(draft.selection);
+        setMessages([]);
+        setAttachedDocuments([]);
+        setShowDetails({});
+        setSavedNotebookMessageIds({});
+        setIsPromptLibraryOpen(false);
+        setIsComposerToolsOpen(false);
+        setInput(draft.request_text);
+        inputRef.current?.focus();
+    }, [cancelActiveRequest]);
+
+    useEffect(() => {
+        if (!matrixDraft) return;
+        stageMatrixDraft(matrixDraft);
+        onMatrixDraftConsumed?.();
+    }, [matrixDraft, onMatrixDraftConsumed, stageMatrixDraft]);
+
+    useEffect(() => {
+        if (onMatrixDraftConsumed) return;
+        const receiveDraft = (event: Event) => {
+            const draft = readMatrixFollowupDraft((event as CustomEvent<unknown>).detail);
+            if (draft) stageMatrixDraft(draft);
+        };
+        window.addEventListener(MATRIX_FOLLOWUP_EVENT, receiveDraft);
+        return () => window.removeEventListener(MATRIX_FOLLOWUP_EVENT, receiveDraft);
+    }, [onMatrixDraftConsumed, stageMatrixDraft]);
+
+    useEffect(() => () => {
+        requestGenerationRef.current += 1;
+        requestControllerRef.current?.abort();
+    }, []);
+
+    useEffect(() => {
+        if (matrixOwnerRef.current !== user?.id && memoryOnlyRef.current) clearMatrixContext();
+        matrixOwnerRef.current = user?.id;
+    }, [user?.id, clearMatrixContext]);
+
+    useEffect(() => {
+        const revokeSelection = (event: Event) => {
+            const snapshotId = (event as CustomEvent<{ snapshot_id?: string }>).detail?.snapshot_id;
+            if (snapshotId && snapshotId === matrixSelection?.snapshot_id) clearMatrixContext();
+        };
+        window.addEventListener('vnibb:matrix-revoked', revokeSelection);
+        return () => window.removeEventListener('vnibb:matrix-revoked', revokeSelection);
+    }, [matrixSelection?.snapshot_id, clearMatrixContext]);
+
     const handleSend = async (prompt?: string, promptSource: 'typed' | 'suggested' = prompt ? 'suggested' : 'typed') => {
         const messageText = prompt || input.trim();
         if (!messageText) return;
         if (isLoading) return;
+        const selection = matrixSelection;
+        const privateRun = memoryOnlyRef.current;
+        const generation = ++requestGenerationRef.current;
+        const controller = new AbortController();
+        requestControllerRef.current = controller;
+        const isCurrentRequest = () => requestGenerationRef.current === generation;
 
         dispatchOnboardingMeaningfulAction('prompt_submit');
         captureAnalyticsEvent(ANALYTICS_EVENTS.copilotPromptSubmitted, {
@@ -679,6 +773,7 @@ export function AICopilot({
             role: 'user',
             content: messageText,
             timestamp: new Date(),
+            memoryOnly: privateRun,
         };
 
         setMessages((prev) => [...prev, userMessage]);
@@ -693,6 +788,7 @@ export function AICopilot({
             role: 'assistant',
             content: '',
             timestamp: new Date(),
+            memoryOnly: privateRun,
         }]);
 
         // B2 — kill the silent 8s gap. Set an immediate "Thinking…" status
@@ -725,7 +821,7 @@ export function AICopilot({
 
         try {
             // Construct context for widget
-            const requestContext = {
+            const requestContext = selection ? undefined : {
                 widgetType: widgetContext || 'Dashboard',
                 widgetTypeKey: widgetSummary?.widgetTypeKey || null,
                 activeTab: activeTabName || null,
@@ -748,14 +844,17 @@ export function AICopilot({
             const response = await openCopilotChatStream({
                 message: messageText,
                 context: requestContext,
+                matrix_selection: selection || undefined,
                 history,
-                settings: aiSettings,
-            });
+                settings: selection ? { ...aiSettings, webSearch: false, enableSidebarWorkflowOutputs: false } : aiSettings,
+            }, controller.signal);
+            if (!isCurrentRequest()) return;
 
             let fullContent = '';
             let timedOut = false;
 
             armSseInactivityTimer(() => {
+                if (!isCurrentRequest()) return;
                 timedOut = true;
                 setCurrentStatus(null);
                 setMessages((prev) => prev.map((msg) =>
@@ -770,8 +869,9 @@ export function AICopilot({
 
             await consumeCopilotStream(response, {
                 onChunk: (chunk) => {
-                    if (timedOut) return;
+                    if (timedOut || !isCurrentRequest()) return;
                     armSseInactivityTimer(() => {
+                        if (!isCurrentRequest()) return;
                         timedOut = true;
                         setCurrentStatus(null);
                     });
@@ -784,8 +884,9 @@ export function AICopilot({
                     ));
                 },
                 onReasoning: (reasoning) => {
-                    if (timedOut) return;
+                    if (timedOut || !isCurrentRequest()) return;
                     armSseInactivityTimer(() => {
+                        if (!isCurrentRequest()) return;
                         timedOut = true;
                         setCurrentStatus(null);
                     });
@@ -797,6 +898,7 @@ export function AICopilot({
                     ));
                 },
                 onDone: (event) => {
+                    if (!isCurrentRequest()) return;
                     setCurrentStatus(null);
                     setResponseStatus('VniAgent response ready.');
                     captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseCompleted, {
@@ -825,6 +927,7 @@ export function AICopilot({
                             : msg
                     ));
 
+                    if (privateRun) return;
                     // Run ledger: record this completed run locally so the answer
                     // is auditable (prompt, sources/evidence, tools, metadata).
                     try {
@@ -868,6 +971,22 @@ export function AICopilot({
             });
 
         } catch (error) {
+            if (!isCurrentRequest()) return;
+            if (privateRun) {
+                const status = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
+                const errorMessage = status === 403
+                    ? 'Matrix send denied: selected sources are not approved for provider export. No request was sent to the model.'
+                    : status === 401
+                        ? 'Sign in to send this Matrix selection. Access is checked again for every request.'
+                        : 'Matrix request failed. Your selection may no longer be accessible. Check your access and try again.';
+                setCurrentStatus(null);
+                setResponseStatus('Matrix request failed. Review the error in this chat.');
+                setInput(messageText);
+                setMessages((prev) => prev.map((msg) => msg.id === assistantMsgId
+                    ? { ...msg, content: errorMessage }
+                    : msg));
+                return;
+            }
             logClientError('VniAgent Error:', error);
             setCurrentStatus(null);
             setResponseStatus('VniAgent response failed.');
@@ -904,11 +1023,15 @@ export function AICopilot({
             }
         } finally {
             clearSseInactivityTimer();
-            setIsLoading(false);
+            if (isCurrentRequest()) {
+                requestControllerRef.current = null;
+                setIsLoading(false);
+            }
         }
     };
 
     const handleSaveToResearchNotebook = (message: Message) => {
+        if (memoryOnlyRef.current || message.memoryOnly) return;
         if (message.role !== 'assistant' || !message.responseMeta || !message.content.trim()) return;
         addNotebookItem({
             kind: 'agent_answer',
@@ -939,7 +1062,7 @@ export function AICopilot({
     };
 
     const handleExport = () => {
-        if (messages.length === 0) return;
+        if (messages.length === 0 || memoryOnlyRef.current || messages.some((message) => message.memoryOnly)) return;
 
         captureAnalyticsEvent(ANALYTICS_EVENTS.copilotExported, {
             symbol: currentSymbol,
@@ -964,7 +1087,7 @@ export function AICopilot({
     };
 
     const handleNewChat = () => {
-        if (messages.some((message) => message.role === 'user' && message.content.trim())) {
+        if (!memoryOnlyRef.current && !messages.some((message) => message.memoryOnly) && messages.some((message) => message.role === 'user' && message.content.trim())) {
             setRecentSessions(
                 archiveVniAgentSession({
                     sessionKey,
@@ -983,8 +1106,8 @@ export function AICopilot({
             previous_message_count: messages.length,
             attached_document_count: attachedDocuments.length,
         });
-        setMessages([]);
-        setInput('');
+        clearMatrixContext();
+        setResponseStatus('');
         setAttachedDocuments([]);
         setCurrentStatus(null);
         setShowDetails({});
@@ -995,6 +1118,7 @@ export function AICopilot({
     };
 
     const handleRestoreRecentSession = (archive: VniAgentSessionArchive) => {
+        clearMatrixContext();
         setMessages(archive.messages.map((message) => fromPersistedMessage(message as PersistedMessage)));
         setShowDetails({});
         setAttachedDocuments([]);
@@ -1040,11 +1164,13 @@ export function AICopilot({
     };
 
     const handleAttachDocument = async (file: File | undefined) => {
-        if (!file) return;
+        if (!file || memoryOnlyRef.current) return;
+        const generation = requestGenerationRef.current;
 
         try {
             setCurrentStatus(`Parsing ${file.name}...`);
             const response = await createCopilotDocumentContext(file);
+            if (generation !== requestGenerationRef.current || memoryOnlyRef.current) return;
             setAttachedDocuments((prev) => [...prev, response.document]);
             setCurrentStatus(null);
             captureAnalyticsEvent(ANALYTICS_EVENTS.copilotDocumentAttached, {
@@ -1055,6 +1181,7 @@ export function AICopilot({
                 file_size_bucket: file.size < 250000 ? 'small' : file.size < 1000000 ? 'medium' : 'large',
             });
         } catch (error) {
+            if (generation !== requestGenerationRef.current || memoryOnlyRef.current) return;
             setCurrentStatus(null);
             setMessages((prev) => [
                 ...prev,
@@ -1090,7 +1217,7 @@ export function AICopilot({
                     <button
                         type="button"
                         onClick={handleNewChat}
-                        disabled={messages.length === 0 && attachedDocuments.length === 0}
+                        disabled={messages.length === 0 && attachedDocuments.length === 0 && !matrixSelection}
                         className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                         aria-label="Clear chat"
                         title="Clear chat"
@@ -1113,7 +1240,7 @@ export function AICopilot({
                     <div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
                         <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-primary)]">
                             <Database size={11} className="text-cyan-300" />
-                            {aiSettings.preferDatabaseData ? 'VNIBB DB' : 'External-first'}
+                            {matrixSelection ? 'Frozen Matrix' : aiSettings.preferDatabaseData ? 'VNIBB DB' : 'External-first'}
                         </span>
                         <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em]">
                             {getProviderLabel(aiSettings.provider)}
@@ -1127,13 +1254,13 @@ export function AICopilot({
                         >
                             {getFriendlyModelLabel(activeModelLabel)}
                         </span>
-                        {aiSettings.webSearch ? (
+                        {!matrixSelection && aiSettings.webSearch ? (
                             <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-blue-200">
                                 <Globe size={11} /> web
                             </span>
                         ) : null}
                     </div>
-                    {messages.length > 0 && (
+                    {!memoryOnly && messages.length > 0 && (
                         <button
                             onClick={handleExport}
                             className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
@@ -1145,21 +1272,21 @@ export function AICopilot({
                     )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-[11px] text-blue-200/85">
-                    {widgetContext ? (
+                    {!matrixSelection && widgetContext ? (
                         <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1">
                             @{widgetContext}
                         </span>
                     ) : null}
-                    {activeTabName ? (
+                    {!matrixSelection && activeTabName ? (
                         <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1">
                             {activeTabName}
                         </span>
                     ) : null}
                     <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1 font-semibold">
-                        {currentSymbol}
+                        {matrixSelection ? 'Selected results only' : currentSymbol}
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1 text-blue-100/80">
-                        <Clock3 size={11} /> {currentSessionMessageCount > 0
+                        <Clock3 size={11} /> {memoryOnly ? 'Memory-only chat — not saved' : currentSessionMessageCount > 0
                             ? `${currentSessionMessageCount} saved message${currentSessionMessageCount === 1 ? '' : 's'} in this context`
                             : 'Fresh context for this symbol'}
                     </span>
@@ -1174,7 +1301,20 @@ export function AICopilot({
                 ) : null}
             </div>
 
-            {widgetContext && (
+            {matrixSelection && (
+                <div className="space-y-2 border-b border-cyan-500/30 bg-cyan-500/10 px-4 py-3" role="status">
+                    <div className="flex items-center justify-between gap-2">
+                        <strong className="text-xs text-cyan-200">Attached Matrix selection · {matrixSelection.result_ids.length} results</strong>
+                        <button type="button" onClick={clearMatrixContext} aria-label="Remove Matrix selection" className="rounded p-2 hover:bg-cyan-500/20">
+                            <X size={14} />
+                        </button>
+                    </div>
+                    <div className="break-all text-[10px] text-[var(--text-muted)]">Snapshot {matrixSelection.snapshot_id}</div>
+                    <p className="text-xs text-[var(--text-secondary)]">Draft only until you click Send. Uses frozen selected results, not live market or widget context. This chat is memory-only; it is not saved to browser history, the run ledger, or notebooks. Removing the selection clears this chat.</p>
+                </div>
+            )}
+
+            {!matrixSelection && widgetContext && (
                 <div className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/60 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                         <div>
@@ -1336,16 +1476,16 @@ export function AICopilot({
                     <div className="space-y-4">
                         <div className="text-center text-[var(--text-muted)] py-8">
                             <Sparkles size={40} className="mx-auto mb-3 text-cyan-300/70" />
-                            <div className="text-sm font-semibold text-[var(--text-primary)]">Start with evidence from the VNIBB database</div>
+                            <div className="text-sm font-semibold text-[var(--text-primary)]">{matrixSelection ? 'Review your Matrix draft, then Send' : 'Start with evidence from the VNIBB database'}</div>
                             <p className="mx-auto mt-2 max-w-[26rem] text-xs leading-5">
-                                {getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)} Responses prioritize your configured VNIBB database, attached documents, and the active workspace context before external sources.
+                                {matrixSelection ? 'Only the attached frozen selection will be used. Access is checked again when you send.' : `${getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)} Responses prioritize your configured VNIBB database, attached documents, and the active workspace context before external sources.`}
                             </p>
                         </div>
 
                         {/* Suggested Prompts */}
                         <div className="space-y-2">
                             <div className="grid grid-cols-2 gap-2">
-                                {suggestedPrompts.map((item, i) => (
+                                {!matrixSelection && suggestedPrompts.map((item, i) => (
                                     <button
                                         key={i}
                                         onClick={() => handleSend(item.prompt, 'suggested')}
@@ -1394,7 +1534,7 @@ export function AICopilot({
                                 </div>
                             </div>
 
-                            {message.role === 'assistant' && !isAssistantPending && message.responseMeta && message.content.trim() && (
+                            {!memoryOnly && !message.memoryOnly && message.role === 'assistant' && !isAssistantPending && message.responseMeta && message.content.trim() && (
                                 <div className="mr-4 flex flex-wrap items-center gap-2">
                                     <button
                                         type="button"
@@ -1442,14 +1582,14 @@ export function AICopilot({
                                             }}
                                         />
                                     )}
-                                    {Boolean(message.actions?.length) && (
+                                    {!message.memoryOnly && Boolean(message.actions?.length) && (
                                         <CopilotActionPanel
                                             actions={message.actions || []}
                                             responseMeta={message.responseMeta}
                                             surface="sidebar"
                                         />
                                     )}
-                                    {Boolean(message.artifacts?.length) && (
+                                    {!message.memoryOnly && Boolean(message.artifacts?.length) && (
                                         <CopilotArtifactPanel
                                             artifacts={message.artifacts || []}
                                             responseMeta={message.responseMeta}
@@ -1461,7 +1601,7 @@ export function AICopilot({
                                             sources={message.sources || []}
                                             responseMeta={message.responseMeta}
                                             surface="sidebar"
-                                            showWorkflowActions={aiSettings.enableSidebarWorkflowOutputs}
+                                            showWorkflowActions={!message.memoryOnly && aiSettings.enableSidebarWorkflowOutputs}
                                         />
                                     )}
                                 </div>
@@ -1501,6 +1641,7 @@ export function AICopilot({
                     />
                     <button
                         type="button"
+                        disabled={Boolean(matrixSelection)}
                         onClick={() => setIsComposerToolsOpen((current) => !current)}
                         className="p-1 text-cyan-300 hover:text-cyan-200"
                         aria-label="Open VniAgent tools"
@@ -1510,8 +1651,8 @@ export function AICopilot({
                     </button>
                     <div className="hidden md:flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
                         <Globe size={11} />
-                        <span>{aiSettings.preferDatabaseData ? 'VNIBB database' : 'external-first'}</span>
-                        {aiSettings.webSearch ? <span>· web</span> : null}
+                        <span>{matrixSelection ? 'Frozen Matrix' : aiSettings.preferDatabaseData ? 'VNIBB database' : 'external-first'}</span>
+                        {!matrixSelection && aiSettings.webSearch ? <span>· web</span> : null}
                     </div>
                     <input
                         ref={inputRef}

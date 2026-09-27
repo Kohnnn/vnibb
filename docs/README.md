@@ -14,6 +14,7 @@
 - `WORLD_NEWS_MONITOR_IMPLEMENTATION.md`: implementation/run log for the live world news monitor suite
 - `TRADINGVIEW_WIDGET_CATALOG.md`: current TradingView widget coverage and status
 - `POSTHOG_ANALYTICS.md`: frontend analytics setup, event coverage, privacy rules, and env contract
+- `openbb-assessment.md`: OpenBB-finance public repository inventory, licensing changes, and VNIBB adoption priorities (2026-09-26)
 
 ## Operations And Data
 
