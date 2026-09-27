@@ -39,3 +39,15 @@ _Avoid_: simple filter, basic filter
 **Widget**:
 An independently-mounted dashboard panel owning its own data fetching and refresh.
 _Avoid_: card, tile, module
+
+**Matrix**:
+A comparison of an explicit company shortlist through curated research questions, with typed results and inspectable evidence, basis and limitations. It supports follow-up investigation rather than replacing an Investment Thesis.
+_Avoid_: screener, spreadsheet, chat
+
+**Research Playbook**:
+A curated set of research questions, typed outputs and eligibility rules applied to a Matrix shortlist. Different business sectors may require different playbooks for meaningful comparison.
+_Avoid_: column preset, prompt collection
+
+**Anchor Company**:
+The company from which a Matrix comparison starts and whose suggested peers prepopulate the editable shortlist. Its peer suggestions do not establish whole-market coverage or prove comparability.
+_Avoid_: market universe, automatic peer universe
