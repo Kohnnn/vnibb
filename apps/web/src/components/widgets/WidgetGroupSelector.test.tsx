@@ -20,7 +20,9 @@ jest.mock('@/contexts/DashboardContext', () => ({
         },
       ],
     },
-    updateWidget: jest.fn(),
+    updateWidget: jest.fn((_dashboard: string, _tab: string, _widget: string, patch: { config?: Record<string, unknown> }) => {
+      if (patch.config) persistedWidgetConfig = patch.config;
+    }),
   }),
 }));
 jest.mock('@/contexts/GlobalMarketsSymbolContext', () => ({
