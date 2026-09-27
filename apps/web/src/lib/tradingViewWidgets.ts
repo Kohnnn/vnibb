@@ -1014,20 +1014,16 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     type: 'tradingview_ticker_tape',
     name: 'Ticker Tape',
     description: 'Scrolling cross-asset ticker tape for global markets.',
-    format: 'web_component',
-    scriptSrc: `${WEB_COMPONENT_BASE}/tv-ticker-tape.js`,
-    componentTag: 'tv-ticker-tape',
+    format: 'iframe',
+    scriptSrc: `${IFRAME_BASE}/embed-widget-ticker-tape.js`,
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/tickers/ticker-tape/',
     symbolMode: 'none',
     defaultConfig: {
       symbols: [...DEFAULT_MARKET_SYMBOLS],
-      direction: 'horizontal',
-      itemSize: 'normal',
-      showSymbolLogo: true,
-      showHover: false,
-      hideChart: false,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
+      displayMode: 'adaptive',
+      isTransparent: false,
     },
     defaultLayout: { w: 24, h: 4, minW: 12, minH: 3 },
     recommended: true,
@@ -1035,28 +1031,8 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     settings: [
       ...withSection('General', [
         { key: 'symbols', label: 'Symbols', type: 'symbol_list', description: 'One symbol per line.' },
-        {
-          key: 'direction',
-          label: 'Direction',
-          type: 'select',
-          options: [
-            { value: 'horizontal', label: 'Horizontal' },
-            { value: 'vertical', label: 'Vertical' },
-          ],
-        },
-        {
-          key: 'itemSize',
-          label: 'Item Size',
-          type: 'select',
-          options: [
-            { value: 'normal', label: 'Normal' },
-            { value: 'compact', label: 'Compact' },
-          ],
-        },
-        { key: 'showHover', label: 'Show Hover', type: 'boolean' },
-        { key: 'hideChart', label: 'Hide Chart', type: 'boolean' },
-        { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
-        ...COMMON_WEB_THEME_FIELDS,
+        { key: 'displayMode', label: 'Display Mode', type: 'select', options: DISPLAY_MODE_OPTIONS },
+        ...COMMON_IFRAME_THEME_FIELDS,
       ]),
     ],
   },
@@ -1854,6 +1830,18 @@ export function buildTradingViewRuntimeConfig(
     );
     merged.symbols = toIframeMultiSymbolObjects(validated);
   }
+  // DXY resolves in other widgets, but the public ticker tape reports it unavailable.
+  if (type === 'tradingview_ticker_tape') {
+    const symbols = filterValidTradingViewSymbols(normalizeSymbolList(merged.symbols))
+      .filter((entry) => entry !== 'TVC:DXY');
+    merged.symbols = toIframeMultiSymbolObjects(symbols);
+    delete merged.direction;
+    delete merged.itemSize;
+    delete merged.showSymbolLogo;
+    delete merged.showHover;
+    delete merged.hideChart;
+  }
+
 
   // B4 — Ticker Tape inline-error fix. The Ticker Tape and Ticker Tag
   // widgets accept a `symbols: Array<{ s; d } | { proName; description }>`
