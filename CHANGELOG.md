@@ -21,6 +21,13 @@ live in `docs/`.
 - Purpose-bound research starters pair a template with its VniAgent prompt. Applying one discloses how its widgets handle tickers and primes the agent through the same seam the onboarding walkthrough uses.
 - Copilot artifact placement remembers the chosen dashboard/tab for the rest of the response and across reloads, records artifact provenance inside the created widget, and can save a table artifact to the research notebook once.
 
+### Fixed
+- Prediction-market catalogue admission counts fresh, real, active, nonclosed,
+  unexpired markets toward each source's 10,000-market cap. Historical rows
+  remain available while separate physical and snapshot storage limits continue
+  to apply. Older Kalshi rows no longer prevent admission of new live contracts.
+  Deployment of this follow-up is not claimed here; see the production runbook.
+
 ### Deployed
 - Released the integrated Workspace and Matrix build on 2026-09-27. Merge
   revision `7c9274e6a060615484832b9838804eb53eb4cc9b` passed all four hosted
