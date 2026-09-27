@@ -67,13 +67,11 @@ test('typing keeps the live buffer and the persisted search in lockstep', async 
   ));
 });
 
-test('a late persisted echo never rewrites the live typing buffer', () => {
+test('a pending local search echo never rewrites the live typing buffer', () => {
   const { rerender } = render(<ScreenerWidget id="screener-1" config={{ search: '' }} />);
   fireEvent.change(screen.getByLabelText('Filter screener results'), { target: { value: 'VC' } });
   fireEvent.change(screen.getByLabelText('Filter screener results'), { target: { value: 'VCB' } });
   rerender(<ScreenerWidget id="screener-1" config={{ search: 'VC' }} />);
-  expect(screen.getByLabelText('Filter screener results')).toHaveValue('VCB');
-  rerender(<ScreenerWidget id="screener-1" config={{ search: '' }} />);
   expect(screen.getByLabelText('Filter screener results')).toHaveValue('VCB');
 });
 
@@ -105,6 +103,21 @@ test('an external persisted search replaces the live buffer without writing the 
   updateWidget.mockClear();
   rerender(<ScreenerWidget id="screener-1" config={widgetConfig} />);
   expect(updateWidget.mock.calls.some(([, , , updates]) => updates.config.search === 'OLD')).toBe(false);
+});
+
+test('a remote clear after a remote search remains clear', () => {
+  const { rerender } = render(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+  widgetConfig = { search: 'FPT' };
+  widgets[0].config = widgetConfig;
+  rerender(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+  expect(screen.getByLabelText('Filter screener results')).toHaveValue('FPT');
+
+  updateWidget.mockClear();
+  widgetConfig = { search: '' };
+  widgets[0].config = widgetConfig;
+  rerender(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+  expect(screen.getByLabelText('Filter screener results')).toHaveValue('');
+  expect(updateWidget.mock.calls.some(([, , , updates]) => updates.config.search === 'FPT')).toBe(false);
 });
 
 test('a local search echo is ignored while a later external search is adopted', () => {

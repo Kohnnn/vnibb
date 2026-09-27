@@ -16,6 +16,7 @@ from vnibb.models.prediction_market import PredictionMarket
 from vnibb.models.prediction_market_intraday_snapshot import PredictionMarketIntradaySnapshot
 from vnibb.models.prediction_market_snapshot import PredictionMarketSnapshot
 from vnibb.services.prediction_market_policy import (
+    MAX_SOURCE_MARKETS,
     SNAPSHOT_MARKET_LIMIT,
     SNAPSHOT_SOURCE_LIMIT,
     SNAPSHOT_SOURCES,
@@ -95,45 +96,62 @@ async def write_snapshot_bucket(session: AsyncSession, model, now: datetime, buc
                 model.source == PredictionMarket.source,
                 model.source_id == PredictionMarket.source_id,
             ).exists()
-            stmt = (
-                select(
+            scanned = 0
+            source_written = 0
+            cursor = None
+            while source_written < source_limit and scanned < MAX_SOURCE_MARKETS:
+                page_size = min(SNAPSHOT_INSERT_BATCH_SIZE, MAX_SOURCE_MARKETS - scanned)
+                stmt = select(
                     PredictionMarket.id, PredictionMarket.source, PredictionMarket.source_id,
                     PredictionMarket.category, PredictionMarket.question, PredictionMarket.url,
                     PredictionMarket.outcome_prices, PredictionMarket.volume,
-                    PredictionMarket.liquidity,
-                )
-                .where(
+                    PredictionMarket.liquidity, PredictionMarket.updated_at,
+                ).where(
                     PredictionMarket.source == source, *snapshot_eligibility(now),
                     or_(PredictionMarket.source != "kalshi", PredictionMarket.source_id.not_like("KXMV%")),
                     ~already_captured,
                 )
-                .order_by(PredictionMarket.updated_at.desc(), PredictionMarket.id.asc())
-                .limit(source_limit)
-            )
-            markets = (await session.execute(stmt)).all()
-            seen += len(markets)
-            for start in range(0, len(markets), SNAPSHOT_INSERT_BATCH_SIZE):
-                rows = []
-                for market in markets[start:start + SNAPSHOT_INSERT_BATCH_SIZE]:
-                    price = observed_yes_price(market)
-                    if price is None or not market.question or (
-                        len(market.question.encode("utf-8")) > 8192 or
-                        len((market.url or "").encode("utf-8")) > 8192
-                    ):
-                        continue
-                    rows.append({
-                        "market_id": market.id, "source": market.source, "source_id": market.source_id,
-                        "category": market.category, "question": market.question, "url": market.url,
-                        "yes_price": price, "volume": market.volume, "liquidity": market.liquidity,
-                        "extra": {}, "captured_at": now, "bucket_at": bucket,
-                    })
-                if rows:
-                    await _check_capacity(session, len(rows))
-                    statement = insert(model).values(rows).on_conflict_do_nothing(
-                        index_elements=["source", "source_id", "bucket_at"]
-                    ).returning(model.id)
-                    written += len((await session.execute(statement)).scalars().all())
-            remaining -= len(markets)
+                if cursor is not None:
+                    stmt = stmt.where(or_(
+                        PredictionMarket.updated_at < cursor[0],
+                        (PredictionMarket.updated_at == cursor[0]) & (PredictionMarket.id > cursor[1]),
+                    ))
+                stmt = stmt.order_by(PredictionMarket.updated_at.desc(), PredictionMarket.id.asc()).limit(page_size)
+                markets = (await session.execute(stmt)).all()
+                seen += len(markets)
+                scanned += len(markets)
+                if markets:
+                    cursor = (markets[-1].updated_at, markets[-1].id)
+                for start in range(0, len(markets), SNAPSHOT_INSERT_BATCH_SIZE):
+                    rows = []
+                    for market in markets[start:start + SNAPSHOT_INSERT_BATCH_SIZE]:
+                        if source_written + len(rows) >= source_limit:
+                            break
+                        price = observed_yes_price(market)
+                        if price is None or not market.question or (
+                            len(market.question.encode("utf-8")) > 8192 or
+                            len((market.url or "").encode("utf-8")) > 8192
+                        ):
+                            continue
+                        rows.append({
+                            "market_id": market.id, "source": market.source, "source_id": market.source_id,
+                            "category": market.category, "question": market.question, "url": market.url,
+                            "yes_price": price, "volume": market.volume, "liquidity": market.liquidity,
+                            "extra": {}, "captured_at": now, "bucket_at": bucket,
+                        })
+                    if rows:
+                        await _check_capacity(session, len(rows))
+                        statement = insert(model).values(rows).on_conflict_do_nothing(
+                            index_elements=["source", "source_id", "bucket_at"]
+                        ).returning(model.id)
+                        count = len((await session.execute(statement)).scalars().all())
+                        written += count
+                        source_written += count
+                    if source_written >= source_limit:
+                        break
+                if len(markets) < page_size:
+                    break
+            remaining -= source_written
         await session.commit()
         return written, seen
     except BaseException:

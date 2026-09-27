@@ -370,7 +370,7 @@ export function ScreenerWidget({
     const searchSyncRef = useRef({
         instanceKey: searchInstanceKey,
         persistedSearch,
-        localSearches: new Set<string>([persistedSearch]),
+        localSearches: new Set<string>(),
         externalSearch: null as string | null,
     });
     const searchInstanceChanged = searchSyncRef.current.instanceKey !== searchInstanceKey;

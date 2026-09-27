@@ -87,8 +87,10 @@ live in \`docs/\`.
 - Inactive prediction-market lists apply end-date ordering before limiting results. Probability aggregates validate every outcome, retaining genuine first-outcome zero prices in multi-outcome markets while excluding malformed vectors.
 - MCP user JWTs authorize only owner-scoped Matrix selection; existing market and premium tools still require the shared deployment bearer. Matrix export refuses generic \`vnstock\`/\`vnstock_ratio\`, bare relation, and unknown supplier tags even when configured; explicit test-only supplier tags do not grant real-provider rights.
 - Snapshot inserts reject unobserved probability vectors instead of recording false 0% history while retaining genuine zero quotes. Consensus volume stays unavailable when no priced market contributed observed volume; invalid concurrent stale-market indexes are rebuilt rather than marked applied.
+- Snapshot writers page past recent markets without observed quotes within the bounded source catalogue, so unpriced Kalshi rows cannot displace an older fresh genuine 0% quote from daily or intraday history.
 - PostgreSQL bucket triggers derive UTC day/15-minute buckets from captured timestamps for both old and new snapshot writers, so migration-before-image deployment and image-only rollback do not break old writes.
 - Workspace duplicates choose bounded collision-free coordinates; detached TradingView symbols remain exchange-qualified and update when settings change. Newly activated native ticker controls navigate within their linked scope, external Screener searches synchronize across tabs, and VniAgent Open matches the artifact ticker before focusing a widget.
+- A remote Screener clear no longer revives the initial empty search as a stale local echo; detached widget tickers reconcile saved Settings values even if the widget was unmounted when they changed.
 
 - Prediction-market analysis now exposes full contract terms/outcomes and
   1d/7d/30d recorded history, with observed percentage-point changes, ranges,

@@ -228,6 +228,22 @@ test('external settings changes retarget a detached TradingView chart without re
   expect(mockWidgetConfig).toMatchObject({ symbol: 'NASDAQ:MSFT', tickerScope: 'override', useLinkedSymbol: false });
 });
 
+test('remount adopts settings saved while its detached chart was unmounted', () => {
+  mockWidgetType = 'tradingview_chart';
+  mockWidgetConfig = { symbol: 'NASDAQ:AAPL', tickerScope: 'override', useLinkedSymbol: false };
+  const chart = () => <WidgetWrapper id="screener" title="TradingView Chart" widgetType="tradingview_chart" dashboardId="dashboard" tabId="tab" symbol={String(mockWidgetConfig.symbol)}>
+    <output aria-label="Chart ticker" />
+  </WidgetWrapper>;
+  const view = render(chart());
+  mockTickerOverride = 'NASDAQ:AAPL';
+  view.unmount();
+
+  mockWidgetConfig = { ...mockWidgetConfig, symbol: 'NASDAQ:MSFT' };
+  render(chart());
+  expect(screen.getByRole('button', { name: /Ticker group: Global, current ticker NASDAQ:MSFT\. Ticker local to this widget/ })).toBeInTheDocument();
+  expect(mockTickerOverride).toBe('NASDAQ:MSFT');
+});
+
 test('following the workspace after a TradingView detach restores linked markets updates', async () => {
   mockWidgetType = 'tradingview_chart';
   mockWidgetConfig = { symbol: 'NASDAQ:AAPL', tickerScope: 'override', useLinkedSymbol: false };

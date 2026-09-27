@@ -107,6 +107,24 @@ async def test_missing_kalshi_quote_never_becomes_zero_history(test_db):
 
 
 @pytest.mark.asyncio
+async def test_unquoted_recent_markets_do_not_starve_valid_older_quote(test_db, monkeypatch):
+    monkeypatch.setattr(daily, "SNAPSHOT_SOURCE_LIMIT", 2)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    test_db.add_all([
+        _market(3103, source="kalshi", updated_at=now, outcome_prices=[0, 0]),
+        _market(3104, source="kalshi", updated_at=now - timedelta(minutes=1), outcome_prices=[0, 0]),
+        _market(3105, source="kalshi", updated_at=now - timedelta(minutes=2), outcome_prices=[0, 1]),
+    ])
+    await test_db.commit()
+
+    assert (await intraday.snapshot_active_prediction_markets_intraday(test_db)).rows_written == 1
+    assert await daily.snapshot_active_prediction_markets(test_db) == 1
+    for model in (PredictionMarketIntradaySnapshot, PredictionMarketSnapshot):
+        rows = await _snapshots(test_db, model)
+        assert [(row.source_id, row.yes_price) for row in rows] == [("kalshi-3105", 0)]
+
+
+@pytest.mark.asyncio
 async def test_daily_history_reports_measurement_time_not_midnight_bucket(test_db):
     from vnibb.api.v1.prediction_markets import get_prediction_market_history
 
