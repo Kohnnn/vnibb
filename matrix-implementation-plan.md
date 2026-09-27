@@ -47,6 +47,14 @@ constraint. Adding an extra index alone is not a validated repair. Provider-runt
 migration and package-source trust require separate verification; do not bypass
 the failure or claim a clean public-index install from an existing local venv.
 
+The 2026-09-27 isolated Workspace+Matrix integration branch replaced the
+impossible direct `vnai<2.5` requirement and uses SHA-256-constrained publisher
+wheels for VNStock, with PyPI for unrelated dependencies. An empty-environment
+installation and free-tier startup were checked locally; the integrated branch
+passed the full frontend/API gate after two-axis review. This does not change
+the recorded failure of the older PR #61 checks or establish hosted check status
+for the new integration branch.
+
 The configured `vnibb-web` Vercel preview passed. The separate `vnibb` project
 failed for missing `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL`; its preview
 environment contains no variables. Neither deployment settings nor provider
