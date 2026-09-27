@@ -161,6 +161,17 @@ def run_backup(tmp_path):
     docker = bin_dir / "docker"
     docker.write_text(FAKE_DOCKER, encoding="utf-8")
     docker.chmod(0o755)
+    date = bin_dir / "date"
+    date.write_text(
+        '#!/bin/sh\nif [ "$1" = "-u" ] && [ "$2" = "+%Y%m%dT%H%M%SZ" ] '
+        '&& [ -n "$FAKE_BACKUP_STAMP" ]; then\n'
+        '    printf "%s\\n" "$FAKE_BACKUP_STAMP"\n'
+        'else\n'
+        '    exec /bin/date "$@"\n'
+        'fi\n',
+        encoding="utf-8",
+    )
+    date.chmod(0o755)
     compose = tmp_path / "docker-compose.oracle.yml"
     compose.write_text("services: {}\n", encoding="utf-8")
 
@@ -180,6 +191,7 @@ def run_backup(tmp_path):
         keep_sets=7,
         host_free_bytes=None,
         prune_fails=False,
+        stamp=None,
     ):
         if pg_dump_bytes is None:
             pg_dump_bytes = _pg_dump_payload(12 * 1024**2)
@@ -228,6 +240,8 @@ def run_backup(tmp_path):
                 "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
             }
         )
+        if stamp is not None:
+            env["FAKE_BACKUP_STAMP"] = stamp
         if host_free_bytes is not None:
             env["HOST_FREE_BYTES_OVERRIDE"] = str(host_free_bytes)
         # text=False: the fake pg_dump writes PGDMP bytes to stdout, which the
@@ -307,11 +321,11 @@ def test_preflight_issues_no_database_write_and_no_container_run(run_backup):
 
 
 def test_failed_preflight_marks_failed_but_keeps_previous_sets(run_backup):
-    result, _, backup_dir = run_backup()
+    result, _, backup_dir = run_backup(stamp="20250102T000000Z")
     assert result.returncode == 0, result.stderr
     (kept,) = _sets(backup_dir)
 
-    result, _, _ = run_backup(host_free_bytes=MINUTE_AVAILABLE)
+    result, _, _ = run_backup(host_free_bytes=MINUTE_AVAILABLE, stamp="20250102T000001Z")
 
     assert result.returncode != 0
     assert _sets(backup_dir) == [kept]
