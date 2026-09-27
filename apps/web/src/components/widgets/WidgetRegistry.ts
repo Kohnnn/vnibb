@@ -7,11 +7,9 @@
 // In dev builds a completeness check at module init warns when the two
 // diverge so we catch "widget not found" regressions at build time.
 
-import { type ComponentType, createElement as _createElement } from 'react';
+import type { ComponentType } from 'react';
 import * as React from 'react';
 import type { WidgetType } from '@/types/dashboard';
-
-const createElement = React.createElement ?? _createElement;
 
 export type WidgetComponent = ComponentType<WidgetProps>;
 
@@ -98,27 +96,6 @@ function lazyNamed(
     }
     return { default: named as ComponentType<any> };
   };
-}
-
-/**
- * Generic fallback for widgets whose component file exists but is not yet
- * registered. We render a tiny placeholder so dashboards still load even if
- * a specific widget is missing.
- */
-function placeholderLoader(type: WidgetType): WidgetLoader {
-  const loader: WidgetLoader = async () => ({
-    default: function PlaceholderWidget(_props: WidgetProps) {
-      return createElement(
-        'div',
-        {
-          className: 'flex h-full items-center justify-center p-4 text-xs text-[var(--text-muted)]',
-        },
-        `Widget "${type}" is registered but its component module is not yet wired.`
-      );
-    } as ComponentType<any>,
-  });
-  loader.isPlaceholder = true;
-  return loader;
 }
 
 /**
@@ -528,15 +505,15 @@ registerWidget('valuation_lab', lazyNamed(() => import('./ValuationLabWidget'), 
 
 // --- Quant ---
 registerWidget('seasonality_heatmap', () => import('./SeasonalityHeatmapWidget'), 'quant', ['seasonality', 'heatmap']);
-registerWidget('seasonality_spiral_heatmap', placeholderLoader('seasonality_spiral_heatmap'), 'quant', ['spiral', 'seasonality']);
+registerWidget('seasonality_spiral_heatmap', () => import('./SeasonalitySpiralHeatmapWidget'), 'quant', ['spiral', 'seasonality']);
 registerWidget('backtest_lab', () => import('./BacktestLabWidget'), 'quant', ['backtest', 'lab']);
 registerWidget('monte_carlo_lab', () => import('./MonteCarloLabWidget'), 'quant', ['monte', 'carlo']);
 registerWidget('risk_dashboard', () => import('./RiskDashboardWidget'), 'quant', ['risk', 'dashboard']);
 registerWidget('quant_summary', () => import('./QuantSummaryWidget'), 'quant', ['quant', 'summary']);
-registerWidget('market_lab', placeholderLoader('market_lab'), 'quant', ['market', 'lab']);
-registerWidget('signal_robustness_lab', placeholderLoader('signal_robustness_lab'), 'quant', ['signal', 'robustness']);
-registerWidget('edge_half_life', placeholderLoader('edge_half_life'), 'quant', ['edge', 'half', 'life']);
-registerWidget('pair_lab', placeholderLoader('pair_lab'), 'quant', ['pair', 'lab']);
+registerWidget('market_lab', () => import('./MarketLabWidget'), 'quant', ['market', 'lab']);
+registerWidget('signal_robustness_lab', () => import('./SignalRobustnessLabWidget'), 'quant', ['signal', 'robustness']);
+registerWidget('edge_half_life', () => import('./EdgeHalfLifeWidget'), 'quant', ['edge', 'half', 'life']);
+registerWidget('pair_lab', () => import('./PairLabWidget'), 'quant', ['pair', 'lab']);
 registerWidget('sweep_matrix', () => import('./SweepMatrixWidget'), 'quant', ['sweep', 'matrix']);
 registerWidget(
   'volume_flow',
@@ -574,14 +551,14 @@ registerWidget(
   'quant',
   ['macd', 'crossovers']
 );
-registerWidget('parkinson_volatility', placeholderLoader('parkinson_volatility'), 'quant', ['parkinson', 'volatility']);
+registerWidget('parkinson_volatility', () => import('./ParkinsonVolatilityWidget'), 'quant', ['parkinson', 'volatility']);
 registerWidget(
   'garch_volatility',
   lazyNamed(() => import('./GarchVolatilityWidget'), 'GarchVolatilityWidget'),
   'quant',
   ['garch', 'volatility']
 );
-registerWidget('ema_respect', placeholderLoader('ema_respect'), 'quant', ['ema', 'respect']);
+registerWidget('ema_respect', () => import('./EMARespectWidget'), 'quant', ['ema', 'respect']);
 registerWidget('drawdown_recovery', () => import('./DrawdownRecoveryWidget'), 'quant', ['drawdown', 'recovery']);
 registerWidget(
   'gamma_exposure',
@@ -629,9 +606,9 @@ registerWidget('volume_analysis', lazyNamed(() => import('./VolumeAnalysisWidget
 registerWidget('obv_divergence', lazyNamed(() => import('./OBVDivergenceWidget'), 'OBVDivergenceWidget'), 'quant', ['obv', 'divergence']);
 registerWidget('atr_regime', () => import('./ATRRegimeWidget'), 'quant', ['atr', 'regime']);
 registerWidget('gap_fill_stats', () => import('./GapFillStatsWidget'), 'quant', ['gap', 'fill']);
-registerWidget('volume_delta', placeholderLoader('volume_delta'), 'quant', ['volume', 'delta']);
+registerWidget('volume_delta', () => import('./VolumeDeltaWidget'), 'quant', ['volume', 'delta']);
 registerWidget('footprint_proxy', () => import('./FootprintProxyWidget'), 'quant', ['footprint', 'proxy']);
-registerWidget('amihud_illiquidity', placeholderLoader('amihud_illiquidity'), 'quant', ['amihud', 'illiquidity']);
+registerWidget('amihud_illiquidity', () => import('./AmihudIlliquidityWidget'), 'quant', ['amihud', 'illiquidity']);
 
 // --- Analysis / Screener ---
 registerWidget('bank_metrics', lazyNamed(() => import('./BankMetricsWidget'), 'BankMetricsWidget'), 'analysis', ['bank', 'metrics']);
@@ -651,13 +628,13 @@ registerWidget('sector_breakdown', lazyNamed(() => import('./SectorBreakdownWidg
 registerWidget('comparison_analysis', lazyNamed(() => import('./ComparisonAnalysisWidget'), 'ComparisonAnalysisWidget'), 'analysis', ['comparison', 'analysis']);
 registerWidget('news_flow', lazyNamed(() => import('./NewsFlowWidget'), 'NewsFlowWidget'), 'news', ['news', 'flow']);
 registerWidget('news_corporate_actions', lazyNamed(() => import('./NewsCorporateActionsWidget'), 'NewsCorporateActionsWidget'), 'news', ['news', 'corporate', 'actions']);
-registerWidget('income_sankey', placeholderLoader('income_sankey'), 'analysis', ['income', 'sankey']);
+registerWidget('income_sankey', () => import('./IncomeSankeyWidget'), 'analysis', ['income', 'sankey']);
 registerWidget('cashflow_waterfall', lazyNamed(() => import('./CashflowWaterfallWidget'), 'CashflowWaterfallWidget'), 'analysis', ['cashflow', 'waterfall']);
 registerWidget('derivatives_contracts_board', lazyNamed(() => import('./DerivativesContractsBoardWidget'), 'DerivativesContractsBoardWidget'), 'global_markets', ['derivatives', 'contracts']);
 registerWidget('derivatives_price_history', lazyNamed(() => import('./DerivativesPriceHistoryWidget'), 'DerivativesPriceHistoryWidget'), 'global_markets', ['derivatives', 'price', 'history']);
-registerWidget('big_flow_monitor', placeholderLoader('big_flow_monitor'), 'ownership', ['big', 'flow', 'monitor']);
+registerWidget('big_flow_monitor', () => import('./BigFlowMonitorWidget'), 'ownership', ['big', 'flow', 'monitor']);
 registerWidget('alert_settings', lazyNamed(() => import('./AlertSettingsPanel'), 'AlertSettingsPanel'), 'analysis', ['alert', 'settings']);
-registerWidget('positioning_dashboard', placeholderLoader('positioning_dashboard'), 'ownership', ['positioning', 'dashboard']);
+registerWidget('positioning_dashboard', () => import('./PositioningDashboardWidget'), 'ownership', ['positioning', 'dashboard']);
 registerWidget(
   'source_transparent_research_notebook',
   lazyNamed(() => import('./ResearchNotebookWidget'), 'ResearchNotebookWidget'),
@@ -668,7 +645,7 @@ registerWidget(
 // --- Global Markets ---
 registerWidget('forex_rates', lazyNamed(() => import('./ForexRatesWidget'), 'ForexRatesWidget'), 'global_markets', ['forex', 'rates']);
 registerWidget('commodities', lazyNamed(() => import('./CommoditiesWidget'), 'CommoditiesWidget'), 'global_markets', ['commodities', 'gold', 'oil']);
-registerWidget('world_indices', placeholderLoader('world_indices'), 'global_markets', ['world', 'indices']);
+registerWidget('world_indices', lazyNamed(() => import('./WorldIndicesWidget'), 'WorldIndicesWidget'), 'global_markets', ['world', 'indices']);
 registerWidget(
   'polymarket',
   lazyNamed(() => import('./PolymarketWidget'), 'PolymarketWidget'),

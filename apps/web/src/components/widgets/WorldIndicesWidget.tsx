@@ -17,7 +17,7 @@ export function WorldIndicesWidget({ onDataChange }: { onDataChange?: (data: Wid
 
     const rows = data?.data || [];
     const hasData = rows.length > 0;
-    const isFallback = Boolean(data?.error);
+    const isFallback = Boolean((data?.error || error) && hasData);
 
     useEffect(() => {
         onDataChange?.({
@@ -45,8 +45,8 @@ export function WorldIndicesWidget({ onDataChange }: { onDataChange?: (data: Wid
             <div className="flex-1 overflow-auto space-y-1 pt-2">
                 {isLoading && !hasData ? (
                     <WidgetSkeleton lines={6} />
-                ) : error && !hasData ? (
-                    <WidgetError error={error as Error} onRetry={() => refetch()} />
+                ) : (error || data?.error) && !hasData ? (
+                    <WidgetError error={error || new Error(data!.error!)} onRetry={() => refetch()} />
                 ) : !hasData ? (
                     <WidgetEmpty message="No world index data available" icon={<Globe size={18} />} />
                 ) : (

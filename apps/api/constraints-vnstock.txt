@@ -1,0 +1,4 @@
+# Publisher-hosted wheels; SHA-256 is from https://vnstocks.com/api/simple/.
+# Keep PyPI as the sole package index for non-VNStock dependencies.
+vnstock @ https://vnstocks.com/api/packages/files/vnstock/4.0.9/vnstock-4.0.9-py3-none-any.whl#sha256=b51358c58c1fd9a299379f2d49b5c29e692fbae49e75f2ebc7cbfcc1cb996e64
+vnai @ https://vnstocks.com/api/packages/files/vnai/2.6.2/vnai-2.6.2-py3-none-any.whl#sha256=5b2852157031322f817ac9a306d67fbf138ec824292eaeb0b75e4e884f093081

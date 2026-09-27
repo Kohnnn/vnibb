@@ -35,7 +35,6 @@ dependencies = [
     
     # Data Providers
     "vnstock>=4.0.4,<4.1",  # Vietnam stock data, keep current with Sponsor runtime warnings
-    "vnai>=2.4.0,<2.5",     # Keep pace with current vnstock runtime bootstrap
     # NOTE: `vnii` is not guaranteed on default PyPI in all build environments.
     # It is installed via VNStock premium bootstrap path (installer/extra-index) when needed.
     # Premium packages (vnstock_data, vnstock_ta, vnstock_news, vnstock_pipeline)

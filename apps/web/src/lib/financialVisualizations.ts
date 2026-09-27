@@ -87,6 +87,12 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
   const ordered = sortByPeriod(rows).filter((row) => row.period);
   const latest = ordered.at(-1);
   if (!latest) return null;
+  if (typeof latest.net_income !== 'number' || !Number.isFinite(latest.net_income) ||
+    typeof latest.operating_income !== 'number' || !Number.isFinite(latest.operating_income) ||
+    (latest.gross_profit == null && latest.cost_of_revenue == null) ||
+    [latest.revenue, latest.gross_profit, latest.operating_income,
+      latest.pre_tax_profit ?? latest.profit_before_tax, latest.net_income]
+      .some((value) => typeof value === 'number' && value <= 0)) return null;
 
   const previous = ordered.length > 1 ? ordered.at(-2) ?? null : null;
   const revenue = asPositive(latest.revenue);
@@ -95,6 +101,7 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
   const costOfRevenue = asPositive(latest.cost_of_revenue);
   const reportedGrossProfit = asPositive(latest.gross_profit);
   const grossProfit = reportedGrossProfit || Math.max(revenue - costOfRevenue, 0);
+  if (costOfRevenue + grossProfit > revenue) return null;
   const sellingGeneralAdmin = asPositive(latest.selling_general_admin);
   const researchDevelopment = asPositive(latest.research_development);
   const depreciation = asPositive(latest.depreciation);
@@ -112,7 +119,6 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
   const otherIncome = asPositive(latest.other_income);
   const reportedPreTaxProfit = asPositive(latest.pre_tax_profit ?? latest.profit_before_tax);
   const preTaxProfit = reportedPreTaxProfit || Math.max(operatingIncome + otherIncome - interestExpense, 0);
-  const taxExpense = asPositive(latest.tax_expense);
   const netIncome = asPositive(latest.net_income);
   const nonOperatingAdjustment = preTaxProfit - operatingIncome;
   const nonOperatingAbs = Math.abs(nonOperatingAdjustment);
@@ -225,7 +231,7 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
       id: nonOperatingAdjustment >= 0 ? 'non_operating_gain' : 'non_operating_drag',
       label: nonOperatingAdjustment >= 0 ? 'Net Non-Op Gain' : 'Net Non-Op Drag',
       value: nonOperatingAbs,
-      stage: 3,
+      stage: nonOperatingAdjustment >= 0 ? 2 : 3,
       tone: nonOperatingAdjustment >= 0 ? '#38bdf8' : '#fb7185',
       changePct: calculatePercentChange(nonOperatingAdjustment, previousNonOperatingAdjustment, { clamp: 'yoy_change' }),
     },
@@ -241,7 +247,7 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
       id: taxAdjustment <= 0 ? 'tax_expense' : 'tax_benefit',
       label: taxAdjustment <= 0 ? 'Tax Expense' : 'Tax Benefit',
       value: taxAbs,
-      stage: 4,
+      stage: taxAdjustment <= 0 ? 4 : 3,
       tone: taxAdjustment <= 0 ? '#f59e0b' : '#38bdf8',
       changePct: calculatePercentChange(taxAdjustment, previousTaxAdjustment, { clamp: 'yoy_change' }),
     },

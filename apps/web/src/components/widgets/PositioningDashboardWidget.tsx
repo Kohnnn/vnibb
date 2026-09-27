@@ -7,7 +7,7 @@ import { useSymbolsByGroup } from '@/lib/queries'
 import * as api from '@/lib/api'
 import type { TransactionFlowResponse } from '@/types/equity'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
-import { WidgetEmpty } from '@/components/ui/widget-states'
+import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 
 interface PositioningDashboardWidgetProps {
@@ -71,7 +71,7 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
   const [group, setGroup] = useState<UniverseGroup>('VN30')
   const [windowDays, setWindowDays] = useState<WindowDays>(5)
 
-  const { data: universe, isLoading: universeLoading } = useSymbolsByGroup(group)
+  const { data: universe, isLoading: universeLoading, error: universeError, refetch: refetchUniverse } = useSymbolsByGroup(group)
 
   const symbols = useMemo(
     () => (universe?.data || []).map((row) => row.symbol).filter(Boolean).slice(0, MAX_SYMBOLS),
@@ -90,6 +90,7 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
 
   const isLoading = universeLoading || flowQueries.some((q) => q.isLoading)
   const isFetching = flowQueries.some((q) => q.isFetching)
+  const failedFlow = flowQueries.find((query) => query.error)?.error
 
   const rows = useMemo<PositioningRow[]>(() => {
     return symbols.map((sym, index) => {
@@ -137,6 +138,8 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
   }, [withData, onDataChange, windowDays])
 
   if (isLoading && !withData.length) return <WidgetSkeleton />
+  if (universeError && !universe) return <WidgetError error={universeError} onRetry={() => refetchUniverse()} />
+  if (failedFlow && !withData.length) return <WidgetError error={failedFlow} onRetry={() => { flowQueries.forEach((query) => { if (query.error) void query.refetch() }) }} />
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -223,6 +226,13 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {failedFlow && (
+        <div className="flex items-center justify-between gap-2 px-1 text-[10px] text-amber-300" role="alert">
+          <span>Some flow data is unavailable: {failedFlow.message}</span>
+          <button type="button" onClick={() => { flowQueries.forEach((query) => { if (query.error) void query.refetch() }) }}>Retry</button>
         </div>
       )}
 

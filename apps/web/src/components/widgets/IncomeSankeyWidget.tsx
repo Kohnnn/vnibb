@@ -58,16 +58,16 @@ function IncomeSankeyWidgetComponent({ id, symbol, onRemove, onDataChange }: Inc
   useEffect(() => {
     onDataChange?.(
       buildWidgetRuntime({
-        empty: !hasData,
+        empty: !model,
         apiGroup: '/equity',
         endpoint: `/equity/${symbol}/income-statement?period=${apiPeriod}`,
         sourceLabel: 'Income flow',
         lastDataDate: dataUpdatedAt,
         stale: Boolean(error && hasData),
-        extra: hasData ? { periods: displayItems.length } : undefined,
+        extra: model ? { periods: displayItems.length } : undefined,
       }),
     );
-  }, [onDataChange, hasData, error, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
+  }, [onDataChange, model, error, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
   const latestLabel = model
     ? formatFinancialPeriodLabel(model.period, { mode: periodMode, index: displayItems.length - 1, total: displayItems.length })
     : period === 'FY'
@@ -117,7 +117,7 @@ function IncomeSankeyWidgetComponent({ id, symbol, onRemove, onDataChange }: Inc
           ) : !model ? (
             <WidgetEmpty
               message={`No flow visualization available for ${symbol}`}
-              detail="Revenue and profit fields must be present for the selected period."
+              detail="A positive revenue-to-net-income flow must be available for the selected period; losses cannot be shown as positive ribbons."
               icon={<GitBranchPlus size={18} />}
             />
           ) : (

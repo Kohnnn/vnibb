@@ -57,14 +57,8 @@ describe('WidgetRegistry completeness', () => {
         }
     });
 
-    it('identifies placeholder entries without unregistering them', () => {
-        expect(isWidgetPlaceholder('valuation_multiples_chart')).toBe(false);
-        expect(widgetRegistry.has('valuation_band')).toBe(true);
-        expect(isWidgetPlaceholder('price_chart')).toBe(false);
-        expect(isWidgetPlaceholder('signal_summary')).toBe(false);
-        expect(isWidgetPlaceholder('obv_divergence')).toBe(false);
-        expect(isWidgetPlaceholder('source_transparent_research_notebook')).toBe(false);
-        expect(isWidgetPlaceholder('earnings_season_monitor')).toBe(false);
+    it('exposes every registered widget as available in the widget library', () => {
+        expect(registeredTypes.filter((type) => isWidgetPlaceholder(type as never))).toEqual([]);
     });
 
     it('wires the QA-reported and system-default widgets to real modules', async () => {

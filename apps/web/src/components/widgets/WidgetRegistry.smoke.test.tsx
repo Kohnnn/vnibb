@@ -5,7 +5,7 @@
  * a component module (catches import-time throws). It does NOT mount anything,
  * so a widget that crashes during its first render — reading `foo.bar` on
  * undefined data, calling a browser API missing in jsdom, throwing in a hook —
- * ships undetected. This test mounts each non-placeholder widget in its initial
+ * ships undetected. This test mounts each registered widget in its initial
  * (loading) state and asserts none of them throw synchronously on mount.
  *
  * Scope is deliberately narrow: no per-widget fixtures and no content
@@ -16,7 +16,7 @@
  */
 
 import * as React from 'react';
-import { act, render } from '@testing-library/react';
+import { act, render, type RenderResult } from '@testing-library/react';
 
 import { widgetRegistry } from './WidgetRegistry';
 import { QueryProvider } from '@/lib/QueryProvider';
@@ -91,12 +91,52 @@ describe('WidgetRegistry mount smoke test', () => {
         globalThis.fetch = originalFetch;
     });
 
-    const entries = Array.from(widgetRegistry.entries()).filter(
-        ([, entry]) => !entry.isPlaceholder
-    );
+    const entries = Array.from(widgetRegistry.entries());
 
     it('has widgets to smoke test', () => {
         expect(entries.length).toBeGreaterThan(0);
+    });
+
+    it.each([
+        ['seasonality_spiral_heatmap', 'Spiral Heatmap'],
+        ['market_lab', null],
+        ['signal_robustness_lab', null],
+        ['edge_half_life', 'Edge Half-Life'],
+        ['pair_lab', 'Pair Lab'],
+        ['parkinson_volatility', 'Parkinson Volatility'],
+        ['ema_respect', 'EMA Respect Analysis'],
+        ['volume_delta', 'Volume Delta (20D)'],
+        ['amihud_illiquidity', 'Amihud Illiquidity'],
+        ['income_sankey', 'Income Sankey'],
+        ['big_flow_monitor', 'Big Flow'],
+        ['positioning_dashboard', null],
+        ['world_indices', null],
+    ] as const)('renders the real %s widget from a saved dashboard', async (type, label) => {
+        const entry = widgetRegistry.get(type);
+        expect(entry).toBeDefined();
+        const errors: Error[] = [];
+        const Widget = entry!.component;
+        let view!: RenderResult;
+
+        await act(async () => {
+            view = render(
+                <TestProviders>
+                    <MountErrorBoundary onError={(error) => errors.push(error)}>
+                        <React.Suspense fallback={null}>
+                            <Widget id={`saved-${type}`} symbol="VNM" />
+                        </React.Suspense>
+                    </MountErrorBoundary>
+                </TestProviders>
+            );
+            await entry!.lazyComponent();
+        });
+
+        expect(errors).toEqual([]);
+        if (label) {
+            expect(view.container).toHaveTextContent(label);
+        } else {
+            expect(view.container.querySelector('.animate-pulse')).not.toBeNull();
+        }
     });
 
     it.each(entries)('mounts %s without throwing', async (type, entry) => {

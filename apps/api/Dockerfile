@@ -30,7 +30,7 @@ COPY . .
 RUN printf '%s\n' "$IMAGE_RELEASE_REVISION" > /app/.release-revision
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && pip install --no-cache-dir . \
+    && pip install --isolated --no-cache-dir --index-url https://pypi.org/simple -c constraints-vnstock.txt . \
     && python -c "from importlib.metadata import version; print(f'vnstock {version(\"vnstock\")} | vnai {version(\"vnai\")}')"
 
 RUN --mount=type=secret,id=vnstock_api_key,required=false \

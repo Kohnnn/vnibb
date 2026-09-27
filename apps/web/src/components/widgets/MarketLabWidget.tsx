@@ -60,6 +60,7 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
           apiGroup: '/equity',
           endpoint: `/equity/historical?symbol=${upperSymbol}`,
           adjustmentMode: data?.meta?.adjustment_mode ?? 'adjusted',
+          stale: Boolean(error && hasData),
           updatedAt: data?.meta?.last_data_date ?? (dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined),
         },
       },
@@ -69,7 +70,7 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
       adjustmentAppliedCount: data?.meta?.adjustment_applied_count ?? null,
       adjustmentWarning,
     })
-  }, [adjustmentWarning, hasData, onDataChange, upperSymbol, stats, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_mode, data?.meta?.adjustment_requested_count, data?.meta?.last_data_date, dataUpdatedAt])
+  }, [adjustmentWarning, hasData, error, onDataChange, upperSymbol, stats, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_mode, data?.meta?.adjustment_requested_count, data?.meta?.last_data_date, dataUpdatedAt])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to run the market lab" icon={<FlaskConical size={18} />} />
@@ -175,6 +176,7 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
         className="px-1 pt-1"
         isFetching={isFetching}
         updatedAt={data?.meta?.last_data_date ?? dataUpdatedAt}
+        isCached={Boolean(error && hasData)}
         sourceLabel="Adjusted EOD · derived"
         align="right"
       />

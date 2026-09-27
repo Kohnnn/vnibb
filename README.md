@@ -59,7 +59,7 @@ Run from `vnibb/`.
 ```bash
 # 1. Install dependencies
 pnpm install --frozen-lockfile
-python -m pip install -e "apps/api[dev]"
+python -m pip install --isolated --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"
 
 # 2. Add env values to apps/web/.env.local
 NEXT_PUBLIC_API_URL=http://localhost:8000
@@ -76,6 +76,8 @@ pnpm --filter frontend dev
 
 # 6. Open: http://localhost:3000 (frontend), http://localhost:8000/docs (API docs), and http://127.0.0.1:8001/health (MCP health)
 ```
+
+The API install uses PyPI for general dependencies and SHA-256-constrained wheels from the [official VNStock package index](https://vnstocks.com/api/simple/) for `vnstock` 4.0.9 and its `vnai` 2.6.2 dependency. Keep `apps/api/constraints-vnstock.txt` in the install command for local setup, CI, and Docker; no VNStock credential is required for these free packages. Premium modules still use the optional authenticated image-build installer. To check credential-free resolution without installing packages, run `python -m pytest apps/api/scripts/test_vnstock_install.py -q` in an environment with `pip` and `pytest` and network access. This explicit network check is separate from the offline API test suite. On Python 3.12, `pip install --dry-run --ignore-installed --only-binary=:all:` resolved the API `[dev]` dependencies and confirmed both vendor wheel URLs and hashes. Artifact pinning and using PyPI as the only package index prevent the VNStock index from supplying unrelated dependencies, but future constraint updates still require independent publisher/artifact review; other PyPI packages are not hash-locked.
 
 If you want VniAgent to use the MCP sidecar locally, add this backend env:
 
@@ -99,7 +101,7 @@ Start here:
 
 Install:
 - `pnpm install --frozen-lockfile`
-- `python -m pip install -e "apps/api[dev]"`
+- `python -m pip install --isolated --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"`
 
 Run:
 - frontend: `pnpm --filter frontend dev`
