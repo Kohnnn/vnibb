@@ -1,5 +1,5 @@
 import type { CopilotArtifact, CopilotSourceRef, CopilotWidgetTarget } from '@/lib/api'
-import type { DashboardState, WidgetType } from '@/types/dashboard'
+import type { Dashboard, DashboardState, WidgetInstance, WidgetType } from '@/types/dashboard'
 
 export interface VniAgentWidgetIntent {
   widgetType: WidgetType
@@ -123,6 +123,7 @@ export function getIntentFromArtifact(artifact: CopilotArtifact): VniAgentWidget
 export function findMatchingWidgetTarget(
   state: DashboardState,
   intent: VniAgentWidgetIntent,
+  resolveSymbol?: (dashboard: Dashboard, widget: WidgetInstance) => string,
 ): VniAgentWidgetTarget | null {
   const dashboards = state.dashboards || []
   const intentSymbols = asStringArray(intent.config?.initialSymbols)
@@ -133,13 +134,16 @@ export function findMatchingWidgetTarget(
         if (widget.type !== intent.widgetType) {
           return null
         }
+        if (intent.symbol && resolveSymbol && resolveSymbol(dashboard, widget).toUpperCase() !== intent.symbol.toUpperCase()) {
+          return null
+        }
 
         let score = 0
         if (dashboard.id === state.activeDashboardId) score += 2
         if (tab.id === state.activeTabId) score += 2
 
         const widgetSymbol = typeof widget.config?.symbol === 'string' ? widget.config.symbol : undefined
-        if (intent.symbol && widgetSymbol === intent.symbol) score += 2
+        if (!resolveSymbol && intent.symbol && widgetSymbol === intent.symbol) score += 2
         if (!widgetSymbol) score += 1
 
         const widgetInitialSymbols = asStringArray(widget.config?.initialSymbols)

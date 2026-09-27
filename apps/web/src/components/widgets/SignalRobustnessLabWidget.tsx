@@ -13,8 +13,15 @@ import {
   computeNullBenchmark,
   type UniversePoint,
 } from '@/lib/signalRobustness'
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink'
+import { useDashboardWidget } from '@/hooks/useDashboardWidget'
+import { useWidgetGroups } from '@/contexts/WidgetGroupContext'
+import { readTickerScope } from '@/lib/widgetScope'
+import type { WidgetGroupId } from '@/types/widget'
 
 interface SignalRobustnessLabWidgetProps {
+  id: string
+  widgetGroup?: WidgetGroupId
   symbol?: string
   onSymbolClick?: (symbol: string) => void
   onDataChange?: (data: WidgetDataPayload) => void
@@ -46,7 +53,12 @@ function avg(values: number[]): number | null {
   return values.reduce((a, b) => a + b, 0) / values.length
 }
 
-export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: SignalRobustnessLabWidgetProps) {
+export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolClick, onDataChange }: SignalRobustnessLabWidgetProps) {
+  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetId: id, widgetType: 'signal_robustness_lab', symbol })
+  const { tickerOverrideFor } = useWidgetGroups()
+  const widgetLocation = useDashboardWidget(id)
+  const isDetached = Boolean(tickerOverrideFor(id)) || readTickerScope(widgetLocation?.widget.config).mode === 'override'
+  const selectSymbol = onSymbolClick ?? (isDetached ? undefined : setLinkedSymbol)
   const [signalKey, setSignalKey] = useState<SignalKey>('pe')
   const [comparator, setComparator] = useState<'gte' | 'lte'>('lte')
   const [threshold, setThreshold] = useState<number>(15)
@@ -318,13 +330,15 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
             {evaluation.passes.map((row) => (
               <tr key={row.symbol} className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-tertiary)]/30">
                 <td className="px-1 py-1">
-                  <button
-                    type="button"
-                    onClick={() => onSymbolClick?.(row.symbol)}
-                    className="font-bold text-[var(--accent-blue)] hover:underline"
-                  >
-                    {row.symbol}
-                  </button>
+                  {selectSymbol ? (
+                    <button
+                      type="button"
+                      onClick={() => selectSymbol(row.symbol)}
+                      className="font-bold text-[var(--accent-blue)] hover:underline"
+                    >
+                      {row.symbol}
+                    </button>
+                  ) : <span title="Ticker local to this widget; use its ticker selector to change it">{row.symbol}</span>}
                 </td>
                 <td className="px-1 py-1 text-right font-semibold text-[var(--text-primary)]">
                   {row.signal === null ? '—' : row.signal.toFixed(1)}

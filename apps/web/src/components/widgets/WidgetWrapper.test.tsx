@@ -24,7 +24,7 @@ jest.mock('@/contexts/WidgetGroupContext', () => ({
     getSymbolForGroup: (group: string) => group === 'A' ? 'FPT' : 'VCI',
     setGroupSymbol: jest.fn(),
     tickerOverrideFor: (id: string) => id === 'screener' ? mockTickerOverride : null,
-    setWidgetTickerOverride: (_id: string, symbol: string) => { mockTickerOverride = /^[A-Z0-9]{3}$/.test(symbol) ? symbol : null; },
+    setWidgetTickerOverride: (_id: string, symbol: string) => { mockTickerOverride = symbol; },
     clearWidgetTickerOverride: () => { mockTickerOverride = null; },
   }),
 }));
@@ -180,19 +180,52 @@ test('a three-letter TradingView exchange never becomes the local ticker', async
   mockWidgetType = 'tradingview_chart';
   mockWidgetConfig = { symbol: 'AMEX:SPY', useLinkedSymbol: true };
   const user = userEvent.setup();
+  const Chart = ({ symbol }: { symbol: string }) => <output aria-label="Chart ticker">{symbol}</output>;
   const view = render(<WidgetWrapper id="screener" title="TradingView Chart" widgetType="tradingview_chart" dashboardId="dashboard" tabId="tab" symbol="TVC:DXY">
-    <output aria-label="Chart ticker" />
+    <Chart symbol="TVC:DXY" />
   </WidgetWrapper>);
   await user.click(screen.getByRole('button', { name: /^Ticker group: / }));
   await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /^Ticker scope for this widget/ }));
   await user.click(screen.getByRole('menuitem', { name: 'Keep ticker in this widget' }));
   expect(screen.getByRole('button', { name: /Ticker group: Global, current ticker TVC:DXY\. Ticker local to this widget/ })).toBeInTheDocument();
+  expect(mockTickerOverride).toBe('TVC:DXY');
+  expect(screen.getByRole('status', { name: 'Chart ticker' })).toHaveTextContent('TVC:DXY');
+  view.rerender(<WidgetWrapper id="screener" title="TradingView Chart" widgetType="tradingview_chart" dashboardId="dashboard" tabId="tab" symbol="NYSE:IBM">
+    <Chart symbol="NYSE:IBM" />
+  </WidgetWrapper>);
+  expect(screen.getByRole('status', { name: 'Chart ticker' })).toHaveTextContent('TVC:DXY');
   view.unmount();
   mockTickerOverride = null;
   render(<WidgetWrapper id="screener" title="TradingView Chart" widgetType="tradingview_chart" dashboardId="dashboard" tabId="tab" symbol="NYSE:IBM">
     <output aria-label="Chart ticker" />
   </WidgetWrapper>);
   expect(screen.getByRole('button', { name: /Ticker group: Global, current ticker TVC:DXY\. Ticker local to this widget/ })).toBeInTheDocument();
+});
+
+test('external settings changes retarget a detached TradingView chart without reattaching or rewriting settings', async () => {
+  mockWidgetType = 'tradingview_chart';
+  mockWidgetConfig = { symbol: 'NASDAQ:AAPL', tickerScope: 'override', useLinkedSymbol: false };
+  mockTickerOverride = 'NASDAQ:AAPL';
+  const user = userEvent.setup();
+  const Chart = ({ symbol }: { symbol: string }) => <output aria-label="Chart ticker">{symbol}</output>;
+  const chart = () => <WidgetWrapper id="screener" title="TradingView Chart" widgetType="tradingview_chart" dashboardId="dashboard" tabId="tab" symbol={String(mockWidgetConfig.symbol)}>
+    <Chart symbol="NASDAQ:AAPL" />
+  </WidgetWrapper>;
+  const view = render(chart());
+
+  expect(screen.getByRole('status', { name: 'Chart ticker' })).toHaveTextContent('NASDAQ:AAPL');
+  mockWidgetConfig = { ...mockWidgetConfig, symbol: 'NASDAQ:MSFT' };
+  view.rerender(chart());
+
+  await waitFor(() => expect(screen.getByRole('status', { name: 'Chart ticker' })).toHaveTextContent('NASDAQ:MSFT'));
+  expect(screen.getByRole('button', { name: /Ticker group: Global, current ticker NASDAQ:MSFT\. Ticker local to this widget/ })).toBeInTheDocument();
+  expect(mockTickerOverride).toBe('NASDAQ:MSFT');
+  expect(mockUpdateWidget).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole('button', { name: /^Ticker group: / }));
+  await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /^Group A · FPT/ }));
+  expect(screen.getByRole('status', { name: 'Chart ticker' })).toHaveTextContent('NASDAQ:MSFT');
+  expect(mockWidgetConfig).toMatchObject({ symbol: 'NASDAQ:MSFT', tickerScope: 'override', useLinkedSymbol: false });
 });
 
 test('following the workspace after a TradingView detach restores linked markets updates', async () => {

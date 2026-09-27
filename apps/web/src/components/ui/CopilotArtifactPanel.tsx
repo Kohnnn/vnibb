@@ -24,6 +24,8 @@ import {
   type CopilotTableArtifact,
 } from '@/lib/api';
 import { useDashboard } from '@/contexts/DashboardContext';
+import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
+import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import { GLOBAL_SYSTEM_TEMPLATE_IDS } from '@/contexts/DashboardContext/constants';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
@@ -32,6 +34,8 @@ import {
   focusDashboardWidget,
   getIntentFromArtifact,
 } from '@/lib/vniagentWorkspace';
+import { readTickerScope, resolveWidgetSymbol } from '@/lib/widgetScope';
+import { isTradingViewWidget, usesTradingViewWidgetSymbol } from '@/lib/tradingViewWidgets';
 import {
   buildArtifactProvenance,
   readArtifactPlacement,
@@ -45,6 +49,7 @@ import {
   artifactNotebookDedupeKey,
 } from '@/lib/researchNotebook'
 import type { WidgetCreate } from '@/types/dashboard';
+import type { WidgetGroupConfig, WidgetGroupId } from '@/types/widget';
 
 interface CopilotArtifactPanelProps {
   artifacts: CopilotArtifact[];
@@ -264,6 +269,9 @@ function useArtifactDestination(): ArtifactPlacementStore {
 
 export function CopilotArtifactPanel({ artifacts, responseMeta, surface = 'sidebar' }: CopilotArtifactPanelProps) {
   const { state, addWidget, setActiveDashboard, setActiveTab } = useDashboard();
+  const { getSharedGroups, tickerOverrideFor } = useWidgetGroups();
+  const { appGlobalMarketsSymbol } = useGlobalMarketsSymbol();
+  const sharedGroups = getSharedGroups();
   const artifactKey = useMemo(() => artifacts.map((artifact) => artifact.id).join('|'), [artifacts]);
   const responseId = responseMeta?.responseId;
   const { promotedWidgets, restored, recordPromotion } = usePromotedWidgets(responseId);
@@ -297,6 +305,9 @@ export function CopilotArtifactPanel({ artifacts, responseMeta, surface = 'sideb
           responseMeta={responseMeta}
           surface={surface}
           state={state}
+          sharedGroups={sharedGroups}
+          tickerOverrideFor={tickerOverrideFor}
+          appGlobalMarketsSymbol={appGlobalMarketsSymbol}
           addWidget={addWidget}
           setActiveDashboard={setActiveDashboard}
           setActiveTab={setActiveTab}
@@ -317,6 +328,9 @@ interface ArtifactCardProps {
   responseMeta?: CopilotResponseMeta;
   surface: 'sidebar' | 'widget' | 'analysis';
   state: Parameters<typeof findMatchingWidgetTarget>[0];
+  sharedGroups: Record<WidgetGroupId, WidgetGroupConfig>;
+  tickerOverrideFor: (widgetId: string) => string | null;
+  appGlobalMarketsSymbol: string;
   addWidget: ReturnType<typeof useDashboard>['addWidget'];
   setActiveDashboard: ReturnType<typeof useDashboard>['setActiveDashboard'];
   setActiveTab: ReturnType<typeof useDashboard>['setActiveTab'];
@@ -332,6 +346,9 @@ function ArtifactCard({
   responseMeta,
   surface,
   state,
+  sharedGroups,
+  tickerOverrideFor,
+  appGlobalMarketsSymbol,
   addWidget,
   setActiveDashboard,
   setActiveTab,
@@ -343,10 +360,24 @@ function ArtifactCard({
   onDestinationChange,
 }: ArtifactCardProps) {
   const intent = useMemo(() => getIntentFromArtifact(artifact), [artifact]);
-  const existingTarget = useMemo(
-    () => (intent ? findMatchingWidgetTarget(state, intent) : null),
-    [intent, state],
-  );
+  const existingTarget = useMemo(() => intent ? findMatchingWidgetTarget(state, intent, (dashboard, widget) => {
+    const groupId = widget.widgetGroup ?? 'global';
+    const groups = dashboard.widgetGroups ?? sharedGroups;
+    const groupSymbol = groups[groupId]?.symbol || groups.global.symbol;
+    const tradingViewSymbol = isTradingViewWidget(widget.type) && usesTradingViewWidgetSymbol(widget.type);
+    const override = tickerOverrideFor(widget.id);
+    const scope = override
+      ? { mode: 'override' as const, symbol: override }
+      : readTickerScope(widget.config, tradingViewSymbol);
+    const scopedSymbol = resolveWidgetSymbol(scope, groupSymbol);
+    if (tradingViewSymbol && scope.mode === 'group' && widget.config?.useLinkedSymbol !== false) {
+      return dashboard.globalMarketsSymbol || appGlobalMarketsSymbol;
+    }
+    if (tradingViewSymbol && scope.mode === 'group' && widget.config?.useLinkedSymbol === false) {
+      return typeof widget.config.symbol === 'string' && widget.config.symbol ? widget.config.symbol : dashboard.globalMarketsSymbol || appGlobalMarketsSymbol;
+    }
+    return scopedSymbol;
+  }) : null, [intent, state, sharedGroups, tickerOverrideFor, appGlobalMarketsSymbol]);
   const destinations = state.dashboards.flatMap((dashboard) =>
     dashboard.isEditable === false || GLOBAL_SYSTEM_TEMPLATE_IDS.has(dashboard.id) ? [] : dashboard.tabs.map((tab) => ({
       dashboardId: dashboard.id,

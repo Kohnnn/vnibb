@@ -366,18 +366,36 @@ export function ScreenerWidget({
         setActiveScreenId((current) => current === persistedActiveScreenId ? current : persistedActiveScreenId);
     }, [persistedActiveScreenId]);
 
-    // `search` is the live typing buffer and stays authoritative while the user
-    // types. The persisted value is adopted only when the widget instance
-    // changes (dashboard / tab / widget id), never on ordinary config echoes:
-    // the store round-trip is slower than typing, so re-adopting it would
-    // duplicate and drop in-flight keystrokes.
-    const searchInstanceRef = useRef<string | null>(null);
+    const searchInstanceKey = `${widgetLocation?.dashboardId ?? ''}\u0000${widgetLocation?.tabId ?? ''}\u0000${id}`;
+    const searchSyncRef = useRef({
+        instanceKey: searchInstanceKey,
+        persistedSearch,
+        localSearches: new Set<string>([persistedSearch]),
+        externalSearch: null as string | null,
+    });
+    const searchInstanceChanged = searchSyncRef.current.instanceKey !== searchInstanceKey;
+    const persistedSearchChanged = searchSyncRef.current.persistedSearch !== persistedSearch;
+    const shouldAdoptPersistedSearch = searchInstanceChanged
+        || (persistedSearchChanged && !searchSyncRef.current.localSearches.has(persistedSearch));
+
     useEffect(() => {
-        const instanceKey = `${widgetLocation?.dashboardId ?? ''}\u0000${widgetLocation?.tabId ?? ''}\u0000${id}`;
-        if (instanceKey === searchInstanceRef.current) return;
-        searchInstanceRef.current = instanceKey;
-        setSearch(persistedSearch);
-    }, [id, widgetLocation?.dashboardId, widgetLocation?.tabId, persistedSearch]);
+        if (!searchInstanceChanged && !persistedSearchChanged) return;
+        searchSyncRef.current.instanceKey = searchInstanceKey;
+        searchSyncRef.current.persistedSearch = persistedSearch;
+        if (shouldAdoptPersistedSearch) {
+            if (searchInstanceChanged) searchSyncRef.current.localSearches.clear();
+            searchSyncRef.current.externalSearch = persistedSearch;
+            setSearch(persistedSearch);
+        } else if (persistedSearch === search) {
+            searchSyncRef.current.localSearches.clear();
+        }
+    }, [persistedSearch, persistedSearchChanged, search, searchInstanceChanged, searchInstanceKey, shouldAdoptPersistedSearch]);
+
+    const changeSearch = (nextSearch: string) => {
+        searchSyncRef.current.localSearches.add(nextSearch);
+        searchSyncRef.current.externalSearch = null;
+        setSearch(nextSearch);
+    };
 
     useEffect(() => {
         setMarket((current) => current === persistedMarket ? current : persistedMarket);
@@ -421,6 +439,7 @@ export function ScreenerWidget({
     const sort = useMemo(() => `${sortField}:${sortOrder}`, [sortField, sortOrder]);
 
     useEffect(() => {
+        if (shouldAdoptPersistedSearch || (searchSyncRef.current.externalSearch !== null && search !== searchSyncRef.current.externalSearch)) return;
         if (!widgetLocation) return;
 
         const currentConfig = widgetLocation.widget.config || {};
@@ -454,7 +473,7 @@ export function ScreenerWidget({
         }
 
         updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, { config: nextConfig });
-    }, [activeColumnIds, activeFilters, activeScreenId, advancedFilterGroup, customScreens, id, market, search, sortField, sortOrder, updateWidget, viewMode, widgetLocation]);
+    }, [activeColumnIds, activeFilters, activeScreenId, advancedFilterGroup, customScreens, id, market, search, shouldAdoptPersistedSearch, sortField, sortOrder, updateWidget, viewMode, widgetLocation]);
 
     const {
         data: screenerData,
@@ -780,7 +799,7 @@ export function ScreenerWidget({
         });
         setActiveFilters([]);
         setAdvancedFilterGroup(createEmptyFilterGroup());
-        setSearch('');
+        changeSearch('');
         setActiveScreenId('all');
         setSortField(DEFAULT_SORT_FIELD);
         setSortOrder(DEFAULT_SORT_ORDER);
@@ -854,7 +873,7 @@ export function ScreenerWidget({
                         <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--text-muted)]" />
                         <input
                             value={search}
-                            onChange={(event) => setSearch(event.target.value)}
+                            onChange={(event) => changeSearch(event.target.value)}
                             placeholder="Quick search..."
                             aria-label="Filter screener results"
                             className="h-8 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] pl-8 pr-3 text-[11px] text-[var(--text-primary)] outline-none transition-all placeholder:text-[var(--text-muted)] focus:border-blue-500/50"

@@ -79,7 +79,7 @@ VniAgent server context path
 |-------|------------|---------|
 | **Primary EOD** | Vietcap public market-data API | Canonical raw-VND OHLCV corpus and freshness basis |
 | **Runtime fallback** | VNStock 4.0 free tier (KBS baseline) | Screener, quotes, financials, and provider gap fill |
-| **AI Assist** | VNAI 2.4+ | AI-powered analysis hooks |
+| **AI Assist** | VNAI 2.6.2 publisher wheel | Installed with the constrained free-tier image; historical 2.4.x hook compatibility is unverified, so premium-only paths require separate runtime proof |
 | **Premium accelerators** | vnstock_data, vnstock_ta, vnstock_news, vnstock_pipeline | Optional; enabled only with `VNSTOCK_RUNTIME_TIER=premium` and a premium-built image |
 
 ### Database & Persistence

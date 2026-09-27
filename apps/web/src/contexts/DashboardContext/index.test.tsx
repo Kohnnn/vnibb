@@ -306,6 +306,51 @@ describe('DashboardProvider browser persistence', () => {
     expect(JSON.parse(screen.getByTestId('saved-widgets').textContent ?? '[]')).toEqual(saved?.tabs[0].widgets);
   });
 
+  it.each([
+    ['an occupied offset', [
+      { id: 'source', type: 'notes' as const, tabId: 'saved-tab', config: { text: 'original' }, layout: { i: 'source', x: 0, y: 0, w: 8, h: 6 } },
+      { id: 'neighbor', type: 'notes' as const, tabId: 'saved-tab', config: {}, layout: { i: 'neighbor', x: 8, y: 0, w: 8, h: 6 } },
+      { id: 'occupied', type: 'notes' as const, tabId: 'saved-tab', config: {}, layout: { i: 'occupied', x: 0, y: 6, w: 24, h: 6 } },
+    ]],
+    ['the right edge', [
+      { id: 'source', type: 'notes' as const, tabId: 'saved-tab', config: { text: 'original' }, layout: { i: 'source', x: 16, y: 0, w: 8, h: 6 } },
+      { id: 'occupied', type: 'notes' as const, tabId: 'saved-tab', config: {}, layout: { i: 'occupied', x: 0, y: 6, w: 24, h: 6 } },
+    ]],
+  ])('duplicates a widget at %s without moving authored widgets or overlapping', async (_scenario, widgets) => {
+    const dashboard = { ...customDashboard, tabs: [{ id: 'saved-tab', name: 'Saved tab', order: 0, widgets }] };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([dashboard]));
+    let clonedLayout: typeof widgets[number]['layout'] | undefined;
+
+    function DuplicateProbe() {
+      const { cloneWidget, state } = useDashboard();
+      const saved = state.dashboards.find((item) => item.id === dashboard.id)?.tabs[0].widgets ?? [];
+      return <>
+        <output data-testid="duplicates">{JSON.stringify(saved)}</output>
+        <button onClick={() => { clonedLayout = cloneWidget(dashboard.id, 'saved-tab', 'source')?.layout; }}>duplicate</button>
+      </>;
+    }
+
+    render(<DashboardProvider><DuplicateProbe /></DashboardProvider>);
+    await waitFor(() => expect(JSON.parse(screen.getByTestId('duplicates').textContent ?? '[]')).toHaveLength(widgets.length));
+    fireEvent.click(screen.getByRole('button', { name: 'duplicate' }));
+
+    const saved = JSON.parse(screen.getByTestId('duplicates').textContent ?? '[]') as typeof widgets;
+    const clone = saved.at(-1)!;
+    expect(saved.slice(0, -1)).toEqual(widgets);
+    expect(clone.id).not.toBe('source');
+    expect(clone.config).toEqual(widgets[0].config);
+    expect(clone.layout).toEqual(clonedLayout);
+    expect(clone.layout.w).toBe(widgets[0].layout.w);
+    expect(clone.layout.h).toBe(widgets[0].layout.h);
+    expect(Number.isFinite(clone.layout.x) && Number.isFinite(clone.layout.y)).toBe(true);
+    expect(clone.layout.x).toBeGreaterThanOrEqual(0);
+    expect(clone.layout.x + clone.layout.w).toBeLessThanOrEqual(24);
+    for (const widget of widgets) {
+      expect(clone.layout.x < widget.layout.x + widget.layout.w && clone.layout.x + clone.layout.w > widget.layout.x && clone.layout.y < widget.layout.y + widget.layout.h && clone.layout.y + clone.layout.h > widget.layout.y).toBe(false);
+    }
+    expect(storedDashboards().find((item) => item.id === dashboard.id)?.tabs[0].widgets).toEqual(saved);
+  });
+
   it('preserves the active tab for each dashboard during atomic persistence', async () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify([{
       ...customDashboard,

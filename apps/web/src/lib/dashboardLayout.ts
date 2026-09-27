@@ -298,6 +298,27 @@ export function layoutsOverlap(
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
 }
 
+export function findAvailableLayoutPosition(
+  items: ReadonlyArray<LayoutCoordinates>,
+  size: Pick<LayoutCoordinates, 'w' | 'h'>,
+  cols = 24
+): { x: number; y: number } {
+  const w = Math.min(size.w, cols)
+  const bottom = items.reduce((max, item) =>
+    Number.isFinite(item.y) && Number.isFinite(item.h) ? Math.max(max, item.y + item.h) : max, 0)
+  const candidate = { x: 0, y: 0, w, h: size.h }
+
+  for (let y = 0; y <= bottom; y += 1) {
+    candidate.y = y
+    for (let x = 0; x <= cols - w; x += 1) {
+      candidate.x = x
+      if (!items.some((item) => layoutsOverlap(candidate, item))) return { x, y }
+    }
+  }
+
+  return { x: 0, y: bottom }
+}
+
 export function findNextAvailableLayout<T extends CompactableLayoutItem>(
   items: T[],
   type?: WidgetType | string,

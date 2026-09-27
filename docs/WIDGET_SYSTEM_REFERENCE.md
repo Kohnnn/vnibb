@@ -116,10 +116,11 @@ as authority.
   keys are rejected if a client tries to supply them.
 - **External MCP** — read-only `get_matrix_selection` resolves the same selection
   from the per-request authenticated user identity, never from a token in tool
-  arguments. The shared deployment bearer and stdio transports cannot authorize
-  Matrix. External export additionally requires an explicit source-rights policy
-  that default-denies unapproved providers; an allow-list entry ending in
-  `:unknown` is a deny sentinel, not a grant.
+  arguments. A user JWT authorizes only that Matrix tool; it cannot enumerate or
+  call the existing market/premium tools, resources or prompts. Those retain the
+  shared deployment bearer. The shared bearer and stdio transports cannot
+  authorize Matrix. External export additionally requires explicit source rights
+  and default-denies unapproved suppliers.
 
 Limits: no PDF/OCR ingestion, custom column authoring, scheduled refresh,
 autonomous per-cell execution, Office or Tick-and-Tie verification, or new provider
@@ -143,19 +144,20 @@ neither is satisfied by a code deploy alone.
 ### Source-rights configuration
 
 `MATRIX_EXPORT_ALLOWED_SOURCES` is an operator-supplied, comma-separated allow-list
-of real provider sources, each written as `store.relation:supplier` — for example
-`stored.sql.income_statements:<real supplier tag>`. Matching is verbatim, so the
-supplier tag must be the one the stored records actually carry.
+of individually attributable supplier sources, each written as
+`store.relation:supplier`. Matching is exact. Bare `stored.sql.*` labels and the
+suffixes `:unknown`, `:vnstock` and `:vnstock_ratio` **never grant export**, even
+when configured: existing financial ingestion labels mixed VCI/KBS observations
+with those generic tags and does not retain per-field supplier attribution.
+Derived results require every original observation to be eligible; a generic
+input cannot be laundered through a formula. Absent or empty configuration denies
+all real-source export. Only the clearly synthetic fixture bypasses the gate.
 
-An entry ending in `:unknown` is a **deny sentinel**, never a grant: it is dropped
-before grant matching, so configuring `family:unknown` denies unknown-supplier
-evidence rather than permitting it. Do not add real providers by appending
-`:unknown`. Absent or empty configuration denies all real-source export, which is
-the intended default; only the synthetic fixture bypasses the gate.
-
-No real provider is sanctioned for export by this verification record. The
-allow-list syntax and deny behavior are verified; provider-specific grants still
-require documented permission and the exact supplier tag from retained records.
+No real provider is sanctioned for export by this verification record. Test-only
+`matrix_seed` proves exact attributed-source matching, not a production license.
+Future real grants require retained per-field supplier provenance and documented
+display/export permission; this is not achieved by allowlisting historical
+`vnstock` rows.
 
 ### Claims that stay unverified without a live corpus
 

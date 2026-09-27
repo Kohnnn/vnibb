@@ -265,7 +265,7 @@ import { dispatchOnboardingMeaningfulAction, findPreferredDashboardId, findPrefe
 import { useDashboardSync, useLoadFromBackend } from '@/lib/useDashboardSync';
 import { config } from '@/lib/config';
 import { normalizeWidgetType } from '@/data/widgetDefinitions';
-import { autoFitGridItems, compactGridItems, findNextAvailableLayout, getWidgetDefaultLayout, layoutsOverlap, preserveTemplateGridItems } from '@/lib/dashboardLayout';
+import { autoFitGridItems, compactGridItems, findAvailableLayoutPosition, findNextAvailableLayout, getWidgetDefaultLayout, layoutsOverlap, preserveTemplateGridItems } from '@/lib/dashboardLayout';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { getPublishedSystemDashboardTemplates } from '@/lib/api';
 
@@ -1187,15 +1187,17 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         const tab = dashboard?.tabs.find((t) => t.id === tabId);
         const widget = tab?.widgets.find((w) => w.id === widgetId);
         if (!widget) return null;
+        const cloneWidth = Math.min(widget.layout.w, 24);
+        const position = findAvailableLayoutPosition(tab!.widgets.map(({ layout }) => layout), { w: cloneWidth, h: widget.layout.h });
 
         const clonedWidget: WidgetInstance = {
             ...widget,
             id: generateId(),
             layout: {
                 ...widget.layout,
+                w: cloneWidth,
                 i: generateId(),
-                x: widget.layout.x + 2,
-                y: widget.layout.y + 2,
+                ...position,
             },
         };
         dispatch({ type: 'ADD_WIDGET', payload: { dashboardId, tabId, widget: clonedWidget } });

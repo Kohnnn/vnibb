@@ -783,7 +783,7 @@ async def get_prediction_market_consensus(
                 func.count(market.id).label("n_markets"),
                 func.sum(case((numeric, price * weight), else_=0.0)).label("weighted"),
                 func.sum(case((numeric, weight), else_=0.0)).label("weight"),
-                func.sum(case((numeric, market.volume), else_=0.0)).label("volume"),
+                func.sum(case((numeric, market.volume))).label("volume"),
                 func.max(case((numeric, market.url))).label("url"),
                 func.sum(case((numeric, 1), else_=0)).label("priced_count"),
             )

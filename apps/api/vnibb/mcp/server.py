@@ -907,7 +907,50 @@ def _build_transport_security() -> Any:
     )
 
 
-mcp = FastMCP(
+class AuthorizedMCP(FastMCP):
+    """Keep user JWTs scoped to Matrix at the MCP dispatch boundary."""
+
+    def _matrix_only_request(self) -> bool:
+        try:
+            request = self.get_context().request_context.request
+        except (AttributeError, ValueError):
+            return False
+        return isinstance(request, Request) and isinstance(
+            getattr(request.state, "matrix_user", None), User
+        )
+
+    async def list_tools(self):
+        tools = await super().list_tools()
+        if self._matrix_only_request():
+            return [tool for tool in tools if tool.name == "get_matrix_selection"]
+        return tools
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]):
+        if self._matrix_only_request() and name != "get_matrix_selection":
+            raise ToolError("Tool not authorized for user JWT")
+        return await super().call_tool(name, arguments)
+
+    async def list_resources(self):
+        return [] if self._matrix_only_request() else await super().list_resources()
+
+    async def list_resource_templates(self):
+        return [] if self._matrix_only_request() else await super().list_resource_templates()
+
+    async def read_resource(self, uri):
+        if self._matrix_only_request():
+            raise PermissionError("Resource not authorized for user JWT")
+        return await super().read_resource(uri)
+
+    async def list_prompts(self):
+        return [] if self._matrix_only_request() else await super().list_prompts()
+
+    async def get_prompt(self, name: str, arguments: dict[str, Any] | None = None):
+        if self._matrix_only_request():
+            raise PermissionError("Prompt not authorized for user JWT")
+        return await super().get_prompt(name, arguments)
+
+
+mcp = AuthorizedMCP(
     name="VNIBB Read-Only MCP",
     instructions=MCP_INSTRUCTIONS,
     json_response=True,

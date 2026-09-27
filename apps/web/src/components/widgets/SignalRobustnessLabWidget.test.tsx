@@ -5,6 +5,9 @@ import { SignalRobustnessLabWidget } from './SignalRobustnessLabWidget'
 
 jest.mock('@/lib/queries', () => ({ useScreenerData: jest.fn() }))
 jest.mock('./QuantRunHistoryPanel', () => ({ QuantRunHistoryPanel: () => null }))
+jest.mock('@/hooks/useWidgetSymbolLink', () => ({ useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }) }))
+jest.mock('@/hooks/useDashboardWidget', () => ({ useDashboardWidget: () => null }))
+jest.mock('@/contexts/WidgetGroupContext', () => ({ useWidgetGroups: () => ({ tickerOverrideFor: () => null }) }))
 
 const screenerQuery = jest.mocked(useScreenerData)
 
@@ -29,7 +32,7 @@ it('uses supported screener fields and excludes missing metrics and returns from
   } as never)
 
   const onDataChange = jest.fn()
-  render(<SignalRobustnessLabWidget onDataChange={onDataChange} />)
+  render(<SignalRobustnessLabWidget id="saved-robustness" onDataChange={onDataChange} />)
 
   expect(screen.getAllByRole('combobox')[0]).toHaveValue('pe')
   expect(screen.getByText('Universe').parentElement).toHaveTextContent('4')

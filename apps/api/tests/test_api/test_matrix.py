@@ -38,7 +38,7 @@ async def stored(test_db):
             "review_state": "unreviewed",
         })
         evidence.append({
-            "evidence_id": evidence_id, "entity_id": symbol, "source": "stored.sql.income_statements",
+            "evidence_id": evidence_id, "entity_id": symbol, "source": "stored.sql.income_statements:matrix_seed",
             "locator": f"income:{symbol}:2025", "field": "revenue", "value": amount,
             "unit": "VND", "period": "2025", "as_of": "2025-12-31",
             "captured_at": "2026-01-01T00:00:00Z", "provenance": "stored_observation",
@@ -169,7 +169,7 @@ async def test_export_rights_require_all_derived_inputs(test_db, stored, monkeyp
     with pytest.raises(HTTPException) as error:
         service.require_matrix_export_rights(packet)
     assert error.value.status_code == 403
-    monkeypatch.setenv("MATRIX_EXPORT_ALLOWED_SOURCES", "stored.sql.income_statements")
+    monkeypatch.setenv("MATRIX_EXPORT_ALLOWED_SOURCES", "stored.sql.income_statements:matrix_seed")
     service.require_matrix_export_rights(packet)
     derived = {**packet["evidence"][0], "evidence_id": "derived", "provenance": "derived", "source": "derived.matrix", "input_evidence_ids": [packet["evidence"][0]["evidence_id"]]}
     packet["evidence"].append(derived)
@@ -178,6 +178,30 @@ async def test_export_rights_require_all_derived_inputs(test_db, stored, monkeyp
     with pytest.raises(HTTPException) as error:
         service.require_matrix_export_rights(packet)
     assert error.value.status_code == 403
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", [
+    "stored.sql.income_statements",
+    "stored.sql.income_statements:vnstock",
+    "stored.sql.income_statements:vnstock_ratio",
+    "stored.sql.income_statements:unknown",
+    "stored.sql.financial_ratios:vnstock_ratio",
+    "stored.sql.balance_sheets:vnstock",
+])
+async def test_export_rights_never_grant_unattributed_financial_sources(test_db, stored, monkeypatch, source):
+    packet = await service.resolve_matrix_selection(test_db, OWNER, {
+        "snapshot_id": stored["snapshot"]["snapshot_id"], "result_ids": [stored["snapshot"]["cells"][0]["result_id"]],
+    })
+    monkeypatch.setenv("MATRIX_EXPORT_ALLOWED_SOURCES", f"{source}, stored.sql.income_statements:matrix_seed")
+    packet["evidence"][0]["source"] = source
+    packet["evidence"].append({**packet["evidence"][0], "evidence_id": "derived", "provenance": "derived", "source": "derived.matrix", "input_evidence_ids": [packet["evidence"][0]["evidence_id"]]})
+
+    with pytest.raises(HTTPException) as error:
+        service.require_matrix_export_rights(packet)
+    assert error.value.status_code == 403
+
+    packet["evidence"][0]["source"] = "stored.sql.income_statements:matrix_seed"
+    service.require_matrix_export_rights(packet)
 
 
 @pytest.mark.asyncio

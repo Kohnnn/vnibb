@@ -192,6 +192,48 @@ async def test_matrix_export_rights_default_deny_exact_source_and_synthetic(
 
 
 @pytest.mark.asyncio
+async def test_user_jwt_only_authorizes_matrix_tool(matrix_http):
+    async with connected_client(matrix_http, signed_token()) as (session, _):
+        listed = await session.list_tools()
+        assert [tool.name for tool in listed.tools] == ["get_matrix_selection"]
+        for name, args in (
+            ("get_premium_dataset", {"dataset": "company.info", "symbol": "FPT"}),
+            ("list_supported_collections", {}),
+            ("unknown_market_alias", {}),
+        ):
+            denied = await session.call_tool(name, args)
+            assert "not authorized" in error_text(denied)
+            assert denied.structuredContent is None
+
+        assert (await session.list_resources()).resources == []
+        assert (await session.list_resource_templates()).resourceTemplates == []
+        assert (await session.list_prompts()).prompts == []
+        with pytest.raises(Exception, match="not authorized"):
+            await session.read_resource("vnibb://mongo/datasets")
+        with pytest.raises(Exception, match="not authorized"):
+            await session.get_prompt("market_brief")
+
+
+@pytest.mark.asyncio
+async def test_shared_bearer_can_read_premium_dataset_but_user_jwt_cannot(matrix_http, monkeypatch):
+    class PremiumService:
+        enabled = True
+
+        async def get_raw_dataset_records(self, symbol, *, dataset, limit):
+            assert (symbol, dataset, limit) == ("FPT", "company.info", 20)
+            return [{"symbol": "FPT", "name": "licensed data"}]
+
+    monkeypatch.setattr(server, "get_mongo_market_data_service", PremiumService)
+    args = {"dataset": "company.info", "symbol": "FPT"}
+    async with connected_client(matrix_http, signed_token()) as (session, http):
+        assert "not authorized" in error_text(await session.call_tool("get_premium_dataset", args))
+        http.headers["Authorization"] = "Bearer deployment-shared"
+        permitted = await session.call_tool("get_premium_dataset", args)
+        assert not permitted.isError
+        assert permitted.structuredContent["items"] == [{"symbol": "FPT", "name": "licensed data"}]
+
+
+@pytest.mark.asyncio
 async def test_shared_bearer_keeps_market_access_but_never_matrix(matrix_http, matrix_store):
     fixture, _ = matrix_store
     async with connected_client(matrix_http, "deployment-shared") as (session, http):

@@ -33,3 +33,14 @@ it('uses imported symbol groups without changing browser-wide group symbols', ()
     expect(result.current.globalSymbol).toBe('VCB');
     expect(result.current.getSymbolForGroup('A')).toBe('HPG');
 });
+
+it('preserves a valid exchange-qualified ticker when detaching a widget', () => {
+    localStorage.clear();
+    mockUseDashboard.mockReturnValue({ activeDashboard: null, updateDashboardRuntime: jest.fn() } as unknown as DashboardContextValue);
+    const { result } = renderHook(() => useWidgetGroups(), { wrapper: WidgetGroupProvider });
+
+    act(() => result.current.setWidgetTickerOverride('dollar-index', 'tvc:dxy'));
+
+    expect(result.current.tickerOverrideFor('dollar-index')).toBe('TVC:DXY');
+    expect(result.current.getSymbolForGroup('global')).toBe(DEFAULT_GROUPS.global.symbol);
+});

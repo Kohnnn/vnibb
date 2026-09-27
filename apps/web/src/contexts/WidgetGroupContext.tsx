@@ -109,7 +109,10 @@ export function WidgetGroupProvider({ children }: { children: ReactNode }) {
    * keeps its own ticker until the user resets it.
    */
   const setWidgetTickerOverride = useCallback((widgetId: string, symbol: string) => {
-    const normalized = normalizeTickerSymbol(symbol);
+    const candidate = symbol.trim().toUpperCase();
+    const normalized = candidate.includes(':')
+      ? (/^[A-Z0-9._-]{2,20}:[A-Z0-9._-]{1,40}$/.test(candidate) ? candidate : null)
+      : normalizeTickerSymbol(symbol);
     if (!normalized) return;
     setOverrides((prev) => ({ ...prev, [widgetId]: normalized }));
   }, []);

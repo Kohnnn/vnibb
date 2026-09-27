@@ -69,6 +69,7 @@ test('typing keeps the live buffer and the persisted search in lockstep', async 
 
 test('a late persisted echo never rewrites the live typing buffer', () => {
   const { rerender } = render(<ScreenerWidget id="screener-1" config={{ search: '' }} />);
+  fireEvent.change(screen.getByLabelText('Filter screener results'), { target: { value: 'VC' } });
   fireEvent.change(screen.getByLabelText('Filter screener results'), { target: { value: 'VCB' } });
   rerender(<ScreenerWidget id="screener-1" config={{ search: 'VC' }} />);
   expect(screen.getByLabelText('Filter screener results')).toHaveValue('VCB');
@@ -86,4 +87,76 @@ test('a widget instance change adopts the persisted search exactly once', () => 
   const inputs = screen.getAllByLabelText('Filter screener results');
   expect(inputs[0]).toHaveValue('HPG');
   expect(inputs[1]).toHaveValue('FPT');
+});
+
+test('an external persisted search replaces the live buffer without writing the old search back', () => {
+  widgetConfig = { search: 'OLD' };
+  widgets[0].config = widgetConfig;
+  const { rerender } = render(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+  updateWidget.mockClear();
+
+  widgetConfig = { search: 'FPT' };
+  widgets[0].config = widgetConfig;
+  rerender(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+
+  expect(screen.getByLabelText('Filter screener results')).toHaveValue('FPT');
+  expect(updateWidget.mock.calls.some(([, , , updates]) => updates.config.search === 'OLD')).toBe(false);
+
+  updateWidget.mockClear();
+  rerender(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+  expect(updateWidget.mock.calls.some(([, , , updates]) => updates.config.search === 'OLD')).toBe(false);
+});
+
+test('a local search echo is ignored while a later external search is adopted', () => {
+  const { rerender } = render(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+  const input = screen.getByLabelText('Filter screener results');
+  fireEvent.change(input, { target: { value: 'VC' } });
+  fireEvent.change(input, { target: { value: 'VCB' } });
+
+  widgetConfig = { search: 'VC' };
+  widgets[0].config = widgetConfig;
+  rerender(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+  expect(input).toHaveValue('VCB');
+
+  updateWidget.mockClear();
+  widgetConfig = { search: 'FPT' };
+  widgets[0].config = widgetConfig;
+  rerender(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+  expect(input).toHaveValue('FPT');
+  expect(updateWidget.mock.calls.some(([, , , updates]) => updates.config.search === 'VCB')).toBe(false);
+});
+
+test('typing after an external search persists the new local search', () => {
+  widgetConfig = { search: 'OLD' };
+  widgets[0].config = widgetConfig;
+  const { rerender } = render(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+
+  widgetConfig = { search: 'FPT' };
+  widgets[0].config = widgetConfig;
+  rerender(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+  updateWidget.mockClear();
+
+  fireEvent.change(screen.getByLabelText('Filter screener results'), { target: { value: 'FPTC' } });
+  expect(screen.getByLabelText('Filter screener results')).toHaveValue('FPTC');
+  expect(updateWidget).toHaveBeenCalledWith(
+    'workspace',
+    'tab',
+    'screener-1',
+    expect.objectContaining({ config: expect.objectContaining({ search: 'FPTC' }) }),
+  );
+});
+
+test('a delayed local echo cannot undo a newer external search', () => {
+  const { rerender } = render(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+  fireEvent.change(screen.getByLabelText('Filter screener results'), { target: { value: 'VCB' } });
+
+  widgetConfig = { search: 'FPT' };
+  widgets[0].config = widgetConfig;
+  rerender(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+  expect(screen.getByLabelText('Filter screener results')).toHaveValue('FPT');
+
+  widgetConfig = { search: 'VCB' };
+  widgets[0].config = widgetConfig;
+  rerender(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+  expect(screen.getByLabelText('Filter screener results')).toHaveValue('FPT');
 });

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 from datetime import UTC, datetime, timedelta
 from time import monotonic
 
@@ -20,6 +19,7 @@ from vnibb.services.prediction_market_policy import (
     SNAPSHOT_MARKET_LIMIT,
     SNAPSHOT_SOURCE_LIMIT,
     SNAPSHOT_SOURCES,
+    observed_yes_price,
     snapshot_eligibility,
 )
 
@@ -35,13 +35,6 @@ SNAPSHOT_PRUNE_BATCH_SIZE = 1000
 SNAPSHOT_PRUNE_MAX_SECONDS = 240.0
 _SNAPSHOT_ADVISORY_LOCK_KEY = 863744185
 _sqlite_snapshot_lock = asyncio.Lock()
-
-def _yes_price(prices: object) -> float | None:
-    if isinstance(prices, list) and prices and type(prices[0]) in (int, float):
-        value = float(prices[0])
-        if math.isfinite(value) and 0 <= value <= 1:
-            return value
-    return None
 
 
 async def _lock_writers(session: AsyncSession) -> None:
@@ -122,7 +115,7 @@ async def write_snapshot_bucket(session: AsyncSession, model, now: datetime, buc
             for start in range(0, len(markets), SNAPSHOT_INSERT_BATCH_SIZE):
                 rows = []
                 for market in markets[start:start + SNAPSHOT_INSERT_BATCH_SIZE]:
-                    price = _yes_price(market.outcome_prices)
+                    price = observed_yes_price(market)
                     if price is None or not market.question or (
                         len(market.question.encode("utf-8")) > 8192 or
                         len((market.url or "").encode("utf-8")) > 8192

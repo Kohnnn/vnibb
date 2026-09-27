@@ -7,6 +7,9 @@ import { widgetRegistry } from './WidgetRegistry';
 
 jest.mock('@/lib/queries', () => ({ useSymbolsByGroup: jest.fn() }));
 jest.mock('@/lib/api', () => ({ getTransactionFlow: jest.fn() }));
+jest.mock('@/hooks/useWidgetSymbolLink', () => ({ useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }) }));
+jest.mock('@/hooks/useDashboardWidget', () => ({ useDashboardWidget: () => null }));
+jest.mock('@/contexts/WidgetGroupContext', () => ({ useWidgetGroups: () => ({ tickerOverrideFor: () => null }) }));
 const universeQuery = jest.mocked(useSymbolsByGroup);
 const Positioning = widgetRegistry.get('positioning_dashboard')!.component;
 

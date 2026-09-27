@@ -9,8 +9,15 @@ import type { TransactionFlowResponse } from '@/types/equity'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink'
+import { useDashboardWidget } from '@/hooks/useDashboardWidget'
+import { useWidgetGroups } from '@/contexts/WidgetGroupContext'
+import { readTickerScope } from '@/lib/widgetScope'
+import type { WidgetGroupId } from '@/types/widget'
 
 interface PositioningDashboardWidgetProps {
+  id: string
+  widgetGroup?: WidgetGroupId
   symbol?: string
   onSymbolClick?: (symbol: string) => void
   onDataChange?: (data: WidgetDataPayload) => void
@@ -67,7 +74,12 @@ function fmtNet(value: number | null): string {
   return `${sign}${scaled}`
 }
 
-export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: PositioningDashboardWidgetProps) {
+export function PositioningDashboardWidget({ id, symbol, widgetGroup, onSymbolClick, onDataChange }: PositioningDashboardWidgetProps) {
+  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetId: id, widgetType: 'positioning_dashboard', symbol })
+  const { tickerOverrideFor } = useWidgetGroups()
+  const widgetLocation = useDashboardWidget(id)
+  const isDetached = Boolean(tickerOverrideFor(id)) || readTickerScope(widgetLocation?.widget.config).mode === 'override'
+  const selectSymbol = onSymbolClick ?? (isDetached ? undefined : setLinkedSymbol)
   const [group, setGroup] = useState<UniverseGroup>('VN30')
   const [windowDays, setWindowDays] = useState<WindowDays>(5)
 
@@ -220,13 +232,15 @@ export function PositioningDashboardWidget({ onSymbolClick, onDataChange }: Posi
                   className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-tertiary)]/30"
                 >
                   <td className="px-1 py-1">
-                    <button
-                      type="button"
-                      onClick={() => onSymbolClick?.(row.symbol)}
-                      className="font-bold text-[var(--accent-blue)] hover:underline"
-                    >
-                      {row.symbol}
-                    </button>
+                    {selectSymbol ? (
+                      <button
+                        type="button"
+                        onClick={() => selectSymbol(row.symbol)}
+                        className="font-bold text-[var(--accent-blue)] hover:underline"
+                      >
+                        {row.symbol}
+                      </button>
+                    ) : <span title="Ticker local to this widget; use its ticker selector to change it">{row.symbol}</span>}
                   </td>
                   <td className={`px-1 py-1 text-right font-semibold ${tone(row.foreignNet)}`}>{fmtNet(row.foreignNet)}</td>
                   <td className={`px-1 py-1 text-right ${tone(row.proprietaryNet)}`}>{fmtNet(row.proprietaryNet)}</td>

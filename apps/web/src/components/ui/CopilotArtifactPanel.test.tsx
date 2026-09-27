@@ -22,9 +22,17 @@ const mockState = {
     { id: 'personal', name: 'Research', isEditable: true, tabs: [{ id: 'notes', name: 'Notes', widgets: [] }, { id: 'valuation', name: 'Valuation', widgets: [] }] },
   ],
 }
+const mockGetSharedGroups = jest.fn(() => ({ global: { symbol: 'VCI' }, A: { symbol: 'FPT' } }))
+const mockTickerOverrideFor = jest.fn((_id: string): string | null => null)
 
 jest.mock('@/contexts/DashboardContext', () => ({
   useDashboard: () => mockUseDashboard(),
+}))
+jest.mock('@/contexts/WidgetGroupContext', () => ({
+  useWidgetGroups: () => ({ getSharedGroups: mockGetSharedGroups, tickerOverrideFor: mockTickerOverrideFor }),
+}))
+jest.mock('@/contexts/GlobalMarketsSymbolContext', () => ({
+  useGlobalMarketsSymbol: () => ({ appGlobalMarketsSymbol: 'VCI' }),
 }))
 jest.mock('@/lib/vniagentWorkspace', () => ({
   ...jest.requireActual('@/lib/vniagentWorkspace'),
@@ -57,6 +65,7 @@ describe('artifact placement', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockFocus.mockReset()
+    mockTickerOverrideFor.mockImplementation(() => null)
     window.localStorage.clear()
     mockAddWidget.mockImplementation(() => ({ id: 'created-widget' }))
     mockUseDashboard.mockImplementation(() => ({ state: mockState, addWidget: mockAddWidget, setActiveDashboard: mockSetDashboard, setActiveTab: mockSetTab }))
@@ -123,7 +132,7 @@ describe('artifact placement', () => {
   it('opens an existing widget without mutating its dashboard ticker', () => {
     mockUseDashboard.mockImplementation(() => ({ state: { ...mockState, dashboards: [
       ...mockState.dashboards,
-      { id: 'target', name: 'Target', isEditable: true, tabs: [{ id: 'target-tab', name: 'Target tab', widgets: [{ id: 'existing', type: 'price_chart', config: { symbol: 'FPT' } }] }] },
+      { id: 'target', name: 'Target', isEditable: true, tabs: [{ id: 'target-tab', name: 'Target tab', widgets: [{ id: 'existing', type: 'price_chart', config: { tickerScope: 'override', symbol: 'FPT' } }] }] },
     ] }, addWidget: mockAddWidget, setActiveDashboard: mockSetDashboard, setActiveTab: mockSetTab }))
     render(<CopilotArtifactPanel artifacts={[artifact]} />)
 
@@ -131,12 +140,90 @@ describe('artifact placement', () => {
 
     expect(mockFocus).toHaveBeenCalledWith(expect.objectContaining({ dashboardId: 'target', widgetId: 'existing' }), mockSetDashboard, mockSetTab)
   })
+  it('does not offer Open for a VCI-linked chart when the artifact is FPT', () => {
+    mockUseDashboard.mockImplementation(() => ({ state: { ...mockState, dashboards: [
+      ...mockState.dashboards,
+      { id: 'target', name: 'Target', isEditable: true, tabs: [{ id: 'target-tab', name: 'Target tab', widgets: [{ id: 'vci-chart', type: 'price_chart', config: { symbol: 'FPT' } }] }] },
+    ] }, addWidget: mockAddWidget, setActiveDashboard: mockSetDashboard, setActiveTab: mockSetTab }))
+
+    render(<CopilotArtifactPanel artifacts={[artifact]} />)
+
+    expect(screen.queryByRole('button', { name: /open price chart/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add fpt price chart/i })).toBeInTheDocument()
+  })
+
+  it('opens a same-symbol group chart instead of a closer wrong-symbol chart', () => {
+    mockUseDashboard.mockImplementation(() => ({ state: { ...mockState, dashboards: [
+      { ...mockState.dashboards[0], tabs: [{ id: 'system-tab', name: 'Overview', widgets: [{ id: 'wrong-chart', type: 'price_chart', config: {} }] }] },
+      ...mockState.dashboards.slice(1),
+      { id: 'target', name: 'Target', isEditable: true, tabs: [{ id: 'target-tab', name: 'Target tab', widgets: [{ id: 'fpt-chart', type: 'price_chart', widgetGroup: 'A', config: {} }] }] },
+    ] }, addWidget: mockAddWidget, setActiveDashboard: mockSetDashboard, setActiveTab: mockSetTab }))
+
+    render(<CopilotArtifactPanel artifacts={[artifact]} />)
+    fireEvent.click(screen.getByRole('button', { name: /open price chart/i }))
+
+    expect(mockFocus).toHaveBeenCalledWith(expect.objectContaining({ dashboardId: 'target', widgetId: 'fpt-chart' }), mockSetDashboard, mockSetTab)
+    expect(mockAddWidget).not.toHaveBeenCalled()
+  })
+  it('opens an in-memory widget override without changing the shared ticker', () => {
+    mockTickerOverrideFor.mockImplementation((id) => id === 'local-chart' ? 'FPT' : null)
+    mockUseDashboard.mockImplementation(() => ({ state: { ...mockState, dashboards: [
+      ...mockState.dashboards,
+      { id: 'target', name: 'Target', isEditable: true, tabs: [{ id: 'target-tab', name: 'Target tab', widgets: [{ id: 'local-chart', type: 'price_chart', config: {} }] }] },
+    ] }, addWidget: mockAddWidget, setActiveDashboard: mockSetDashboard, setActiveTab: mockSetTab }))
+
+    render(<CopilotArtifactPanel artifacts={[artifact]} />)
+    fireEvent.click(screen.getByRole('button', { name: /open price chart/i }))
+
+    expect(mockFocus).toHaveBeenCalledWith(expect.objectContaining({ widgetId: 'local-chart' }), mockSetDashboard, mockSetTab)
+  })
+
+  it('matches destination workspace group ticker, not the current workspace group ticker', () => {
+    mockUseDashboard.mockImplementation(() => ({ state: { ...mockState, dashboards: [
+      ...mockState.dashboards,
+      { id: 'target', name: 'Target', isEditable: true, widgetGroups: { global: { symbol: 'FPT' } }, tabs: [{ id: 'target-tab', name: 'Target tab', widgets: [{ id: 'target-chart', type: 'price_chart', config: {} }] }] },
+    ] }, addWidget: mockAddWidget, setActiveDashboard: mockSetDashboard, setActiveTab: mockSetTab }))
+
+    render(<CopilotArtifactPanel artifacts={[artifact]} />)
+    fireEvent.click(screen.getByRole('button', { name: /open price chart/i }))
+
+    expect(mockFocus).toHaveBeenCalledWith(expect.objectContaining({ widgetId: 'target-chart' }), mockSetDashboard, mockSetTab)
+  })
+  it('does not open a linked TradingView chart whose effective Global Markets ticker differs', () => {
+    const tradingViewArtifact: CopilotTableArtifact = {
+      ...artifact, widgetTarget: { widgetType: 'tradingview_chart', label: 'Advanced Chart', symbol: 'FPT' },
+    }
+    mockUseDashboard.mockImplementation(() => ({ state: { ...mockState, dashboards: [
+      ...mockState.dashboards,
+      { id: 'target', name: 'Target', isEditable: true, globalMarketsSymbol: 'VCI', tabs: [{ id: 'target-tab', name: 'Target tab', widgets: [{ id: 'linked-chart', type: 'tradingview_chart', config: { symbol: 'FPT', useLinkedSymbol: true } }] }] },
+    ] }, addWidget: mockAddWidget, setActiveDashboard: mockSetDashboard, setActiveTab: mockSetTab }))
+
+    render(<CopilotArtifactPanel artifacts={[tradingViewArtifact]} />)
+
+    expect(screen.queryByRole('button', { name: /open advanced chart/i })).not.toBeInTheDocument()
+  })
+
+  it('opens an unlinked TradingView chart at its own ticker', () => {
+    const tradingViewArtifact: CopilotTableArtifact = {
+      ...artifact, widgetTarget: { widgetType: 'tradingview_chart', label: 'Advanced Chart', symbol: 'FPT' },
+    }
+    mockUseDashboard.mockImplementation(() => ({ state: { ...mockState, dashboards: [
+      ...mockState.dashboards,
+      { id: 'target', name: 'Target', isEditable: true, globalMarketsSymbol: 'VCI', tabs: [{ id: 'target-tab', name: 'Target tab', widgets: [{ id: 'unlinked-chart', type: 'tradingview_chart', config: { symbol: 'FPT', useLinkedSymbol: false } }] }] },
+    ] }, addWidget: mockAddWidget, setActiveDashboard: mockSetDashboard, setActiveTab: mockSetTab }))
+
+    render(<CopilotArtifactPanel artifacts={[tradingViewArtifact]} />)
+    fireEvent.click(screen.getByRole('button', { name: /open advanced chart/i }))
+
+    expect(mockFocus).toHaveBeenCalledWith(expect.objectContaining({ widgetId: 'unlinked-chart' }), mockSetDashboard, mockSetTab)
+  })
 })
 
 describe('artifact destination memory', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockFocus.mockReset()
+    mockTickerOverrideFor.mockImplementation(() => null)
     window.localStorage.clear()
     mockUseDashboard.mockImplementation(() => ({ state: mockState, addWidget: mockAddWidget, setActiveDashboard: mockSetDashboard, setActiveTab: mockSetTab }))
   })

@@ -287,6 +287,18 @@ export function WidgetWrapper({
     // Get current group details if assigned
     const configuredScope = readTickerScope(currentWidget?.config, isTradingViewWidget(widgetType) && usesTradingViewWidgetSymbol(widgetType));
     const [tickerScope, setTickerScope] = useState<TickerScope>(configuredScope);
+    const previousConfiguredScope = useRef(configuredScope);
+    useEffect(() => {
+        const previous = previousConfiguredScope.current;
+        if (previous.mode === configuredScope.mode && previous.symbol === configuredScope.symbol) return;
+        previousConfiguredScope.current = configuredScope;
+        setTickerScope(configuredScope);
+        if (configuredScope.mode === 'override' && configuredScope.symbol) {
+            setWidgetTickerOverride(id, configuredScope.symbol);
+        } else {
+            clearWidgetTickerOverride(id);
+        }
+    }, [configuredScope.mode, configuredScope.symbol, id, setWidgetTickerOverride, clearWidgetTickerOverride]);
     const isTradingViewLinkedWidget = Boolean(
         currentWidget &&
         isTradingViewWidget(widgetType) &&

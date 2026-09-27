@@ -14,7 +14,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import delete
-
 from vnibb.api.v1 import prediction_markets as router
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.models.prediction_market_intraday_snapshot import (
@@ -419,3 +418,49 @@ async def test_missing_price_vector_is_not_zero_probability(client, test_db):
     assert consensus["consensus_yes_price"] == 0
     assert consensus["sources"][0]["volume"] == 1
     assert [row.source_id for row in await _load_active_markets(test_db)] == ["observed-zero"]
+
+
+@pytest.mark.asyncio
+async def test_consensus_missing_quotes_have_no_observed_volume(client, test_db):
+    missing = _market(source="kalshi", source_id="missing", question="CPI missing?", volume=100)
+    missing.outcome_prices = [0, 0]
+    malformed = _market(source="kalshi", source_id="malformed", question="CPI malformed?", volume=200)
+    malformed.outcome_prices = [0.4, None]
+    test_db.add_all([missing, malformed])
+    await test_db.commit()
+
+    response = (await client.get("/api/v1/prediction-markets/consensus", params={"query": "CPI"})).json()
+    assert response["n_markets"] == 2
+    assert response["consensus_yes_price"] is None
+    assert response["sources"][0]["yes_price"] is None
+    assert response["sources"][0]["volume"] is None
+
+
+@pytest.mark.asyncio
+async def test_consensus_null_observed_volume_excludes_invalid_quotes(client, test_db):
+    observed = _market(source="polymarket", source_id="observed", question="CPI observed?", yes_price=0.6)
+    missing = _market(source="polymarket", source_id="missing", question="CPI missing?", volume=100)
+    missing.outcome_prices = [0, 0]
+    test_db.add_all([observed, missing])
+    await test_db.commit()
+
+    response = (await client.get("/api/v1/prediction-markets/consensus", params={"query": "CPI"})).json()
+    assert response["n_markets"] == 2
+    assert response["consensus_yes_price"] == pytest.approx(0.6)
+    assert response["sources"][0]["yes_price"] == pytest.approx(0.6)
+    assert response["sources"][0]["volume"] is None
+
+
+@pytest.mark.asyncio
+async def test_consensus_observed_zero_volume_remains_zero(client, test_db):
+    observed = _market(source="kalshi", source_id="observed", question="CPI observed?", yes_price=0, volume=0)
+    missing = _market(source="kalshi", source_id="missing", question="CPI missing?", volume=100)
+    missing.outcome_prices = [0, 0]
+    test_db.add_all([observed, missing])
+    await test_db.commit()
+
+    response = (await client.get("/api/v1/prediction-markets/consensus", params={"query": "CPI"})).json()
+    assert response["n_markets"] == 2
+    assert response["consensus_yes_price"] == 0
+    assert response["sources"][0]["yes_price"] == 0
+    assert response["sources"][0]["volume"] == 0

@@ -25,13 +25,45 @@ _BUCKET_TABLES = (
     ("prediction_market_intraday_snapshots", INTRADAY_UNIQUE, "15 minutes"),
 )
 
+BUCKET_TRIGGER_FUNCTION = "set_prediction_market_snapshot_bucket_at"
+
+
+def _install_postgres_bucket_trigger(table: str, cadence: str) -> None:
+    trigger = f"trg_{table}_bucket_at"
+    op.execute(f"DROP TRIGGER IF EXISTS {trigger} ON {table}")
+    op.execute(f"""
+        CREATE TRIGGER {trigger}
+        BEFORE INSERT OR UPDATE OF captured_at, bucket_at ON {table}
+        FOR EACH ROW EXECUTE FUNCTION {BUCKET_TRIGGER_FUNCTION}('{cadence}')
+    """)
+
+
+def _create_postgres_bucket_function() -> None:
+    op.execute(f"""
+        CREATE OR REPLACE FUNCTION {BUCKET_TRIGGER_FUNCTION}() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            IF TG_ARGV[0] = 'day' THEN
+                NEW.bucket_at := date_trunc('day', NEW.captured_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
+            ELSE
+                NEW.bucket_at := to_timestamp(floor(extract(epoch from NEW.captured_at) / 900) * 900);
+            END IF;
+            RETURN NEW;
+        END;
+        $$
+    """)
+
 
 def _add_snapshot_buckets() -> None:
     bind = op.get_bind()
     postgres = bind.dialect.name == "postgresql"
+    if postgres:
+        _create_postgres_bucket_function()
     for table, _, cadence in _BUCKET_TABLES:
         if "bucket_at" not in {column["name"] for column in sa.inspect(bind).get_columns(table)}:
             op.add_column(table, sa.Column("bucket_at", sa.DateTime(timezone=True), nullable=True))
+        if postgres:
+            _install_postgres_bucket_trigger(table, cadence)
         if postgres:
             expression = (
                 "date_trunc('day', captured_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
@@ -139,5 +171,9 @@ def downgrade() -> None:
         op.drop_index(DAILY_UNIQUE, "prediction_market_snapshots")
         op.drop_index(MARKET_ADMISSION_INDEX, "prediction_markets")
         op.drop_index(MARKET_FRESH_INDEX, "prediction_markets")
+    if op.get_bind().dialect.name == "postgresql":
+        for table, _, _ in _BUCKET_TABLES:
+            op.execute(f"DROP TRIGGER IF EXISTS trg_{table}_bucket_at ON {table}")
+        op.execute(f"DROP FUNCTION IF EXISTS {BUCKET_TRIGGER_FUNCTION}()")
     for table, _, _ in _BUCKET_TABLES:
         op.drop_column(table, "bucket_at")

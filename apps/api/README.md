@@ -37,16 +37,20 @@ High-performance REST API providing Vietnamese stock market data. Built with Fas
 - **Database:** Self-hosted database stack
 - **ORM:** SQLAlchemy 2.0 (async)
 - **Cache:** Cache tier with in-process memory fallback
-- **Data:** vnstock post-3.4.2 / 3.5.x runtime line (KBS-first, TCBS removed)
+- **Data:** VNStock 4.0.9 free tier by default (KBS, VCI and DNSE supported; no TCBS)
 
 ---
 
 ## VNStock Alignment
 
-- Public upstream docs and version history at `vnstocks.com` currently document stable releases through `v3.4.2`.
-- Upstream GitHub `main` includes newer March 2026 changes, including TCBS removal and KBS-first runtime behavior.
-- VNIBB currently pins `vnstock>=3.5.0,<3.6` in `apps/api/pyproject.toml`, so this backend assumes the post-TCBS source set: `KBS` (default), `VCI`, and `DNSE`.
-- `mrgoonie/vnstock-agent` is the MCP/CLI companion project. Its README defaults `VNSTOCK_SOURCE=VCI`, so set `KBS` explicitly when you want parity with VNIBB.
+- The API requires `vnstock>=4.0.4,<4.1`. CI and immutable release images install
+  SHA-256-constrained VNStock 4.0.9 and VNAI 2.6.2 publisher wheels from
+  `constraints-vnstock.txt` while unrelated packages remain on public PyPI.
+- Free-tier startup does not import premium modules. A premium image needs its
+  own verified package provenance, source-license decision and runtime checks;
+  installing VNAI 2.6.2 is not proof that every historical 2.4.x hook is compatible.
+- Configure `VNSTOCK_SOURCE=KBS` for the current KBS-first fallback; VCI and DNSE
+  are alternative sources. Do not configure retired TCBS.
 
 ---
 
@@ -186,10 +190,11 @@ Premium package strategy:
 - Build a premium image with the BuildKit `vnstock_api_key` secret and a verified installer SHA-256, then deploy the published image digest.
 
 VNStock alignment notes:
-- Stable public docs currently point to `v3.4.2`, while GitHub `main` carries newer runtime changes used by VNIBB.
-- `TCBS` is removed in the newer upstream runtime line and should not be configured here.
-- Use `VNSTOCK_SOURCE=KBS` (recommended), `VCI`, or `DNSE`.
-- OSS screener coverage changed upstream; keep premium modules installed (`vnstock_data`, `vnstock_ta`, `vnstock_pipeline`, `vnstock_news`, `vnii`) for full legacy screener parity.
+- Use `VNSTOCK_SOURCE=KBS` (recommended), `VCI`, or `DNSE`; TCBS is retired.
+- `VNSTOCK_RUNTIME_TIER=free` keeps optional premium imports off the startup path.
+- Premium modules (`vnstock_data`, `vnstock_ta`, `vnstock_pipeline`,
+  `vnstock_news`, `vnii`) require separately verified sponsor installation and
+  compatibility before enabling `VNSTOCK_RUNTIME_TIER=premium`.
 
 ---
 
