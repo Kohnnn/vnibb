@@ -201,6 +201,12 @@ class MatrixAvailablePeriods(MatrixModel):
     quarter: list[str]
 
 
+class MatrixSelectedPeriods(MatrixModel):
+    anchor_symbol: Symbol
+    playbook_id: str
+    periods_by_symbol: dict[Symbol, MatrixAvailablePeriods]
+
+
 class MatrixPreparation(MatrixModel):
     anchor_symbol: str
     playbook_id: str

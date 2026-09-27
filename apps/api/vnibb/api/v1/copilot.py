@@ -10,7 +10,7 @@ Provides:
 import json
 from typing import Any, Literal
 
-from fastapi import APIRouter, File, Header, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, model_validator
 from fastapi.responses import StreamingResponse
 
@@ -204,13 +204,20 @@ async def chat_stream(
     """
     matrix_context = None
     if request.matrix_selection is not None:
-        user = await get_current_user(authorization)
-        async with async_session_maker() as db:
-            packet = await resolve_matrix_selection(
-                db, user.id, request.matrix_selection.model_dump(mode="json")
-            )
-        require_matrix_export_rights(packet)
-        matrix_context = build_matrix_copilot_context(packet)
+        try:
+            user = await get_current_user(authorization)
+            async with async_session_maker() as db:
+                packet = await resolve_matrix_selection(
+                    db, user.id, request.matrix_selection.model_dump(mode="json")
+                )
+            require_matrix_export_rights(packet)
+            matrix_context = build_matrix_copilot_context(packet)
+        except HTTPException as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=exc.detail,
+                headers={**(exc.headers or {}), "Cache-Control": "no-store"},
+            ) from exc
 
     async def generate():
         try:
@@ -283,7 +290,7 @@ async def chat_stream(
         generate(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-store" if matrix_context is not None else "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },

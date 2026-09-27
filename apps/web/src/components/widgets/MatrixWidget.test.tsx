@@ -26,6 +26,10 @@ beforeEach(() => {
   jest.spyOn(matrixApi, 'playbooks').mockResolvedValue([{ playbook_id: 'nonfinancial', label: 'Nonfinancial', description: 'Stored classification required.', definition_revision: 'definition-1', dimensions: snapshot.dimensions }]);
   jest.spyOn(matrixApi, 'fixture').mockResolvedValue(snapshot);
   jest.spyOn(matrixApi, 'prepare').mockResolvedValue({ anchor_symbol: 'FPT', playbook_id: 'nonfinancial', symbols: ['FPT', 'CMG'], peer_basis: 'Same stored industry', periods: ['2025'], periods_by_symbol: { FPT: { year: ['2025'], quarter: ['2025-Q2'] }, CMG: { year: ['2025'], quarter: ['2025-Q2'] } }, period_type: 'year', limitations: [] });
+  jest.spyOn(matrixApi, 'periods').mockImplementation(async (anchor, symbols) => {
+    if (symbols.includes('XYZ')) throw new Error('Every selected company must have an active stored company record');
+    return { anchor_symbol: anchor, playbook_id: 'nonfinancial', periods_by_symbol: Object.fromEntries(symbols.map((item) => [item, { year: ['2025'], quarter: ['2025-Q2'] }])) };
+  });
   jest.spyOn(matrixApi, 'create').mockResolvedValue({ ...snapshot, synthetic: false });
   jest.spyOn(matrixApi, 'evidence').mockResolvedValue([]);
   jest.spyOn(matrixApi, 'selection');
@@ -62,11 +66,15 @@ it('offers latest common year on shortlist edits and independent common quarters
       ABC: { year: ['2024'], quarter: ['2025-Q1'] },
     },
   });
+  jest.spyOn(matrixApi, 'periods').mockResolvedValue({ anchor_symbol: 'FPT', playbook_id: 'nonfinancial', periods_by_symbol: {
+    FPT: { year: ['2025', '2024'], quarter: ['2025-Q2', '2025-Q1'] },
+    CMG: { year: ['2025', '2024'], quarter: ['2025-Q2', '2025-Q1'] },
+  } });
   render(<MatrixWidget id="matrix" symbol="FPT" />);
   fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
   await waitFor(() => expect(screen.getByLabelText('Year')).toHaveValue('2024'));
   fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, CMG' } });
-  expect(screen.getByLabelText('Year')).toHaveValue('2025');
+  await waitFor(() => expect(screen.getByLabelText('Year')).toHaveValue('2025'));
   expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: 'Create snapshot' }));
   await waitFor(() => expect(matrixApi.create).toHaveBeenCalledWith(expect.objectContaining({ symbols: ['FPT', 'CMG'], period: '2025', period_type: 'year' })));
@@ -90,12 +98,16 @@ it('retains a selected common period on shortlist edits and never offers absent 
       ABC: { year: ['2024', '2023'], quarter: ['2025-Q1'] },
     },
   });
+  jest.spyOn(matrixApi, 'periods').mockImplementation(async (anchor, symbols) => {
+    if (symbols.includes('XYZ')) throw new Error('Unknown company');
+    return { anchor_symbol: anchor, playbook_id: 'nonfinancial', periods_by_symbol: Object.fromEntries(symbols.map((item) => [item, { year: ['2025', '2024', '2023'], quarter: ['2025-Q2', '2025-Q1'] }])) };
+  });
   render(<MatrixWidget id="matrix" symbol="FPT" />);
   fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
   await waitFor(() => expect(screen.getByLabelText('Year')).toHaveValue('2024'));
   fireEvent.change(screen.getByLabelText('Year'), { target: { value: '2023' } });
   fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, CMG' } });
-  expect(screen.getByLabelText('Year')).toHaveValue('2023');
+  await waitFor(() => expect(screen.getByLabelText('Year')).toHaveValue('2023'));
   fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, XYZ' } });
   expect(screen.getByLabelText('Year')).toHaveValue('');
   expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeDisabled();
@@ -122,6 +134,62 @@ it('enables a stored common quarter when no annual year is shared', async () => 
   fireEvent.click(screen.getByRole('button', { name: 'Create snapshot' }));
   await waitFor(() => expect(matrixApi.create).toHaveBeenCalledWith(expect.objectContaining({ period: '2025-Q1', period_type: 'quarter' })));
 });
+
+it('authorizes a manually added eleventh eligible peer for annual and quarter creation', async () => {
+  mockUser = { id: 'owner-a', provider: 'supabase' };
+  const proposed = ['FPT', ...Array.from({ length: 9 }, (_, index) => `P${index}`)];
+  jest.spyOn(matrixApi, 'prepare').mockResolvedValue({ anchor_symbol: 'FPT', playbook_id: 'nonfinancial', symbols: proposed, peer_basis: 'Stored peers', periods: [], period_type: 'year', limitations: [], periods_by_symbol: Object.fromEntries(proposed.map((item) => [item, { year: ['2024'], quarter: ['2024-Q1'] }])) });
+  jest.spyOn(matrixApi, 'periods').mockImplementation(async (anchor, selected) => ({ anchor_symbol: anchor, playbook_id: 'nonfinancial', periods_by_symbol: Object.fromEntries(selected.map((item) => [item, { year: ['2025'], quarter: ['2025-Q2'] }])) }));
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  await screen.findByText('Stored peers');
+  fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, P9' } });
+  expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeDisabled();
+  await waitFor(() => expect(screen.getByLabelText('Year')).toHaveValue('2025'));
+  fireEvent.click(screen.getByRole('button', { name: 'Create snapshot' }));
+  await waitFor(() => expect(matrixApi.create).toHaveBeenCalledWith(expect.objectContaining({ symbols: ['FPT', 'P9'], period: '2025' })));
+  fireEvent.change(screen.getByLabelText('Period basis'), { target: { value: 'quarter' } });
+  expect(screen.getByLabelText('Quarter')).toHaveValue('2025-Q2');
+  fireEvent.click(screen.getByRole('button', { name: 'Create snapshot' }));
+  await waitFor(() => expect(matrixApi.create).toHaveBeenLastCalledWith(expect.objectContaining({ symbols: ['FPT', 'P9'], period: '2025-Q2' })));
+  expect(matrixApi.periods).toHaveBeenCalledWith('FPT', ['FPT', 'P9']);
+});
+
+it('ignores an obsolete edited shortlist response and keeps ineligible peers blocked', async () => {
+  mockUser = { id: 'owner-a', provider: 'supabase' };
+  const pending = Promise.withResolvers<{ anchor_symbol: string; playbook_id: string; periods_by_symbol: Record<string, { year: string[]; quarter: string[] }> }>();
+  jest.spyOn(matrixApi, 'periods').mockImplementation((_anchor, selected) => selected.includes('BANK') ? pending.promise : Promise.reject(new Error('Unknown company')));
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  await screen.findByText('Same stored industry');
+  fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, BANK' } });
+  await waitFor(() => expect(matrixApi.periods).toHaveBeenCalledWith('FPT', ['FPT', 'BANK']));
+  fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, UNKNOWN' } });
+  await act(async () => pending.resolve({ anchor_symbol: 'FPT', playbook_id: 'nonfinancial', periods_by_symbol: { FPT: { year: ['2025'], quarter: ['2025-Q2'] }, BANK: { year: ['2025'], quarter: ['2025-Q2'] } } }));
+  await screen.findByText('Unknown company');
+  expect(screen.getByLabelText('Year')).toHaveValue('');
+  expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeDisabled();
+});
+
+
+it('keeps edited shortlist and selected year when preparing the same anchor again', async () => {
+  mockUser = { id: 'owner-a', provider: 'supabase' };
+  jest.spyOn(matrixApi, 'prepare').mockResolvedValue({ anchor_symbol: 'FPT', playbook_id: 'nonfinancial', symbols: ['FPT', 'CMG'], peer_basis: 'Stored peers', periods: ['2025', '2024'], period_type: 'year', limitations: [], periods_by_symbol: {
+    FPT: { year: ['2025', '2024'], quarter: [] }, CMG: { year: ['2025', '2024'], quarter: [] },
+  } });
+  jest.spyOn(matrixApi, 'periods').mockResolvedValue({ anchor_symbol: 'FPT', playbook_id: 'nonfinancial', periods_by_symbol: { FPT: { year: ['2025', '2024'], quarter: [] }, NEW: { year: ['2025', '2024'], quarter: [] } } });
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  await waitFor(() => expect(screen.getByLabelText('Year')).toHaveValue('2025'));
+  fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, NEW' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('Year'), { target: { value: '2024' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  await waitFor(() => expect(matrixApi.prepare).toHaveBeenCalledTimes(2));
+  expect(screen.getByLabelText('Companies · maximum 10')).toHaveValue('FPT, NEW');
+  expect(screen.getByLabelText('Year')).toHaveValue('2024');
+});
+
 
 it('drops a pending owned snapshot when the authenticated account changes', async () => {
   mockUser = { id: 'owner-a', provider: 'supabase' };

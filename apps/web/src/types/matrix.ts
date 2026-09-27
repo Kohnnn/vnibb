@@ -95,6 +95,11 @@ export interface MatrixPlaybook {
   definition_revision: string;
   dimensions: MatrixDimension[];
 }
+export interface MatrixSelectedPeriods {
+  anchor_symbol: string;
+  playbook_id: string;
+  periods_by_symbol: Record<string, { year: string[]; quarter: string[] }>;
+}
 export interface MatrixPreparation {
   anchor_symbol: string;
   playbook_id: string;

@@ -35,7 +35,7 @@ from typing import Final, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import Float, and_, case, cast, exists, func, or_, select
+from sqlalchemy import Float, and_, case, cast, exists, func, literal_column, or_, select
 from sqlalchemy import String as SA_String
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,6 +54,7 @@ from vnibb.services.prediction_market_estimator import (
     estimate_recession,
 )
 from vnibb.services.prediction_market_policy import (
+    MAX_MARKET_OUTCOMES,
     active_market_candidates,
     observed_yes_price,
     snapshot_eligibility,
@@ -280,7 +281,11 @@ async def list_prediction_markets(
     market = PredictionMarket if active is False else active_market_candidates(
         datetime.now(UTC), (source,) if source else KNOWN_PREDICTION_MARKET_SOURCES
     )
-    stmt = select(market).order_by(market.updated_at.desc(), market.id.asc())
+    stmt = select(market)
+    if active is False:
+        stmt = stmt.order_by(market.end_date.is_(None), market.end_date.asc(), market.id.asc())
+    else:
+        stmt = stmt.order_by(market.updated_at.desc(), market.id.asc())
     if source is not None:
         stmt = stmt.where(market.source == source)
     if active is False:
@@ -644,26 +649,54 @@ def _topic_matches(keywords: tuple[str, ...], *, include_slug: bool = False, mar
 
 
 def _observed_price_sql(market, db: AsyncSession):
-    prices = []
-    for index in (0, 1):
-        value = market.outcome_prices[index]
-        numeric = (
-            func.json_typeof(value) == "number"
-            if db.bind.dialect.name == "postgresql"
-            else func.json_type(market.outcome_prices, f"$[{index}]").in_(("integer", "real"))
-        )
-        prices.append(case((numeric, cast(value.as_string(), Float))))
-    first, second = prices
-    valid = and_(first.between(0, 1), or_(first > 0, second > 0))
+    postgres = db.bind.dialect.name == "postgresql"
+    value = market.outcome_prices[0]
+    first_numeric = (
+        func.json_typeof(value) == "number"
+        if postgres
+        else func.json_type(market.outcome_prices, "$[0]").in_(("integer", "real"))
+    )
+    first = case((first_numeric, cast(value.as_string(), Float)))
+    is_array = (
+        func.json_typeof(market.outcome_prices) == "array"
+        if postgres
+        else func.json_type(market.outcome_prices) == "array"
+    )
+    bounded = and_(
+        is_array,
+        case((is_array, func.json_array_length(market.outcome_prices)), else_=0).between(1, MAX_MARKET_OUTCOMES),
+    )
+    array = case(
+        (bounded, market.outcome_prices),
+        else_=literal_column("'[]'::json") if postgres else "[]",
+    )
+    elements = (
+        func.json_array_elements(array).table_valued("value")
+        if postgres
+        else func.json_each(array).table_valued("value", "type")
+    )
+    numeric = (
+        func.json_typeof(elements.c.value) == "number"
+        if postgres
+        else elements.c.type.in_(("integer", "real"))
+    )
+    price = case((numeric, cast(cast(elements.c.value, SA_String), Float)))
+    malformed = or_(~numeric, price < 0, price > 1)
+    valid = and_(
+        bounded,
+        first_numeric,
+        ~exists(select(1).select_from(elements).where(malformed)),
+        exists(select(1).select_from(elements).where(price > 0)),
+    )
     return first, valid
 
 
 def _topic_aggregates(db: AsyncSession):
     """Return source-level counts and weighted topic sums, never market objects.
 
-    SQL JSON type checks preserve the old Python rule: the first price must be
-    numeric (not a string, null, object or boolean). Both dialects are used by
-    this project: PostgreSQL in production and SQLite in API fixtures.
+    SQL JSON type checks apply the shared price rule to every admitted outcome:
+    every price is numeric and within [0, 1], and at least one is positive.
+    Both PostgreSQL and SQLite use bounded, correlated JSON expansion.
     """
     market = active_market_candidates(datetime.now(UTC))
     price, numeric = _observed_price_sql(market, db)

@@ -9,13 +9,14 @@ from vnibb.schemas.matrix import (
     MatrixEvidence,
     MatrixPlaybook,
     MatrixPreparation,
+    MatrixSelectedPeriods,
     MatrixResearchRequest,
     MatrixReview,
     MatrixSelection,
     MatrixSnapshot,
 )
 from vnibb.services import matrix_service
-from vnibb.services.matrix_observations import prepare_matrix
+from vnibb.services.matrix_observations import prepare_matrix, selected_matrix_periods
 from vnibb.services.matrix_playbooks import PLAYBOOKS
 
 router = APIRouter()
@@ -48,6 +49,14 @@ async def fixture_evidence(result_id: Annotated[str, Query(min_length=1, max_len
 async def prepare(db: DatabaseDep, anchor_symbol: Annotated[str, Query(pattern=r"^[A-Z0-9]{1,12}$")]):
     try:
         return await prepare_matrix(db, anchor_symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/periods", response_model=MatrixSelectedPeriods)
+async def periods(db: DatabaseDep, anchor_symbol: Annotated[str, Query(pattern=r"^[A-Z0-9]{1,12}$")], symbols: Annotated[list[str], Query(min_length=2, max_length=10)]):
+    try:
+        return await selected_matrix_periods(db, anchor_symbol, symbols)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

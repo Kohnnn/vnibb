@@ -100,11 +100,18 @@ def request_body(record):
 async def test_matrix_send_reaches_actual_provider_payload_without_truncation(matrix_chat, test_db):
     client, record, completion = matrix_chat
     body = request_body(record)
+    question = "Which company has the most reliable cash conversion, and why?"
+    body["message"] = "Compare the ten frozen selected cells. " + "context " * 235 + question
+    assert len(body["message"]) < 2000
     expected = await resolve_matrix_selection(test_db, "matrix-owner", body["matrix_selection"])
     response = await client.post("/chat/stream", json=body, headers=auth_header())
     assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-store"
     completion.assert_awaited_once()
     payload = completion.call_args.args[1]
+    assert payload["messages"][-1] == {"role": "user", "content": body["message"]}
+    assert payload["messages"][-1]["content"].endswith(question)
     serialized = payload["messages"][2]["content"].split("```json\n", 1)[1].rsplit("\n```", 1)[0]
     context = json.loads(serialized)
     assert len(serialized) > 16000
@@ -129,6 +136,9 @@ async def test_matrix_send_rejects_unbound_or_wrong_owner(matrix_chat, user, sta
     client, record, completion = matrix_chat
     response = await client.post("/chat/stream", json=request_body(record), headers=auth_header(user) if user else {})
     assert response.status_code == status
+    assert response.headers["cache-control"] == "no-store"
+    if status == 401:
+        assert response.headers["www-authenticate"] == "Bearer"
     completion.assert_not_awaited()
 
 
@@ -141,6 +151,7 @@ async def test_matrix_send_reauthorizes_revoked_selection(matrix_chat, test_db):
     await test_db.commit()
     response = await client.post("/chat/stream", json=body, headers=auth_header())
     assert response.status_code == 404
+    assert response.headers["cache-control"] == "no-store"
     completion.assert_not_awaited()
 
 
@@ -150,6 +161,7 @@ async def test_matrix_send_requires_explicit_export_rights(matrix_chat, monkeypa
     monkeypatch.delenv("MATRIX_EXPORT_ALLOWED_SOURCES", raising=False)
     response = await client.post("/chat/stream", json=request_body(record), headers=auth_header())
     assert response.status_code == 403
+    assert response.headers["cache-control"] == "no-store"
     completion.assert_not_awaited()
 
 
@@ -182,6 +194,8 @@ async def test_normal_chat_does_not_require_matrix_auth(matrix_chat, monkeypatch
     monkeypatch.setattr(copilot.ai_context_service, "build_runtime_context", normal_context)
     response = await client.post("/chat/stream", json={"message": "Analyze VNM"})
     assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache"
     normal_context.assert_awaited_once()
     completion.assert_awaited_once()
 
@@ -191,6 +205,7 @@ async def test_matrix_provider_errors_do_not_echo_credentials(matrix_chat, caplo
     client, record, completion = matrix_chat
     completion.side_effect = RuntimeError("provider echoed Authorization: secret-test-token")
     response = await client.post("/chat/stream", json=request_body(record), headers=auth_header())
+    assert response.headers["cache-control"] == "no-store"
     assert "secret-test-token" not in response.text
     assert "secret-test-token" not in caplog.text
     assert "Matrix provider request failed" in response.text

@@ -73,8 +73,10 @@ explicit **Create** action over an anchor company and an editable peer shortlist
 (2–10) at a common fiscal year, with a common-quarter override, evaluated against
 one of four curated sector playbooks: non-financial quality, banks, insurers,
 securities. The explicit preparation response lists available years and quarters
-per proposed symbol; editing the shortlist recomputes only their common periods,
-without executing research.
+per proposed symbol; editing a 2–10-company shortlist requests a bounded,
+read-only `/matrix/periods` lookup for those active, same-playbook companies
+and recomputes only their common periods. Neither lookup executes research or
+calls a provider.
 
 Reading the grid is always read-only. Changing density, filter, sort, pinned
 company, column width or open inspector never executes research and never calls a

@@ -81,6 +81,46 @@ async def test_spread_and_consensus_aggregate_all_matching_markets(client, test_
 
 
 @pytest.mark.asyncio
+async def test_multichoice_zero_price_counts_but_malformed_vectors_do_not(client, test_db):
+    zero = _market(source="polymarket", source_id="zero", question="CPI rises?", yes_price=0)
+    zero.outcomes = ["Yes", "No", "Other"]
+    zero.outcome_prices = [0, 0, 1]
+    eighty = _market(source="polymarket", source_id="eighty", question="CPI falls?", yes_price=0.8)
+    invalid_tail = _market(source="polymarket", source_id="tail", question="CPI changes?", yes_price=0.9)
+    invalid_tail.outcome_prices = [0.9, 0.1, "invalid"]
+    invalid_range = _market(source="polymarket", source_id="range", question="CPI stabilizes?", yes_price=0.9)
+    invalid_range.outcome_prices = [0.9, 0.1, 1.1]
+    missing = _market(source="polymarket", source_id="missing", question="CPI flat?", yes_price=0.9)
+    missing.outcome_prices = []
+    all_zero = _market(source="polymarket", source_id="all-zero", question="CPI unchanged?", yes_price=0)
+    all_zero.outcome_prices = [0, 0, 0]
+    invalid_null = _market(source="polymarket", source_id="null", question="CPI threshold?", yes_price=0.9)
+    invalid_null.outcome_prices = [0.9, 0.1, None]
+    invalid_bool = _market(source="polymarket", source_id="bool", question="CPI ceiling?", yes_price=0.9)
+    invalid_bool.outcome_prices = [0.9, 0.1, True]
+    oversized = _market(source="polymarket", source_id="oversized", question="CPI overshoots?", yes_price=0.9)
+    oversized.outcome_prices = [0.9] + [0.1] * 32
+    kalshi = _market(source="kalshi", source_id="k-zero", question="CPI rises?", yes_price=0)
+    kalshi.outcome_prices = [0, 1]
+    test_db.add_all([zero, eighty, invalid_tail, invalid_range, invalid_null, invalid_bool, all_zero, oversized, missing, kalshi])
+    await test_db.commit()
+
+    consensus = (await client.get("/api/v1/prediction-markets/consensus", params={"query": "CPI"})).json()
+    assert consensus["consensus_yes_price"] == pytest.approx(0.8 / 3)
+    assert next(source for source in consensus["sources"] if source["source"] == "polymarket")["yes_price"] == pytest.approx(0.4)
+
+    spread = (await client.get("/api/v1/prediction-markets/spread")).json()
+    cpi_spread = next(topic for topic in spread["topics"] if topic["topic"] == "cpi")
+    assert cpi_spread["polymarket_consensus"] == pytest.approx(0.4)
+    assert cpi_spread["kalshi_consensus"] == 0
+    assert cpi_spread["gap"] == pytest.approx(0.4)
+
+    cross = (await client.get("/api/v1/prediction-markets/cross-calibration")).json()
+    cpi_cross = next(topic for topic in cross["topics"] if topic["topic"] == "cpi")
+    assert {source["source"]: source["consensus_yes_price"] for source in cpi_cross["sources"]} == pytest.approx({"polymarket": 0.4, "kalshi": 0})
+
+
+@pytest.mark.asyncio
 async def test_alerts_select_nearest_baseline_and_rank_after_threshold(client, test_db):
     now = datetime.now(UTC)
     for source_id, price, previous in (("p-1", 0.6, 0.5), ("p-2", 0.9, 0.3), ("p-3", 0.51, 0.5)):
@@ -155,6 +195,41 @@ async def test_inactive_history_merges_live_and_archive_without_dropping_early_r
     assert all_rows["data"] == []
     active = (await client.get("/api/v1/prediction-markets", params={"active": "true"})).json()
     assert active["data"] == []
+
+
+@pytest.mark.asyncio
+async def test_inactive_limit_orders_live_rows_by_end_date_before_limiting(client, test_db):
+    late_end = _market(source="polymarket", source_id="late-end", question="Closed CPI?", yes_price=0.4)
+    late_end.active = False
+    late_end.end_date = datetime(2026, 6, 1, tzinfo=UTC)
+    late_end.updated_at = datetime(2026, 5, 1, tzinfo=UTC)
+    early_end = _market(source="kalshi", source_id="early-end", question="Closed CPI?", yes_price=0.2)
+    early_end.active = False
+    early_end.end_date = datetime(2025, 6, 1, tzinfo=UTC)
+    early_end.updated_at = datetime(2025, 5, 1, tzinfo=UTC)
+    test_db.add_all([late_end, early_end])
+    await test_db.commit()
+
+    response = await client.get("/api/v1/prediction-markets", params={"active": "false", "limit": 1})
+    assert response.status_code == 200
+    assert [row["source_id"] for row in response.json()["data"]] == ["early-end"]
+
+
+@pytest.mark.asyncio
+async def test_current_limit_keeps_updated_recency_order(client, test_db):
+    now = datetime.now(UTC)
+    recent = _market(source="polymarket", source_id="recent", question="CPI tomorrow?", yes_price=0.8)
+    recent.updated_at = now
+    recent.end_date = now + timedelta(days=30)
+    older = _market(source="polymarket", source_id="older", question="CPI tomorrow?", yes_price=0.4)
+    older.updated_at = now - timedelta(hours=1)
+    older.end_date = now + timedelta(days=1)
+    test_db.add_all([older, recent])
+    await test_db.commit()
+
+    response = await client.get("/api/v1/prediction-markets", params={"limit": 1})
+    assert response.status_code == 200
+    assert [row["source_id"] for row in response.json()["data"]] == ["recent"]
 
 
 @pytest.mark.asyncio

@@ -62,7 +62,7 @@ live in `docs/`.
   unapproved providers (including configured `family:unknown`), so snapshot
   references are never bearer grants.
 - Research Matrix is available in the Investor's Widget Library under AI & Research; adding it to a personal tab keeps the existing 24-column workspace geometry and the Matrix snapshot authorization model.
-- Matrix preparation exposes available fiscal years and quarters for each proposed company; editing the peer shortlist recalculates common periods locally without starting new research or requiring annual rows to see a shared quarter.
+- Matrix preparation exposes available fiscal years and quarters for proposed companies; a bounded read-only lookup checks edited 2–10-company shortlists before Create, including eligible peers beyond the initial nine suggestions. A shared quarter does not require annual rows.
 
 ### Fixed
 - Narrow widget headers move controls into an accessible compact panel; overflow menus escape card clipping and support keyboard navigation. Chart timeframe/type controls now agree across the header, chart body, and saved configuration.
@@ -79,6 +79,8 @@ live in `docs/`.
 - API installs in CI, the release image, and the documented local setup use SHA-256-constrained VNStock publisher wheels with PyPI for unrelated dependencies. The impossible direct `vnai<2.5` pin was removed; free-tier startup and optional premium installation retain their existing contracts.
 - Ratio TTM views no longer inherit cached FY statement columns after a period switch. Income Sankey quarter selection respects the chosen Q1–Q4 rather than always charting the latest quarter; intraday Volume Delta no longer labels five-minute samples as a 20-day cumulative total.
 - Nightly prediction-market cleanup jobs now await their guarded tasks. Automatic stale-catalogue deletion excludes unarchived terminal contracts reserved for archive-first retention; retained genuine 1d/7d/30d observations remain available even if today's quote vector disappears or the catalogue row is pruned.
+- Reviewed Matrix follow-ups keep references in the typed selection instead of the editable question; oversized questions fail visibly rather than being silently truncated. Authorized Matrix chat streams and denials use `no-store`.
+- Inactive prediction-market lists apply end-date ordering before limiting results. Probability aggregates validate every outcome, retaining genuine first-outcome zero prices in multi-outcome markets while excluding malformed vectors.
 
 - Prediction-market analysis now exposes full contract terms/outcomes and
   1d/7d/30d recorded history, with observed percentage-point changes, ranges,

@@ -153,7 +153,7 @@ async def create_matrix_snapshot(db, user_id: str, request: dict) -> dict:
         matrix_id = str(uuid4())
     try:
         observations = await build_matrix_observations(
-            db, request["symbols"], request["playbook_id"], request["period"], request["period_type"]
+            db, request["symbols"], request["playbook_id"], request["period"], request["period_type"], request["anchor_symbol"]
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

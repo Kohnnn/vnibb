@@ -17,6 +17,7 @@ from vnibb.services.matrix_observations import (
     display_decimal,
     prepare_matrix,
 )
+from vnibb.services import matrix_service
 from vnibb.services.matrix_playbooks import classify_sector
 
 CAPTURED = "2025-01-01T00:00:00+00:00"
@@ -214,6 +215,57 @@ async def test_prepare_exposes_per_symbol_years_and_independent_quarters(test_db
             "MXB": {"year": ["2025", "2024"], "quarter": ["2025-Q1"]},
             "MXC": {"year": ["2024"], "quarter": ["2025-Q1"]},
         }
+    finally:
+        await test_db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_manual_eleventh_peer_periods_and_ineligible_scope(test_db):
+    try:
+        symbols = ["MXA", *(f"MX{index}" for index in range(10)), "MXZ"]
+        for index, symbol in enumerate(symbols):
+            test_db.add(Stock(id=990001 + index, symbol=symbol, industry="Software", is_active=1))
+            for quarter in (None, 2):
+                row = statement(IncomeStatement, year=2025, quarter=quarter, revenue=100)
+                row.id, row.symbol = 990100 + index * 10 + (quarter or 0), symbol
+                test_db.add(row)
+        test_db.add(Stock(id=990100, symbol="MXBANK", industry="Banks", is_active=1))
+        test_db.add(Stock(id=990101, symbol="MXEMPTY", industry="Software", is_active=1))
+        test_db.add(Stock(id=990102, symbol="MXRETAIL", industry="Retail", is_active=1))
+        for symbol, row_id in (("MXBANK", 991000), ("MXRETAIL", 991001)):
+            row = statement(IncomeStatement, year=2025, quarter=2, revenue=100)
+            row.id, row.symbol = row_id, symbol
+            test_db.add(row)
+        await test_db.flush()
+        app = FastAPI()
+        app.include_router(router, prefix="/matrix")
+
+        async def database():
+            yield test_db
+
+        app.dependency_overrides[get_db] = database
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://matrix.test") as client:
+            preparation = (await client.get("/matrix/prepare", params={"anchor_symbol": "MXA"})).json()
+            assert "MXZ" not in preparation["symbols"]
+            response = await client.get("/matrix/periods", params=[("anchor_symbol", "MXA"), ("symbols", "MXA"), ("symbols", "MXZ")])
+            assert response.status_code == 200
+            assert response.json()["periods_by_symbol"] == {
+                symbol: {"year": ["2025"], "quarter": ["2025-Q2"]} for symbol in ("MXA", "MXZ")
+            }
+            empty = await client.get("/matrix/periods", params=[("anchor_symbol", "MXA"), ("symbols", "MXA"), ("symbols", "MXEMPTY")])
+            assert empty.status_code == 200
+            assert empty.json()["periods_by_symbol"]["MXEMPTY"] == {"year": [], "quarter": []}
+            for invalid in ("MXBANK", "MXRETAIL", "MISSING"):
+                rejected = await client.get("/matrix/periods", params=[("anchor_symbol", "MXA"), ("symbols", "MXA"), ("symbols", invalid)])
+                assert rejected.status_code == 422
+        with pytest.raises(ValueError, match="classification"):
+            await build_matrix_observations(test_db, ["MXA", "MXBANK"], "nonfinancial", "2025-Q2", "quarter", "MXA")
+        built = await build_matrix_observations(test_db, ["MXA", "MXZ"], "nonfinancial", "2025-Q2", "quarter", "MXA")
+        assert {entity["symbol"] for entity in built["entities"]} == {"MXA", "MXZ"}
+        annual = await matrix_service.create_matrix_snapshot(test_db, "matrix-owner", {"anchor_symbol": "MXA", "symbols": ["MXA", "MXZ"], "playbook_id": "nonfinancial", "period": "2025", "period_type": "year"})
+        quarterly = await matrix_service.create_matrix_snapshot(test_db, "matrix-owner", {"anchor_symbol": "MXA", "symbols": ["MXA", "MXZ"], "playbook_id": "nonfinancial", "period": "2025-Q2", "period_type": "quarter"})
+        assert {entity["symbol"] for entity in annual["entities"]} == {"MXA", "MXZ"}
+        assert quarterly["period"] == "2025-Q2"
     finally:
         await test_db.rollback()
 

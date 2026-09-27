@@ -270,6 +270,37 @@ def _classification_cell(stock: Stock, captured_at: str) -> tuple[dict, list[dic
     return _cell(stock.symbol, "classification", {"kind": "classification", "labels": labels}, evidence_ids=[item["evidence_id"] for item in evidence]), evidence
 
 
+async def selected_matrix_periods(db, anchor_symbol: str, symbols: list[str]) -> dict:
+    if not 2 <= len(symbols) <= 10 or len(set(symbols)) != len(symbols) or anchor_symbol not in symbols:
+        raise ValueError("Select 2–10 unique companies including the anchor")
+    if any(not re.fullmatch(r"[A-Z0-9]{1,12}", symbol) for symbol in symbols):
+        raise ValueError("Invalid company symbol")
+    stocks = (await db.execute(select(Stock.symbol, Stock.industry, Stock.sector).where(Stock.is_active == 1, Stock.symbol.in_(symbols)))).all()
+    by_symbol = {stock.symbol: stock for stock in stocks}
+    if len(by_symbol) != len(symbols):
+        raise ValueError("Every selected company must have an active stored company record")
+    anchor = by_symbol[anchor_symbol]
+    family, subtype = classify_sector(anchor.industry, anchor.sector)
+    if family is None:
+        raise ValueError("Anchor has no supported stored sector classification")
+    industry = normalized_classification(anchor.industry or anchor.sector)
+    for stock in stocks:
+        if classify_sector(stock.industry, stock.sector) != (family, subtype) or (
+            family == "nonfinancial" and normalized_classification(stock.industry or stock.sector) != industry
+        ):
+            raise ValueError("Selected company classification does not match the anchor playbook")
+    return {"anchor_symbol": anchor_symbol, "playbook_id": family, "periods_by_symbol": await _stored_periods(db, symbols)}
+
+
+async def _stored_periods(db, symbols: list[str]) -> dict:
+    rows = (await db.execute(select(IncomeStatement.symbol, IncomeStatement.period_type, IncomeStatement.fiscal_year, IncomeStatement.fiscal_quarter).where(IncomeStatement.symbol.in_(symbols), IncomeStatement.fiscal_year.between(2000, datetime.now(UTC).year), or_(IncomeStatement.period_type == "year", and_(IncomeStatement.period_type == "quarter", IncomeStatement.fiscal_quarter.between(1, 4))), or_(IncomeStatement.net_income.is_not(None), IncomeStatement.revenue.is_not(None))).distinct())).all()
+    available = {symbol: {"year": set(), "quarter": set()} for symbol in symbols}
+    for row in rows:
+        period = str(row.fiscal_year) if row.period_type == "year" else f"{row.fiscal_year}-Q{row.fiscal_quarter}"
+        available[row.symbol][row.period_type].add(period)
+    return {symbol: {basis: sorted(periods, reverse=True) for basis, periods in item.items()} for symbol, item in available.items()}
+
+
 async def prepare_matrix(db, anchor_symbol: str) -> dict:
     anchor_symbol = anchor_symbol.strip().upper()
     stocks = (await db.execute(select(Stock.symbol, Stock.industry, Stock.sector).where(Stock.is_active == 1).order_by(Stock.symbol))).all()
@@ -284,13 +315,8 @@ async def prepare_matrix(db, anchor_symbol: str) -> dict:
         classification = normalized_classification(anchor.industry or anchor.sector)
         peers = [stock for stock in peers if normalized_classification(stock.industry or stock.sector) == classification]
     symbols = [anchor_symbol, *(stock.symbol for stock in peers[:9])]
-    rows = (await db.execute(select(IncomeStatement.symbol, IncomeStatement.period_type, IncomeStatement.fiscal_year, IncomeStatement.fiscal_quarter).where(IncomeStatement.symbol.in_(symbols), IncomeStatement.fiscal_year.between(2000, datetime.now(UTC).year), or_(IncomeStatement.period_type == "year", and_(IncomeStatement.period_type == "quarter", IncomeStatement.fiscal_quarter.between(1, 4))), or_(IncomeStatement.net_income.is_not(None), IncomeStatement.revenue.is_not(None))).distinct())).all()
-    available = {symbol: {"year": set(), "quarter": set()} for symbol in symbols}
-    for row in rows:
-        period = str(row.fiscal_year) if row.period_type == "year" else f"{row.fiscal_year}-Q{row.fiscal_quarter}"
-        available[row.symbol][row.period_type].add(period)
-    periods = sorted(set.intersection(*(item["year"] for item in available.values())), reverse=True)
-    periods_by_symbol = {symbol: {basis: sorted(periods, reverse=True) for basis, periods in item.items()} for symbol, item in available.items()}
+    periods_by_symbol = await _stored_periods(db, symbols)
+    periods = sorted(set.intersection(*(set(item["year"]) for item in periods_by_symbol.values())), reverse=True)
     limits = ["Peer proposals use stored classifications, not exchange membership; confirm the shortlist before creating.", "Common periods establish retained income-row overlap, not complete metric or audit comparability."]
     if len(symbols) < 2:
         limits.append("Fewer than two classified companies are stored; snapshot creation requires 2–10 companies.")
@@ -311,20 +337,24 @@ async def _load_rows(db, symbols: list[str], year: int, quarter: int | None, per
     return rows
 
 
-async def build_matrix_observations(db, symbols: list[str], playbook_id: str, period: str, period_type: str) -> dict:
+async def build_matrix_observations(db, symbols: list[str], playbook_id: str, period: str, period_type: str, anchor_symbol: str | None = None) -> dict:
     year, quarter = parse_period(period, period_type)
     playbook = next((item for item in PLAYBOOKS if item["playbook_id"] == playbook_id), None)
     if playbook is None:
         raise ValueError("Unknown Matrix playbook")
-    stocks = list((await db.execute(select(Stock).where(Stock.symbol.in_(symbols)))).scalars().all())
+    stocks = list((await db.execute(select(Stock).where(Stock.symbol.in_(symbols), Stock.is_active == 1))).scalars().all())
     by_symbol = {stock.symbol: stock for stock in stocks}
     if set(by_symbol) != set(symbols):
         raise ValueError("Every selected company must have a retained company record")
-    if any(classify_sector(stock.industry, stock.sector)[0] != playbook_id for stock in stocks):
-        raise ValueError("Selected company classification does not match the playbook")
-    subtypes = {classify_sector(stock.industry, stock.sector)[1] for stock in stocks}
-    if playbook_id == "insurer" and len(subtypes) > 1:
-        raise ValueError("Insurer subtypes cannot be combined in one comparison")
+    anchor = by_symbol[anchor_symbol or symbols[0]]
+    family, subtype = classify_sector(anchor.industry, anchor.sector)
+    industry = normalized_classification(anchor.industry or anchor.sector)
+    if family != playbook_id or any(
+        classify_sector(stock.industry, stock.sector) != (family, subtype) or (
+            family == "nonfinancial" and normalized_classification(stock.industry or stock.sector) != industry
+        ) for stock in stocks
+    ):
+        raise ValueError("Selected company classification does not match the anchor playbook")
     rows = await _load_rows(db, symbols, year, quarter, period_type)
     captured_at = datetime.now(UTC).isoformat()
     result = {"entities": [], "dimensions": deepcopy(playbook["dimensions"]), "cells": [], "evidence": [], "limitations": [STORED_LIMIT, "Missing inputs remain unavailable; unknown units or accounting scope block derived comparisons.", "Period-specific valuation does not establish a common market observation date."]}

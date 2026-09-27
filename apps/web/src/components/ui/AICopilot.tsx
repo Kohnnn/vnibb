@@ -73,6 +73,13 @@ import {
 import { MATRIX_FOLLOWUP_EVENT, readMatrixFollowupDraft, type MatrixFollowupDraft } from '@/lib/matrixHandoff';
 import type { MatrixSelection } from '@/types/matrix';
 import { useAuth } from '@/contexts/AuthContext';
+const MAX_MATRIX_MESSAGE_LENGTH = 2000;
+const MATRIX_QUESTION = 'Analyze these selected frozen Matrix results, preserving periods, units, basis, result states, and limitations.';
+
+function editableMatrixQuestion(requestText: string): string {
+    return requestText.split('\n').some((line) => line.startsWith('{"company":')) ? MATRIX_QUESTION : requestText;
+}
+
 interface Message {
     id: string;
     role: 'user' | 'assistant';
@@ -483,6 +490,7 @@ export function AICopilot({
     const [runLedger, setRunLedger] = useState<VniAgentRunEntry[]>([]);
     const [isRunLedgerOpen, setIsRunLedgerOpen] = useState(false);
     const [matrixSelection, setMatrixSelection] = useState<MatrixSelection | null>(null);
+    const [matrixInputError, setMatrixInputError] = useState('');
     const [memoryOnly, setMemoryOnly] = useState(false);
     const memoryOnlyRef = useRef(false);
     const requestGenerationRef = useRef(0);
@@ -501,6 +509,7 @@ export function AICopilot({
         setMemoryOnly(false);
         setMatrixSelection(null);
         setInput('');
+        setMatrixInputError('');
         setMessages([]);
         setShowDetails({});
         setSavedNotebookMessageIds({});
@@ -699,13 +708,14 @@ export function AICopilot({
         memoryOnlyRef.current = true;
         setMemoryOnly(true);
         setMatrixSelection(draft.selection);
+        setMatrixInputError('');
         setMessages([]);
         setAttachedDocuments([]);
         setShowDetails({});
         setSavedNotebookMessageIds({});
         setIsPromptLibraryOpen(false);
         setIsComposerToolsOpen(false);
-        setInput(draft.request_text);
+        setInput(editableMatrixQuestion(draft.request_text));
         inputRef.current?.focus();
     }, [cancelActiveRequest]);
 
@@ -748,6 +758,11 @@ export function AICopilot({
         const messageText = prompt || input.trim();
         if (!messageText) return;
         if (isLoading) return;
+        if (matrixSelection && messageText.length > MAX_MATRIX_MESSAGE_LENGTH) {
+            setMatrixInputError(`Matrix question is too long (${messageText.length}/${MAX_MATRIX_MESSAGE_LENGTH} characters). Shorten it before sending; nothing was sent.`);
+            return;
+        }
+        setMatrixInputError('');
         const selection = matrixSelection;
         const privateRun = memoryOnlyRef.current;
         const generation = ++requestGenerationRef.current;
@@ -1659,7 +1674,7 @@ export function AICopilot({
                         type="text"
                         aria-label="VniAgent message"
                         value={input}
-                        onChange={(e) => setInput(e.target.value)}
+                        onChange={(e) => { setInput(e.target.value); setMatrixInputError(''); }}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                         placeholder={getInputPlaceholder(widgetContext)}
                         className="flex-1 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none"
@@ -1673,6 +1688,7 @@ export function AICopilot({
                         <Send size={18} />
                     </button>
                 </div>
+                {matrixInputError && <p role="alert" className="mt-2 text-xs text-amber-300">{matrixInputError}</p>}
                 {isComposerToolsOpen && (
                     <div className="mt-2 flex justify-start">
                         <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 shadow-lg">

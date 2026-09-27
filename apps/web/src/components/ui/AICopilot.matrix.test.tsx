@@ -92,6 +92,41 @@ describe('Matrix Copilot handoff', () => {
         expect(screen.queryByRole('button', { name: 'Save to Research Notebook' })).not.toBeInTheDocument();
     });
 
+    test('ten-cell machine references stay out of the editable question and appended edits reach the request', async () => {
+        const tenSelection = { snapshot_id: 'owned-ten-cell-snapshot', result_ids: Array.from({ length: 10 }, (_, index) => `result-${index}`) };
+        const referenceLines = tenSelection.result_ids.map((id) => JSON.stringify({ company: 'AAA', entity_id: 'AAA', question: 'Revenue', result_id: id, source_scope: 'financials', note: 'reference-only '.repeat(30) }));
+        const longDraft = `Research frozen Matrix snapshot ${tenSelection.snapshot_id}, revision frozen-revision, period 2024.\nReferences only; resolve with owner authorization. No trading or execution is authorized.\n${referenceLines.join('\n')}\nLimitations: retained serving observations are not original issuer evidence.`;
+        const question = 'Which company has the most reliable cash conversion, and why?';
+        expect(longDraft.length).toBeGreaterThan(2000);
+        render(<AICopilot isOpen onClose={() => {}} currentSymbol="VNM" />);
+        act(() => { window.dispatchEvent(new CustomEvent(MATRIX_FOLLOWUP_EVENT, { detail: { selection: tenSelection, request_text: longDraft } })); });
+        const composer = screen.getByRole('textbox', { name: 'VniAgent message' });
+        expect(composer).not.toHaveValue(longDraft);
+        expect((composer as HTMLInputElement).value).not.toContain('result-0');
+        fireEvent.change(composer, { target: { value: `${(composer as HTMLInputElement).value} ${question}` } });
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        await screen.findByText('Protected frozen answer');
+        const request = jest.mocked(openCopilotChatStream).mock.calls[0][0];
+        expect(request.message).toContain(question);
+        expect(request.message.length).toBeLessThanOrEqual(2000);
+        expect(request.matrix_selection).toEqual(tenSelection);
+        expect(request.context).toBeUndefined();
+        expect(storedContent()).not.toContain(question);
+        expect(storedContent()).not.toContain('result-0');
+    });
+
+    test('rejects oversized Matrix questions visibly instead of sending text that the model would truncate', () => {
+        render(<AICopilot isOpen onClose={() => {}} currentSymbol="VNM" />);
+        stageDraft();
+        const question = 'Which figure is audited? ' + 'explain '.repeat(300);
+        fireEvent.change(screen.getByRole('textbox', { name: 'VniAgent message' }), { target: { value: question } });
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        expect(screen.getByRole('alert')).toHaveTextContent(/Matrix question is too long/);
+        expect(screen.getByRole('textbox', { name: 'VniAgent message' })).toHaveValue(question);
+        expect(openCopilotChatStream).not.toHaveBeenCalled();
+        expect(storedContent()).not.toContain(question);
+    });
+
     test('keeps follow-up answers private, then removes all Matrix content before normal chat resumes', async () => {
         render(<AICopilot isOpen onClose={() => {}} currentSymbol="VNM" />);
         stageDraft();

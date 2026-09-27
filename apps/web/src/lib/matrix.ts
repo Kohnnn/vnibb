@@ -1,11 +1,12 @@
 import { fetchAPI } from '@/lib/api';
-import type { MatrixCell, MatrixCreate, MatrixEvidence, MatrixPlaybook, MatrixPreparation, MatrixResearchRequest, MatrixSelection, MatrixSnapshot, MatrixView } from '@/types/matrix';
+import type { MatrixCell, MatrixCreate, MatrixEvidence, MatrixPlaybook, MatrixPreparation, MatrixResearchRequest, MatrixSelectedPeriods, MatrixSelection, MatrixSnapshot, MatrixView } from '@/types/matrix';
 
 const root = '/matrix';
 const protectedOptions = { auth: 'required' as const, cache: 'no-store' as const };
 export const matrixApi = {
   playbooks: () => fetchAPI<MatrixPlaybook[]>(`${root}/playbooks`, { cache: 'no-store' }),
   prepare: (anchor: string) => fetchAPI<MatrixPreparation>(`${root}/prepare`, { params: { anchor_symbol: anchor }, cache: 'no-store' }),
+  periods: (anchor: string, symbols: string[]) => fetchAPI<MatrixSelectedPeriods>(`${root}/periods?${new URLSearchParams([['anchor_symbol', anchor], ...symbols.map((symbol): [string, string] => ['symbols', symbol])])}`, { cache: 'no-store' }),
   fixture: () => fetchAPI<MatrixSnapshot>(`${root}/fixture`, { cache: 'no-store' }),
   create: (body: MatrixCreate) => fetchAPI<MatrixSnapshot>(`${root}/snapshots`, { ...protectedOptions, method: 'POST', body: JSON.stringify(body) }),
   snapshot: (id: string) => fetchAPI<MatrixSnapshot>(`${root}/snapshots/${encodeURIComponent(id)}`, protectedOptions),
