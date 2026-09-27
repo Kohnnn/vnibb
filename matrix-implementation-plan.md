@@ -51,9 +51,12 @@ The 2026-09-27 isolated Workspace+Matrix integration branch replaced the
 impossible direct `vnai<2.5` requirement and uses SHA-256-constrained publisher
 wheels for VNStock, with PyPI for unrelated dependencies. An empty-environment
 installation and free-tier startup were checked locally; the integrated branch
-passed the full frontend/API gate after two-axis review. This does not change
-the recorded failure of the older PR #61 checks or establish hosted check status
-for the new integration branch.
+passed the full frontend/API gate after two-axis review. Draft [PR #62](https://github.com/Kohnnn/vnibb/pull/62)
+at commit `9d714c4` passed all four hosted GitHub Actions jobs in
+[run 36302357556](https://github.com/Kohnnn/vnibb/actions/runs/36302357556),
+including empty-PostgreSQL migrations, release contracts and Chromium smoke.
+The older PR #61 dependency failure remains part of that branch's history;
+neither branch was merged.
 
 The configured `vnibb-web` Vercel preview passed. The separate `vnibb` project
 failed for missing `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL`; its preview
