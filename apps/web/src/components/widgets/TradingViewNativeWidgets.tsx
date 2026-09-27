@@ -26,13 +26,7 @@ interface TradingViewNativeWidgetProps {
   onRemove?: () => void;
   widgetGroup?: WidgetGroupId;
   widgetType: TradingViewNativeWidgetType;
-  /**
-   * Optional native fallback rendered if the TradingView embed fails to
-   * mount within the timeout window. Used by widgets like the Screener
-   * and the (TV) Stock Heatmap that have an in-house equivalent we can
-   * swap to so the user never sees a permanent blank panel. (B3, B9, B10
-   * from the QA evaluation report.)
-   */
+  /** Native equivalent for supported widgets when their embed fails. */
   fallback?: React.ReactNode;
 }
 
@@ -143,38 +137,6 @@ function TradingViewNativeWidget({
   const [isInView, setIsInView] = useState(false);
   const allowsOverflow = widgetType === 'tradingview_ticker_tag';
 
-  useEffect(() => {
-    if (widgetType !== 'tradingview_ticker_tape') return;
-
-    const isTradingViewChunkError = (value: unknown) => {
-      const message = value instanceof Error ? value.message : String(value || '');
-      return (
-        message.includes('ChunkLoadError') ||
-        message.includes('tradingview-widget.com') ||
-        message.includes('snowplow-embed-widget-tracker')
-      );
-    };
-
-    const handleError = (event: ErrorEvent) => {
-      if (!isTradingViewChunkError(event.error || event.message || event.filename)) return;
-      setLoadError(new Error('TradingView ticker tape failed to load a required chunk.'));
-      setIsLoading(false);
-    };
-
-    const handleRejection = (event: PromiseRejectionEvent) => {
-      if (!isTradingViewChunkError(event.reason)) return;
-      event.preventDefault();
-      setLoadError(new Error('TradingView ticker tape failed to load a required chunk.'));
-      setIsLoading(false);
-    };
-
-    window.addEventListener('error', handleError);
-    window.addEventListener('unhandledrejection', handleRejection);
-    return () => {
-      window.removeEventListener('error', handleError);
-      window.removeEventListener('unhandledrejection', handleRejection);
-    };
-  }, [widgetType]);
 
   const resolvedSymbol = useMemo(() => {
     if (!symbol) return '';
@@ -545,11 +507,8 @@ function createTradingViewWrapper(
   };
 }
 
-// Native fallbacks for TradingView widgets that have an in-house equivalent.
-// When the TradingView embed times out or is blocked (CSP, ad-blocker,
-// regional restriction), the wrapper renders these instead so the user
-// never sees a permanent blank panel. (Phase 1 native fallback per
-// `docs/qa-v1.0.0-evaluation-remediation.md`.)
+// Only widgets with a first-party equivalent use a native fallback.
+// Other failed embeds show the provider error and retry action.
 //
 // We use next/dynamic so the native fallback bundles aren't pulled into
 // the TV widget chunk unless the fallback actually needs to render. The
@@ -579,64 +538,6 @@ const NativeCryptoMarketFallback = dynamic(
   { ssr: false },
 );
 
-function NativeTickerTapeFallback({ config }: { config?: WidgetConfig }) {
-  const symbols = useMemo(() => {
-    const configured = Array.isArray(config?.symbols) ? config.symbols : [];
-    const raw = configured.length > 0
-      ? configured
-      : ['AMEX:SPY', 'NASDAQ:QQQ', 'TVC:DXY', 'BINANCE:BTCUSDT', 'TVC:GOLD', 'TVC:USOIL'];
-    return raw
-      .map((item) => {
-        if (typeof item === 'string') return item;
-        if (item && typeof item === 'object') {
-          const record = item as Record<string, unknown>;
-          return String(record.proName || record.s || record.name || '').trim();
-        }
-        return '';
-      })
-      .filter(Boolean)
-      .slice(0, 12);
-  }, [config]);
-
-  return (
-    <WidgetContainer title="Ticker Tape" noPadding>
-      <div className="flex h-full min-h-[96px] items-center overflow-hidden bg-[var(--bg-primary)] px-3">
-        {/*
-          QA-v4 GM-3: The marquee must render the symbol list twice for a
-          seamless infinite scroll (the track translates -50%, so the
-          second copy seamlessly becomes the first). The second copy is
-          marked aria-hidden so screen readers and automated scrapers
-          don't surface it as a "duplicate symbol".
-        */}
-        <div className="flex min-w-max animate-[marquee_28s_linear_infinite] items-center gap-3">
-          {symbols.map((symbol) => (
-            <div
-              key={`tape-primary-${symbol}`}
-              className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] shadow-sm"
-            >
-              {symbol}
-            </div>
-          ))}
-          {symbols.map((symbol) => (
-            <div
-              key={`tape-marquee-${symbol}`}
-              aria-hidden="true"
-              className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] shadow-sm"
-            >
-              {symbol}
-            </div>
-          ))}
-        </div>
-      </div>
-      <style>{`
-        @keyframes marquee {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-      `}</style>
-    </WidgetContainer>
-  );
-}
 
 export const TradingViewChartWidget = createTradingViewWrapper('tradingview_chart');
 export const TradingViewSymbolOverviewWidget = createTradingViewWrapper('tradingview_symbol_overview');
@@ -645,9 +546,7 @@ export const TradingViewMarketSummaryWidget = createTradingViewWrapper('tradingv
 export const TradingViewMarketOverviewWidget = createTradingViewWrapper('tradingview_market_overview');
 export const TradingViewStockMarketWidget = createTradingViewWrapper('tradingview_stock_market');
 export const TradingViewMarketDataWidget = createTradingViewWrapper('tradingview_market_data');
-export const TradingViewTickerTapeWidget = createTradingViewWrapper('tradingview_ticker_tape', {
-  fallback: ({ config }) => <NativeTickerTapeFallback config={config} />,
-});
+export const TradingViewTickerTapeWidget = createTradingViewWrapper('tradingview_ticker_tape');
 export const TradingViewTickerTagWidget = createTradingViewWrapper('tradingview_ticker_tag');
 export const TradingViewSingleTickerWidget = createTradingViewWrapper('tradingview_single_ticker');
 export const TradingViewTickerWidget = createTradingViewWrapper('tradingview_ticker');

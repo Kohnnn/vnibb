@@ -21,7 +21,7 @@ Source of truth:
 | `tradingview_market_overview` | Market Overview | iframe | `https://www.tradingview.com/widget-docs/widgets/watchlists/market-overview/` |
 | `tradingview_stock_market` | Stock Market | iframe | `https://www.tradingview.com/widget-docs/widgets/watchlists/stock-market/` |
 | `tradingview_market_data` | Market Data | iframe | `https://www.tradingview.com/widget-docs/widgets/watchlists/market-quotes/` |
-| `tradingview_ticker_tape` | Ticker Tape | Web Component | `https://www.tradingview.com/widget-docs/widgets/tickers/ticker-tape/` |
+| `tradingview_ticker_tape` | Ticker Tape | iframe (legacy embed; web component unavailable in dashboard) | `https://www.tradingview.com/widget-docs/widgets/tickers/ticker-tape/` |
 | `tradingview_ticker_tag` | Ticker Tag | Web Component | `https://www.tradingview.com/widget-docs/widgets/tickers/ticker-tag/` |
 | `tradingview_single_ticker` | Single Ticker | iframe | `https://www.tradingview.com/widget-docs/widgets/tickers/single-ticker/` |
 | `tradingview_ticker` | Ticker | iframe | `https://www.tradingview.com/widget-docs/widgets/tickers/ticker/` |
