@@ -54,9 +54,15 @@ export function TopMoversWidget({
 
   const stocks = data?.data || [];
   const hasData = stocks.length > 0;
-  const isFallback = Boolean(error && hasData);
+  const hasSourceError = Boolean(data?.error);
+  const isFallback = Boolean((error || hasSourceError) && hasData);
   const isLastSession = Boolean(data?.is_last_session);
   const sessionLabel = data?.session_label;
+  const fallbackNote = isFallback
+    ? isLastSession
+      ? `Requested ${mode === 'gainer' ? 'gainers' : 'losers'} unavailable; showing last-session fallback${sessionLabel ? ` (${sessionLabel})` : ''}.`
+      : `Requested ${mode === 'gainer' ? 'gainers' : 'losers'} unavailable; showing fallback movers.`
+    : null;
   const sourceUpdatedAt =
     getLatestTimestampValue([
       data?.updated_at,
@@ -77,7 +83,7 @@ export function TopMoversWidget({
         sourceLabel: mode === 'gainer' ? 'Top gainers' : 'Top losers',
         lastDataDate: sourceUpdatedAt,
         stale: isFallback || isLastSession,
-        extra: hasData ? { mode, count: stocks.length } : undefined,
+        extra: hasData ? { mode, count: stocks.length, fallback: isFallback, lastSession: isLastSession } : undefined,
       }),
     );
   }, [hasData, sourceUpdatedAt, isFallback, isLastSession, mode, stocks.length, onDataChange]);
@@ -133,11 +139,11 @@ export function TopMoversWidget({
             isFetching={isFetching && hasData}
             isCached={isFallback || isLastSession}
             note={
-              isLastSession && sessionLabel
+              fallbackNote ?? (isLastSession && sessionLabel
                 ? `Last session ${sessionLabel}`
                 : mode === 'gainer'
                   ? 'Top gainers'
-                  : 'Top losers'
+                  : 'Top losers')
             }
             align="right"
           />
@@ -146,8 +152,8 @@ export function TopMoversWidget({
         <div className="flex-1 overflow-auto px-2 py-1">
           {isLoading && !hasData ? (
             <WidgetSkeleton lines={6} />
-          ) : error && !hasData ? (
-            <WidgetError error={error as Error} onRetry={() => refetch()} />
+          ) : (error || hasSourceError) && !hasData ? (
+            <WidgetError error={error as Error || new Error('Market mover provider unavailable.')} onRetry={() => refetch()} />
           ) : !hasData ? (
             <WidgetEmpty message="Market mover data will appear when available." icon={<Activity size={18} />} />
           ) : (

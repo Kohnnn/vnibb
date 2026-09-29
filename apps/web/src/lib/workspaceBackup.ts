@@ -6,7 +6,7 @@ import { DEFAULT_GROUPS, type WidgetGroupConfig, type WidgetGroupId } from '@/ty
 
 export const WORKSPACE_BACKUP_VERSION = 1;
 export const MAX_WORKSPACE_BACKUP_BYTES = 5 * 1024 * 1024;
-export const WORKSPACE_BACKUP_EXCLUSIONS = 'System and administrator layouts, stored authentication, settings, templates and unrelated browser storage are not included. Widget configuration and user-entered content are included; review the file before sharing. Known credential fields are rejected, not silently removed.';
+export const WORKSPACE_BACKUP_EXCLUSIONS = 'This configuration backup includes dashboard layout, widget configuration and entered thesis text/citations, but not original Research Notebook items, holdings, stored authentication, settings, templates, unrelated browser storage or system/administrator layouts. Use Transfer thesis & evidence separately for research originals; holdings require their own export. Review the file before sharing. Known credential fields are rejected, not silently removed.';
 
 export interface WorkspaceBackup {
     format: 'vnibb-personal-workspace';

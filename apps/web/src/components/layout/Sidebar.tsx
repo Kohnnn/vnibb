@@ -37,6 +37,7 @@ import type { Dashboard, DashboardFolder } from '@/types/dashboard';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { CURRENT_RELEASE, WHATS_NEW_REOPEN_EVENT } from '@/lib/version';
 import { WorkspaceBackupModal } from '@/components/modals/WorkspaceBackupModal';
+import { ResearchBundleModal } from '@/components/modals/ResearchBundleModal';
 
 const COLLAPSED_SIDEBAR_WIDTH = 56;
 
@@ -66,6 +67,7 @@ export function Sidebar({
     const [editingName, setEditingName] = useState('');
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [workspaceBackupOpen, setWorkspaceBackupOpen] = useState(false);
+    const [researchBundleOpen, setResearchBundleOpen] = useState(false);
     const [showMoveSubmenu, setShowMoveSubmenu] = useState(false);
     const createMenuRef = useRef<HTMLDivElement | null>(null);
     const contextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -894,6 +896,11 @@ export function Sidebar({
                         <Archive size={14} className="shrink-0" />
                         {!collapsed && <span>Backup workspaces</span>}
                     </button>
+                    <button type="button" onClick={() => setResearchBundleOpen(true)} title="Transfer thesis and evidence"
+                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]">
+                        <FileText size={14} className="shrink-0" />
+                        {!collapsed && <span>Transfer thesis &amp; evidence</span>}
+                    </button>
                     <button
                         onClick={() => setSettingsOpen(true)}
                         className={`
@@ -928,6 +935,7 @@ export function Sidebar({
 
             <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
             <WorkspaceBackupModal isOpen={workspaceBackupOpen} onClose={() => setWorkspaceBackupOpen(false)} />
+            {researchBundleOpen && <ResearchBundleModal onClose={() => setResearchBundleOpen(false)} />}
 
 
             {/* Context Menu */}

@@ -1,9 +1,12 @@
+import { Suspense } from 'react';
 import { render, screen } from '@testing-library/react';
 import { useCashFlow, useFinancialRatios, useFullTechnicalAnalysis, useRatioHistory } from '@/lib/queries';
 import { BankMetricsWidget } from './BankMetricsWidget';
 import { ValuationBandWidget } from './ValuationBandWidget';
 import { CashflowWaterfallWidget } from './CashflowWaterfallWidget';
 import { TechnicalSummaryWidget } from './TechnicalSummaryWidget';
+import { widgetDefinitions } from '@/data/widgetDefinitions';
+import { widgetRegistry } from './WidgetRegistry';
 
 jest.mock('@/lib/queries', () => ({
   useCashFlow: jest.fn(),
@@ -96,6 +99,31 @@ function query(data: unknown) {
   return { data, isLoading: false, error: null, refetch: jest.fn(), isFetching: false, dataUpdatedAt: 0 } as any;
 }
 
+describe('Wave 12 library activation', () => {
+  it.each([
+    ['bank_metrics', 'Bank Analytics', /no reported bank-specific metrics/i],
+    ['valuation_band', 'Valuation Band', /not enough ratio history/i],
+    ['cashflow_waterfall', 'Cash Flow Waterfall', /no cash bridge available/i],
+    ['technical_summary', 'Technical Summary', /no technical indicators available/i],
+  ] as const)('discovers and resolves persisted %s to an honest empty state', async (type, name, emptyMessage) => {
+    mockUseCashFlow.mockReturnValue(query(undefined));
+    mockUseFinancialRatios.mockReturnValue(query(undefined));
+    mockUseFullTechnicalAnalysis.mockReturnValue(query(undefined));
+    mockUseRatioHistory.mockReturnValue(query(undefined));
+
+    expect(widgetDefinitions.filter((definition) => definition.type === type)).toEqual([
+      expect.objectContaining({ name }),
+    ]);
+    const Widget = widgetRegistry.get(type)?.component;
+    expect(Widget).toBeDefined();
+    if (!Widget) return;
+
+    render(<Suspense fallback={<div>Loading widget</div>}><Widget id={`restored-${type}`} symbol="FPT" /></Suspense>);
+
+    expect(await screen.findByText(emptyMessage)).toBeInTheDocument();
+  });
+});
+
 describe('Wave 12 widget truth states', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -166,5 +194,35 @@ describe('Wave 12 widget truth states', () => {
     expect(screen.getByText('Sparse history')).toBeInTheDocument();
     expect(screen.getAllByText('--').length).toBeGreaterThan(0);
     expect(mockUseFullTechnicalAnalysis).toHaveBeenCalledWith('FPT', { timeframe: 'D' });
+  });
+
+  it('does not invent a technical recommendation from a response with no observed indicators', () => {
+    const onDataChange = jest.fn();
+    mockUseFullTechnicalAnalysis.mockReturnValue(query({
+      signals: { overall_signal: 'neutral', buy_count: 0, neutral_count: 0, sell_count: 0, total_indicators: 0, indicators: [] },
+      data_quality: { status: 'degraded', bars: 0, issues: ['No usable indicators'] },
+    }));
+
+    render(<TechnicalSummaryWidget id="technical-empty" symbol="FPT" onDataChange={onDataChange} />);
+
+    expect(screen.getByText(/no technical indicators available/i)).toBeInTheDocument();
+    expect(screen.queryByText('NEUTRAL')).not.toBeInTheDocument();
+    expect(onDataChange).toHaveBeenCalledWith(expect.objectContaining({
+      __widgetRuntime: expect.objectContaining({ layoutHint: expect.objectContaining({ empty: true }) }),
+    }));
+  });
+
+  it('labels fetched valuation history as server-sourced and cached data as stale', () => {
+    const onDataChange = jest.fn();
+    mockUseRatioHistory.mockReturnValue({
+      ...query({ data: [{ period: '2022', pe: 10 }, { period: '2023', pe: 12 }, { period: '2024', pe: 14 }] }),
+      error: new Error('Network unavailable'),
+    });
+
+    render(<ValuationBandWidget id="valuation-cached" symbol="FPT" onDataChange={onDataChange} />);
+
+    expect(onDataChange).toHaveBeenCalledWith(expect.objectContaining({
+      __widgetRuntime: expect.objectContaining({ provenance: expect.objectContaining({ localOnly: undefined, stale: true }) }),
+    }));
   });
 });

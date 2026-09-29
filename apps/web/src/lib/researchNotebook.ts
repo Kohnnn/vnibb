@@ -60,7 +60,8 @@ export interface NotebookItem {
   createdAt: string
 }
 
-const MAX_ITEMS = 200
+export const MAX_NOTEBOOK_ITEMS = 200
+
 const NOTEBOOK_KINDS: NotebookItemKind[] = ['news', 'widget_snapshot', 'agent_answer', 'note', 'artifact']
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -105,6 +106,10 @@ function normalizeItem(value: unknown): NotebookItem | null {
   }
 }
 
+export function normalizeNotebookItem(value: unknown): NotebookItem | null {
+  return normalizeItem(value)
+}
+
 function readRaw(): NotebookItem[] {
   if (typeof window === 'undefined') return []
   try {
@@ -119,11 +124,11 @@ function readRaw(): NotebookItem[] {
 
 function write(items: NotebookItem[]) {
   if (typeof window === 'undefined') throw new Error('Research notebook storage is unavailable')
-  const next = items.slice(0, MAX_ITEMS)
+  const next = items.slice(0, MAX_NOTEBOOK_ITEMS)
   try {
     window.localStorage.setItem(RESEARCH_NOTEBOOK_KEY, JSON.stringify(next))
   } catch {
-    window.localStorage.setItem(RESEARCH_NOTEBOOK_KEY, JSON.stringify(next.slice(0, Math.floor(MAX_ITEMS / 2))))
+    window.localStorage.setItem(RESEARCH_NOTEBOOK_KEY, JSON.stringify(next.slice(0, Math.floor(MAX_NOTEBOOK_ITEMS / 2))))
   }
   window.dispatchEvent(new CustomEvent(RESEARCH_NOTEBOOK_EVENT))
 }
@@ -145,10 +150,11 @@ export function addNotebookItem(input: Omit<NotebookItem, 'id' | 'createdAt'>): 
     id: `nb:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
     createdAt: new Date().toISOString(),
   }
-  const next = [item, ...readNotebookItems()].slice(0, MAX_ITEMS)
+  const next = [item, ...readNotebookItems()].slice(0, MAX_NOTEBOOK_ITEMS)
   write(next)
   return next
 }
+
 
 export function removeNotebookItem(id: string): NotebookItem[] {
   const next = readNotebookItems().filter((item) => item.id !== id)

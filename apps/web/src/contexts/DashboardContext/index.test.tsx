@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { NotesWidget } from '@/components/widgets/NotesWidget';
 import type { Dashboard, SystemDashboardTemplateListResponse } from '@/types/dashboard';
 import {
   DashboardProvider,
@@ -26,6 +27,9 @@ jest.mock('@/lib/api', () => ({
 jest.mock('@/lib/useDashboardSync', () => ({
   useDashboardSync: jest.fn(),
   useLoadFromBackend: jest.fn(),
+}));
+jest.mock('@/hooks/useWidgetSymbolLink', () => ({
+  useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }),
 }));
 
 const customDashboard: Dashboard = {
@@ -75,6 +79,36 @@ function renderProvider() {
 function storedDashboards(): Dashboard[] {
   return JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '[]') as Dashboard[];
 }
+function SystemNotesProbe() {
+  const { state } = useDashboard();
+  const system = state.dashboards.find((dashboard) => dashboard.id === 'default-fundamental');
+  const notes = system?.tabs.flatMap((tab) => tab.widgets).find((widget) => widget.type === 'notes');
+  return notes ? <NotesWidget id={notes.id} symbol="FPT" config={notes.config} /> : null;
+}
+
+describe('system Investor Home thesis protection', () => {
+  const mockGetPublishedSystemDashboardTemplates = jest.mocked(getPublishedSystemDashboardTemplates);
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: jest.fn() });
+    mockGetPublishedSystemDashboardTemplates.mockResolvedValue({ count: 0, data: [] });
+  });
+
+  afterEach(() => jest.clearAllMocks());
+
+  it('disables edits whose UPDATE_WIDGET action is rejected by the system dashboard', async () => {
+    render(<DashboardProvider><SystemNotesProbe /></DashboardProvider>);
+    const thesis = await screen.findByRole('textbox', { name: 'Thesis' });
+    expect(thesis).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save thesis' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('System workspace is read-only');
+    expect(screen.queryByText('Saved in dashboard')).not.toBeInTheDocument();
+    expect(storedDashboards().find((dashboard) => dashboard.id === 'default-fundamental')?.tabs
+      .flatMap((tab) => tab.widgets).find((widget) => widget.type === 'notes')?.config)
+      .not.toHaveProperty('thesesBySymbol.FPT');
+  });
+});
 
 describe('DashboardProvider backend sync flag', () => {
   const mockGetPublishedSystemDashboardTemplates = jest.mocked(getPublishedSystemDashboardTemplates);
@@ -458,6 +492,29 @@ describe('DashboardProvider browser persistence', () => {
     await waitFor(() => expect(screen.getByTestId('dashboards')).toHaveTextContent(hiddenWidgetDashboard.id));
     expect(screen.getByTestId('storage-notice')).not.toHaveTextContent('Dashboard storage was corrupted and has been reset');
     expect(screen.getByTestId('widget-types')).toHaveTextContent('rs_ranking,market_heatmap,dividend_ladder,ai_copilot');
+  });
+
+  it('restores the four activated research widgets without migration or dropping their configuration', async () => {
+    const widgetTypes = ['bank_metrics', 'valuation_band', 'cashflow_waterfall', 'technical_summary'] as const;
+    const widgets = widgetTypes.map((type, index) => ({
+      id: `research-${type}`,
+      tabId: 'research-tab',
+      type,
+      config: { symbol: 'FPT', title: `Saved ${type}` },
+      layout: { i: `research-${type}`, x: 0, y: index * 6, w: 8, h: 6 },
+    }));
+    const dashboard = {
+      ...customDashboard,
+      id: 'research-dashboard',
+      tabs: [{ id: 'research-tab', name: 'Research', order: 0, widgets }],
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([dashboard]));
+
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('widget-types')).toHaveTextContent(widgetTypes.join(',')));
+    expect(storedDashboards().find((item) => item.id === dashboard.id)?.tabs[0].widgets).toEqual(widgets);
+    expect(screen.getByTestId('storage-notice')).not.toHaveTextContent('Dashboard storage was corrupted');
   });
 
   it('retains distinct legacy and canonical valuation widgets during the v26 migration', async () => {

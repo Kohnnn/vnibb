@@ -98,6 +98,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
   }, [rows, metric, mean, sigma1Lower, sigma1Upper, sigma2Lower, sigma2Upper]);
 
   const hasData = seriesValues.length >= 3;
+  const isFallback = Boolean(error && historyResponse?.data?.length);
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -106,7 +107,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
       endpoint: `/equity/${upperSymbol}/ratios/history?ratios=pe,pb,ps,ev_ebitda,ev_sales&period=year&limit=60`,
       sourceLabel: 'Ratio history',
       lastDataDate: rows.at(-1)?.period ?? dataUpdatedAt,
-      derived: true,
+      stale: isFallback,
       extra: {
         periods: rows.length,
         metric,
@@ -114,7 +115,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
         percentile,
       },
     }));
-  }, [current, dataUpdatedAt, hasData, metric, onDataChange, percentile, rows, rows.length, upperSymbol]);
+  }, [current, dataUpdatedAt, hasData, isFallback, metric, onDataChange, percentile, rows, upperSymbol]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view valuation bands" icon={<Sigma size={18} />} />;
@@ -154,6 +155,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
           </div>
           <WidgetMeta
             updatedAt={dataUpdatedAt}
+            isCached={isFallback}
             isFetching={isFetching && hasData}
             note={`Annual · ${seriesValues.length} positive observations · descriptive only`}
             sourceLabel="VNIBB ratio history"

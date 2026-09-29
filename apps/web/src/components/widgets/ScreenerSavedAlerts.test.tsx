@@ -4,28 +4,24 @@ import type { ScreenerResponse } from '@/types/screener'
 import { useScreenerData } from '@/lib/queries'
 import { recordAlertActivity } from '@/lib/alertActivity'
 import { ScreenerWidget } from './ScreenerWidget'
+import { useDashboard } from '@/contexts/DashboardContext'
+import userEvent from '@testing-library/user-event'
 
 jest.mock('@/lib/queries', () => ({
   useScreenerData: jest.fn(),
   useVnstockSource: () => 'KBS',
 }))
 jest.mock('@/lib/alertActivity', () => ({ recordAlertActivity: jest.fn() }))
-jest.mock('@/contexts/DashboardContext', () => ({
-  useDashboard: () => ({
-    state: { dashboards: [] },
-    activeDashboard: null,
-    activeTab: null,
-    addWidget: jest.fn(),
-    createDashboard: jest.fn(),
-    createTab: jest.fn(),
-    updateWidget: jest.fn(),
-  }),
-}))
+jest.mock('@/contexts/DashboardContext', () => ({ useDashboard: jest.fn() }))
 jest.mock('@/hooks/useWidgetSymbolLink', () => ({ useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }) }))
 jest.mock('@/components/ui/WidgetContainer', () => ({ WidgetContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }))
 jest.mock('@/components/ui/WidgetMeta', () => ({ WidgetMeta: () => null }))
-jest.mock('@/components/ui/VirtualizedTable', () => ({ VirtualizedTable: () => <div>Stocks table</div> }))
-
+jest.mock('@/components/ui/VirtualizedTable', () => ({
+  VirtualizedTable: ({ data, columns }: {
+    data: Array<Record<string, unknown>>;
+    columns: Array<{ id: string; accessor: (row: Record<string, unknown>) => React.ReactNode }>;
+  }) => <div>{data.map((row) => <div key={String(row.ticker)}>{columns.find((column) => column.id === 'row_actions')?.accessor(row)}</div>)}</div>,
+}))
 import type { Dashboard } from '@/types/dashboard'
 import {
   buildSavedScreenAlertId,
@@ -38,6 +34,21 @@ import {
   shouldResumeScreenerAlertPoll,
   resolveScreenerWatchlistAction,
 } from './ScreenerWidget'
+const addWidget = jest.fn()
+const createDashboard = jest.fn()
+const createTab = jest.fn()
+const updateWidget = jest.fn()
+const dashboardContext = {
+  state: { dashboards: [] as Dashboard[] },
+  activeDashboard: null as Dashboard | null,
+  activeTab: null as Dashboard['tabs'][number] | null,
+  addWidget,
+  createDashboard,
+  createTab,
+  updateWidget,
+}
+jest.mocked(useDashboard).mockImplementation(() => dashboardContext as never)
+
 
 const savedScreen = {
   id: 'quality',
@@ -159,6 +170,24 @@ describe('saved screener alerts', () => {
   })
 })
 
+function watchlistDashboard(id: string, symbols: string[] = []): Dashboard {
+  return {
+    id,
+    name: id,
+    order: 0,
+    isDefault: false,
+    showGroupLabels: true,
+    tabs: [{ id: `${id}-tab`, name: 'Overview', order: 0, widgets: [{
+      id: `${id}-watchlist`, type: 'watchlist', tabId: `${id}-tab`,
+      config: { watchlistSymbols: symbols, title: `${id} list` },
+      layout: { i: `${id}-watchlist`, x: 0, y: 0, w: 4, h: 4 },
+    }] }],
+    syncGroups: [],
+    createdAt: '',
+    updatedAt: '',
+  }
+}
+
 const mockedScreenerQuery = jest.mocked(useScreenerData)
 const mockedRecordAlertActivity = jest.mocked(recordAlertActivity)
 
@@ -176,6 +205,103 @@ function setScan(data: ScreenerResponse) {
 describe('screener availability', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    dashboardContext.state.dashboards = []
+    dashboardContext.activeDashboard = null
+    dashboardContext.activeTab = null
+  })
+
+  test('adds to a single watchlist without losing existing symbols and ignores normalized duplicates', async () => {
+    const dashboard = watchlistDashboard('investor', [' vnm '])
+    dashboardContext.state.dashboards = [dashboard]
+    dashboardContext.activeDashboard = dashboard
+    dashboardContext.activeTab = dashboard.tabs[0]
+    setScan({ data: [{ ticker: 'FPT' }], meta: { availability: 'available' } })
+    const user = userEvent.setup()
+    render(<ScreenerWidget id="screen-watchlist" />)
+
+    await user.click(screen.getByRole('button', { name: 'Add FPT to Watchlist' }))
+    expect(updateWidget).toHaveBeenCalledWith('investor', 'investor-tab', 'investor-watchlist', {
+      config: { title: 'investor list', watchlistSymbols: ['VNM', 'FPT'] },
+    })
+    dashboard.tabs[0].widgets[0].config.watchlistSymbols = ['VNM', 'FPT']
+    await user.click(screen.getByRole('button', { name: 'Add FPT to Watchlist' }))
+    expect(updateWidget).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('status')).toHaveTextContent('FPT is already in investor / Overview / investor list.')
+  })
+
+  test('requires keyboard-accessible choice when multiple watchlists exist', async () => {
+    const first = watchlistDashboard('first', ['VNM'])
+    const second = watchlistDashboard('second', ['MSN'])
+    dashboardContext.state.dashboards = [first, second]
+    dashboardContext.activeDashboard = first
+    dashboardContext.activeTab = first.tabs[0]
+    setScan({ data: [{ ticker: 'FPT' }], meta: { availability: 'available' } })
+    const user = userEvent.setup()
+    render(<ScreenerWidget id="screen-watchlist" />)
+
+    screen.getByRole('button', { name: 'Add FPT to Watchlist' }).focus()
+    await user.keyboard('{Enter}')
+    expect(updateWidget).not.toHaveBeenCalled()
+    expect(screen.getByRole('group', { name: 'Choose watchlist for FPT' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'second / Overview / second list' }))
+    expect(updateWidget).toHaveBeenCalledWith('second', 'second-tab', 'second-watchlist', {
+      config: { title: 'second list', watchlistSymbols: ['MSN', 'FPT'] },
+    })
+    expect(first.tabs[0].widgets[0].config.watchlistSymbols).toEqual(['VNM'])
+  })
+
+  test('can create a watchlist if targets disappear while a choice is open', async () => {
+    const first = watchlistDashboard('first')
+    const second = watchlistDashboard('second')
+    dashboardContext.state.dashboards = [first, second]
+    dashboardContext.activeDashboard = first
+    dashboardContext.activeTab = first.tabs[0]
+    setScan({ data: [{ ticker: 'FPT' }], meta: { availability: 'available' } })
+    const view = render(<ScreenerWidget id="screen-watchlist" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add FPT to Watchlist' }))
+
+    first.tabs[0].widgets = []
+    dashboardContext.state.dashboards = [first]
+    view.rerender(<ScreenerWidget id="screen-watchlist" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Create watchlist for FPT' }))
+
+    expect(addWidget).toHaveBeenCalledWith('first', 'first-tab', expect.objectContaining({
+      type: 'watchlist', config: { watchlistSymbols: ['FPT'] },
+    }))
+  })
+
+  test('creates a watchlist when none exists instead of modifying another widget', () => {
+    const dashboard = watchlistDashboard('investor')
+    dashboard.tabs[0].widgets = []
+    dashboardContext.state.dashboards = [dashboard]
+    dashboardContext.activeDashboard = dashboard
+    dashboardContext.activeTab = dashboard.tabs[0]
+    setScan({ data: [{ ticker: 'FPT' }], meta: { availability: 'available' } })
+    render(<ScreenerWidget id="screen-watchlist" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add FPT to Watchlist' }))
+
+    expect(addWidget).toHaveBeenCalledWith('investor', 'investor-tab', expect.objectContaining({
+      type: 'watchlist', config: { watchlistSymbols: ['FPT'] },
+    }))
+    expect(updateWidget).not.toHaveBeenCalled()
+  })
+
+  test('creates an editable dashboard and tab when there is no watchlist workspace', () => {
+    const dashboard = watchlistDashboard('new-investor')
+    dashboard.tabs = []
+    createDashboard.mockReturnValue(dashboard)
+    createTab.mockReturnValue({ id: 'new-tab', name: 'Watchlist', order: 0, widgets: [] })
+    setScan({ data: [{ ticker: 'FPT' }], meta: { availability: 'available' } })
+    render(<ScreenerWidget id="screen-watchlist" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add FPT to Watchlist' }))
+
+    expect(createDashboard).toHaveBeenCalledWith({ name: 'Investor Workflow' })
+    expect(createTab).toHaveBeenCalledWith('new-investor', 'Watchlist')
+    expect(addWidget).toHaveBeenCalledWith('new-investor', 'new-tab', expect.objectContaining({
+      type: 'watchlist', config: { watchlistSymbols: ['FPT'] },
+    }))
   })
 
   test('shows retry for an outage, but reset filters for a genuine zero-match scan', () => {
