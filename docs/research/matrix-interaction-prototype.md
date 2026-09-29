@@ -1,4 +1,4 @@
-# #40 prototype — Matrix maximize/inspector interaction (corrected)
+# #40 prototype — Matrix maximize/inspector interaction (corrected + measured)
 
 > **Correction notice.** An earlier revision of this artifact claimed expanded space was `MISSING`
 > and described a "one Escape closes both" behavior as *measured*. Both were wrong. Corrections are
@@ -43,38 +43,51 @@ one Escape closes only the inspector. The earlier claim is likely the reverse of
 - **Desktop:** inspector renders in place, nested inside the outer dialog.
 
 Whether these compose correctly — first Escape closes only the inspector, focus returns to the
-invoking cell, and the maximized view survives — is **the actual open question**.
+invoking cell, and the maximized view survives — was the open question. It is now **measured**.
 
-## What the prototype now is
+## Measured result — Escape nesting is correct at both widths
 
-A browser exercise of the **already-available** maximize and inspector, at both widths. Not a
-proposal to add UI. The measured outcomes to capture:
+Exercised with a throwaway Jest harness (jsdom) composing the **real** `MaximizedWidgetPortal`
+with an inspector clone matching `MatrixInspector`'s actual binding: React `onKeyDown` on the
+`<aside>`, calling `stopPropagation()` then closing. The harness was deleted after the run; it
+existed to settle this question, not to ship.
 
-| Step | Desktop expectation | Narrow expectation |
+| Composition | One Escape with inspector open | Escape with no inspector open |
 |---|---|---|
-| Maximize Matrix, open a cell's evidence | inspector opens inside the maximized view | inspector covers viewport at `zIndex 10000` |
-| Press Escape once | **only** inspector closes (unverified) | **?** — body-level portal, path differs |
-| Press Escape again | maximized view closes | **?** |
-| Focus after inspector closes | returns to the invoking cell | **?** |
-| Reopen inspector without re-maximizing | unchanged snapshot/revision | **?** |
+| Desktop (inspector nested in the dialog) | `inspector=no`, `maximized=yes` | `maximized=no` |
+| Narrow (inspector portaled to `document.body`, `zIndex 10000`) | `inspector=no`, `maximized=yes` | — |
 
-Every `?` is a genuine unknown. The static reading predicts desktop behaves correctly; it does not
-establish it, and it says nothing reliable about narrow.
+**The nested-overlay risk does not exist.** One Escape closes only the inspector and the maximized
+view survives, at both widths. React delegates synthetic events to the root container, so the inner
+`stopPropagation()` prevents the event reaching the portal's `document` listener — and this holds
+even when the inspector is a `document.body` sibling, because the listener never sees the event.
 
-## Recommendation for reaction
+My original claim ("one Escape closes both") was the reverse of the measured behavior.
 
-**Do not modify the shared wrapper or MatrixWidget.** Maximize already works; touching shared UI for
-an existing control risks every other widget for no gain.
+## Scope of this evidence
 
-The decision this ticket actually needs is narrow: **if** the browser exercise shows the nested
-inspector misbehaving under maximize at either width, decide how it should behave. If both widths
-compose correctly, #40's interaction surface is complete and the ticket closes on that evidence.
+Measured in jsdom, not a real browser. jsdom reproduces React's synthetic-event delegation, which is
+the mechanism under test, so the Escape finding is sound. It does **not** exercise layout, real
+focus-ring rendering, or viewport-dependent readability — those remain unverified, and the
+readability question below is still open.
+## Recommendation
 
-## What would falsify the current (unverified) reading
+**Do not modify the shared wrapper or MatrixWidget.** Maximize already works, and the nested Escape
+path measured correct at both widths. Touching shared UI for a working control risks every other
+widget for no gain.
 
-- Escape reaching the portal's document listener while the inspector is open on desktop.
-- Focus escaping the maximized view, or landing on a detached node, after the inspector closes.
-- Narrow-width behavior differing from desktop in a way not accounted for by the body-level portal.
+One item remains genuinely open, and it is **not** an interaction defect: **readability**. Nothing
+has measured whether a real shortlist (8–10 companies × 5 dimensions plus evidence) is legible at
+`expanded` density versus maximized. That is the only question left before #40 can close, and it
+needs a real viewport — jsdom cannot answer it.
+
+## What would falsify the above
+
+- A real shortlist unreadable at `expanded` density that becomes readable when maximized — which
+  would make maximize a *load-bearing* affordance rather than a convenience.
+- Focus escaping the maximized view, or landing on a detached node, after the inspector closes in a
+  real browser (jsdom does not model layout or detached-node focus).
+- Real-browser narrowing behaving differently from the jsdom result.
 
 ## Explicitly not in this prototype
 
