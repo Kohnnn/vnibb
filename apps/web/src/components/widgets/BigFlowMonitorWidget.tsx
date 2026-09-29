@@ -78,6 +78,7 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
   const hasData = trades.length > 0
 
   useEffect(() => {
+    if (error) return
     onDataChange?.({
       __widgetRuntime: {
         layoutHint: { empty: !hasData, compactHeight: 5 },
@@ -100,7 +101,9 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
         min_value_bn: threshold,
       })),
     })
-  }, [trades, hasData, onDataChange, dataUpdatedAt, threshold])
+  }, [trades, hasData, onDataChange, dataUpdatedAt, threshold, error])
+
+  if (error && !data) return <WidgetError error={error as Error} onRetry={() => refetch()} />
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -108,7 +111,7 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <Waves size={12} className="text-cyan-400" />
           <span>Big Flow</span>
-          <span className="text-[10px] text-[var(--text-muted)]">{trades.length} prints ≥ {threshold}B</span>
+          <span className="text-[10px] text-[var(--text-muted)]">{error ? 'Latest tape unavailable' : `${trades.length} prints ≥ ${threshold}B`}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
@@ -163,6 +166,7 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
         </div>
       </div>
 
+      {error && <div role="alert" className="px-1 text-[10px] text-amber-300">Latest block-trade tape unavailable; showing previously received trades. <button type="button" onClick={() => refetch()}>Retry</button></div>}
       {isLoading && !hasData ? (
         <WidgetSkeleton lines={8} />
       ) : error && !hasData ? (
