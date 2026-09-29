@@ -1,6 +1,8 @@
 import type { DashboardState } from '@/types/dashboard';
 import { createWorkspaceBackup, importWorkspaceBackup, parseWorkspaceBackup, previewWorkspaceBackup, WORKSPACE_BACKUP_EXCLUSIONS } from './workspaceBackup';
 import { DEFAULT_GROUPS } from '@/types/widget';
+import { normalizeThesisConfig } from './investorWorkflow';
+
 
 const original: DashboardState = {
     activeDashboardId: '101', activeTabId: 'tab-a',
@@ -32,6 +34,19 @@ const original: DashboardState = {
         },
     ],
 };
+
+it('transfers citation metadata but not Research Notebook originals in workspace configuration backup', () => {
+    const state = JSON.parse(JSON.stringify(original)) as DashboardState;
+    state.dashboards[1].tabs[1].widgets[0].config.thesesBySymbol = { FPT: {
+        status: 'watching', thesis: 'Growth', catalysts: 'Demand', risks: 'Margin', invalidation: 'Miss', reviewDate: '2026-12-31',
+        notebookItemIds: ['nb:lost'], citations: [{ itemId: 'nb:lost', title: 'Company source', sourceId: 'filing-1', capturedAt: '2026-07-20T00:00:00Z' }],
+    } };
+    const backup = createWorkspaceBackup(state);
+    const restored = importWorkspaceBackup(original, backup, (() => { let n = 0; return () => `citation-${++n}`; })());
+    const copied = restored.dashboards.at(-1)!.tabs[1].widgets[0];
+    expect(normalizeThesisConfig(copied.config).thesesBySymbol.FPT.citations).toEqual([{ itemId: 'nb:lost', title: 'Company source', sourceId: 'filing-1', capturedAt: '2026-07-20T00:00:00Z' }]);
+    expect(WORKSPACE_BACKUP_EXCLUSIONS).toContain('not original Research Notebook items');
+});
 
 describe('personal workspace backup', () => {
     it('roundtrips multiple tabs, nested folders, widget config and group references without changing existing work', () => {

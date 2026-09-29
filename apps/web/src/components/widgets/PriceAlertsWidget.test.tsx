@@ -77,4 +77,25 @@ describe('PriceAlertsWidget', () => {
     expect(screen.getByRole('button', { name: 'Pause FPT alert' })).toHaveClass('min-h-11', 'focus-visible:ring-2');
     expect(screen.getByRole('button', { name: 'Delete FPT alert' })).toHaveClass('min-w-11', 'focus-visible:ring-2');
   });
+  it('names threshold fields and icon controls for keyboard use', () => {
+    renderWidget();
+    expect(screen.getByRole('button', { name: 'Enable browser alert notifications' })).toHaveClass('min-h-11', 'focus-visible:ring-2');
+    fireEvent.click(screen.getByRole('button', { name: 'Add price alert' }));
+    expect(screen.getByRole('textbox', { name: 'Alert symbol' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Alert condition' })).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: 'Alert threshold' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add' })).toHaveClass('min-h-11', 'focus-visible:ring-2');
+  });
+
+
+  it('does not display or evaluate invalid persisted thresholds or conditions', () => {
+    renderWidget('FPT', [
+      { id: 'infinite', symbol: 'FPT', condition: 'above', threshold: Infinity, createdAt: '2026-07-20T00:00:00Z', isActive: true, notificationSent: false },
+      { id: 'zero', symbol: 'FPT', condition: 'below', threshold: 0, createdAt: '2026-07-20T00:00:00Z', isActive: true, notificationSent: false },
+      { id: 'unknown', symbol: 'FPT', condition: 'other', threshold: 100, createdAt: '2026-07-20T00:00:00Z', isActive: true, notificationSent: false },
+    ]);
+
+    expect(screen.getByText('No price alerts set')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pause FPT alert' })).not.toBeInTheDocument();
+  });
 });

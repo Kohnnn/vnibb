@@ -108,7 +108,7 @@ class NotificationService {
 
 // ============ Alert Storage ============
 
-function loadLegacyAlerts(): PriceAlert[] {
+function loadLegacyAlerts(): unknown {
     if (typeof window === 'undefined') return [];
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
@@ -123,18 +123,19 @@ function hasOwnConfigKey(config: Record<string, unknown> | undefined, key: strin
 }
 
 function parsePersistedAlerts(config: Record<string, unknown> | undefined): PriceAlert[] {
-    const rawValue = config?.alerts;
-    if (!Array.isArray(rawValue)) {
-        return hasOwnConfigKey(config, 'alerts') ? [] : loadLegacyAlerts();
-    }
+    const rawValue = hasOwnConfigKey(config, 'alerts') ? config?.alerts : loadLegacyAlerts();
+    if (!Array.isArray(rawValue)) return [];
 
     return rawValue.filter((alert): alert is PriceAlert => {
         if (!alert || typeof alert !== 'object') return false;
         const candidate = alert as Partial<PriceAlert>;
         return typeof candidate.id === 'string'
             && typeof candidate.symbol === 'string'
-            && typeof candidate.condition === 'string'
+            && normalizeTickerSymbol(candidate.symbol) !== null
+            && (candidate.condition === 'above' || candidate.condition === 'below' || candidate.condition === 'change_up' || candidate.condition === 'change_down')
             && typeof candidate.threshold === 'number'
+            && Number.isFinite(candidate.threshold)
+            && candidate.threshold > 0
             && typeof candidate.createdAt === 'string'
             && typeof candidate.isActive === 'boolean'
             && typeof candidate.notificationSent === 'boolean';
@@ -462,8 +463,10 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                     <WidgetMeta note={wsConnected ? 'Live stream' : 'Polling'} align="right" />
                     {notificationPermission !== 'granted' && (
                         <button
+                            type="button"
                             onClick={handleRequestPermission}
-                            className="p-1 text-yellow-500 hover:text-yellow-400 hover:bg-[var(--bg-hover)] rounded"
+                            aria-label="Enable browser alert notifications"
+                            className="min-h-11 min-w-11 rounded p-2 text-yellow-500 hover:bg-[var(--bg-hover)] hover:text-yellow-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
                             title="Enable notifications"
                         >
                             <BellOff size={12} />
@@ -473,7 +476,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                         type="button"
                         onClick={openAddForm}
                         aria-label={showAdd ? 'Close price alert form' : 'Add price alert'}
-                        className="min-h-9 min-w-9 rounded p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                        className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
                     >
                         <Plus size={12} />
                     </button>
@@ -499,6 +502,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                     <div className="flex gap-1">
                         <input
                             type="text"
+                            aria-label="Alert symbol"
                             placeholder="Symbol"
                             value={newAlert.symbol}
                             onChange={(e) => setNewAlert({ ...newAlert, symbol: e.target.value.toUpperCase() })}
@@ -506,6 +510,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                             maxLength={10}
                         />
                         <select
+                            aria-label="Alert condition"
                             value={newAlert.condition}
                             onChange={(e) => setNewAlert({ ...newAlert, condition: e.target.value as PriceAlert['condition'] })}
                             className="bg-[var(--bg-primary)] text-[var(--text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--border-color)] focus:border-blue-500 focus:outline-none"
@@ -519,6 +524,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                     <div className="flex gap-1">
                         <input
                             type="number"
+                            aria-label="Alert threshold"
                             placeholder={newAlert.condition.includes('change') ? 'Percent' : 'Price'}
                             value={newAlert.threshold}
                             onChange={(e) => setNewAlert({ ...newAlert, threshold: e.target.value })}
@@ -530,7 +536,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                             type="button"
                             onClick={addAlert}
                             disabled={!normalizeTickerSymbol(newAlert.symbol) || !isValidAlertThreshold(newAlert.threshold)}
-                            className="px-3 bg-yellow-600 hover:bg-yellow-500 disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)] text-white text-xs rounded font-medium transition-colors"
+                            className="min-h-11 rounded bg-yellow-600 px-3 text-xs font-medium text-white transition-colors hover:bg-yellow-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)]"
                         >
                             Add
                         </button>

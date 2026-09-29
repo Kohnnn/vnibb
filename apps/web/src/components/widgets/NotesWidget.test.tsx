@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import { NotesWidget } from './NotesWidget';
-import { addNotebookItem, clearNotebook } from '@/lib/researchNotebook';
+import { addNotebookItem, clearNotebook, readNotebookItems, removeNotebookItem, RESEARCH_NOTEBOOK_EVENT, RESEARCH_NOTEBOOK_KEY } from '@/lib/researchNotebook';
 
 const updateWidget = jest.fn();
 const setLinkedSymbol = jest.fn();
@@ -41,24 +41,51 @@ describe('NotesWidget evidence links', () => {
     act(() => clearNotebook());
   });
 
-  it('attaches current-symbol notebook evidence and preserves missing evidence truthfully', () => {
+  it('retains citation metadata when its original is removed or the browser notebook is cleared', () => {
     act(() => {
-      addNotebookItem({
-        kind: 'news',
-        title: 'FPT source',
-        symbol: 'FPT',
-        sources: [{ label: 'VNIBB', url: 'https://example.test/fpt', asOf: '2026-07-20T00:00:00Z' }],
-      });
+      addNotebookItem({ kind: 'news', title: 'FPT source', symbol: 'FPT',
+        sources: [{ id: 'source-1', label: 'VNIBB', url: 'https://example.test/fpt', asOf: '2026-07-20T00:00:00Z' }] });
     });
-
+    const item = readNotebookItems()[0];
     const { rerender } = render(<NotesWidget id="notes" symbol="FPT" config={{}} />);
-    fireEvent.change(screen.getByLabelText('Attach browser-local research evidence'), { target: { value: screen.getByRole('option', { name: 'FPT · FPT source' }).getAttribute('value') } });
+    fireEvent.change(screen.getByLabelText('Attach browser-local research evidence'), { target: { value: item.id } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save thesis' }));
+    const saved = updateWidget.mock.calls[0][3].config.thesesBySymbol.FPT;
+    expect(saved.citations).toEqual([{ itemId: item.id, title: 'FPT source', source: 'VNIBB', url: 'https://example.test/fpt', sourceId: 'source-1', symbol: 'FPT', asOf: '2026-07-20T00:00:00Z', capturedAt: item.createdAt }]);
 
-    expect(screen.getByText('FPT source')).toBeInTheDocument();
-    expect(screen.getByText(/VNIBB · 2026-07-20T00:00:00Z/)).toBeInTheDocument();
+    act(() => removeNotebookItem(item.id));
+    rerender(<NotesWidget id="notes" symbol="FPT" config={{ thesesBySymbol: { FPT: saved } }} />);
+    expect(screen.getByText('Original research unavailable or deleted. Citation only; original content is not included.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /FPT source/ })).toHaveAttribute('href', 'https://example.test/fpt');
+    expect(screen.getByText(/Source ID source-1/)).toBeInTheDocument();
+    act(() => clearNotebook());
+    expect(screen.getByText(/Original research unavailable or deleted/)).toBeInTheDocument();
+  });
 
-    rerender(<NotesWidget id="notes" symbol="FPT" config={{ thesesBySymbol: { FPT: { notebookItemIds: ['nb:missing'] } } }} />);
-    expect(screen.getByText('Evidence unavailable or deleted: nb:missing')).toBeInTheDocument();
+  it('preserves a saved citation after notebook cap eviction', () => {
+    act(() => addNotebookItem({ kind: 'news', title: 'First source', symbol: 'FPT', sources: [{ id: 'first-source' }] }));
+    const first = readNotebookItems()[0];
+    const { rerender } = render(<NotesWidget id="notes" symbol="FPT" config={{}} />);
+    fireEvent.change(screen.getByLabelText('Attach browser-local research evidence'), { target: { value: first.id } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save thesis' }));
+    const saved = updateWidget.mock.calls[0][3].config.thesesBySymbol.FPT;
+    act(() => {
+      const newer = Array.from({ length: 200 }, (_, index) => ({ id: `nb:new-${index}`, kind: 'note', title: `New research ${index}`,
+        createdAt: new Date(Date.parse(first.createdAt) + index + 1).toISOString() }));
+      window.localStorage.setItem(RESEARCH_NOTEBOOK_KEY, JSON.stringify([...newer, first]));
+      window.dispatchEvent(new CustomEvent(RESEARCH_NOTEBOOK_EVENT));
+      addNotebookItem({ kind: 'note', title: 'Latest research' });
+    });
+    expect(readNotebookItems().some(({ id }) => id === first.id)).toBe(false);
+    rerender(<NotesWidget id="notes" symbol="FPT" config={{ thesesBySymbol: { FPT: saved } }} />);
+    expect(screen.getByText('First source')).toBeInTheDocument();
+    expect(screen.getByText(/Original research unavailable or deleted/)).toBeInTheDocument();
+  });
+
+  it('discloses legacy ID-only missing originals without inventing a citation', () => {
+    render(<NotesWidget id="notes" symbol="FPT" config={{ thesesBySymbol: { FPT: { notebookItemIds: ['nb:missing'] } } }} />);
+    expect(screen.getByText('nb:missing')).toBeInTheDocument();
+    expect(screen.getByText(/Original research unavailable or deleted/)).toBeInTheDocument();
   });
 
   it('records one metadata-only event when a thesis is completed', () => {
@@ -112,5 +139,6 @@ describe('NotesWidget evidence links', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show theses due for review' }));
     fireEvent.click(screen.getByRole('button', { name: 'View due thesis for VNM' }));
     expect(setLinkedSymbol).toHaveBeenCalledWith('VNM');
+    expect(screen.getByRole('textbox', { name: 'Thesis' })).toBeInTheDocument();
   });
 });

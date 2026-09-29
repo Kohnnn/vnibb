@@ -85,8 +85,8 @@ export function WorkspaceBackupModal({ isOpen, onClose }: WorkspaceBackupModalPr
                     <h2 id="workspace-backup-title" className="text-base font-semibold">Backup and restore workspaces</h2>
                     <button type="button" aria-label="Close backup dialog" onClick={onClose} className="rounded p-2 text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"><X size={16} /></button>
                 </div>
-                <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">Download your personal dashboards, tabs, widget configuration and positions, sync groups and folders as a JSON file. The file stays on your device unless you share it.</p>
-                <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">Excluded: {WORKSPACE_BACKUP_EXCLUSIONS}</p>
+                <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">Download personal dashboard layout, tabs, widget configuration and positions, sync groups and folders as a JSON file. Entered thesis text and citations are widget configuration, not original research. The file stays on your device unless you share it.</p>
+                <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">{WORKSPACE_BACKUP_EXCLUSIONS}</p>
                 <button type="button" onClick={handleExport} className="mt-4 rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500">Download backup</button>
                 <div className="mt-5 border-t border-[var(--border-color)] pt-4">
                     <label htmlFor="workspace-backup-file" className="block text-xs font-semibold">Restore from a backup file (up to 5 MB)</label>
@@ -97,7 +97,7 @@ export function WorkspaceBackupModal({ isOpen, onClose }: WorkspaceBackupModalPr
                         <p className="mt-1">{preview.dashboards} dashboards · {preview.tabs} tabs · {preview.widgets} widgets · {preview.syncGroups} sync groups · {preview.folders} folders</p>
                         <p className="mt-2 break-words">Dashboards: {preview.dashboardNames.join(', ') || 'None'}</p>
                         <p className="mt-1 break-words">Folders: {preview.folderNames.join(', ') || 'None'}</p>
-                        <p className="mt-2 text-[var(--text-muted)]">Excluded: {preview.exclusions}</p>
+                        <p className="mt-2 text-[var(--text-muted)]">{preview.exclusions}</p>
                         <p className="mt-2">Your existing dashboards and folders stay unchanged. New local-only copies get fresh IDs; nothing is sent to the backend.</p>
                         <button type="button" onClick={handleRestore} disabled={!preview.dashboards && !preview.folders} className="mt-3 rounded-md bg-emerald-600 px-3 py-2 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">Import as new workspaces</button>
                     </div>}

@@ -412,7 +412,7 @@ class InsiderTrackingService:
 
             if not _is_missing_block_trade_column_error(exc):
                 logger.warning("Block trades query failed: %s", exc)
-                return []
+                raise
 
             logger.warning("Block trades query fell back to legacy schema: %s", exc)
 
@@ -448,7 +448,7 @@ class InsiderTrackingService:
         except Exception as exc:
             await _rollback_after_query_error(self.db, "Legacy block trades fallback")
             logger.warning("Legacy block trades fallback failed: %s", exc)
-            return []
+            raise
     
     async def get_user_alerts(
         self,

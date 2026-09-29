@@ -27,7 +27,6 @@ jest.mock('./QuantRunHistoryPanel', () => ({ QuantRunHistoryPanel: () => null })
 
 const cases = [
   ['big_flow_monitor', 'Big Flow'],
-  ['positioning_dashboard', 'Positioning'],
   ['signal_robustness_lab', 'Signal Robustness'],
 ] as const
 

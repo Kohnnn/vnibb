@@ -816,11 +816,11 @@ export function ScreenerWidget({
         {
             id: 'row_actions',
             header: 'Actions',
-            width: 88,
+            width: 116,
             sortable: false,
             accessor: (row: Record<string, unknown>) => {
                 const symbol = String(row.ticker ?? row.symbol ?? '');
-                return <div className="flex items-center gap-1"><button type="button" onClick={(event) => { event.stopPropagation(); handleSymbolSelect(symbol); }} aria-label={`View ${symbol}`} className="min-h-9 min-w-9 rounded p-2 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"><Search size={13} /></button><button type="button" onClick={(event) => { event.stopPropagation(); handleAddToWatchlist(symbol); }} aria-label={`Add ${symbol} to Watchlist`} className="min-h-9 min-w-9 rounded p-2 text-blue-300 hover:bg-blue-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"><Plus size={13} /></button></div>;
+                return <div className="flex items-center gap-1"><button type="button" onClick={(event) => { event.stopPropagation(); handleSymbolSelect(symbol); }} aria-label={`View ${symbol}`} className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"><Search size={13} /></button><button type="button" onClick={(event) => { event.stopPropagation(); handleAddToWatchlist(symbol); }} aria-label={`Add ${symbol} to Watchlist`} className="min-h-11 min-w-11 rounded p-2 text-blue-300 hover:bg-blue-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"><Plus size={13} /></button></div>;
             },
         },
     ], [handleAddToWatchlist, handleSymbolSelect, visibleColumns]);
@@ -980,8 +980,9 @@ export function ScreenerWidget({
                 {pendingWatchlistSymbol && (
                     <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border-color)] bg-blue-500/5 px-3 py-2 text-xs" role="group" aria-label={`Choose watchlist for ${pendingWatchlistSymbol}`}>
                         <span className="font-semibold text-[var(--text-primary)]">Add {pendingWatchlistSymbol} to:</span>
-                        {watchlistTargets.map((target) => <button key={`${target.dashboardId}:${target.tabId}:${target.widgetId}`} type="button" onClick={() => addSymbolToTarget(pendingWatchlistSymbol, target)} className="min-h-9 rounded border border-[var(--border-color)] px-3 py-1 text-[var(--text-secondary)] hover:border-blue-500/40 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">{target.label}</button>)}
-                        <button type="button" onClick={() => setPendingWatchlistSymbol(null)} className="min-h-9 rounded px-3 py-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Cancel</button>
+                        {watchlistTargets.length === 0 && <button type="button" onClick={() => createWatchlistWithSymbol(pendingWatchlistSymbol)} className="min-h-11 rounded border border-blue-500/40 px-3 py-1 text-blue-300 hover:bg-blue-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Create watchlist for {pendingWatchlistSymbol}</button>}
+                        {watchlistTargets.map((target) => <button key={`${target.dashboardId}:${target.tabId}:${target.widgetId}`} type="button" onClick={() => addSymbolToTarget(pendingWatchlistSymbol, target)} className="min-h-11 rounded border border-[var(--border-color)] px-3 py-1 text-[var(--text-secondary)] hover:border-blue-500/40 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">{target.label}</button>)}
+                        <button type="button" onClick={() => setPendingWatchlistSymbol(null)} className="min-h-11 rounded px-3 py-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Cancel</button>
                     </div>
                 )}
                 {watchlistStatus && <div className="border-b border-[var(--border-color)] px-3 py-1 text-[10px] text-emerald-300" role="status">{watchlistStatus}</div>}
@@ -1021,7 +1022,7 @@ export function ScreenerWidget({
                         <VirtualizedTable
                             data={filteredData}
                             columns={tableColumns}
-                            rowHeight={38}
+                            rowHeight={44}
                             onRowClick={(row) => handleSymbolSelect((row.ticker ?? row.symbol) as string)}
                             interactiveCells
                             sortField={sortField}

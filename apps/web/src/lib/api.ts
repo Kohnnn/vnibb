@@ -1609,6 +1609,7 @@ export interface TopMoversResponse {
     count: number;
     data: TopMoverData[];
     updated_at?: string | null;
+    error?: string | null;
     is_last_session?: boolean;
     session_label?: string | null;
 }

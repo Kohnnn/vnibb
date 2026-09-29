@@ -50,6 +50,8 @@ describe('ResearchNotebookWidget', () => {
     expect(screen.getByText('Pinned company news')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'View VNM' }))
     expect(setLinkedSymbol).toHaveBeenCalledWith('VNM')
+    expect(screen.getByRole('button', { name: 'View VNM' })).toHaveClass('min-h-11', 'focus-visible:ring-2')
+    expect(screen.getByRole('button', { name: 'Remove Pinned company news from notebook' })).toHaveClass('min-w-11', 'focus-visible:ring-2')
 
     act(() => {
       clearNotebook()

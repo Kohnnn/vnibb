@@ -511,7 +511,7 @@ Acceptance:
 
 ## Wave 11: Connected Investor Workflow
 
-Status: Implementation in progress
+Status: Focused source and component scenarios verified for issue #83; browser acceptance remains pending integration verification.
 
 ### 11.1 Watchlist Connections
 
@@ -552,9 +552,11 @@ Acceptance:
 - watchlist, activity, navigation, and alert flows complete by keyboard;
 - assistive labels distinguish action, target, and unavailable state.
 
+Issue #83 evidence: `ScreenerSavedAlerts.test.tsx` exercises zero/one/multiple watchlist paths, keyboard choice, normalized duplicate handling, existing-symbol preservation, and disappearing targets; `Wave4Widgets.test.tsx` verifies 50-symbol query cap and Dashboard/Manual/Deduplicated/Capped counts. `AlertActivityInboxWidget.test.tsx`, `ResearchNotebookWidget.test.tsx`, and `NotesWidget.test.tsx` exercise activity, notebook, and due-thesis navigation; `PriceAlertsWidget.test.tsx` covers linked-symbol seeding, finite thresholds, malformed persisted alerts, and labelled controls. Runtime UI/browser acceptance is not yet claimed.
+
 ## Wave 12: Existing Widget Activation
 
-Status: Implementation in progress
+Status: Four existing widgets resolved and restored in focused issue #83 tests; browser acceptance remains pending integration verification.
 
 Deliverables:
 
@@ -567,6 +569,8 @@ Acceptance:
 - exactly those four widgets are discoverable and resolve from the registry;
 - persisted instances render without data migration;
 - no other placeholder activates; unavailable or sparse data does not imply coverage, valuation certainty, or advice.
+
+Issue #83 evidence: `Wave12WidgetActivation.test.tsx` resolves each of the four catalogue IDs through lazy registry components to sparse states and checks technical non-advice/coverage plus server-sourced valuation provenance; `DashboardContext/index.test.tsx` restores all four saved instances and configurations without migration. Other placeholder activation was not changed. Runtime UI/browser acceptance is not yet claimed.
 
 ## Wave 13: Bounded Market Intelligence
 
@@ -609,6 +613,13 @@ Acceptance:
 
 - Positioning Dashboard remains unavailable unless the audit records bounded requests and explicit coverage;
 - Big Flow never fabricates a zero/empty state for provider failure.
+
+Gate result (measured, not promoted):
+
+- Positioning Dashboard issues one `/equity/{group}/symbols` lookup plus up to 40 parallel `/equity/{symbol}/transaction-flow` requests (`MAX_SYMBOLS = 40` in `apps/web/src/components/widgets/PositioningDashboardWidget.tsx`).
+- The request-count/coverage audit is therefore outstanding: the widget is now removed from `widgetDefinitions.ts`, its `positioning_dashboard` entry was deleted so it is no longer promotable from the library, and the registered component renders an explicit unavailable state that issues no symbol or flow request. Saved `positioning_dashboard` instances still resolve through the registry and keep their stored configuration.
+- Big Flow endpoint failure is now distinguishable from a legitimate empty tape: `InsiderTrackingService.get_recent_block_trades` propagates query failures instead of returning `[]`, `/api/v1/insider/block-trades` answers 503 `Block-trade data unavailable`, and `BigFlowMonitorWidget` shows the failure (and suppresses `onDataChange`) instead of fabricating a zero tape while a genuine empty 200 still renders "0 prints" and the threshold empty state.
+- Coverage disclosure for Positioning is not recorded, so activation stays blocked; this gate records the measurement only and makes no production acceptance claim.
 
 ## Implementation Order And Verification
 
