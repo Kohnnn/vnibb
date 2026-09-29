@@ -237,9 +237,9 @@ async def get_block_trades(
 
         return [BlockTradeResponse.model_validate(trade) for trade in trades]
 
-    except Exception as e:
-        logger.exception("Error fetching block trades: %s", e)
-        return []
+    except Exception:
+        logger.exception("Error fetching block trades")
+        raise HTTPException(status_code=503, detail="Block-trade data unavailable") from None
 
 
 # ============================================================================

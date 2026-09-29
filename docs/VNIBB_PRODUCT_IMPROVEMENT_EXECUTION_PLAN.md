@@ -614,6 +614,13 @@ Acceptance:
 - Positioning Dashboard remains unavailable unless the audit records bounded requests and explicit coverage;
 - Big Flow never fabricates a zero/empty state for provider failure.
 
+Gate result (measured, not promoted):
+
+- Positioning Dashboard issues one `/equity/{group}/symbols` lookup plus up to 40 parallel `/equity/{symbol}/transaction-flow` requests (`MAX_SYMBOLS = 40` in `apps/web/src/components/widgets/PositioningDashboardWidget.tsx`).
+- The request-count/coverage audit is therefore outstanding: the widget is now removed from `widgetDefinitions.ts`, its `positioning_dashboard` entry was deleted so it is no longer promotable from the library, and the registered component renders an explicit unavailable state that issues no symbol or flow request. Saved `positioning_dashboard` instances still resolve through the registry and keep their stored configuration.
+- Big Flow endpoint failure is now distinguishable from a legitimate empty tape: `InsiderTrackingService.get_recent_block_trades` propagates query failures instead of returning `[]`, `/api/v1/insider/block-trades` answers 503 `Block-trade data unavailable`, and `BigFlowMonitorWidget` shows the failure (and suppresses `onDataChange`) instead of fabricating a zero tape while a genuine empty 200 still renders "0 prints" and the threshold empty state.
+- Coverage disclosure for Positioning is not recorded, so activation stays blocked; this gate records the measurement only and makes no production acceptance claim.
+
 ## Implementation Order And Verification
 
 1. Wave 10 valuation semantics and browser-local evidence linkage.

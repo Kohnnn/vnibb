@@ -1055,16 +1055,6 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['fundamental analysis', 'thesis', 'strengths', 'risks', 'company analysis']
     },
     {
-        type: 'positioning_dashboard',
-        name: 'Positioning Dashboard',
-        description: 'Foreign / proprietary / domestic net-flow positioning across a VN universe (5D/20D)',
-        category: 'ownership',
-        defaultConfig: {},
-        defaultLayout: { w: 7, h: 8, minW: 5, minH: 5 },
-        recommended: true,
-        searchKeywords: ['positioning', 'foreign', 'proprietary', 'domestic', 'net flow', 'participants', 'vn30', 'flow']
-    },
-    {
         type: 'market_structure',
         name: 'Market Structure',
         description: 'Volume-by-price profile with POC/VAH/VAL, key high-volume levels, and foreign-flow tilt',

@@ -5,6 +5,10 @@ from datetime import datetime
 import pytest
 
 from vnibb.services.insider_tracking import InsiderTrackingService
+from fastapi import HTTPException
+
+from vnibb.api.v1.insider import get_block_trades
+
 
 
 class _FakeResult:
@@ -67,3 +71,34 @@ async def test_recent_block_trades_falls_back_for_legacy_schema():
             "is_proprietary": False,
         }
     ]
+
+@pytest.mark.asyncio
+async def test_block_trade_query_failure_is_not_an_empty_tape():
+    class FailedSession:
+        async def execute(self, _stmt):
+            raise RuntimeError("provider unavailable")
+
+        async def rollback(self):
+            pass
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await InsiderTrackingService(FailedSession()).get_recent_block_trades()  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_block_trade_endpoint_distinguishes_failure_from_real_empty(monkeypatch):
+    class Service:
+        def __init__(self, _db):
+            pass
+
+        async def get_recent_block_trades(self, symbol, limit):
+            if symbol == "FAIL":
+                raise RuntimeError("provider private failure")
+            return []
+
+    monkeypatch.setattr("vnibb.api.v1.insider.InsiderTrackingService", Service)
+    assert await get_block_trades(symbol="EMPTY", limit=100, db=None) == []
+    with pytest.raises(HTTPException) as exc:
+        await get_block_trades(symbol="FAIL", limit=100, db=None)
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "Block-trade data unavailable"
