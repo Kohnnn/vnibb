@@ -1,76 +1,83 @@
-# #40 prototype — Matrix expanded-space handoff and grid-behavior note
+# #40 prototype — Matrix maximize/inspector interaction (corrected)
+
+> **Correction notice.** An earlier revision of this artifact claimed expanded space was `MISSING`
+> and described a "one Escape closes both" behavior as *measured*. Both were wrong. Corrections are
+> recorded below rather than silently overwritten, because the earlier claim was shipped to the
+> ticket.
 
 Isolated synthetic artifact for live user reaction. **Not production UI.** Reuses VNIBB visual
 conventions and existing components; no new framework; no fabricated live values.
 
-## What this prototype exists to answer
+## Correction 1 — Matrix already maximizes (earlier claim: MISSING)
 
-The interaction surface for #40 is almost entirely **already implemented** on `main`:
+False negative from searching `MatrixWidget.tsx` for `MaximizedWidgetPortal` instead of tracing the
+render path. Maximization is centralized in the shared wrapper:
 
-| #40 item | Status | Evidence |
+- `DashboardClient.tsx:1481` renders **every** grid widget through `WidgetWrapper`.
+- `WidgetWrapper.tsx:776–777` passes `isMaximized={isMaximized} onMaximize={handleMaximize}` into the
+  toolbar.
+- `WidgetWrapper.tsx:896–908` portals that same widget content into `MaximizedWidgetPortal`.
+
+So Matrix already maximizes, and `MatrixWidget` correctly does **not** import the portal itself.
+There is no missing capability and nothing to add. The earlier "Shape B — Matrix does not maximize"
+recommendation would have **removed an existing control**.
+
+## Correction 2 — the Escape claim was asserted, not measured
+
+Earlier text called a static-code suspicion a "Measured concern" and claimed one Escape closes the
+inspector *and* the portal. No browser session was run. Reading the actual attachment points:
+
+- `MaximizedWidgetPortal.tsx:69` binds `document.addEventListener('keydown', handleKeys)`.
+- `MatrixInspector.tsx:54` binds React `onKeyDown` on the `<aside>` **DOM node**, not on `document`.
+
+React delegates synthetic events to the root container, so `stopPropagation()` there prevents the
+event from reaching `document`. **On desktop the portal's listener should therefore not fire** —
+one Escape closes only the inspector. The earlier claim is likely the reverse of the truth.
+
+**This remains unproven and must not be restated as fact.** The two widths differ concretely:
+
+- **Narrow (<768 px):** `MatrixInspector.tsx:87` portals the panel to `document.body` at
+  `zIndex: 10000` — a sibling of the outer dialog, not a descendant. Key events from a body-level
+  portal still propagate to `document`, so the outer handler is reachable by a different path than
+  on desktop.
+- **Desktop:** inspector renders in place, nested inside the outer dialog.
+
+Whether these compose correctly — first Escape closes only the inspector, focus returns to the
+invoking cell, and the maximized view survives — is **the actual open question**.
+
+## What the prototype now is
+
+A browser exercise of the **already-available** maximize and inspector, at both widths. Not a
+proposal to add UI. The measured outcomes to capture:
+
+| Step | Desktop expectation | Narrow expectation |
 |---|---|---|
-| typed cells | present | `MatrixInspector.tsx` `dimension.output_type`, `payload.metrics` |
-| read-only inspector | present | 4 tabs: Result / Evidence / Basis / Review |
-| compact/standard/expanded density | present | `MatrixWidget.tsx` density select |
-| pinned company identity | present | `pin` in sort comparator |
-| selection | present | `selected: Set<string>` |
-| no execution from view | present | inspector states view changes never execute research |
-| keyboard/focus | present | "Arrow keys move between results · Space selects · Enter inspects · Escape closes inspector" |
-| responsive evidence inspector | present | `matchMedia('(max-width: 767px)')` |
-| artifact unavailability | present | "No evidence retained. See basis and limitations." |
-| hidden selection disclosure | present | `hiddenMatrixSelectionCount(selected, visibleCells)` |
-| clipboard fallback | present | "Clipboard unavailable. Select and copy the text below." |
-| **embedded-widget vs expanded-widget space** | **MISSING** | `MatrixWidget` has no `MaximizedWidgetPortal` integration |
+| Maximize Matrix, open a cell's evidence | inspector opens inside the maximized view | inspector covers viewport at `zIndex 10000` |
+| Press Escape once | **only** inspector closes (unverified) | **?** — body-level portal, path differs |
+| Press Escape again | maximized view closes | **?** |
+| Focus after inspector closes | returns to the invoking cell | **?** |
+| Reopen inspector without re-maximizing | unchanged snapshot/revision | **?** |
 
-So this prototype targets the **single genuine gap**: whether Matrix wants expanded-widget space at
-all, and if so in which of the two shapes VNIBB already supports.
-
-## The two candidate shapes
-
-**Shape A — full-screen portal (existing convention).**
-`MaximizedWidgetPortal` renders outside the grid DOM via `createPortal`, exactly as `WidgetWrapper`
-already does at line 897. Focus is trapped, Escape closes, and the restore target is
-`restoreFocusRef`. This is what every other widget gets today.
-
-**Shape B — Matrix does not maximize; the inspector is the expansion.**
-Matrix already has its own expansion affordance: `MatrixInspector` opens as a portal panel with four
-tabs. Adding a second, competing full-screen mode would give the widget two different "expanded"
-meanings, and would nest a portal (inspector) inside a portal (maximized), which is where focus
-handling and Escape routing get fragile.
-
-## The concrete question to react to
-
-Open the Matrix widget on a frozen snapshot, then try to inspect one cell's evidence:
-
-1. In **Shape A**, the full-screen portal owns the viewport. The inspector opens *inside* it. Escape
-   must close **only the inspector** first; a second Escape closes the portal. Two nested portals
-   now both claim the Escape key.
-2. In **Shape B**, density stays `expanded` and the inspector portal is the only overlay. Escape has
-   exactly one meaning at every moment.
-
-**Measured concern with Shape A:** `MaximizedWidgetPortal` registers its own Escape/close handling for
-the whole overlay. The inspector panel is `role="dialog"`-like and moves focus to its first button on
-mount. Nesting them means the inner panel must stop propagation or the outer portal closes with the
-inspector still conceptually open — the user loses the cell they were reading.
+Every `?` is a genuine unknown. The static reading predicts desktop behaves correctly; it does not
+establish it, and it says nothing reliable about narrow.
 
 ## Recommendation for reaction
 
-**Shape B**, with a narrow caveat: expose expanded space only if a real Matrix use case needs a
-wider grid than the `expanded` density already provides. Nothing in the #38 playbook (anchor plus a
-2–10 company shortlist across five dimensions) demonstrably exceeds that. If a wider view *is* wanted,
-extend the inspector to full-screen rather than maximizing the whole widget — one overlay, one Escape
-meaning.
+**Do not modify the shared wrapper or MatrixWidget.** Maximize already works; touching shared UI for
+an existing control risks every other widget for no gain.
 
-## What would falsify this
+The decision this ticket actually needs is narrow: **if** the browser exercise shows the nested
+inspector misbehaving under maximize at either width, decide how it should behave. If both widths
+compose correctly, #40's interaction surface is complete and the ticket closes on that evidence.
 
-- A real shortlist (8–10 companies × 5 dimensions + evidence) that is unreadable at `expanded`
-  density on a 1440 px viewport.
-- A keyboard user who cannot reach a cell's evidence without the widget-level maximize.
-- A measured need to compare two cells side by side, which the current single-inspector model cannot
-  do at any density.
+## What would falsify the current (unverified) reading
+
+- Escape reaching the portal's document listener while the inspector is open on desktop.
+- Focus escaping the maximized view, or landing on a detached node, after the inspector closes.
+- Narrow-width behavior differing from desktop in a way not accounted for by the body-level portal.
 
 ## Explicitly not in this prototype
 
-Production integration, a new frontend framework, fabricated live values, side-by-side multi-cell
-comparison, or any change to the inspector's existing four-tab contract. No execution from any view
-operation.
+Production integration, changes to `WidgetWrapper` or `MaximizedWidgetPortal`, a new frontend
+framework, fabricated live values, side-by-side multi-cell comparison, or any change to the
+inspector's four-tab contract. No execution from any view operation.
