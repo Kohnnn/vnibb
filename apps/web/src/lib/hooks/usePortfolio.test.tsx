@@ -46,6 +46,24 @@ describe('usePortfolio committed holdings', () => {
         expect(result.current.storageError).toBeNull();
     });
 
+    it('keeps the failed edit warning through a successful background snapshot until retry', () => {
+        const { result } = renderHook(() => usePortfolio());
+        let id = '';
+        act(() => { id = result.current.addPosition(position('FPT'))!.id; });
+        const failure = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
+        act(() => { expect(result.current.updatePosition(id, { quantity: 20 })).toBe(false); });
+        failure.mockRestore();
+
+        act(() => { result.current.recordValueSnapshot(10_000, 10_000); });
+        expect(result.current.storageError).toMatch(/Could not save holdings/);
+        expect(result.current.positions[0].quantity).toBe(10);
+        expect(JSON.parse(window.localStorage.getItem(KEY)!).positions[0].quantity).toBe(10);
+
+        act(() => { expect(result.current.updatePosition(id, { quantity: 20 })).toBe(true); });
+        expect(result.current.storageError).toBeNull();
+        expect(JSON.parse(window.localStorage.getItem(KEY)!).positions[0].quantity).toBe(20);
+    });
+
     it('rejects fractional, zero, negative, NaN and unsafe share quantities at the hook boundary', () => {
         const { result } = renderHook(() => usePortfolio());
         let id = '';

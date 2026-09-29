@@ -158,7 +158,7 @@ export function usePortfolio() {
                 valueHistory: newHistory,
                 updatedAt: new Date().toISOString(),
             };
-        });
+        }, false);
     }, [setPortfolio]);
 
     // Get unique symbols for price fetching

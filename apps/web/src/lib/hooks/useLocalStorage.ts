@@ -11,7 +11,7 @@ import { logClientError, logClientWarn } from '@/lib/clientLogger';
 export function useLocalStorage<T>(
     key: string,
     initialValue: T
-): [T, (value: T | ((prev: T) => T)) => boolean, () => boolean, string | null] {
+): [T, (value: T | ((prev: T) => T), clearErrorOnSuccess?: boolean) => boolean, () => boolean, string | null] {
     // Initialize with initialValue to avoid hydration mismatch
     const [storedValue, setStoredValue] = useState<T>(initialValue);
     const committedValue = useRef(storedValue);
@@ -31,13 +31,13 @@ export function useLocalStorage<T>(
     }, [key]);
 
     const setValue = useCallback(
-        (value: T | ((prev: T) => T)): boolean => {
+        (value: T | ((prev: T) => T), clearErrorOnSuccess = true): boolean => {
             try {
                 const next = value instanceof Function ? value(committedValue.current) : value;
                 window.localStorage.setItem(key, JSON.stringify(next));
                 committedValue.current = next;
                 setStoredValue(next);
-                setStorageError(null);
+                if (clearErrorOnSuccess) setStorageError(null);
                 return true;
             } catch (error) {
                 if (error instanceof DOMException && error.name === 'QuotaExceededError') {
