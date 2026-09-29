@@ -1,7 +1,7 @@
 // useLocalStorage hook - Type-safe localStorage with SSR support
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { logClientError, logClientWarn } from '@/lib/clientLogger';
 
 /**
@@ -11,58 +11,60 @@ import { logClientError, logClientWarn } from '@/lib/clientLogger';
 export function useLocalStorage<T>(
     key: string,
     initialValue: T
-): [T, (value: T | ((prev: T) => T)) => void, () => void] {
+): [T, (value: T | ((prev: T) => T)) => boolean, () => boolean, string | null] {
     // Initialize with initialValue to avoid hydration mismatch
     const [storedValue, setStoredValue] = useState<T>(initialValue);
-    const [isHydrated, setIsHydrated] = useState(false);
-
+    const committedValue = useRef(storedValue);
+    const [storageError, setStorageError] = useState<string | null>(null);
     // Load from localStorage after mount (client-side only)
     useEffect(() => {
         try {
             const item = window.localStorage.getItem(key);
             if (item !== null) {
                 const parsed = JSON.parse(item) as T;
+                committedValue.current = parsed;
                 setStoredValue(parsed);
             }
         } catch (error) {
             logClientWarn(`Error reading localStorage key "${key}":`, error);
         }
-        setIsHydrated(true);
     }, [key]);
 
-    // Setter function with storage quota error handling
     const setValue = useCallback(
-        (value: T | ((prev: T) => T)) => {
+        (value: T | ((prev: T) => T)): boolean => {
             try {
-                const valueToStore = value instanceof Function ? value(storedValue) : value;
-                setStoredValue(valueToStore);
-
-                if (typeof window !== 'undefined') {
-                    window.localStorage.setItem(key, JSON.stringify(valueToStore));
-                }
+                const next = value instanceof Function ? value(committedValue.current) : value;
+                window.localStorage.setItem(key, JSON.stringify(next));
+                committedValue.current = next;
+                setStoredValue(next);
+                setStorageError(null);
+                return true;
             } catch (error) {
-                // Handle storage quota exceeded
                 if (error instanceof DOMException && error.name === 'QuotaExceededError') {
                     logClientError('localStorage quota exceeded. Consider clearing old data.');
                 } else {
                     logClientWarn(`Error setting localStorage key "${key}":`, error);
                 }
+                setStorageError('Could not save holdings to browser storage. Your last saved holdings remain available; free browser storage or check permissions, then retry.');
+                return false;
             }
         },
-        [key, storedValue]
+        [key]
     );
 
-    // Clear function to remove the key
-    const clearValue = useCallback(() => {
+    const clearValue = useCallback((): boolean => {
         try {
+            window.localStorage.removeItem(key);
+            committedValue.current = initialValue;
             setStoredValue(initialValue);
-            if (typeof window !== 'undefined') {
-                window.localStorage.removeItem(key);
-            }
+            setStorageError(null);
+            return true;
         } catch (error) {
             logClientWarn(`Error clearing localStorage key "${key}":`, error);
+            setStorageError('Could not clear holdings from browser storage. Your last saved holdings remain available; check browser storage and retry.');
+            return false;
         }
     }, [key, initialValue]);
 
-    return [storedValue, setValue, clearValue];
+    return [storedValue, setValue, clearValue, storageError];
 }

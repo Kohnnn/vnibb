@@ -50,28 +50,26 @@ const DEFAULT_PORTFOLIO: Portfolio = {
 // ============================================================================
 
 export function usePortfolio() {
-    const [portfolio, setPortfolio, clearPortfolio] = useLocalStorage<Portfolio>(
+    const [portfolio, setPortfolio, clearPortfolio, storageError] = useLocalStorage<Portfolio>(
         PORTFOLIO_STORAGE_KEY,
         DEFAULT_PORTFOLIO
     );
 
     // Add a new position
-    const addPosition = useCallback((
-        position: Omit<Position, 'id'>
-    ): Position => {
+    const addPosition = useCallback((position: Omit<Position, 'id'>): Position | null => {
+        if (!Number.isSafeInteger(position.quantity) || position.quantity <= 0) return null;
+
         const newPosition: Position = {
             ...position,
             id: `pos_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
             symbol: position.symbol.toUpperCase().trim(),
         };
 
-        setPortfolio(prev => ({
+        return setPortfolio(prev => ({
             ...prev,
             positions: [...prev.positions, newPosition],
             updatedAt: new Date().toISOString(),
-        }));
-
-        return newPosition;
+        })) ? newPosition : null;
     }, [setPortfolio]);
 
     // Update an existing position
@@ -79,9 +77,10 @@ export function usePortfolio() {
         id: string,
         updates: Partial<Omit<Position, 'id'>>
     ): boolean => {
-        let found = false;
+        if (updates.quantity !== undefined && (!Number.isSafeInteger(updates.quantity) || updates.quantity <= 0)) return false;
 
-        setPortfolio(prev => {
+        let found = false;
+        const saved = setPortfolio(prev => {
             const idx = prev.positions.findIndex(p => p.id === id);
             if (idx === -1) return prev;
 
@@ -90,8 +89,8 @@ export function usePortfolio() {
             updatedPositions[idx] = {
                 ...updatedPositions[idx],
                 ...updates,
-                symbol: updates.symbol 
-                    ? updates.symbol.toUpperCase().trim() 
+                symbol: updates.symbol
+                    ? updates.symbol.toUpperCase().trim()
                     : updatedPositions[idx].symbol,
             };
 
@@ -102,14 +101,14 @@ export function usePortfolio() {
             };
         });
 
-        return found;
+        return found && saved;
     }, [setPortfolio]);
 
     // Remove a position
     const removePosition = useCallback((id: string): boolean => {
         let found = false;
 
-        setPortfolio(prev => {
+        const saved = setPortfolio(prev => {
             const idx = prev.positions.findIndex(p => p.id === id);
             if (idx === -1) return prev;
 
@@ -121,7 +120,7 @@ export function usePortfolio() {
             };
         });
 
-        return found;
+        return found && saved;
     }, [setPortfolio]);
 
     // Update cash balance
@@ -181,6 +180,7 @@ export function usePortfolio() {
         valueHistory: portfolio.valueHistory,
         symbols,
         totalCost,
+        storageError,
         addPosition,
         updatePosition,
         removePosition,
