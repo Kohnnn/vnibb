@@ -59,11 +59,12 @@ os.environ["ADMIN_API_KEY"] = "test-admin-key"
 os.environ["DATA_BACKEND"] = "postgres"
 os.environ["MONGODB_ENABLED"] = "false"
 
-from vnibb.api.main import app
-from vnibb.core.config import settings
-from vnibb.core.database import Base, get_db
-from vnibb.middleware.rate_limit import RateLimitMiddleware
-from vnibb.models import *
+# Deferred imports: every symbol below needs the environment configured above.
+from vnibb.api.main import app  # noqa: E402
+from vnibb.core.config import settings  # noqa: E402
+from vnibb.core.database import Base, get_db  # noqa: E402
+from vnibb.middleware.rate_limit import RateLimitMiddleware  # noqa: E402
+from vnibb.models import *  # noqa: E402,F403
 
 TEST_DATABASE_URL = os.environ["DATABASE_URL"] if POSTGRES_CONTRACT else "sqlite+aiosqlite:///:memory:"
 
