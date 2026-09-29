@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ExternalLink, Link2, Save, StickyNote, Trash2, Unlink } from 'lucide-react';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useDashboard } from '@/contexts/DashboardContext';
+import { isEditableDashboardId } from '@/contexts/DashboardContext/helpers';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
@@ -35,6 +36,7 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
     const { state, updateWidget } = useDashboard();
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetId: id, widgetType: 'notes', symbol });
     const widgetLocation = useDashboardWidget(id);
+    const canSave = Boolean(widgetLocation && isEditableDashboardId(widgetLocation.dashboardId));
     const persisted = useMemo(() => normalizeThesisConfig(config), [config]);
     const workspaceTheses = useMemo(() => {
         const theses: Record<string, InvestmentThesis> = {};
@@ -104,7 +106,7 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
     }, [dueTheses.length, notes.length, onDataChange, symbol, thesis.thesis]);
 
     const save = () => {
-        if (!widgetLocation) return;
+        if (!widgetLocation || !canSave) return;
         updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, {
             config: {
                 ...widgetLocation.widget.config,
@@ -166,13 +168,15 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
     return (
         <div className="flex h-full flex-col gap-2">
             <div className="flex items-center justify-between px-1 text-xs text-[var(--text-muted)]">
-                <div className="flex items-center gap-2"><StickyNote size={12} className="text-yellow-400" /><span>Thesis · {symbol}</span>{!isSaved && <span className="text-orange-400">Unsaved</span>}</div>
+                <div className="flex items-center gap-2"><StickyNote size={12} className="text-yellow-400" /><span>Thesis · {symbol}</span>{canSave && !isSaved && <span className="text-orange-400">Unsaved</span>}</div>
                 <div className="flex items-center gap-1">
-                    <WidgetMeta note="Saved in dashboard" align="right" />
+                    <WidgetMeta note={canSave ? 'Saved in dashboard' : 'Read-only system workspace'} align="right" />
                     <button type="button" onClick={() => setShowDueOnly(true)} className="rounded px-2 py-1 hover:bg-[var(--bg-tertiary)]" aria-label="Show theses due for review">Due {dueTheses.length}</button>
-                    <button type="button" onClick={save} className="rounded p-1 hover:bg-[var(--bg-tertiary)] hover:text-green-400" aria-label="Save thesis"><Save size={13} /></button>
+                    <button type="button" onClick={save} disabled={!canSave} className="rounded p-1 hover:bg-[var(--bg-tertiary)] hover:text-green-400 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Save thesis"><Save size={13} /></button>
                 </div>
             </div>
+            {!canSave && <p role="status" className="rounded border border-amber-500/30 p-2 text-xs text-amber-300">System workspace is read-only. Use Templates or Blank workspace in the sidebar, add a tab and Notes widget, then save your thesis there.</p>}
+            <fieldset disabled={!canSave} className="contents">
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 text-[10px]" aria-label="Investment Thesis completion checklist">
                 <div className="flex items-center justify-between text-[var(--text-muted)]"><span>Thesis completion</span><span>{completedChecks}/6</span></div>
                 <div className="mt-1 grid grid-cols-6 gap-1">{completionChecks.map(([label, complete]) => <span key={label} className={complete ? 'text-emerald-400' : 'text-[var(--text-muted)]'} title={label}>{complete ? 'Ready' : label}</span>)}</div>
@@ -192,6 +196,7 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
                 {attachableEvidence.length === 0 && linkedEvidence.length === 0 && <div className="text-[10px] text-[var(--text-muted)]">No matching browser-local research. Symbol-less items may be selected when available.</div>}
             </div>
             <div className="flex min-h-0 flex-1 flex-col"><div className="flex items-center justify-between text-xs text-[var(--text-muted)]"><label htmlFor={`${id}-notes`}>Legacy notes</label><button type="button" onClick={clearNote} className="rounded p-1 hover:bg-[var(--bg-tertiary)] hover:text-red-400" aria-label="Clear legacy notes"><Trash2 size={12} /></button></div><textarea id={`${id}-notes`} value={notes} onChange={(event) => { setNotes(event.target.value); setIsSaved(false); }} placeholder={`Write notes about ${symbol}...`} className="mt-1 min-h-16 flex-1 resize-none rounded bg-[var(--bg-tertiary)] p-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500" /></div>
+            </fieldset>
         </div>
     );
 }
