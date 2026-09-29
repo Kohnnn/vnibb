@@ -91,6 +91,7 @@ function renderSidebarWithDashboards(dashboards: readonly [Dashboard, Dashboard]
     createDashboard: () => firstDashboard,
     exportWorkspace: jest.fn(),
     restoreWorkspace: jest.fn(),
+    importResearchBundle: jest.fn(),
     updateDashboard: jest.fn(),
     updateDashboardRuntime: jest.fn(),
     deleteDashboard: jest.fn(),

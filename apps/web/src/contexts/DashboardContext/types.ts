@@ -15,6 +15,7 @@ import type {
     WidgetLayout,
 } from '@/types/dashboard';
 import type { WorkspaceBackup } from '@/lib/workspaceBackup';
+import type { ResearchImportPlan } from '@/lib/researchBundle';
 
 // Re-export from dashboard types
 export {
@@ -108,6 +109,7 @@ export interface DashboardContextValue {
     createDashboard: (data: DashboardCreate) => Dashboard;
     exportWorkspace: (groups?: Dashboard['widgetGroups'], linkedGlobalMarketsSymbol?: string) => WorkspaceBackup;
     restoreWorkspace: (backup: WorkspaceBackup) => void;
+    importResearchBundle: (plan: ResearchImportPlan) => void;
     updateDashboard: (id: string, updates: Partial<Dashboard>) => void;
     updateDashboardRuntime: (id: string, updates: Partial<Dashboard>) => void;
     deleteDashboard: (id: string) => void;

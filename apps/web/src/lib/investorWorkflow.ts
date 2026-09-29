@@ -1,6 +1,43 @@
 import type { CompanyEventData } from '@/types/equity';
+import type { NotebookItem } from '@/lib/researchNotebook';
 
 export type ThesisStatus = 'researching' | 'watching' | 'active' | 'closed';
+export interface ThesisCitation {
+    itemId: string;
+    title: string;
+    source?: string;
+    url?: string;
+    sourceId?: string;
+    symbol?: string;
+    asOf?: string;
+    capturedAt: string;
+}
+
+export const MAX_THESIS_CITATIONS = 50;
+
+export function citeNotebookItem(item: NotebookItem): ThesisCitation {
+    const source = item.sources?.[0];
+    return {
+        itemId: item.id,
+        title: item.title.slice(0, 300),
+        ...(source?.sourceName || source?.label || source?.sourceSystem ? { source: (source.sourceName || source.label || source.sourceSystem)!.slice(0, 200) } : {}),
+        ...(source?.url || source?.sourceUrl || source?.feedUrl ? { url: (source.url || source.sourceUrl || source.feedUrl)!.slice(0, 2048) } : {}),
+        ...(source?.id ? { sourceId: source.id.slice(0, 300) } : {}),
+        ...(item.symbol ? { symbol: item.symbol.slice(0, 40) } : {}),
+        ...(source?.asOf || source?.publishedAt ? { asOf: (source.asOf || source.publishedAt)!.slice(0, 100) } : {}),
+        capturedAt: item.createdAt,
+    };
+}
+export function citationMatchesItem(citation: ThesisCitation | undefined, item: NotebookItem): boolean {
+    if (!citation) return true;
+    const observed = citeNotebookItem(item);
+    return citation.itemId === observed.itemId && citation.title === observed.title
+        && citation.capturedAt === observed.capturedAt
+        && citation.source === observed.source && citation.url === observed.url
+        && citation.sourceId === observed.sourceId && citation.symbol === observed.symbol
+        && citation.asOf === observed.asOf;
+}
+
 
 export interface InvestmentThesis {
     status: ThesisStatus;
@@ -10,6 +47,7 @@ export interface InvestmentThesis {
     invalidation: string;
     reviewDate: string;
     notebookItemIds?: string[];
+    citations?: ThesisCitation[];
 }
 
 export interface ThesisConfig {
@@ -50,12 +88,28 @@ function normalizeReviewDate(value: unknown): string {
 
 function normalizeNotebookItemIds(value: unknown): string[] {
     if (!Array.isArray(value)) return [];
-    return [...new Set(value.filter((id): id is string => typeof id === 'string' && /^nb:[^\s]+$/.test(id)))];
+    return [...new Set(value.filter((id): id is string => typeof id === 'string' && /^nb:[^\s]{1,200}$/.test(id)))].slice(0, MAX_THESIS_CITATIONS);
+}
+function normalizeCitations(value: unknown, ids: readonly string[]): ThesisCitation[] {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set<string>();
+    return value.slice(0, MAX_THESIS_CITATIONS).flatMap((entry): ThesisCitation[] => {
+        if (!isRecord(entry) || typeof entry.itemId !== 'string' || !ids.includes(entry.itemId)
+            || seen.has(entry.itemId) || typeof entry.title !== 'string' || !entry.title
+            || typeof entry.capturedAt !== 'string' || !Number.isFinite(Date.parse(entry.capturedAt))) return [];
+        seen.add(entry.itemId);
+        const optional = (key: keyof ThesisCitation, max: number) =>
+            typeof entry[key] === 'string' && entry[key] ? { [key]: (entry[key] as string).slice(0, max) } : {};
+        return [{ itemId: entry.itemId, title: entry.title.slice(0, 300), capturedAt: entry.capturedAt.slice(0, 100),
+            ...optional('source', 200), ...optional('url', 2048), ...optional('sourceId', 300),
+            ...optional('symbol', 40), ...optional('asOf', 100) }];
+    }).slice(0, MAX_THESIS_CITATIONS);
 }
 
 function normalizeThesis(value: unknown): InvestmentThesis {
     const record = isRecord(value) ? value : {};
     const notebookItemIds = normalizeNotebookItemIds(record.notebookItemIds);
+    const citations = normalizeCitations(record.citations, notebookItemIds);
     return {
         status: THESIS_STATUSES.includes(record.status as ThesisStatus) ? record.status as ThesisStatus : 'researching',
         thesis: normalizeText(record.thesis),
@@ -64,6 +118,7 @@ function normalizeThesis(value: unknown): InvestmentThesis {
         invalidation: normalizeText(record.invalidation),
         reviewDate: normalizeReviewDate(record.reviewDate),
         ...(notebookItemIds.length ? { notebookItemIds } : {}),
+        ...(citations.length ? { citations } : {}),
     };
 }
 

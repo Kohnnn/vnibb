@@ -7,7 +7,7 @@ import { useDashboard } from '@/contexts/DashboardContext';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
-import { isReviewDue, isThesisComplete, normalizeThesisConfig, type InvestmentThesis, type ThesisStatus } from '@/lib/investorWorkflow';
+import { citeNotebookItem, citationMatchesItem, isReviewDue, isThesisComplete, normalizeThesisConfig, MAX_THESIS_CITATIONS, type ThesisCitation, type InvestmentThesis, type ThesisStatus } from '@/lib/investorWorkflow';
 import { RESEARCH_NOTEBOOK_EVENT, readNotebookItems, type NotebookItem } from '@/lib/researchNotebook';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { WidgetGroupId } from '@/types/widget';
@@ -71,11 +71,15 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
     const dueTheses = useMemo(() => Object.entries(workspaceTheses)
         .filter(([, value]) => isReviewDue(value.reviewDate))
         .sort(([, left], [, right]) => left.reviewDate.localeCompare(right.reviewDate)), [workspaceTheses]);
-    const availableEvidenceIds = useMemo(() => new Set(notebookItems.map((item) => item.id)), [notebookItems]);
+    const availableEvidenceIds = useMemo(() => new Set(notebookItems.filter((item) => citationMatchesItem(thesis.citations?.find((citation) => citation.itemId === item.id), item)).map((item) => item.id)), [notebookItems, thesis.citations]);
     const linkedEvidence = useMemo(() => {
         const byId = new Map(notebookItems.map((item) => [item.id, item]));
-        return (thesis.notebookItemIds || []).map((itemId) => ({ itemId, item: byId.get(itemId) ?? null }));
-    }, [notebookItems, thesis.notebookItemIds]);
+        const citations = new Map(thesis.citations?.map((citation) => [citation.itemId, citation]) || []);
+        return (thesis.notebookItemIds || []).map((itemId) => {
+            const item = byId.get(itemId);
+            return { itemId, item: item && citationMatchesItem(citations.get(itemId), item) ? item : null, citation: citations.get(itemId) };
+        });
+    }, [notebookItems, thesis.notebookItemIds, thesis.citations]);
     const attachableEvidence = useMemo(() => notebookItems.filter((item) => (
         (item.symbol?.toUpperCase() === symbol.toUpperCase() || !item.symbol) && !(thesis.notebookItemIds || []).includes(item.id)
     )), [notebookItems, symbol, thesis.notebookItemIds]);
@@ -127,8 +131,18 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
         setThesis((current) => ({ ...current, [key]: value }));
         setIsSaved(false);
     };
-    const attachEvidence = (itemId: string) => updateThesis('notebookItemIds', [...new Set([...(thesis.notebookItemIds || []), itemId])]);
-    const detachEvidence = (itemId: string) => updateThesis('notebookItemIds', (thesis.notebookItemIds || []).filter((id) => id !== itemId));
+    const attachEvidence = (itemId: string) => {
+        const item = notebookItems.find((entry) => entry.id === itemId);
+        if (!item || (thesis.notebookItemIds || []).includes(itemId) || (thesis.notebookItemIds || []).length >= MAX_THESIS_CITATIONS) return;
+        setThesis((current) => ({ ...current, notebookItemIds: [...(current.notebookItemIds || []), itemId],
+            citations: [...(current.citations || []), citeNotebookItem(item)] }));
+        setIsSaved(false);
+    };
+    const detachEvidence = (itemId: string) => {
+        setThesis((current) => ({ ...current, notebookItemIds: current.notebookItemIds?.filter((id) => id !== itemId),
+            citations: current.citations?.filter((citation) => citation.itemId !== itemId) }));
+        setIsSaved(false);
+    };
 
     if (showDueOnly) {
         return (
@@ -139,7 +153,7 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
                 </div>
                 {dueTheses.length === 0 ? <div className="text-xs text-[var(--text-muted)]">No theses are due for review.</div> : (
                     <div className="space-y-2 overflow-auto">
-                        {dueTheses.map(([dueSymbol, value]) => <button key={dueSymbol} type="button" onClick={() => setLinkedSymbol(dueSymbol)} aria-label={`View due thesis for ${dueSymbol}`} className="min-h-11 w-full rounded border border-[var(--border-subtle)] p-2 text-left text-xs hover:border-blue-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">
+                        {dueTheses.map(([dueSymbol, value]) => <button key={dueSymbol} type="button" onClick={() => { setLinkedSymbol(dueSymbol); setShowDueOnly(false); }} aria-label={`View due thesis for ${dueSymbol}`} className="min-h-11 w-full rounded border border-[var(--border-subtle)] p-2 text-left text-xs hover:border-blue-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">
                             <div className="font-semibold text-[var(--text-primary)]">{dueSymbol} · {value.reviewDate}</div>
                             <div className="mt-1 text-[var(--text-secondary)]">{value.thesis || 'No thesis recorded.'}</div>
                         </button>)}
@@ -173,8 +187,8 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
             <Field label="Invalidation" value={thesis.invalidation} onChange={(value) => updateThesis('invalidation', value)} />
             <div className="space-y-1 rounded border border-[var(--border-subtle)] p-2 text-xs">
                 <div className="flex items-center justify-between text-[var(--text-muted)]"><span>Linked browser-local research</span><span>{linkedEvidence.length}</span></div>
-                {linkedEvidence.map(({ itemId, item }) => item ? <EvidenceItem key={itemId} item={item} onDetach={() => detachEvidence(itemId)} /> : <div key={itemId} className="flex items-center justify-between gap-2 text-amber-300"><span>Evidence unavailable or deleted: {itemId}</span><button type="button" onClick={() => detachEvidence(itemId)} className="rounded p-1 hover:bg-[var(--bg-tertiary)]" aria-label={`Detach missing evidence ${itemId}`}><Unlink size={12} /></button></div>)}
-                <label className="flex items-center gap-1 text-[var(--text-muted)]"><Link2 size={12} />Attach existing research<select value="" onChange={(event) => { if (event.target.value) attachEvidence(event.target.value); }} className="min-w-0 flex-1 rounded bg-[var(--bg-tertiary)] p-1 text-[var(--text-primary)]" aria-label="Attach browser-local research evidence"><option value="">Select evidence</option>{attachableEvidence.map((item) => <option key={item.id} value={item.id}>{item.symbol ? `${item.symbol} · ` : 'No symbol · '}{item.title}</option>)}</select></label>
+                {linkedEvidence.map(({ itemId, item, citation }) => <EvidenceItem key={itemId} item={item} citation={citation} itemId={itemId} onDetach={() => detachEvidence(itemId)} />)}
+                <label className="flex items-center gap-1 text-[var(--text-muted)]"><Link2 size={12} />Attach existing research<select value="" disabled={linkedEvidence.length >= MAX_THESIS_CITATIONS} onChange={(event) => { if (event.target.value) attachEvidence(event.target.value); }} className="min-w-0 flex-1 rounded bg-[var(--bg-tertiary)] p-1 text-[var(--text-primary)]" aria-label="Attach browser-local research evidence"><option value="">Select evidence</option>{attachableEvidence.map((item) => <option key={item.id} value={item.id}>{item.symbol ? `${item.symbol} · ` : 'No symbol · '}{item.title}</option>)}</select></label>
                 {attachableEvidence.length === 0 && linkedEvidence.length === 0 && <div className="text-[10px] text-[var(--text-muted)]">No matching browser-local research. Symbol-less items may be selected when available.</div>}
             </div>
             <div className="flex min-h-0 flex-1 flex-col"><div className="flex items-center justify-between text-xs text-[var(--text-muted)]"><label htmlFor={`${id}-notes`}>Legacy notes</label><button type="button" onClick={clearNote} className="rounded p-1 hover:bg-[var(--bg-tertiary)] hover:text-red-400" aria-label="Clear legacy notes"><Trash2 size={12} /></button></div><textarea id={`${id}-notes`} value={notes} onChange={(event) => { setNotes(event.target.value); setIsSaved(false); }} placeholder={`Write notes about ${symbol}...`} className="mt-1 min-h-16 flex-1 resize-none rounded bg-[var(--bg-tertiary)] p-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500" /></div>
@@ -182,12 +196,18 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
     );
 }
 
-function EvidenceItem({ item, onDetach }: { item: NotebookItem; onDetach: () => void }) {
-    const source = item.sources?.[0];
-    const sourceUrl = source?.url || source?.sourceUrl || source?.feedUrl;
-    const provenance = [item.symbol, source?.sourceName || source?.label || source?.sourceSystem, source?.asOf || source?.publishedAt || item.createdAt].filter(Boolean).join(' · ');
-    return <div className="flex items-start justify-between gap-2 rounded bg-[var(--bg-tertiary)] p-1.5"><div className="min-w-0"><div className="truncate text-[var(--text-primary)]">{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:text-blue-300">{item.title}<ExternalLink size={10} /></a> : item.title}</div><div className="truncate text-[10px] text-[var(--text-muted)]">{provenance || 'Browser-local research; provenance unavailable.'}</div></div><button type="button" onClick={onDetach} className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] hover:text-red-300" aria-label={`Detach evidence ${item.title}`}><Unlink size={12} /></button></div>;
+function EvidenceItem({ item, citation, itemId, onDetach }: { item: NotebookItem | null; citation?: ThesisCitation; itemId: string; onDetach: () => void }) {
+    const recorded = citation || (item ? citeNotebookItem(item) : null);
+    const details = recorded && [recorded.symbol, recorded.source, recorded.sourceId && `Source ID ${recorded.sourceId}`,
+        recorded.asOf && `As of ${recorded.asOf}`, `Captured ${recorded.capturedAt}`].filter(Boolean).join(' · ');
+    const sourceUrl = recorded?.url && /^https?:\/\//i.test(recorded.url) ? recorded.url : undefined;
+    return <div className="flex items-start justify-between gap-2 rounded bg-[var(--bg-tertiary)] p-1.5"><div className="min-w-0">
+        <div className="truncate text-[var(--text-primary)]">{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:text-blue-300">{recorded!.title}<ExternalLink size={10} /></a> : recorded?.title || itemId}</div>
+        {details && <div className="text-[10px] text-[var(--text-muted)]">{details}</div>}
+        {!item && <div className="text-[10px] text-amber-300">Original research unavailable or deleted. Citation only; original content is not included.</div>}
+    </div><button type="button" onClick={onDetach} className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] hover:text-red-300" aria-label={`Detach evidence ${recorded?.title || itemId}`}><Unlink size={12} /></button></div>;
 }
+
 
 function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
     return <label className="flex flex-col gap-1 text-xs text-[var(--text-muted)]">{label}<textarea value={value} onChange={(event) => onChange(event.target.value)} className="min-h-12 resize-y rounded bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500" /></label>;

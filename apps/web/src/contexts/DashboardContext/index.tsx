@@ -25,6 +25,8 @@ import type {
     WidgetCreate,
 } from '@/types/dashboard';
 import { createWorkspaceBackup, importWorkspaceBackup, type WorkspaceBackup } from '@/lib/workspaceBackup';
+import type { ResearchImportPlan } from '@/lib/researchBundle';
+import { MAX_NOTEBOOK_ITEMS, RESEARCH_NOTEBOOK_EVENT, RESEARCH_NOTEBOOK_KEY, readNotebookItems } from '@/lib/researchNotebook';
 
 // Re-export everything from submodules for backward compatibility
 export * from './types';
@@ -508,6 +510,7 @@ interface DashboardContextValue {
     createDashboard: (data: DashboardCreate) => Dashboard;
     exportWorkspace: (groups?: Dashboard['widgetGroups'], linkedGlobalMarketsSymbol?: string) => WorkspaceBackup;
     restoreWorkspace: (backup: WorkspaceBackup) => void;
+    importResearchBundle: (plan: ResearchImportPlan) => void;
     updateDashboard: (id: string, updates: Partial<Dashboard>) => void;
     updateDashboardRuntime: (id: string, updates: Partial<Dashboard>) => void;
     deleteDashboard: (id: string) => void;
@@ -1260,11 +1263,54 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         dispatch({ type: 'LOAD_STATE', payload: next });
     }, [localStateReady]);
 
+    const importResearchBundle = useCallback((plan: ResearchImportPlan) => {
+        if (!localStateReady || typeof window === 'undefined') throw new Error('Workspace storage is not ready yet. Nothing was imported.');
+        const existing = readNotebookItems();
+        if (existing.length + plan.items.length > MAX_NOTEBOOK_ITEMS) throw new Error('Research notebook capacity exceeded. Nothing was imported.');
+        const ids = new Set(existing.map((item) => item.id));
+        if (plan.items.some((item) => ids.has(item.id))) throw new Error('Research notebook ID conflict. Nothing was imported.');
+        const now = new Date().toISOString();
+        const dashboardId = `import-${generateId()}`;
+        const tabId = generateId();
+        const dashboards = [...stateRef.current.dashboards, {
+            id: dashboardId, name: `Imported research · ${new Date().toLocaleDateString()}`,
+            order: stateRef.current.dashboards.length, isDefault: false, isEditable: true,
+            showGroupLabels: false, syncGroups: [], createdAt: now, updatedAt: now,
+            tabs: [{ id: tabId, name: 'Investment Theses', order: 0, widgets: plan.theses.map(({ symbol, thesis, note }, index) => {
+                const id = generateId();
+                return { id, type: 'notes' as const, tabId,
+                    config: { symbol, tickerScope: 'override', thesesBySymbol: { [symbol]: thesis }, notesBySymbol: note !== undefined ? { [symbol]: note } : {} },
+                    layout: { i: generateId(), x: (index % 2) * 12, y: Math.floor(index / 2) * 18, w: 12, h: 18 } };
+            }) }],
+        }];
+        const next = { ...stateRef.current, dashboards };
+        const serialized = serializeDashboardStorage(next);
+        if (!serialized || !hasValidDashboardSnapshot(dashboards, next.folders)) throw new Error('Imported research cannot be saved. Nothing was imported.');
+        const storage = window.localStorage;
+        const previous = storage.getItem(RESEARCH_NOTEBOOK_KEY);
+        try {
+            storage.setItem(RESEARCH_NOTEBOOK_KEY, JSON.stringify([...plan.items, ...existing]));
+            if (!persistDashboardStorage(next)) throw new Error('Could not save imported research dashboard. Nothing was imported.');
+        } catch (cause) {
+            try {
+                if (previous === null) storage.removeItem(RESEARCH_NOTEBOOK_KEY);
+                else storage.setItem(RESEARCH_NOTEBOOK_KEY, previous);
+            } catch { throw new Error('Research import failed and notebook rollback could not be saved. Check browser storage before retrying.'); }
+            throw cause;
+        }
+        stateRef.current = next;
+        persistedStateRef.current = JSON.stringify(serialized);
+        skipNextPersistenceRef.current = true;
+        dispatch({ type: 'LOAD_STATE', payload: next });
+        window.dispatchEvent(new CustomEvent(RESEARCH_NOTEBOOK_EVENT));
+    }, [localStateReady]);
+
     const contextValue: DashboardContextValue = {
         state,
         localStateReady,
         exportWorkspace,
         restoreWorkspace,
+        importResearchBundle,
         setActiveDashboard,
         createDashboard,
         updateDashboard,
