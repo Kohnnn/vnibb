@@ -36,6 +36,7 @@ live in \`docs/\`.
 - Top Movers identifies last-session fallback rows separately from requested gainers and marks provider failures as unavailable rather than empty-market results.
 - Screener table actions retain full touch targets; technical and valuation widgets disclose unavailable indicators and source/cache provenance rather than implying unsupported freshness.
 - The built-in Investor Home thesis editor is read-only and directs users to an editable personal workspace; the system dashboard rejects widget configuration writes, so it no longer claims that unsaved thesis text was saved.
+- Big Flow reports provider failure as unavailable instead of a zero-activity tape; the block-trade service no longer converts query errors into an empty result. Positioning Dashboard is not promotable until its request count and symbol coverage are bounded and disclosed; saved instances keep resolving as an explicit unavailable state.
 
 ### Deployed
 - Released the integrated Workspace and Matrix build on 2026-09-27. Merge
