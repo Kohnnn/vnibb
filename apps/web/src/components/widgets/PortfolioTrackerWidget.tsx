@@ -68,7 +68,7 @@ function AddPositionForm({
     onAdd,
     onCancel,
 }: {
-    onAdd: (pos: Omit<Position, 'id'>) => void;
+    onAdd: (pos: Omit<Position, 'id'>) => boolean;
     onCancel: () => void;
 }) {
     const [symbol, setSymbol] = useState('');
@@ -79,18 +79,21 @@ function AddPositionForm({
     );
     const [notes, setNotes] = useState('');
 
-    const handleSubmit = () => {
-        if (!symbol.trim() || !quantity || !avgCost) return;
+    const parsedQuantity = Number(quantity);
+    const validQuantity = Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0;
+    const validCost = avgCost.trim() !== '' && Number.isFinite(Number(avgCost)) && Number(avgCost) >= 0;
 
-        onAdd({
+    const handleSubmit = () => {
+        if (!symbol.trim() || !validQuantity || !validCost) return;
+
+        if (!onAdd({
             symbol: symbol.trim().toUpperCase(),
-            quantity: parseInt(quantity, 10),
-            avgCost: parseFloat(avgCost),
+            quantity: parsedQuantity,
+            avgCost: Number(avgCost),
             purchaseDate,
             notes: notes.trim() || undefined,
-        });
+        })) return;
 
-        // Reset form
         setSymbol('');
         setQuantity('');
         setAvgCost('');
@@ -116,6 +119,7 @@ function AddPositionForm({
                     onChange={e => setQuantity(e.target.value)}
                     className="bg-zinc-700 text-white text-xs px-2 py-1.5 rounded focus:ring-1 focus:ring-blue-500 outline-none"
                     min={1}
+                    step={1}
                 />
                 <input
                     type="number"
@@ -143,7 +147,7 @@ function AddPositionForm({
                 />
                 <button
                     onClick={handleSubmit}
-                    disabled={!symbol.trim() || !quantity || !avgCost}
+                    disabled={!symbol.trim() || !validQuantity || !validCost}
                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white text-xs rounded transition-colors"
                 >
                     Add
@@ -165,11 +169,14 @@ function EditPositionRow({
     onCancel,
 }: {
     position: Position;
-    onSave: (updates: Partial<Omit<Position, 'id'>>) => void;
+    onSave: (updates: Partial<Omit<Position, 'id'>>) => boolean;
     onCancel: () => void;
 }) {
     const [quantity, setQuantity] = useState(position.quantity.toString());
     const [avgCost, setAvgCost] = useState(position.avgCost.toString());
+    const parsedQuantity = Number(quantity);
+    const validQuantity = quantity.trim() !== '' && Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0;
+    const validCost = avgCost.trim() !== '' && Number.isFinite(Number(avgCost)) && Number(avgCost) >= 0;
 
     return (
         <tr className="bg-zinc-800/50">
@@ -181,6 +188,7 @@ function EditPositionRow({
                     onChange={e => setQuantity(e.target.value)}
                     className="w-16 bg-zinc-700 text-white text-xs px-1 py-0.5 rounded"
                     min={1}
+                    step={1}
                 />
             </td>
             <td className="py-1.5 px-1">
@@ -196,9 +204,10 @@ function EditPositionRow({
             <td className="py-1.5 px-1 text-right" colSpan={2}>
                 <button
                     onClick={() => onSave({
-                        quantity: parseInt(quantity, 10),
-                        avgCost: parseFloat(avgCost),
+                        quantity: parsedQuantity,
+                        avgCost: Number(avgCost),
                     })}
+                    disabled={!validQuantity || !validCost}
                     className="p-1 text-green-400 hover:bg-zinc-700 rounded mr-1"
                 >
                     <Check size={12} />
@@ -316,6 +325,7 @@ export function PortfolioTrackerWidget({
         updatePosition,
         removePosition,
         recordValueSnapshot,
+        storageError,
     } = usePortfolio();
 
     const { prices, isLoading: pricesLoading, refetch } = usePortfolioPrices(symbols);
@@ -607,13 +617,19 @@ export function PortfolioTrackerWidget({
                 </div>
             )}
 
+            {storageError && (
+                <div role="alert" className="border-b border-red-500/30 bg-red-500/10 px-2 py-2 text-xs text-red-200">
+                    {storageError} Export CSV or JSON to back up the last saved holdings.
+                </div>
+            )}
             {/* Add Form */}
             {showAddForm && (
                 <div className="px-2 py-2 border-b border-zinc-800">
                     <AddPositionForm
                         onAdd={pos => {
-                            addPosition(pos);
+                            if (!addPosition(pos)) return false;
                             setShowAddForm(false);
+                            return true;
                         }}
                         onCancel={() => setShowAddForm(false)}
                     />
@@ -666,8 +682,9 @@ export function PortfolioTrackerWidget({
                                             key={pos.id}
                                             position={pos}
                                             onSave={updates => {
-                                                updatePosition(pos.id, updates);
+                                                if (!updatePosition(pos.id, updates)) return false;
                                                 setEditingId(null);
+                                                return true;
                                             }}
                                             onCancel={() => setEditingId(null)}
                                         />
