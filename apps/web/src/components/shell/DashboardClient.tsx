@@ -45,6 +45,7 @@ import { usePeriodState } from '@/hooks/usePeriodState';
 import {
     readAdminLayoutControlsVisible,
     subscribeAdminLayoutKey,
+    writeAdminLayoutControlsVisible,
 } from '@/lib/adminLayoutAccess';
 import { saveAdminSystemDashboardTemplate } from '@/lib/api';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
@@ -327,6 +328,8 @@ function DashboardContent() {
         if (!activeDashboard || !ADMIN_MANAGED_SYSTEM_IDS.has(activeDashboard.id)) return;
         if (adminLayoutControlsVisible && isAdmin) return;
         if (activeDashboard.adminUnlocked !== true && !isEditing) return;
+        // The legacy browser credential is gone; do not leave controls actable on a dead session.
+        if (!isAdmin && adminLayoutControlsVisible) writeAdminLayoutControlsVisible(false);
         setDashboardAdminUnlocked(activeDashboard.id, false);
         setIsEditing(false);
     }, [activeDashboard, adminLayoutControlsVisible, isAdmin, isEditing, setDashboardAdminUnlocked]);

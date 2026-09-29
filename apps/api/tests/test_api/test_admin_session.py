@@ -157,6 +157,34 @@ async def test_online_authority_checks_every_admin_request(client, admin_policy)
     assert first.status_code == second.status_code == 200
     assert admin_policy.await_count == 2
 
+@pytest.mark.asyncio
+async def test_admin_accepts_issuer_lifetime_above_one_hour_when_bound_is_raised(client, monkeypatch):
+    """GoTrue's GOTRUE_JWT_EXP is operator-configurable; the bound must be raisable to meet it."""
+    monkeypatch.setattr(settings, "admin_session_max_ttl_seconds", 7200)
+    response = await client.get(
+        "/api/v1/admin/session",
+        headers={"Authorization": f"Bearer {session_token(exp=int(time()) + 7200)}"},
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_admin_bound_can_cover_the_documented_issuer_ceiling(client):
+    """A ceiling below the issuer lifetime is an unconfigurable denial of service."""
+    schema_fields = settings.model_fields["admin_session_max_ttl_seconds"].metadata
+    assert schema_fields, "admin_session_max_ttl_seconds must declare a validated bound"
+    bounds = [constraint.le for constraint in schema_fields if isinstance(getattr(constraint, "le", None), int)]
+    assert bounds and max(bounds) >= 86400
+
+
+@pytest.mark.asyncio
+async def test_admin_rejects_lifetime_above_configured_bound(client):
+    response = await client.get(
+        "/api/v1/admin/session",
+        headers={"Authorization": f"Bearer {session_token(exp=int(time()) + 90000)}"},
+    )
+    assert response.status_code == 401
+
 
 @pytest.mark.asyncio
 async def test_online_authority_gets_caller_bearer_and_publishable_key(client, admin_policy):

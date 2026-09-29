@@ -131,6 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         clearLegacyAdminLayoutCredentials();
+        setAdminCheck((value) => value + 1);
     }, []);
 
     useEffect(() => {

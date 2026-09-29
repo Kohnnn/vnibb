@@ -69,7 +69,8 @@ class Settings(BaseSettings):
     admin_api_key: Optional[str] = None
     admin_user_ids: str = ""
     admin_revoked_session_ids: str = ""
-    admin_session_max_ttl_seconds: int = Field(default=3600, ge=60, le=3600)
+    # Must be >= the issuer's GOTRUE_JWT_EXP; the issuer lifetime is operator-configurable.
+    admin_session_max_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
     apps_script_api_key: Optional[str] = Field(default=None, validation_alias="VNIBB_APPS_SCRIPT_KEY")
     vnibb_mcp_host: str = "0.0.0.0"
     vnibb_mcp_port: int = 8001
@@ -227,7 +228,7 @@ class Settings(BaseSettings):
     vn_timezone: str = "Asia/Ho_Chi_Minh"
     market_holiday_dates: Annotated[List[str], NoDecode] = []
     data_quality_sustained_breach_runs: int = Field(default=2, ge=2, le=30)
-    
+
     # ==========================================================================
     # Data Freshness Thresholds (in hours)
     # ==========================================================================
