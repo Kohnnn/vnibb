@@ -392,7 +392,7 @@ Implications:
 
 - A code-only change does not reach users who already have a published template for that key until the database template is re-published (or removed).
 - Bump `CURRENT_MIGRATION_VERSION` and add a `refreshSystemDashboardTemplates` migration step whenever the built-in factories change, so local fallback users (and offline/no-DB-template cases) pick up the new layout.
-- Re-publish the four templates (`default-fundamental`, `default-technical`, `default-quant`, `default-global-markets`) through `PUT /api/v1/admin/system-layouts/{dashboard_key}` (requires `X-Admin-Key`) so global users get the same layout.
+- Re-publish the four templates (`default-fundamental`, `default-technical`, `default-quant`, `default-global-markets`) through interactive `PUT /api/v1/admin/system-layouts/{dashboard_key}` using a Supabase Bearer session for an operator UUID in backend `ADMIN_USER_IDS`. Server/CI publishers instead use `PUT /api/v1/admin/automation/system-layouts/{dashboard_key}` with server-only `ADMIN_API_KEY` in `X-Admin-Key`; never put that secret in browser settings. See `docs/admin_global_system_layouts.md` for rotation, revocation, and the blocked production acceptance gate.
 
 To avoid hand-transcription drift between the code factories and the published payloads, generate the publish JSON directly from the factories:
 
@@ -402,7 +402,7 @@ GENERATE_SYSTEM_LAYOUTS=1 OUT_DIR=../../.tmp/system-layouts \
   pnpm jest --runTestsByPath src/contexts/__generators__/systemLayoutPayloads.gen.test.ts
 ```
 
-The generator (`src/contexts/__generators__/systemLayoutPayloads.gen.test.ts`) mirrors `DashboardClient.serializeSystemDashboardForPublish`, emits deterministic widget IDs, and is a no-op (guard-only) during the normal `ci:gate` Jest run. Publish each emitted `{dashboard_key}.json` body with the admin endpoint, then confirm version increments via `GET /api/v1/dashboard/system-layouts/published`.
+The generator (`src/contexts/__generators__/systemLayoutPayloads.gen.test.ts`) mirrors `DashboardClient.serializeSystemDashboardForPublish`, emits deterministic widget IDs, and is a no-op (guard-only) during the normal `ci:gate` Jest run. Publish each emitted `{dashboard_key}.json` body with the appropriately authenticated interactive or automation endpoint above, then confirm version increments via `GET /api/v1/dashboard/system-layouts/published`.
 
 ## Resize Rules
 

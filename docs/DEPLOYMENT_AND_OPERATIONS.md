@@ -151,9 +151,9 @@ VniAgent server context path
 
 ## Frontend auth rollout flags
 
-VNIBB currently runs in local workspace/admin-key mode. Tenant membership, role-based login, and user-scoped layout resolution are documented as future-phase work, so dashboard route protection is disabled by default.
+Local workspace browsing and interactive administration have separate access rules. Admin operations require an authenticated Supabase session whose immutable user UUID appears in backend `ADMIN_USER_IDS`; browser shared-key administration is removed. Empty allowlists deny access. Supabase auth remains separate from serving PostgreSQL; never query the serving database's `auth` schema for authorization.
 
-Leave `NEXT_PUBLIC_ENABLE_AUTH` unset or `false` for the current rollout. Set `NEXT_PUBLIC_ENABLE_AUTH=true` only when the tenant/auth roadmap is ready to enforce `/login` redirects. `NEXT_PUBLIC_DISABLE_AUTH=true` still forces bypass during tests or previews.
+`NEXT_PUBLIC_ENABLE_AUTH` controls dashboard `/login` redirects; leaving it unset or `false` does not bypass backend admin authorization. `NEXT_PUBLIC_DISABLE_AUTH=true` only bypasses frontend route gating in tests/previews. Never expose `ADMIN_API_KEY` or signing secrets via frontend environment variables or storage. Clear previously stored browser admin keys and rotate the formerly exposed secret: clearing alone is not revocation. See `docs/admin_global_system_layouts.md` and `docs/oracle_runbook.md` for session revocation controls, all-worker rollout requirements, and the production acceptance gate, which remains BLOCKED pending verified operators, rotation, provisioned/accepted revocation authority, and authenticated live acceptance.
 
 ## Data Flow: Raw Data to Widgets
 

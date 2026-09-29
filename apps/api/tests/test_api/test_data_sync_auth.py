@@ -65,10 +65,3 @@ async def test_admin_seed_rejects_missing_admin_key(client):
         headers={"X-Admin-Key": ""},
     )
     assert response.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_admin_accepts_configured_key(client):
-    # Default client fixture sends the configured test key.
-    response = await client.get("/api/v1/admin/sync-status")
-    assert response.status_code != 401

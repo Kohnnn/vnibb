@@ -7,11 +7,10 @@ import { getAdminAITelemetry, type AdminAITelemetryRecord } from '@/lib/api';
 import { formatAbsoluteTimestamp } from '@/lib/format';
 
 interface AICopilotTelemetryReviewProps {
-  adminKey: string;
   enabled: boolean;
 }
 
-export function AICopilotTelemetryReview({ adminKey, enabled }: AICopilotTelemetryReviewProps) {
+export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewProps) {
   const [records, setRecords] = useState<AdminAITelemetryRecord[]>([]);
   const [summary, setSummary] = useState<{
     total: number;
@@ -34,12 +33,14 @@ export function AICopilotTelemetryReview({ adminKey, enabled }: AICopilotTelemet
   const [searchFilter, setSearchFilter] = useState('');
 
   const fetchTelemetry = async () => {
-    if (!enabled || !adminKey.trim()) {
+    if (!enabled) {
+      setRecords([]);
+      setSummary(null);
       return;
     }
     setLoading(true);
     try {
-      const response = await getAdminAITelemetry(adminKey.trim(), 25, {
+      const response = await getAdminAITelemetry(25, {
         provider: providerFilter || undefined,
         model: modelFilter || undefined,
         symbol: symbolFilter || undefined,
@@ -50,6 +51,8 @@ export function AICopilotTelemetryReview({ adminKey, enabled }: AICopilotTelemet
       setSummary(response.summary || null);
       setError(null);
     } catch (fetchError) {
+      setRecords([]);
+      setSummary(null);
       setError(fetchError instanceof Error ? fetchError.message : 'Failed to load AI telemetry');
     } finally {
       setLoading(false);
@@ -58,7 +61,7 @@ export function AICopilotTelemetryReview({ adminKey, enabled }: AICopilotTelemet
 
   useEffect(() => {
     void fetchTelemetry();
-  }, [adminKey, enabled, modelFilter, providerFilter, searchFilter, symbolFilter, voteFilter]);
+  }, [enabled, modelFilter, providerFilter, searchFilter, symbolFilter, voteFilter]);
 
   if (!enabled) {
     return null;

@@ -14,6 +14,7 @@ import { useUnit } from '@/contexts/UnitContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useDashboard } from '@/contexts/DashboardContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { searchStocks } from '@/data/stockData';
 import { DEFAULT_TICKER, normalizeTickerSymbol } from '@/lib/defaultTicker';
@@ -30,13 +31,8 @@ import {
 import { CURRENT_RELEASE, CURRENT_RELEASE_DATE, WHATS_NEW_REOPEN_EVENT } from '@/lib/version';
 import { formatNumber, formatUnitValue, getUnitCaption, type UnitDisplay } from '@/lib/units';
 import {
-  clearAdminLayoutKey,
   readAdminLayoutControlsVisible,
-  readAdminLayoutKey,
-  readAdminLayoutKeyValidated,
   writeAdminLayoutControlsVisible,
-  writeAdminLayoutKey,
-  writeAdminLayoutKeyValidated,
 } from '@/lib/adminLayoutAccess';
 import {
   getAdminAIPromptLibrary,
@@ -45,7 +41,6 @@ import {
   getAdminProviderStatus,
   getCopilotRuntimeConfig,
   getCopilotModelCatalog,
-  getAdminSystemDashboardTemplateBundle,
   saveAdminAIPromptLibrary,
   saveAdminUnitRuntimeConfig,
   saveAdminAIRuntimeConfig,
@@ -115,6 +110,7 @@ function formatAIProviderLabel(provider: string | null | undefined): string {
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const hasTrackedOpenRef = useRef(false)
+  const { isAdmin, adminStatus, adminError, refreshAdminSession } = useAuth();
   const [activeTab, setActiveTab] = useState<SettingTab>('general');
   const [defaultTickerInput, setDefaultTickerInput] = useState(DEFAULT_TICKER);
   const [defaultTab, setDefaultTab] = useState<DefaultTabPreference>('overview');
@@ -122,9 +118,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [preferenceStatus, setPreferenceStatus] = useState<string | null>(null);
   const [aiSettingsError, setAiSettingsError] = useState<string | null>(null);
   const [isTickerMenuOpen, setIsTickerMenuOpen] = useState(false);
-  const [adminLayoutKeyInput, setAdminLayoutKeyInput] = useState('');
   const [showGlobalLayoutControls, setShowGlobalLayoutControls] = useState(false);
-  const [isAdminLayoutKeyValidating, setIsAdminLayoutKeyValidating] = useState(false);
   const [adminAiModelInput, setAdminAiModelInput] = useState('openai/gpt-4o-mini');
   const [isAdminAiRuntimeLoading, setIsAdminAiRuntimeLoading] = useState(false);
   const [isAdminAiRuntimeSaving, setIsAdminAiRuntimeSaving] = useState(false);
@@ -227,13 +221,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
   }, [])
 
-  const loadAdminPromptLibrary = useCallback(async (adminKey: string) => {
-    const trimmedKey = adminKey.trim()
-    if (!trimmedKey) return
-
+  const loadAdminPromptLibrary = useCallback(async () => {
+    if (!isAdmin) return
     try {
       setIsAdminPromptLibraryLoading(true)
-      const response = await getAdminAIPromptLibrary(trimmedKey)
+      const response = await getAdminAIPromptLibrary()
       setSharedPrompts(response.data || [])
       setSharedPromptVersion(response.version || 0)
       setSharedPromptHistory(response.history || [])
@@ -242,17 +234,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     } finally {
       setIsAdminPromptLibraryLoading(false)
     }
-  }, [])
+  }, [isAdmin])
 
-  const loadAdminAiRuntimeConfig = useCallback(async (adminKey: string) => {
-    const trimmedKey = adminKey.trim()
-    if (!trimmedKey) return
-
+  const loadAdminAiRuntimeConfig = useCallback(async () => {
+    if (!isAdmin) return
     try {
       setIsAdminAiRuntimeLoading(true)
-      const config = await getAdminAIRuntimeConfig(trimmedKey)
+      const config = await getAdminAIRuntimeConfig()
       setAdminAiModelInput(config.model || 'openai/gpt-4o-mini')
-      const providerStatus = await getAdminProviderStatus(trimmedKey)
+      const providerStatus = await getAdminProviderStatus()
       setAdminOpenRouterConfigured(Boolean(providerStatus.providers.openrouter_configured))
       setAdminOpenRouterReachable(typeof providerStatus.providers.openrouter_reachable === 'boolean' ? providerStatus.providers.openrouter_reachable : null)
       setAdminOpenRouterCatalogSource(typeof providerStatus.providers.openrouter_catalog_source === 'string' ? providerStatus.providers.openrouter_catalog_source : null)
@@ -264,15 +254,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     } finally {
       setIsAdminAiRuntimeLoading(false)
     }
-  }, [])
+  }, [isAdmin])
 
-  const loadAdminUnitRuntimeConfig = useCallback(async (adminKey: string) => {
-    const trimmedKey = adminKey.trim()
-    if (!trimmedKey) return
-
+  const loadAdminUnitRuntimeConfig = useCallback(async () => {
+    if (!isAdmin) return
     try {
       setIsAdminUnitRuntimeLoading(true)
-      const config = await getAdminUnitRuntimeConfig(trimmedKey)
+      const config = await getAdminUnitRuntimeConfig()
       applyAdminUsdRuntimeConfig(config)
       setAdminUsdVndDefaultRateInput(String(config.usd_vnd_default_rate || 25000))
       setAdminUsdRateInputs(toRateInputs(config.usd_vnd_rates_by_year))
@@ -281,7 +269,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     } finally {
       setIsAdminUnitRuntimeLoading(false)
     }
-  }, [applyAdminUsdRuntimeConfig])
+  }, [applyAdminUsdRuntimeConfig, isAdmin])
 
   useEffect(() => {
     if (isOpen) {
@@ -292,7 +280,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setPreferenceStatus(null);
       setAiSettingsError(null);
       setIsTickerMenuOpen(false);
-      setAdminLayoutKeyInput(readAdminLayoutKey());
       setShowGlobalLayoutControls(readAdminLayoutControlsVisible());
       const aiSettings = readStoredAISettings();
       setAiProvider(aiSettings.provider);
@@ -316,13 +303,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       void loadPublicRuntimeConfig()
     }
 
-    if (activeTab === 'admin' && readAdminLayoutKeyValidated()) {
-      const adminKey = readAdminLayoutKey()
-      void loadAdminAiRuntimeConfig(adminKey)
-      void loadAdminUnitRuntimeConfig(adminKey)
-      void loadAdminPromptLibrary(adminKey)
+    if (activeTab === 'admin' && isAdmin) {
+      void loadAdminAiRuntimeConfig()
+      void loadAdminUnitRuntimeConfig()
+      void loadAdminPromptLibrary()
     }
-  }, [activeTab, isOpen, loadAdminAiRuntimeConfig, loadAdminPromptLibrary, loadAdminUnitRuntimeConfig, loadOpenRouterModels, loadPublicRuntimeConfig])
+  }, [activeTab, isAdmin, isOpen, loadAdminAiRuntimeConfig, loadAdminPromptLibrary, loadAdminUnitRuntimeConfig, loadOpenRouterModels, loadPublicRuntimeConfig])
 
   useEffect(() => {
     if (!preferenceStatus) return;
@@ -505,15 +491,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   }
 
   const saveSharedPromptLibrary = async () => {
-    const trimmedKey = adminLayoutKeyInput.trim()
-    if (!trimmedKey) {
-      setPreferenceStatus('Admin key required before saving shared VniAgent prompts.')
+    if (!isAdmin) {
+      setPreferenceStatus('Admin access required. Sign in with an authorized account and check your session.')
       return
     }
-
     try {
       setIsAdminPromptLibrarySaving(true)
-      const response = await saveAdminAIPromptLibrary(trimmedKey, sharedPrompts)
+      const response = await saveAdminAIPromptLibrary(sharedPrompts)
       setSharedPrompts(response.data || [])
       setSharedPromptVersion(response.version || 0)
       setSharedPromptHistory(response.history || [])
@@ -1497,91 +1481,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             {activeTab === 'admin' && (
               <div className="space-y-6">
                 <div>
-                  <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Global Layout Admin Key</h4>
+                  <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Admin Session</h4>
                   <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
-                    <div className="text-sm font-bold text-[var(--text-primary)]">Admin-first Initial layout publishing</div>
+                    <div className="text-sm font-bold text-[var(--text-primary)]">Admin access</div>
                     <div className="mt-1 text-xs text-[var(--text-muted)]">
-                      Store your admin hash key locally on this machine to unlock draft and publish controls for the Initial system dashboards.
+                      {adminStatus === 'authorized' ? 'Your signed-in account is authorized to edit admin settings and publish system dashboards.'
+                        : adminStatus === 'checking' ? 'Checking your admin session…'
+                          : adminStatus === 'signed-out' ? 'Sign in with a Supabase admin account to access these controls.'
+                            : `Admin access denied: ${adminError || 'Your account does not have admin permission.'} Sign in with an authorized account or ask an administrator to grant access.`}
                     </div>
-                    <input
-                      type="password"
-                      value={adminLayoutKeyInput}
-                      onChange={(event) => setAdminLayoutKeyInput(event.target.value)}
-                      placeholder="Enter admin layout key"
-                      className="mt-4 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
-                    />
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const trimmedKey = adminLayoutKeyInput.trim()
-                          if (!trimmedKey) {
-                            captureAnalyticsEvent(ANALYTICS_EVENTS.adminLayoutKeyCleared, {
-                              source: 'empty_save',
-                            })
-                            clearAdminLayoutKey()
-                            writeAdminLayoutControlsVisible(false)
-                            setShowGlobalLayoutControls(false)
-                            setPreferenceStatus('Admin layout key cleared.')
-                            return
-                          }
-
-                          try {
-                            setIsAdminLayoutKeyValidating(true)
-                            await getAdminSystemDashboardTemplateBundle('default-fundamental', trimmedKey)
-                            await loadAdminAiRuntimeConfig(trimmedKey)
-                            await loadAdminUnitRuntimeConfig(trimmedKey)
-                            writeAdminLayoutKey(trimmedKey)
-                            writeAdminLayoutKeyValidated(true)
-                            captureAnalyticsEvent(ANALYTICS_EVENTS.adminLayoutKeySaved, {
-                              status: 'validated',
-                            })
-                            setPreferenceStatus('Admin layout key validated and saved locally.')
-                          } catch (error) {
-                            captureAnalyticsEvent(ANALYTICS_EVENTS.adminLayoutKeyValidationFailed, {
-                              error_type: error instanceof Error ? error.message : 'validation_failed',
-                            })
-                            clearAdminLayoutKey()
-                            writeAdminLayoutKeyValidated(false)
-                            writeAdminLayoutControlsVisible(false)
-                            setShowGlobalLayoutControls(false)
-                            setPreferenceStatus(error instanceof Error ? `Admin key invalid: ${error.message}` : 'Admin key validation failed.')
-                          } finally {
-                            setIsAdminLayoutKeyValidating(false)
-                          }
-                        }}
-                        disabled={isAdminLayoutKeyValidating}
-                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isAdminLayoutKeyValidating ? 'Validating…' : 'Save Key'}
+                    {adminStatus === 'denied' && (
+                      <button type="button" onClick={refreshAdminSession} className="mt-3 rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+                        Check admin access again
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          captureAnalyticsEvent(ANALYTICS_EVENTS.adminLayoutKeyCleared, {
-                            source: 'clear_button',
-                          })
-                          clearAdminLayoutKey()
-                          writeAdminLayoutKeyValidated(false)
-                          writeAdminLayoutControlsVisible(false)
-                          setAdminLayoutKeyInput('')
-                          setShowGlobalLayoutControls(false)
-                          setPreferenceStatus('Admin layout key removed from this browser.')
-                        }}
-                        className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                      >
-                        Clear Key
-                      </button>
-                    </div>
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${readAdminLayoutKeyValidated() ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-muted)]'}`}>
-                        Admin key: {readAdminLayoutKeyValidated() ? 'active' : 'inactive'}
-                      </div>
-                      <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${showGlobalLayoutControls ? 'border-blue-500/30 bg-blue-500/10 text-blue-300' : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-muted)]'}`}>
-                        Layout controls: {showGlobalLayoutControls ? 'visible' : 'hidden'}
-                      </div>
-                    </div>
-                    {readAdminLayoutKeyValidated() ? (
+                    )}
+                    {isAdmin ? (
                       <div className="mt-4 flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3">
                         <div className="pr-4">
                           <div className="text-sm font-semibold text-[var(--text-primary)]">Show global layout controls</div>
@@ -1602,13 +1516,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         />
                       </div>
                     ) : null}
-                    <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-3 text-xs text-amber-100/80">
-                      This is an initial admin-only flow. Later tenant roles can replace the raw key with a proper server-issued admin session.
-                    </div>
                   </div>
                 </div>
 
-                {readAdminLayoutKeyValidated() && (
+                {isAdmin && (
                   <div>
                     <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">VniAgent Runtime Defaults</h4>
                     <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
@@ -1670,15 +1581,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         <button
                           type="button"
                           onClick={async () => {
-                            const trimmedKey = adminLayoutKeyInput.trim()
                             const trimmedModel = adminAiModelInput.trim()
-                            if (!trimmedKey || !trimmedModel) {
-                              setPreferenceStatus('Provide both an admin key and a model slug before saving VniAgent runtime defaults.')
+                            if (!isAdmin || !trimmedModel) {
+                              setPreferenceStatus('Admin access and a model slug are required before saving VniAgent runtime defaults.')
                               return
                             }
                             try {
                               setIsAdminAiRuntimeSaving(true)
-                              const saved = await saveAdminAIRuntimeConfig(trimmedKey, trimmedModel)
+                              const saved = await saveAdminAIRuntimeConfig(trimmedModel)
                               setAdminAiModelInput(saved.model || trimmedModel)
                               setPublicRuntimeProvider(saved.provider || 'openrouter')
                               setPublicRuntimeModel(saved.model || trimmedModel)
@@ -1699,7 +1609,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => void loadAdminAiRuntimeConfig(adminLayoutKeyInput)}
+                          onClick={() => void loadAdminAiRuntimeConfig()}
                           disabled={isAdminAiRuntimeSaving || isAdminAiRuntimeLoading}
                           className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
@@ -1710,7 +1620,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                 )}
 
-                {readAdminLayoutKeyValidated() && (
+                {isAdmin && (
                   <div>
                     <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Admin USD/VND Defaults</h4>
                     <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 space-y-4">
@@ -1764,11 +1674,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         <button
                           type="button"
                           onClick={async () => {
-                            const trimmedKey = adminLayoutKeyInput.trim()
                             const parsed = Number(adminUsdVndDefaultRateInput)
                             const { rates: yearlyRates, invalidYear } = parseUsdRateInputs(adminUsdRateInputs, usdRateYears)
-                            if (!trimmedKey || !Number.isFinite(parsed) || parsed <= 0) {
-                              setPreferenceStatus('Provide a valid admin key and a USD/VND rate greater than zero.')
+                            if (!isAdmin || !Number.isFinite(parsed) || parsed <= 0) {
+                              setPreferenceStatus('Admin access and a USD/VND rate greater than zero are required.')
                               return
                             }
                             if (invalidYear !== null) {
@@ -1777,7 +1686,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             }
                             try {
                               setIsAdminUnitRuntimeSaving(true)
-                              const saved = await saveAdminUnitRuntimeConfig(trimmedKey, parsed, yearlyRates)
+                              const saved = await saveAdminUnitRuntimeConfig(parsed, yearlyRates)
                               applyAdminUsdRuntimeConfig(saved as UnitRuntimeConfigResponse)
                               setAdminUsdVndDefaultRateInput(String(saved.usd_vnd_default_rate))
                               setAdminUsdRateInputs(toRateInputs(saved.usd_vnd_rates_by_year))
@@ -1799,7 +1708,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => void loadAdminUnitRuntimeConfig(adminLayoutKeyInput)}
+                          onClick={() => void loadAdminUnitRuntimeConfig()}
                           disabled={isAdminUnitRuntimeSaving || isAdminUnitRuntimeLoading}
                           className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
@@ -1810,7 +1719,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                 )}
 
-                {readAdminLayoutKeyValidated() && (
+                {isAdmin && (
                   <div>
                     <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Shared VniAgent Prompt Library</h4>
                     <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 space-y-4">
@@ -1910,7 +1819,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => void loadAdminPromptLibrary(adminLayoutKeyInput)}
+                          onClick={() => void loadAdminPromptLibrary()}
                           disabled={isAdminPromptLibraryLoading || isAdminPromptLibrarySaving}
                           className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
@@ -1929,10 +1838,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                 )}
 
-                <AICopilotTelemetryReview
-                  adminKey={adminLayoutKeyInput}
-                  enabled={readAdminLayoutKeyValidated()}
-                />
+                <AICopilotTelemetryReview enabled={isAdmin} />
               </div>
             )}
           </div>

@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     websocket_cycle_timeout_seconds: float = Field(default=4.5, gt=0, le=5)
     websocket_send_timeout_seconds: float = Field(default=2, gt=0, le=5)
     admin_api_key: Optional[str] = None
+    admin_user_ids: str = ""
+    admin_revoked_session_ids: str = ""
+    admin_session_max_ttl_seconds: int = Field(default=3600, ge=60, le=3600)
     apps_script_api_key: Optional[str] = Field(default=None, validation_alias="VNIBB_APPS_SCRIPT_KEY")
     vnibb_mcp_host: str = "0.0.0.0"
     vnibb_mcp_port: int = 8001

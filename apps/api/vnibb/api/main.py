@@ -103,8 +103,6 @@ def get_cors_headers(request: Request) -> dict[str, str]:
             "Authorization",
             "X-Requested-With",
             "X-VNIBB-Client-ID",
-            "X-Admin-Key",
-            "X-Admin-Actor",
         ]
     )
 
@@ -712,22 +710,17 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router, prefix="/health", tags=["Health"])
 
-    # `/metrics` and `/debug` were publicly reachable. `/debug` returns sync
-    # history, in-flight progress, and dependency probes; `/metrics` exposes
-    # internal counters. Both are operator surfaces, not product ones, and the
-    # repo already has a fail-closed admin guard for exactly this. Reuses
-    # `require_admin_access` (503 when ADMIN_API_KEY is unset, 401 on a bad
-    # key) so these cannot silently fall open.
-    from vnibb.api.v1.admin import require_admin_access
+    # Diagnostics are server automation surfaces, separate from browser sessions.
+    from vnibb.api.v1.admin import require_admin_automation_access
 
-    @app.get("/metrics", include_in_schema=False, dependencies=[Depends(require_admin_access)])
+    @app.get("/metrics", include_in_schema=False, dependencies=[Depends(require_admin_automation_access)])
     async def metrics():
         return PlainTextResponse(
             metrics_registry.render(),
             media_type="text/plain; version=0.0.4",
         )
 
-    @app.get("/debug", tags=["Debug"], dependencies=[Depends(require_admin_access)])
+    @app.get("/debug", tags=["Debug"], dependencies=[Depends(require_admin_automation_access)])
     async def debug_status():
         """Lightweight debug endpoint for sync and dependency status."""
         from sqlalchemy import select

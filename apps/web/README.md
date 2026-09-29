@@ -107,7 +107,7 @@ NEXT_PUBLIC_AUTH_PROVIDER=supabase
 NEXT_PUBLIC_ENABLE_AUTH=false
 ```
 
-Login enforcement is disabled by default because VNIBB currently runs in local workspace/admin-key mode. Leave `NEXT_PUBLIC_ENABLE_AUTH` unset or `false` for the current rollout. Set `NEXT_PUBLIC_ENABLE_AUTH=true` only when the tenant/auth roadmap work is ready to enforce `/login` redirects.
+`NEXT_PUBLIC_ENABLE_AUTH` controls dashboard login redirects, not backend admin authorization. Interactive admin operations always require a real Supabase session for an immutable operator UUID in backend `ADMIN_USER_IDS` (empty denies). There is no browser shared-key admin mode; never expose `ADMIN_API_KEY` or `SUPABASE_JWT_SECRET` in frontend variables/storage. Clear any previously stored admin key and rotate the formerly browser-exposed server secret; clearing alone does not revoke it. Supabase auth is separate from serving PostgreSQL. See [`admin_global_system_layouts.md`](../../docs/admin_global_system_layouts.md) and [`oracle_runbook.md`](../../docs/oracle_runbook.md) for backend session limits/revocation and the BLOCKED production migration/acceptance gate.
 
 ---
 

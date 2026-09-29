@@ -45,8 +45,8 @@ async def test_ready_health_endpoint_returns_200(client):
 
 
 @pytest.mark.asyncio
-async def test_admin_sync_status_alias_returns_freshness_payload(client):
-    response = await client.get("/api/v1/admin/sync-status")
+async def test_admin_sync_status_alias_returns_freshness_payload(admin_client):
+    response = await admin_client.get("/api/v1/admin/sync-status")
 
     assert response.status_code == 200
     payload = response.json()
@@ -54,7 +54,7 @@ async def test_admin_sync_status_alias_returns_freshness_payload(client):
 
 
 @pytest.mark.asyncio
-async def test_admin_sync_status_returns_recent_sync_jobs(client, test_db):
+async def test_admin_sync_status_returns_recent_sync_jobs(admin_client, test_db):
     test_db.add(
         SyncStatus(
             sync_type="full_market",
@@ -68,7 +68,7 @@ async def test_admin_sync_status_returns_recent_sync_jobs(client, test_db):
     )
     await test_db.commit()
 
-    response = await client.get("/api/v1/admin/sync-status")
+    response = await admin_client.get("/api/v1/admin/sync-status")
 
     assert response.status_code == 200
     payload = response.json()

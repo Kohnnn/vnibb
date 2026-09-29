@@ -83,6 +83,9 @@ Edit `deployment/env.oracle` and set:
 - `MEMORY_CACHE_MAX_ENTRY_BYTES=1048576` or larger if the cache tier is disabled and microstructure payloads must fit memory fallback
 - `SENTRY_DSN`
 - `ADMIN_API_KEY`
+- `ADMIN_USER_IDS` (comma-separated verified immutable Supabase operator UUIDs; empty denies interactive admin access)
+- `ADMIN_REVOKED_SESSION_IDS` (comma-separated denied session UUIDs)
+- `ADMIN_SESSION_MAX_TTL_SECONDS=3600` (maximum accepted signed token lifetime, `exp - iat`)
 - `LOG_FORMAT=json`
 - `CORS_ORIGINS`
 - `VNIBB_API_IMAGE_REPOSITORY` as the registry repository and `VNIBB_API_IMAGE_DIGEST` as the published `sha256:<digest>`
@@ -90,11 +93,21 @@ Edit `deployment/env.oracle` and set:
 
 ### System layout templates
 
-No manual store setup is required. Draft and published system layouts live in the Postgres `app_kv` table under the `system_layout_template` key prefix, so admin draft/publish works as soon as the backend is deployed against the app database.
+No manual layout-store setup is required. Draft and published system layouts live in the Postgres `app_kv` table under the `system_layout_template` key prefix. Interactive draft/publish additionally requires a verified, allowlisted Supabase session.
 
-### Admin-first workflow result
+### Admin session migration — production BLOCKED
 
-After deploy, admins can save the platform admin key in the web UI and manage locked Initial layouts without SSH access or code edits.
+Interactive `/api/v1/admin/*` requests require a Supabase access JWT in `Authorization: Bearer ...`; shared keys no longer authorize these requests. Verify the operator's immutable user UUID through the existing Supabase project/admin interface and add it to backend `ADMIN_USER_IDS` as a comma-separated string. Never use email, browser role flags, or a query against the serving PostgreSQL `auth` schema as authority: the existing authentication service is separate from serving PostgreSQL.
+
+Backend JWT verification uses the existing project's HS256 `SUPABASE_JWT_SECRET`, issuer `${SUPABASE_URL}/auth/v1` (normalize the URL's trailing slash), and audience `authenticated`. Tokens must include `exp`, `iat`, `sub`, `session_id`, `iss`, and `aud`; `sub` and `session_id` must be UUIDs. `ADMIN_SESSION_MAX_TTL_SECONDS` defaults to 3600 and rejects tokens whose signed lifetime exceeds that bound. Do not expose the signing secret to the frontend.
+
+Revocation is backend-controlled: add the session UUID to comma-separated `ADMIN_REVOKED_SESSION_IDS`, or remove the operator UUID from `ADMIN_USER_IDS` for all their admin sessions. An empty allowlist denies access. Roll **all API workers/replicas** after changing these settings or the signing configuration; stale workers keep their old authorization state. Supabase logout/remote revocation does not instantly invalidate an issued access JWT; expiry or backend denylist/removal does. Explicitly accept this caveat and provision an accountable operator with configuration and rollout authority.
+
+`ADMIN_API_KEY` is now a **server-only automation/operations secret**. Layout publishers use `GET` / `PUT /api/v1/admin/automation/system-layouts/{dashboard_key}` with `X-Admin-Key` and fixed actor `automation:layout-publisher`; do not send `X-Admin-Actor`. Retained `/data`, realtime start/stop, and metrics/debug operational routes still consume this secret. Never put it in browser settings or `NEXT_PUBLIC_*` variables. The two `apps/api/scripts/publish_*_markets_layout.py` publishers read `ADMIN_API_KEY` from their execution environment.
+
+Before cutover, clear the formerly stored platform admin key from every operator browser profile/site storage, rotate the formerly browser-exposed key in backend and authorized automation/operational secret stores, and roll all workers. Clearing browser storage is not revocation. Verify the old key fails and the rotated key works only on authorized automation/operational routes.
+
+Production remains **BLOCKED** until operator UUID verification, key rotation, explicitly accepted/provisioned revocation authority, and authenticated live acceptance are recorded. Acceptance must cover allowlisted draft/publish and published reload, non-allowlisted and expired/denied-session rejection, shared-key rejection on interactive routes, and rotated-key automation. See `docs/admin_global_system_layouts.md` for the full rollout checklist.
 
 ### Build and publish the release image
 

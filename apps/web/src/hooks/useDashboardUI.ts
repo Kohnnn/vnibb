@@ -53,7 +53,6 @@ export interface DashboardUIState {
     // Onboarding
     isWalkthroughOpen: boolean;
     // Admin layout
-    adminLayoutKey: string;
     adminLayoutControlsVisible: boolean;
     isPublishingSystemLayout: boolean;
     // Dragging
@@ -82,7 +81,6 @@ type DashboardUIAction =
     | { type: 'INCREMENT_COPILOT_PROMPT_LIBRARY_REQUEST_ID' }
     | { type: 'SET_WIDGET_SETTINGS_STATE'; payload: WidgetSettingsState | null }
     | { type: 'SET_WALKTHROUGH_OPEN'; payload: boolean }
-    | { type: 'SET_ADMIN_LAYOUT_KEY'; payload: string }
     | { type: 'SET_ADMIN_LAYOUT_CONTROLS_VISIBLE'; payload: boolean }
     | { type: 'SET_PUBLISHING_SYSTEM_LAYOUT'; payload: boolean }
     | { type: 'SET_DRAGGING_PANE'; payload: DraggingPane }
@@ -109,7 +107,6 @@ const initialState: DashboardUIState = {
     copilotPromptLibraryRequestId: 0,
     widgetSettingsState: null,
     isWalkthroughOpen: false,
-    adminLayoutKey: '',
     adminLayoutControlsVisible: false,
     isPublishingSystemLayout: false,
     draggingPane: null,
@@ -152,8 +149,6 @@ function dashboardUIReducer(state: DashboardUIState, action: DashboardUIAction):
             return { ...state, widgetSettingsState: action.payload };
         case 'SET_WALKTHROUGH_OPEN':
             return { ...state, isWalkthroughOpen: action.payload };
-        case 'SET_ADMIN_LAYOUT_KEY':
-            return { ...state, adminLayoutKey: action.payload };
         case 'SET_ADMIN_LAYOUT_CONTROLS_VISIBLE':
             return { ...state, adminLayoutControlsVisible: action.payload };
         case 'SET_PUBLISHING_SYSTEM_LAYOUT':
@@ -276,9 +271,6 @@ export function useDashboardUI(options: UseDashboardUIOptions = {}) {
     }, []);
 
     // Admin layout actions
-    const setAdminLayoutKey = useCallback((key: string) => {
-        dispatch({ type: 'SET_ADMIN_LAYOUT_KEY', payload: key });
-    }, []);
 
     const setAdminLayoutControlsVisible = useCallback((visible: boolean) => {
         dispatch({ type: 'SET_ADMIN_LAYOUT_CONTROLS_VISIBLE', payload: visible });
@@ -434,7 +426,6 @@ export function useDashboardUI(options: UseDashboardUIOptions = {}) {
         // Walkthrough actions
         setIsWalkthroughOpen,
         // Admin layout actions
-        setAdminLayoutKey,
         setAdminLayoutControlsVisible,
         setIsPublishingSystemLayout,
         setAdminLayoutStatus,

@@ -330,7 +330,7 @@ async def test_submit_outcome_records_telemetry(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_admin_ai_runtime_endpoints_round_trip(client, monkeypatch):
+async def test_admin_ai_runtime_endpoints_round_trip(admin_client, monkeypatch):
     async def fake_get_runtime_config():
         return {"provider": "openrouter", "model": "openai/gpt-4o-mini", "updated_at": None}
 
@@ -350,8 +350,8 @@ async def test_admin_ai_runtime_endpoints_round_trip(client, monkeypatch):
         fake_save_runtime_config,
     )
 
-    get_response = await client.get("/api/v1/admin/ai-runtime")
-    put_response = await client.put(
+    get_response = await admin_client.get("/api/v1/admin/ai-runtime")
+    put_response = await admin_client.put(
         "/api/v1/admin/ai-runtime", json={"model": "google/gemini-2.5-flash"}
     )
 
@@ -362,7 +362,7 @@ async def test_admin_ai_runtime_endpoints_round_trip(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_admin_unit_runtime_endpoints_round_trip(client, monkeypatch):
+async def test_admin_unit_runtime_endpoints_round_trip(admin_client, monkeypatch):
     async def fake_get_runtime_config():
         return {
             "usd_vnd_default_rate": 25000,
@@ -386,8 +386,8 @@ async def test_admin_unit_runtime_endpoints_round_trip(client, monkeypatch):
         fake_save_runtime_config,
     )
 
-    get_response = await client.get("/api/v1/admin/unit-runtime")
-    put_response = await client.put(
+    get_response = await admin_client.get("/api/v1/admin/unit-runtime")
+    put_response = await admin_client.put(
         "/api/v1/admin/unit-runtime",
         json={
             "usd_vnd_default_rate": 25250,
@@ -403,8 +403,8 @@ async def test_admin_unit_runtime_endpoints_round_trip(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_admin_unit_runtime_rejects_invalid_year_map(client):
-    response = await client.put(
+async def test_admin_unit_runtime_rejects_invalid_year_map(admin_client):
+    response = await admin_client.put(
         "/api/v1/admin/unit-runtime",
         json={
             "usd_vnd_default_rate": 25000,
@@ -417,7 +417,7 @@ async def test_admin_unit_runtime_rejects_invalid_year_map(client):
 
 
 @pytest.mark.asyncio
-async def test_admin_ai_telemetry_returns_recent_records(client, monkeypatch):
+async def test_admin_ai_telemetry_returns_recent_records(admin_client, monkeypatch):
     async def fake_get_recent_records(limit=25):
         return [
             {
@@ -443,7 +443,7 @@ async def test_admin_ai_telemetry_returns_recent_records(client, monkeypatch):
         fake_get_recent_records,
     )
 
-    response = await client.get("/api/v1/admin/ai-telemetry?limit=10")
+    response = await admin_client.get("/api/v1/admin/ai-telemetry?limit=10")
 
     assert response.status_code == 200
     assert response.json()["count"] == 1
@@ -529,7 +529,7 @@ async def test_get_models_returns_model_catalog(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_admin_ai_prompt_library_round_trip(client, monkeypatch):
+async def test_admin_ai_prompt_library_round_trip(admin_client, monkeypatch):
     async def fake_get_shared_prompts():
         return [
             {
@@ -565,8 +565,8 @@ async def test_admin_ai_prompt_library_round_trip(client, monkeypatch):
         fake_save_shared_prompts,
     )
 
-    get_response = await client.get("/api/v1/admin/ai-prompts")
-    put_response = await client.put(
+    get_response = await admin_client.get("/api/v1/admin/ai-prompts")
+    put_response = await admin_client.put(
         "/api/v1/admin/ai-prompts",
         json={
             "prompts": [

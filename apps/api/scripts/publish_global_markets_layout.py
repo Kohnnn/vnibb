@@ -7,19 +7,19 @@ if the published template was previously pointing the "Screener" tab at a
 TradingView Advanced Chart (the bug we shipped fixes for in PR-2), running
 this script will overwrite the bad payload with the correct one.
 
-Endpoint: ``PUT /api/v1/admin/system-layouts/default-global-markets``
-(handler: ``apps/api/vnibb/api/v1/admin.py:save_admin_system_layout``)
+Endpoint: ``PUT /api/v1/admin/automation/system-layouts/default-global-markets``
+(server-controlled actor: ``automation:layout-publisher``)
 
 Usage
 -----
 
   python apps/api/scripts/publish_global_markets_layout.py \
-      --base-url https://vnibb-api.example.com \
-      --admin-key $env:VNIBB_ADMIN_LAYOUT_KEY
+      --base-url https://vnibb-api.example.com
 
 By default the script targets ``http://127.0.0.1:8000`` and reads the
-admin key from the ``VNIBB_ADMIN_LAYOUT_KEY`` environment variable. The
-``--dry-run`` flag prints the payload it would send and exits.
+automation key from the server-only ``ADMIN_API_KEY`` environment variable.
+Inject it from your secret manager; do not store it in browser settings.
+The ``--dry-run`` flag prints the payload it would send and exits.
 
 This script is intentionally self-contained: it does not import the
 FastAPI app, so it can be run from anywhere with Python 3.11+ and the
@@ -245,16 +245,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--admin-key",
-        default=os.environ.get("VNIBB_ADMIN_LAYOUT_KEY") or os.environ.get("ADMIN_API_KEY"),
+        default=os.environ.get("ADMIN_API_KEY"),
         help=(
-            "Admin API key for the X-Admin-Key header. Defaults to "
-            "$VNIBB_ADMIN_LAYOUT_KEY or $ADMIN_API_KEY."
+            "Server-only automation key for X-Admin-Key. Prefer the ADMIN_API_KEY "
+            "environment variable to avoid exposing secrets in process arguments."
         ),
-    )
-    parser.add_argument(
-        "--actor",
-        default="screener-tab-fix-script",
-        help="Value sent in the X-Admin-Actor header so audit logs attribute the change.",
     )
     parser.add_argument(
         "--notes",
@@ -289,12 +284,12 @@ def main() -> int:
 
     if not args.admin_key:
         print(
-            "error: admin key not provided. Pass --admin-key or set VNIBB_ADMIN_LAYOUT_KEY.",
+            "error: automation key not provided. Set ADMIN_API_KEY.",
             file=sys.stderr,
         )
         return 2
 
-    url = f"{args.base_url.rstrip('/')}/api/v1/admin/system-layouts/{DASHBOARD_KEY}"
+    url = f"{args.base_url.rstrip('/')}/api/v1/admin/automation/system-layouts/{DASHBOARD_KEY}"
     payload = json.dumps(body).encode("utf-8")
     req = urllib_request.Request(  # noqa: S310 - admin script, URL is operator-supplied
         url,
@@ -303,7 +298,6 @@ def main() -> int:
         headers={
             "Content-Type": "application/json",
             "X-Admin-Key": args.admin_key,
-            "X-Admin-Actor": args.actor,
         },
     )
 

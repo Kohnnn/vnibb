@@ -138,6 +138,9 @@ export async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}):
         if (signal) signal.removeEventListener('abort', abortFromCaller);
 
         if (!response.ok) {
+            if (endpoint.startsWith('/admin/') && (response.status === 401 || response.status === 403) && isBrowser) {
+                window.dispatchEvent(new CustomEvent('vnibb:admin-access-denied', { detail: headers.get('Authorization') }));
+            }
             const errorData = await response.json().catch(() => ({
                 detail: response.statusText || 'Unknown error'
             }));

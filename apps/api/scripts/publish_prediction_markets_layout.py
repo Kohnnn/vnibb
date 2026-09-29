@@ -5,19 +5,19 @@ Adds a single "Prediction Markets" tab to the existing dashboard family.
 Mirrors the static fallback shipped in `apps/web/src/contexts/DashboardContext/
 systemDashboards.ts::PREDICTION_MARKETS_TAB_TEMPLATE`.
 
-Endpoint: ``PUT /api/v1/admin/system-layouts/default-prediction-markets``
-(handler: ``apps/api/vnibb/api/v1/admin.py:save_admin_system_layout``)
+Endpoint: ``PUT /api/v1/admin/automation/system-layouts/default-prediction-markets``
+(server-controlled actor: ``automation:layout-publisher``)
 
 Usage
 -----
 
   python apps/api/scripts/publish_prediction_markets_layout.py \\
-      --base-url https://vnibb-api.example.com \\
-      --admin-key $env:VNIBB_ADMIN_LAYOUT_KEY
+      --base-url https://vnibb-api.example.com
 
 By default the script targets ``http://127.0.0.1:8000`` and reads the
-admin key from the ``VNIBB_ADMIN_LAYOUT_KEY`` environment variable. The
-``--dry-run`` flag prints the payload it would send and exits.
+automation key from the server-only ``ADMIN_API_KEY`` environment variable.
+Inject it from your secret manager; do not store it in browser settings.
+The ``--dry-run`` flag prints the payload it would send and exits.
 
 This script is intentionally self-contained: it does not import the
 FastAPI app, so it can be run from anywhere with Python 3.11+ and the
@@ -56,39 +56,39 @@ def build_prediction_markets_dashboard() -> dict[str, Any]:
 
     poltil = {
         "id": "tile-polymarket-econ",
-        "widget_type": "polymarket",
-        "defaultConfig": {"source": "polymarket", "category": "economic", "limit": 12},
-        "defaultLayout": {"i": "tile-polymarket-econ", "x": 0, "y": 0, "w": 8, "h": 7, "minW": 6, "minH": 5},
+        "type": "polymarket",
+        "config": {"source": "polymarket", "category": "economic", "limit": 12},
+        "layout": {"x": 0, "y": 0, "w": 8, "h": 7, "minW": 6, "minH": 5},
     }
     pol_sports = {
         "id": "tile-polymarket-sports",
-        "widget_type": "polymarket",
-        "defaultConfig": {"source": "polymarket", "category": "sports", "limit": 12},
-        "defaultLayout": {"i": "tile-polymarket-sports", "x": 8, "y": 0, "w": 8, "h": 7, "minW": 6, "minH": 5},
+        "type": "polymarket",
+        "config": {"source": "polymarket", "category": "sports", "limit": 12},
+        "layout": {"x": 8, "y": 0, "w": 8, "h": 7, "minW": 6, "minH": 5},
     }
     kalshi_top = {
         "id": "tile-kalshi-top",
-        "widget_type": "kalshi",
-        "defaultConfig": {"source": "kalshi", "limit": 12},
-        "defaultLayout": {"i": "tile-kalshi-top", "x": 0, "y": 7, "w": 8, "h": 7, "minW": 6, "minH": 5},
+        "type": "kalshi",
+        "config": {"source": "kalshi", "limit": 12},
+        "layout": {"x": 0, "y": 7, "w": 8, "h": 7, "minW": 6, "minH": 5},
     }
     election = {
         "id": "tile-election-odds",
-        "widget_type": "election_odds",
-        "defaultConfig": {},
-        "defaultLayout": {"i": "tile-election-odds", "x": 8, "y": 7, "w": 8, "h": 8, "minW": 6, "minH": 6},
+        "type": "election_odds",
+        "config": {},
+        "layout": {"x": 8, "y": 7, "w": 8, "h": 8, "minW": 6, "minH": 6},
     }
     macro = {
         "id": "tile-macro-calibration",
-        "widget_type": "macro_calibration",
-        "defaultConfig": {},
-        "defaultLayout": {"i": "tile-macro-calibration", "x": 0, "y": 14, "w": 16, "h": 8, "minW": 8, "minH": 6},
+        "type": "macro_calibration",
+        "config": {},
+        "layout": {"x": 0, "y": 14, "w": 16, "h": 8, "minW": 8, "minH": 6},
     }
     movers = {
         "id": "tile-prediction-movers",
-        "widget_type": "prediction_movers",
-        "defaultConfig": {"windowHours": 24, "limit": 12},
-        "defaultLayout": {"i": "tile-prediction-movers", "x": 16, "y": 0, "w": 8, "h": 14, "minW": 6, "minH": 9},
+        "type": "prediction_movers",
+        "config": {"windowHours": 24, "limit": 12},
+        "layout": {"x": 16, "y": 0, "w": 8, "h": 14, "minW": 6, "minH": 9},
     }
 
     tab = {
@@ -99,24 +99,22 @@ def build_prediction_markets_dashboard() -> dict[str, Any]:
     }
 
     return {
-        "key": DASHBOARD_KEY,
+        "id": DASHBOARD_KEY,
         "name": DASHBOARD_NAME,
         "description": "Phase 7 — prediction-market coverage. Polymarket, Kalshi, election odds, macro calibration, and probability movers.",
-        "layout_config": {
-            "tabs": [tab],
-            "syncGroups": [],
-            "showGroupLabels": True,
-        },
-        "is_default": False,
-        "created_at": timestamp,
-        "updated_at": timestamp,
+        "tabs": [tab],
+        "syncGroups": [],
+        "showGroupLabels": True,
+        "isDefault": False,
+        "isEditable": False,
+        "isDeletable": False,
+        "createdAt": timestamp,
+        "updatedAt": timestamp,
     }
 
 
-def _post_json(url: str, payload: dict[str, Any], admin_key: str | None) -> dict[str, Any]:
-    headers = {"Accept": "application/json"}
-    if admin_key:
-        headers["X-Admin-Layout-Key"] = admin_key
+def _post_json(url: str, payload: dict[str, Any], admin_key: str) -> dict[str, Any]:
+    headers = {"Accept": "application/json", "X-Admin-Key": admin_key}
     body = json.dumps(payload).encode("utf-8")
     req = urllib_request.Request(
         url,
@@ -131,19 +129,28 @@ def _post_json(url: str, payload: dict[str, Any], admin_key: str | None) -> dict
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Publish the Prediction Markets dashboard template")
     parser.add_argument("--base-url", default=os.getenv("VNIBB_API_BASE_URL", DEFAULT_BASE_URL))
-    parser.add_argument("--admin-key", default=os.getenv("VNIBB_ADMIN_LAYOUT_KEY"))
+    parser.add_argument(
+        "--admin-key",
+        default=os.getenv("ADMIN_API_KEY"),
+        help="Server-only automation key; prefer ADMIN_API_KEY over process arguments.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
     dashboard = build_prediction_markets_dashboard()
+    body = {"dashboard": dashboard, "publish": True}
 
     if args.dry_run:
-        sys.stdout.write(json.dumps(dashboard, indent=2))
+        sys.stdout.write(json.dumps(body, indent=2))
         return 0
 
-    endpoint = args.base_url.rstrip("/") + f"/api/v1/admin/system-layouts/{DASHBOARD_KEY}"
+    if not args.admin_key:
+        sys.stderr.write("error: automation key not provided. Set ADMIN_API_KEY.\n")
+        return 2
+
+    endpoint = args.base_url.rstrip("/") + f"/api/v1/admin/automation/system-layouts/{DASHBOARD_KEY}"
     try:
-        _post_json(endpoint, dashboard, args.admin_key)
+        _post_json(endpoint, body, args.admin_key)
     except urllib_error.HTTPError as exc:  # pragma: no cover - admin path
         sys.stderr.write(f"PUT failed: {exc.code} {exc.reason}\n")
         return 1

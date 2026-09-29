@@ -7,7 +7,7 @@ under a common prefix.
 
 from fastapi import APIRouter, Depends
 
-from vnibb.api.v1.admin import require_admin_access
+from vnibb.api.v1.admin import require_admin_automation_access
 from vnibb.api.v1.admin import router as admin_router
 from vnibb.api.v1.analysis import router as analysis_router
 from vnibb.api.v1.apps_script import router as apps_script_router
@@ -100,7 +100,7 @@ api_router.include_router(
     prefix="/data",
     tags=["Data Pipeline"],
     # Seeding/sync endpoints are destructive and expensive; admin key required.
-    dependencies=[Depends(require_admin_access)],
+    dependencies=[Depends(require_admin_automation_access)],
 )
 
 # New vnstock premium endpoints
