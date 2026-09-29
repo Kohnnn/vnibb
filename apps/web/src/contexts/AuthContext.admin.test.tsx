@@ -13,7 +13,7 @@ jest.mock('@/lib/supabase', () => ({
 
 let authChanged: (event: string, session: Session | null) => void;
 const account = { id: 'user-1', email: 'admin@example.test', user_metadata: { role: 'admin' } };
-const sessionFor = (token: string) => ({ access_token: token, user: account } as Session);
+const sessionFor = (token: string) => ({ access_token: token, user: account } as unknown as Session);
 
 function AdminState() {
     const { isAdmin, adminStatus, adminError } = useAuth();

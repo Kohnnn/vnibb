@@ -1,14 +1,15 @@
 'use client';
 
-import { useState, useEffect, useMemo, memo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect, useMemo, useRef, memo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Database, Search, Download, RefreshCw } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { VirtualizedTable, type VirtualizedColumn } from '@/components/ui/VirtualizedTable';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { env } from '@/lib/env';
+import { useAuth } from '@/contexts/AuthContext';
+import { fetchAPI } from '@/lib/api';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface TableData {
@@ -24,41 +25,23 @@ interface DatabaseStats {
     last_sync?: string;
 }
 
-const API_URL = env.apiUrl;
-
 async function fetchDatabaseStats(): Promise<DatabaseStats> {
-    try {
-        const response = await fetch(`${API_URL}/api/v1/admin/database/stats`);
-        if (!response.ok) throw new Error('Admin stats endpoint failed');
-
-        const data = await response.json();
-        const tables = Object.entries(data.tables || {}).map(([name, info]: [string, any]) => ({
-            name,
-            count: info.count || 0,
-            last_updated: info.last_updated
-        }));
-
-        const totalRecords = tables.reduce((sum, t) => sum + t.count, 0);
-
-        return {
-            tables,
-            total_records: totalRecords,
-            database_status: totalRecords > 0 ? 'healthy' : 'warning',
-            last_sync: data.last_checked
-        };
-    } catch (error) {
-        return {
-            tables: [],
-            total_records: 0,
-            database_status: 'error',
-        };
-    }
+  const data = await fetchAPI<{ tables: TableData[]; last_checked?: string }>('/admin/database/stats', { auth: 'required' });
+  const tables = data.tables;
+  const totalRecords = tables.reduce((sum, table) => sum + table.count, 0);
+  return {
+    tables,
+    total_records: totalRecords,
+    database_status: totalRecords > 0 ? 'healthy' : 'warning',
+    last_sync: data.last_checked,
+  };
 }
 
-async function fetchTableSample(table: string, limit = 500) {
-  const res = await fetch(`${API_URL}/api/v1/admin/database/sample/${table}?limit=${limit}`);
-  if (!res.ok) throw new Error('Failed to fetch sample');
-  return res.json();
+async function fetchTableSample(table: string, limit = 500): Promise<{ rows: Record<string, unknown>[] }> {
+  return fetchAPI(`/admin/database/sample/${encodeURIComponent(table)}`, {
+    auth: 'required',
+    params: { limit },
+  });
 }
 
 function formatValue(val: any): string {
@@ -99,6 +82,14 @@ function downloadCSV(csv: string, filename: string) {
 function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange }: { onRemove?: () => void, lastRefresh?: number, onDataChange?: (data: WidgetDataPayload) => void }) {
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const { user, isAdmin, adminStatus } = useAuth();
+  const queryClient = useQueryClient();
+  const operatorId = isAdmin ? user?.id : null;
+  useEffect(() => {
+    if (operatorId) return;
+    setSelectedTable(null);
+    queryClient.removeQueries({ queryKey: ['adminDatabase'] });
+  }, [operatorId, queryClient]);
 
   const {
     data: stats,
@@ -108,22 +99,23 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange 
     isFetching,
     dataUpdatedAt,
   } = useQuery({
-    queryKey: ['databaseStats'],
+    queryKey: ['adminDatabase', operatorId, 'stats'],
     queryFn: fetchDatabaseStats,
+    enabled: Boolean(operatorId),
     staleTime: 30000,
   });
 
-  const { data: sampleData, isLoading: sampleLoading } = useQuery({
-    queryKey: ['tableSample', selectedTable],
+  const { data: sampleData, isLoading: sampleLoading, error: sampleError } = useQuery({
+    queryKey: ['adminDatabase', operatorId, 'sample', selectedTable],
     queryFn: () => fetchTableSample(selectedTable!, 500),
-    enabled: !!selectedTable,
+    enabled: Boolean(operatorId && selectedTable),
   });
 
   useEffect(() => {
-    if (lastRefresh) {
+    if (lastRefresh && operatorId) {
         refetch();
     }
-  }, [lastRefresh, refetch]);
+  }, [lastRefresh, operatorId, refetch]);
 
   const rows = useMemo(() => {
     if (!sampleData?.rows) return [];
@@ -159,41 +151,46 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange 
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
-      empty: !hasTables,
+      empty: !operatorId || !hasTables,
       apiGroup: '/admin',
       endpoint: selectedTable ? `/api/v1/admin/database/sample/${selectedTable}` : '/api/v1/admin/database/stats',
       sourceLabel: 'VNIBB admin database inspector',
-      lastDataDate: stats?.last_sync,
-      extra: { tables: stats?.tables?.length ?? 0, selected: selectedTable },
+      lastDataDate: operatorId ? stats?.last_sync : undefined,
+      extra: { tables: operatorId ? stats?.tables?.length ?? 0 : 0, selected: operatorId ? selectedTable : null },
     }))
-  }, [hasTables, onDataChange, selectedTable, stats?.last_sync, stats?.tables?.length]);
+  }, [hasTables, onDataChange, operatorId, selectedTable, stats?.last_sync, stats?.tables?.length]);
 
   return (
     <WidgetContainer
       title="Data Browser"
-      onRefresh={() => refetch()}
+      onRefresh={() => { if (operatorId) void refetch(); }}
       onClose={onRemove}
-      isLoading={statsLoading && !hasTables}
       noPadding
+      isLoading={Boolean(operatorId && statsLoading && !hasTables)}
     >
       <div className="flex flex-col h-full overflow-hidden">
         <div className="px-3 pt-2">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
-            isFetching={isFetching && hasTables}
-            isCached={Boolean(statsError && hasTables)}
+            isFetching={Boolean(operatorId && isFetching && hasTables)}
+            isCached={Boolean(operatorId && statsError && hasTables)}
             note="Admin stats"
             align="right"
           />
         </div>
         {/* Table List */}
         <div className="p-2 border-b border-[var(--border-default)] bg-[var(--bg-primary)] flex flex-wrap gap-1">
-          {statsLoading && !hasTables ? (
+          {!operatorId ? (
+            <WidgetError
+              title={adminStatus === 'checking' ? 'Checking admin access' : 'Admin access required'}
+              error={new Error(adminStatus === 'checking' ? 'Verifying your operator session.' : 'Sign in with an authorized operator account.')}
+            />
+          ) : statsLoading && !hasTables ? (
             <WidgetSkeleton lines={3} />
-          ) : statsError && !hasTables ? (
+          ) : statsError ? (
             <WidgetError error={statsError as Error} onRetry={() => refetch()} />
           ) : !hasTables ? (
-            <WidgetEmpty message="No tables found or backend offline" />
+            <WidgetEmpty message="No tables found" />
           ) : (
             stats?.tables?.map((table: TableData) => (
               <button
@@ -236,13 +233,14 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange 
                     </button>
                 </div>
 
-                {/* Data Table */}
                 <div className="flex-1 overflow-hidden bg-[var(--bg-primary)]">
                     {sampleLoading ? (
                         <div className="p-10 flex flex-col items-center justify-center text-[var(--text-muted)] gap-2">
                              <RefreshCw size={24} className="animate-spin" />
                              <span className="text-[10px] font-bold uppercase tracking-widest">Fetching data...</span>
                         </div>
+                    ) : sampleError ? (
+                        <WidgetError error={sampleError as Error} onRetry={() => void queryClient.invalidateQueries({ queryKey: ['adminDatabase', operatorId, 'sample', selectedTable] })} />
                     ) : rows.length === 0 ? (
                          <WidgetEmpty message="No rows match your filter" />
                     ) : (
