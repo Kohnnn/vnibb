@@ -4,6 +4,9 @@ import { useTopMovers } from '@/lib/queries';
 import { widgetRegistry } from './WidgetRegistry';
 
 jest.mock('@/lib/queries', () => ({ useTopMovers: jest.fn() }));
+jest.mock('@/hooks/useWidgetSymbolLink', () => ({
+  useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }),
+}));
 const moversQuery = jest.mocked(useTopMovers);
 const TopMovers = widgetRegistry.get('top_movers')!.component;
 

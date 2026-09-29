@@ -20,6 +20,8 @@ live in `docs/`.
 - Statement tables support chartable metric selection with labeled series; period headers retain sortable columns. Active metric context reaches the copilot through the widget runtime payload.
 - Purpose-bound research starters pair a template with its VniAgent prompt. Applying one discloses how its widgets handle tickers and primes the agent through the same seam the onboarding walkthrough uses.
 - Copilot artifact placement remembers the chosen dashboard/tab for the rest of the response and across reloads, records artifact provenance inside the created widget, and can save a table artifact to the research notebook once.
+- Investment Thesis now retains citation identity when notebook originals change, links due-for-review theses to their editor, and transfers selected theses with matching source originals in a separate research bundle. Imported research dashboards remain browser-local.
+- Investor Home connects watchlists, holdings, alerts, activity, and notebook navigation, with persisted alert validation and labeled controls.
 
 ### Fixed
 - Prediction-market catalogue admission counts fresh, real, active, nonclosed,
@@ -27,6 +29,9 @@ live in `docs/`.
   remain available while separate physical and snapshot storage limits continue
   to apply. Older Kalshi rows no longer prevent admission of new live contracts.
   Deployment of this follow-up is not claimed here; see the production runbook.
+- Holdings edits and exports use committed local data; failed browser-storage writes leave the form intact and the warning visible until a successful retry, including after background valuation snapshots.
+- Top Movers identifies last-session fallback rows separately from requested gainers and marks provider failures as unavailable rather than empty-market results.
+- Screener table actions retain full touch targets; technical and valuation widgets disclose unavailable indicators and source/cache provenance rather than implying unsupported freshness.
 
 ### Deployed
 - Released the integrated Workspace and Matrix build on 2026-09-27. Merge
