@@ -4,9 +4,9 @@ import os
 import sys
 from collections.abc import AsyncGenerator
 from time import time
-from uuid import uuid4
 from unittest.mock import MagicMock
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient, MockTransport, Response

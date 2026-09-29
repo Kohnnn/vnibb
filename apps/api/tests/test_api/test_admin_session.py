@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from vnibb.core.config import settings
 
-
 OPERATOR_ID = "8b11dc68-f065-4095-8826-81c857ff5f6c"
 SESSION_ID = "61c8d6f8-5820-45f2-a5da-e6cf0e56f3dc"
 SECRET = "test-only-admin-session-signing-secret"
