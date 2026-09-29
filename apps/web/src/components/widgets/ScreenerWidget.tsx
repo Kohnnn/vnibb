@@ -816,7 +816,7 @@ export function ScreenerWidget({
         {
             id: 'row_actions',
             header: 'Actions',
-            width: 96,
+            width: 116,
             sortable: false,
             accessor: (row: Record<string, unknown>) => {
                 const symbol = String(row.ticker ?? row.symbol ?? '');
