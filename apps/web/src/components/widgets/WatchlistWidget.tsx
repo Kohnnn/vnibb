@@ -282,11 +282,11 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                         <span className="text-xs text-[var(--text-muted)] font-bold uppercase tracking-tighter">{symbols.length} symbols</span>
                     </div>
                     <div className="flex items-center gap-1">
-                        <button onClick={() => setShowAddInput(!showAddInput)} className="p-1 text-[var(--text-muted)] hover:text-blue-400 transition-colors">
+                        <button type="button" aria-label="Add watchlist symbol" onClick={() => setShowAddInput(!showAddInput)} className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] hover:text-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-colors">
                             <Plus size={14} />
                         </button>
                         {symbols.length > 0 && (
-                            <button onClick={() => setShowClearConfirm(true)} className="p-1 text-[var(--text-muted)] hover:text-red-400 transition-colors">
+                            <button type="button" aria-label="Clear watchlist" onClick={() => setShowClearConfirm(true)} className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-colors">
                                 <Trash2 size={14} />
                             </button>
                         )}
@@ -308,8 +308,8 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                         <div className="flex items-center justify-between">
                             <span className="text-[10px] text-red-400 font-bold uppercase">Clear watchlist?</span>
                             <div className="flex gap-2">
-                                <button onClick={handleClearAll} className="bg-red-600 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase">Clear</button>
-                                <button onClick={() => setShowClearConfirm(false)} className="text-[var(--text-secondary)] text-[10px] font-bold uppercase">Cancel</button>
+                                <button type="button" onClick={handleClearAll} className="min-h-11 rounded bg-red-600 px-3 text-[10px] font-bold uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Clear</button>
+                                <button type="button" onClick={() => setShowClearConfirm(false)} className="min-h-11 rounded px-3 text-[var(--text-secondary)] text-[10px] font-bold uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Cancel</button>
                             </div>
                         </div>
                     </div>
@@ -320,14 +320,15 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                         <div className="flex gap-1">
                             <input
                                 type="text"
+                                aria-label="Watchlist symbol"
                                 value={newSymbol}
                                 onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
                                 onKeyDown={(e) => e.key === 'Enter' && handleAddSymbol()}
-                                className="flex-1 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-2 py-1 text-xs text-[var(--text-primary)] uppercase font-bold focus:border-blue-500 outline-none"
+                                className="min-h-11 flex-1 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-2 py-1 text-xs text-[var(--text-primary)] uppercase font-bold focus-visible:ring-2 focus-visible:ring-blue-500/40 outline-none"
                                 placeholder="SYMBOL"
                                 autoFocus
                             />
-                            <button onClick={handleAddSymbol} className="bg-blue-600 text-white px-2 py-1 rounded text-[10px] font-black uppercase tracking-tighter">Add</button>
+                            <button type="button" onClick={handleAddSymbol} className="min-h-11 rounded bg-blue-600 px-3 py-1 text-[10px] font-black uppercase tracking-tighter focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Add</button>
                         </div>
                     </div>
                 )}
