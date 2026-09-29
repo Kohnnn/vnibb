@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.mark.postgres_contract
 @pytest.mark.asyncio
-async def test_postgres_release_contract_uses_migrated_tables_and_api_routes(client, test_db):
+async def test_postgres_release_contract_uses_migrated_tables_and_api_routes(client, admin_client, test_db):
     assert test_db.bind is not None
     assert test_db.bind.dialect.name == "postgresql"
 
@@ -44,7 +44,7 @@ async def test_postgres_release_contract_uses_migrated_tables_and_api_routes(cli
 
     ready = await client.get("/ready")
     detailed = await client.get("/health/detailed")
-    data_health = await client.get("/api/v1/admin/data-health")
+    data_health = await admin_client.get("/api/v1/admin/data-health")
 
     assert ready.status_code == 200
     assert ready.json()["ready"] is True

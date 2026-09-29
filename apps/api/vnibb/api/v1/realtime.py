@@ -9,7 +9,7 @@ import logging
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from vnibb.api.v1.admin import require_admin_access
+from vnibb.api.v1.admin import require_admin_automation_access
 from vnibb.services.realtime_pipeline import get_realtime_pipeline, is_vietnam_market_open
 
 router = APIRouter()
@@ -35,7 +35,7 @@ class StreamingRequest(BaseModel):
     response_model=StreamingStatus,
     summary="Start Real-time Streaming",
     description="Start WebSocket streaming for market data. Uses vnstock_pipeline if available.",
-    dependencies=[Depends(require_admin_access)],
+    dependencies=[Depends(require_admin_automation_access)],
 )
 async def start_streaming(
     request: StreamingRequest = None,
@@ -87,7 +87,7 @@ async def start_streaming(
     response_model=StreamingStatus,
     summary="Stop Real-time Streaming",
     description="Stop WebSocket streaming.",
-    dependencies=[Depends(require_admin_access)],
+    dependencies=[Depends(require_admin_automation_access)],
 )
 async def stop_streaming() -> StreamingStatus:
     """Stop WebSocket streaming."""

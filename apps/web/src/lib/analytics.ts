@@ -8,9 +8,6 @@ type PostHogClient = typeof import('posthog-js').default
 export const ANALYTICS_EVENTS = {
   adminAiRuntimeSaved: 'admin_ai_runtime_saved',
   adminLayoutControlsToggled: 'admin_layout_controls_toggled',
-  adminLayoutKeyCleared: 'admin_layout_key_cleared',
-  adminLayoutKeySaved: 'admin_layout_key_saved',
-  adminLayoutKeyValidationFailed: 'admin_layout_key_validation_failed',
   adminPromptDraftAdded: 'admin_prompt_draft_added',
   adminPromptLibrarySaved: 'admin_prompt_library_saved',
   adminPromptRemoved: 'admin_prompt_removed',

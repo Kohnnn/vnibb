@@ -60,16 +60,17 @@ export async function getPublishedSystemDashboardTemplates(): Promise<SystemDash
     return fetchAPI<SystemDashboardTemplateListResponse>('/dashboard/system-templates');
 }
 
-export async function getAdminSystemDashboardTemplateBundle(): Promise<SystemDashboardTemplateBundleResponse> {
-    return fetchAPI<SystemDashboardTemplateBundleResponse>('/admin/system-dashboard-templates/bundle');
+export async function getAdminSystemDashboardTemplateBundle(dashboardKey: string): Promise<SystemDashboardTemplateBundleResponse> {
+    return fetchAPI<SystemDashboardTemplateBundleResponse>(`/admin/system-layouts/${dashboardKey}`, { auth: 'required' });
 }
 
 export async function saveAdminSystemDashboardTemplate(
     dashboardKey: string,
     dashboard: Dashboard
 ): Promise<unknown> {
-    return fetchAPI<unknown>('/admin/system-dashboard-templates', {
+    return fetchAPI<unknown>(`/admin/system-layouts/${dashboardKey}`, {
         method: 'PUT',
-        body: JSON.stringify({ dashboard_key: dashboardKey, dashboard }),
+        auth: 'required',
+        body: JSON.stringify({ dashboard }),
     });
 }

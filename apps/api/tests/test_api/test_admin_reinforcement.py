@@ -33,13 +33,6 @@ async def test_admin_routes_reject_unauthorized(method, path, unauth_client):
     assert response.status_code == 401, f"{method} {path} should return 401, got {response.status_code}"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("method,path", UNAUTH_ROUTES)
-async def test_admin_routes_accept_authorized(method, path, client):
-    response = await client.request(method, path)
-    assert response.status_code not in (401, 403), f"{method} {path} returned {response.status_code} with valid key"
-
-
 PUBLIC_ROUTES = [
     ("GET", "/api/v1/admin/ai-runtime/public"),
     ("GET", "/api/v1/admin/unit-runtime/public"),
@@ -55,8 +48,8 @@ async def test_public_admin_routes_accessible_without_auth(method, path, unauth_
 
 
 @pytest.mark.asyncio
-async def test_admin_reinforce_dry_run_with_explicit_symbols(client):
-    response = await client.post(
+async def test_admin_reinforce_dry_run_with_explicit_symbols(admin_client):
+    response = await admin_client.post(
         "/api/v1/admin/reinforce",
         json={
             "symbols": ["vnm", "fpt", "VNM"],
@@ -79,8 +72,8 @@ async def test_admin_reinforce_dry_run_with_explicit_symbols(client):
 
 
 @pytest.mark.asyncio
-async def test_admin_reinforce_rejects_invalid_domain(client):
-    response = await client.post(
+async def test_admin_reinforce_rejects_invalid_domain(admin_client):
+    response = await admin_client.post(
         "/api/v1/admin/reinforce",
         json={
             "symbols": ["VNM"],
@@ -102,8 +95,8 @@ def test_admin_query_rejects_write_and_multiple_statements():
 
 
 @pytest.mark.asyncio
-async def test_admin_query_caps_rows_and_reports_truncation(client):
-    response = await client.post(
+async def test_admin_query_caps_rows_and_reports_truncation(admin_client):
+    response = await admin_client.post(
         "/api/v1/admin/database/query",
         json={"query": "SELECT 1 AS value UNION ALL SELECT 2 UNION ALL SELECT 3"},
     )
@@ -114,7 +107,7 @@ async def test_admin_query_caps_rows_and_reports_truncation(client):
 
 
 @pytest.mark.asyncio
-async def test_sync_status_does_not_mutate_stale_records(client, test_db):
+async def test_sync_status_does_not_mutate_stale_records(admin_client, test_db):
     record = SyncStatus(
         sync_type="test",
         status="running",
@@ -123,7 +116,7 @@ async def test_sync_status_does_not_mutate_stale_records(client, test_db):
     test_db.add(record)
     await test_db.commit()
 
-    response = await client.get("/api/v1/admin/sync-status")
+    response = await admin_client.get("/api/v1/admin/sync-status")
     await test_db.refresh(record)
 
     assert response.status_code == 200
@@ -132,7 +125,7 @@ async def test_sync_status_does_not_mutate_stale_records(client, test_db):
 
 
 @pytest.mark.asyncio
-async def test_admin_reinforce_stale_mode_schedules_background_job(client, monkeypatch):
+async def test_admin_reinforce_stale_mode_schedules_background_job(admin_client, monkeypatch):
     async def fake_collect_reinforcement_candidates(_db, limit: int):
         assert limit == 5
         return ["VCB", "HPG"]
@@ -153,7 +146,7 @@ async def test_admin_reinforce_stale_mode_schedules_background_job(client, monke
         fake_run_reinforcement,
     )
 
-    response = await client.post(
+    response = await admin_client.post(
         "/api/v1/admin/data-health/reinforce",
         json={
             "symbols": ["STALE"],

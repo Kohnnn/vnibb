@@ -8,7 +8,8 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { getDashboardClientId } from '@/lib/api';
+import { getAdminSession, getDashboardClientId } from '@/lib/api';
+import { clearLegacyAdminLayoutCredentials } from '@/lib/adminLayoutAccess';
 import { identifyAnalyticsUser, resetAnalytics } from '@/lib/analytics';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
@@ -58,6 +59,9 @@ interface AuthContextType {
     loading: boolean;
     isConfigured: boolean;
     provider: AuthProviderName;
+    adminStatus: 'signed-out' | 'checking' | 'authorized' | 'denied';
+    adminError: string | null;
+    refreshAdminSession: () => void;
     isAdmin: boolean;
     isGuest: boolean;
     signIn: (email: string, password: string) => Promise<{ error: AuthFailure | null }>;
@@ -110,10 +114,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [loading, setLoading] = useState(true);
     const [isDevMode, setIsDevMode] = useState(false);
     const lastIdentifiedUserIdRef = useRef<string | null>(null);
+    const [adminAuthorization, setAdminAuthorization] = useState<{ token: string; userId: string; error: string | null } | null>(null);
+    const [adminCheck, setAdminCheck] = useState(0);
 
-    // Derived state
-    const isAdmin = user?.user_metadata?.role === 'admin';
+    const accessToken = session?.provider === 'supabase'
+        ? (session.raw as { access_token?: string } | null)?.access_token ?? null
+        : null;
+    const isAdmin = Boolean(accessToken && user?.provider === 'supabase' && adminAuthorization?.token === accessToken && adminAuthorization.userId === user.id && !adminAuthorization.error);
+    const adminStatus: AuthContextType['adminStatus'] = !accessToken || !user || user.provider !== 'supabase'
+        ? 'signed-out'
+        : adminAuthorization?.token !== accessToken || adminAuthorization.userId !== user.id
+            ? 'checking'
+            : adminAuthorization.error ? 'denied' : 'authorized';
+    const adminError = adminStatus === 'denied' ? adminAuthorization?.error ?? null : null;
     const isGuest = user?.user_metadata?.role === 'guest';
+
+    useEffect(() => {
+        clearLegacyAdminLayoutCredentials();
+        setAdminCheck((value) => value + 1);
+    }, []);
+
+    useEffect(() => {
+        if (!accessToken || !user || user.provider !== 'supabase') return;
+        let active = true;
+        void getAdminSession().then((admin) => {
+            if (active) setAdminAuthorization((current) => current?.token === accessToken && current.error?.startsWith('Admin access was denied.')
+                ? current : { token: accessToken, userId: user.id, error: admin.id === user.id && admin.role === 'admin' ? null : 'Admin session does not match your signed-in account.' });
+        }).catch((error: unknown) => {
+            if (active) setAdminAuthorization((current) => current?.token === accessToken && current.error?.startsWith('Admin access was denied.')
+                ? current : { token: accessToken, userId: user.id, error: error instanceof Error ? error.message : 'Admin access denied.' });
+        });
+        return () => { active = false; };
+    }, [accessToken, user?.id, user?.provider, adminCheck]);
+
+    useEffect(() => {
+        if (!accessToken || !user || user.provider !== 'supabase') return;
+        const onAdminDenied = (event: Event) => {
+            if ((event as CustomEvent<string>).detail === `Bearer ${accessToken}`) {
+                setAdminAuthorization({ token: accessToken, userId: user.id, error: 'Admin access was denied. Sign in with an authorized account or ask an administrator to grant access.' });
+            }
+        };
+        window.addEventListener('vnibb:admin-access-denied', onAdminDenied);
+        return () => window.removeEventListener('vnibb:admin-access-denied', onAdminDenied);
+    }, [accessToken, user?.id, user?.provider]);
 
     useEffect(() => {
         // Check for dev mode (admin/guest sessions in localStorage)
@@ -135,8 +178,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return;
         }
 
+        let receivedAuthEvent = false;
         // Get initial session
         supabase.auth.getSession().then(({ data: { session: supabaseSession } }) => {
+            if (receivedAuthEvent) return;
             setSession({ provider: 'supabase', raw: supabaseSession });
             setUser(supabaseSession?.user ? mapSupabaseUser(supabaseSession.user) : null);
             setLoading(false);
@@ -146,6 +191,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const {
             data: { subscription },
         } = supabase.auth.onAuthStateChange((_event, supabaseSession) => {
+            receivedAuthEvent = true;
             setSession({ provider: 'supabase', raw: supabaseSession });
             setUser(supabaseSession?.user ? mapSupabaseUser(supabaseSession.user) : null);
             setLoading(false);
@@ -261,6 +307,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Clear dev mode
         if (isDevMode) {
             localStorage.removeItem('vnibb_dev_user');
+            setAdminAuthorization(null);
             setUser(null);
             setSession(null);
             setIsDevMode(false);
@@ -268,6 +315,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (!supabase) return;
+        setAdminAuthorization(null);
         await supabase.auth.signOut();
     };
 
@@ -280,6 +328,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isConfigured: isSupabaseConfigured,
         provider: activeProvider,
         isAdmin,
+        adminStatus,
+        adminError,
+        refreshAdminSession: () => { setAdminAuthorization(null); setAdminCheck((value) => value + 1); },
         isGuest,
         signIn,
         signUp,

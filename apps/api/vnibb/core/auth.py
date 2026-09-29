@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import logging
 import re
+from time import time
+from uuid import UUID
 
+import httpx
 from fastapi import Header, HTTPException, status
 from jose import JWTError, jwt
 from pydantic import BaseModel
@@ -107,6 +110,61 @@ async def get_current_user(authorization: str | None = Header(None)) -> User:
         raise AuthError("Invalid or expired token")
 
     raise AuthError("Authentication is not configured")
+
+
+async def _get_active_admin_user_id(token: str) -> str:
+    """Ask the issuing Auth service to reject signed-out/revoked sessions."""
+    url = f"{settings.supabase_url.rstrip('/')}/auth/v1/user"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            response = await client.get(
+                url,
+                headers={"apikey": settings.supabase_anon_key, "Authorization": f"Bearer {token}"},
+            )
+        if response.status_code in (401, 403):
+            raise AuthError("Admin session is no longer active")
+        if response.status_code != 200:
+            raise HTTPException(status_code=503, detail="Admin session authority is unavailable")
+        return str(UUID(response.json()["id"]))
+    except (httpx.RequestError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=503, detail="Admin session authority is unavailable") from exc
+
+
+async def require_admin_access(authorization: str | None = Header(None)) -> User:
+    """Authorize bounded Supabase sessions against server-owned operator policy."""
+    token = _extract_bearer_token(authorization)
+    allowed_ids = {value.strip() for value in settings.admin_user_ids.split(",") if value.strip()}
+    if not allowed_ids or not settings.supabase_jwt_secret or not settings.supabase_url or not settings.supabase_anon_key:
+        raise HTTPException(status_code=503, detail="Admin session authorization is not configured")
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.supabase_jwt_secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+            issuer=f"{settings.supabase_url.rstrip('/')}/auth/v1",
+            options={"require_exp": True, "require_iat": True, "require_sub": True,
+                     "require_aud": True, "require_iss": True},
+        )
+        user_id = str(UUID(payload["sub"]))
+        session_id = str(UUID(payload["session_id"]))
+        issued_at, expires_at = payload["iat"], payload["exp"]
+        if (type(issued_at) is not int or type(expires_at) is not int
+                or issued_at > time() or expires_at <= issued_at
+                or expires_at - issued_at > settings.admin_session_max_ttl_seconds):
+            raise ValueError("Invalid session lifetime")
+    except (JWTError, KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise AuthError("Invalid or expired admin session") from exc
+
+    revoked_ids = {value.strip() for value in settings.admin_revoked_session_ids.split(",") if value.strip()}
+    if session_id in revoked_ids:
+        raise AuthError("Admin session has been revoked")
+    if user_id not in allowed_ids:
+        raise HTTPException(status_code=403, detail="Admin access is not granted to this account")
+    if await _get_active_admin_user_id(token) != user_id:
+        raise AuthError("Admin session identity mismatch")
+    return User(id=user_id, email="", role="admin", aud="authenticated", provider="supabase")
 
 
 def _normalize_dashboard_client_id(client_id: str | None) -> str | None:

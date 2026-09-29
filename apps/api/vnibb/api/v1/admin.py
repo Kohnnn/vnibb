@@ -15,6 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPExcep
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from vnibb.core.auth import User, require_admin_access
 from vnibb.core.cache import redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import engine, get_db
@@ -136,10 +137,13 @@ def _validate_admin_query(query: str) -> str:
     return normalized
 
 
-def require_admin_access(
+def require_admin_automation_access(
     x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key"),
+    origin: Optional[str] = Header(default=None),
 ) -> None:
-    """Protect sensitive admin endpoints with API key auth (fail-closed)."""
+    """Protect server-only automation with its independently rotated API key."""
+    if origin is not None:
+        raise HTTPException(status_code=403, detail="Automation credentials are not accepted from browsers")
     configured_key = settings.admin_api_key
     if not configured_key:
         raise HTTPException(
@@ -147,8 +151,13 @@ def require_admin_access(
             detail="ADMIN_API_KEY must be configured to access this endpoint",
         )
 
-    if not x_admin_key or not hmac.compare_digest(x_admin_key, configured_key):
+    if not x_admin_key or not hmac.compare_digest(x_admin_key.encode(), configured_key.encode()):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@router.get("/session")
+async def get_admin_session(user: User = Depends(require_admin_access)) -> Dict[str, str]:
+    return {"id": user.id, "role": "admin"}
 
 
 @router.get("/ai-telemetry", dependencies=[Depends(require_admin_access)])
@@ -422,7 +431,7 @@ def _coerce_admin_system_layout_body(payload: Any) -> Dict[str, Any]:
 async def save_admin_system_layout(
     dashboard_key: str,
     request: Request,
-    x_admin_actor: Optional[str] = Header(default=None, alias="X-Admin-Actor"),
+    user: User = Depends(require_admin_access),
 ) -> SystemLayoutTemplateBundleResponse:
     try:
         raw_body = await request.body()
@@ -453,7 +462,7 @@ async def save_admin_system_layout(
     else:
         publish_value = bool(publish_raw)
 
-    updated_by = (x_admin_actor or "admin").strip() or "admin"
+    updated_by = user.id
     return await system_layout_template_service.save_dashboard_template(
         dashboard_key=dashboard_key,
         dashboard=dashboard_payload,
@@ -461,6 +470,27 @@ async def save_admin_system_layout(
         updated_by=updated_by,
         publish=publish_value,
     )
+
+
+@router.get(
+    "/automation/system-layouts/{dashboard_key}",
+    response_model=SystemLayoutTemplateBundleResponse,
+    dependencies=[Depends(require_admin_automation_access)],
+)
+async def get_automation_system_layout(dashboard_key: str) -> SystemLayoutTemplateBundleResponse:
+    return await system_layout_template_service.get_template_bundle(dashboard_key)
+
+
+@router.put(
+    "/automation/system-layouts/{dashboard_key}",
+    response_model=SystemLayoutTemplateBundleResponse,
+    dependencies=[Depends(require_admin_automation_access)],
+)
+async def save_automation_system_layout(
+    dashboard_key: str, request: Request,
+) -> SystemLayoutTemplateBundleResponse:
+    actor = User(id="automation:layout-publisher", email="", role="automation")
+    return await save_admin_system_layout(dashboard_key, request, actor)
 
 
 def _quote_identifier(table_name: str) -> str:

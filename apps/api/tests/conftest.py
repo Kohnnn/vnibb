@@ -3,11 +3,14 @@ import ipaddress
 import os
 import sys
 from collections.abc import AsyncGenerator
+from time import time
 from unittest.mock import MagicMock
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, MockTransport, Response
+from jose import jwt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -56,10 +59,12 @@ os.environ["ADMIN_API_KEY"] = "test-admin-key"
 os.environ["DATA_BACKEND"] = "postgres"
 os.environ["MONGODB_ENABLED"] = "false"
 
-from vnibb.api.main import app
-from vnibb.core.database import Base, get_db
-from vnibb.middleware.rate_limit import RateLimitMiddleware
-from vnibb.models import *
+# Deferred imports: every symbol below needs the environment configured above.
+from vnibb.api.main import app  # noqa: E402
+from vnibb.core.config import settings  # noqa: E402
+from vnibb.core.database import Base, get_db  # noqa: E402
+from vnibb.middleware.rate_limit import RateLimitMiddleware  # noqa: E402
+from vnibb.models import *  # noqa: E402,F403
 
 TEST_DATABASE_URL = os.environ["DATABASE_URL"] if POSTGRES_CONTRACT else "sqlite+aiosqlite:///:memory:"
 
@@ -134,3 +139,47 @@ async def client(test_db) -> AsyncGenerator[AsyncClient, None]:
         yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def admin_client(client: AsyncClient, monkeypatch) -> AsyncClient:
+    user_id = str(uuid4())
+    now = int(time())
+    supabase_url = "https://test.supabase.co"
+    jwt_secret = "test-admin-session-secret"
+    monkeypatch.setattr(settings, "supabase_url", supabase_url)
+    monkeypatch.setattr(settings, "supabase_jwt_secret", jwt_secret)
+    monkeypatch.setattr(settings, "supabase_anon_key", "test-publishable-key")
+    monkeypatch.setattr(settings, "admin_user_ids", user_id)
+
+    async def verify_session(request):
+        assert request.url == f"{supabase_url}/auth/v1/user"
+        assert request.headers["apikey"] == settings.supabase_anon_key
+        claims = jwt.decode(
+            request.headers["Authorization"].removeprefix("Bearer "),
+            jwt_secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+        return Response(200, json={"id": claims["sub"]})
+
+    original_client = AsyncClient
+
+    def auth_client(*args, **kwargs):
+        return original_client(*args, transport=MockTransport(verify_session), **kwargs)
+
+    monkeypatch.setattr("vnibb.core.auth.httpx.AsyncClient", auth_client)
+    token = jwt.encode(
+        {
+            "sub": user_id,
+            "session_id": str(uuid4()),
+            "iat": now,
+            "exp": now + 3600,
+            "aud": "authenticated",
+            "iss": f"{supabase_url}/auth/v1",
+        },
+        jwt_secret,
+        algorithm="HS256",
+    )
+    client.headers["Authorization"] = f"Bearer {token}"
+    return client

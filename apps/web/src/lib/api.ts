@@ -216,6 +216,9 @@ export async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}):
         if (signal) signal.removeEventListener('abort', abortFromCaller);
 
         if (!response.ok) {
+            if (endpoint.startsWith('/admin/') && (response.status === 401 || response.status === 403) && isBrowser) {
+                window.dispatchEvent(new CustomEvent('vnibb:admin-access-denied', { detail: headers.get('Authorization') }));
+            }
             const errorData = await response.json().catch(() => ({
                 detail: response.statusText || 'Unknown error'
             }));
@@ -1102,23 +1105,30 @@ export async function getPublishedSystemDashboardTemplates(): Promise<SystemDash
     return fetchAPI<SystemDashboardTemplateListResponse>('/dashboard/system-layouts/published');
 }
 
+export interface AdminSessionResponse {
+    id: string;
+    role: 'admin';
+}
+
+export async function getAdminSession(): Promise<AdminSessionResponse> {
+    return fetchAPI<AdminSessionResponse>('/admin/session', { auth: 'required' });
+}
+
 export async function getAdminSystemDashboardTemplateBundle(
     dashboardKey: string,
-    adminKey: string,
 ): Promise<SystemDashboardTemplateBundleResponse> {
     return fetchAPI<SystemDashboardTemplateBundleResponse>(`/admin/system-layouts/${dashboardKey}`, {
-        headers: { 'X-Admin-Key': adminKey },
+        auth: 'required',
     });
 }
 
 export async function saveAdminSystemDashboardTemplate(
     dashboardKey: string,
     payload: { dashboard: Dashboard; notes?: string; publish?: boolean },
-    adminKey: string,
 ): Promise<SystemDashboardTemplateBundleResponse> {
     return fetchAPI<SystemDashboardTemplateBundleResponse>(`/admin/system-layouts/${dashboardKey}`, {
         method: 'PUT',
-        headers: { 'X-Admin-Key': adminKey },
+        auth: 'required',
         body: payload as unknown as BodyInit,
     });
 }
@@ -3242,7 +3252,6 @@ export async function submitCopilotOutcome(
 }
 
 export async function getAdminAITelemetry(
-    adminKey: string,
     limit = 25,
     filters: {
         provider?: string;
@@ -3254,38 +3263,33 @@ export async function getAdminAITelemetry(
     } = {},
 ): Promise<AdminAITelemetryResponse> {
     return fetchAPI<AdminAITelemetryResponse>('/admin/ai-telemetry', {
-        headers: { 'X-Admin-Key': adminKey },
+        auth: 'required',
         params: { limit, ...filters },
         timeout: 20000,
     });
 }
 
-export async function getAdminAIPromptLibrary(
-    adminKey: string,
-): Promise<AdminAIPromptLibraryResponse> {
+export async function getAdminAIPromptLibrary(): Promise<AdminAIPromptLibraryResponse> {
     return fetchAPI<AdminAIPromptLibraryResponse>('/admin/ai-prompts', {
-        headers: { 'X-Admin-Key': adminKey },
+        auth: 'required',
         timeout: 15000,
     });
 }
 
 export async function saveAdminAIPromptLibrary(
-    adminKey: string,
     prompts: PromptTemplate[],
 ): Promise<AdminAIPromptLibraryResponse> {
     return fetchAPI<AdminAIPromptLibraryResponse>('/admin/ai-prompts', {
         method: 'PUT',
-        headers: { 'X-Admin-Key': adminKey },
+        auth: 'required',
         body: JSON.stringify({ prompts }),
         timeout: 15000,
     });
 }
 
-export async function getAdminAIRuntimeConfig(
-    adminKey: string,
-): Promise<AdminAIRuntimeConfigResponse> {
+export async function getAdminAIRuntimeConfig(): Promise<AdminAIRuntimeConfigResponse> {
     return fetchAPI<AdminAIRuntimeConfigResponse>('/admin/ai-runtime', {
-        headers: { 'X-Admin-Key': adminKey },
+        auth: 'required',
         timeout: 15000,
     });
 }
@@ -3296,20 +3300,16 @@ export async function getPublicUnitRuntimeConfig(): Promise<UnitRuntimeConfigRes
     });
 }
 
-export async function getAdminUnitRuntimeConfig(
-    adminKey: string,
-): Promise<UnitRuntimeConfigResponse> {
+export async function getAdminUnitRuntimeConfig(): Promise<UnitRuntimeConfigResponse> {
     return fetchAPI<UnitRuntimeConfigResponse>('/admin/unit-runtime', {
-        headers: { 'X-Admin-Key': adminKey },
+        auth: 'required',
         timeout: 15000,
     });
 }
 
-export async function getAdminProviderStatus(
-    adminKey: string,
-): Promise<AdminProviderStatusResponse> {
+export async function getAdminProviderStatus(): Promise<AdminProviderStatusResponse> {
     return fetchAPI<AdminProviderStatusResponse>('/admin/providers/status', {
-        headers: { 'X-Admin-Key': adminKey },
+        auth: 'required',
         timeout: 15000,
     });
 }
@@ -3364,25 +3364,23 @@ export async function createCopilotDocumentContext(file: File): Promise<{ docume
 }
 
 export async function saveAdminAIRuntimeConfig(
-    adminKey: string,
     model: string,
 ): Promise<AdminAIRuntimeConfigResponse> {
     return fetchAPI<AdminAIRuntimeConfigResponse>('/admin/ai-runtime', {
         method: 'PUT',
-        headers: { 'X-Admin-Key': adminKey },
+        auth: 'required',
         body: JSON.stringify({ model }),
         timeout: 15000,
     });
 }
 
 export async function saveAdminUnitRuntimeConfig(
-    adminKey: string,
     usdVndDefaultRate: number,
     usdVndRatesByYear: Record<string, number> = {},
 ): Promise<UnitRuntimeConfigResponse> {
     return fetchAPI<UnitRuntimeConfigResponse>('/admin/unit-runtime', {
         method: 'PUT',
-        headers: { 'X-Admin-Key': adminKey },
+        auth: 'required',
         body: JSON.stringify({
             usd_vnd_default_rate: usdVndDefaultRate,
             usd_vnd_rates_by_year: usdVndRatesByYear,
@@ -3944,6 +3942,7 @@ export interface AdminAutoBackfillResponse {
 
 export async function getAdminDataHealth(): Promise<AdminDataHealthResponse> {
     return fetchAPI<AdminDataHealthResponse>('/admin/data-health', {
+        auth: 'required',
         timeout: 20000,
     })
 }
@@ -3955,6 +3954,7 @@ export async function triggerAdminDataHealthAutoBackfill(options?: {
 }): Promise<AdminAutoBackfillResponse> {
     return fetchAPI<AdminAutoBackfillResponse>('/admin/data-health/auto-backfill', {
         method: 'POST',
+        auth: 'required',
         params: {
             days_stale: options?.daysStale,
             limit_symbols: options?.limitSymbols,

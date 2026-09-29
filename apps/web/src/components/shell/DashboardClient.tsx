@@ -44,8 +44,8 @@ import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import {
     readAdminLayoutControlsVisible,
-    readAdminLayoutKey,
     subscribeAdminLayoutKey,
+    writeAdminLayoutControlsVisible,
 } from '@/lib/adminLayoutAccess';
 import { saveAdminSystemDashboardTemplate } from '@/lib/api';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
@@ -152,7 +152,7 @@ function DashboardContent() {
     const { globalSymbol: stockGlobalSymbol, setGlobalSymbol: setStockGlobalSymbol } = useSymbolLink();
     const { globalMarketsSymbol, setGlobalMarketsSymbol } = useGlobalMarketsSymbol();
     const { config: unitConfig, setUnit } = useUnit();
-    const { user } = useAuth();
+    const { user, isAdmin } = useAuth();
 
     const [isEditing, setIsEditing] = useState(false);
     const [isGridEditable, setIsGridEditable] = useState(false);
@@ -175,7 +175,6 @@ function DashboardContent() {
     const [viewportHeight, setViewportHeight] = useState(0);
     const [mounted, setMounted] = useState(false);
     const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
-    const [adminLayoutKey, setAdminLayoutKey] = useState('');
     const [adminLayoutControlsVisible, setAdminLayoutControlsVisible] = useState(false);
     // Status feedback now routes through sonner toasts (see AppToaster). These
     // callbacks preserve the previous setter call-sites while removing the
@@ -318,21 +317,22 @@ function DashboardContent() {
 
     useEffect(() => {
         if (!mounted) return;
-        const syncAdminKey = () => {
-            setAdminLayoutKey(readAdminLayoutKey());
+        const syncAdminControls = () => {
             setAdminLayoutControlsVisible(readAdminLayoutControlsVisible());
         };
-        syncAdminKey();
-        return subscribeAdminLayoutKey(syncAdminKey);
+        syncAdminControls();
+        return subscribeAdminLayoutKey(syncAdminControls);
     }, [mounted]);
 
     useEffect(() => {
         if (!activeDashboard || !ADMIN_MANAGED_SYSTEM_IDS.has(activeDashboard.id)) return;
-        if (adminLayoutControlsVisible) return;
+        if (adminLayoutControlsVisible && isAdmin) return;
         if (activeDashboard.adminUnlocked !== true && !isEditing) return;
+        // The legacy browser credential is gone; do not leave controls actable on a dead session.
+        if (!isAdmin && adminLayoutControlsVisible) writeAdminLayoutControlsVisible(false);
         setDashboardAdminUnlocked(activeDashboard.id, false);
         setIsEditing(false);
-    }, [activeDashboard, adminLayoutControlsVisible, isEditing, setDashboardAdminUnlocked]);
+    }, [activeDashboard, adminLayoutControlsVisible, isAdmin, isEditing, setDashboardAdminUnlocked]);
 
     const openWalkthrough = useCallback((force = false) => {
         if (!mounted) {
@@ -539,7 +539,7 @@ function DashboardContent() {
     const showAdminSystemLayoutControls =
         isAdminManagedSystemDashboard &&
         adminLayoutControlsVisible &&
-        adminLayoutKey.trim().length > 0;
+        isAdmin;
 
     const serializeSystemDashboardForPublish = useCallback((dashboard: typeof activeDashboard) => {
         if (!dashboard) return null;
@@ -597,16 +597,16 @@ function DashboardContent() {
     }, []);
 
     const handleToggleAdminLayoutMode = useCallback(() => {
-        if (!activeDashboard || !isAdminManagedSystemDashboard) return;
+        if (!activeDashboard || !isAdminManagedSystemDashboard || !isAdmin || !adminLayoutControlsVisible) return;
         const nextUnlocked = activeDashboard.adminUnlocked !== true;
         setDashboardAdminUnlocked(activeDashboard.id, nextUnlocked);
         setIsEditing(nextUnlocked);
         setAdminLayoutStatus(nextUnlocked ? 'Admin layout mode enabled.' : 'Admin layout mode disabled.');
-    }, [activeDashboard, isAdminManagedSystemDashboard, setDashboardAdminUnlocked]);
+    }, [activeDashboard, adminLayoutControlsVisible, isAdmin, isAdminManagedSystemDashboard, setDashboardAdminUnlocked]);
 
     const handlePersistSystemLayout = useCallback(async (publish: boolean) => {
-        if (!activeDashboard || !isAdminManagedSystemDashboard || !adminLayoutKey) {
-            setAdminLayoutStatus('Save an admin layout key in Settings before publishing global layouts.');
+        if (!activeDashboard || !isAdminManagedSystemDashboard || !isAdmin || !adminLayoutControlsVisible) {
+            setAdminLayoutStatus('Admin session required. Sign in with an authorized account and enable layout controls in Settings.');
             return;
         }
         const payloadDashboard = serializeSystemDashboardForPublish(activeDashboard);
@@ -620,12 +620,13 @@ function DashboardContent() {
                     dashboard: payloadDashboard,
                     publish,
                 },
-                adminLayoutKey,
             );
             setDashboardAdminUnlocked(activeDashboard.id, false);
             setIsEditing(false);
             setAdminLayoutStatus(publish ? 'Published globally.' : 'Draft saved.');
         } catch (error) {
+            setDashboardAdminUnlocked(activeDashboard.id, false);
+            setIsEditing(false);
             console.error('Failed to persist system layout template:', error);
             setAdminLayoutStatus(
                 error instanceof Error ? error.message : 'Failed to persist system layout.',
@@ -633,7 +634,7 @@ function DashboardContent() {
         } finally {
             setIsPublishingSystemLayout(false);
         }
-    }, [activeDashboard, adminLayoutKey, isAdminManagedSystemDashboard, serializeSystemDashboardForPublish, setDashboardAdminUnlocked]);
+    }, [activeDashboard, adminLayoutControlsVisible, isAdmin, isAdminManagedSystemDashboard, serializeSystemDashboardForPublish, setDashboardAdminUnlocked]);
 
     useEffect(() => {
         if (!mounted) return;
@@ -1346,7 +1347,7 @@ function DashboardContent() {
                                     <button
                                         type="button"
                                         onClick={handleToggleAdminLayoutMode}
-                                        disabled={!adminLayoutKey || isPublishingSystemLayout}
+                                        disabled={!isAdmin || isPublishingSystemLayout}
                                         className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {activeDashboard.adminUnlocked ? 'Disable Admin Mode' : 'Enable Admin Mode'}
@@ -1356,7 +1357,7 @@ function DashboardContent() {
                                     <button
                                         type="button"
                                         onClick={() => void handlePersistSystemLayout(false)}
-                                        disabled={!adminLayoutKey || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
+                                        disabled={!isAdmin || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
                                         className="rounded-lg border border-[var(--border-default)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         Save Draft
@@ -1364,7 +1365,7 @@ function DashboardContent() {
                                     <button
                                         type="button"
                                         onClick={() => void handlePersistSystemLayout(true)}
-                                        disabled={!adminLayoutKey || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
+                                        disabled={!isAdmin || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
                                         className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {isPublishingSystemLayout ? 'Publishing...' : 'Publish Global'}

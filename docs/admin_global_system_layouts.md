@@ -3,7 +3,7 @@
 ## Purpose
 Enable an admin to edit locked Initial dashboards in the UI, save drafts, and publish layouts globally without needing SSH access, manual backend edits, or a frontend redeploy for layout-only changes.
 
-For the exact click-by-click setup, see the archived `system_layouts_manual_setup.md` under the workspace archive (`../docs/archive/vnibb-docs-2026-06-09/`, outside this repo).
+For deployment and credential migration, use the rollout checklist below and `docs/oracle_runbook.md`; archived shared-key setup instructions are obsolete.
 
 This document also defines the recommended tenant-ready path so the current admin-first model can evolve cleanly into role-based tenant layout management later.
 
@@ -50,7 +50,7 @@ For the current rollout, only **Global** is implemented in code. Tenant and user
 ## Current Admin-First Flow
 ### What is already implemented
 - locked Initial dashboards remain read-only for normal users
-- admin can save a hash key locally in the browser
+- admins sign in through the existing Supabase authentication service; the backend authorizes their immutable user UUID
 - admin can unlock a locked Initial dashboard in the UI
 - admin can save a draft or publish a global version through backend APIs
 - published global templates are fetched from Postgres on load
@@ -67,11 +67,20 @@ For the current rollout, only **Global** is implemented in code. Tenant and user
 - `PUT /api/v1/admin/system-layouts/{dashboard_key}`
 
 ### Current admin auth model
-- admin enters the key in `Settings > Admin`
-- key is stored in browser local storage
-- admin requests send `X-Admin-Key`
-- this is acceptable for initial admin-first operation
-- later this should be replaced by a short-lived admin session/token
+- Interactive `/api/v1/admin/*` calls use `Authorization: Bearer <Supabase access JWT>`, not a shared key. The automation routes below are the explicit exception.
+- Set backend `ADMIN_USER_IDS` to a comma-separated string of verified immutable Supabase user UUIDs (`sub`), not emails or browser-supplied roles. An empty allowlist denies all interactive admin access.
+- The backend verifies HS256 signatures with server-only `SUPABASE_JWT_SECRET`. Required claims are `exp`, `iat`, `sub`, `session_id`, `iss`, and `aud`; issuer must be `${SUPABASE_URL}/auth/v1` (without a duplicate slash), audience must be `authenticated`, and user/session identifiers must be UUIDs. Each interactive request also calls `${SUPABASE_URL}/auth/v1/user` using the caller bearer JWT and backend `SUPABASE_ANON_KEY`; the Auth service must return HTTP 200 with an identity matching the signed `sub`. A missing publishable key or unavailable Auth service denies access; this check is never cached.
+- `ADMIN_SESSION_MAX_TTL_SECONDS` bounds the accepted signed token lifetime (`exp - iat`); tokens exceeding it are rejected, not silently shortened. Keep it at or above the Auth service's configured JWT expiry (`GOTRUE_JWT_EXP`, default 3600 in `docker-compose.oracle.yml`); a shorter backend bound denies every operator once the issuer lifetime exceeds it. The default 3600 matches the default issuer lifetime, and the configurable ceiling is 86400.
+- `ADMIN_REVOKED_SESSION_IDS` is a comma-separated string of session UUIDs denied by the backend. Remove a user UUID from `ADMIN_USER_IDS` to revoke all of that user's admin access.
+- Roll **all API workers/replicas** after changing allowlist, denylist, TTL, or signing configuration. Until every old worker is replaced, stale authorization can still be accepted.
+- Supabase sign-out removes the session row; the per-request online Auth check denies that session once sign-out completes, even while its signed JWT remains cryptographically valid until expiry. Online checks add network latency and fail closed (503) during Auth outages/timeouts. `ADMIN_REVOKED_SESSION_IDS` and allowlist removal remain emergency backend controls; deploy policy changes to every worker. Verify sign-out/revocation against the actual configured Auth service before production acceptance.
+- Supabase authentication is separate from the serving PostgreSQL database. Verify operator UUIDs through the existing trusted Supabase project/admin interface; never query an `auth` schema in the serving database.
+
+### Server-only automation
+- `GET` / `PUT /api/v1/admin/automation/system-layouts/{dashboard_key}` require `X-Admin-Key` matching backend `ADMIN_API_KEY`.
+- These routes use the fixed verified actor `automation:layout-publisher`. Callers cannot choose an actor with `X-Admin-Actor`.
+- Keep this secret in server/CI secret storage only, never browser settings, browser storage, or `NEXT_PUBLIC_*` variables. It also protects retained operational `/data`, realtime start/stop, and metrics/debug routes; migrate their secret consumers together.
+- Rotate any formerly browser-exposed key before enabling automation. Clearing stored browser keys is necessary cleanup, **not revocation**; replace the server secret, update authorized automation consumers, and roll every worker so the old value is rejected. Never read a stored key out or paste it into analytics, tickets, or chat.
 
 ## Layout Template Storage
 ### Implement now
@@ -184,7 +193,15 @@ System-layout templates are stored in the Postgres `app_kv` table. No other stor
 Add these to your Oracle deployment env:
 
 ```env
-ADMIN_API_KEY=replace-with-long-random-value
+SUPABASE_URL=https://your-existing-auth-project.supabase.co
+SUPABASE_JWT_SECRET=replace-with-existing-project-hs256-signing-secret
+# Comma-separated immutable operator UUIDs; empty denies interactive admin access.
+ADMIN_USER_IDS=
+# Comma-separated session UUIDs explicitly revoked by the backend.
+ADMIN_REVOKED_SESSION_IDS=
+ADMIN_SESSION_MAX_TTL_SECONDS=3600
+# Server-only automation/operations secret; rotate the formerly browser-exposed value.
+ADMIN_API_KEY=replace-with-new-long-random-value
 DATA_BACKEND=postgres
 CACHE_BACKEND=redis
 ```
@@ -202,20 +219,19 @@ NEXT_PUBLIC_AUTH_PROVIDER=supabase
 ### One-off admin seed scripts
 For dashboards where the bundled fallback is good enough but you want
 the admin-published version to be ahead of time-of-deploy, the repo
-ships canonical scripts that PUT to the system-layouts admin endpoint:
+ships canonical scripts that PUT to the dedicated automation system-layouts endpoint:
 
 ```bash
+# Inject ADMIN_API_KEY from server/CI secret storage; do not paste it into command history.
 # Standard: Global Markets dashboard (one-off seed).
 python apps/api/scripts/publish_global_markets_layout.py \
-    --base-url https://api.example.com \
-    --admin-key "$VNIBB_ADMIN_LAYOUT_KEY"
+    --base-url https://api.example.com
 
 # Phase 7.7: Prediction Markets dashboard (Polymarket, Kalshi, Election,
 # Macro Calibration, Movers). The --dry-run flag prints the JSON payload
 # without contacting the API.
 python apps/api/scripts/publish_prediction_markets_layout.py \
-    --base-url https://api.example.com \
-    --admin-key "$VNIBB_ADMIN_LAYOUT_KEY" --dry-run
+    --base-url https://api.example.com --dry-run
 ```
 
 Both scripts are self-contained (no FastAPI imports; only `urllib`) so
@@ -234,19 +250,19 @@ What it should **not** mean:
 - removing backend APIs from the flow
 
 The backend should remain the security boundary because:
-- it validates `X-Admin-Key`
+- it verifies the signed user session and server allowlist for interactive requests, and the separate server-only automation key for automation requests
 - it controls writes to the database stack
 - it can later enforce tenant RBAC cleanly
 
 ## Rollout Checklist
-### Implement now
-1. keep the current Postgres stack
-2. confirm the `app_kv` table exists (it ships with the base schema)
-3. set `ADMIN_API_KEY`
-4. redeploy backend + frontend
-5. save admin key in `Settings > Admin`
-6. unlock an Initial dashboard
-7. save draft / publish global
+### Production gate — BLOCKED pending verified acceptance
+1. Keep the current Postgres stack and confirm `app_kv` exists; do not inspect or migrate authentication schemas in the serving database.
+2. Verify each intended operator's immutable UUID in the existing Supabase project and configure `ADMIN_USER_IDS`; configure matching issuer, signing secret, and publishable/legacy anon key server-side. Confirm the API can reach `${SUPABASE_URL}/auth/v1/user` within its 3-second timeout; account for one uncached Auth round-trip per interactive request and fail-closed outage behavior.
+3. Provision an accountable operator with authority to edit `ADMIN_REVOKED_SESSION_IDS` / `ADMIN_USER_IDS` and roll every worker. Verify online Auth rejects completed sign-out/remote revocation while the original signed JWT is still unexpired; keep the 3600-second lifetime bound as defense in depth.
+4. Remove existing stored platform admin keys from every operator browser profile/site storage. Rotate the formerly browser-exposed `ADMIN_API_KEY`, update trusted automation/operational consumers, and roll all workers; clearing browser storage alone does not revoke it, and the stored value must never be read out or pasted into analytics, tickets, or chat.
+4b. On load the web client removes those legacy keys and re-checks the admin session; when the session is no longer verified it also clears the persisted admin-controls visibility, so no layout control stays actable against a removed credential.
+5. Deploy backend + frontend with no public admin secret. Complete authenticated live acceptance: allowlisted operator can unlock, save draft, and publish; non-allowlisted, expired, and signed-out/revoked sessions are denied; Auth outage denies admin access; shared-key-only interactive requests and the old automation key are denied.
+6. Verify automation with the rotated server-only secret and verify a published layout reloads for a normal client. Record the operator UUID verification, rotation, accepted/provisioned revocation authority, and live acceptance evidence before unblocking production.
 
 ### Future tenant phase
 1. create `tenant_dashboard_templates`
@@ -254,11 +270,9 @@ The backend should remain the security boundary because:
 3. create `tenant_audit_logs`
 4. add backend tenant resolution
 5. add tenant scope selector to the publish UI
-6. replace raw admin key with short-lived admin session
 
 ## Recommended Next Steps
 1. Finish the admin-first global workflow using the shared Postgres store
 2. Add rollback/version history for global templates
 3. Add tenant tables and backend tenant resolution
 4. Add tenant-scoped publish controls in the UI
-5. Replace raw `X-Admin-Key` browser usage with a short-lived admin session

@@ -99,34 +99,35 @@ export async function submitCopilotOutcome(
 }
 
 export async function getAdminAITelemetry(): Promise<unknown> {
-    return fetchAPI<unknown>('/admin/ai/telemetry');
+    return fetchAPI<unknown>('/admin/ai-telemetry', { auth: 'required' });
 }
 
 export async function getAdminAIPromptLibrary(): Promise<unknown> {
-    return fetchAPI<unknown>('/admin/ai/prompts');
+    return fetchAPI<unknown>('/admin/ai-prompts', { auth: 'required' });
 }
 
 export async function saveAdminAIPromptLibrary(prompts: unknown): Promise<void> {
-    return fetchAPI<void>('/admin/ai/prompts', {
+    return fetchAPI<void>('/admin/ai-prompts', {
         method: 'PUT',
-        body: JSON.stringify(prompts),
+        auth: 'required',
+        body: JSON.stringify({ prompts }),
     });
 }
 
 export async function getAdminAIRuntimeConfig(): Promise<CopilotRuntimeConfig> {
-    return fetchAPI<CopilotRuntimeConfig>('/admin/ai/runtime-config');
+    return fetchAPI<CopilotRuntimeConfig>('/admin/ai-runtime', { auth: 'required' });
 }
 
 export async function getPublicUnitRuntimeConfig(): Promise<{ unit: string; value: unknown }> {
     return fetchAPI<{ unit: string; value: unknown }>('/copilot/unit-runtime-config');
 }
 
-export async function getAdminUnitRuntimeConfig(unit: string): Promise<unknown> {
-    return fetchAPI<unknown>(`/admin/unit-runtime-config/${unit}`);
+export async function getAdminUnitRuntimeConfig(): Promise<unknown> {
+    return fetchAPI<unknown>('/admin/unit-runtime', { auth: 'required' });
 }
 
 export async function getAdminProviderStatus(): Promise<unknown> {
-    return fetchAPI<unknown>('/admin/ai/provider-status');
+    return fetchAPI<unknown>('/admin/providers/status', { auth: 'required' });
 }
 
 export async function getCopilotModelCatalog(provider: 'openrouter' = 'openrouter'): Promise<{ models: ModelOption[] }> {
@@ -148,16 +149,18 @@ export async function createCopilotDocumentContext(file: File): Promise<{ docume
 }
 
 export async function saveAdminAIRuntimeConfig(config: CopilotRuntimeConfig): Promise<void> {
-    return fetchAPI<void>('/admin/ai/runtime-config', {
+    return fetchAPI<void>('/admin/ai-runtime', {
         method: 'PUT',
-        body: JSON.stringify(config),
+        auth: 'required',
+        body: JSON.stringify({ model: config.model }),
     });
 }
 
-export async function saveAdminUnitRuntimeConfig(unit: string, value: unknown): Promise<void> {
-    return fetchAPI<void>(`/admin/unit-runtime-config/${unit}`, {
+export async function saveAdminUnitRuntimeConfig(value: unknown): Promise<void> {
+    return fetchAPI<void>('/admin/unit-runtime', {
         method: 'PUT',
-        body: JSON.stringify({ value }),
+        auth: 'required',
+        body: JSON.stringify(value),
     });
 }
 
