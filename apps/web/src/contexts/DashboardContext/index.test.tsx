@@ -460,6 +460,29 @@ describe('DashboardProvider browser persistence', () => {
     expect(screen.getByTestId('widget-types')).toHaveTextContent('rs_ranking,market_heatmap,dividend_ladder,ai_copilot');
   });
 
+  it('restores the four activated research widgets without migration or dropping their configuration', async () => {
+    const widgetTypes = ['bank_metrics', 'valuation_band', 'cashflow_waterfall', 'technical_summary'] as const;
+    const widgets = widgetTypes.map((type, index) => ({
+      id: `research-${type}`,
+      tabId: 'research-tab',
+      type,
+      config: { symbol: 'FPT', title: `Saved ${type}` },
+      layout: { i: `research-${type}`, x: 0, y: index * 6, w: 8, h: 6 },
+    }));
+    const dashboard = {
+      ...customDashboard,
+      id: 'research-dashboard',
+      tabs: [{ id: 'research-tab', name: 'Research', order: 0, widgets }],
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([dashboard]));
+
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('widget-types')).toHaveTextContent(widgetTypes.join(',')));
+    expect(storedDashboards().find((item) => item.id === dashboard.id)?.tabs[0].widgets).toEqual(widgets);
+    expect(screen.getByTestId('storage-notice')).not.toHaveTextContent('Dashboard storage was corrupted');
+  });
+
   it('retains distinct legacy and canonical valuation widgets during the v26 migration', async () => {
     const legacy = {
       id: 'valuation-legacy-1',

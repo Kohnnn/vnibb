@@ -3,19 +3,16 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { useQuery } from '@tanstack/react-query';
 import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { parseWatchlistSymbols, WatchlistWidget } from './WatchlistWidget';
+import { useDashboard } from '@/contexts/DashboardContext';
+import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 
 jest.mock('@tanstack/react-query', () => ({ useQuery: jest.fn() }));
 jest.mock('@/lib/hooks/useWebSocket', () => ({ useWebSocket: jest.fn() }));
 
 const setLinkedSymbol = jest.fn();
 
-jest.mock('@/contexts/DashboardContext', () => ({
-    useDashboard: () => ({ updateWidget: jest.fn() }),
-}));
-
-jest.mock('@/hooks/useDashboardWidget', () => ({
-    useDashboardWidget: () => undefined,
-}));
+jest.mock('@/contexts/DashboardContext', () => ({ useDashboard: jest.fn() }));
+jest.mock('@/hooks/useDashboardWidget', () => ({ useDashboardWidget: jest.fn() }));
 
 jest.mock('@/hooks/useWidgetSymbolLink', () => ({
     useWidgetSymbolLink: () => ({ setLinkedSymbol }),
@@ -32,6 +29,11 @@ jest.mock('@/components/ui/WidgetMeta', () => ({
 jest.mock('@/components/ui/widget-states', () => ({
     WidgetEmpty: ({ message }: { message: string }) => <div>{message}</div>,
 }));
+
+const updateWidget = jest.fn();
+const dashboardWidget = { dashboardId: 'dashboard', tabId: 'tab', widget: { config: { watchlistSymbols: ['VCI'] } } };
+jest.mocked(useDashboard).mockImplementation(() => ({ updateWidget }) as never);
+jest.mocked(useDashboardWidget).mockImplementation(() => dashboardWidget as never);
 
 const mockUseQuery = jest.mocked(useQuery);
 const mockUseWebSocket = jest.mocked(useWebSocket);
@@ -53,6 +55,7 @@ function renderWatchlist(symbols: string[]) {
 describe('WatchlistWidget quotes', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        dashboardWidget.widget.config = { watchlistSymbols: ['VCI'] };
         mockUseQuery.mockReturnValue({ data: { data: [] } } as ReturnType<typeof useQuery>);
         mockUseWebSocket.mockReturnValue(socketResult());
     });
@@ -118,5 +121,30 @@ describe('WatchlistWidget quotes', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'View VCI' }));
         expect(setLinkedSymbol).toHaveBeenCalledWith('VCI');
+    });
+
+    it('names watchlist controls and operates selection from the keyboard', () => {
+        renderWatchlist(['VCI']);
+
+        expect(screen.getByRole('button', { name: 'Add watchlist symbol' })).toHaveClass('min-h-11', 'focus-visible:ring-2');
+        expect(screen.getByRole('button', { name: 'Clear watchlist' })).toHaveClass('min-w-11', 'focus-visible:ring-2');
+        const row = screen.getByRole('button', { name: 'View VCI' });
+        row.focus();
+        fireEvent.keyDown(row, { key: 'Enter' });
+        expect(setLinkedSymbol).toHaveBeenCalledWith('VCI');
+        fireEvent.click(screen.getByRole('button', { name: 'Add watchlist symbol' }));
+        expect(screen.getByRole('textbox', { name: 'Watchlist symbol' })).toHaveFocus();
+    });
+    it('preserves an externally added symbol when dashboard config catches up to the mounted watchlist', () => {
+        const view = renderWatchlist(['VCI']);
+        updateWidget.mockClear();
+
+        dashboardWidget.widget.config = { watchlistSymbols: ['VCI', 'FPT'] };
+        view.rerender(<WatchlistWidget id="watchlist" config={dashboardWidget.widget.config} widgetGroup="A" />);
+
+        expect(screen.getByRole('button', { name: 'View FPT' })).toBeInTheDocument();
+        expect(updateWidget).not.toHaveBeenCalledWith('dashboard', 'tab', 'watchlist', expect.objectContaining({
+            config: expect.objectContaining({ watchlistSymbols: ['VCI'] }),
+        }));
     });
 });

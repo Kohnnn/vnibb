@@ -95,11 +95,12 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useFullTechnicalAnalysis(symbol, { timeframe });
 
     const ta = data;
-    const hasData = Boolean(ta);
-    const isFallback = Boolean(error && hasData);
     const signals = ta?.signals;
+    const observedSignalCount = (finite(signals?.buy_count) ?? 0) + (finite(signals?.neutral_count) ?? 0) + (finite(signals?.sell_count) ?? 0);
+    const hasData = Boolean(ta && (observedSignalCount > 0 || (finite(signals?.total_indicators) ?? 0) > 0 || signals?.indicators?.length));
+    const isFallback = Boolean(error && hasData);
     const overallSignal = signals?.overall_signal || 'neutral';
-    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !ta, { timeoutMs: 8_000 });
     const movingAverageSignals = ta?.moving_averages?.signals
         ? Object.entries(ta.moving_averages.signals).slice(0, 4)
         : [];
@@ -110,8 +111,7 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
     const buyCount = finite(signals?.buy_count) ?? 0;
     const neutralCount = finite(signals?.neutral_count) ?? 0;
     const sellCount = finite(signals?.sell_count) ?? 0;
-    const observedSignalCount = buyCount + neutralCount + sellCount;
-    const totalSignals = Math.max(finite(signals?.total_indicators) ?? 0, observedSignalCount, 1);
+    const totalSignals = Math.max(finite(signals?.total_indicators) ?? 0, observedSignalCount, signals?.indicators?.length ?? 0, 1);
     const dataQualityIssues = ta?.data_quality?.issues || [];
     const gaugeBackground = useMemo(
         () => buildSignalGaugeBackground(buyCount, neutralCount, sellCount),
@@ -191,7 +191,7 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
             ) : error && !hasData ? (
                 <WidgetError error={error as Error} onRetry={() => refetch()} />
             ) : !hasData ? (
-                <WidgetEmpty message="No technical data available." />
+                <WidgetEmpty message="No technical indicators available." detail="The technical response did not contain usable indicator coverage." />
             ) : (
                 <div className="flex-1 overflow-y-auto px-2.5 py-2 space-y-3 scrollbar-hide text-left">
                     <WidgetMeta

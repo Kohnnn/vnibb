@@ -511,7 +511,7 @@ Acceptance:
 
 ## Wave 11: Connected Investor Workflow
 
-Status: Implementation in progress
+Status: Focused source and component scenarios verified for issue #83; browser acceptance remains pending integration verification.
 
 ### 11.1 Watchlist Connections
 
@@ -552,9 +552,11 @@ Acceptance:
 - watchlist, activity, navigation, and alert flows complete by keyboard;
 - assistive labels distinguish action, target, and unavailable state.
 
+Issue #83 evidence: `ScreenerSavedAlerts.test.tsx` exercises zero/one/multiple watchlist paths, keyboard choice, normalized duplicate handling, existing-symbol preservation, and disappearing targets; `Wave4Widgets.test.tsx` verifies 50-symbol query cap and Dashboard/Manual/Deduplicated/Capped counts. `AlertActivityInboxWidget.test.tsx`, `ResearchNotebookWidget.test.tsx`, and `NotesWidget.test.tsx` exercise activity, notebook, and due-thesis navigation; `PriceAlertsWidget.test.tsx` covers linked-symbol seeding, finite thresholds, malformed persisted alerts, and labelled controls. Runtime UI/browser acceptance is not yet claimed.
+
 ## Wave 12: Existing Widget Activation
 
-Status: Implementation in progress
+Status: Four existing widgets resolved and restored in focused issue #83 tests; browser acceptance remains pending integration verification.
 
 Deliverables:
 
@@ -567,6 +569,8 @@ Acceptance:
 - exactly those four widgets are discoverable and resolve from the registry;
 - persisted instances render without data migration;
 - no other placeholder activates; unavailable or sparse data does not imply coverage, valuation certainty, or advice.
+
+Issue #83 evidence: `Wave12WidgetActivation.test.tsx` resolves each of the four catalogue IDs through lazy registry components to sparse states and checks technical non-advice/coverage plus server-sourced valuation provenance; `DashboardContext/index.test.tsx` restores all four saved instances and configurations without migration. Other placeholder activation was not changed. Runtime UI/browser acceptance is not yet claimed.
 
 ## Wave 13: Bounded Market Intelligence
 
