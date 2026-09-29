@@ -6,7 +6,6 @@ import httpx
 import pytest
 from jose import jwt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
 from vnibb.core.config import settings
 
 OPERATOR_ID = "8b11dc68-f065-4095-8826-81c857ff5f6c"
