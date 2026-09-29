@@ -24,6 +24,8 @@ it('imports research originals and theses as a separate persisted dashboard with
     act(() => view.result.current.importResearchBundle(plan));
     expect(view.result.current.state.dashboards).toHaveLength(before + 1);
     const imported = view.result.current.state.dashboards.at(-1)!;
+    expect(imported.id).toMatch(/^import-/);
+    expect(imported.id).not.toMatch(/^dash-/);
     expect(imported.tabs[0].widgets[0].config).toMatchObject({ symbol: 'FPT', thesesBySymbol: { FPT: { notebookItemIds: ['nb:imported'] } } });
     expect(readNotebookItems().map(({ id }) => id)).toEqual(['nb:imported', 'nb:old']);
     view.unmount();

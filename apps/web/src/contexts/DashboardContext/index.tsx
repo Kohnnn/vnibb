@@ -1270,7 +1270,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         const ids = new Set(existing.map((item) => item.id));
         if (plan.items.some((item) => ids.has(item.id))) throw new Error('Research notebook ID conflict. Nothing was imported.');
         const now = new Date().toISOString();
-        const dashboardId = `dash-${generateId()}`;
+        const dashboardId = `import-${generateId()}`;
         const tabId = generateId();
         const dashboards = [...stateRef.current.dashboards, {
             id: dashboardId, name: `Imported research · ${new Date().toLocaleDateString()}`,

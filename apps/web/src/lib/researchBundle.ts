@@ -1,4 +1,4 @@
-import { normalizeThesisConfig, type InvestmentThesis, type ThesisCitation } from '@/lib/investorWorkflow';
+import { citationMatchesItem, normalizeThesisConfig, type InvestmentThesis, type ThesisCitation } from '@/lib/investorWorkflow';
 import { MAX_NOTEBOOK_ITEMS, normalizeNotebookItem, type NotebookItem } from '@/lib/researchNotebook';
 
 export const MAX_RESEARCH_BUNDLE_BYTES = 5 * 1024 * 1024;
@@ -51,11 +51,12 @@ function sameData(left: unknown, right: unknown): boolean {
 
 export function createResearchBundle(theses: BundledThesis[], items: NotebookItem[]): ResearchBundle {
     if (!theses.length || theses.length > MAX_RESEARCH_THESES) throw new Error('Select 1–50 theses to export.');
-    const ids = new Set(theses.flatMap(({ thesis }) => thesis.notebookItemIds || []));
+    const references = theses.flatMap(({ thesis }) => (thesis.notebookItemIds || []).map((id) => ({ id, citation: thesis.citations?.find((entry) => entry.itemId === id) })));
     const bundle: ResearchBundle = {
         format: 'vnibb-thesis-evidence', version: 1, createdAt: new Date().toISOString(),
         theses: theses.map(({ symbol, thesis, note }) => ({ symbol, thesis, ...(note !== undefined ? { note } : {}) })),
-        items: items.filter((item) => ids.has(item.id)),
+        items: items.filter((item) => references.some(({ id }) => id === item.id)
+            && references.every(({ id, citation }) => id !== item.id || citationMatchesItem(citation, item))),
     };
     return parseResearchBundle(JSON.stringify(bundle));
 }

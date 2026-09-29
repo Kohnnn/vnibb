@@ -1,6 +1,6 @@
 import { createResearchBundle, parseResearchBundle, planResearchImport } from './researchBundle';
 import type { NotebookItem } from './researchNotebook';
-import type { InvestmentThesis } from './investorWorkflow';
+import { citeNotebookItem, type InvestmentThesis } from './investorWorkflow';
 
 const original: NotebookItem = {
     id: 'nb:original', kind: 'news', title: 'Earnings release', body: 'Original private research', symbol: 'FPT',
@@ -9,7 +9,7 @@ const original: NotebookItem = {
 const thesis: InvestmentThesis = {
     status: 'active', thesis: 'Growing', catalysts: 'Capacity', risks: 'Execution', invalidation: 'Margins',
     reviewDate: '2026-12-31', notebookItemIds: ['nb:original', 'nb:evicted'],
-    citations: [{ itemId: 'nb:original', title: 'Earnings release', sourceId: 'source-1', capturedAt: original.createdAt },
+    citations: [citeNotebookItem(original),
         { itemId: 'nb:evicted', title: 'Old article', capturedAt: '2025-01-01T00:00:00Z' }],
 };
 
@@ -25,6 +25,18 @@ it('round-trips selected thesis evidence with immutable citations, remaps collis
     expect(plan.theses[0].thesis.citations?.map(({ itemId }) => itemId)).toEqual(['nb:import-1', 'nb:import-2']);
     expect(plan.summary).toEqual({ theses: 1, evidence: 1, remappedIds: 1, symbolConflicts: 1, missingOriginals: 1 });
     expect(plan.items.some((item) => item.id === 'nb:import-2')).toBe(false);
+});
+
+it('omits a reused notebook ID with different citation identity instead of exporting unrelated private content', () => {
+    const unrelated = { ...original, title: 'Someone else’s note', body: 'Do not transfer', createdAt: '2026-08-01T00:00:00.000Z' };
+    const bundle = createResearchBundle([{ symbol: 'FPT', thesis }], [unrelated]);
+    expect(bundle.items).toEqual([]);
+    expect(bundle.theses[0].thesis.citations).toEqual(thesis.citations);
+    let counter = 0;
+    const imported = planResearchImport(bundle, [unrelated], new Set(), () => `nb:missing-${++counter}`);
+    expect(imported.summary.missingOriginals).toBe(2);
+    expect(imported.items).toEqual([]);
+    expect(imported.theses[0].thesis.citations?.[0].title).toBe('Earnings release');
 });
 
 it('rejects workspace configurations, unsupported versions and malformed citations without importing', () => {
