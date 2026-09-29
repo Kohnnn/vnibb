@@ -1,6 +1,8 @@
 from time import time
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import httpx
 import pytest
 from jose import jwt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -32,9 +34,18 @@ def session_token(**claims):
 def admin_policy(monkeypatch):
     monkeypatch.setattr(settings, "supabase_jwt_secret", SECRET)
     monkeypatch.setattr(settings, "supabase_url", "https://admin-auth.example.test")
+    monkeypatch.setattr(settings, "supabase_anon_key", "test-publishable-key")
     monkeypatch.setattr(settings, "admin_user_ids", OPERATOR_ID)
     monkeypatch.setattr(settings, "admin_revoked_session_ids", "")
     monkeypatch.setattr(settings, "admin_session_max_ttl_seconds", 3600)
+    session_response = AsyncMock(return_value=httpx.Response(200, json={"id": OPERATOR_ID}))
+    original_client = httpx.AsyncClient
+
+    def auth_client(*args, **kwargs):
+        return original_client(*args, transport=httpx.MockTransport(session_response), **kwargs)
+
+    monkeypatch.setattr("vnibb.core.auth.httpx.AsyncClient", auth_client)
+    return session_response
 
 
 @pytest.mark.asyncio
@@ -80,7 +91,7 @@ async def test_admin_requires_security_claims(client, claim):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("setting", ["admin_user_ids", "supabase_url", "supabase_jwt_secret"])
+@pytest.mark.parametrize("setting", ["admin_user_ids", "supabase_url", "supabase_jwt_secret", "supabase_anon_key"])
 async def test_admin_fails_closed_without_policy(client, monkeypatch, setting):
     monkeypatch.setattr(settings, setting, "")
     response = await client.get("/api/v1/admin/session", headers={"Authorization": f"Bearer {session_token()}"})
@@ -106,6 +117,56 @@ async def test_admin_allowlist_removal_denies_existing_token(client, monkeypatch
     monkeypatch.setattr(settings, "admin_user_ids", str(uuid4()))
     after = await client.get("/api/v1/admin/session", headers=headers)
     assert after.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_signed_out_session_is_rejected_by_online_authority(client, admin_policy):
+    admin_policy.return_value = httpx.Response(401, json={"message": "session not found"})
+    response = await client.get("/api/v1/admin/session", headers={"Authorization": f"Bearer {session_token()}"})
+    assert response.status_code == 401
+    assert admin_policy.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_mismatched_online_identity_is_rejected(client, admin_policy):
+    admin_policy.return_value = httpx.Response(200, json={"id": str(uuid4())})
+    response = await client.get("/api/v1/admin/session", headers={"Authorization": f"Bearer {session_token()}"})
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [500, 503])
+async def test_online_authority_outage_fails_closed(client, admin_policy, status):
+    admin_policy.return_value = httpx.Response(status)
+    response = await client.get("/api/v1/admin/session", headers={"Authorization": f"Bearer {session_token()}"})
+    assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_online_authority_timeout_fails_closed(client, admin_policy):
+    admin_policy.side_effect = httpx.ReadTimeout("Auth service unavailable")
+    response = await client.get("/api/v1/admin/session", headers={"Authorization": f"Bearer {session_token()}"})
+    assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_online_authority_checks_every_admin_request(client, admin_policy):
+    headers = {"Authorization": f"Bearer {session_token()}"}
+    first = await client.get("/api/v1/admin/session", headers=headers)
+    second = await client.get("/api/v1/admin/session", headers=headers)
+    assert first.status_code == second.status_code == 200
+    assert admin_policy.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_online_authority_gets_caller_bearer_and_publishable_key(client, admin_policy):
+    token = session_token()
+    response = await client.get("/api/v1/admin/session", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    request = admin_policy.await_args.args[0]
+    assert str(request.url) == "https://admin-auth.example.test/auth/v1/user"
+    assert request.headers["Authorization"] == f"Bearer {token}"
+    assert request.headers["apikey"] == "test-publishable-key"
 
 
 INTERACTIVE_ROUTES = [

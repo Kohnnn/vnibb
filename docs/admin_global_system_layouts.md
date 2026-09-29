@@ -69,11 +69,11 @@ For the current rollout, only **Global** is implemented in code. Tenant and user
 ### Current admin auth model
 - Interactive `/api/v1/admin/*` calls use `Authorization: Bearer <Supabase access JWT>`, not a shared key. The automation routes below are the explicit exception.
 - Set backend `ADMIN_USER_IDS` to a comma-separated string of verified immutable Supabase user UUIDs (`sub`), not emails or browser-supplied roles. An empty allowlist denies all interactive admin access.
-- The backend verifies HS256 signatures with server-only `SUPABASE_JWT_SECRET`. Required claims are `exp`, `iat`, `sub`, `session_id`, `iss`, and `aud`; issuer must be `${SUPABASE_URL}/auth/v1` (without a duplicate slash), audience must be `authenticated`, and user/session identifiers must be UUIDs.
+- The backend verifies HS256 signatures with server-only `SUPABASE_JWT_SECRET`. Required claims are `exp`, `iat`, `sub`, `session_id`, `iss`, and `aud`; issuer must be `${SUPABASE_URL}/auth/v1` (without a duplicate slash), audience must be `authenticated`, and user/session identifiers must be UUIDs. Each interactive request also calls `${SUPABASE_URL}/auth/v1/user` using the caller bearer JWT and backend `SUPABASE_ANON_KEY`; the Auth service must return HTTP 200 with an identity matching the signed `sub`. A missing publishable key or unavailable Auth service denies access; this check is never cached.
 - `ADMIN_SESSION_MAX_TTL_SECONDS=3600` bounds the accepted signed token lifetime (`exp - iat`); tokens exceeding it are rejected, not silently shortened.
 - `ADMIN_REVOKED_SESSION_IDS` is a comma-separated string of session UUIDs denied by the backend. Remove a user UUID from `ADMIN_USER_IDS` to revoke all of that user's admin access.
 - Roll **all API workers/replicas** after changing allowlist, denylist, TTL, or signing configuration. Until every old worker is replaced, stale authorization can still be accepted.
-- Supabase logout or remote session revocation does **not** instantly invalidate an already issued access JWT here. It remains usable until expiry or backend denylisting/allowlist removal takes effect. The operator must explicitly accept and provision this revocation authority before production use.
+- Supabase sign-out removes the session row; the per-request online Auth check denies that session once sign-out completes, even while its signed JWT remains cryptographically valid until expiry. Online checks add network latency and fail closed (503) during Auth outages/timeouts. `ADMIN_REVOKED_SESSION_IDS` and allowlist removal remain emergency backend controls; deploy policy changes to every worker. Verify sign-out/revocation against the actual configured Auth service before production acceptance.
 - Supabase authentication is separate from the serving PostgreSQL database. Verify operator UUIDs through the existing trusted Supabase project/admin interface; never query an `auth` schema in the serving database.
 
 ### Server-only automation
@@ -257,10 +257,10 @@ The backend should remain the security boundary because:
 ## Rollout Checklist
 ### Production gate — BLOCKED pending verified acceptance
 1. Keep the current Postgres stack and confirm `app_kv` exists; do not inspect or migrate authentication schemas in the serving database.
-2. Verify each intended operator's immutable UUID in the existing Supabase project and configure `ADMIN_USER_IDS`; configure the matching issuer and HS256 signing secret server-side.
-3. Provision an accountable operator with authority to edit `ADMIN_REVOKED_SESSION_IDS` / `ADMIN_USER_IDS` and roll every worker. Explicitly accept the signed-token expiry/revocation caveat and the 3600-second lifetime bound.
+2. Verify each intended operator's immutable UUID in the existing Supabase project and configure `ADMIN_USER_IDS`; configure matching issuer, signing secret, and publishable/legacy anon key server-side. Confirm the API can reach `${SUPABASE_URL}/auth/v1/user` within its 3-second timeout; account for one uncached Auth round-trip per interactive request and fail-closed outage behavior.
+3. Provision an accountable operator with authority to edit `ADMIN_REVOKED_SESSION_IDS` / `ADMIN_USER_IDS` and roll every worker. Verify online Auth rejects completed sign-out/remote revocation while the original signed JWT is still unexpired; keep the 3600-second lifetime bound as defense in depth.
 4. Remove existing stored platform admin keys from every operator browser profile/site storage. Rotate the formerly browser-exposed `ADMIN_API_KEY`, update trusted automation/operational consumers, and roll all workers; clearing browser storage alone does not revoke it.
-5. Deploy backend + frontend with no public admin secret. Complete authenticated live acceptance: allowlisted operator can unlock, save draft, and publish; non-allowlisted and expired/revoked sessions are denied; shared-key-only interactive requests and the old automation key are denied.
+5. Deploy backend + frontend with no public admin secret. Complete authenticated live acceptance: allowlisted operator can unlock, save draft, and publish; non-allowlisted, expired, and signed-out/revoked sessions are denied; Auth outage denies admin access; shared-key-only interactive requests and the old automation key are denied.
 6. Verify automation with the rotated server-only secret and verify a published layout reloads for a normal client. Record the operator UUID verification, rotation, accepted/provisioned revocation authority, and live acceptance evidence before unblocking production.
 
 ### Future tenant phase

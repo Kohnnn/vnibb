@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 from urllib.parse import urlsplit
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, MockTransport, Response
 from jose import jwt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -148,7 +148,26 @@ def admin_client(client: AsyncClient, monkeypatch) -> AsyncClient:
     jwt_secret = "test-admin-session-secret"
     monkeypatch.setattr(settings, "supabase_url", supabase_url)
     monkeypatch.setattr(settings, "supabase_jwt_secret", jwt_secret)
+    monkeypatch.setattr(settings, "supabase_anon_key", "test-publishable-key")
     monkeypatch.setattr(settings, "admin_user_ids", user_id)
+
+    async def verify_session(request):
+        assert request.url == f"{supabase_url}/auth/v1/user"
+        assert request.headers["apikey"] == settings.supabase_anon_key
+        claims = jwt.decode(
+            request.headers["Authorization"].removeprefix("Bearer "),
+            jwt_secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+        return Response(200, json={"id": claims["sub"]})
+
+    original_client = AsyncClient
+
+    def auth_client(*args, **kwargs):
+        return original_client(*args, transport=MockTransport(verify_session), **kwargs)
+
+    monkeypatch.setattr("vnibb.core.auth.httpx.AsyncClient", auth_client)
     token = jwt.encode(
         {
             "sub": user_id,
