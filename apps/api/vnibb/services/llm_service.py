@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 
 from vnibb.core.config import settings
-from vnibb.services.ai_action_service import build_action_suggestions
+from vnibb.services.ai_action_service import build_action_suggestions, build_follow_up_suggestions
 from vnibb.services.ai_artifact_service import build_artifacts
 from vnibb.services.ai_telemetry_service import ai_telemetry_service
 
@@ -621,6 +621,15 @@ class LlmService:
             if workflow_outputs_enabled
             else []
         )
+        rendered["followUps"] = (
+            build_follow_up_suggestions(
+                _latest_user_message(messages),
+                context,
+                rendered["artifacts"],
+            )
+            if workflow_outputs_enabled
+            else []
+        )
         rendered["config"] = {
             "provider": config["provider"],
             "model": config["model"],
@@ -774,6 +783,7 @@ class LlmService:
             "sources": rendered["sources"],
             "artifacts": rendered["artifacts"],
             "actions": rendered["actions"],
+            "followUps": rendered["followUps"],
             "responseMeta": response_meta,
         }
 
@@ -844,6 +854,7 @@ class LlmService:
                 "sources": rendered["sources"],
                 "artifacts": rendered["artifacts"],
                 "actions": rendered["actions"],
+                "followUps": rendered["followUps"],
                 "response_meta": response_meta,
             },
         }

@@ -200,6 +200,7 @@ The copilot stream currently supports these event shapes:
 - `{"done": true, "usedSourceIds": [...], "sources": [...], "artifacts": [...]}`
 - `{"done": true, ..., "actions": [...]}`
 - `{"done": true, ..., "responseMeta": {...}}`
+- `{"done": true, ..., "followUps": [{"id": "...", "label": "...", "prompt": "...", "sourceIds": [...]}]}`
 - `{"error": "..."}`
 
 ## Next OpenBB-Inspired Steps
@@ -211,3 +212,4 @@ The strongest remaining OpenBB-style improvements are:
 3. Document-native context ingestion
 4. More advanced tool orchestration beyond the current allowlisted actions
 5. Richer feedback capture such as per-artifact ratings and workspace-level review actions
+6. Dynamic follow-up suggestions ship as `followUps`: grounded, deterministic, and derived from the response context rather than model prose. The remaining gap is the reverse direction — user-authored skills, deferred until instruction-trust semantics exist.

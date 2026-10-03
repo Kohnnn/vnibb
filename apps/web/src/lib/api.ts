@@ -2836,6 +2836,13 @@ export interface CopilotActionSuggestion {
     sourceIds?: string[];
 }
 
+export interface CopilotFollowUp {
+    id: string;
+    label: string;
+    prompt: string;
+    sourceIds?: string[];
+}
+
 export interface CopilotReasoningStep {
     eventType: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
     message: string;
@@ -2974,6 +2981,7 @@ export interface CopilotStreamEvent {
     reasoning?: CopilotReasoningStep;
     artifacts?: CopilotArtifact[];
     actions?: CopilotActionSuggestion[];
+    followUps?: CopilotFollowUp[];
     responseMeta?: CopilotResponseMeta;
 }
 
@@ -3054,6 +3062,14 @@ interface RawCopilotActionSuggestion {
     source_ids?: string[];
 }
 
+interface RawCopilotFollowUp {
+    id?: string;
+    label?: string;
+    prompt?: string;
+    sourceIds?: string[];
+    source_ids?: string[];
+}
+
 interface RawCopilotResponseMeta {
     responseId?: string;
     response_id?: string;
@@ -3088,6 +3104,11 @@ function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
         ? event.artifacts as Array<RawCopilotTableArtifact | RawCopilotChartArtifact>
         : [];
     const rawActions = Array.isArray(event.actions) ? event.actions as RawCopilotActionSuggestion[] : [];
+    const rawFollowUps = Array.isArray(event.followUps)
+        ? event.followUps as RawCopilotFollowUp[]
+        : Array.isArray(event.follow_ups)
+            ? event.follow_ups as RawCopilotFollowUp[]
+            : [];
     const rawResponseMeta = (event.responseMeta && typeof event.responseMeta === 'object'
         ? event.responseMeta
         : event.response_meta && typeof event.response_meta === 'object'
@@ -3203,6 +3224,16 @@ function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
                     ? action.source_ids.filter((item): item is string => typeof item === 'string')
                     : undefined,
         })).filter((action) => Boolean(action.id && action.label)),
+        followUps: rawFollowUps.map((followUp) => ({
+            id: String(followUp.id || ''),
+            label: String(followUp.label || ''),
+            prompt: String(followUp.prompt || ''),
+            sourceIds: Array.isArray(followUp.sourceIds)
+                ? followUp.sourceIds.filter((item): item is string => typeof item === 'string')
+                : Array.isArray(followUp.source_ids)
+                    ? followUp.source_ids.filter((item): item is string => typeof item === 'string')
+                    : undefined,
+        })).filter((followUp) => Boolean(followUp.id && followUp.label && followUp.prompt)),
         responseMeta: rawResponseMeta && typeof (rawResponseMeta.responseId || rawResponseMeta.response_id) === 'string'
             ? {
                 responseId: String(rawResponseMeta.responseId || rawResponseMeta.response_id || ''),

@@ -153,3 +153,79 @@ def test_render_validated_markdown_strips_model_sources_heading_and_uses_fallbac
     assert rendered["answer_markdown"] == "Summary body."
     assert rendered["used_source_ids"] == []
     assert rendered["final_markdown"] == "Summary body."
+
+
+@pytest.mark.asyncio
+async def test_stream_done_event_carries_grounded_follow_ups(monkeypatch):
+    service = LlmService()
+    monkeypatch.setattr(settings, "openrouter_api_key", "app-key")
+    context = {
+        "client_context": {"symbol": "VNM", "activeTab": "fundamentals"},
+        "source_catalog": [
+            {"id": "VNM-RATIOS", "kind": "financial_ratios", "symbol": "VNM"},
+            {"id": "VNM-PRICES", "kind": "price_history", "symbol": "VNM"},
+        ],
+    }
+
+    async def fake_completion(self, config, payload):
+        return "Answer."
+
+    async def fake_record(self, **kwargs):
+        return {
+            "responseId": "resp-1",
+            "provider": "openrouter",
+            "model": "openai/gpt-4o-mini",
+            "mode": "app_default",
+            "latencyMs": 1,
+        }
+
+    monkeypatch.setattr(LlmService, "_request_completion_text", fake_completion)
+    monkeypatch.setattr(LlmService, "_record_response_telemetry", fake_record)
+
+    events = [
+        event
+        async for event in service.generate_response_stream_events(
+            [{"role": "user", "content": "Summarize VNM"}],
+            context,
+            {"mode": "app_default", "provider": "openrouter", "model": "openai/gpt-4o-mini", "apiKey": "k"},
+        )
+    ]
+
+    done = next(event for event in events if event.get("done"))
+    assert done["followUps"]
+    for follow_up in done["followUps"]:
+        assert follow_up["id"] and follow_up["label"] and follow_up["prompt"]
+    assert any(entry["id"] == "peer_comparison" for entry in done["followUps"])
+
+
+@pytest.mark.asyncio
+async def test_stream_done_event_omits_follow_ups_without_grounding(monkeypatch):
+    service = LlmService()
+    monkeypatch.setattr(settings, "openrouter_api_key", "app-key")
+
+    async def fake_completion(self, config, payload):
+        return "Answer."
+
+    async def fake_record(self, **kwargs):
+        return {
+            "responseId": "resp-1",
+            "provider": "openrouter",
+            "model": "openai/gpt-4o-mini",
+            "mode": "app_default",
+            "latencyMs": 1,
+        }
+
+    monkeypatch.setattr(LlmService, "_request_completion_text", fake_completion)
+    monkeypatch.setattr(LlmService, "_record_response_telemetry", fake_record)
+
+    events = [
+        event
+        async for event in service.generate_response_stream_events(
+            [{"role": "user", "content": "Hello"}],
+            {"client_context": {"symbol": "VNM"}, "source_catalog": []},
+            {"mode": "app_default", "provider": "openrouter", "model": "openai/gpt-4o-mini", "apiKey": "k"},
+        )
+    ]
+
+    done = next(event for event in events if event.get("done"))
+    assert done["followUps"] == []

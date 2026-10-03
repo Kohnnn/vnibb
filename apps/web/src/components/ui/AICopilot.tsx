@@ -31,6 +31,7 @@ import { useProfile, useStockQuote, useFinancialRatios } from '@/lib/queries';
 import { PromptsLibrary } from '@/components/modals/PromptsLibrary';
 import {
     type CopilotActionSuggestion,
+    type CopilotFollowUp,
     createCopilotDocumentContext,
     getCopilotRuntimeConfig,
     type CopilotDocumentContext,
@@ -89,6 +90,7 @@ interface Message {
     sources?: CopilotSourceRef[];
     artifacts?: CopilotArtifact[];
     actions?: CopilotActionSuggestion[];
+    followUps?: CopilotFollowUp[];
     responseMeta?: CopilotResponseMeta;
     feedbackVote?: 'up' | 'down';
     timestamp: Date;
@@ -104,6 +106,7 @@ interface PersistedMessage {
     sources?: CopilotSourceRef[];
     artifacts?: CopilotArtifact[];
     actions?: CopilotActionSuggestion[];
+    followUps?: CopilotFollowUp[];
     responseMeta?: CopilotResponseMeta;
     feedbackVote?: 'up' | 'down';
     timestamp: string;
@@ -338,6 +341,7 @@ function toPersistedMessage(message: Message): PersistedMessage {
         sources: message.sources,
         artifacts: message.artifacts,
         actions: message.actions,
+        followUps: message.followUps,
         responseMeta: message.responseMeta,
         feedbackVote: message.feedbackVote,
         timestamp: message.timestamp.toISOString(),
@@ -354,6 +358,7 @@ function fromPersistedMessage(message: PersistedMessage): Message {
         sources: message.sources,
         artifacts: message.artifacts,
         actions: message.actions,
+        followUps: message.followUps,
         responseMeta: message.responseMeta,
         feedbackVote: message.feedbackVote,
         timestamp: new Date(message.timestamp),
@@ -937,6 +942,7 @@ export function AICopilot({
                                 sources: event.sources || [],
                                 artifacts: event.artifacts || [],
                                 actions: event.actions || [],
+                                followUps: event.followUps || [],
                                 responseMeta: event.responseMeta,
                             }
                             : msg
@@ -1560,6 +1566,22 @@ export function AICopilot({
                                         {savedNotebookMessageIds[message.id] ? 'Saved to Research Notebook' : 'Save to Research Notebook'}
                                     </button>
                                     <span className="text-[10px] text-[var(--text-muted)]">Saved browser-local; may include selected document-derived content.</span>
+                                </div>
+                            )}
+                            {!memoryOnly && !message.memoryOnly && message.role === 'assistant' && !isAssistantPending && message.content.trim() && Boolean(message.followUps?.length) && (
+                                <div className="mr-4 space-y-1" aria-label="Suggested follow-up questions">
+                                    {message.followUps!.map((followUp) => (
+                                        <button
+                                            key={followUp.id}
+                                            type="button"
+                                            disabled={isLoading}
+                                            onClick={() => handleSend(followUp.prompt, 'suggested')}
+                                            className="flex w-full items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 px-2.5 py-2 text-left text-xs text-[var(--text-secondary)] transition-colors hover:border-blue-500/30 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:opacity-50"
+                                        >
+                                            <Sparkles size={12} className="shrink-0 text-blue-400" />
+                                            <span className="truncate">{followUp.label}</span>
+                                        </button>
+                                    ))}
                                 </div>
                             )}
                             {message.role === 'assistant' && hasMessageDetails(message) && (
