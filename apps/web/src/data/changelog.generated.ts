@@ -40,6 +40,17 @@ live in \`docs/\`.
 - Big Flow reports provider failure as unavailable instead of a zero-activity tape; the block-trade service no longer converts query errors into an empty result. Positioning Dashboard is not promotable until its request count and symbol coverage are bounded and disclosed; saved instances keep resolving as an explicit unavailable state.
 
 ### Deployed
+- Released grounded VniAgent follow-ups to cloud-01 on 2026-10-03. API, MCP and
+  scheduler run revision \`e1399211a051efe0546546de511b7549e0ad9f23\`, pinned to
+  \`ghcr.io/kohnnn/vnibb-api@sha256:0f29208a5a86893b21ffb143d7cb049eef63f6cd77753a5eb0e089cb9d63905d\`.
+  All four hosted CI jobs passed; migrations remain at \`b7312f0c4e88\`.
+  Live copilot SSE returned VNM-only source IDs for symbol prompts. With
+  sidebar workflow outputs enabled, production browser verification rendered
+  three follow-up buttons and clicking valuation submitted the VNM prompt.
+  Readiness, market endpoint, CORS and WebSocket smoke checks passed. The
+  premium runtime mount and existing database/proxy containers were preserved;
+  the prior digest \`8545eb64eace697740ce1016654ac7a35cd74c69556c097c10068558176840b3\`
+  and environment backup remain available under \`deployment/backups/copilot-rollout/\`.
 - Released the integrated Workspace and Matrix build on 2026-09-27. Merge
   revision \`7c9274e6a060615484832b9838804eb53eb4cc9b\` passed all four hosted
   CI jobs. OCI API, MCP and scheduler run the same ARM64 image
