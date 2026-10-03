@@ -304,9 +304,9 @@ def build_follow_up_suggestions(
 ) -> list[dict[str, Any]]:
     """Derive grounded, answerable follow-up prompts from validated context.
 
-    Every suggestion is backed by a source kind present in the runtime context,
-    so it can be answered from data VNIBB already holds. Nothing is invented: a
-    scaffold whose required kinds are all absent is never emitted.
+    Symbol prompts use only catalog evidence identified with the target ticker;
+    market prompts retain market evidence. A scaffold whose required kinds are
+    all absent from its scoped evidence is never emitted.
     """
     if limit <= 0:
         return []
@@ -317,25 +317,53 @@ def build_follow_up_suggestions(
     active_tab = str(client_context.get("activeTab") or "").strip().lower()
 
     source_catalog = context.get("source_catalog") if isinstance(context, dict) else []
-    available_kinds: set[str] = set()
-    for entry in source_catalog or []:
-        if not isinstance(entry, dict):
-            continue
-        kind = str(entry.get("kind") or "").strip()
-        if kind:
-            available_kinds.add(kind)
-        symbol = str(entry.get("symbol") or "").strip()
-        if symbol and not current_symbol:
-            current_symbol = symbol.upper()
+    source_catalog = [entry for entry in source_catalog or [] if isinstance(entry, dict)]
+    if not current_symbol:
+        current_symbol = next(
+            (
+                str(entry.get("symbol") or "").strip().upper()
+                for entry in source_catalog
+                if str(entry.get("symbol") or "").strip()
+            ),
+            "",
+        )
+    symbol_catalog = [
+        entry
+        for entry in source_catalog
+        if current_symbol
+        and str(entry.get("symbol") or "").strip().upper() == current_symbol
+    ]
+    scoped_catalogs = {"symbol": symbol_catalog, "market": source_catalog}
+    scoped_kinds = {
+        scope: {str(entry.get("kind") or "").strip() for entry in catalog}
+        for scope, catalog in scoped_catalogs.items()
+    }
+    symbol_source_ids = {
+        str(entry.get("id") or "").strip()
+        for entry in symbol_catalog
+        if str(entry.get("id") or "").strip()
+    }
 
     artifact_ids = {
         str(artifact.get("id") or "").strip()
         for artifact in artifacts or []
         if isinstance(artifact, dict) and str(artifact.get("id") or "").strip()
     }
+    symbol_artifact_ids = {
+        str(artifact.get("id") or "").strip()
+        for artifact in artifacts or []
+        if isinstance(artifact, dict)
+        and any(
+            str(source_id).strip() in symbol_source_ids
+            for source_id in artifact.get("sourceIds") or []
+        )
+    }
+    scoped_artifact_ids = {"symbol": symbol_artifact_ids, "market": artifact_ids}
 
     ranked: list[tuple[int, dict[str, Any]]] = []
     for scaffold in FOLLOW_UP_SCAFFOLDS:
+        scope = scaffold["scope"]
+        available_kinds = scoped_kinds[scope]
         requires = scaffold["requires"]
         if not any(kind in available_kinds for kind in requires):
             continue
@@ -352,7 +380,7 @@ def build_follow_up_suggestions(
                 _follow_up_priority(
                     scaffold,
                     available_kinds=available_kinds,
-                    artifact_ids=artifact_ids,
+                    artifact_ids=scoped_artifact_ids[scope],
                     active_tab=active_tab,
                 ),
                 {
@@ -361,9 +389,8 @@ def build_follow_up_suggestions(
                     "prompt": prompt,
                     "sourceIds": sorted(
                         str(entry.get("id") or "")
-                        for entry in source_catalog or []
-                        if isinstance(entry, dict)
-                        and str(entry.get("kind") or "") in scaffold["requires"]
+                        for entry in scoped_catalogs[scope]
+                        if str(entry.get("kind") or "").strip() in scaffold["requires"]
                         and str(entry.get("id") or "")
                     ),
                 },

@@ -22,7 +22,7 @@ live in `docs/`.
 - Copilot artifact placement remembers the chosen dashboard/tab for the rest of the response and across reloads, records artifact provenance inside the created widget, and can save a table artifact to the research notebook once.
 - Investment Thesis now retains citation identity when notebook originals change, links due-for-review theses to their editor, and transfers selected theses with matching source originals in a separate research bundle. Imported research dashboards remain browser-local.
 - Investor Home connects watchlists, holdings, alerts, activity, and notebook navigation, with persisted alert validation and labeled controls.
-- VniAgent offers grounded follow-up questions under a completed answer. Each suggestion is derived from the source kinds actually present in the response context, so it is answerable from data VNIBB already holds; unsupported suggestions are omitted rather than shown. Suggestions backed by an artifact or the active tab rank first.
+- VniAgent offers grounded follow-up questions under a completed answer. Symbol-scoped eligibility, ranking evidence, and citations use only sources identified with the requested ticker; other tickers and unknown-symbol evidence cannot back its prompts. Market-scoped suggestions retain market sources. Suggestions backed by an artifact or the active tab rank first.
 
 ### Fixed
 - Prediction-market catalogue admission counts fresh, real, active, nonclosed,
