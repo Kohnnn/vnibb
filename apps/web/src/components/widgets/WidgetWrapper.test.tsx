@@ -325,3 +325,23 @@ test('actual Notes widget keeps unsaved thesis and legacy notes when maximized a
   expect(screen.getByRole('textbox', { name: 'Legacy notes' })).toHaveValue('Unsaved research');
   expect(mockUpdateWidget).not.toHaveBeenCalled();
 });
+
+test('the widget menu opens scoped requirements and limitations and closes again', async () => {
+  mockWidgetType = 'financial_ratios';
+  const user = userEvent.setup();
+  render(<WidgetWrapper id="screener" title="Financial Ratios" widgetType="financial_ratios" dashboardId="dashboard" tabId="tab" symbol="VCI">
+    <output aria-label="Hidden widget content" />
+  </WidgetWrapper>);
+
+  expect(screen.queryByRole('region', { name: 'Widget requirements and limitations' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Widget actions for Financial Ratios' }));
+  await user.click(await screen.findByRole('menuitem', { name: /Requirements & limitations/ }));
+
+  const panel = screen.getByRole('region', { name: 'Widget requirements and limitations' });
+  expect(panel).toHaveTextContent('financial_ratios');
+  expect(panel).toHaveTextContent('Current ticker: VCI');
+  expect(panel).toHaveTextContent('Available ratios do not establish completeness of statements');
+
+  await user.click(within(panel).getByRole('button', { name: 'Close widget requirements' }));
+  expect(screen.queryByRole('region', { name: 'Widget requirements and limitations' })).not.toBeInTheDocument();
+});

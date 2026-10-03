@@ -2713,6 +2713,10 @@ export interface PromptTemplate {
     recommendedWidgetKeys?: string[];
     isDefault?: boolean;
     source?: string;
+    revision?: number;
+    scope?: 'symbol' | 'market' | 'symbol_market' | 'matrix';
+    requiredEvidenceKinds?: string[];
+    limits?: string[];
 }
 
 export interface CopilotDocumentContext {
@@ -2753,10 +2757,17 @@ export interface CopilotHistoryMessage {
     content: string;
 }
 
+export interface CuratedWorkflowSelection {
+    id: string;
+    revision: number;
+    symbol?: string;
+}
+
 export interface CopilotStreamRequest {
     message: string;
     context?: WidgetContext | null;
     matrix_selection?: MatrixSelection;
+    workflow?: CuratedWorkflowSelection;
     history: CopilotHistoryMessage[];
     settings?: AISettings;
 }

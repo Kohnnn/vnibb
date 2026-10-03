@@ -4,6 +4,11 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field
+
+from vnibb.services.matrix_playbooks import PLAYBOOKS
+
 from sqlalchemy.exc import SQLAlchemyError
 
 from vnibb.core.database import async_session_maker
@@ -22,15 +27,23 @@ DEFAULT_PROMPTS: list[dict[str, Any]] = [
         "category": "analysis",
         "recommendedWidgetKeys": ["financials"],
         "isDefault": True,
+        "revision": 1,
+        "scope": "symbol",
+        "requiredEvidenceKinds": ["dividends", "income_statement", "cash_flow"],
+        "limits": ["Historical payouts are not a promise of future dividends.", "Unknown dates and missing payout history remain explicit limitations."],
         "source": "system",
     },
     {
         "id": "peer-comparison",
         "label": "Peer Comparison",
-        "template": "From the current comparison context for {symbol}, compare valuation multiples, profitability, and momentum. Identify the most attractive and least attractive name and explain why.",
+        "template": "Review the authorized frozen Matrix selection using its existing sector Research Playbook. Preserve exact selected evidence, accounting basis, result states and limitations; do not infer unselected data or rank incomparable companies.",
         "category": "comparison",
-        "recommendedWidgetKeys": ["comparison"],
+        "recommendedWidgetKeys": ["comparison", "research_matrix"],
         "isDefault": True,
+        "revision": 1,
+        "scope": "matrix",
+        "requiredEvidenceKinds": ["matrix_evidence"],
+        "limits": ["Requires an authorized frozen Matrix selection and its existing sector Research Playbook.", "Selected cells do not establish whole-market coverage or comparability."],
         "source": "system",
     },
     {
@@ -40,6 +53,10 @@ DEFAULT_PROMPTS: list[dict[str, Any]] = [
         "category": "fundamentals",
         "recommendedWidgetKeys": ["financials"],
         "isDefault": True,
+        "revision": 1,
+        "scope": "symbol",
+        "requiredEvidenceKinds": ["income_statement", "balance_sheet", "cash_flow", "financial_ratios"],
+        "limits": ["Missing statements or ratios prevent a complete fundamental review.", "Preserve reporting periods, units and unknown source dates; no investment advice."],
         "source": "system",
     },
     {
@@ -49,6 +66,10 @@ DEFAULT_PROMPTS: list[dict[str, Any]] = [
         "category": "analysis",
         "recommendedWidgetKeys": ["financials"],
         "isDefault": True,
+        "revision": 1,
+        "scope": "symbol",
+        "requiredEvidenceKinds": ["income_statement", "company_events"],
+        "limits": ["An outlook is a conditional scenario, not a verified forecast.", "Do not invent earnings dates, consensus estimates or unreported results."],
         "source": "system",
     },
     {
@@ -58,6 +79,10 @@ DEFAULT_PROMPTS: list[dict[str, Any]] = [
         "category": "technical",
         "recommendedWidgetKeys": ["price_chart"],
         "isDefault": True,
+        "revision": 1,
+        "scope": "symbol",
+        "requiredEvidenceKinds": ["price_history"],
+        "limits": ["Stored prices may lag the market; no execution or live-price guarantee.", "Levels are conditional observations, not advice."],
         "source": "system",
     },
     {
@@ -66,6 +91,10 @@ DEFAULT_PROMPTS: list[dict[str, Any]] = [
         "template": "Analyze the ownership and control context for {symbol}. Identify major holders, alignment risks, and anything that could materially affect governance or float.",
         "category": "fundamentals",
         "isDefault": True,
+        "revision": 1,
+        "scope": "symbol",
+        "requiredEvidenceKinds": ["company_profile", "insider_deals"],
+        "limits": ["Profile and insider records do not establish a complete beneficial-owner register."],
         "source": "system",
     },
     {
@@ -75,6 +104,10 @@ DEFAULT_PROMPTS: list[dict[str, Any]] = [
         "category": "analysis",
         "recommendedWidgetKeys": ["foreign_trading"],
         "isDefault": True,
+        "revision": 1,
+        "scope": "symbol",
+        "requiredEvidenceKinds": ["foreign_trading", "price_history"],
+        "limits": ["Stored flow observations do not prove investor intent or future flows."],
         "source": "system",
     },
     {
@@ -84,6 +117,10 @@ DEFAULT_PROMPTS: list[dict[str, Any]] = [
         "category": "analysis",
         "recommendedWidgetKeys": ["market_breadth"],
         "isDefault": True,
+        "revision": 1,
+        "scope": "market",
+        "requiredEvidenceKinds": ["market_indices", "sector_breadth"],
+        "limits": ["Broad market context is independent of the active symbol and may have unknown dates."],
         "source": "system",
     },
     {
@@ -92,11 +129,125 @@ DEFAULT_PROMPTS: list[dict[str, Any]] = [
         "template": "Summarize the most important recent news and event risk for {symbol}. Explain what matters immediately versus what matters over the next quarter.",
         "category": "news",
         "isDefault": True,
+        "revision": 1,
+        "scope": "symbol",
+        "requiredEvidenceKinds": ["company_news", "company_events"],
+        "limits": ["News summaries may be incomplete; do not imply real-time or exhaustive event coverage."],
         "source": "system",
+    },
+    {
+        "id": "global-context",
+        "label": "Global Context",
+        "template": "Place the stored price context for {symbol} against the available market indices and sector breadth. Separate observed domestic market context from unavailable global evidence, and state what would invalidate the setup.",
+        "category": "technical",
+        "recommendedWidgetKeys": ["price_chart", "market_breadth"],
+        "isDefault": True,
+        "source": "system",
+        "revision": 1,
+        "scope": "symbol_market",
+        "requiredEvidenceKinds": ["price_history", "market_indices", "sector_breadth"],
+        "limits": ["Domestic index and sector evidence does not establish global-market coverage.", "No live-price or execution guarantee."],
     },
 ]
 
 VALID_PROMPT_CATEGORIES = {"analysis", "comparison", "fundamentals", "technical", "news", "custom"}
+
+
+class CuratedWorkflowSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=80)
+    revision: int = Field(strict=True, ge=1)
+    symbol: str | None = Field(default=None, max_length=16)
+
+
+def resolve_curated_workflow(selection: CuratedWorkflowSelection) -> dict[str, Any]:
+    workflow = next((item for item in DEFAULT_PROMPTS if item["id"] == selection.id), None)
+    if workflow is None:
+        raise HTTPException(404, "Unknown curated workflow")
+    if workflow["revision"] != selection.revision:
+        raise HTTPException(409, "Curated workflow revision changed; refresh the prompt library")
+    return workflow
+
+
+def apply_curated_workflow(
+    selection: CuratedWorkflowSelection, context: dict[str, Any]
+) -> dict[str, Any]:
+    workflow = resolve_curated_workflow(selection)
+    scope = workflow["scope"]
+    if "matrix_selection" in context and scope != "matrix":
+        raise HTTPException(422, "Choose the Matrix peer workflow for a frozen Matrix selection")
+    active_symbol = str((context.get("client_context") or {}).get("symbol") or "").strip().upper()
+    symbol = str(selection.symbol or active_symbol).strip().upper() or None
+    if scope in {"symbol", "symbol_market"}:
+        if not symbol or not symbol.isascii() or not symbol.isalnum():
+            raise HTTPException(422, "Select a current symbol for this curated workflow")
+        if active_symbol and symbol != active_symbol:
+            raise HTTPException(422, "Curated workflow symbol does not match the current context")
+
+    sources = [
+        source for source in (context.get("source_catalog") or [])
+        if isinstance(source, dict) and str(source.get("id") or "").strip()
+        and (
+            (scope in {"market", "symbol_market"} and source.get("scope") == "market")
+            or (scope in {"symbol", "symbol_market"} and source.get("scope") == "symbol"
+                and str(source.get("symbol") or "").strip().upper() == symbol)
+        )
+    ]
+    available_kinds = {str(source.get("kind") or "") for source in sources}
+    playbook = None
+    if scope == "matrix":
+        packet = context.get("matrix_selection") or {}
+        snapshot = packet.get("snapshot") or {}
+        playbook = next((item for item in PLAYBOOKS if item["playbook_id"] == snapshot.get("playbook_id")), None)
+        if playbook is None or playbook["definition_revision"] != snapshot.get("definition_revision"):
+            raise HTTPException(422, "Use an authorized Matrix selection with a current Research Playbook")
+        if symbol and symbol not in packet.get("entity_ids", []):
+            raise HTTPException(422, "Curated workflow symbol is outside the Matrix selection")
+        sources = [source for source in (context.get("source_catalog") or [])
+                   if isinstance(source, dict) and str(source.get("id") or "").strip()
+                   and source.get("scope") == "matrix" and source.get("evidence_id")]
+        available_kinds = {"matrix_evidence"} if sources else set()
+
+    missing = [kind for kind in workflow["requiredEvidenceKinds"] if kind not in available_kinds]
+    limitations = list(workflow["limits"])
+    limitations.extend(f"Missing required evidence: {kind}. Do not infer its availability or values." for kind in missing)
+    if any(not source.get("as_of") for source in sources):
+        limitations.append("Some evidence has an unknown as-of date; do not claim it is current.")
+    return {
+        **context,
+        "source_catalog": sources,
+        "curated_workflow": {
+            "id": workflow["id"], "revision": workflow["revision"], "symbol": symbol,
+            "scope": scope, "required_evidence_kinds": list(workflow["requiredEvidenceKinds"]),
+            "missing_evidence_kinds": missing, "limitations": limitations,
+            "source_ids": [source["id"] for source in sources],
+            "playbook_id": playbook["playbook_id"] if playbook else None,
+        },
+    }
+
+
+def curated_workflow_instructions(context: dict[str, Any]) -> str:
+    metadata = context.get("curated_workflow")
+    if not isinstance(metadata, dict):
+        return ""
+    selection = CuratedWorkflowSelection.model_validate({
+        key: metadata.get(key) for key in ("id", "revision", "symbol")
+    })
+    resolved = apply_curated_workflow(selection, context)["curated_workflow"]
+    workflow = resolve_curated_workflow(selection)
+    instruction = workflow["template"].replace("{symbol}", resolved["symbol"] or "the selected companies")
+    instruction = instruction.replace("{widget_or_symbol}", "the scoped server evidence").replace("{tab}", "the current workspace")
+    if resolved["playbook_id"]:
+        playbook = next(item for item in PLAYBOOKS if item["playbook_id"] == resolved["playbook_id"])
+        instruction = "Review the selected companies using the existing Research Playbook. " + playbook["description"]
+        instruction += " Questions: " + " ".join(item["question"] for item in playbook["dimensions"])
+    return (
+        f"\nReviewed curated workflow {selection.id}@{selection.revision}. Scope: {resolved['scope']}; symbol: {resolved['symbol'] or 'selected scope'}.\n"
+        + instruction + "\nMandatory evidence: " + ", ".join(resolved["required_evidence_kinds"])
+        + ".\nLimitations: " + " ".join(resolved["limitations"])
+        + "\nUse only matching scoped server evidence. Cite its source IDs. When required evidence is missing, begin with an explicit limited-evidence assessment rather than a complete workflow conclusion."
+    )
 
 
 class AIPromptLibraryService:

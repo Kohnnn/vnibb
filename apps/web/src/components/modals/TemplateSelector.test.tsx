@@ -170,7 +170,7 @@ describe('TemplateSelector', () => {
     await user.click(within(disclosure).getByRole('button', { name: new RegExp(`apply ${template.name}`, 'i') }));
 
     expect(onStarterPromptRequest).toHaveBeenCalledTimes(1);
-    expect(onStarterPromptRequest).toHaveBeenCalledWith(starter?.promptKey);
+    expect(onStarterPromptRequest).toHaveBeenCalledWith(starter?.promptKey, starter?.workflow);
     expect(onSelectTemplate).toHaveBeenCalledWith(template);
     expect(onClose).toHaveBeenCalledTimes(1);
   });

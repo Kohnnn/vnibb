@@ -22,9 +22,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   describeStarterDisclosure,
   getStarterForTemplate,
-  type ResearchStarter,
-  type StarterPromptKey,
 } from '@/lib/researchStarters';
+import type { ResearchStarter, StarterPromptKey } from '@/lib/researchStarters';
 
 interface TemplateSelectorProps {
   open: boolean;
@@ -34,7 +33,7 @@ interface TemplateSelectorProps {
    * Primes VniAgent with the applied starter's prompt. DashboardClient owns
    * the copilot seam (setCopilotStarterPrompt + request-id bump + openCopilot).
    */
-  onStarterPromptRequest?: (promptKey: StarterPromptKey) => void;
+  onStarterPromptRequest?: (promptKey: StarterPromptKey, workflow: ResearchStarter['workflow']) => void;
   /**
    * Ticker groups the dashboard produced by `onSelectTemplate` actually
    * shares. Templates seed widgets without a widgetGroup, so callers pass an
@@ -215,7 +214,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
     onSelectTemplate(template);
     if (starter) {
       setAppliedStarter(starter);
-      onStarterPromptRequest?.(starter.promptKey);
+      onStarterPromptRequest?.(starter.promptKey, starter.workflow);
     }
     onClose();
   };
@@ -721,6 +720,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
               <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">
                 {pendingStarter.disclosure}
               </p>
+              <p className="mt-2 text-xs text-[var(--text-secondary)]">Current symbol: {currentSymbol || 'not selected'}</p>
               <div className="mt-4 flex items-center justify-end gap-2">
                 <button
                   type="button"

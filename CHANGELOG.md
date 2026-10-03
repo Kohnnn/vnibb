@@ -23,8 +23,16 @@ live in `docs/`.
 - Investment Thesis now retains citation identity when notebook originals change, links due-for-review theses to their editor, and transfers selected theses with matching source originals in a separate research bundle. Imported research dashboards remain browser-local.
 - Investor Home connects watchlists, holdings, alerts, activity, and notebook navigation, with persisted alert validation and labeled controls.
 - VniAgent offers grounded follow-up questions under a completed answer. Symbol-scoped eligibility, ranking evidence, and citations use only sources identified with the requested ticker; other tickers and unknown-symbol evidence cannot back its prompts. Market-scoped suggestions retain market sources. Suggestions backed by an artifact or the active tab rank first.
+- Widget requirements expose catalogue-owned ticker scope, reviewed inputs, VniAgent evidence mappings, and limits. Agent context follows the focused widget ticker and drops mismatched company snapshots.
+- Read-only thesis sharing freezes author-entered research for named authenticated recipients, with expiry, owner revocation, and active-session checks on every operation. Provider originals and unverified citations remain excluded; local research transfer is unchanged.
+- Google Sheets integration adds opt-in bounded pulls (`/api/v1/apps-script/bounded/{dataset}`) with truthful provenance: availability distinguishes unavailable from empty, the source date stays unknown when the data carries none (fetch time is never reported as the data date), and each pull writes limits/as-of/source/limitations next to the data. Legacy flat endpoints and `VNIBB_*` cell formulas are unchanged; writes redact secret-like columns and never place API keys in cells.
+- Reviewed research starters carry versioned server-resolved workflow identities, mandatory evidence kinds, and explicit limitations; stale identities fail before streaming and missing evidence is disclosed instead of invented.
 
 ### Fixed
+- VniAgent follow-ups require every mandatory source kind in the prompt's scope. Partial evidence no longer offers valuation, margin, balance-sheet, flow, catalyst, or market-breadth questions that need missing sources; single-source prompts remain available. This fix is not yet deployed.
+- Follow-up eligibility, citations, and ranking use the same scoped evidence selection. Required source entries without citable IDs cannot enable a question; padded duplicate IDs are normalized and deduplicated.
+- Private research-share reads bypass service-worker caches, and activation purges older cached snapshots. Account changes discard stale create/revoke completions; anonymous issuer identities are rejected.
+- Reviewed starter identities survive initial workspace session restoration, clear on later ticker/session changes, and restrict final citation validation to evidence in the selected workflow scope.
 - Prediction-market catalogue admission counts fresh, real, active, nonclosed,
   unexpired markets toward each source's 10,000-market cap. Historical rows
   remain available while separate physical and snapshot storage limits continue

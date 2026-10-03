@@ -188,8 +188,8 @@ def build_action_suggestions(
 FOLLOW_UP_MAX = 3
 
 # Deterministic, context-grounded follow-up scaffolds. Each entry names the
-# source kinds that make it answerable, the artifact that counts as supporting
-# evidence when present, and the tab that should surface it first.
+# mandatory source kinds that make it answerable, the artifact that counts as
+# supporting evidence when present, and the tab that should surface it first.
 FOLLOW_UP_SCAFFOLDS: tuple[dict[str, Any], ...] = (
     {
         "id": "valuation_range",
@@ -305,8 +305,8 @@ def build_follow_up_suggestions(
     """Derive grounded, answerable follow-up prompts from validated context.
 
     Symbol prompts use only catalog evidence identified with the target ticker;
-    market prompts retain market evidence. A scaffold whose required kinds are
-    all absent from its scoped evidence is never emitted.
+    market prompts retain market evidence. A scaffold is emitted only when all
+    required kinds are present in its scoped evidence.
     """
     if limit <= 0:
         return []
@@ -317,7 +317,10 @@ def build_follow_up_suggestions(
     active_tab = str(client_context.get("activeTab") or "").strip().lower()
 
     source_catalog = context.get("source_catalog") if isinstance(context, dict) else []
-    source_catalog = [entry for entry in source_catalog or [] if isinstance(entry, dict)]
+    source_catalog = [
+        entry for entry in source_catalog or []
+        if isinstance(entry, dict) and str(entry.get("id") or "").strip()
+    ]
     if not current_symbol:
         current_symbol = next(
             (
@@ -334,10 +337,13 @@ def build_follow_up_suggestions(
         and str(entry.get("symbol") or "").strip().upper() == current_symbol
     ]
     scoped_catalogs = {"symbol": symbol_catalog, "market": source_catalog}
-    scoped_kinds = {
-        scope: {str(entry.get("kind") or "").strip() for entry in catalog}
-        for scope, catalog in scoped_catalogs.items()
-    }
+    scoped_evidence: dict[str, dict[str, set[str]]] = {}
+    for scope, catalog in scoped_catalogs.items():
+        evidence: dict[str, set[str]] = {}
+        for entry in catalog:
+            kind = str(entry.get("kind") or "").strip()
+            evidence.setdefault(kind, set()).add(str(entry["id"]).strip())
+        scoped_evidence[scope] = evidence
     symbol_source_ids = {
         str(entry.get("id") or "").strip()
         for entry in symbol_catalog
@@ -363,10 +369,12 @@ def build_follow_up_suggestions(
     ranked: list[tuple[int, dict[str, Any]]] = []
     for scaffold in FOLLOW_UP_SCAFFOLDS:
         scope = scaffold["scope"]
-        available_kinds = scoped_kinds[scope]
+        evidence = scoped_evidence[scope]
+        available_kinds = set(evidence)
         requires = scaffold["requires"]
-        if not any(kind in available_kinds for kind in requires):
+        if not all(kind in evidence for kind in requires):
             continue
+        source_ids = sorted(set().union(*(evidence[kind] for kind in requires)))
         if scaffold["scope"] == "symbol" and not current_symbol:
             continue
         if _message_mentions(message, scaffold["label"].lower()):
@@ -387,12 +395,7 @@ def build_follow_up_suggestions(
                     "id": scaffold["id"],
                     "label": scaffold["label"],
                     "prompt": prompt,
-                    "sourceIds": sorted(
-                        str(entry.get("id") or "")
-                        for entry in scoped_catalogs[scope]
-                        if str(entry.get("kind") or "").strip() in scaffold["requires"]
-                        and str(entry.get("id") or "")
-                    ),
+                    "sourceIds": source_ids,
                 },
             )
         )

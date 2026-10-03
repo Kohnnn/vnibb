@@ -108,6 +108,13 @@ var CONFIG = {
   retryBackoffMs: 1500,     // base backoff; grows linearly per attempt
   requestTimeoutNote: 30,   // server middleware timeout in seconds (info only)
   maxSheetCells: 10000000,
+
+  /**
+   * Bounded-pull behaviour. Each pull writes data plus a mandatory provenance
+   * block so a reader sees limits/as-of/source next to the values.
+   */
+  boundedLimitMax: 2000,
+  boundedHistoricalMaxDays: 1826,
 };
 
 
@@ -140,6 +147,12 @@ function onOpen() {
         .addItem('Listing (symbol list)', 'menuPullListing_')
         .addItem('Market Indices', 'pullMarketIndices'))
       .addSeparator()
+      .addSubMenu(SpreadsheetApp.getUi().createMenu('Bounded pull w/ provenance…')
+        .addItem('Financials (bounded)', 'menuPullBoundedFinancials_')
+        .addItem('Screener (bounded)', 'menuPullBoundedScreener_')
+        .addItem('Historical (bounded)', 'menuPullBoundedHistorical_')
+        .addItem('Ratios (bounded)', 'menuPullBoundedRatios_')
+        .addItem('Listing (bounded)', 'menuPullBoundedListing_'))
       .addItem('🩺 Health Check', 'vnibbHealth')
       .addToUi();
   } catch (e) {
@@ -243,6 +256,49 @@ function promptTicker_(context, default_) {
   if (resp.getSelectedButton() !== ui.Button.OK) return null;
   var sym = (resp.getResponseText() || '').trim().toUpperCase();
   return sym || (default_ || null);
+}
+
+// ---------------------------------------------------------------------------
+// Bounded-pull menu helpers — same prompts, provenance-aware writers.
+// ---------------------------------------------------------------------------
+
+function menuPullBoundedFinancials_() {
+  var s = readSettings_();
+  var sym = promptTicker_('Bounded Financials', s.defaultSymbol);
+  if (!sym) return;
+  pullBoundedFinancials(sym, 'income', s.defaultPeriod, s.defaultLimit);
+}
+
+function menuPullBoundedScreener_() {
+  var s = readSettings_();
+  var ui = SpreadsheetApp.getUi();
+  var resp = ui.prompt('Bounded Screener', 'Exchange (HOSE / HNX / UPCOM / ALL):', ui.ButtonSet.OK_CANCEL);
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  var exch = (resp.getResponseText() || s.defaultExchange).trim().toUpperCase() || 'HOSE';
+  pullBoundedScreener(exch, s.defaultLimit);
+}
+
+function menuPullBoundedHistorical_() {
+  var s = readSettings_();
+  var sym = promptTicker_('Bounded Historical Prices', s.defaultSymbol);
+  if (!sym) return;
+  pullBoundedHistorical(sym, null, null, s.defaultInterval, s.defaultLimit);
+}
+
+function menuPullBoundedRatios_() {
+  var s = readSettings_();
+  var sym = promptTicker_('Bounded Ratios', s.defaultSymbol);
+  if (!sym) return;
+  pullBoundedRatios(sym, s.defaultPeriod);
+}
+
+function menuPullBoundedListing_() {
+  var s = readSettings_();
+  var ui = SpreadsheetApp.getUi();
+  var resp = ui.prompt('Bounded Listing', 'Exchange (HOSE / HNX / UPCOM / ALL):', ui.ButtonSet.OK_CANCEL);
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  var exch = (resp.getResponseText() || s.defaultExchange).trim().toUpperCase() || 'HOSE';
+  pullBoundedListing(exch);
 }
 
 
@@ -482,6 +538,24 @@ function fetchVnibb(endpoint, params) {
   }
 
   throw lastErr || new Error('VNIBB request failed after ' + attempts + ' attempts: ' + url);
+}
+
+/**
+ * GET a `/bounded/{dataset}` envelope. Reuses fetchVnibb's auth, retries and
+ * error messages, so bounded and legacy pulls fail the same way.
+ *
+ * @param {string} dataset  screener | financials | historical | ratios | listing | market_indices
+ * @param {Object=} params  Query params.
+ * @returns {{data: Array<Object>, meta: Object, error: (string|null)}}
+ */
+function fetchBounded_(dataset, params) {
+  var allowed = ['screener', 'financials', 'historical', 'ratios', 'listing', 'market_indices'];
+  if (allowed.indexOf(dataset) === -1) {
+    throw new Error(
+      'Unknown bounded dataset "' + dataset + '". Expected one of: ' + allowed.join(', ') + '.'
+    );
+  }
+  return fetchVnibb('/bounded/' + encodeURIComponent(dataset), params);
 }
 
 
@@ -780,21 +854,55 @@ function resolveSpreadsheet_() {
   return SpreadsheetApp.openById(CONFIG.spreadsheetId);
 }
 
+// Column names that must never reach a cell. The client never receives the
+// API key in a payload, but a future response field must not leak it either.
+var SECRET_COLUMNS_ = /(api[_-]?key|secret|password|token|authorization|bearer)/i;
+
 /**
- * Write an array of flat objects into a named tab. Headers are the union of
- * all keys across rows (so rows with differing shapes stay aligned). Nested
- * objects/arrays are JSON-stringified because Sheets' setValues rejects
- * non-primitive cell values.
+ * Convert one row value into a value Sheets' setValues() accepts: secret-like
+ * fields are blanked, non-primitive values are JSON-stringified, and numeric
+ * values pass through unchanged (the serving pipeline owns their scale; a
+ * spreadsheet must not silently re-unit them).
  *
- * @param {Array<Object>} rows      Array of {key: value} objects.
- * @param {string} sheetName        Target tab name.
+ * @param {string} header  Column name.
+ * @param {*} value        Raw cell value.
+ * @returns {string|number|boolean}
  */
+function cellValue_(header, value) {
+  if (SECRET_COLUMNS_.test(String(header || ''))) return '[redacted]';
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number' && !isFinite(value)) throw new Error('Non-finite value cannot be written to Sheets.');
+  if (typeof value === 'object') value = JSON.stringify(value);
+  if (typeof value === 'string') {
+    var key = readApiKey_();
+    if (key) value = value.split(key).join('[redacted]');
+    if (value.length > 50000) throw new Error('Cell exceeds 50,000 characters; narrow the pull.');
+    if (/^\s*=/.test(value)) value = "'" + value;
+  }
+  return value;
+}
+
+/**
+ * Refuse a write that would exceed CONFIG.maxSheetCells before touching Sheets.
+ * @param {number} rows
+ * @param {number} columns
+ */
+
 function assertSheetCellBudget_(rows, columns) {
   var cells = rows * columns;
   var limit = Number(CONFIG.maxSheetCells) || 10000000;
   if (cells > limit) throw new Error('Sheet cell budget exceeded: ' + cells + ' cells exceeds ' + limit + '. Narrow the request or raise CONFIG.maxSheetCells within the Google Sheets limit.');
 }
 
+/**
+ * Write an array of flat objects into a named tab. Headers are the union of
+ * all keys across rows (so rows with differing shapes stay aligned). Values are
+ * filtered through cellValue_ (secret-like columns redacted, nested values
+ * JSON-stringified) because setValues() accepts scalar cell values only.
+ *
+ * @param {Array<Object>} rows      Array of {key: value} objects.
+ * @param {string} sheetName        Target tab name.
+ */
 function writeRowsToSheet(rows, sheetName) {
   if (!Array.isArray(rows) || rows.length === 0) return;
 
@@ -811,10 +919,7 @@ function writeRowsToSheet(rows, sheetName) {
 
   var values = rows.map(function (row) {
     return headers.map(function (h) {
-      var v = row ? row[h] : undefined;
-      if (v === null || v === undefined) return '';
-      if (typeof v === 'object') return JSON.stringify(v); // nested -> text
-      return v;
+      return cellValue_(h, row ? row[h] : undefined);
     });
   });
   assertSheetCellBudget_(values.length + 1, numCols);
@@ -824,15 +929,323 @@ function writeRowsToSheet(rows, sheetName) {
   var sheet = ss.getSheetByName(name);
   if (!sheet) {
     sheet = ss.insertSheet(name);
-  } else {
-    sheet.clear();
   }
+  ensureSheetGrid_(sheet, values.length + 1, numCols);
+  sheet.clear();
 
-  sheet.getRange(1, 1, 1, numCols).setValues([headers]);
+  sheet.getRange(1, 1, 1, numCols).setValues([headers.map(function (header) { return cellValue_('', header); })]);
   sheet.getRange(2, 1, values.length, numCols).setValues(values);
   sheet.setFrozenRows(1);
 
   Logger.log('Wrote ' + values.length + ' rows, ' + numCols + ' cols to "' + name + '".');
+}
+
+function ensureSheetGrid_(sheet, rows, columns) {
+  if (sheet.getMaxRows && rows > sheet.getMaxRows()) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), rows - sheet.getMaxRows());
+  }
+  if (sheet.getMaxColumns && columns > sheet.getMaxColumns()) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), columns - sheet.getMaxColumns());
+  }
+}
+
+
+// ===========================================================================
+// Provenance block — limits / as-of / source written next to the data
+// ===========================================================================
+
+/**
+ * Render one provenance metadata object into a small label/value block.
+ * Values are always scalars or JSON strings so setValues() accepts them.
+ *
+ * @param {Object} meta  The `meta` object from a /bounded response.
+ * @returns {Array<Array<string>>} Rows of [label, value].
+ */
+function provenanceRows_(meta) {
+  var m = meta || {};
+  var asOf = m.source_date;
+  var rows = [
+    ['dataset', String(m.dataset || '')],
+    ['availability', String(m.availability || 'unknown')],
+    ['source', String(m.source || 'unknown')],
+    // "unknown" rather than the fetch time: fetch time is not the data date.
+    ['source_date', asOf ? String(asOf) : 'unknown'],
+    ['source_date_basis', String(m.source_date_basis || 'Newest observed date, not whole-dataset freshness')],
+    ['undated_rows', String(m.undated_row_count === undefined ? 'unknown' : m.undated_row_count)],
+    ['serving_metadata', JSON.stringify(m.serving_meta || {})],
+    ['error', String(m.error || '')],
+    ['retrieved_at', String(m.retrieved_at || '')],
+    ['rows_returned', String(m.count === undefined ? '' : m.count)],
+    ['requested_limit', String(m.limit === undefined ? '' : m.limit)],
+    ['query', JSON.stringify(m.query || {})],
+  ];
+  var limitations = Array.isArray(m.limitations) ? m.limitations : [];
+  for (var i = 0; i < limitations.length; i++) {
+    rows.push(['limitation ' + (i + 1), String(limitations[i])]);
+  }
+  return rows;
+}
+
+/**
+ * Write a provenance block into a tab so a reader sees the limits, source and
+ * as-of date alongside the data. Never writes API keys — meta carries none.
+ *
+ * @param {Object} meta      The `meta` object from a /bounded response.
+ * @param {string} sheetName Target tab name.
+ */
+function writeProvenanceBlock_(meta, sheetName) {
+  var rows = provenanceRows_(meta);
+  assertSheetCellBudget_(rows.length, 2);
+  var sheet = writeProvenanceRows_(sheetName);
+  sheet.getRange(1, 1, rows.length, 2).setValues(rows.map(function (row) {
+    return row.map(function (value) { return cellValue_('', value); });
+  }));
+  sheet.getRange(1, 1, rows.length, 1).setFontWeight('bold');
+  sheet.setColumnWidth(1, 160);
+  sheet.setColumnWidth(2, 420);
+  Logger.log('Wrote provenance block to "' + sheetName + '".');
+}
+
+/**
+ * Resolve (or create) the provenance tab for a dataset and clear it.
+ * Kept separate so writeProvenanceBlock_ stays a single responsibility.
+ * @param {string} sheetName
+ * @returns {Sheet}
+ */
+function writeProvenanceRows_(sheetName) {
+  var ss = resolveSpreadsheet_();
+  var name = sheetName || 'VNIBB Provenance';
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+  } else {
+    sheet.clear();
+  }
+  return sheet;
+}
+
+/**
+ * Normalise the bounded envelope: the server returns {data, meta, error}. This
+ * normalises missing pieces so callers can trust data/meta shapes.
+ *
+ * @param {Object} envelope
+ * @returns {{data: Array<Object>, meta: Object, error: (string|null)}}
+ */
+function readBoundedEnvelope_(envelope) {
+  if (!envelope || !Array.isArray(envelope.data) || !envelope.meta ||
+      !Number.isInteger(envelope.meta.limit) || envelope.meta.limit < 1 ||
+      envelope.data.length > envelope.meta.limit) {
+    throw new Error('Invalid bounded envelope or row limit exceeded; no sheet was changed. Check the server version.');
+  }
+  var data = envelope.data;
+  return {
+    data: data,
+    meta: envelope.meta || {},
+    error: envelope.error || null,
+  };
+}
+
+/**
+ * Report a bounded result to the user without throwing away provenance.
+ * @param {string} label
+ * @param {{data, meta, error}} result
+ */
+function logBoundedResult_(label, result) {
+  var m = result.meta || {};
+  Logger.log(
+    label + ': availability=' + (m.availability || 'unknown') +
+    ', source=' + (m.source || 'unknown') +
+    ', source_date=' + (m.source_date || 'unknown') +
+    ', rows=' + result.data.length + '/' + (m.limit === undefined ? '?' : m.limit)
+  );
+  if (result.error) Logger.log(label + ' error: ' + result.error);
+}
+
+function writeBoundedResult_(result, dataTab, provenanceTab) {
+  result.meta.error = result.error;
+  writeBoundedProvenance_(result.meta, provenanceTab);
+  if (result.data.length) {
+    writeRowsToSheet(result.data, dataTab);
+  } else {
+    var sheet = resolveSpreadsheet_().getSheetByName(dataTab);
+    if (sheet) sheet.clear();
+  }
+  if (result.meta.availability === 'unavailable') {
+    throw new Error('VNIBB data unavailable: ' + (result.error || 'Serving pipeline failed') + '. Existing data cleared; see ' + provenanceTab + '. Retry later.');
+  }
+}
+
+// ===========================================================================
+// Bounded pulls — same serving pipeline, explicit provenance
+// ===========================================================================
+
+/**
+ * Bounded financial-statement pull: writes the statement rows and a provenance
+ * block. Legacy pullFinancials() stays as-is for existing formulas.
+ *
+ * @param {string} symbol
+ * @param {string=} statementType 'income' | 'balance' | 'cashflow'
+ * @param {string=} period        'year' | 'quarter'
+ * @param {number=} limit         1-20 periods (default 5)
+ * @returns {Array<Object>} The written rows.
+ */
+function pullBoundedFinancials(symbol, statementType, period, limit) {
+  symbol        = (symbol || 'VNM').toUpperCase();
+  statementType = statementType || 'income';
+  period        = period || 'year';
+  limit         = Math.min(20, boundedClampLimit_(limit, 5));
+
+  var envelope = fetchBounded_('financials', {
+    symbol: symbol,
+    statement_type: statementType,
+    period: period,
+    limit: limit,
+  });
+  var result = readBoundedEnvelope_(envelope);
+  logBoundedResult_(symbol + ' ' + statementType, result);
+
+  writeBoundedResult_(result, symbol + ' ' + statementType + ' (' + period + ')', symbol + ' ' + statementType + ' (' + period + ') provenance');
+  return result.data;
+}
+
+/**
+ * Bounded screener pull. Legacy pullScreener() stays as-is.
+ * @param {string=} exchange
+ * @param {number=} limit
+ * @param {string=} industry
+ * @param {string=} source
+ * @returns {Array<Object>}
+ */
+function pullBoundedScreener(exchange, limit, industry, source) {
+  exchange = exchange || 'HOSE';
+  limit    = boundedClampLimit_(limit, 200);
+  var envelope = fetchBounded_('screener', {
+    exchange: exchange,
+    limit: limit,
+    industry: industry || null,
+    source: source || 'KBS',
+  });
+  var result = readBoundedEnvelope_(envelope);
+  logBoundedResult_('Screener ' + exchange, result);
+  writeBoundedResult_(result, 'Screener (' + exchange + ')', 'Screener (' + exchange + ') provenance');
+  return result.data;
+}
+
+/**
+ * Bounded historical pull. Enforces the server's date-range bound locally
+ * before the request so a bad range fails fast with a clear message.
+ *
+ * @param {string} symbol
+ * @param {string=} startDate 'YYYY-MM-DD'; defaults to 1 year ago
+ * @param {string=} endDate   'YYYY-MM-DD'; defaults to today
+ * @param {string=} interval
+ * @param {number=} limit
+ * @returns {Array<Object>}
+ */
+function pullBoundedHistorical(symbol, startDate, endDate, interval, limit) {
+  symbol   = (symbol || 'VNM').toUpperCase();
+  interval = interval || '1D';
+  var tz = Session.getScriptTimeZone();
+  endDate = endDate || Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  if (!startDate) {
+    var d = new Date();
+    d.setFullYear(d.getFullYear() - 1);
+    startDate = Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+  }
+  assertBoundedRange_(startDate, endDate);
+
+  var envelope = fetchBounded_('historical', {
+    symbol: symbol,
+    start_date: startDate,
+    end_date: endDate,
+    interval: interval,
+    limit: boundedClampLimit_(limit, 2000),
+  });
+  var result = readBoundedEnvelope_(envelope);
+  logBoundedResult_(symbol + ' OHLCV', result);
+  writeBoundedResult_(result, symbol + ' OHLCV', symbol + ' OHLCV provenance');
+  return result.data;
+}
+
+/**
+ * Bounded ratios pull.
+ * @param {string} symbol
+ * @param {string=} period
+ * @returns {Array<Object>}
+ */
+function pullBoundedRatios(symbol, period) {
+  symbol = (symbol || 'VNM').toUpperCase();
+  period = period || 'year';
+  var envelope = fetchBounded_('ratios', { symbol: symbol, period: period });
+  var result = readBoundedEnvelope_(envelope);
+  logBoundedResult_(symbol + ' ratios', result);
+  writeBoundedResult_(result, symbol + ' Ratios', symbol + ' Ratios provenance');
+  return result.data;
+}
+
+/**
+ * Bounded listing pull.
+ * @param {string=} exchange
+ * @param {number=} limit
+ * @returns {Array<Object>}
+ */
+function pullBoundedListing(exchange, limit) {
+  exchange = exchange || 'HOSE';
+  var envelope = fetchBounded_('listing', {
+    exchange: exchange,
+    limit: boundedClampLimit_(limit, 2000),
+  });
+  var result = readBoundedEnvelope_(envelope);
+  logBoundedResult_('Listing ' + exchange, result);
+  writeBoundedResult_(result, 'Listing ' + exchange, 'Listing ' + exchange + ' provenance');
+  return result.data;
+}
+
+/**
+ * Clamp a requested limit to the server's accepted range.
+ * @param {number|string} value
+ * @param {number} fallback
+ * @returns {number}
+ */
+function boundedClampLimit_(value, fallback) {
+  var limit = Number(value) || fallback;
+  if (limit < 1) limit = 1;
+  var max = Number(CONFIG.boundedLimitMax) || 2000;
+  if (limit > max) limit = max;
+  return Math.floor(limit);
+}
+
+/**
+ * Fail fast when a historical range exceeds the server's bound.
+ * @param {string} startDate
+ * @param {string} endDate
+ */
+function assertBoundedRange_(startDate, endDate) {
+  var start = new Date(startDate + 'T00:00:00Z');
+  var end = new Date(endDate + 'T00:00:00Z');
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+    throw new Error('Historical dates must be YYYY-MM-DD; got ' + startDate + ' .. ' + endDate + '.');
+  }
+  if (end < start) {
+    throw new Error('Historical end_date ' + endDate + ' is before start_date ' + startDate + '.');
+  }
+  var days = Math.round((end - start) / 86400000);
+  var max = Number(CONFIG.boundedHistoricalMaxDays) || 1826;
+  if (days > max) {
+    throw new Error(
+      'Historical range is ' + days + ' days, over the ' + max +
+      '-day bound. Narrow the request; the server enforces this bound too.'
+    );
+  }
+}
+
+/**
+ * Write a provenance block when the user hasn't disabled it.
+ * @param {Object} meta
+ * @param {string} sheetName
+ */
+function writeBoundedProvenance_(meta, sheetName) {
+  writeProvenanceBlock_(meta, sheetName);
 }
 
 

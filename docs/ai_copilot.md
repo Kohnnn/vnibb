@@ -213,3 +213,34 @@ The strongest remaining OpenBB-style improvements are:
 4. More advanced tool orchestration beyond the current allowlisted actions
 5. Richer feedback capture such as per-artifact ratings and workspace-level review actions
 6. Dynamic follow-up suggestions ship as `followUps`: grounded, deterministic, and derived from the response context rather than model prose. The remaining gap is the reverse direction — user-authored skills, deferred until instruction-trust semantics exist.
+
+## Widget capability context
+
+The workspace widget catalogue in `apps/web/src/data/widgetDefinitions.ts` is the source of truth for widget capabilities consumed by VniAgent. Each catalogue widget derives a `WidgetCapability` with catalogue name/description/category plus an explicit VniAgent record:
+
+- `coverage`: `mapped` only for widgets wired to a real server evidence kind; every other catalogue widget is `unknown`.
+- `scope`: `symbol` or `market` for mapped widgets; `unknown` otherwise, with no inferred coverage.
+- `evidenceKinds`: the server evidence kinds (`company_profile`, `price_history`, `financial_ratios`, `income_statement`, `balance_sheet`, `cash_flow`, `company_news`, `foreign_trading`, `order_flow`, `insider_deals`, `company_events`, `dividends`, `market_indices`, `sector_breadth`) actually mapped today.
+- `configurationInputs`: reviewed, typed inputs (currently the price-chart period and display mode) validated with `validateWidgetCapabilityConfiguration`; invalid or unreviewed values are excluded rather than passed through.
+- `evidenceLimits`: explicit unknowns (freshness, rights, completeness) plus per-widget limits.
+
+`buildVniAgentWorkspaceContext` in `apps/web/src/lib/vniagentWorkspace.ts` builds the existing copilot request context from this contract: the widget's resolved ticker scopes symbol evidence, a prefetched snapshot for a different ticker is dropped, market-scoped widgets never inherit a company ticker or company snapshot, and capability data is delivered under `widgetPayload.widgetCapabilities`. No runtime plugin loader and no browser-supplied capability fields are trusted.
+
+Every widget exposes **Requirements & limitations** from its action menu (`WidgetCapabilityPanel`), showing scope, current ticker, VniAgent coverage, reviewed configuration inputs, and evidence limits without claiming unsupported parameters.
+
+## Reviewed curated workflows
+
+Research starters reuse the existing dashboard templates and VniAgent prompt library. Each code-owned workflow has a stable ID, integer revision, supported scope, mandatory evidence kinds and visible limits. The template confirmation and prompt library show these requirements and the current symbol before selection. The composer keeps the selected workflow separate from editable question text; local and admin-shared prompt text does not become authoritative workflow instructions.
+
+`GET /api/v1/copilot/prompts` returns flat `revision`, `scope`, `requiredEvidenceKinds` and `limits` metadata for reviewed system prompts. A stream request selects a workflow by identity only:
+
+```json
+{"message":"Review the risks","context":{"symbol":"VNM"},"workflow":{"id":"financial-summary","revision":1,"symbol":"VNM"}}
+```
+
+The server rejects unknown IDs (404), stale revisions (409), unsupported scope or mismatched current symbols (422), and instruction-body fields in the workflow selection (422). After building trusted runtime context, it resolves the code-owned instructions and selects only nonblank source IDs with matching evidence kind and scope. Another company's statements cannot satisfy the current symbol's mandatory requirements; market requirements only use market-scoped evidence. Missing kinds and unknown as-of dates are explicit limitations. Browser snapshots and user instruction bodies never establish evidence availability.
+
+Peer comparison reuses the authorized frozen Matrix selection and the current sector Research Playbook definition, questions and accounting limits. It does not define a second comparison playbook or silently compare live browser widgets. Attach a frozen Matrix selection before sending the peer workflow. Selected Matrix cells are not a whole-market universe and do not prove comparability.
+
+To revise a reviewed workflow, edit `DEFAULT_PROMPTS` in `ai_prompt_library_service.py` and increment its revision; update the matching starter identity/disclosure in `researchStarters.ts`. Workflow instructions are code-reviewed, not user-authored executable skills. The public stream boundary tests cover version rejection, missing/complete evidence, cross-symbol scope and instruction injection; prompt-library tests cover truthful selection metadata and local/offline trust boundaries.
+

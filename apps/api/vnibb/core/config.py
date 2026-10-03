@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     admin_revoked_session_ids: str = ""
     # Must be >= the issuer's GOTRUE_JWT_EXP; the issuer lifetime is operator-configurable.
     admin_session_max_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
+    active_session_max_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
     apps_script_api_key: Optional[str] = Field(default=None, validation_alias="VNIBB_APPS_SCRIPT_KEY")
     vnibb_mcp_host: str = "0.0.0.0"
     vnibb_mcp_port: int = 8001

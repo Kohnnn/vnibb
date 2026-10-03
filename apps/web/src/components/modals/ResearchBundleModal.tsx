@@ -7,6 +7,7 @@ import { useDashboard } from '@/contexts/DashboardContext';
 import { normalizeThesisConfig } from '@/lib/investorWorkflow';
 import { createResearchBundle, MAX_RESEARCH_BUNDLE_BYTES, parseResearchBundle, planResearchImport, type BundledThesis, type ResearchBundle } from '@/lib/researchBundle';
 import { readNotebookItems } from '@/lib/researchNotebook';
+import { ResearchShareControls } from '@/components/research/ResearchShareControls';
 
 export function ResearchBundleModal({ onClose }: { onClose: () => void }) {
     const { state, importResearchBundle } = useDashboard();
@@ -82,6 +83,7 @@ export function ResearchBundleModal({ onClose }: { onClose: () => void }) {
             <div className="mt-5 border-t border-[var(--border-color)] pt-3"><label className="text-sm font-semibold">Import research bundle JSON (up to 5 MB)<input type="file" accept="application/json,.json" onChange={handleFile} className="mt-2 block w-full text-xs" /></label>
                 {incoming && <div className="mt-2 text-xs">Ready to import {incoming.theses.length} theses and {incoming.items.length} originals as new local records. References without originals stay citation-only. Existing research will not be overwritten.<button type="button" onClick={handleImport} className="mt-2 block rounded border border-blue-500 px-3 py-2 hover:bg-blue-500/20 focus-visible:ring-2 focus-visible:ring-blue-400">Import Into New Research Dashboard</button></div>}
             </div>
+            <ResearchShareControls buildBundle={() => createResearchBundle(available.filter(({ key }) => selected.includes(key)).map(({ value }) => value), readNotebookItems())} />
             {error && <p role="alert" className="mt-3 text-xs text-red-300">{error}</p>}
             {message && <p role="status" className="mt-3 text-xs text-emerald-300">{message}</p>}
         </section>

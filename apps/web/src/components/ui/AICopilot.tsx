@@ -38,11 +38,14 @@ import {
     consumeCopilotStream,
     openCopilotChatStream,
     type CopilotArtifact,
+    type CuratedWorkflowSelection,
+    type PromptTemplate,
     type CopilotResponseMeta,
     type CopilotReasoningStep,
     type CopilotSourceRef,
 } from '@/lib/api';
 import { getCopilotSourceLabel } from '@/lib/copilotSourceLabel';
+import { ReviewedWorkflowDisclosure } from '@/components/ui/ReviewedWorkflowDisclosure';
 import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
 import { CopilotActionPanel } from '@/components/ui/CopilotActionPanel';
 import { CopilotFeedbackBar } from '@/components/ui/CopilotFeedbackBar';
@@ -56,6 +59,9 @@ import { dispatchOnboardingMeaningfulAction } from '@/lib/userPreferences';
 import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
 import { logClientError } from '@/lib/clientLogger';
 import { addNotebookItem } from '@/lib/researchNotebook';
+import { buildVniAgentWorkspaceContext } from '@/lib/vniagentWorkspace';
+import { getStarterForWorkflow } from '@/lib/researchStarters';
+import { getSessionKey, normalizeTabKey, normalizeWidgetKey } from '@/lib/copilotSessionKey';
 import {
     archiveVniAgentSession,
     readRecentVniAgentSessions,
@@ -122,6 +128,7 @@ interface AICopilotProps {
     promptLibraryRequestId?: number;
     starterPrompt?: 'analyze' | 'technical';
     starterPromptRequestId?: number;
+    starterWorkflow?: Pick<CuratedWorkflowSelection, 'id' | 'revision'>;
     matrixDraft?: MatrixFollowupDraft | null;
     onMatrixDraftConsumed?: () => void;
 }
@@ -206,27 +213,6 @@ const WIDGET_PROMPTS: Record<string, PromptSuggestion[]> = {
         { label: 'Decision', icon: Bot, prompt: 'Using this widget only as the starting point, tell me whether the fundamentals are investable and why' },
     ],
 };
-
-function normalizeTabKey(tabName?: string): string {
-    if (!tabName) return 'overview';
-    const key = tabName.toLowerCase();
-    if (key.includes('financial')) return 'financials';
-    if (key.includes('comparison')) return 'comparison';
-    if (key.includes('technical')) return 'technical';
-    if (key.includes('overview')) return 'overview';
-    return 'overview';
-}
-
-function normalizeWidgetKey(widgetName?: string): string | null {
-    if (!widgetName) return null;
-    const key = widgetName.toLowerCase();
-    if (key.includes('comparison')) return 'comparison';
-    if (key.includes('price chart') || key.includes('chart')) return 'price_chart';
-    if (key.includes('foreign')) return 'foreign_trading';
-    if (key.includes('breadth') || key.includes('sector performance')) return 'market_breadth';
-    if (key.includes('financial') || key.includes('income') || key.includes('balance') || key.includes('cash flow') || key.includes('ratio')) return 'financials';
-    return null;
-}
 
 function getWidgetSummary(widgetContext?: string, widgetContextData?: Record<string, unknown>): ConnectedWidgetSummary | null {
     if (!widgetContext && !widgetContextData) {
@@ -325,11 +311,6 @@ function sanitizeCopilotContent(content: string): string {
         .trim();
 }
 
-function getSessionKey(symbol: string, widgetContext?: string, activeTabName?: string): string {
-    const widgetKey = normalizeWidgetKey(widgetContext) || 'general';
-    const tabKey = normalizeTabKey(activeTabName);
-    return `vnibb:copilot:session:${symbol || 'UNKNOWN'}:${widgetKey}:${tabKey}`;
-}
 
 function toPersistedMessage(message: Message): PersistedMessage {
     return {
@@ -474,6 +455,7 @@ export function AICopilot({
     promptLibraryRequestId = 0,
     starterPrompt,
     starterPromptRequestId = 0,
+    starterWorkflow,
     matrixDraft,
     onMatrixDraftConsumed,
 }: AICopilotProps) {
@@ -481,6 +463,8 @@ export function AICopilot({
     const matrixOwnerRef = useRef(user?.id);
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
+    const [selectedWorkflow, setSelectedWorkflow] = useState<CuratedWorkflowSelection | null>(null);
+    const [selectedPromptMetadata, setSelectedPromptMetadata] = useState<PromptTemplate | undefined>();
     const [isLoading, setIsLoading] = useState(false);
     const [showDetails, setShowDetails] = useState<DetailsState>({});
     const [aiSettings, setAISettings] = useState<AISettings>(() => readStoredAISettings());
@@ -513,6 +497,8 @@ export function AICopilot({
         memoryOnlyRef.current = false;
         setMemoryOnly(false);
         setMatrixSelection(null);
+        setSelectedWorkflow(null);
+        setSelectedPromptMetadata(undefined);
         setInput('');
         setMatrixInputError('');
         setMessages([]);
@@ -526,6 +512,7 @@ export function AICopilot({
     const lastPromptLibraryRequestIdRef = useRef(0);
     const lastStarterPromptRequestIdRef = useRef(0);
 
+
     // Data fetching for context
     const useLiveContext = !memoryOnly && !matrixDraft;
     const { data: profile } = useProfile(currentSymbol, useLiveContext);
@@ -538,6 +525,12 @@ export function AICopilot({
         () => getWidgetSummary(widgetContext, widgetContextData),
         [widgetContext, widgetContextData]
     );
+    const focusedSymbol = useMemo(() => buildVniAgentWorkspaceContext({
+        widgetType: widgetContext || 'Dashboard',
+        widgetTypeKey: widgetSummary?.widgetTypeKey || null,
+        symbol: currentSymbol,
+        widgetPayload: widgetContextData,
+    }).symbol, [currentSymbol, widgetContext, widgetContextData, widgetSummary?.widgetTypeKey]);
     const widgetDataPreview = useMemo(() => getWidgetDataPreview(widgetSummary), [widgetSummary]);
     const latestResolvedResponseMeta = useMemo(
         () => [...messages].reverse().find((message) => message.role === 'assistant' && message.responseMeta)?.responseMeta,
@@ -548,8 +541,8 @@ export function AICopilot({
         [activeTabKey, activeWidgetKey]
     );
     const sessionKey = useMemo(
-        () => getSessionKey(currentSymbol, widgetContext, activeTabName),
-        [currentSymbol, widgetContext, activeTabName]
+        () => getSessionKey(focusedSymbol, widgetContext, activeTabName),
+        [focusedSymbol, widgetContext, activeTabName]
     );
     const currentSessionMessageCount = useMemo(
         () => messages.filter((message) => message.role === 'user' || message.content.trim()).length,
@@ -567,8 +560,8 @@ export function AICopilot({
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
-
     useEffect(() => {
+        setSelectedWorkflow(null);
         if (memoryOnlyRef.current) return;
         cancelActiveRequest();
         if (typeof window === 'undefined') return;
@@ -585,11 +578,9 @@ export function AICopilot({
         }
     }, [sessionKey, cancelActiveRequest]);
 
-    useEffect(() => {
-        if (!isOpen) return;
-        setRecentSessions(readRecentVniAgentSessions());
-        setRunLedger(readVniAgentRuns());
-    }, [isOpen, sessionKey]);
+
+
+
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -624,18 +615,13 @@ export function AICopilot({
         lastPromptLibraryRequestIdRef.current = promptLibraryRequestId;
         setIsPromptLibraryOpen(true);
     }, [isOpen, promptLibraryRequestId]);
-
     useEffect(() => {
-        if (!isOpen || !starterPrompt || starterPromptRequestId <= 0 || lastStarterPromptRequestIdRef.current === starterPromptRequestId) {
-            return;
-        }
+        if (!isOpen) return;
+        setRecentSessions(readRecentVniAgentSessions());
+        setRunLedger(readVniAgentRuns());
+    }, [isOpen, sessionKey]);
 
-        lastStarterPromptRequestIdRef.current = starterPromptRequestId;
-        const prompt = DEFAULT_PROMPTS.find((item) => item.label.toLowerCase() === starterPrompt)?.prompt;
-        if (prompt) {
-            setInput(prompt);
-        }
-    }, [isOpen, starterPrompt, starterPromptRequestId]);
+
 
     useEffect(() => {
         if (!isPromptLibraryOpen) {
@@ -686,6 +672,22 @@ export function AICopilot({
             cancelled = true;
         };
     }, [aiSettings.mode]);
+    useEffect(() => {
+        if (!isOpen || !starterPrompt || starterPromptRequestId <= 0) return;
+        if (lastStarterPromptRequestIdRef.current === starterPromptRequestId) return;
+
+        // Restore the session first; consume each starter once so later ticker
+        // or workspace switches clear it rather than carrying it forward.
+        lastStarterPromptRequestIdRef.current = starterPromptRequestId;
+        setSelectedPromptMetadata(undefined);
+        const scope = starterWorkflow ? getStarterForWorkflow(starterWorkflow)?.scope : undefined;
+        setSelectedWorkflow(starterWorkflow ? {
+            ...starterWorkflow,
+            ...(scope === 'symbol' || scope === 'symbol_market' ? { symbol: focusedSymbol } : {}),
+        } : null);
+        const prompt = DEFAULT_PROMPTS.find((item) => item.label.toLowerCase() === starterPrompt)?.prompt;
+        if (prompt) setInput(prompt);
+    }, [focusedSymbol, isOpen, sessionKey, starterPrompt, starterPromptRequestId, starterWorkflow]);
 
     useEffect(() => {
         if (memoryOnlyRef.current) return;
@@ -708,11 +710,14 @@ export function AICopilot({
         ]);
     }, [activeTabName, currentSymbol, isOpen, messages.length, sessionKey, widgetContext]);
 
+
+
     const stageMatrixDraft = useCallback((draft: MatrixFollowupDraft) => {
         cancelActiveRequest();
         memoryOnlyRef.current = true;
         setMemoryOnly(true);
         setMatrixSelection(draft.selection);
+        setSelectedWorkflow(null);
         setMatrixInputError('');
         setMessages([]);
         setAttachedDocuments([]);
@@ -769,6 +774,8 @@ export function AICopilot({
         }
         setMatrixInputError('');
         const selection = matrixSelection;
+        const workflow = prompt ? undefined : selectedWorkflow || undefined;
+        setSelectedWorkflow(null);
         const privateRun = memoryOnlyRef.current;
         const generation = ++requestGenerationRef.current;
         const controller = new AbortController();
@@ -840,8 +847,7 @@ export function AICopilot({
         };
 
         try {
-            // Construct context for widget
-            const requestContext = selection ? undefined : {
+            const requestContext = selection ? undefined : buildVniAgentWorkspaceContext({
                 widgetType: widgetContext || 'Dashboard',
                 widgetTypeKey: widgetSummary?.widgetTypeKey || null,
                 activeTab: activeTabName || null,
@@ -855,7 +861,7 @@ export function AICopilot({
                     ...(widgetContextData || {}),
                     documentContexts: attachedDocuments,
                 },
-            };
+            });
 
             // Prepare messages for API
             const history = messages.slice(-20).map(m => ({ role: m.role, content: sanitizeCopilotContent(m.content) }));
@@ -865,6 +871,7 @@ export function AICopilot({
                 message: messageText,
                 context: requestContext,
                 matrix_selection: selection || undefined,
+                workflow,
                 history,
                 settings: selection ? { ...aiSettings, webSearch: false, enableSidebarWorkflowOutputs: false } : aiSettings,
             }, controller.signal);
@@ -1665,6 +1672,11 @@ export function AICopilot({
 
             {/* Input */}
             <div className="p-4 border-t border-[var(--border-color)]">
+                {selectedWorkflow && <div className="mb-2 flex items-center justify-between gap-2 text-xs text-cyan-200">
+                    <span>Reviewed workflow: {selectedWorkflow.id} · revision {selectedWorkflow.revision}</span>
+                    <button type="button" onClick={() => setSelectedWorkflow(null)} className="rounded px-2 py-1 hover:bg-[var(--bg-hover)]">Use without workflow</button>
+                </div>}
+                {selectedWorkflow && <ReviewedWorkflowDisclosure workflow={selectedWorkflow} symbol={focusedSymbol} prompt={selectedPromptMetadata} matrixSelectionAvailable={Boolean(matrixSelection)} />}
                 <div className="flex items-center gap-2 bg-[var(--bg-secondary)] rounded-lg px-3 py-2 border border-[var(--border-color)]">
                     <input
                         ref={fileInputRef}
@@ -1733,16 +1745,19 @@ export function AICopilot({
             <PromptsLibrary
                 isOpen={isPromptLibraryOpen}
                 onClose={() => setIsPromptLibraryOpen(false)}
-                onSelectPrompt={(prompt) => {
+                onSelectPrompt={(prompt, workflow, metadata) => {
                     captureAnalyticsEvent(ANALYTICS_EVENTS.copilotPromptLibrarySelected, {
                         symbol: currentSymbol,
                         tab_name: activeTabName,
                         widget_context: widgetContext,
                     });
                     setInput(prompt);
+                    setSelectedWorkflow(workflow || null);
+                    setSelectedPromptMetadata(metadata);
                     window.setTimeout(() => inputRef.current?.focus(), 0);
                 }}
-                symbol={currentSymbol}
+                symbol={focusedSymbol}
+                matrixSelectionAvailable={Boolean(matrixSelection)}
                 widgetContext={widgetContext}
                 widgetTypeKey={widgetSummary?.widgetTypeKey || activeWidgetKey}
                 activeTabName={activeTabName}

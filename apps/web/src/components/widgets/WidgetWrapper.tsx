@@ -15,7 +15,9 @@ import {
     Settings,
     Move,
     MoreHorizontal,
+    BadgeInfo,
 } from 'lucide-react';
+import { WidgetCapabilityPanel } from './WidgetCapabilityPanel';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
@@ -163,6 +165,7 @@ export function WidgetWrapper({
     const [isMaximized, setIsMaximized] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(initialCollapsed);
     const [isTickerDropdownOpen, setIsTickerDropdownOpen] = useState(false);
+    const [showCapabilities, setShowCapabilities] = useState(false);
     const [widgetGroup, setWidgetGroup] = useState<WidgetGroupId>(initialWidgetGroup);
     const [internalData, setInternalData] = useState<any>(widgetData);
     const [isContentVisible, setIsContentVisible] = useState(false);
@@ -467,6 +470,16 @@ export function WidgetWrapper({
     const handleDuplicate = () => {
         trackWidgetAction('duplicate');
         cloneWidget(dashboardId, tabId, id);
+    };
+
+    const handleOpenCapabilities = () => {
+        trackWidgetAction('open_capabilities');
+        setShowCapabilities(true);
+    };
+
+    const handleCloseCapabilities = () => {
+        trackWidgetAction('close_capabilities');
+        setShowCapabilities(false);
     };
 
     const handleCopyToDashboard = (targetDashboardId: string) => {
@@ -800,6 +813,10 @@ export function WidgetWrapper({
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent className="min-w-[150px]">
+                                <DropdownMenuItem onClick={handleOpenCapabilities} className="cursor-pointer text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]">
+                                    <BadgeInfo size={14} className="mr-2" />
+                                    <span>Requirements &amp; limitations</span>
+                                </DropdownMenuItem>
                                 <DropdownMenuSub>
                                     <DropdownMenuSubTrigger className="cursor-pointer text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]">
                                         <Download size={14} className="mr-2" />
@@ -857,6 +874,9 @@ export function WidgetWrapper({
                         </DropdownMenu>
                     }
                 />
+                {showCapabilities ? (
+                    <WidgetCapabilityPanel widgetType={widgetType} symbol={displaySymbol} config={currentWidget?.config} onClose={handleCloseCapabilities} />
+                ) : null}
 
                 {isEditing && layoutInsight ? (
                     <div className={cn(

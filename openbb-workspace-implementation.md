@@ -1,0 +1,28 @@
+# Approved Workspace Improvements
+
+Base: `78dc83365ed3aa4d7a87378b5a3790c76f3efc9c` on `main`. All five proposals approved. Existing uncommitted cache/Mongo/scheduler/Matrix prototype work is excluded. The all-required follow-up fix is local, not deployed.
+
+## Contracts and sequence
+
+1. **Widget capabilities → VniAgent:** extend the code-owned catalogue with typed scope, supported inputs and evidence limitations; consume it in the existing workspace-context path and a visible widget capability explanation. Do not establish a plugin loader or duplicate catalogue. Check invalid widget types, scoped parameters, and evidence-limit propagation.
+2. **Follow-up evidence:** select scoped matching evidence once; use that same selection for mandatory-kind eligibility, citations and ranking. Keep the local all-required regressions; add missing/blank source-ID boundaries. Check ratios-only, full valuation evidence, cross-symbol sources, and market independence through `build_follow_up_suggestions`.
+3. **Sheets workflow:** retain existing authenticated endpoint/client contracts; add bounded pulls with truthful source/as-of/unknown metadata, safe scalar writes, actionable errors, and clear setup examples. Never treat fetch time as data date or expose the key in cells. Check HTTP responses and execute the actual Apps Script client functions in a deterministic runtime harness.
+4. **Read-only research sharing:** owner creates a frozen research snapshot for specified authenticated recipients; recipient only reads; owner lists/revokes; every operation validates active issuer identity and authorization. Reuse Postgres `app_kv`, not a second store. Reject anonymous access and denied/unverified provider exports. Add a read-only web view and create/revoke controls to research transfer UI. Check owner/recipient/outsider, expiry, revocation, session authority failure, size caps, rights policy, and rendering without edit/import controls. No public bearer links or team co-editing.
+5. **Curated research starters:** extend reviewed code/admin-controlled starter contracts with version and mandatory evidence requirements; show these limits before use and transmit the selected workflow identity to VniAgent. Server resolves trusted instructions, never trusts browser instruction bodies. Check version mismatch, missing evidence, supported symbol/workflow scope and reuse of current starter/prompt library UI.
+6. **Integration:** one owner integrates shared router/auth/composer/changelog seams after independent slices; no migration of unrelated WIP. Typecheck at integration milestones; run focused behavior tests after each slice.
+7. **Verification:** smoke actual local API and web flows, including sharing forbidden/revoked reads. Run the full `ci:gate` once after integration and fix observed failures with focused reruns. Production/operator acceptance remains separately evidenced; no deployment claim.
+8. **Review and commit:** standards and spec reviewers compare this scoped batch to the pinned base and plan; resolve substantive findings. Commit only this batch on the current branch, leaving unrelated changes intact.
+
+## Done when
+All five workflows work through their real public seams, permissions fail closed, source dates/rights stay truthful, typechecks and focused/full-suite results are recorded, reviews resolved, and a scoped commit exists. New source-dependent features must stay unavailable when live identity or rights configuration is absent; user approval is not a provider license grant.
+
+## Local verification
+
+- Full integration run: frontend 136 suites / 775 tests; backend 1,195 passed, three skipped, two warnings. These full runs preceded the final boundary repairs.
+- Final boundary reruns: 160 API/auth/sharing/context tests passed; 66 curated/copilot/LLM/Matrix tests passed; 53 frontend identity/workflow/context tests passed. Changed-line backend Ruff passed. Frontend lint returned zero errors; generated Workbox artifacts and existing directives emitted warnings, and the Matrix harness emitted a React `act` warning.
+- Final frontend typecheck and production build passed. Actual production dashboard smoke applied Fundamental Analyst, displayed financial-summary revision 1 requirements for VCI, then cleared the reviewed identity after switching to FPT.
+- Actual generated service worker in Chromium purged a previously cached private snapshot, kept same-origin and cross-origin share reads out of cache, and denied offline replay of a seeded stale snapshot.
+- Sheets client runtime harness: 42 checks passed. Real mounted API handlers over isolated SQLite served bounded stored statements/ratios/history with truthful unknown dates; external providers were explicitly offline. Curated mounted-router smoke rejected unknown/stale/forged identities and captured the trusted developer prompt.
+- Final review found and closed a detached-widget ticker mismatch: reviewed workflow selection, disclosure and conversation identity now resolve the same focused ticker as request context. The final focused rerun passed 46 tests, including detached FPT submission under a VNM workspace and identity clearing on a later detached-symbol switch. Browser smoke showed the prompt library resolving FPT from the detached chart while the workspace remained VNM; production metadata lacking revisions stayed text-only.
+- Sharing mounted-router smoke passed 14 owner/recipient/outsider/session/expiry/revocation/rights scenarios with 13 authority requests, using a deterministic local issuer boundary rather than production accounts.
+- No production rollout or provider-rights grant is claimed by this batch.

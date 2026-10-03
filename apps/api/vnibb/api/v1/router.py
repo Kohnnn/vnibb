@@ -30,6 +30,7 @@ from vnibb.api.v1.news import router as news_router
 from vnibb.api.v1.prediction_markets import router as prediction_markets_router
 from vnibb.api.v1.quant import router as quant_router
 from vnibb.api.v1.realtime import router as realtime_router
+from vnibb.api.v1.research_sharing import router as research_sharing_router
 from vnibb.api.v1.rs_rating import router as rs_rating_router
 from vnibb.api.v1.screener import router as screener_router
 from vnibb.api.v1.search import router as search_router
@@ -43,6 +44,7 @@ from vnibb.api.v1.websocket import router as websocket_router
 api_router = APIRouter()
 
 api_router.include_router(matrix_router, prefix="/matrix", tags=["Matrix"])
+api_router.include_router(research_sharing_router, prefix="/research-shares", tags=["Research Sharing"])
 
 # Mount sub-routers
 api_router.include_router(

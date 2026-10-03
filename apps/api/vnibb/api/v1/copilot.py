@@ -22,7 +22,12 @@ from vnibb.services.matrix_service import resolve_matrix_selection, require_matr
 from vnibb.services.ai_context_service import ai_context_service
 from vnibb.services.ai_document_service import ai_document_service
 from vnibb.services.ai_model_catalog_service import ai_model_catalog_service
-from vnibb.services.ai_prompt_library_service import ai_prompt_library_service
+from vnibb.services.ai_prompt_library_service import (
+    CuratedWorkflowSelection,
+    ai_prompt_library_service,
+    apply_curated_workflow,
+    resolve_curated_workflow,
+)
 from vnibb.services.ai_runtime_config_service import ai_runtime_config_service
 from vnibb.services.ai_telemetry_service import ai_telemetry_service
 from vnibb.services.copilot_service import copilot_service
@@ -84,15 +89,68 @@ class ChatStreamRequest(BaseModel):
     """Request for streaming chat."""
 
     message: str
-
-
     context: WidgetContext | None = None
     history: list[Message] = []
     settings: CopilotRequestSettings | None = None
     matrix_selection: MatrixSelection | None = None
+    workflow: CuratedWorkflowSelection | None = None
 
 
-RESERVED_SERVER_CONTEXT_KEYS = ("matrix_selection", "source_catalog")
+RESERVED_SERVER_CONTEXT_KEYS = ("matrix_selection", "source_catalog", "curated_workflow")
+
+
+def _reject_reserved_client_context(context: dict[str, Any] | None) -> None:
+    reserved = [key for key in RESERVED_SERVER_CONTEXT_KEYS if key in (context or {})]
+    if reserved:
+        raise ValueError(
+            f"Server-owned context keys cannot be supplied by clients: {', '.join(reserved)}"
+        )
+
+
+def _validate_curated_workflow_scope(
+    selection: CuratedWorkflowSelection,
+    scope: str,
+    context: "WidgetContext | None",
+    matrix_context: dict[str, Any] | None,
+) -> None:
+    """Reject contradicted workflow/symbol scope before the SSE stream opens.
+
+    The authoritative evidence check lives in ``apply_curated_workflow`` after the
+    runtime context exists. This gate only catches identity conflicts that are
+    already decidable from the request plus authorized server state, so a matching
+    workflow never opens a stream it cannot satisfy.
+    """
+
+    def _reject(detail: str) -> None:
+        raise HTTPException(
+            status_code=422, detail=detail, headers={"Cache-Control": "no-store"}
+        )
+
+    context_symbol = str((context.symbol if context else "") or "").strip().upper()
+    selection_symbol = str(selection.symbol or "").strip().upper()
+
+    if scope == "matrix":
+        if selection_symbol:
+            entity_ids = {
+                str(item).strip().upper()
+                for item in (matrix_context or {})
+                .get("matrix_selection", {})
+                .get("entity_ids", [])
+            }
+            if selection_symbol not in entity_ids:
+                _reject("Curated workflow symbol is outside the frozen Matrix selection")
+        return
+
+    if scope in {"symbol", "symbol_market"}:
+        if selection_symbol and context_symbol and selection_symbol != context_symbol:
+            _reject("Curated workflow symbol does not match the current context")
+        requested = selection_symbol or context_symbol
+        # Repo symbol contract: 2-4 ASCII uppercase letters, e.g. VNM/FPT (SYMBOL_RE).
+        if not requested or len(requested) < 2 or len(requested) > 4 or not requested.isascii() or not requested.isalpha():
+            _reject("Select a current symbol for this curated workflow")
+        return
+    # Market scope intentionally ignores the active symbol; only scoped market
+    # evidence is consumed, so there is nothing to conflict with here.
 
 
 class ChatRequest(BaseModel):
@@ -103,17 +161,18 @@ class ChatRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_client_context(self):
-        reserved = [key for key in RESERVED_SERVER_CONTEXT_KEYS if key in (self.context or {})]
-        if reserved:
-            raise ValueError(
-                f"Server-owned context keys cannot be supplied by clients: {', '.join(reserved)}"
-            )
+        _reject_reserved_client_context(self.context)
         return self
 
 
 class AskRequest(BaseModel):
     query: str
     context: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_client_context(self):
+        _reject_reserved_client_context(self.context)
+        return self
 
 
 class CopilotSuggestionResponse(BaseModel):
@@ -128,6 +187,10 @@ class PromptTemplate(BaseModel):
     recommendedWidgetKeys: list[str] | None = None
     isDefault: bool | None = None
     source: str | None = None
+    revision: int | None = None
+    scope: str | None = None
+    requiredEvidenceKinds: list[str] | None = None
+    limits: list[str] | None = None
 
 
 class PromptsResponse(BaseModel):
@@ -219,6 +282,32 @@ async def chat_stream(
                 headers={**(exc.headers or {}), "Cache-Control": "no-store"},
             ) from exc
 
+    workflow_scope = None
+    if request.workflow is not None:
+        # Resolve the code-owned identity before the SSE stream opens so unknown
+        # workflows fail 404 and stale revisions fail 409 instead of surfacing as
+        # an in-stream error. Only id/revision/symbol ever arrive from the client;
+        # instruction bodies and evidence limits are always server-owned.
+        workflow_scope = resolve_curated_workflow(request.workflow)["scope"]
+        if matrix_context is not None and workflow_scope != "matrix":
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "This curated workflow does not describe the frozen Matrix selection; "
+                    "use the peer-comparison workflow for Matrix selections"
+                ),
+                headers={"Cache-Control": "no-store"},
+            )
+        if matrix_context is None and workflow_scope == "matrix":
+            raise HTTPException(
+                status_code=422,
+                detail="This curated workflow requires an authorized frozen Matrix selection",
+                headers={"Cache-Control": "no-store"},
+            )
+        _validate_curated_workflow_scope(
+            request.workflow, workflow_scope, request.context, matrix_context
+        )
+
     async def generate():
         try:
             request_settings = (
@@ -258,7 +347,14 @@ async def chat_stream(
                 }
                 if request.context.widgetPayload:
                     context_dict["widget_payload"] = request.context.widgetPayload
-
+            if request.workflow is not None and workflow_scope in {"symbol", "symbol_market"}:
+                # The workflow symbol is verified by _validate_curated_workflow_scope
+                # before the stream opens. Seed it into the pre-build context so
+                # server evidence retrieval targets the workflow's symbol even when
+                # the browser context carries no ticker or the message is generic.
+                workflow_symbol = str(request.workflow.symbol or "").strip().upper()
+                if workflow_symbol:
+                    context_dict["symbol"] = workflow_symbol
             # Convert history to dict format
             messages = [{"role": m.role, "content": m.content} for m in request.history]
             messages.append({"role": "user", "content": request.message})
@@ -272,7 +368,28 @@ async def chat_stream(
                     client_context=context_dict,
                     prefer_database_data=_resolve_prefer_database_data(request.settings),
                 )
-            yield f"data: {json.dumps({'reasoning': {'eventType': 'SUCCESS', 'message': 'Runtime context ready', 'details': {'symbolCount': len(runtime_context.get('market_context') or []), 'sourceCount': len(runtime_context.get('source_catalog') or [])}}})}\n\n"
+            curated_context = None
+            if request.workflow is not None:
+                # Apply on the server-sanitized runtime context (never the raw
+                # browser payload): sanitize_context_value has already dropped
+                # secrets and bounded depth, and the curated resolver re-derives
+                # evidence limits from the code-owned identity.
+                runtime_context = apply_curated_workflow(request.workflow, runtime_context)
+                curated_context = runtime_context["curated_workflow"]
+            ready_details: dict[str, Any] = {
+                "symbolCount": len(runtime_context.get("market_context") or []),
+                "sourceCount": len(runtime_context.get("source_catalog") or []),
+            }
+            if curated_context is not None:
+                ready_details["workflow"] = {
+                    "id": curated_context["id"],
+                    "revision": curated_context["revision"],
+                    "scope": curated_context["scope"],
+                    "symbol": curated_context["symbol"],
+                    "sourceIds": curated_context["source_ids"],
+                    "missingEvidenceKinds": curated_context["missing_evidence_kinds"],
+                }
+            yield f"data: {json.dumps({'reasoning': {'eventType': 'SUCCESS', 'message': 'Runtime context ready', 'details': ready_details}})}\n\n"
 
             # Stream from LLM
             async for event in llm_service.generate_response_stream_events(

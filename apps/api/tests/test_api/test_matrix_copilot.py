@@ -209,3 +209,76 @@ async def test_matrix_provider_errors_do_not_echo_credentials(matrix_chat, caplo
     assert "secret-test-token" not in response.text
     assert "secret-test-token" not in caplog.text
     assert "Matrix provider request failed" in response.text
+
+
+@pytest.mark.asyncio
+async def test_matrix_curated_workflow_rejects_non_matrix_scope_before_stream(
+    matrix_chat, monkeypatch
+):
+    client, record, completion = matrix_chat
+    body = request_body(record)
+    body["workflow"] = {"id": "financial-summary", "revision": 1, "symbol": "AAA0"}
+    response = await client.post("/chat/stream", json=body, headers=auth_header())
+    assert response.status_code == 422
+    assert response.headers["cache-control"] == "no-store"
+    assert "does not describe the frozen Matrix selection" in response.text
+    completion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_matrix_curated_workflow_rejects_symbol_outside_frozen_selection(
+    matrix_chat, monkeypatch
+):
+    client, record, completion = matrix_chat
+    # A short valid ticker that is not among the frozen entity ids: the scope
+    # denial must come from our pre-SSE Matrix membership check, not from the
+    # CuratedWorkflowSelection symbol length cap.
+    body = request_body(record)
+    body["workflow"] = {"id": "peer-comparison", "revision": 1, "symbol": "ZZZ"}
+    response = await client.post("/chat/stream", json=body, headers=auth_header())
+    assert response.status_code == 422
+    assert response.headers["cache-control"] == "no-store"
+    assert "outside the frozen Matrix selection" in response.text
+    completion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_matrix_peer_comparison_workflow_reaches_code_owned_playbook_instructions(
+    matrix_chat, test_db
+):
+    from copy import deepcopy
+
+    from vnibb.services.matrix_playbooks import PLAYBOOKS
+
+    client, record, completion = matrix_chat
+    playbook = next(item for item in PLAYBOOKS if item["playbook_id"] == "nonfinancial")
+    stored = await test_db.get(
+        AppKeyValue, f"matrix:snapshot:{record['snapshot']['snapshot_id']}"
+    )
+    # Plain JSON column: nested in-place mutation is not tracked by SQLAlchemy.
+    # Reassign the whole value so the revision persists across commit.
+    updated_value = deepcopy(stored.value)
+    updated_value["snapshot"]["definition_revision"] = playbook["definition_revision"]
+    for dimension in updated_value["snapshot"]["dimensions"]:
+        dimension["definition_revision"] = playbook["definition_revision"]
+    stored.value = updated_value
+    await test_db.commit()
+
+    result_id = next(
+        cell["result_id"]
+        for cell in record["snapshot"]["cells"]
+        if cell["entity_id"] == "AAA3"
+    )
+    body = request_body(record)
+    body["matrix_selection"]["result_ids"] = [result_id]
+    body["workflow"] = {"id": "peer-comparison", "revision": 1, "symbol": "AAA3"}
+    response = await client.post("/chat/stream", json=body, headers=auth_header())
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    completion.assert_awaited_once()
+    payload = completion.call_args.args[1]
+    developer_prompt = payload["messages"][1]["content"]
+    assert "Reviewed curated workflow peer-comparison@1" in developer_prompt
+    assert playbook["description"] in developer_prompt
+    assert "Mandatory evidence: matrix_evidence" in developer_prompt
+    assert "Ignore evidence" not in developer_prompt

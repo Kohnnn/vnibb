@@ -4,8 +4,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { X, Search, Plus, Trash2, MessageSquare, TrendingUp, BarChart, FileText, Sparkles, Layers3, LineChart, Newspaper } from 'lucide-react';
-import { getCopilotPrompts, type PromptTemplate } from '@/lib/api';
+import { getCopilotPrompts } from '@/lib/api';
+import type { CuratedWorkflowSelection, PromptTemplate } from '@/lib/api';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
+import { ReviewedWorkflowDisclosure } from '@/components/ui/ReviewedWorkflowDisclosure';
 
 type Prompt = PromptTemplate & {
     name: string;
@@ -141,11 +143,12 @@ const LEGACY_PROMPTS_STORAGE_KEY = 'vnibb-prompts';
 interface PromptsLibraryProps {
     isOpen: boolean;
     onClose: () => void;
-    onSelectPrompt?: (prompt: string) => void;
+    onSelectPrompt?: (prompt: string, workflow?: CuratedWorkflowSelection, metadata?: PromptTemplate) => void;
     symbol?: string;
     widgetContext?: string;
     widgetTypeKey?: string | null;
     activeTabName?: string;
+    matrixSelectionAvailable?: boolean;
 }
 
 function applyPromptContext(
@@ -163,7 +166,7 @@ function applyPromptContext(
         .replaceAll('{tab}', activeTabName || 'current workspace');
 }
 
-export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widgetContext, widgetTypeKey, activeTabName }: PromptsLibraryProps) {
+export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widgetContext, widgetTypeKey, activeTabName, matrixSelectionAvailable = false }: PromptsLibraryProps) {
     const [prompts, setPrompts] = useState<Prompt[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedCategory, setSelectedCategory] = useState<'all' | Prompt['category']>('all');
@@ -180,7 +183,11 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
             let localPrompts: Prompt[] = [];
             if (stored) {
                 try {
-                    localPrompts = JSON.parse(stored) as Prompt[];
+                    const parsed: unknown = JSON.parse(stored);
+                    localPrompts = Array.isArray(parsed) ? parsed.map((prompt: Prompt) => ({
+                        ...prompt, source: 'local', isDefault: false,
+                        revision: undefined, scope: undefined, requiredEvidenceKinds: undefined, limits: undefined,
+                    })) : [];
                 } catch {
                     localPrompts = [];
                 }
@@ -283,7 +290,11 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
             tab_name: activeTabName,
             source: prompt.source || 'system',
         });
-        onSelectPrompt?.(applyPromptContext(prompt.content, symbol, widgetContext, activeTabName));
+        const includeSymbol = prompt.scope === 'symbol' || prompt.scope === 'symbol_market';
+        const workflow = prompt.source === 'system' && prompt.revision
+            ? { id: prompt.id, revision: prompt.revision, ...(includeSymbol && symbol ? { symbol } : {}) }
+            : undefined;
+        onSelectPrompt?.(applyPromptContext(prompt.content, symbol, widgetContext, activeTabName), workflow, workflow ? prompt : undefined);
         onClose();
     };
 
@@ -478,10 +489,17 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                                     <p className="text-[11px] text-[var(--text-muted)] mt-1 line-clamp-2">
                                         {applyPromptContext(prompt.content, symbol, widgetContext, activeTabName)}
                                     </p>
+                                    {prompt.revision && prompt.source === 'system' ? (
+                                        <div className="mt-2">
+                                            <ReviewedWorkflowDisclosure workflow={{ id: prompt.id, revision: prompt.revision }} symbol={symbol} prompt={prompt} matrixSelectionAvailable={matrixSelectionAvailable} />
+                                        </div>
+                                    ) : (
+                                        <p className="mt-2 text-[11px] text-[var(--text-muted)]">Editable prompt text only; not a reviewed server workflow.</p>
+                                    )}
                                 </div>
 
                                 {/* Delete Button (only for custom prompts) */}
-                                {!prompt.isDefault && (
+                                {!prompt.isDefault && prompt.source !== 'shared' && (
                                     <button
                                         onClick={(e) => {
                                             e.stopPropagation();

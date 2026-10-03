@@ -318,3 +318,28 @@ After backend deployment, run these probes:
 - `GET /api/v1/comparison/VNM,FPT,VCB` returns `200`
 - `GET /api/v1/screener` does not redirect (no `307`)
 - `GET /api/v1/market/heatmap` returns `200` with either populated sectors or empty-state payload
+
+## Frozen recipient-only research sharing
+
+All four endpoints require an active Supabase bearer session. Each operation verifies issuer, audience, UUID subject/session, timestamps and bounded lifetime, then asks the live issuer `/auth/v1/user` to revalidate the current caller. Configure `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET` and `ACTIVE_SESSION_MAX_TTL_SECONDS` (default 3600). Missing authorization returns 401; missing auth configuration or an unavailable issuer returns 503. No anonymous client-ID fallback, public bearer links, stored owner credentials or auth-directory lookup is supported. Successful responses carry `Cache-Control: no-store`; clients send bearer authorization and use `cache: 'no-store'`.
+Signed JWT or authoritative issuer responses identifying an anonymous account (`is_anonymous: true`) are rejected even when they otherwise carry a valid authenticated UUID session.
+
+| Method and path | Contract |
+|---|---|
+| `POST /api/v1/research-shares` | Owner creates an immutable snapshot; returns share metadata (201). Body: `bundle`, `recipient_ids` (1–20 distinct authenticated account UUIDs excluding owner), `expires_at` (timezone-bearing timestamp, future and at most 30 days away). |
+| `GET /api/v1/research-shares` | Lists only the current owner's share metadata, including revoked/expired shares; never lists another investor's shares or snapshot text. |
+| `GET /api/v1/research-shares/{share_id}` | Owner or named recipient reads the frozen bundle, subject to live identity, expiry, revocation and rights checks on every read. Outsiders/revoked/expired/missing shares return 404 without disclosing existence. |
+| `DELETE /api/v1/research-shares/{share_id}` | Owner revokes persistent consent; idempotent and denies recipient mutations. Returns `{ "revoked": true }`. |
+
+Snapshots use Postgres `app_kv` under `research-share:` keys; no migration or second store is needed. Limits: 100 snapshots per owner (including revoked/expired records), 5 MB serialized snapshot, 50 theses, 200 notebook items and 50 references/citations per thesis. PostgreSQL creation serializes per-owner count enforcement with a transaction advisory lock. Payloads are typed `vnibb-thesis-evidence` version 1 bundles; malformed references, duplicate IDs, unsafe credential/instruction fields, executable HTML and recognized credential/model-instruction text are rejected. Text is rendered as escaped text, never executed or sent as model instructions.
+
+**Provider redistribution remains denied.** Browser notebook provenance and client-supplied allowlist labels are not authoritative rights evidence. The service calls the existing Matrix export-rights predicate and denies provider/news/widget/agent/artifact originals, source metadata and citations, even when a client claims synthetic or allowlisted provenance. Source-rights configuration absence is not a release grant. User-authored-only text can be shared when provider evidence is clearly absent; this content classification is neither a legal grant nor proof of origin. Authors must review their text and must not represent copied provider material as authored.
+
+The research transfer modal retains its existing local JSON backup/import workflow. Its sharing controls show an explicit author-only preview with counts of excluded provider originals/citations and require confirmation before freezing thesis text and source-free authored notebook notes. The read-only `/research-shares/{share_id}` web route requires the named account, renders thesis/risk/invalidation/review fields and linked authored notes, and has no editing/import controls. A share URL is an identifier, not an authorization token or source-evidence rights grant.
+
+Owner consent persists after sign-out and ends only at explicit revocation or expiry. Every current caller must have an active issuer-validated session; owner sign-out does not revoke an already granted persistent share. Access already read or copied cannot be recalled; the viewer clears sensitive text on sign-out and revalidates on visibility changes and periodically while open.
+
+Production service-worker routes for research-share API reads and pages are network-only, including cross-origin API hosts. Worker activation removes matching snapshots cached by older versions. Offline access cannot replay a cached private share; this does not recall copies already saved outside the app.
+
+Local verification seams: `apps/api/tests/test_api/test_research_sharing.py`, `apps/web/src/lib/researchSharing.test.ts`, and `apps/web/src/components/research/ResearchShare{Controls,Viewer}.test.tsx`. Production acceptance additionally requires real owner/recipient/outsider issuer accounts; test fixture identities do not certify operator configuration, source licenses or deployment.
+

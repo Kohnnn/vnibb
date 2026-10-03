@@ -1,5 +1,122 @@
 import type { CopilotArtifact, CopilotSourceRef, CopilotWidgetTarget } from '@/lib/api'
-import type { Dashboard, DashboardState, WidgetInstance, WidgetType } from '@/types/dashboard'
+import type { Dashboard, DashboardState, WidgetCategory, WidgetInstance, WidgetType } from '@/types/dashboard'
+import { getWidgetCapabilities, getWidgetCapabilityForEvidenceKind, normalizeWidgetType, validateWidgetCapabilityConfiguration } from '@/data/widgetDefinitions'
+import type { VniAgentEvidenceKind, WidgetCapability } from '@/data/widgetDefinitions'
+
+export interface VniAgentWorkspaceContextInput {
+  widgetTypeKey?: string | null
+  widgetType?: string
+  symbol: string
+  activeTab?: string | null
+  dataSnapshot?: Record<string, unknown>
+  widgetPayload?: Record<string, unknown> | null
+}
+
+/**
+ * Capability context delivered inside the existing widgetPayload channel.
+ * Identity fields are absent when no valid catalogue widget was selected.
+ * Supported inputs use compact scalar descriptors so the runtime's bounded
+ * browser-context sanitizer preserves allowed values and defaults at depth four.
+ */
+export interface VniAgentWidgetCapabilityContext {
+  widgetType?: WidgetType
+  name: string
+  description: string
+  category?: WidgetCategory
+  coverage: 'mapped' | 'unknown'
+  scope: 'symbol' | 'market' | 'unknown'
+  symbolRequirement: string
+  configurationInputs: readonly string[]
+  evidenceKinds: readonly VniAgentEvidenceKind[]
+  evidenceLimits: readonly string[]
+  configuration: Partial<Record<string, string>>
+  invalidConfigurationKeys: string[]
+  resolvedSymbol: string | null
+}
+
+export interface VniAgentWorkspaceContext {
+  widgetType: string
+  widgetTypeKey: string | null
+  activeTab: string | null
+  symbol: string
+  dataSnapshot: Record<string, unknown>
+  widgetPayload: Record<string, unknown> & { symbol: string; widgetCapabilities: VniAgentWidgetCapabilityContext }
+}
+
+/** Copies only the catalogue capability fields, dropping any browser-supplied overrides. */
+function toCapabilityContext(
+  capability: WidgetCapability,
+  configuration: { values: Partial<Record<string, string>>; invalidKeys: string[] },
+  symbol: string,
+): VniAgentWidgetCapabilityContext {
+  return {
+    widgetType: capability.widgetType,
+    name: capability.name,
+    description: capability.description,
+    category: capability.category,
+    coverage: capability.coverage,
+    scope: capability.scope,
+    symbolRequirement: capability.symbolRequirement,
+    configurationInputs: capability.configurationInputs.map(input =>
+      `${input.key} (${input.label}): allowed values ${input.values.join(', ')}; default ${input.defaultValue}. ${input.description}`
+    ),
+    evidenceKinds: capability.evidenceKinds,
+    evidenceLimits: capability.evidenceLimits,
+    configuration: configuration.values,
+    invalidConfigurationKeys: configuration.invalidKeys,
+    resolvedSymbol: capability.scope === 'symbol' ? symbol || null : null,
+  }
+}
+
+function unscopedCapabilityContext(): VniAgentWidgetCapabilityContext {
+  return {
+    name: 'Dashboard',
+    description: 'No valid catalogue widget is attached to this request.',
+    coverage: 'unknown',
+    scope: 'unknown',
+    symbolRequirement: 'Unknown; no catalogue widget was selected.',
+    configurationInputs: [],
+    evidenceKinds: [],
+    evidenceLimits: ['No valid catalogue widget was selected; no widget-specific VniAgent coverage is declared.'],
+    configuration: {},
+    invalidConfigurationKeys: [],
+    resolvedSymbol: null,
+  }
+}
+
+function readCapabilitySymbol(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  const symbol = value.trim().toUpperCase()
+  return /^[A-Z0-9]{3}$/.test(symbol) ? symbol : ''
+}
+
+export function buildVniAgentWorkspaceContext(input: VniAgentWorkspaceContextInput): VniAgentWorkspaceContext {
+  const capability = getWidgetCapabilities(input.widgetTypeKey)
+  const payload = input.widgetPayload || {}
+  const widgetConfig = payload.widgetConfig && typeof payload.widgetConfig === 'object' && !Array.isArray(payload.widgetConfig)
+    ? payload.widgetConfig as Record<string, unknown>
+    : undefined
+  const configuration = capability ? validateWidgetCapabilityConfiguration(capability, widgetConfig) : { values: {}, invalidKeys: [] }
+  const symbol = capability?.scope === 'market'
+    ? ''
+    : readCapabilitySymbol(payload.symbol !== undefined ? payload.symbol : input.symbol)
+  const snapshotMatchesScope = capability?.scope === 'symbol' && symbol === readCapabilitySymbol(input.symbol)
+
+  return {
+    widgetType: capability?.name || input.widgetType || 'Dashboard',
+    widgetTypeKey: capability?.widgetType || null,
+    activeTab: input.activeTab || null,
+    symbol,
+    dataSnapshot: snapshotMatchesScope ? input.dataSnapshot || {} : {},
+    widgetPayload: {
+      ...payload,
+      symbol,
+      widgetCapabilities: capability
+        ? toCapabilityContext(capability, configuration, symbol)
+        : unscopedCapabilityContext(),
+    },
+  }
+}
 
 export interface VniAgentWidgetIntent {
   widgetType: WidgetType
@@ -12,8 +129,9 @@ function intentFromWidgetTarget(target?: CopilotWidgetTarget): VniAgentWidgetInt
   if (!target?.widgetType) {
     return null
   }
+  const normalizedType = normalizeWidgetType(target.widgetType)
   return {
-    widgetType: target.widgetType as WidgetType,
+    widgetType: (normalizedType || target.widgetType) as WidgetType,
     label: target.label || target.widgetType,
     symbol: target.symbol,
     config: target.config,
@@ -46,37 +164,12 @@ export function getIntentFromSource(source: CopilotSourceRef): VniAgentWidgetInt
     return directIntent
   }
 
-  switch (source.kind) {
-    case 'company_profile':
-      return { widgetType: 'ticker_profile', label: 'Company Profile', symbol: source.symbol }
-    case 'price_history':
-      return { widgetType: 'price_chart', label: 'Price Chart', symbol: source.symbol }
-    case 'financial_ratios':
-      return { widgetType: 'financial_ratios', label: 'Financial Ratios', symbol: source.symbol }
-    case 'income_statement':
-      return { widgetType: 'income_statement', label: 'Income Statement', symbol: source.symbol }
-    case 'balance_sheet':
-      return { widgetType: 'balance_sheet', label: 'Balance Sheet', symbol: source.symbol }
-    case 'cash_flow':
-      return { widgetType: 'cash_flow', label: 'Cash Flow', symbol: source.symbol }
-    case 'company_news':
-      return { widgetType: 'news_feed', label: 'News Feed', symbol: source.symbol }
-    case 'foreign_trading':
-      return { widgetType: 'foreign_trading', label: 'Foreign Trading', symbol: source.symbol }
-    case 'order_flow':
-      return { widgetType: 'transaction_flow', label: 'Transaction Flow', symbol: source.symbol }
-    case 'insider_deals':
-      return { widgetType: 'insider_trading', label: 'Insider Trading', symbol: source.symbol }
-    case 'company_events':
-      return { widgetType: 'events_calendar', label: 'Events Calendar', symbol: source.symbol }
-    case 'dividends':
-      return { widgetType: 'dividend_payment', label: 'Dividend Payment', symbol: source.symbol }
-    case 'market_indices':
-      return { widgetType: 'market_overview', label: 'Market Overview' }
-    case 'sector_breadth':
-      return { widgetType: 'market_breadth', label: 'Market Breadth' }
-    default:
-      return null
+  const capability = getWidgetCapabilityForEvidenceKind(source.kind || '')
+  if (!capability) return null
+  return {
+    widgetType: capability.widgetType,
+    label: capability.name,
+    symbol: capability.scope === 'symbol' ? source.symbol : undefined,
   }
 }
 

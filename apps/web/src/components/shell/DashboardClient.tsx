@@ -61,13 +61,14 @@ import {
 import type { WidgetInstance, WidgetType, WidgetConfig, Dashboard } from '@/types/dashboard';
 import type { WidgetGroupId } from '@/types/widget';
 import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '@/types/dashboard-templates';
-import { getStarterForTemplate, type StarterPromptKey } from '@/lib/researchStarters';
+import { getStarterForTemplate } from '@/lib/researchStarters';
+import type { ResearchStarter, StarterPromptKey } from '@/lib/researchStarters';
 import { AlertCircle, Grid3X3, PlusCircle, RefreshCw, Shield, X } from 'lucide-react';
 
 const WidgetLibrary = dynamic(() => import('@/components/widgets').then((m) => ({ default: m.WidgetLibrary as unknown as React.ComponentType<{ isOpen: boolean; onClose: () => void }> })), { ssr: false });
 const WidgetSettingsModal = dynamic(() => import('@/components/modals').then((m) => ({ default: m.WidgetSettingsModal })), { ssr: false });
 const AppsLibrary = dynamic(() => import('@/components/modals').then((m) => ({ default: m.AppsLibrary })), { ssr: false });
-const TemplateSelector = dynamic(() => import('@/components/modals').then((m) => ({ default: m.TemplateSelector as unknown as React.ComponentType<{ open: boolean; onClose: () => void; onSelectTemplate: (template: DashboardTemplate) => void; onStarterPromptRequest?: (promptKey: StarterPromptKey) => void; sharedTickerGroups?: readonly WidgetGroupId[]; currentDashboard: Dashboard | null; currentSymbol: string }> })), { ssr: false });
+const TemplateSelector = dynamic(() => import('@/components/modals').then((m) => ({ default: m.TemplateSelector as unknown as React.ComponentType<{ open: boolean; onClose: () => void; onSelectTemplate: (template: DashboardTemplate) => void; onStarterPromptRequest?: (promptKey: StarterPromptKey, workflow: ResearchStarter['workflow']) => void; sharedTickerGroups?: readonly WidgetGroupId[]; currentDashboard: Dashboard | null; currentSymbol: string }> })), { ssr: false });
 const AICopilot = dynamic(() => import('@/components/ui/AICopilot').then((m) => ({ default: m.AICopilot })), { ssr: false });
 const OnboardingWalkthrough = dynamic(() => import('@/components/onboarding/OnboardingWalkthrough').then((m) => ({ default: m.OnboardingWalkthrough as unknown as React.ComponentType<{ open: boolean; currentSymbol: string; onSkip: () => void; onGoalSelect: (goalId: OnboardingGoalId, symbol?: string) => boolean; onComplete: (goalId: OnboardingGoalId, openVniAgent?: boolean) => void }> })), { ssr: false });
 
@@ -164,6 +165,7 @@ function DashboardContent() {
     const [copilotWidgetData, setCopilotWidgetData] = useState<Record<string, unknown> | undefined>(undefined);
     const [copilotPromptLibraryRequestId, setCopilotPromptLibraryRequestId] = useState(0);
     const [copilotStarterPrompt, setCopilotStarterPrompt] = useState<'analyze' | 'technical' | undefined>(undefined);
+    const [copilotStarterWorkflow, setCopilotStarterWorkflow] = useState<ResearchStarter['workflow'] | undefined>(undefined);
     const [copilotStarterPromptRequestId, setCopilotStarterPromptRequestId] = useState(0);
     const [matrixDraft, setMatrixDraft] = useState<MatrixFollowupDraft | null>(null);
     const consumeMatrixDraft = useCallback(() => setMatrixDraft(null), []);
@@ -981,6 +983,7 @@ function DashboardContent() {
             const starter = getStarterForTemplate(template.id);
             if (starter) {
                 setCopilotStarterPrompt(starter.promptKey);
+                setCopilotStarterWorkflow(starter.workflow);
                 setCopilotStarterPromptRequestId((current) => current + 1);
                 window.requestAnimationFrame(() => openCopilot('research_starter'));
             }
@@ -1007,8 +1010,9 @@ function DashboardContent() {
      * The template picker owns the starter decision (purpose + disclosure) and
      * hands the prompt key back here, so the copilot seam stays in one place.
      */
-    const handleStarterPromptRequest = useCallback((promptKey: StarterPromptKey) => {
+    const handleStarterPromptRequest = useCallback((promptKey: StarterPromptKey, workflow: ResearchStarter['workflow']) => {
         setCopilotStarterPrompt(promptKey);
+        setCopilotStarterWorkflow(workflow);
         setCopilotStarterPromptRequestId((current) => current + 1);
         window.requestAnimationFrame(() => openCopilot('research_starter'));
     }, [openCopilot]);
@@ -1099,6 +1103,7 @@ function DashboardContent() {
         const starter = getStarterForTemplate(template.id);
         if (starter) {
             setCopilotStarterPrompt(starter.promptKey);
+            setCopilotStarterWorkflow(starter.workflow);
             setCopilotStarterPromptRequestId((current) => current + 1);
             window.requestAnimationFrame(() => openCopilot('research_starter'));
         }
@@ -1610,6 +1615,7 @@ function DashboardContent() {
                                         activeTabName={activeTab?.name}
                                         promptLibraryRequestId={copilotPromptLibraryRequestId}
                                         starterPrompt={copilotStarterPrompt}
+                                        starterWorkflow={copilotStarterWorkflow}
                                         starterPromptRequestId={copilotStarterPromptRequestId}
                                         matrixDraft={matrixDraft}
                                         onMatrixDraftConsumed={consumeMatrixDraft}
@@ -1636,6 +1642,7 @@ function DashboardContent() {
                                 activeTabName={activeTab?.name}
                                 promptLibraryRequestId={copilotPromptLibraryRequestId}
                                 starterPrompt={copilotStarterPrompt}
+                                starterWorkflow={copilotStarterWorkflow}
                                 starterPromptRequestId={copilotStarterPromptRequestId}
                                 matrixDraft={matrixDraft}
                                 onMatrixDraftConsumed={consumeMatrixDraft}

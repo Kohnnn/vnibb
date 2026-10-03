@@ -244,4 +244,104 @@ describe('Matrix Copilot handoff', () => {
         expect(screen.getByRole('button', { name: 'Remove Matrix selection' })).toBeInTheDocument();
         expect(storedContent()).not.toContain(draft.request_text);
     });
+    test('starter workflow disclosure renders once for the reviewed revision and the send carries workflow plus the scoped ticker', async () => {
+        render(<AICopilot isOpen onClose={() => {}} currentSymbol="VNM" starterPrompt="analyze" starterPromptRequestId={1} starterWorkflow={{ id: 'financial-summary', revision: 1 }} />);
+        await screen.findByTitle('Active model: test-model');
+        expect(screen.getByRole('note', { name: 'Reviewed workflow requirements' })).toBeInTheDocument();
+        expect(screen.getAllByText(/Reviewed workflow financial-summary@1/)).toHaveLength(1);
+        expect(screen.getByText(/Scope: symbol · Current symbol: VNM/)).toBeInTheDocument();
+        expect(screen.getByText(/Requires: income_statement, balance_sheet, cash_flow, financial_ratios/)).toBeInTheDocument();
+        expect(screen.getByRole('textbox', { name: 'VniAgent message' })).toHaveValue('Analyze the financial health of this company');
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        await screen.findByText('Protected frozen answer');
+        const request = jest.mocked(openCopilotChatStream).mock.calls[0][0];
+        expect(request.workflow).toEqual({ id: 'financial-summary', revision: 1, symbol: 'VNM' });
+        expect(request.context?.symbol).toBe('VNM');
+    });
+
+    test('same-requestId symbol/session switch clears the disclosure and no stale workflow is sent', async () => {
+        const view = render(<AICopilot isOpen onClose={() => {}} currentSymbol="VNM" starterPrompt="analyze" starterPromptRequestId={1} starterWorkflow={{ id: 'financial-summary', revision: 1 }} />);
+        expect(screen.getByRole('note', { name: 'Reviewed workflow requirements' })).toBeInTheDocument();
+        await screen.findByTitle('Active model: test-model');
+        view.rerender(<AICopilot isOpen onClose={() => {}} currentSymbol="FPT" widgetContext="Financials" activeTabName="Financials" starterPrompt="analyze" starterPromptRequestId={1} starterWorkflow={{ id: 'financial-summary', revision: 1 }} />);
+        expect(screen.queryByRole('note', { name: 'Reviewed workflow requirements' })).not.toBeInTheDocument();
+        fireEvent.change(screen.getByRole('textbox', { name: 'VniAgent message' }), { target: { value: 'Fresh FPT question' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        await screen.findByText('Protected frozen answer');
+        const request = jest.mocked(openCopilotChatStream).mock.calls[0][0];
+        expect(request.workflow).toBeUndefined();
+        expect(request.context?.symbol).toBe('FPT');
+    });
+
+    test('new starter request with a new symbol/session stages the workflow exactly once after restore', async () => {
+        const view = render(<AICopilot isOpen onClose={() => {}} currentSymbol="VNM" starterPrompt="analyze" starterPromptRequestId={1} starterWorkflow={{ id: 'financial-summary', revision: 1 }} />);
+        await screen.findByTitle('Active model: test-model');
+        expect(screen.getByRole('note', { name: 'Reviewed workflow requirements' })).toBeInTheDocument();
+        view.rerender(<AICopilot isOpen onClose={() => {}} currentSymbol="FPT" widgetContext="Financials" activeTabName="Financials" starterPrompt="analyze" starterPromptRequestId={2} starterWorkflow={{ id: 'financial-summary', revision: 1 }} />);
+        expect(screen.getByRole('note', { name: 'Reviewed workflow requirements' })).toBeInTheDocument();
+        expect(screen.getByText(/Scope: symbol · Current symbol: FPT/)).toBeInTheDocument();
+        expect(screen.getAllByText(/Reviewed workflow financial-summary@1/)).toHaveLength(1);
+        expect(screen.getByRole('textbox', { name: 'VniAgent message' })).toHaveValue('Analyze the financial health of this company');
+        view.rerender(<AICopilot isOpen onClose={() => {}} currentSymbol="FPT" widgetContext="Financials" activeTabName="Financials" starterPrompt="analyze" starterPromptRequestId={2} starterWorkflow={{ id: 'financial-summary', revision: 1 }} />);
+        expect(screen.getAllByRole('note', { name: 'Reviewed workflow requirements' })).toHaveLength(1);
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        await screen.findByText('Protected frozen answer');
+        expect(jest.mocked(openCopilotChatStream)).toHaveBeenCalledTimes(1);
+        const request = jest.mocked(openCopilotChatStream).mock.calls[0][0];
+        expect(request.workflow).toEqual({ id: 'financial-summary', revision: 1, symbol: 'FPT' });
+        expect(request.context?.symbol).toBe('FPT');
+    });
+    test('detached price-chart workspace scopes starter disclosure and workflow to the widget symbol', async () => {
+        render(
+            <AICopilot
+                isOpen
+                onClose={() => {}}
+                currentSymbol="VNM"
+                widgetContext="Price Chart"
+                widgetContextData={{ widgetTypeKey: 'price_chart', symbol: 'FPT' }}
+                starterPrompt="analyze"
+                starterPromptRequestId={1}
+                starterWorkflow={{ id: 'financial-summary', revision: 1 }}
+            />
+        );
+        await screen.findByTitle('Active model: test-model');
+        expect(screen.getByText(/Scope: symbol · Current symbol: FPT/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        await screen.findByText('Protected frozen answer');
+        const request = jest.mocked(openCopilotChatStream).mock.calls[0][0];
+        expect(request.workflow).toEqual({ id: 'financial-summary', revision: 1, symbol: 'FPT' });
+        expect(request.context?.symbol).toBe('FPT');
+    });
+
+    test('detached workspace symbol change clears the old scoped identity without re-staging', async () => {
+        const view = render(
+            <AICopilot
+                isOpen
+                onClose={() => {}}
+                currentSymbol="VNM"
+                widgetContext="Price Chart"
+                widgetContextData={{ widgetTypeKey: 'price_chart', symbol: 'FPT' }}
+                starterPrompt="analyze"
+                starterPromptRequestId={1}
+                starterWorkflow={{ id: 'financial-summary', revision: 1 }}
+            />
+        );
+        await screen.findByTitle('Active model: test-model');
+        expect(screen.getByText(/Current symbol: FPT/)).toBeInTheDocument();
+        view.rerender(
+            <AICopilot
+                isOpen
+                onClose={() => {}}
+                currentSymbol="VNM"
+                widgetContext="Price Chart"
+                widgetContextData={{ widgetTypeKey: 'price_chart', symbol: 'HPG' }}
+                starterPrompt="analyze"
+                starterPromptRequestId={1}
+                starterWorkflow={{ id: 'financial-summary', revision: 1 }}
+            />
+        );
+        expect(screen.queryByRole('note', { name: 'Reviewed workflow requirements' })).not.toBeInTheDocument();
+        expect(screen.queryByText(/Current symbol: FPT/)).not.toBeInTheDocument();
+    });
 });
+
