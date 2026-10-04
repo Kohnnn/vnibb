@@ -541,3 +541,12 @@ async def test_price_depth_catalog_upserts_preserve_levels_and_refresh_batch(mon
     assert all(row["updatedAt"] == second_batch for row in out)
     assert all(row["createdAt"] == first_batch for row in collection.rows)
     assert len(collection.rows) == 3
+
+    third_batch = datetime(2026, 10, 1, 17)
+    monkeypatch.setattr(catalog, "_now", lambda: third_batch)
+    zeroed = [{**raw, "volume": 0} for raw in refreshed]
+    catalog._upsert_raw_rows(db, spec, "SSI", zeroed, dry_run=False)
+    # The older 30500 level remains positive in storage, not in current depth.
+    for include_provenance in (False, True):
+        out = await service.get_price_depth_precise("ssi", limit=1, include_provenance=include_provenance)
+        assert out == []

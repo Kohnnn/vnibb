@@ -484,6 +484,8 @@ class MongoMarketDataService:
         def _read() -> list[dict[str, Any]]:
             coll = self._get_collection("market_vnstock_premium_records")
             rows: list[dict[str, Any]] = []
+            batch_selected = False
+            batch_update: Any = None
             for record in coll.find(
                 {"dataset": "equity.price_depth", "symbol": symbol_upper},
                 {
@@ -498,14 +500,16 @@ class MongoMarketDataService:
                     "recordKey": 1,
                 },
             ).sort([("updatedAt", -1), ("observedAt", -1), ("recordKey", 1)]):
-                if rows and rows[0]["_batch_update"] != record.get("updatedAt"):
+                if not batch_selected:
+                    batch_update = record.get("updatedAt")
+                    batch_selected = True
+                elif batch_update != record.get("updatedAt"):
                     break
                 raw = record.get("raw") or {}
                 row_price = _to_float(raw.get("price"))
                 row_volume = _to_float(raw.get("volume"))
                 if row_price <= 0 or row_volume <= 0:
                     continue
-                batch_update = record.get("updatedAt")
                 if len(rows) >= limit:
                     continue
                 row: dict[str, Any] = {
@@ -519,9 +523,7 @@ class MongoMarketDataService:
                     row["observedAt"] = record.get("observedAt")
                     row["updatedAt"] = batch_update
                     row["recordKey"] = record.get("recordKey")
-                rows.append({**row, "_batch_update": batch_update})
-            for row in rows:
-                row.pop("_batch_update", None)
+                rows.append(row)
             return rows
 
         try:

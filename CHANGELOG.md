@@ -36,6 +36,7 @@ live in `docs/`.
   not establish market-data freshness.
 
 ### Fixed
+- MCP price-depth retrieval selects the newest write batch before filtering levels. An all-zero newest batch returns empty depth instead of resurfacing stale positive levels from an older batch.
 - Catalog depth ingestion preserves distinct prices even when provider rows share symbol/ticker/time metadata. Scope-and-price keys stay stable across volume changes; the regression executes real `_upsert_raw_rows` operations against an upsert-aware store and verifies bounded reader results and repeat refreshes. Previously overwritten levels require a new provider fetch.
 - VniAgent follow-ups require every mandatory source kind in the prompt's scope. Partial evidence no longer offers valuation, margin, balance-sheet, flow, catalyst, or market-breadth questions that need missing sources; single-source prompts remain available. This fix is not yet deployed.
 - Follow-up eligibility, citations, and ranking use the same scoped evidence selection. Required source entries without citable IDs cannot enable a question; padded duplicate IDs are normalized and deduplicated.
