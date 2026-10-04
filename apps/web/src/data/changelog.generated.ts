@@ -49,6 +49,7 @@ live in \`docs/\`.
 - Listing/profile cache writes use atomic symbol-key upserts, preventing duplicate listing inputs or concurrent first writes from rolling back valid metadata. Sparse updates preserve existing values and creation timestamps.
 - Mongo EOD ingestion refuses writes without an assured unique natural-key index and propagates bulk failures to the scheduler instead of reporting a successful zero-row refresh. Existing Vietcap coverage remains a valid zero-write result; partially accepted unordered bulks are disclosed as failed ingestion.
 - The scheduled Mongo EOD job now records a durable failed outcome when any symbol fails, after the entire sync finishes. Consecutive failure counters increment for partial and total failures, then reset on a successful zero-write or normal run.
+- PostgreSQL release-contract fixtures open fresh connections per test event loop, preventing pooled asyncpg connections from leaking between loops. Production connection pooling is unchanged.
 - Prediction-market catalogue admission counts fresh, real, active, nonclosed,
   unexpired markets toward each source's 10,000-market cap. Historical rows
   remain available while separate physical and snapshot storage limits continue

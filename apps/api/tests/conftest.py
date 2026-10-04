@@ -12,7 +12,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient, MockTransport, Response
 from jose import jwt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 POSTGRES_CONTRACT = os.environ.get("POSTGRES_CONTRACT") == "1"
 
@@ -80,7 +80,9 @@ def event_loop():
 @pytest.fixture(scope="session")
 async def test_engine():
     engine_kwargs = {"echo": False}
-    if not POSTGRES_CONTRACT:
+    if POSTGRES_CONTRACT:
+        engine_kwargs["poolclass"] = NullPool
+    else:
         engine_kwargs.update(
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
