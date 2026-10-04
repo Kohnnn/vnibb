@@ -62,7 +62,7 @@ async def _record_job_outcome(job_name: str, outcome: str, detail: str = "") -> 
                             "last_at": observed_at,
                             "consecutive_failures": (
                                 previous.c.consecutive_failures + 1
-                                if outcome in {"failed", "timeout"} else 0
+                                if outcome in {"failed", "timeout"} else previous.c.consecutive_failures if outcome == "partial" else 0
                             ),
                         },
                         where=(previous.c.last_at.is_(None) | (previous.c.last_at <= observed_at)),
@@ -274,10 +274,17 @@ async def _run_guarded_job(
                 else runner()
             )
             if timeout_seconds > 0:
-                await asyncio.wait_for(guarded_runner, timeout=timeout_seconds)
+                result = await asyncio.wait_for(guarded_runner, timeout=timeout_seconds)
             else:
-                await guarded_runner
+                result = await guarded_runner
+            stages = list(result.values()) if isinstance(result, dict) else [result]
+            if any(getattr(stage, "success", True) is False for stage in stages):
+                raise RuntimeError("sync returned unsuccessful stage results")
             elapsed = (datetime.utcnow() - started_at).total_seconds()
+            pending = sum(getattr(stage, "pending_count", 0) for stage in stages)
+            if any(getattr(stage, "complete", True) is False for stage in stages):
+                await _record_job_outcome(job_name, "partial", f"progress saved; pending acquisitions={pending}")
+                return
             await _record_job_outcome(job_name, "ok", f"completed in {elapsed:.1f}s")
             logger.info("%s completed in %.1fs", job_name, elapsed)
         except TimeoutError:
@@ -419,34 +426,28 @@ def configure_scheduler():
     logger.info("Scheduled: daily_trading_sync at 9:20 UTC (4:20 PM VNT)")
 
     # =========================================================================
-    # Financial Ratios Sync - monthly, 3rd at 18:00 UTC
-    # =========================================================================
-    # `financial_ratios` had no scheduled owner at all. Its only writers are
-    # `FullMarketSync.run_full_sync` and `run_full_seeding`, neither a cron, so
-    # the table sat at 2026-05-20 for 125 days while the freshness probe
-    # correctly reported it critical. Ratios only move when a company files,
-    # so a monthly pass is the right cadence; it also re-covers any symbol the
-    # initial seeding missed.
+    # Financial Ratios: daily bounded continuation; completed Universe cycles
+    # are reused for 30 days. Partial work never certifies coverage/freshness.
     async def guarded_financial_ratios_sync() -> None:
-        from vnibb.services.data_pipeline import data_pipeline
+        from vnibb.services.sync_all_data import run_financial_ratios_sync
 
         await _run_guarded_job(
             "financial_ratios_sync",
-            lambda: data_pipeline.sync_financial_ratios(period="quarter"),
+            run_financial_ratios_sync,
             FINANCIAL_RATIOS_TIMEOUT_SECONDS,
         )
 
     scheduler.add_job(
         guarded_financial_ratios_sync,
-        trigger=CronTrigger(day=3, hour=18, minute=0, timezone="UTC"),
+        trigger=CronTrigger(hour=18, minute=0, timezone="UTC"),
         id="financial_ratios_sync",
-        name="Financial Ratios Sync (monthly)",
+        name="Financial Ratios Sync (monthly cycle, daily continuation)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
         misfire_grace_time=3600,
     )
-    logger.info("Scheduled: financial_ratios_sync monthly on day 3 at 18:00 UTC")
+    logger.info("Scheduled: financial_ratios_sync daily at 18:00 UTC (monthly complete-Universe cycle)")
 
     # =========================================================================
     # Daily Data Quality Check - 4:40 PM VNT (9:40 AM UTC)

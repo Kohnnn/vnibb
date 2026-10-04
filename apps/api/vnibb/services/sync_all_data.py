@@ -8,11 +8,12 @@ which is the single runtime data source.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, select
 
@@ -20,6 +21,7 @@ from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
+from vnibb.models.sync_status import SyncStatus
 from vnibb.services.data_pipeline import data_pipeline
 
 logger = logging.getLogger(__name__)
@@ -36,6 +38,8 @@ class SyncResult:
     error_count: int
     duration_seconds: float
     errors: list[str]
+    complete: bool = True
+    pending_count: int = 0
 
 
 class FullMarketSync:
@@ -148,7 +152,11 @@ class FullMarketSync:
         resolved_symbols = symbols or await self._get_seeded_symbols(max_symbols=max_symbols)
 
         async def _operation() -> int:
-            return await data_pipeline.sync_company_profiles(symbols=resolved_symbols)
+            progress: dict = {}
+            count = await data_pipeline.sync_company_profiles(symbols=resolved_symbols, progress=progress)
+            if progress.get("error_count"):
+                raise RuntimeError("Profile acquisition has failed symbols")
+            return count
 
         return await self._run_stage("profiles", _operation)
 
@@ -202,6 +210,122 @@ class FullMarketSync:
 
         return await self._run_stage("prices", _operation)
 
+    async def run_maintenance_cycle(
+        self,
+        sync_type: str,
+        symbols: list[str],
+        stages: list[tuple[str, Callable[[str, dict], Awaitable[int]]]],
+        budget_seconds: float,
+        refresh_days: int,
+    ) -> SyncResult:
+        """Resume a complete-Universe cycle; only acquired symbols advance coverage."""
+        started = time.monotonic()
+        symbols = sorted(set(symbols))
+        if not symbols:
+            return SyncResult(False, 0, 1, 0, ["Active Universe is empty"])
+        async with async_session_maker() as session:
+            previous = (await session.scalars(
+                select(SyncStatus).where(SyncStatus.sync_type == sync_type)
+                .order_by(SyncStatus.id.desc()).limit(1)
+            )).first()
+        metadata = dict(previous.additional_data or {}) if previous else {}
+        same_universe = metadata.get("expected_symbols") == symbols
+        fresh = (previous is not None and previous.status == "completed"
+                 and previous.completed_at is not None
+                 and previous.completed_at >= datetime.utcnow() - timedelta(days=refresh_days))
+        if same_universe and fresh:
+            return SyncResult(True, 0, 0, time.monotonic() - started, [])
+        if previous is not None and previous.status != "completed" and same_universe:
+            sync_id = previous.id
+        else:
+            sync_id = await data_pipeline._create_sync_record(sync_type, f"{sync_type}-{int(time.time())}", 0)
+            metadata = {"expected_symbols": symbols, "expected_count": len(symbols), "stages": {}}
+        stage_metadata = metadata.setdefault("stages", {})
+        for name, _ in stages:
+            state = stage_metadata.setdefault(name, {"acquired_symbols": [], "failed_symbols": []})
+            state["pending_count"] = len(symbols) - len(state["acquired_symbols"])
+        work = [(symbol, name, operation) for symbol in symbols for name, operation in stages]
+        cursor = (metadata.get("last_symbol"), metadata.get("last_stage"))
+        cursor_index = next((index for index, (symbol, name, _) in enumerate(work) if (symbol, name) == cursor), None)
+        if cursor_index is not None:
+            work = work[cursor_index + 1:] + work[:cursor_index + 1]
+        failures = 0
+        acquired = 0
+        errors: list[str] = []
+        # Iterate symbols first so every symbol receives every required period before
+        # progressing, rather than stranding later periods behind a large first pass.
+        try:
+            from vnibb.providers.vnstock.runtime import financial_provider_busy
+            for symbol, name, operation in work:
+                state = stage_metadata[name]
+                if symbol in state["acquired_symbols"]:
+                    continue
+                remaining = budget_seconds - (time.monotonic() - started)
+                if remaining <= 0 or financial_provider_busy():
+                    break
+                progress: dict = {}
+                deadline = asyncio.timeout(remaining)
+                try:
+                    async with deadline:
+                        count = await operation(symbol, progress)
+                    if not count or progress.get("error_count", 0):
+                        raise RuntimeError("acquisition unavailable or incomplete")
+                    state["acquired_symbols"].append(symbol)
+                    state["failed_symbols"] = [item for item in state["failed_symbols"] if item != symbol]
+                    acquired += 1
+                except Exception as exc:
+                    if not deadline.expired():
+                        failures += 1
+                        if symbol not in state["failed_symbols"]:
+                            state["failed_symbols"].append(symbol)
+                        errors.append(f"{name}:{symbol}:{type(exc).__name__}")
+                        failure = errors[-1]
+                        history = metadata.setdefault("acquisition_error_history", [])
+                        if failure not in history:
+                            metadata["acquisition_error_history"] = (history + [failure])[-100:]
+                state["pending_count"] = len(symbols) - len(state["acquired_symbols"])
+                metadata["last_stage"] = name
+                metadata["last_symbol"] = symbol
+                await data_pipeline._update_sync_record(
+                    sync_id, status="running", success_count=sum(len(value["acquired_symbols"]) for value in stage_metadata.values()),
+                    error_count=sum(len(value["failed_symbols"]) for value in stage_metadata.values()), additional_data=metadata,
+                )
+                if deadline.expired() or time.monotonic() - started >= budget_seconds or financial_provider_busy():
+                    break
+        except BaseException:
+            metadata["complete"] = False
+            for state in stage_metadata.values():
+                state["pending_count"] = len(symbols) - len(state["acquired_symbols"])
+            await data_pipeline._update_sync_record(sync_id, status="partial", additional_data=metadata)
+            raise
+        for name, _ in stages:
+            state = stage_metadata.setdefault(name, {"acquired_symbols": [], "failed_symbols": []})
+            state["pending_count"] = len(symbols) - len(state["acquired_symbols"])
+        pending = sum(state["pending_count"] for state in stage_metadata.values())
+        metadata["complete"] = pending == 0
+        await data_pipeline._update_sync_record(
+            sync_id, status="completed" if pending == 0 else "partial",
+            success_count=sum(len(value["acquired_symbols"]) for value in stage_metadata.values()),
+            error_count=sum(len(value["failed_symbols"]) for value in stage_metadata.values()),
+            additional_data=metadata, errors={"acquisition_failures": metadata.get("acquisition_error_history", [])},
+        )
+        return SyncResult(failures == 0, acquired, failures, time.monotonic() - started, errors[:20], pending == 0, pending)
+
+    async def sync_daily_profiles(self, symbols: list[str], budget_seconds: float = 600) -> SyncResult:
+        return await self.run_maintenance_cycle("daily_profile_maintenance", symbols, [
+            ("profiles", lambda symbol, progress: data_pipeline.sync_company_profiles(symbols=[symbol], progress=progress)),
+        ], budget_seconds=budget_seconds, refresh_days=7)
+
+    async def sync_daily_maintenance(self, symbols: list[str], budget_seconds: float = 1200) -> SyncResult:
+        # Profiles have a separate 600s slice; filing acquisition gets 1200s.
+        # Both weekly complete-Universe cycles resume daily, without recertifying
+        # symbols already acquired. Quarterly ratios have their daily guarded owner.
+        return await self.run_maintenance_cycle("daily_financial_maintenance", symbols, [
+            ("financials_year", lambda symbol, progress: data_pipeline.sync_financials(symbols=[symbol], period="year", progress=progress)),
+            ("financials_quarter", lambda symbol, progress: data_pipeline.sync_financials(symbols=[symbol], period="quarter", progress=progress)),
+            ("ratios_year", lambda symbol, progress: data_pipeline.sync_financial_ratios(symbols=[symbol], period="year", progress=progress)),
+        ], budget_seconds, refresh_days=7)
+
     async def sync_all_financials(
         self,
         symbols: list[str] | None = None,
@@ -213,16 +337,12 @@ class FullMarketSync:
 
         async def _operation() -> int:
             total = 0
-            total += await data_pipeline.sync_financials(symbols=resolved_symbols, period="year")
-            total += await data_pipeline.sync_financials(symbols=resolved_symbols, period="quarter")
-            total += await data_pipeline.sync_financial_ratios(
-                symbols=resolved_symbols,
-                period="year",
-            )
-            total += await data_pipeline.sync_financial_ratios(
-                symbols=resolved_symbols,
-                period="quarter",
-            )
+            for operation in (data_pipeline.sync_financials, data_pipeline.sync_financial_ratios):
+                for period in ("year", "quarter"):
+                    progress: dict = {}
+                    total += await operation(symbols=resolved_symbols, period=period, progress=progress)
+                    if progress.get("error_count"):
+                        raise RuntimeError(f"Financial {period} acquisition has failed symbols")
             return total
 
         return await self._run_stage("financials", _operation)
@@ -246,8 +366,11 @@ class FullMarketSync:
 
         async def _operation() -> int:
             total = 0
-            total += await data_pipeline.sync_dividends(symbols=resolved_symbols)
-            total += await data_pipeline.sync_company_events(symbols=resolved_symbols)
+            for operation in (data_pipeline.sync_dividends, data_pipeline.sync_company_events):
+                progress: dict = {}
+                total += await operation(symbols=resolved_symbols, progress=progress)
+                if progress.get("error_count"):
+                    raise RuntimeError("Corporate action acquisition has failed symbols")
             return total
 
         return await self._run_stage("corporate_actions", _operation)
@@ -379,74 +502,77 @@ async def run_daily_market_sync(
     history_days: int = DAILY_MARKET_HISTORY_DAYS,
     include_corporate_actions: bool = True,
 ) -> dict[str, SyncResult]:
-    """Run the post-close daily market refresh for all active symbols."""
-
-    async def _run_direct_stage(
-        stage_name: str,
-        operation: Callable[[], Awaitable[int]],
-    ) -> SyncResult:
-        start = time.monotonic()
-        errors: list[str] = []
-        synced_count = 0
-        success = True
-
-        try:
-            synced_count = int(await operation())
-        except Exception as exc:  # noqa: BLE001
-            success = False
-            errors.append(str(exc))
-            logger.exception("%s sync failed: %s", stage_name, exc)
-
-        duration_seconds = time.monotonic() - start
-        return SyncResult(
-            success=success,
-            synced_count=synced_count,
-            error_count=len(errors),
-            duration_seconds=duration_seconds,
-            errors=errors,
-        )
-
+    """Refresh the full daily market Universe and resume weekly filing maintenance."""
+    daily_started = time.monotonic()
     sync = FullMarketSync()
     results: dict[str, SyncResult] = {}
-
-    symbols = await sync._get_seeded_symbols()
-    if not symbols:
-        results["symbols"] = await _run_direct_stage("symbols", data_pipeline.sync_stock_list)
+    sync_id = await data_pipeline._create_sync_record("daily_market", f"daily-market-{int(time.time())}", history_days)
+    metadata: dict = {"stages": {}}
+    try:
         symbols = await sync._get_seeded_symbols()
+        if not symbols:
+            results["symbols"] = await sync.sync_all_symbols()
+            symbols = await sync._get_seeded_symbols()
+        if not symbols:
+            raise RuntimeError("Active Universe is empty")
+        metadata.update(expected_symbols=symbols, expected_count=len(symbols))
 
-    results["prices"] = await sync.sync_all_prices(
-        symbols=symbols,
-        include_historical=True,
-        history_days=history_days,
-    )
-    results["indices"] = await sync.sync_all_indices()
-    results["profiles"] = await sync.sync_all_profiles(symbols=symbols)
-    results["financials"] = await sync.sync_all_financials(symbols=symbols)
+        async def record(name: str, operation: Callable[[], Awaitable[SyncResult]]) -> None:
+            results[name] = await operation()
+            metadata["stages"][name] = results[name].__dict__
+            await data_pipeline._update_sync_record(sync_id, additional_data=metadata)
 
-    async def _sync_rs_ratings() -> int:
-        from vnibb.services.rs_rating_service import RSRatingService
+        async def prices() -> SyncResult:
+            async def acquire() -> int:
+                price_progress: dict = {}
+                count = await data_pipeline.sync_daily_prices(symbols=symbols, days=history_days,
+                    fill_missing_gaps=True, cache_recent=False, progress=price_progress)
+                progress: dict = {}
+                screener_count = await data_pipeline.sync_screener_data(progress=progress)
+                if progress.get("error_count") or screener_count != len(symbols):
+                    raise RuntimeError("Screener did not acquire the complete active Universe")
+                count += screener_count
+                if price_progress.get("error_count"):
+                    raise RuntimeError("Daily price acquisition has failed symbols")
+                return count
+            return await sync._run_stage("prices", acquire)
 
-        service = RSRatingService()
-        result = await service.calculate_all_rs_ratings()
-        if not result.get("success"):
-            raise RuntimeError(result.get("error") or "RS rating calculation failed")
-        return int(result.get("total_stocks") or 0)
+        await record("prices", prices)
+        await record("indices", sync.sync_all_indices)
 
-    results["rs_ratings"] = await _run_direct_stage("rs_ratings", _sync_rs_ratings)
-
-    if include_corporate_actions:
-
-        async def _sync_corporate_actions() -> int:
-            total = await data_pipeline.sync_dividends(symbols=symbols)
-            total += await data_pipeline.sync_company_events(symbols=symbols)
-            return total
-
-        results["corporate_actions"] = await _run_direct_stage(
-            "corporate_actions",
-            _sync_corporate_actions,
-        )
-
+        async def rs_ratings() -> SyncResult:
+            from vnibb.services.rs_rating_service import RSRatingService
+            async def acquire() -> int:
+                result = await RSRatingService().calculate_all_rs_ratings()
+                if not result.get("success"):
+                    raise RuntimeError("RS rating calculation failed")
+                return int(result.get("total_stocks") or 0)
+            return await sync._run_stage("rs_ratings", acquire)
+        await record("rs_ratings", rs_ratings)
+        if include_corporate_actions:
+            await record("corporate_actions", lambda: sync.sync_all_corporate_actions(symbols=symbols))
+        profile_budget = min(600, max(0, 7080 - (time.monotonic() - daily_started)))
+        await record("profiles", lambda: sync.sync_daily_profiles(symbols, budget_seconds=profile_budget))
+        financial_budget = min(1200, max(0, 7080 - (time.monotonic() - daily_started)))
+        await record("financials", lambda: sync.sync_daily_maintenance(symbols, budget_seconds=financial_budget))
+        complete = all(result.success and result.complete for result in results.values())
+        await data_pipeline._update_sync_record(sync_id,
+            status="completed" if complete else "partial",
+            success_count=sum(result.synced_count for result in results.values()),
+            error_count=sum(result.error_count for result in results.values()), additional_data=metadata)
+    except BaseException:
+        await data_pipeline._update_sync_record(sync_id, status="failed", additional_data=metadata)
+        raise
     return results
+
+
+async def run_financial_ratios_sync(budget_seconds: float = 4500) -> SyncResult:
+    """Daily guarded continuation of a complete-Universe monthly ratios cycle."""
+    sync = FullMarketSync()
+    symbols = await sync._get_seeded_symbols()
+    return await sync.run_maintenance_cycle("financial_ratios_maintenance", symbols, [
+        ("ratios_quarter", lambda symbol, progress: data_pipeline.sync_financial_ratios(symbols=[symbol], period="quarter", progress=progress)),
+    ], budget_seconds, refresh_days=30)
 
 
 async def run_full_sync(

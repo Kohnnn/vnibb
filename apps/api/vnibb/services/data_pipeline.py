@@ -7,63 +7,61 @@ Supports both PostgreSQL and SQLite dialects.
 """
 
 import asyncio
-import os
 import logging
+import os
 import re
 from contextvars import ContextVar
+from datetime import date, datetime, time, timedelta
+from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import uuid4
-from datetime import date, datetime, timedelta, time
-from typing import Optional, List, Dict, Any, Union, Tuple
+from zoneinfo import ZoneInfo
 
 import pandas as pd
-from zoneinfo import ZoneInfo
-from sqlalchemy import select, and_, or_, func, text, update, delete, case
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, case, delete, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from vnibb.core.database import async_session_maker, engine
-from vnibb.core.cache import redis_client, build_cache_key
-from vnibb.core.config import settings
-from vnibb.core.vn_sectors import resolve_sector_name
+from vnibb.core.cache import build_cache_key, redis_client
 from vnibb.core.cache_constants import (
-    PIPELINE_TTL_LISTING,
-    PIPELINE_TTL_PROFILE,
-    PIPELINE_TTL_SCREENER,
-    PIPELINE_TTL_PRICE_LATEST,
-    PIPELINE_TTL_PRICE_RECENT,
-    PIPELINE_TTL_FINANCIALS,
-    PIPELINE_TTL_FOREIGN_TRADING,
-    PIPELINE_TTL_ORDER_FLOW,
-    PIPELINE_TTL_INTRADAY,
-    PIPELINE_TTL_ORDERBOOK,
-    PIPELINE_TTL_ORDERBOOK_DAILY,
     PIPELINE_TTL_BLOCK_TRADES,
     PIPELINE_TTL_DERIVATIVES_LATEST,
     PIPELINE_TTL_DERIVATIVES_RECENT,
-    RECENT_PRICE_DAYS,
+    PIPELINE_TTL_FINANCIALS,
+    PIPELINE_TTL_FOREIGN_TRADING,
+    PIPELINE_TTL_INTRADAY,
+    PIPELINE_TTL_LISTING,
+    PIPELINE_TTL_ORDER_FLOW,
+    PIPELINE_TTL_ORDERBOOK,
+    PIPELINE_TTL_ORDERBOOK_DAILY,
+    PIPELINE_TTL_PRICE_LATEST,
+    PIPELINE_TTL_PRICE_RECENT,
+    PIPELINE_TTL_PROFILE,
+    PIPELINE_TTL_SCREENER,
     RECENT_DERIVATIVE_DAYS,
+    RECENT_PRICE_DAYS,
 )
-from vnibb.models.stock import Stock, StockPrice, StockIndex
-from vnibb.models.company import Company, Shareholder, Officer
-from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
-from vnibb.models.news import CompanyNews, CompanyEvent, Dividend, InsiderDeal
+from vnibb.core.config import settings
+from vnibb.core.database import async_session_maker, engine
+from vnibb.core.retry import with_retry
+from vnibb.core.vn_sectors import resolve_sector_name
 from vnibb.models.alerts import BlockTrade
+from vnibb.models.company import Company, Officer, Shareholder
+from vnibb.models.derivatives import DerivativePrice
+from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+from vnibb.models.market import MarketSector, SectorPerformance, Subsidiary
+from vnibb.models.market_news import MarketNews
+from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
+from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock, StockIndex, StockPrice
+from vnibb.models.sync_status import SyncStatus
+from vnibb.models.technical_indicator import TechnicalIndicator
 from vnibb.models.trading import (
-    ForeignTrading,
     FinancialRatio,
+    ForeignTrading,
     IntradayTrade,
     OrderbookSnapshot,
     OrderFlowDaily,
 )
-from vnibb.models.derivatives import DerivativePrice
-from vnibb.models.market import MarketSector, SectorPerformance, Subsidiary
-from vnibb.models.technical_indicator import TechnicalIndicator
-from vnibb.models.market_news import MarketNews
-from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.sync_status import SyncStatus
-from vnibb.core.retry import with_retry
-from vnibb.services.realtime_pipeline import is_vietnam_market_open
-from vnibb.services.prediction_market_retention import retention as prediction_market_retention
 from vnibb.providers.vnstock.financial_ratios import (
     FinancialRatiosQueryParams,
     VnstockFinancialRatiosFetcher,
@@ -73,6 +71,9 @@ from vnibb.providers.vnstock.financials import (
     StatementType,
     VnstockFinancialsFetcher,
 )
+from vnibb.services.data_quality import is_market_business_day
+from vnibb.services.prediction_market_retention import retention as prediction_market_retention
+from vnibb.services.realtime_pipeline import is_vietnam_market_open
 
 logger = logging.getLogger(__name__)
 
@@ -687,9 +688,10 @@ class DataPipeline:
         return MARKET_INDEX_ALIASES.get(normalized, normalized.replace("-", ""))
 
     def _iter_weekdays(self, start_date: date, end_date: date):
+        holidays = {date.fromisoformat(value) for value in settings.market_holiday_dates}
         current = start_date
         while current <= end_date:
-            if current.weekday() < 5:
+            if is_market_business_day(current, holidays):
                 yield current
             current += timedelta(days=1)
 
@@ -703,6 +705,7 @@ class DataPipeline:
         if start_date > end_date:
             return []
 
+        holidays = {date.fromisoformat(value) for value in settings.market_holiday_dates}
         missing_dates = [
             day for day in self._iter_weekdays(start_date, end_date) if day not in existing_dates
         ]
@@ -717,7 +720,7 @@ class DataPipeline:
             day_gap = (day - range_end).days
             contiguous = True
             for offset in range(1, day_gap):
-                if (range_end + timedelta(days=offset)).weekday() < 5:
+                if is_market_business_day(range_end + timedelta(days=offset), holidays):
                     contiguous = False
                     break
             if contiguous and (day - range_start).days < max_range_days:
@@ -1050,10 +1053,14 @@ class DataPipeline:
         sync_id: Optional[int] = None,
     ) -> int:
         """Sync comprehensive metrics for stocks using vnstock finance.ratio."""
-        from vnibb.providers.vnstock.runtime import get_listing_class, get_vnstock_class
+        from vnibb.providers.vnstock.runtime import (
+            create_finance,
+            finance_method_kwargs,
+            get_listing_class,
+            run_financial_provider,
+        )
 
         Listing = get_listing_class()
-        Vnstock = get_vnstock_class()
 
         logger.info("Syncing screener data...")
         loop = asyncio.get_running_loop()
@@ -1213,7 +1220,7 @@ class DataPipeline:
             deduped_symbols = list(dict.fromkeys(symbol_list))
         else:
             async with async_session_maker() as session:
-                stmt = select(Stock.symbol).where(Stock.is_active == 1)
+                stmt = select(Stock.symbol).where(Stock.is_active == 1).order_by(Stock.symbol.asc())
                 if normalized_exchanges:
                     stmt = stmt.where(func.upper(Stock.exchange).in_(normalized_exchanges))
                 result = await session.execute(stmt)
@@ -1366,14 +1373,6 @@ class DataPipeline:
             )
 
         async with async_session_maker() as session:
-            if symbols is None and exchanges is None and limit is None and start_index == 0:
-                await session.execute(
-                    delete(SyncStatus).where(
-                        SyncStatus.sync_type == "screener_universe",
-                        SyncStatus.additional_data["snapshot_date"].as_string() == today.isoformat(),
-                    )
-                )
-                await session.commit()
             count = 0
             failed_symbols = 0
             for idx in range(start_index, len(deduped_symbols)):
@@ -1385,8 +1384,9 @@ class DataPipeline:
                         try:
 
                             def _fetch_ratio_snapshot(sym: str, src: str):
-                                stock = Vnstock().stock(symbol=sym, source=src)
-                                df = stock.finance.ratio(period="year")
+                                finance = create_finance(sym, src, "year")
+                                kwargs = finance_method_kwargs(finance.ratio, "year")
+                                df = finance.ratio(**kwargs)
                                 if df is None or df.empty:
                                     return None
 
@@ -1465,7 +1465,8 @@ class DataPipeline:
                                 try:
                                     end_date = datetime.now()
                                     start_date = end_date - timedelta(days=10)
-                                    history = stock.quote.history(
+                                    from vnibb.providers.vnstock.runtime import get_quote_class
+                                    history = get_quote_class()(symbol=sym, source=src).history(
                                         start=start_date.strftime("%Y-%m-%d"),
                                         end=end_date.strftime("%Y-%m-%d"),
                                     )
@@ -1484,11 +1485,8 @@ class DataPipeline:
 
                                 return ratio_row
 
-                            ratio_df = await asyncio.wait_for(
-                                loop.run_in_executor(
-                                    None, _fetch_ratio_snapshot, symbol, ratio_source
-                                ),
-                                timeout=settings.vnstock_timeout,
+                            ratio_df = await run_financial_provider(
+                                lambda sym=symbol, src=ratio_source: _fetch_ratio_snapshot(sym, src), settings.vnstock_timeout
                             )
                             if ratio_df:
                                 break
@@ -1504,6 +1502,13 @@ class DataPipeline:
                             )
 
                     row = ratio_df or {}
+                    if not ratio_df:
+                        failed_symbols += 1
+                        if progress is not None:
+                            progress["error_count"] = progress.get("error_count", 0) + 1
+                            progress["stage_stats"]["screener"]["errors"] += 1
+                        # Preserve already-certified same-day row/cache on a failed rerun.
+                        continue
                     stock_row = stock_metadata.get(symbol, {})
                     company_row = company_metadata.get(symbol, {})
                     listing_row = listing_metadata.get(symbol, {})
@@ -1524,18 +1529,14 @@ class DataPipeline:
                         price_value = row_price
                         volume_value = row_volume
                         trade_date_value = row_trade_date
-                    elif previous_price is not None:
-                        price_value = previous_price
-                        volume_value = previous_volume
-                        trade_date_value = self._parse_date_value(
-                            previous_row.get("trade_date")
-                        )
-                    else:
+                    elif latest_price is not None:
                         price_value = latest_price
                         volume_value = latest_volume
-                        trade_date_value = self._parse_date_value(
-                            latest_price_row.get("trade_date")
-                        )
+                        trade_date_value = self._parse_date_value(latest_price_row.get("trade_date"))
+                    else:
+                        price_value = previous_price
+                        volume_value = previous_volume
+                        trade_date_value = self._parse_date_value(previous_row.get("trade_date"))
                     market_cap_value = (
                         _parse_float(row.get("market_cap"))
                         or _parse_float(row.get("marketCap"))
@@ -1717,7 +1718,7 @@ class DataPipeline:
                             "bvps": values.get("bvps"),
                         }
                     )
-                    if progress is not None:
+                    if progress is not None and ratio_df:
                         progress["success_count"] = progress.get("success_count", 0) + 1
                         progress["stage_stats"]["screener"]["success"] += 1
                 except Exception as ratio_error:
@@ -2006,13 +2007,15 @@ class DataPipeline:
                     )
                     stock_id = stock_id_result.scalar()
                     if not stock_id:
-                        continue
+                        raise RuntimeError(f"Missing stock identity for {symbol}")
 
                     if fill_missing_gaps:
                         existing_rows_result = await session.execute(
                             select(StockPrice.time).where(
                                 StockPrice.symbol == symbol,
                                 StockPrice.interval == "1D",
+                                StockPrice.time >= resolved_start,
+                                StockPrice.time <= resolved_end,
                             )
                         )
                         existing_dates = {
@@ -2020,28 +2023,12 @@ class DataPipeline:
                             for (row_time,) in existing_rows_result.fetchall()
                             if isinstance(row_time, date)
                         }
-                        if existing_dates:
-                            db_min_time = min(existing_dates)
-                            db_max_time = max(existing_dates)
-                            gap_ranges = self._build_missing_date_ranges(
-                                existing_dates=existing_dates,
-                                start_date=db_min_time,
-                                end_date=db_max_time,
-                                max_range_days=30,
-                            )
-                            fetch_ranges = gap_ranges or []
-
-                            if db_max_time < resolved_end:
-                                tail_start = max(db_max_time + timedelta(days=1), resolved_start)
-                                if tail_start <= resolved_end:
-                                    fetch_ranges.append((tail_start, resolved_end))
-                            if resolved_start < db_min_time:
-                                head_end = min(db_min_time - timedelta(days=1), resolved_end)
-                                if resolved_start <= head_end:
-                                    fetch_ranges.append((resolved_start, head_end))
-
-                            if not fetch_ranges:
-                                fetch_ranges = [(resolved_start, resolved_end)]
+                        fetch_ranges = self._build_missing_date_ranges(
+                            existing_dates=existing_dates,
+                            start_date=resolved_start,
+                            end_date=resolved_end,
+                            max_range_days=30,
+                        )
 
                 latest_row: Optional[Dict[str, Any]] = None
                 symbol_synced = 0
@@ -2051,7 +2038,7 @@ class DataPipeline:
                     )
                     stock_id = stock_id_result.scalar()
                     if not stock_id:
-                        continue
+                        raise RuntimeError(f"Missing stock identity for {symbol}")
 
                     for range_start, range_end in fetch_ranges:
                         if range_start > range_end:
@@ -2069,13 +2056,7 @@ class DataPipeline:
                             bypass_internal_retry=True,
                         )
                         if range_df is None or range_df.empty:
-                            logger.debug(
-                                "Price gap fetch returned empty for %s (%s -> %s)",
-                                symbol,
-                                range_start_str,
-                                range_end_str,
-                            )
-                            continue
+                            raise RuntimeError(f"Empty price acquisition for {symbol} ({range_start_str} -> {range_end_str})")
 
                         for _, row in range_df.iterrows():
                             row_time = (
@@ -2173,8 +2154,12 @@ class DataPipeline:
                         except Exception:  # noqa: BLE001
                             pass
                 elif progress is not None:
-                    progress["error_count"] = progress.get("error_count", 0) + 1
-                    progress["stage_stats"]["prices"]["errors"] += 1
+                    if not fetch_ranges:
+                        progress["success_count"] = progress.get("success_count", 0) + 1
+                        progress["stage_stats"]["prices"]["success"] += 1
+                    else:
+                        progress["error_count"] = progress.get("error_count", 0) + 1
+                        progress["stage_stats"]["prices"]["errors"] += 1
             except SystemExit as exc:
                 logger.warning(f"Price sync aborted for {symbol}: {exc}")
                 if progress is not None:
@@ -2471,29 +2456,28 @@ class DataPipeline:
             symbol = symbols[idx]
             await self._wait_for_rate_limit("profiles")
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import (
+                    get_company_class,
+                    run_financial_provider,
+                )
 
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
+                def acquire_profile(symbol=symbol) -> Dict[str, Any]:
+                    company = get_company_class()(symbol=symbol, source=settings.vnstock_source)
+                    overview_row: Dict[str, Any] = {}
+                    profile_row: Dict[str, Any] = {}
+                    errors: list[Exception] = []
+                    for method_name, target in (("overview", overview_row), ("profile", profile_row)):
+                        try:
+                            frame = getattr(company, method_name)()
+                            if frame is not None and not frame.empty:
+                                target.update(frame.iloc[0].to_dict())
+                        except Exception as exc:
+                            errors.append(exc)
+                    if not overview_row and not profile_row and errors:
+                        raise errors[-1]
+                    return {**profile_row, **overview_row}
 
-                overview_row: Dict[str, Any] = {}
-                profile_row: Dict[str, Any] = {}
-
-                try:
-                    overview_df = stock.company.overview()
-                    if overview_df is not None and not overview_df.empty:
-                        overview_row = overview_df.iloc[0].to_dict()
-                except Exception as overview_error:
-                    logger.debug("Overview fetch failed for %s: %s", symbol, overview_error)
-
-                try:
-                    profile_df = stock.company.profile()
-                    if profile_df is not None and not profile_df.empty:
-                        profile_row = profile_df.iloc[0].to_dict()
-                except Exception as profile_error:
-                    logger.debug("Profile fetch failed for %s: %s", symbol, profile_error)
-
-                merged_row = {**profile_row, **overview_row}
+                merged_row = await run_financial_provider(acquire_profile, settings.vnstock_timeout)
                 if not merged_row:
                     if progress is not None:
                         progress["error_count"] = progress.get("error_count", 0) + 1
@@ -2823,9 +2807,12 @@ class DataPipeline:
                         period=normalized_period,
                         limit=fetch_limit,
                     )
-                    items = await VnstockFinancialsFetcher.fetch(params)
+                    raw_items = await VnstockFinancialsFetcher.extract_data(
+                        VnstockFinancialsFetcher.transform_query(params)
+                    )
+                    items = VnstockFinancialsFetcher.transform_data(params, raw_items)
                     if not items:
-                        continue
+                        raise RuntimeError(f"Empty {statement_type.value} acquisition for {symbol}")
 
                     latest_cache_payload: List[Dict[str, Any]] = []
                     async with async_session_maker() as session:
@@ -3946,7 +3933,10 @@ class DataPipeline:
             await self._wait_for_rate_limit("financials")
             try:
                 params = FinancialRatiosQueryParams(symbol=symbol, period=normalized_period)
-                ratio_items = await VnstockFinancialRatiosFetcher.fetch(params)
+                raw_items = await VnstockFinancialRatiosFetcher.extract_data(
+                    VnstockFinancialRatiosFetcher.transform_query(params)
+                )
+                ratio_items = VnstockFinancialRatiosFetcher.transform_data(params, raw_items)
 
                 async with async_session_maker() as session:
                     seeded_rows = await _seed_ratio_period_rows(session, symbol)
@@ -4085,10 +4075,14 @@ class DataPipeline:
                             seeded_rows,
                         )
 
-                total += 1
-                if progress is not None:
-                    progress["success_count"] = progress.get("success_count", 0) + 1
-                    progress["stage_stats"]["financial_ratios"]["success"] += 1
+                if ratio_items:
+                    total += 1
+                    if progress is not None:
+                        progress["success_count"] = progress.get("success_count", 0) + 1
+                        progress["stage_stats"]["financial_ratios"]["success"] += 1
+                elif progress is not None:
+                    progress["error_count"] = progress.get("error_count", 0) + 1
+                    progress["stage_stats"]["financial_ratios"]["errors"] += 1
             except SystemExit as exc:
                 logger.warning(f"Financial ratios sync aborted for {symbol}: {exc}")
                 if progress is not None:
@@ -4242,7 +4236,10 @@ class DataPipeline:
             await self._wait_for_rate_limit("profiles")
             try:
                 params = CompanyEventsQueryParams(symbol=symbol, limit=limit)
-                items = await VnstockCompanyEventsFetcher.fetch(params)
+                raw_items = await VnstockCompanyEventsFetcher.extract_data(
+                    VnstockCompanyEventsFetcher.transform_query(params)
+                )
+                items = VnstockCompanyEventsFetcher.transform_data(params, raw_items)
                 payloads: List[Dict[str, Any]] = []
 
                 if items:

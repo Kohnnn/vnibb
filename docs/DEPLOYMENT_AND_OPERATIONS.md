@@ -424,10 +424,10 @@ curl -fsS 'https://<api-host>/api/v1/prediction-markets/limitless/active' | jq '
 curl -fsS 'https://<api-host>/api/v1/prediction-markets/manifold/active'  | jq '.count'
 curl -fsS 'https://<api-host>/api/v1/prediction-markets?topic=election&category=politics&limit=5' | jq '.count'
 
-# If any source reports 0, the seed fixture path will have already
-# upserted a guaranteed-good row count — re-run the populate helper
-# manually to recover:
-#   python -m vnibb.scripts.populate_prediction_markets
+# A zero source count is not proof of an empty upstream market. Inspect the
+# scheduler's recorded source errors and the provider's genuine endpoint/access
+# policy. Production ingestion never substitutes fixture odds or clears failures
+# to manufacture recovery. Rerun the registered guarded job only after repair.
 
 # 7. Frontend health proxies (Next.js) match the backend status.
 curl -fsS https://<web-host>/api/live  | jq .

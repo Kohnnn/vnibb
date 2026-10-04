@@ -5,7 +5,6 @@ Fetches financial statements (Income Statement, Balance Sheet, Cash Flow)
 for Vietnam-listed companies via vnstock library.
 """
 
-import asyncio
 import inspect
 import logging
 import math
@@ -177,13 +176,17 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
         credentials: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch financial statement data from vnstock."""
-        loop = asyncio.get_event_loop()
+        from vnibb.providers.vnstock.runtime import run_financial_provider
 
         def _fetch_sync() -> list[dict]:
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import (
+                    create_finance,
+                    finance_method_kwargs,
+                    get_finance_class,
+                )
 
-                Vnstock = get_vnstock_class()
+                Finance = get_finance_class()
 
                 statement_type = query["statement_type"]
                 period = query["period"]
@@ -193,6 +196,8 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 for source in ["VCI", settings.vnstock_source, "KBS"]:
                     if source and source not in candidate_sources:
                         candidate_sources.append(source)
+                if getattr(Finance, "supports_source", True) is False:
+                    candidate_sources = ["default"]
 
                 def _get_statement_method(finance: Any):
                     if statement_type == "income":
@@ -205,16 +210,11 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     raise ValueError(f"Unknown statement type: {statement_type}")
 
                 def _fetch_df(finance: Any, lang: str | None):
-                    kwargs = {"period": period}
                     method = _get_statement_method(finance)
-
-                    supports_lang = False
-                    try:
-                        supports_lang = "lang" in inspect.signature(method).parameters
-                    except (TypeError, ValueError):
-                        supports_lang = False
-
-                    if lang is not None and supports_lang:
+                    kwargs = finance_method_kwargs(method, period)
+                    if lang is None:
+                        kwargs.pop("lang", None)
+                    elif "lang" in kwargs:
                         kwargs["lang"] = lang
 
                     return method(**kwargs)
@@ -364,12 +364,13 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 best_source: str | None = None
                 best_lang: str | None = None
                 candidate_payloads: list[tuple[str, str | None, list[dict[str, Any]], int]] = []
+                last_error: Exception | None = None
 
                 for source in candidate_sources:
                     try:
-                        stock = Vnstock().stock(symbol=query["symbol"], source=source)
-                        finance = stock.finance
+                        finance = create_finance(query["symbol"], source, period)
                     except Exception as source_init_error:
+                        last_error = source_init_error
                         logger.debug(
                             "vnstock source init failed for %s source=%s: %s",
                             query["symbol"],
@@ -386,13 +387,16 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         supports_lang = False
 
                     lang_candidates: list[str | None] = (
-                        [None, "en", "vi"] if supports_lang else [None]
+                        ["en", None, "vi"] if supports_lang else [None]
                     )
 
                     for lang in lang_candidates:
+                        if lang is None and any(candidate[0] == source for candidate in candidate_payloads):
+                            continue
                         try:
                             df = _fetch_df(finance, lang)
                         except Exception as source_error:
+                            last_error = source_error
                             logger.debug(
                                 "vnstock %s fetch failed for %s source=%s lang=%s: %s",
                                 statement_type,
@@ -417,6 +421,17 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                                 best_score = score
                                 best_source = source
                                 best_lang = lang
+                            supplemental = {
+                                "income": {"selling_general_admin", "depreciation", "research_development", "ebitda"},
+                                "balance": {"accounts_payable", "goodwill", "intangible_assets"},
+                                "cashflow": {"depreciation", "free_cash_flow", "capex", "capital_expenditure"},
+                            }.get(statement_type, set())
+                            parsed = VnstockFinancialsFetcher.transform_data(
+                                FinancialsQueryParams(symbol=query["symbol"], statement_type=StatementType(statement_type),
+                                    period=period, limit=query["limit"]), normalized_rows
+                            )
+                            if parsed and all(all(getattr(item, field, None) is not None for field in supplemental) for item in parsed):
+                                break
 
                 if best_rows:
                     params_model = FinancialsQueryParams(
@@ -512,6 +527,8 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         )
                     return [item.model_dump(mode="json") for item in merged_rows]
 
+                if last_error is not None and not candidate_payloads:
+                    raise last_error
                 logger.warning(f"No {statement_type} data for {query['symbol']}")
                 return []
 
@@ -563,10 +580,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             return records
 
         try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(None, _fetch_sync),
-                timeout=settings.vnstock_timeout,
-            )
+            return await run_financial_provider(_fetch_sync, settings.vnstock_timeout)
         except TimeoutError as exc:
             raise ProviderTimeoutError(
                 provider="vnstock",

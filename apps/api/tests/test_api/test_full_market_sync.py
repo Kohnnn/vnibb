@@ -127,29 +127,32 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
         calls.append("seeded")
         return ["VNM", "FPT"]
 
-    async def fake_sync_all_prices(
-        self, *, symbols=None, include_historical=False, history_days=None
-    ):
-        calls.append(("prices", tuple(symbols or []), include_historical, history_days))
-        return make_result(20)
+    async def fake_screener(*, progress):
+        calls.append("screener_universe")
+        return 2
+
+    async def fake_prices(**kwargs):
+        calls.append(("prices", tuple(kwargs["symbols"]), kwargs["days"], kwargs["fill_missing_gaps"]))
+        return 20
+
+    async def fake_create(*args):
+        return 99
+
+    async def fake_update(*args, **kwargs):
+        calls.append(("ledger", kwargs))
 
     async def fake_sync_all_indices(self):
         calls.append("indices")
         return make_result(4)
 
-    async def fake_sync_all_profiles(self, *, symbols=None, max_symbols=None):
-        calls.append(("profiles", tuple(symbols or []), max_symbols))
-        return make_result(2)
+    async def fake_maintenance(self, symbols, budget_seconds=None):
+        return SyncResult(True, 2, 0, 0.1, [], complete=False, pending_count=6)
 
-    async def fake_sync_all_financials(self, *, symbols=None, max_symbols=None):
-        calls.append(("financials", tuple(symbols or []), max_symbols))
-        return make_result(6)
-
-    async def fake_sync_dividends(symbols=None):
+    async def fake_sync_dividends(symbols=None, progress=None):
         calls.append(("dividends", tuple(symbols or [])))
         return 2
 
-    async def fake_sync_company_events(symbols=None):
+    async def fake_sync_company_events(symbols=None, progress=None):
         calls.append(("company_events", tuple(symbols or [])))
         return 3
 
@@ -162,10 +165,13 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
 
     monkeypatch.setattr(FullMarketSync, "_get_seeded_symbols", fake_get_seeded_symbols)
     monkeypatch.setattr(FullMarketSync, "run_full_sync", fail_run_full_sync)
-    monkeypatch.setattr(FullMarketSync, "sync_all_prices", fake_sync_all_prices)
+    monkeypatch.setattr(data_pipeline, "sync_screener_data", fake_screener)
+    monkeypatch.setattr(data_pipeline, "sync_daily_prices", fake_prices)
+    monkeypatch.setattr(data_pipeline, "_create_sync_record", fake_create)
+    monkeypatch.setattr(data_pipeline, "_update_sync_record", fake_update)
     monkeypatch.setattr(FullMarketSync, "sync_all_indices", fake_sync_all_indices)
-    monkeypatch.setattr(FullMarketSync, "sync_all_profiles", fake_sync_all_profiles)
-    monkeypatch.setattr(FullMarketSync, "sync_all_financials", fake_sync_all_financials)
+    monkeypatch.setattr(FullMarketSync, "sync_daily_maintenance", fake_maintenance)
+    monkeypatch.setattr(FullMarketSync, "sync_daily_profiles", fake_maintenance)
     monkeypatch.setattr(data_pipeline, "sync_dividends", fake_sync_dividends)
     monkeypatch.setattr(data_pipeline, "sync_company_events", fake_sync_company_events)
     monkeypatch.setattr(
@@ -175,21 +181,10 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
 
     results = await run_daily_market_sync()
 
-    assert list(results.keys()) == [
-        "prices",
-        "indices",
-        "profiles",
-        "financials",
-        "rs_ratings",
-        "corporate_actions",
-    ]
-    assert calls == [
-        "seeded",
-        ("prices", ("VNM", "FPT"), True, 21),
-        "indices",
-        ("profiles", ("VNM", "FPT"), None),
-        ("financials", ("VNM", "FPT"), None),
-        ("rs_ratings", None),
-        ("dividends", ("VNM", "FPT")),
-        ("company_events", ("VNM", "FPT")),
-    ]
+    assert list(results) == ["prices", "indices", "rs_ratings", "corporate_actions", "profiles", "financials"]
+    assert "screener_universe" in calls
+    assert ("prices", ("VNM", "FPT"), 21, True) in calls
+    ledger = [item[1] for item in calls if isinstance(item, tuple) and item[0] == "ledger"][-1]
+    assert ledger["status"] == "partial"
+    assert ledger["additional_data"]["expected_count"] == 2
+    assert ledger["additional_data"]["stages"]["financials"]["pending_count"] == 6

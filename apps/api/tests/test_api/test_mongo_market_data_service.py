@@ -550,3 +550,33 @@ async def test_price_depth_catalog_upserts_preserve_levels_and_refresh_batch(mon
     for include_provenance in (False, True):
         out = await service.get_price_depth_precise("ssi", limit=1, include_provenance=include_provenance)
         assert out == []
+
+
+@pytest.mark.parametrize("failed_symbol", [None, "VNM"])
+def test_catalog_run_reports_partial_provider_failure(monkeypatch, capsys, failed_symbol):
+    import json
+    import sys
+
+    from scripts import backfill_mongo_vnstock_full_catalog as catalog
+
+    outcomes = []
+
+    def fetch(symbol):
+        if symbol == failed_symbol:
+            raise RuntimeError("provider unavailable")
+        return [{"price": 30000, "volume": 100}]
+
+    monkeypatch.setattr(sys, "argv", ["catalog", "--symbols", "SSI,VNM", "--datasets", "equity.price_depth"])
+    monkeypatch.setattr(catalog, "_connect_db", lambda: object())
+    monkeypatch.setattr(catalog, "_ensure_indexes", lambda db: None)
+    monkeypatch.setattr(catalog, "_fetcher_for", lambda *args, **kwargs: fetch)
+    monkeypatch.setattr(catalog, "_upsert_raw_rows", lambda db, spec, symbol, rows, **kwargs: len(rows))
+    monkeypatch.setattr(catalog, "_checkpoint", lambda *args: None)
+    monkeypatch.setattr(catalog, "_failure", lambda *args: None)
+    monkeypatch.setattr(catalog, "_mark_run", lambda db, run_id, status, data: outcomes.append(status))
+
+    exit_code = catalog.main()
+    summary = json.loads(capsys.readouterr().out)["datasets"]["equity.price_depth"]
+    assert exit_code == (1 if failed_symbol else 0)
+    assert outcomes[-1] == ("failed" if failed_symbol else "completed")
+    assert summary == {"success": 1 if failed_symbol else 2, "errors": 1 if failed_symbol else 0, "rows": 1 if failed_symbol else 2}

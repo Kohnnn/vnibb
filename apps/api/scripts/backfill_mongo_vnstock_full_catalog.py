@@ -946,15 +946,16 @@ def main() -> int:
 
             summary["datasets"][dataset] = dataset_summary
 
+        has_errors = any(dataset["errors"] for dataset in summary["datasets"].values())
         if not args.dry_run:
-            _mark_run(db, run_id, "completed", {"summary": summary, "finishedAt": _now()})
+            _mark_run(db, run_id, "failed" if has_errors else "completed", {"summary": summary, "finishedAt": _now()})
     except Exception:
         if not args.dry_run:
             _mark_run(db, run_id, "failed", {"summary": summary, "finishedAt": _now()})
         raise
 
     print(json.dumps({"runId": run_id, **summary}, indent=2, ensure_ascii=False, default=str))
-    return 0
+    return 1 if has_errors else 0
 
 
 if __name__ == "__main__":

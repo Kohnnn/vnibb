@@ -149,6 +149,36 @@ async def test_sync_daily_prices_uses_fast_fail_history_fetch(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_gap_fill_never_fetches_old_history_or_complete_windows(monkeypatch):
+    pipeline = DataPipeline()
+    queries = []
+    fetches = []
+
+    class HistorySession(FakeSession):
+        async def execute(self, stmt, params=None):
+            if "stock_prices.time" in str(stmt) and "SELECT" in str(stmt):
+                queries.append(stmt.compile().params)
+                # Include an old row to prove the planner independently stays bounded.
+                return FakeResult(rows=[(date(2020, 1, 2),), (date(2026, 3, 16),), (date(2026, 3, 17),)])
+            return await super().execute(stmt, params)
+
+    async def fetch(**kwargs):
+        fetches.append(kwargs)
+        return pd.DataFrame()
+
+    monkeypatch.setattr(data_pipeline_module, "async_session_maker", lambda: HistorySession())
+    monkeypatch.setattr(pipeline, "_fetch_quote_history_frame", fetch)
+    progress = {}
+    await pipeline.sync_daily_prices(symbols=["VNM"], start_date=date(2026, 3, 16),
+        end_date=date(2026, 3, 17), fill_missing_gaps=True, cache_recent=False, progress=progress)
+    assert fetches == []
+    assert date(2026, 3, 16) in queries[0].values()
+    assert date(2026, 3, 17) in queries[0].values()
+    assert progress["stage_stats"]["prices"]["success"] == 1
+    assert not progress.get("error_count")
+
+
+@pytest.mark.asyncio
 async def test_sync_foreign_trading_persists_derived_values(monkeypatch):
     pipeline = DataPipeline()
     statements = []

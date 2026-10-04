@@ -4,18 +4,15 @@ VnStock Financial Ratios Fetcher
 Fetches historical financial ratios for Vietnam-listed companies.
 """
 
-import asyncio
 import logging
 import re
 from typing import Any, List, Optional
 
-import inspect
-
 from pydantic import BaseModel, Field, field_validator
 
-from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.providers.base import BaseFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -205,30 +202,29 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
         query: dict[str, Any],
         credentials: Optional[dict[str, str]] = None,
     ) -> List[dict[str, Any]]:
-        loop = asyncio.get_event_loop()
+        from vnibb.providers.vnstock.runtime import run_financial_provider
 
         def _fetch_sync() -> List[dict[str, Any]]:
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import (
+                    create_finance,
+                    finance_method_kwargs,
+                    get_finance_class,
+                )
 
-                Vnstock = get_vnstock_class()
+                Finance = get_finance_class()
 
                 candidate_sources: list[str] = []
                 for source in ["VCI", settings.vnstock_source, "KBS"]:
                     if source and source not in candidate_sources:
                         candidate_sources.append(source)
+                if getattr(Finance, "supports_source", True) is False:
+                    candidate_sources = ["default"]
 
                 def _fetch_rows_for_source(source: str) -> List[dict[str, Any]]:
-                    stock = Vnstock().stock(symbol=query["symbol"], source=source)
-                    finance = stock.finance
+                    finance = create_finance(query["symbol"], source, query.get("period", "year"))
                     method = finance.ratio
-                    kwargs = {"period": query.get("period", "year")}
-                    try:
-                        supports_lang = "lang" in inspect.signature(method).parameters
-                    except (TypeError, ValueError):
-                        supports_lang = False
-                    if supports_lang:
-                        kwargs["lang"] = "en"
+                    kwargs = finance_method_kwargs(method, query.get("period", "year"))
                     df = method(**kwargs)
 
                     if df is None or df.empty:
@@ -303,15 +299,12 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 logger.error(f"vnstock ratios fetch error: {e}")
                 raise ProviderError(
                     message=str(e), provider="vnstock", details={"symbol": query["symbol"]}
-                )
+                ) from e
 
         try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(None, _fetch_sync),
-                timeout=settings.vnstock_timeout,
-            )
-        except asyncio.TimeoutError:
-            raise ProviderTimeoutError(provider="vnstock", timeout=settings.vnstock_timeout)
+            return await run_financial_provider(_fetch_sync, settings.vnstock_timeout)
+        except TimeoutError as exc:
+            raise ProviderTimeoutError(provider="vnstock", timeout=settings.vnstock_timeout) from exc
 
     @staticmethod
     def transform_data(
@@ -525,6 +518,11 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
         has_row_items = any("item_id" in row for row in data)
         if has_row_items:
             metric_map = {
+                "pe": "pe",
+                "pb": "pb",
+                "ps": "ps",
+                "eps": "eps",
+                "bvps": "bvps",
                 "p_e": "pe",
                 "p_b": "pb",
                 "p_s": "ps",
@@ -568,7 +566,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
             period_columns: list[tuple[Any, str]] = []
             period_values: set[str] = set()
 
-            for raw_key in raw_fields:
+            for raw_key in sorted(raw_fields, key=lambda key: (bool(re.search(r"_\d+$", str(key))), str(key))):
                 normalized_period = _normalize_period_value(raw_key, default_period=params.period)
                 if not normalized_period:
                     continue
@@ -602,7 +600,8 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                         continue
                     if item_id_lower in metric_map:
                         field = metric_map[item_id_lower]
-                        by_period[period][field] = value
+                        if by_period[period].get(field) is None:
+                            by_period[period][field] = value
                         continue
                     if item_id_lower == "liabilities":
                         liabilities_by_period[period] = value

@@ -254,9 +254,9 @@ Conventions:
 |--------|-----|------|------------|---------|------------------|
 | Polymarket Gamma | `https://gamma-api.polymarket.com/markets` | none | generous | every 5 min | `economic | sports | politics | general` |
 | Kalshi Trades | `https://api.elections.kalshi.com/trade-api/v2/markets` | none | 60 req/min | every 5 min | `economic | sports | politics | general` |
-| PredictIt | `https://www.predictit.org/api/markets` | none | ~30 req/min | every 5 min | `politics | general` |
-| Limitless | `https://api.limitless.exchange/markets` | none | generous | every 5 min | `crypto | general` |
-| Manifold | `https://api.manifold.markets/v0` | none | generous | every 5 min | freeform under `extra.raw_category` |
+| PredictIt | `https://www.predictit.org/api/marketdata/all/` | public feed; upstream access controls apply | provider-managed | every 5 min | `politics | general` |
+| Limitless | `https://api.limitless.exchange/markets/active` | endpoint-specific upstream policy | at most 25 markets per page | every 5 min | `crypto | general` |
+| Manifold | `https://api.manifold.markets/v0/search-markets` | public read | provider-managed | every 5 min | supported open binary markets |
 
 Each source shares the `_upsert_prediction_market` upsert from `prediction_market_service`,
 so the schema is source-agnostic and the read endpoint can blend across all of them.
@@ -267,6 +267,13 @@ poison the others (only the affected source's count is missing from the log line
 Provider failures do not manufacture fixture odds. Source-health counts cover
 the bounded current catalogue, not the provider universe; stored snapshot health
 does not establish price availability or live provider connectivity.
+
+PredictIt outcomes retain actual contract names and observed contract YES quotes;
+they are not averaged into a fabricated market-wide Yes/No probability. The public
+feed can be blocked by upstream access controls (HTTP 403 was observed during the
+2026-10-04 recovery). This remains an unavailable source, not a fixture fallback.
+Limitless active pagination and Manifold's supported open-binary search contract
+must be used together with their actual response fields and units.
 
 ### Cross-Source Calibration widget (Phase 10)
 
