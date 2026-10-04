@@ -31,11 +31,12 @@ live in `docs/`.
 - MCP analytical-corpus reads resolve symbols against the outer storage
   `symbol` field only and return the full storage envelope, so premium-dataset
   results no longer surface foreign tickers or drop Vietcap rows that lack a
-  raw symbol. `get_price_depth` reads only the newest snapshot's rows with its
-  `observedAt` attached, making repeated calls deterministic instead of
-  sampling an arbitrary snapshot.
+  raw symbol. `get_price_depth` reads flat levels from the newest `updatedAt`
+  write batch and preserves per-row `observedAt` provenance; write time does
+  not establish market-data freshness.
 
 ### Fixed
+- Catalog depth ingestion preserves distinct prices even when provider rows share symbol/ticker/time metadata. Scope-and-price keys stay stable across volume changes; the regression executes real `_upsert_raw_rows` operations against an upsert-aware store and verifies bounded reader results and repeat refreshes. Previously overwritten levels require a new provider fetch.
 - VniAgent follow-ups require every mandatory source kind in the prompt's scope. Partial evidence no longer offers valuation, margin, balance-sheet, flow, catalyst, or market-breadth questions that need missing sources; single-source prompts remain available. This fix is not yet deployed.
 - Follow-up eligibility, citations, and ranking use the same scoped evidence selection. Required source entries without citable IDs cannot enable a question; padded duplicate IDs are normalized and deduplicated.
 - Private research-share reads bypass service-worker caches, and activation purges older cached snapshots. Account changes discard stale create/revoke completions; anonymous issuer identities are rejected.

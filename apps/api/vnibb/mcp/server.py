@@ -1183,7 +1183,7 @@ def price_depth(symbol: str, limit: int = 500) -> str:
     normalized = normalize_symbol_input(symbol)
     return (
         f"Get the volume-at-price depth profile for {normalized} using `get_price_depth(symbol='{normalized}', "
-        f"limit={limit})`. Report the newest write batch and note the snapshot time."
+        f"limit={limit})`. Report batch updatedAt and per-row observedAt separately; write time is not market freshness."
     )
 
 
@@ -1683,9 +1683,9 @@ async def get_intraday_trades(
 async def get_price_depth(symbol: str, limit: int = 500) -> dict[str, Any]:
     """Get read-only volume-at-price depth rows for one symbol from MongoDB.
 
-    Rows come from the newest ``equity.price_depth`` snapshot only (per-record
-    ``observedAt``), so repeated calls agree on the same session and ``limit``
-    pages that snapshot's profile deterministically.
+    Rows are flat price levels from the newest ``updatedAt`` write batch.
+    ``limit`` caps valid levels; ``observedAt`` is returned per row, separately
+    from batch write time, which does not prove market-data freshness.
     """
     _ensure_mongo_available()
     normalized = normalize_symbol_input(symbol)

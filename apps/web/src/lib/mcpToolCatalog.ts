@@ -159,7 +159,7 @@ export const MCP_TOOL_CATALOG: McpToolDescriptor[] = [
   },
   {
     name: 'get_price_depth',
-    description: 'Newest price-depth snapshot profile for a symbol, deterministic across calls.',
+    description: 'Bounded price-depth levels from the newest write batch, with per-row provenance.',
     source: 'analytical_corpus',
     permission: 'authenticated_read',
     sampleInput: { symbol: 'SSI' },

@@ -85,7 +85,9 @@ Design notes:
 - the database-stack tools read the private analytical store directly via `MongoMarketDataService`; they do not proxy through the FastAPI app
 - `get_premium_dataset` is constrained by a dataset allowlist (`PREMIUM_DATASET_SPECS`) and per-dataset max limits; disabled/empty source datasets (`company.capital_history`, `company.insider_deals`, `equity.block_trades`, `equity.put_through`) are intentionally excluded
 - `get_premium_dataset` resolves symbols against the outer storage `symbol` field and returns the full storage envelope (record key, scope, source, provider source) per item, so results stay symbol-exact and provenance-readable
-- `get_price_depth` reads only the newest `equity.price_depth` snapshot (per-record `observedAt`) and attaches that snapshot time to every row, so repeated calls return the same session's profile deterministically
+- `get_price_depth` reads flat price/volume documents from the newest `updatedAt` write batch, caps returned valid levels by `limit`, and includes per-row `observedAt`, batch `updatedAt`, and `recordKey`. Write time is not proof of market-data freshness.
+- Catalog ingestion keys flat equity/futures/crypto depth levels by scope and normalized price. Volume changes update the level instead of creating a second identity; symbol/ticker/time metadata cannot collapse distinct prices.
+- Previously overwritten levels cannot be recovered by rekeying the surviving document. Deploy the writer correction and refresh the affected depth datasets through catalog ingestion; a new batch excludes older surviving documents from `get_price_depth`. No production refresh is claimed here.
 - use `list_premium_datasets` to discover the allowlisted dataset names and their caps
 
 ## Analytical data source

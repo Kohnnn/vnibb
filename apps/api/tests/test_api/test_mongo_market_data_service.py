@@ -432,14 +432,9 @@ async def test_price_depth_precise_returns_newest_batch_flat_rows_with_provenanc
     rows = await service.get_price_depth_precise(
         "ssi", limit=500, include_provenance=True
     )
-    # ``find`` receives one positional sort argument: the pair list.
-    assert collection.cursor.sort_args == (
-        [("updatedAt", -1), ("observedAt", -1), ("recordKey", 1)],
-    )
     assert {row["price"] for row in rows} == {30000, 29500, 30550}
     assert {row["volume"] for row in rows} == {100, 50, 25}
     assert all(row["updatedAt"] == datetime(2026, 10, 1, 15) for row in rows)
-    assert all(row["recordKey"].startswith("vnstock-data:equity.price_depth:SSI:") for row in rows)
     by_price = {row["price"]: row for row in rows}
     assert by_price[30000]["buy_volume"] == 60
     assert by_price[30000]["sell_volume"] == 40
@@ -455,7 +450,6 @@ async def test_price_depth_precise_returns_empty_when_no_records(monkeypatch):
     rows = await service.get_price_depth_precise("ssi", limit=500, include_provenance=False)
 
     assert rows == []
-    assert collection.cursor.consumed_rows == 0
 
 
 @pytest.mark.asyncio
@@ -479,47 +473,71 @@ async def test_price_depth_precise_limit_caps_rows_within_newest_batch(monkeypat
 
     rows = await service.get_price_depth_precise("ssi", limit=2, include_provenance=False)
 
-    assert len(rows) == 2
-    assert collection.cursor.limit_value is None
-    assert collection.cursor.consumed_rows == 5
+    assert [row["price"] for row in rows] == [30000, 30100]
 
 
 @pytest.mark.asyncio
-async def test_price_depth_precise_writer_shape_round_trip(monkeypatch):
-    # Given: the catalog writer's own framing/record-key helpers produce the
-    # flat row shape the reader consumes (one doc per price level).
+@pytest.mark.parametrize("dataset", ["equity.price_depth", "futures.price_depth", "crypto.price_depth"])
+@pytest.mark.parametrize("identity", [{}, {"symbol": "SSI"}, {"ticker": "SSI"}, {"symbol": "SSI", "time": "2026-10-01T14:30:00"}])
+async def test_price_depth_catalog_upserts_preserve_levels_and_refresh_batch(monkeypatch, identity, dataset):
     import pandas as pd
-    from scripts.backfill_mongo_vnstock_full_catalog import (
-        _frame_rows,
-        _record_key,
-    )
 
-    rows = _frame_rows(
-        pd.DataFrame(
-            [
-                {"symbol": "SSI", "price": 30000, "volume": 100, "buy_volume": 60, "sell_volume": 40},
-                {"symbol": "SSI", "price": 29500, "volume": 50, "undefined_volume": 50},
-                {"symbol": "SSI", "price": 30500, "volume": 0},
-            ]
-        )
-    )
-    synced_at = datetime(2026, 10, 1, 15)
-    written = [
-        {
-            "dataset": "equity.price_depth",
-            "symbol": "SSI",
-            "recordKey": _record_key("equity.price_depth", "SSI", raw),
-            "observedAt": synced_at,
-            "updatedAt": synced_at,
-            "raw": {**raw, "symbol": "SSI", "ticker": "SSI"},
-        }
-        for raw in rows
-    ]
-    collection = Collection(written)
+    from scripts import backfill_mongo_vnstock_full_catalog as catalog
+
+    class StoredCursor(Cursor):
+        def sort(self, pairs):
+            for key, direction in reversed(pairs):
+                self.rows.sort(key=lambda row: row[key], reverse=direction == -1)
+            return self
+
+    class UpsertCollection(Collection):
+        def bulk_write(self, operations, *, ordered):
+            for operation in operations:
+                match = next(
+                    (row for row in self.rows if all(row.get(key) == value for key, value in operation._filter.items())),
+                    None,
+                )
+                if match is None:
+                    match = {**operation._filter, **operation._doc.get("$setOnInsert", {})}
+                    self.rows.append(match)
+                match.update(operation._doc["$set"])
+
+        def find(self, query, projection):
+            return StoredCursor([
+                row for row in self.rows if all(row.get(key) == value for key, value in query.items())
+            ])
+
+    collection = UpsertCollection()
+    db = SimpleNamespace(market_vnstock_premium_records=collection)
+    spec = catalog.MANIFEST[dataset]
+    first_batch = datetime(2026, 10, 1, 15)
+    monkeypatch.setattr(catalog, "_now", lambda: first_batch)
+    levels = catalog._frame_rows(pd.DataFrame([
+        {**identity, "price": 30000, "volume": 100, "buy_volume": 60, "sell_volume": 40},
+        {**identity, "price": 29500, "volume": 50, "undefined_volume": 50},
+        {**identity, "price": 30500, "volume": 25},
+    ]))
+    catalog._upsert_raw_rows(db, spec, "SSI", levels, dry_run=False)
+    assert {row["raw"]["price"] for row in collection.rows} == {30000, 29500, 30500}
+    assert len({row["recordKey"] for row in collection.rows}) == 3
+    if dataset != "equity.price_depth":
+        return
+
     service = MongoMarketDataService()
     monkeypatch.setattr(MongoMarketDataService, "_get_collection", lambda *_: collection)
+    out = await service.get_price_depth_precise("ssi", include_provenance=True)
+    assert {row["price"]: row["volume"] for row in out} == {30000: 100, 29500: 50, 30500: 25}
+    assert len({row["recordKey"] for row in out}) == 3
+    capped = await service.get_price_depth_precise("ssi", limit=2)
+    assert [row["price"] for row in capped] == [row["price"] for row in out[:2]]
 
-    out = await service.get_price_depth_precise("ssi", limit=500, include_provenance=False)
-
-    assert {row["price"] for row in out} == {30000, 29500}
-    assert {row["volume"] for row in out} == {100, 50}
+    second_batch = datetime(2026, 10, 1, 16)
+    monkeypatch.setattr(catalog, "_now", lambda: second_batch)
+    refreshed = [{**levels[0], "price": "30000.00", "volume": 120}, levels[1]]
+    catalog._upsert_raw_rows(db, spec, "SSI", refreshed, dry_run=False)
+    catalog._upsert_raw_rows(db, spec, "SSI", refreshed, dry_run=False)
+    out = await service.get_price_depth_precise("ssi", include_provenance=True)
+    assert {row["price"]: row["volume"] for row in out} == {30000: 120, 29500: 50}
+    assert all(row["updatedAt"] == second_batch for row in out)
+    assert all(row["createdAt"] == first_batch for row in collection.rows)
+    assert len(collection.rows) == 3

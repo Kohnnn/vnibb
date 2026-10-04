@@ -9,10 +9,12 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from uuid import uuid4
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -412,6 +414,10 @@ def _run_async(coro: Any) -> Any:
 
 
 def _record_key(dataset: str, scope_key: str, raw: dict[str, Any]) -> str:
+    if dataset in ("equity.price_depth", "futures.price_depth", "crypto.price_depth") and raw.get("price") is not None:
+        price = format(Decimal(str(raw["price"])).normalize(), "f")
+        return f"vnstock-data:{dataset}:{scope_key}:price:{price}"
+
     natural_keys = [
         raw.get("time"),
         raw.get("date"),
