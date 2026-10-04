@@ -39,7 +39,7 @@ live in `docs/`.
 - Matrix follow-up drafts reach VniAgent on both desktop and mobile dashboard mounts without auto-submitting. Research starter requests are consumed at the dashboard boundary, so closing and reopening VniAgent cannot replay a completed starter.
 - MCP price-depth retrieval selects the newest write batch before filtering levels. An all-zero newest batch returns empty depth instead of resurfacing stale positive levels from an older batch.
 - Catalog depth ingestion preserves distinct prices even when provider rows share symbol/ticker/time metadata. Scope-and-price keys stay stable across volume changes; the regression executes real `_upsert_raw_rows` operations against an upsert-aware store and verifies bounded reader results and repeat refreshes. Previously overwritten levels require a new provider fetch.
-- VniAgent follow-ups require every mandatory source kind in the prompt's scope. Partial evidence no longer offers valuation, margin, balance-sheet, flow, catalyst, or market-breadth questions that need missing sources; single-source prompts remain available. This fix is not yet deployed.
+- VniAgent follow-ups require every mandatory source kind in the prompt's scope. Partial evidence no longer offers valuation, margin, balance-sheet, flow, catalyst, or market-breadth questions that need missing sources; single-source prompts remain available.
 - Follow-up eligibility, citations, and ranking use the same scoped evidence selection. Required source entries without citable IDs cannot enable a question; padded duplicate IDs are normalized and deduplicated.
 - Private research-share reads bypass service-worker caches, and activation purges older cached snapshots. Account changes discard stale create/revoke completions; anonymous issuer identities are rejected.
 - Reviewed starter identities survive initial workspace session restoration, clear on later ticker/session changes, and restrict final citation validation to evidence in the selected workflow scope.
@@ -59,6 +59,7 @@ live in `docs/`.
 - Big Flow reports provider failure as unavailable instead of a zero-activity tape; the block-trade service no longer converts query errors into an empty result. Positioning Dashboard is not promotable until its request count and symbol coverage are bounded and disclosed; saved instances keep resolving as an explicit unavailable state.
 
 ### Deployed
+- Released interrupted-session recovery to cloud-01 on 2026-10-04. API, MCP and scheduler run `ffc322e3cdc097977a4dfdb90581a466e7912e66`, pinned to `ghcr.io/kohnnn/vnibb-api@sha256:9431643d277b6163e20bcf12b672da73521bf07e4c4ced86474e242d70b0c4f0`. All four hosted CI jobs passed; migration head remains `b7312f0c4e88`. Health, market endpoints, dashboard CORS, WebSocket and authenticated MCP reads passed. Existing databases/proxy and the premium runtime mount were preserved. Legacy depth data still requires a provider refresh; upstream prediction-source failures remain disclosed. See the dated recovery section in `docs/oracle_runbook.md` for rollback and verification limits.
 - Released grounded VniAgent follow-ups to cloud-01 on 2026-10-03. API, MCP and
   scheduler run revision `e1399211a051efe0546546de511b7549e0ad9f23`, pinned to
   `ghcr.io/kohnnn/vnibb-api@sha256:0f29208a5a86893b21ffb143d7cb049eef63f6cd77753a5eb0e089cb9d63905d`.
