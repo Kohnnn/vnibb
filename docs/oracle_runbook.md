@@ -120,6 +120,27 @@ Production remains **BLOCKED** until operator UUID verification, key rotation, a
 - Durable scheduler status reports a running worker and 22 jobs. Startup logs contain prediction-source failures for PredictIt, Limitless and Manifold; durable status also retains `daily_sync` and `financial_ratios_sync` failures. These outcomes remain visible rather than being reported as successful ingestion. API and MCP startup logs had no error lines in the reviewed 15-minute window.
 - Production frontend readiness and a real Fundamental Analyst starter draft passed after backend replacement; no prompt was sent. Frontend deployment remains `dpl_789A8Gc5UziYCD4PxFc23dKPhaVZ`; subsequent documentation-only commits are not backend image revisions.
 
+**2026-10-05 financial-ratio natural-key repair (pending deployment):** Production
+`financial_ratios` only ever received the primary-key index;
+`uq_financial_ratio_symbol_period` (declared on the `FinancialRatio` model) never
+existed in the `vnibb` database (verified 2026-10-05: `pg_constraint` and
+`pg_indexes` show only `financial_ratios_pkey`). Because every ratio writer emits
+`INSERT ... ON CONFLICT (symbol, period, period_type)`, any natural-key upsert
+against that table fails with `InvalidColumnReferenceError: there is no unique or
+exclusion constraint matching the ON CONFLICT specification`. This is
+stamped-revision drift: no migration ever declared that constraint, and SQLAlchemy
+does not retro-fit model constraints onto an already-created table.
+
+This is distinct from the recorded `financial_ratios_sync` durable failure above,
+whose `last_detail` is `exceeded 5400s` (a timeout, not a constraint error). The
+missing constraint is a separate, proven write hazard that would block ratio
+persistence even after the timeout is resolved; no production log line attributing
+the timeout to the constraint was observed.
+
+- Migration `e5f1a7c9d2b4` (``apps/api/migrations/versions/20261004_1700_restore_financial_ratio_natural_key.py``) restores the constraint losslessly and idempotently: it scopes its existence probe to the target relation, deduplicates only where duplicate keys exist (production measured zero across 17,400 rows, keeping the newest `id`), and adds the `UNIQUE` constraint. Downgrade drops it.
+- Verified against a disposable PostgreSQL: full migration chain to `e5f1a7c9d2b4` from both an empty database and a simulated drift state (constraint dropped, row present); the exact production `get_upsert_stmt` writer then updated the existing row in place. The PostgreSQL contract test (`apps/api/tests/test_contract/test_financial_ratio_natural_key_migration.py`) and the full release gate pass.
+- Deployment is not claimed here. On the next rollout, `docker compose ... run --rm migrate` ships `e5f1a7c9d2b4` to production and the one-shot `migrate current` check should be updated from `b7312f0c4e88` to `e5f1a7c9d2b4`. Confirm `financial_ratios_sync` records a successful run rather than a durable failure afterward.
+
 ### Build and publish the release image
 
 Build outside OCI. The release image is free-compatible when no premium secret is supplied. For a premium image, use BuildKit's secret mount and provide the installer SHA-256 out of band; never pass the API key with `--build-arg`.
