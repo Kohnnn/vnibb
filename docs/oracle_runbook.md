@@ -120,7 +120,7 @@ Production remains **BLOCKED** until operator UUID verification, key rotation, a
 - Durable scheduler status reports a running worker and 22 jobs. Startup logs contain prediction-source failures for PredictIt, Limitless and Manifold; durable status also retains `daily_sync` and `financial_ratios_sync` failures. These outcomes remain visible rather than being reported as successful ingestion. API and MCP startup logs had no error lines in the reviewed 15-minute window.
 - Production frontend readiness and a real Fundamental Analyst starter draft passed after backend replacement; no prompt was sent. Frontend deployment remains `dpl_789A8Gc5UziYCD4PxFc23dKPhaVZ`; subsequent documentation-only commits are not backend image revisions.
 
-**2026-10-05 financial-ratio natural-key repair (pending deployment):** Production
+**2026-10-05 financial-ratio natural-key repair (deployed):** Production
 `financial_ratios` only ever received the primary-key index;
 `uq_financial_ratio_symbol_period` (declared on the `FinancialRatio` model) never
 existed in the `vnibb` database (verified 2026-10-05: `pg_constraint` and
@@ -139,7 +139,8 @@ the timeout to the constraint was observed.
 
 - Migration `e5f1a7c9d2b4` (``apps/api/migrations/versions/20261004_1700_restore_financial_ratio_natural_key.py``) restores the constraint losslessly and idempotently: it scopes its existence probe to the target relation, deduplicates only where duplicate keys exist (production measured zero across 17,400 rows, keeping the newest `id`), and adds the `UNIQUE` constraint. Downgrade drops it.
 - Verified against a disposable PostgreSQL: full migration chain to `e5f1a7c9d2b4` from both an empty database and a simulated drift state (constraint dropped, row present); the exact production `get_upsert_stmt` writer then updated the existing row in place. The PostgreSQL contract test (`apps/api/tests/test_contract/test_financial_ratio_natural_key_migration.py`) and the full release gate pass.
-- Deployment is not claimed here. On the next rollout, `docker compose ... run --rm migrate` ships `e5f1a7c9d2b4` to production and the one-shot `migrate current` check should be updated from `b7312f0c4e88` to `e5f1a7c9d2b4`. Confirm `financial_ratios_sync` records a successful run rather than a durable failure afterward.
+- Deployed 2026-10-05. API, MCP and scheduler run `2c57654277ef5546662afc3cc7ed4a4e355e441e`, pinned to `ghcr.io/kohnnn/vnibb-api@sha256:c87b372fc0416a7369a2a01ba58c56d6fb79d9435ac1dcc33b6512362f7bda4e` (publication run `37222432293`). The one-shot `migrate` applied `b7312f0c4e88 -> e5f1a7c9d2b4`; `migrate current` reports `e5f1a7c9d2b4 (head)`. `uq_financial_ratio_symbol_period` now exists, all 17,400 `financial_ratios` rows are preserved with zero duplicate keys, and a natural-key upsert was accepted inside a rolled-back transaction. API/MCP health and the scheduler heartbeat pass at the new revision. Databases, Caddy and the premium runtime mount (`vnibb_vnstock_runtime_8fb090c`) were untouched; only `api`, `mcp` and `scheduler` were recreated.
+- Rollback: restore `deployment/env.oracle` from `deployment/env.oracle.bak-ratio-natural-key-20261004T180818Z` (previous digest `sha256:03e2b18758840932515094c5e13ded9b60a3e558a98512b42e3c1101f6d5eb4e`), `docker compose ... pull`, then `up -d --no-build --force-recreate api mcp` and the profiled `scheduler`. `alembic downgrade b7312f0c4e88` drops the constraint if a code rollback requires it. The `financial_ratios_sync` 5400s timeout is a separate open issue that this release does not claim to fix.
 
 ### Build and publish the release image
 
