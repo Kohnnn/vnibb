@@ -546,6 +546,124 @@ def read_guardrails_resource() -> str:
     return ROADMAP_WARNING
 
 
+AGENT_CONNECTION_GUIDE = """
+VNIBB Read-Only MCP — connection guide for downstream agents.
+
+This server exposes curated Vietnam equity market data from the VNIBB Postgres
+database and the MongoDB vnstock analytical corpus. It is intentionally
+read-only: no tool mutates user state, triggers jobs, or opens administrative
+surfaces.
+
+Transport:
+- stdio: run `vnibb-mcp --transport stdio` (IDE-local, no HTTP auth).
+- streamable-http: the deployed FastAPI app mounts the MCP endpoint at `/mcp`
+  (Caddy-public `https://<host>/mcp` or private-network `http://<host>:8001/mcp`).
+
+Authentication:
+- streamable-http deployments require `Authorization: Bearer <token>` where
+  `<token>` is the shared `VNIBB_MCP_SHARED_BEARER_TOKEN`.
+- Unauthenticated `/health` returns the runtime revision and database summary.
+- User JWTs are accepted but scoped to the Matrix selection tool only.
+
+Discovery:
+- `vnibb://mcp/guardrails` — read-only policy and intentionally excluded surfaces.
+- `vnibb://database/collections` — allowlisted Postgres tables, filters, sort
+  fields, limits, and dates.
+- `vnibb://database/schema/{collection}` — one table's MCP-facing metadata.
+- `vnibb://mongo/datasets` — allowlisted MongoDB vnstock premium datasets.
+- `vnibb://mcp/skills` — retrieval workflows for common agent tasks.
+
+Recommended call order:
+1. `get_database_status` / `get_mongo_status` — confirm reachability and sources.
+2. `list_supported_collections` / `list_premium_datasets` — discover the surface.
+3. `get_symbol_snapshot` / `get_market_snapshot` — rich evidence-first reads.
+4. Deep dive with `get_symbol_prices`, `get_latest_financial_statement`,
+   `get_latest_financial_ratios`, `get_company_news`, `get_corporate_timeline`,
+   `get_eod_price_history`, `get_premium_dataset`, `get_intraday_trades`,
+   `get_price_depth`.
+
+Read-only contract:
+- `query_database_collection` is a narrow escape hatch, not the first choice.
+- Treat every row as evidence with its own source, scope, and date; never
+  present unavailable or stale data as current.
+- User-owned tables and Matrix selections require an explicit user JWT.
+
+Connect, discover via resources, and read with `get_symbol_snapshot` /
+`get_market_snapshot` before low-level collection queries.
+""".strip()
+
+
+SKILLS_CATALOG = """
+VNIBB Read-Only MCP — retrieval skills for downstream agents.
+
+Each skill is a named workflow the agent can adopt when the matching intent is
+detected. Skills are read-only: they compose existing tools and resources and
+never mutate data.
+
+1. symbol_deep_dive
+   Intent: research one symbol (fundamental + price + catalysts).
+   Steps:
+   - `get_symbol_snapshot` for the database-first cross-section.
+   - `get_latest_financial_ratios` and `get_latest_financial_statement` for
+     the latest reported period.
+   - `get_symbol_prices` (interval 1D) to validate recent price action.
+   - `get_company_news` and `get_corporate_timeline` for catalysts and events.
+   - Cite source, scope, and data date for every claim.
+
+2. market_brief
+   Intent: market open/close brief across indices and sectors.
+   Steps:
+   - `get_market_snapshot` for index/sector summary.
+   - `get_database_status` / `get_mongo_status` to note freshness.
+   - Follow up any outlier with `get_symbol_snapshot`.
+
+3. eod_price_history
+   Intent: long-horizon OHLCV for charting or backtest context.
+   Steps:
+   - `get_eod_price_history` (lookback_days, start_date, end_date).
+   - Verify interval and date range against the returned envelope.
+
+4. premium_dataset
+   Intent: analytical corpus rows from a vnstock dataset.
+   Steps:
+   - `list_premium_datasets` to confirm the dataset is allowlisted.
+   - `get_premium_dataset` (symbol, dataset, limit).
+   - Treat raw values as provider-sourced and check the dataset scope.
+
+5. intraday_trades
+   Intent: recent intraday tick activity for one symbol.
+   Steps:
+   - `get_intraday_trades` (symbol, lookback_days, limit).
+
+6. price_depth
+   Intent: volume-at-price depth profile for one symbol.
+   Steps:
+   - `get_price_depth` (symbol, limit) — newest write batch only.
+
+7. database_audit
+   Intent: safe table-level inspection / coverage check.
+   Steps:
+   - `list_supported_collections` to confirm the table is exposed.
+   - `query_database_collection` with the allowlisted filters.
+   - Report field presence, freshness, and gaps; stay read-only.
+
+8. matrix_selection
+   Intent: read a user's Matrix selection rows (requires verified Supabase JWT).
+   Steps:
+   - `get_matrix_selection` (snapshot_id, result_ids) over an authorized HTTP
+     request; stdio and shared bearer cannot authorize it.
+""".strip()
+
+
+def read_agent_guide_resource() -> str:
+    """Return the connection guide for downstream agents connecting to this MCP."""
+    return AGENT_CONNECTION_GUIDE
+
+
+def read_skills_catalog_resource() -> str:
+    """Return the retrieval skills catalog for downstream agents."""
+    return SKILLS_CATALOG
+
 COLLECTION_MODELS: dict[str, Any] = {
     "stocks": Stock,
     "stock_prices": StockPrice,
@@ -977,6 +1095,19 @@ def resource_premium_datasets() -> str:
     return json.dumps(_serialize_premium_dataset_specs(), indent=2, sort_keys=True)
 
 
+
+@mcp.resource("vnibb://mcp/guide")
+def resource_agent_guide() -> str:
+    """Connection guide for downstream agents: transport, auth, discovery, read order."""
+    return read_agent_guide_resource()
+
+
+@mcp.resource("vnibb://mcp/skills")
+def resource_skills_catalog() -> str:
+    """Retrieval skills catalog for downstream agents: named workflows over the read-only tools."""
+    return read_skills_catalog_resource()
+
+
 @mcp.resource("vnibb://database/schema/{collection}")
 def resource_collection_schema(collection: str) -> str:
     """Return the MCP-facing metadata for one supported VNIBB database table."""
@@ -1006,6 +1137,53 @@ def market_brief() -> str:
         "Generate a VNIBB market brief using `get_market_snapshot` first. If one sector or symbol needs "
         "deeper evidence, follow up with `get_symbol_snapshot` or `query_database_collection`. Do not invent "
         "data that is not present in the VNIBB database."
+    )
+
+
+@mcp.prompt()
+def eod_price_history(
+    symbol: str, lookback_days: int = 365, start_date: str | None = None, end_date: str | None = None
+) -> str:
+    """Prompt template for long-horizon OHLCV history retrieval."""
+    normalized = normalize_symbol_input(symbol)
+    range_part = ""
+    if start_date or end_date:
+        range_part = f" from {start_date or 'start'} to {end_date or 'now'}"
+    return (
+        f"Retrieve the EOD OHLCV history for {normalized}{range_part} using `get_eod_price_history` "
+        f"(lookback_days={lookback_days}). Verify the interval and returned date range, then cite the "
+        f"envelope's freshness and source."
+    )
+
+
+@mcp.prompt()
+def premium_dataset(symbol: str, dataset: str, limit: int = 100) -> str:
+    """Prompt template for one allowlisted vnstock premium dataset."""
+    normalized = normalize_symbol_input(symbol)
+    return (
+        f"Fetch rows for dataset `{dataset}` of {normalized} using `list_premium_datasets` first to confirm "
+        f"allowlisting, then `get_premium_dataset(symbol='{normalized}', dataset='{dataset}', limit={limit})`. "
+        f"Treat the rows as provider-sourced evidence and note the dataset scope."
+    )
+
+
+@mcp.prompt()
+def intraday_trades(symbol: str, lookback_days: int = 7, limit: int = 500) -> str:
+    """Prompt template for recent intraday tick activity."""
+    normalized = normalize_symbol_input(symbol)
+    return (
+        f"Pull recent intraday tick trades for {normalized} using `get_intraday_trades` "
+        f"(lookback_days={lookback_days}, limit={limit}) and summarize the session activity."
+    )
+
+
+@mcp.prompt()
+def price_depth(symbol: str, limit: int = 500) -> str:
+    """Prompt template for volume-at-price depth retrieval."""
+    normalized = normalize_symbol_input(symbol)
+    return (
+        f"Get the volume-at-price depth profile for {normalized} using `get_price_depth(symbol='{normalized}', "
+        f"limit={limit})`. Report the newest write batch and note the snapshot time."
     )
 
 
@@ -1069,6 +1247,18 @@ def list_supported_collections() -> dict[str, Any]:
         "read_only": True,
         "collections": _serialize_collection_specs(),
         "roadmap_warning": ROADMAP_WARNING,
+    }
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def get_agent_connection_guide() -> dict[str, Any]:
+    """Return the connection guide and retrieval skills for agents integrating with this MCP."""
+    return {
+        "server": "VNIBB Read-Only MCP",
+        "read_only": True,
+        "guide_resource": "vnibb://mcp/guide",
+        "skills_resource": "vnibb://mcp/skills",
+        "guide": AGENT_CONNECTION_GUIDE,
+        "skills": SKILLS_CATALOG,
     }
 
 
@@ -1448,7 +1638,7 @@ async def get_premium_dataset(
 
     bounded_limit = _coerce_limit(limit, spec.max_limit)
     service = get_mongo_market_data_service()
-    records = await service.get_raw_dataset_records(
+    records = await service.get_raw_dataset_records_precise(
         normalized_symbol,
         dataset=spec.dataset,
         limit=bounded_limit,
@@ -1491,16 +1681,22 @@ async def get_intraday_trades(
 
 @mcp.tool()
 async def get_price_depth(symbol: str, limit: int = 500) -> dict[str, Any]:
-    """Get read-only volume-at-price depth rows for one symbol from MongoDB."""
+    """Get read-only volume-at-price depth rows for one symbol from MongoDB.
+
+    Rows come from the newest ``equity.price_depth`` snapshot only (per-record
+    ``observedAt``), so repeated calls agree on the same session and ``limit``
+    pages that snapshot's profile deterministically.
+    """
     _ensure_mongo_available()
     normalized = normalize_symbol_input(symbol)
     if not normalized:
         raise ValueError("A stock symbol is required")
 
     service = get_mongo_market_data_service()
-    rows = await service.get_price_depth(
+    rows = await service.get_price_depth_precise(
         normalized,
         limit=_coerce_limit(limit, 5000),
+        include_provenance=True,
     )
     return {
         "symbol": normalized,

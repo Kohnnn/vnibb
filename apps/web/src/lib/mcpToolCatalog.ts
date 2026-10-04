@@ -145,7 +145,7 @@ export const MCP_TOOL_CATALOG: McpToolDescriptor[] = [
   },
   {
     name: 'get_premium_dataset',
-    description: 'Read an allowlisted premium dataset (per-dataset max limits enforced).',
+    description: 'Read an allowlisted premium dataset, symbol-exact with full storage provenance.',
     source: 'analytical_corpus',
     permission: 'authenticated_read',
     sampleInput: { dataset: 'finance.ratio', symbol: 'VNM' },
@@ -159,7 +159,7 @@ export const MCP_TOOL_CATALOG: McpToolDescriptor[] = [
   },
   {
     name: 'get_price_depth',
-    description: 'Order-book/price-depth snapshot from the analytical corpus.',
+    description: 'Newest price-depth snapshot profile for a symbol, deterministic across calls.',
     source: 'analytical_corpus',
     permission: 'authenticated_read',
     sampleInput: { symbol: 'SSI' },

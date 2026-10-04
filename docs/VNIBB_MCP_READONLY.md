@@ -84,6 +84,8 @@ Design notes:
 - user-owned or operationally sensitive collections are intentionally excluded from the generic query tool
 - the database-stack tools read the private analytical store directly via `MongoMarketDataService`; they do not proxy through the FastAPI app
 - `get_premium_dataset` is constrained by a dataset allowlist (`PREMIUM_DATASET_SPECS`) and per-dataset max limits; disabled/empty source datasets (`company.capital_history`, `company.insider_deals`, `equity.block_trades`, `equity.put_through`) are intentionally excluded
+- `get_premium_dataset` resolves symbols against the outer storage `symbol` field and returns the full storage envelope (record key, scope, source, provider source) per item, so results stay symbol-exact and provenance-readable
+- `get_price_depth` reads only the newest `equity.price_depth` snapshot (per-record `observedAt`) and attaches that snapshot time to every row, so repeated calls return the same session's profile deterministically
 - use `list_premium_datasets` to discover the allowlisted dataset names and their caps
 
 ## Analytical data source
@@ -115,16 +117,29 @@ rather than failing opaquely. The Postgres-table tools remain unaffected.
 - `vnibb://database/collections`
 - `vnibb://mongo/datasets`
 - `vnibb://database/schema/{collection}`
+- `vnibb://mcp/guide` — connection guide for downstream agents: transport,
+  authentication, discovery order, and the read-only contract
+- `vnibb://mcp/skills` — retrieval skills catalog: named workflows agents adopt
+  when their matching intent is detected
 
 These resources exist so clients can inspect policy and schema intent without guessing.
+
+The `get_agent_connection_guide` tool returns both the guide and the skills
+catalog inline, so an agent can self-bootstrap from the tool surface alone
+without a prior resource read.
 
 ## Prompt inventory
 
 - `symbol_deep_dive`
 - `market_brief`
 - `database_collection_audit`
+- `eod_price_history`
+- `premium_dataset`
+- `intraday_trades`
+- `price_depth`
 
-These prompts are lightweight helpers for recurring research workflows.
+These prompts are lightweight helpers for recurring research workflows and
+mirror the named skills in `vnibb://mcp/skills`.
 
 ## Security and guardrails
 

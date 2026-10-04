@@ -2,7 +2,6 @@ from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
-
 from vnibb.providers.vnstock.equity_historical import EquityHistoricalData
 from vnibb.services.mongo_market_data_service import MongoMarketDataService
 
@@ -36,6 +35,9 @@ class Collection:
         self.query = None
         self.projection = None
         self.cursor = None
+        self.find_one_query = None
+        self.find_one_sort = None
+        self.find_one_calls = 0
 
     def find(self, query, projection):
         if self.error:
@@ -44,6 +46,16 @@ class Collection:
         self.projection = projection
         self.cursor = Cursor(self.rows)
         return self.cursor
+
+    def find_one(self, query, projection=None, *, sort=None):
+        if self.error:
+            raise self.error
+        self.find_one_calls += 1
+        self.find_one_query = query
+        self.find_one_sort = sort
+        return self.rows[0] if self.rows else None
+
+
 
 
 @pytest.mark.parametrize(
@@ -314,3 +326,200 @@ async def test_partial_mongo_survives_provider_failure_and_fills_from_db(client,
     assert payload["meta"]["source_counts"] == {"mongo": 1, "db": 2}
     assert payload["meta"]["fallback_used"] is True
     assert "provider resolution failed" in payload["meta"]["warnings"][0]
+
+
+@pytest.mark.asyncio
+async def test_precise_raw_reader_matches_outer_symbol_and_returns_full_envelope(
+    monkeypatch,
+):
+    collection = Collection(
+        [
+            {
+                "dataset": "company.info",
+                "symbol": "FPT",
+                "scopeKey": "FPT",
+                "source": "vnstock-data",
+                "providerSource": "vnstock_data",
+                "recordKey": "vnstock-data:company.info:FPT:abc123",
+                "observedAt": datetime(2026, 9, 30),
+                "updatedAt": datetime(2026, 10, 1),
+                "raw": {"symbol": "FPT", "name": "FPT Corp"},
+            }
+        ]
+    )
+    service = MongoMarketDataService()
+    monkeypatch.setattr(MongoMarketDataService, "_get_collection", lambda *_: collection)
+
+    rows = await service.get_raw_dataset_records_precise("fpt", dataset="company.info", limit=5)
+
+    assert collection.query == {"dataset": "company.info", "symbol": "FPT"}
+    assert rows[0]["recordKey"] == "vnstock-data:company.info:FPT:abc123"
+    assert rows[0]["scopeKey"] == "FPT"
+    assert rows[0]["source"] == "vnstock-data"
+    assert rows[0]["providerSource"] == "vnstock_data"
+
+
+@pytest.mark.asyncio
+async def test_precise_raw_reader_applies_variant_filter(monkeypatch):
+    collection = Collection()
+    service = MongoMarketDataService()
+    monkeypatch.setattr(MongoMarketDataService, "_get_collection", lambda *_: collection)
+
+    await service.get_raw_dataset_records_precise(
+        "vnm", dataset="finance.ratio", variant="finance.ratio.year", limit=20
+    )
+
+    assert collection.query == {
+        "dataset": "finance.ratio",
+        "symbol": "VNM",
+        "datasetVariant": "finance.ratio.year",
+    }
+
+
+@pytest.mark.asyncio
+async def test_price_depth_precise_returns_newest_batch_flat_rows_with_provenance(
+    monkeypatch,
+):
+    # Given: two depth write batches; the newer batch spans four price levels.
+    collection = Collection(
+        [
+            {
+                "dataset": "equity.price_depth",
+                "symbol": "SSI",
+                "recordKey": "vnstock-data:equity.price_depth:SSI:level1",
+                "observedAt": datetime(2026, 10, 1, 14, 30),
+                "updatedAt": datetime(2026, 10, 1, 15),
+                "raw": {"symbol": "SSI", "price": 30000, "volume": 100, "buy_volume": 60, "sell_volume": 40},
+            },
+            {
+                "dataset": "equity.price_depth",
+                "symbol": "SSI",
+                "recordKey": "vnstock-data:equity.price_depth:SSI:level2",
+                "observedAt": datetime(2026, 10, 1, 14, 30),
+                "updatedAt": datetime(2026, 10, 1, 15),
+                "raw": {"symbol": "SSI", "price": 29500, "volume": 50, "undefined_volume": 50},
+            },
+            {
+                "dataset": "equity.price_depth",
+                "symbol": "SSI",
+                "recordKey": "vnstock-data:equity.price_depth:SSI:level3",
+                "observedAt": datetime(2026, 10, 1, 14, 30),
+                "updatedAt": datetime(2026, 10, 1, 15),
+                "raw": {"symbol": "SSI", "price": 30500, "volume": 0},
+            },
+            {
+                "dataset": "equity.price_depth",
+                "symbol": "SSI",
+                "recordKey": "vnstock-data:equity.price_depth:SSI:level4",
+                "observedAt": datetime(2026, 10, 1, 14, 31),
+                "updatedAt": datetime(2026, 10, 1, 15),
+                "raw": {"symbol": "SSI", "price": 30550, "volume": 25},
+            },
+            # Older batch (previous sync) must not leak into the newest batch.
+            {
+                "dataset": "equity.price_depth",
+                "symbol": "SSI",
+                "recordKey": "vnstock-data:equity.price_depth:SSI:old1",
+                "observedAt": datetime(2026, 10, 1, 13, 30),
+                "updatedAt": datetime(2026, 10, 1, 14),
+                "raw": {"symbol": "SSI", "price": 29900, "volume": 999},
+            },
+        ]
+    )
+    service = MongoMarketDataService()
+    monkeypatch.setattr(MongoMarketDataService, "_get_collection", lambda *_: collection)
+
+    rows = await service.get_price_depth_precise(
+        "ssi", limit=500, include_provenance=True
+    )
+    # ``find`` receives one positional sort argument: the pair list.
+    assert collection.cursor.sort_args == (
+        [("updatedAt", -1), ("observedAt", -1), ("recordKey", 1)],
+    )
+    assert {row["price"] for row in rows} == {30000, 29500, 30550}
+    assert {row["volume"] for row in rows} == {100, 50, 25}
+    assert all(row["updatedAt"] == datetime(2026, 10, 1, 15) for row in rows)
+    assert all(row["recordKey"].startswith("vnstock-data:equity.price_depth:SSI:") for row in rows)
+    by_price = {row["price"]: row for row in rows}
+    assert by_price[30000]["buy_volume"] == 60
+    assert by_price[30000]["sell_volume"] == 40
+    assert by_price[29500]["undefined_volume"] == 50
+
+
+@pytest.mark.asyncio
+async def test_price_depth_precise_returns_empty_when_no_records(monkeypatch):
+    collection = Collection()
+    service = MongoMarketDataService()
+    monkeypatch.setattr(MongoMarketDataService, "_get_collection", lambda *_: collection)
+
+    rows = await service.get_price_depth_precise("ssi", limit=500, include_provenance=False)
+
+    assert rows == []
+    assert collection.cursor.consumed_rows == 0
+
+
+@pytest.mark.asyncio
+async def test_price_depth_precise_limit_caps_rows_within_newest_batch(monkeypatch):
+    # Given: five valid flat levels written in one batch.
+    collection = Collection(
+        [
+            {
+                "dataset": "equity.price_depth",
+                "symbol": "SSI",
+                "recordKey": f"vnstock-data:equity.price_depth:SSI:level{i}",
+                "observedAt": datetime(2026, 10, 1, 14, 30),
+                "updatedAt": datetime(2026, 10, 1, 15),
+                "raw": {"symbol": "SSI", "price": 30000 + i * 100, "volume": 100 + i},
+            }
+            for i in range(5)
+        ]
+    )
+    service = MongoMarketDataService()
+    monkeypatch.setattr(MongoMarketDataService, "_get_collection", lambda *_: collection)
+
+    rows = await service.get_price_depth_precise("ssi", limit=2, include_provenance=False)
+
+    assert len(rows) == 2
+    assert collection.cursor.limit_value is None
+    assert collection.cursor.consumed_rows == 5
+
+
+@pytest.mark.asyncio
+async def test_price_depth_precise_writer_shape_round_trip(monkeypatch):
+    # Given: the catalog writer's own framing/record-key helpers produce the
+    # flat row shape the reader consumes (one doc per price level).
+    import pandas as pd
+    from scripts.backfill_mongo_vnstock_full_catalog import (
+        _frame_rows,
+        _record_key,
+    )
+
+    rows = _frame_rows(
+        pd.DataFrame(
+            [
+                {"symbol": "SSI", "price": 30000, "volume": 100, "buy_volume": 60, "sell_volume": 40},
+                {"symbol": "SSI", "price": 29500, "volume": 50, "undefined_volume": 50},
+                {"symbol": "SSI", "price": 30500, "volume": 0},
+            ]
+        )
+    )
+    synced_at = datetime(2026, 10, 1, 15)
+    written = [
+        {
+            "dataset": "equity.price_depth",
+            "symbol": "SSI",
+            "recordKey": _record_key("equity.price_depth", "SSI", raw),
+            "observedAt": synced_at,
+            "updatedAt": synced_at,
+            "raw": {**raw, "symbol": "SSI", "ticker": "SSI"},
+        }
+        for raw in rows
+    ]
+    collection = Collection(written)
+    service = MongoMarketDataService()
+    monkeypatch.setattr(MongoMarketDataService, "_get_collection", lambda *_: collection)
+
+    out = await service.get_price_depth_precise("ssi", limit=500, include_provenance=False)
+
+    assert {row["price"] for row in out} == {30000, 29500}
+    assert {row["volume"] for row in out} == {100, 50}

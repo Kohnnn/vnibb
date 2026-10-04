@@ -377,7 +377,7 @@ async def test_movers_route_when_multiple_baselines_exist_uses_one_nearest_per_m
                 category="Economics",
                 question="Will rates fall?",
                 yes_price=0.55,
-                captured_at=now - timedelta(hours=25),
+                captured_at=now - timedelta(hours=30),
             )
         ),
         make_snapshot(
@@ -388,7 +388,7 @@ async def test_movers_route_when_multiple_baselines_exist_uses_one_nearest_per_m
                 category="Economics",
                 question="Will rates fall?",
                 yes_price=0.10,
-                captured_at=now - timedelta(hours=48),
+                captured_at=now - timedelta(hours=54),
             )
         ),
         make_snapshot(
@@ -411,7 +411,7 @@ async def test_movers_route_when_multiple_baselines_exist_uses_one_nearest_per_m
                 category="Politics",
                 question="Will a candidate win?",
                 yes_price=0.50,
-                captured_at=now - timedelta(hours=25),
+                captured_at=now - timedelta(hours=30),
                 volume=200.0,
             )
         ),

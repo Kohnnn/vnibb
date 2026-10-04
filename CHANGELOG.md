@@ -28,11 +28,21 @@ live in `docs/`.
 - Google Sheets integration adds opt-in bounded pulls (`/api/v1/apps-script/bounded/{dataset}`) with truthful provenance: availability distinguishes unavailable from empty, the source date stays unknown when the data carries none (fetch time is never reported as the data date), and each pull writes limits/as-of/source/limitations next to the data. Legacy flat endpoints and `VNIBB_*` cell formulas are unchanged; writes redact secret-like columns and never place API keys in cells.
 - Reviewed research starters carry versioned server-resolved workflow identities, mandatory evidence kinds, and explicit limitations; stale identities fail before streaming and missing evidence is disclosed instead of invented.
 
+- MCP analytical-corpus reads resolve symbols against the outer storage
+  `symbol` field only and return the full storage envelope, so premium-dataset
+  results no longer surface foreign tickers or drop Vietcap rows that lack a
+  raw symbol. `get_price_depth` reads only the newest snapshot's rows with its
+  `observedAt` attached, making repeated calls deterministic instead of
+  sampling an arbitrary snapshot.
+
 ### Fixed
 - VniAgent follow-ups require every mandatory source kind in the prompt's scope. Partial evidence no longer offers valuation, margin, balance-sheet, flow, catalyst, or market-breadth questions that need missing sources; single-source prompts remain available. This fix is not yet deployed.
 - Follow-up eligibility, citations, and ranking use the same scoped evidence selection. Required source entries without citable IDs cannot enable a question; padded duplicate IDs are normalized and deduplicated.
 - Private research-share reads bypass service-worker caches, and activation purges older cached snapshots. Account changes discard stale create/revoke completions; anonymous issuer identities are rejected.
 - Reviewed starter identities survive initial workspace session restoration, clear on later ticker/session changes, and restrict final citation validation to evidence in the selected workflow scope.
+- Listing/profile cache writes use atomic symbol-key upserts, preventing duplicate listing inputs or concurrent first writes from rolling back valid metadata. Sparse updates preserve existing values and creation timestamps.
+- Mongo EOD ingestion refuses writes without an assured unique natural-key index and propagates bulk failures to the scheduler instead of reporting a successful zero-row refresh. Existing Vietcap coverage remains a valid zero-write result; partially accepted unordered bulks are disclosed as failed ingestion.
+- The scheduled Mongo EOD job now records a durable failed outcome when any symbol fails, after the entire sync finishes. Consecutive failure counters increment for partial and total failures, then reset on a successful zero-write or normal run.
 - Prediction-market catalogue admission counts fresh, real, active, nonclosed,
   unexpired markets toward each source's 10,000-market cap. Historical rows
   remain available while separate physical and snapshot storage limits continue

@@ -1,6 +1,5 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
-
 from vnibb.mcp import server
 
 
@@ -104,9 +103,25 @@ class _FakeMongoService:
         }
         return [{"symbol": symbol, "close": 2.0}]
 
+    async def get_raw_dataset_records_precise(self, symbol, *, dataset, limit):
+        self.calls["precise_raw"] = {"symbol": symbol, "dataset": dataset, "limit": limit}
+        return [{"symbol": symbol, "dataset": dataset, "recordKey": f"k:{symbol}:{dataset}"}]
+
+    async def get_price_depth_precise(self, symbol, *, limit, include_provenance):
+        self.calls["precise_depth"] = {
+            "symbol": symbol,
+            "limit": limit,
+            "include_provenance": include_provenance,
+        }
+        return [{"price": 1.0, "volume": 100, "observedAt": "2026-10-01T00:00:00Z"}]
+
     async def get_raw_dataset_records(self, symbol, *, dataset, limit):
         self.calls["raw"] = {"symbol": symbol, "dataset": dataset, "limit": limit}
         return [{"raw": {"symbol": symbol}, "dataset": dataset}]
+
+    async def get_price_depth(self, symbol, *, limit):
+        self.calls["depth"] = {"symbol": symbol, "limit": limit}
+        return [{"raw": {"symbol": symbol}}]
 
     async def inspect_collections(self, *, sample_limit=5):
         return [{"name": "market_prices_eod", "estimated_count": 10}]
@@ -129,8 +144,9 @@ async def test_get_premium_dataset_caps_limit_and_normalizes(monkeypatch) -> Non
     assert result["symbol"] == "VNM"
     assert result["dataset"] == "finance.ratio"
     # finance.ratio max_limit is 200, so the requested 10_000 must be capped.
-    assert fake.calls["raw"]["limit"] == server.PREMIUM_DATASET_SPECS["finance.ratio"].max_limit
-    assert fake.calls["raw"]["dataset"] == "finance.ratio"
+    assert fake.calls["precise_raw"]["limit"] == server.PREMIUM_DATASET_SPECS["finance.ratio"].max_limit
+    assert fake.calls["precise_raw"]["dataset"] == "finance.ratio"
+    assert "raw" not in fake.calls
 
 
 @pytest.mark.asyncio
@@ -179,3 +195,62 @@ def test_list_premium_datasets_excludes_disabled_datasets() -> None:
         "quote.price_depth",
     ):
         assert disabled not in names
+
+
+@pytest.mark.asyncio
+async def test_get_price_depth_uses_newest_snapshot_deterministically(monkeypatch) -> None:
+    fake = _FakeMongoService()
+    monkeypatch.setattr(server, "get_mongo_market_data_service", lambda: fake)
+
+    result = await server.get_price_depth(symbol="hose:ssi", limit=10_000)
+
+    assert result["symbol"] == "SSI"
+    assert fake.calls["precise_depth"]["symbol"] == "SSI"
+    assert fake.calls["precise_depth"]["limit"] == 5000
+    assert fake.calls["precise_depth"]["include_provenance"] is True
+    assert "depth" not in fake.calls
+
+
+def test_agent_guide_resource_covers_connect_auth_and_discovery() -> None:
+    text = server.read_agent_guide_resource()
+    assert "streamable-http" in text
+    assert "Authorization: Bearer" in text
+    assert "/mcp" in text
+    assert "vnibb://mcp/guardrails" in text
+    assert "vnibb://database/collections" in text
+    assert "vnibb://mongo/datasets" in text
+    assert "get_symbol_snapshot" in text
+    assert "query_database_collection" in text
+
+
+def test_skills_catalog_lists_named_retrieval_workflows() -> None:
+    text = server.read_skills_catalog_resource()
+    for skill in (
+        "symbol_deep_dive",
+        "market_brief",
+        "eod_price_history",
+        "premium_dataset",
+        "intraday_trades",
+        "price_depth",
+        "database_audit",
+        "matrix_selection",
+    ):
+        assert skill in text
+    assert "read-only" in text
+
+
+def test_agent_connection_guide_tool_exposes_guide_and_skills() -> None:
+    result = server.get_agent_connection_guide()
+    assert result["server"] == "VNIBB Read-Only MCP"
+    assert result["read_only"] is True
+    assert result["guide_resource"] == "vnibb://mcp/guide"
+    assert result["skills_resource"] == "vnibb://mcp/skills"
+    assert result["guide"] == server.AGENT_CONNECTION_GUIDE
+    assert result["skills"] == server.SKILLS_CATALOG
+
+
+def test_new_workflow_prompt_templates_return_directive_text() -> None:
+    assert "get_eod_price_history" in server.eod_price_history("vnm", lookback_days=90)
+    assert "get_premium_dataset" in server.premium_dataset("vnm", "equity.foreign_flow", limit=10)
+    assert "get_intraday_trades" in server.intraday_trades("vnm", lookback_days=3, limit=10)
+    assert "get_price_depth" in server.price_depth("vnm", limit=50)

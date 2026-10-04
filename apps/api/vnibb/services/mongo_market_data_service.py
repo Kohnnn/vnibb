@@ -74,6 +74,14 @@ def _eod_trade_day(row: dict[str, Any]) -> Any:
     return trade_date.date() if isinstance(trade_date, datetime) else trade_date
 
 
+def _to_float(value: Any) -> float:
+    """Coerce a stored price/volume value to float, invalid to 0."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _stream_eod_days(cursor: Iterable[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     days: set[Any] = set()
@@ -155,45 +163,77 @@ class MongoMarketDataService:
         return self._client[settings.mongodb_database][name]
 
     def ensure_eod_indexes(self) -> list[str]:
-        """Create the indexes that make `market_prices_eod` self-consistent.
-
-        Uniqueness on (symbol, tradeDate, source) was enforced only by the
-        operator-run backfill scripts (`scripts/vietcap/backfill_vietcap.py`,
-        `scripts/backfill_mongo_vnstock_full_catalog.py`). The live corpus does
-        carry the index today -- verified as `uniq_symbol_tradeDate_source`,
-        unique, with zero duplicate keys across 4.87M documents -- but nothing
-        in the application recreated or asserted it. Whether duplicates were
-        possible therefore depended on script history, not on the code that
-        reads and writes the collection. This moves the guarantee into the
-        service, and the names here deliberately match what the live corpus
-        already has so the call is a no-op there rather than a second index.
-
-        Returns the names of indexes ensured. Idempotent.
-        """
+        """Ensure the EOD collection has the required unique natural key."""
         if not self.enabled:
             raise RuntimeError("MongoDB analytical source is not configured")
 
         coll = self._get_collection("market_prices_eod")
-        specs = [
-            ([("symbol", 1), ("tradeDate", 1), ("source", 1)], "uniq_symbol_tradeDate_source", True),
-            ([("symbol", 1), ("tradeDate", -1)], "idx_symbol_tradeDate_desc", False),
-        ]
-        ensured: list[str] = []
-        for keys, name, unique in specs:
-            try:
-                coll.create_index(keys, name=name, unique=unique)
-                ensured.append(name)
-            except Exception as exc:  # noqa: BLE001
-                # A unique index build fails if duplicates already exist. That
-                # is a real finding, not a reason to abort a write -- surface it
-                # and let the operator run the (dry-run-by-default) dedup.
-                logger.warning(
-                    "Mongo EOD index %s not ensured: %s. If this is a "
-                    "duplicate-key failure, run scripts/dedup_mongo_eod.py first "
-                    "(it defaults to a dry run).",
-                    name,
-                    exc,
+        required_keys = [("symbol", 1), ("tradeDate", 1), ("source", 1)]
+        required_name = "uniq_symbol_tradeDate_source"
+        indexes = list(coll.list_indexes())
+        existing = next(
+            (
+                index
+                for index in indexes
+                if list(index.get("key", {}).items()) == required_keys
+                and index.get("unique") is True
+                and not index.get("partialFilterExpression")
+                and not index.get("sparse")
+            ),
+            None,
+        )
+
+        if existing is not None:
+            index_name = str(existing["name"])
+            options = {
+                option: existing[option]
+                for option in ("collation", "hidden")
+                if option in existing
+            }
+            # Reissuing create_index with the existing specification waits for
+            # an in-progress build; failures must block EOD writes.
+            coll.create_index(
+                required_keys, name=index_name, unique=True, **options
+            )
+            ensured = [index_name]
+        else:
+            same_key_index = next(
+                (
+                    index
+                    for index in indexes
+                    if list(index.get("key", {}).items()) == required_keys
+                ),
+                None,
+            )
+            if same_key_index is not None:
+                raise RuntimeError(
+                    "Mongo EOD index on (symbol, tradeDate, source) exists with an incompatible specification"
                 )
+            named_index = next(
+                (index for index in indexes if index.get("name") == required_name),
+                None,
+            )
+            if named_index is not None:
+                raise RuntimeError(
+                    f"Mongo EOD index {required_name} exists with an incompatible specification"
+                )
+            try:
+                coll.create_index(required_keys, name=required_name, unique=True)
+            except Exception as exc:
+                raise RuntimeError(
+                    "Mongo EOD unique index on (symbol, tradeDate, source) could not be ensured"
+                ) from exc
+            ensured = [required_name]
+
+        secondary_keys = [("symbol", 1), ("tradeDate", -1)]
+        if not any(
+            list(index.get("key", {}).items()) == secondary_keys for index in indexes
+        ):
+            try:
+                coll.create_index(secondary_keys, name="idx_symbol_tradeDate_desc")
+                ensured.append("idx_symbol_tradeDate_desc")
+            except Exception as exc:  # pragma: no cover - best-effort read optimization
+                logger.warning("Mongo EOD secondary index was not ensured: %s", exc)
         return ensured
 
     def _get_database(self) -> Any:
@@ -361,6 +401,133 @@ class MongoMarketDataService:
             return await asyncio.to_thread(_read)
         except Exception as exc:
             logger.warning("Mongo price-depth read failed for %s: %s", symbol_upper, exc)
+            return []
+
+    async def get_raw_dataset_records_precise(
+        self,
+        symbol: str,
+        *,
+        dataset: str,
+        variant: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return raw shared vnstock records for a symbol/dataset pair, symbol-exact.
+
+        Unlike :meth:`get_raw_dataset_records`, this reader matches the outer
+        ``symbol`` field only. The premium envelope writes that field from the
+        requested scope symbol, while ``raw.symbol`` can reflect the provider's
+        own ticker spelling (and is not even present in the Vietcap path), so
+        ``$or`` matching on ``raw.symbol`` can surface foreign tickers or drop
+        rows that carry no raw symbol. The result also carries the full storage
+        envelope (``recordKey``, ``scopeKey``, ``source``, ``providerSource``,
+        ``schemaVersion``) so callers can reconstruct provenance instead of a
+        raw-only projection.
+        """
+
+        symbol_upper = symbol.upper()
+        limit = max(1, min(limit, 5000))
+
+        def _read() -> list[dict[str, Any]]:
+            coll = self._get_collection("market_vnstock_premium_records")
+            query: dict[str, Any] = {"dataset": dataset, "symbol": symbol_upper}
+            if variant is not None:
+                query["datasetVariant"] = variant
+            cursor = (
+                coll.find(
+                    query,
+                    {
+                        "_id": 0,
+                        "dataset": 1,
+                        "datasetVariant": 1,
+                        "symbol": 1,
+                        "scopeKey": 1,
+                        "source": 1,
+                        "providerSource": 1,
+                        "recordKey": 1,
+                        "observedAt": 1,
+                        "updatedAt": 1,
+                        "raw": 1,
+                    },
+                )
+                .sort([("observedAt", -1), ("updatedAt", -1)])
+                .limit(limit)
+            )
+            return list(cursor)
+
+        try:
+            return await asyncio.to_thread(_read)
+        except Exception as exc:
+            logger.warning(
+                "Mongo precise raw dataset read failed for %s %s: %s",
+                symbol_upper,
+                dataset,
+                exc,
+            )
+            return []
+
+    async def get_price_depth_precise(
+        self, symbol: str, *, limit: int = 500, include_provenance: bool = False
+    ) -> list[dict[str, Any]]:
+        """Return normalized volume-at-price rows from the newest depth write batch.
+
+        The catalog writer stores one flat document per price level (``raw``
+        carries ``price``/``volume`` directly, not a nested ``items`` list) and
+        stamps every row of one fetch with the same wall-clock ``updatedAt``
+        batch time. This reader groups the freshest batch (the newest
+        ``updatedAt``) and returns its rows, so repeated calls agree on the
+        same session's profile instead of sampling across arbitrary batches.
+        """
+
+        symbol_upper = symbol.upper()
+        limit = max(1, min(limit, 5000))
+
+        def _read() -> list[dict[str, Any]]:
+            coll = self._get_collection("market_vnstock_premium_records")
+            rows: list[dict[str, Any]] = []
+            for record in coll.find(
+                {"dataset": "equity.price_depth", "symbol": symbol_upper},
+                {
+                    "_id": 0,
+                    "raw.price": 1,
+                    "raw.volume": 1,
+                    "raw.buy_volume": 1,
+                    "raw.sell_volume": 1,
+                    "raw.undefined_volume": 1,
+                    "observedAt": 1,
+                    "updatedAt": 1,
+                    "recordKey": 1,
+                },
+            ).sort([("updatedAt", -1), ("observedAt", -1), ("recordKey", 1)]):
+                if rows and rows[0]["_batch_update"] != record.get("updatedAt"):
+                    break
+                raw = record.get("raw") or {}
+                row_price = _to_float(raw.get("price"))
+                row_volume = _to_float(raw.get("volume"))
+                if row_price <= 0 or row_volume <= 0:
+                    continue
+                batch_update = record.get("updatedAt")
+                if len(rows) >= limit:
+                    continue
+                row: dict[str, Any] = {
+                    "price": row_price,
+                    "volume": row_volume,
+                    "buy_volume": _to_float(raw.get("buy_volume")),
+                    "sell_volume": _to_float(raw.get("sell_volume")),
+                    "undefined_volume": _to_float(raw.get("undefined_volume")),
+                }
+                if include_provenance:
+                    row["observedAt"] = record.get("observedAt")
+                    row["updatedAt"] = batch_update
+                    row["recordKey"] = record.get("recordKey")
+                rows.append({**row, "_batch_update": batch_update})
+            for row in rows:
+                row.pop("_batch_update", None)
+            return rows
+
+        try:
+            return await asyncio.to_thread(_read)
+        except Exception as exc:
+            logger.warning("Mongo price-depth precise read failed for %s: %s", symbol_upper, exc)
             return []
 
     async def get_raw_dataset_records(
@@ -849,9 +1016,12 @@ class MongoMarketDataService:
         the corpus now uses raw VND, so OHLC values are multiplied by 1000 before
         persisting and marked with ``priceUnit='VND'``. Rows must already be
         normalized dicts carrying ``tradeDate`` (a naive ``datetime``) plus OHLCV
-        fields. Returns the number of upsert operations issued.
+        fields. Returns the number of upsert operations accepted by MongoDB. A bulk
+        write exception propagates because unordered writes may partially persist.
         """
 
+        if not self.enabled:
+            return 0
         symbol_upper = symbol.upper()
         if not rows:
             return 0
@@ -859,9 +1029,6 @@ class MongoMarketDataService:
         def _write() -> int:
             from pymongo import UpdateOne
 
-            # Guarantee the (symbol, tradeDate, source) uniqueness this writer
-            # and the read path both assume, rather than trusting that a
-            # backfill script happened to create it. Idempotent and cheap.
             self.ensure_eod_indexes()
             coll = self._get_collection("market_prices_eod")
             synced_at = datetime.now(UTC).replace(tzinfo=None)
@@ -955,11 +1122,7 @@ class MongoMarketDataService:
             coll.bulk_write(ops, ordered=False)
             return len(ops)
 
-        try:
-            return await asyncio.to_thread(_write)
-        except Exception as exc:
-            logger.warning("Mongo EOD upsert failed for %s: %s", symbol_upper, exc)
-            return 0
+        return await asyncio.to_thread(_write)
 
 
 @lru_cache(maxsize=1)

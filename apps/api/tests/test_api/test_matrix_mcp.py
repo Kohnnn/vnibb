@@ -219,7 +219,7 @@ async def test_shared_bearer_can_read_premium_dataset_but_user_jwt_cannot(matrix
     class PremiumService:
         enabled = True
 
-        async def get_raw_dataset_records(self, symbol, *, dataset, limit):
+        async def get_raw_dataset_records_precise(self, symbol, *, dataset, limit):
             assert (symbol, dataset, limit) == ("FPT", "company.info", 20)
             return [{"symbol": "FPT", "name": "licensed data"}]
 
