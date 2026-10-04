@@ -11,17 +11,17 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Generic, List, Optional, TypeVar
 
-from sqlalchemy import and_, select, func
-
+from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vnibb.core.database import async_session_factory
 from vnibb.core.cache_constants import DB_CACHE_TTLS
-from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.sync_status import SyncStatus
+from vnibb.core.database import async_session_factory
 from vnibb.models.company import Company
+from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
+from vnibb.models.sync_status import SyncStatus
 
 logger = logging.getLogger(__name__)
 
@@ -592,55 +592,37 @@ class CacheManager:
                 outstanding_shares,
             )
 
-            # Check if company exists
-            result = await session.execute(select(Company).where(Company.symbol == symbol))
-            company = result.scalar_one_or_none()
-
-            if company:
-                # Update existing record
-                company.company_name = data.get("company_name") or company.company_name
-                company.short_name = data.get("short_name") or company.short_name
-                company.english_name = data.get("english_name") or company.english_name
-                company.exchange = data.get("exchange") or company.exchange
-                company.industry = data.get("industry") or company.industry
-                company.sector = data.get("sector") or company.sector
-                company.established_date = established_date or company.established_date
-                company.listing_date = listing_date or company.listing_date
-                company.website = data.get("website") or company.website
-                company.business_description = (
-                    data.get("description") or company.business_description
-                )
-                company.outstanding_shares = outstanding_shares or company.outstanding_shares
-                company.listed_shares = listed_shares or company.listed_shares
-                company.address = data.get("address") or company.address
-                company.phone = data.get("phone") or company.phone
-                company.email = data.get("email") or company.email
-                company.raw_data = data
-                company.updated_at = now
-            else:
-                # Create new record
-                company = Company(
-                    symbol=symbol,
-                    company_name=data.get("company_name"),
-                    short_name=data.get("short_name"),
-                    english_name=data.get("english_name"),
-                    exchange=data.get("exchange"),
-                    industry=data.get("industry"),
-                    sector=data.get("sector"),
-                    established_date=established_date,
-                    listing_date=listing_date,
-                    website=data.get("website"),
-                    business_description=data.get("description"),
-                    outstanding_shares=outstanding_shares,
-                    listed_shares=listed_shares,
-                    address=data.get("address"),
-                    phone=data.get("phone"),
-                    email=data.get("email"),
-                    raw_data=data,
-                    created_at=now,
-                    updated_at=now,
-                )
-                session.add(company)
+            values = {
+                "symbol": symbol,
+                "company_name": data.get("company_name") or None,
+                "short_name": data.get("short_name") or None,
+                "english_name": data.get("english_name") or None,
+                "exchange": data.get("exchange") or None,
+                "industry": data.get("industry") or None,
+                "sector": data.get("sector") or None,
+                "established_date": established_date,
+                "listing_date": listing_date,
+                "website": data.get("website") or None,
+                "business_description": data.get("description") or None,
+                "outstanding_shares": outstanding_shares,
+                "listed_shares": listed_shares,
+                "address": data.get("address") or None,
+                "phone": data.get("phone") or None,
+                "email": data.get("email") or None,
+                "raw_data": data or None,
+                "created_at": now,
+                "updated_at": now,
+            }
+            dialect_insert = insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+            stmt = dialect_insert(Company).values(**values)
+            updates = {
+                key: func.coalesce(stmt.excluded[key], getattr(Company, key))
+                for key in values
+                if key not in {"symbol", "created_at"}
+            }
+            await session.execute(
+                stmt.on_conflict_do_update(index_elements=["symbol"], set_=updates)
+            )
 
             await session.commit()
             logger.info(f"Stored profile in cache: {symbol}")
@@ -741,47 +723,36 @@ class CacheManager:
         try:
             now = datetime.utcnow()
             count = 0
+            dialect_insert = insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
 
             for record in data:
-                # Get symbol from record (could be 'symbol' or 'ticker')
                 symbol = record.get("symbol") or record.get("ticker")
                 if not symbol:
                     continue
 
                 symbol = symbol.upper()
-
-                # Check if stock exists
-                result = await session.execute(select(Stock).where(Stock.symbol == symbol))
-                stock = result.scalar_one_or_none()
-
-                if stock:
-                    # Update existing record
-                    stock.company_name = (
-                        record.get("company_name") or record.get("organ_name") or stock.company_name
-                    )
-                    stock.short_name = record.get("short_name") or stock.short_name
-                    stock.exchange = record.get("exchange") or stock.exchange
-                    stock.industry = (
-                        record.get("industry") or record.get("industry_name") or stock.industry
-                    )
-                    stock.sector = record.get("sector") or stock.sector
-                    stock.is_active = 1
-                    stock.updated_at = now
-                else:
-                    # Create new record
-                    stock = Stock(
-                        symbol=symbol,
-                        company_name=record.get("company_name") or record.get("organ_name"),
-                        short_name=record.get("short_name"),
-                        exchange=record.get("exchange", "HOSE"),
-                        industry=record.get("industry") or record.get("industry_name"),
-                        sector=record.get("sector"),
-                        is_active=1,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                    session.add(stock)
-
+                values = {
+                    "symbol": symbol,
+                    "company_name": record.get("company_name") or record.get("organ_name") or None,
+                    "short_name": record.get("short_name") or None,
+                    "exchange": record.get("exchange") or "HOSE",
+                    "industry": record.get("industry") or record.get("industry_name") or None,
+                    "sector": record.get("sector") or None,
+                    "is_active": 1,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                stmt = dialect_insert(Stock).values(**values)
+                updates = {
+                    key: func.coalesce(stmt.excluded[key], getattr(Stock, key))
+                    for key in ("company_name", "short_name", "industry", "sector")
+                }
+                updates.update(is_active=1, updated_at=now)
+                if record.get("exchange"):
+                    updates["exchange"] = stmt.excluded.exchange
+                await session.execute(
+                    stmt.on_conflict_do_update(index_elements=["symbol"], set_=updates)
+                )
                 count += 1
 
             await session.commit()

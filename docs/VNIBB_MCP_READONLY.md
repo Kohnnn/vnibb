@@ -89,6 +89,7 @@ Design notes:
 - Batch selection precedes price/volume filtering. If the newest batch contains only zero-volume or invalid levels, `get_price_depth` returns no items; older positive levels are never substituted as current depth.
 - Catalog ingestion keys flat equity/futures/crypto depth levels by scope and normalized price. Volume changes update the level instead of creating a second identity; symbol/ticker/time metadata cannot collapse distinct prices.
 - Previously overwritten levels cannot be recovered by rekeying the surviving document. Deploy the writer correction and refresh the affected depth datasets through catalog ingestion; a new batch excludes older surviving documents from `get_price_depth`. No production refresh is claimed here.
+- Recovery smoke replayed the documented VCB provider frame (`price`, `volume`, buy/sell/undefined volumes) through the catalog fetcher, real MongoDB upserts, and the actual MCP tool. The two price levels remained distinct; an all-zero newest batch excluded a retained older positive level. This proves the captured-frame storage/read contract, not live premium accessor availability or market freshness.
 - use `list_premium_datasets` to discover the allowlisted dataset names and their caps
 
 ## Analytical data source

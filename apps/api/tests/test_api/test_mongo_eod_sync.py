@@ -118,9 +118,266 @@ async def test_run_mongo_eod_sync_isolates_symbol_failures(monkeypatch):
     assert result["failures"] == 1
 
 
+@pytest.mark.asyncio
+async def test_run_mongo_eod_sync_counts_write_failure_per_symbol(monkeypatch):
+    class FakeService:
+        enabled = True
+
+        async def bulk_upsert_eod_prices(self, symbol, rows):
+            if symbol == "BAD":
+                raise RuntimeError("Mongo bulk write failed")
+            return len(rows)
+
+    monkeypatch.setattr(
+        mongo_eod_sync, "get_mongo_market_data_service", lambda: FakeService()
+    )
+
+    async def fake_wait(bucket):
+        return None
+
+    async def fake_fetch(*, symbol, start, end, interval, bypass_internal_retry):
+        return pd.DataFrame(
+            [{"time": "2026-06-05", "open": 1, "high": 2, "low": 1, "close": 1.5, "volume": 10}]
+        )
+
+    monkeypatch.setattr(mongo_eod_sync.data_pipeline, "_wait_for_rate_limit", fake_wait)
+    monkeypatch.setattr(mongo_eod_sync.data_pipeline, "_fetch_quote_history_frame", fake_fetch)
+
+    result = await mongo_eod_sync.run_mongo_eod_sync(
+        symbols=["GOOD", "BAD"], window_days=5
+    )
+
+    assert result == {"symbols": 1, "rows": 1, "failures": 1}
+
+
+@pytest.mark.asyncio
+async def test_run_mongo_eod_sync_keeps_legitimate_zero_write_success(monkeypatch):
+    class FakeService:
+        enabled = True
+
+        async def bulk_upsert_eod_prices(self, symbol, rows):
+            return 0
+
+    monkeypatch.setattr(
+        mongo_eod_sync, "get_mongo_market_data_service", lambda: FakeService()
+    )
+
+    async def fake_wait(bucket):
+        return None
+
+    async def fake_fetch(*, symbol, start, end, interval, bypass_internal_retry):
+        return pd.DataFrame(
+            [{"time": "2026-06-05", "open": 1, "high": 2, "low": 1, "close": 1.5, "volume": 10}]
+        )
+
+    monkeypatch.setattr(mongo_eod_sync.data_pipeline, "_wait_for_rate_limit", fake_wait)
+    monkeypatch.setattr(mongo_eod_sync.data_pipeline, "_fetch_quote_history_frame", fake_fetch)
+
+    result = await mongo_eod_sync.run_mongo_eod_sync(symbols=["VCI"], window_days=5)
+
+    assert result == {"symbols": 1, "rows": 0, "failures": 0}
+
+
+
+def test_ensure_eod_indexes_reuses_compatible_unique_index(monkeypatch):
+    from unittest.mock import MagicMock, call
+
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    service = MongoMarketDataService()
+    collection = MagicMock()
+    collection.list_indexes.return_value = [
+        {"name": "_id_", "key": {"_id": 1}},
+        {
+            "name": "legacy_eod_key",
+            "key": {"symbol": 1, "tradeDate": 1, "source": 1},
+            "unique": True,
+            "hidden": True,
+        },
+    ]
+    monkeypatch.setattr(service, "_get_collection", lambda name: collection)
+    monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
+
+    ensured = service.ensure_eod_indexes()
+
+    assert ensured == ["legacy_eod_key", "idx_symbol_tradeDate_desc"]
+    assert collection.create_index.call_args_list == [
+        call(
+            [("symbol", 1), ("tradeDate", 1), ("source", 1)],
+            name="legacy_eod_key",
+            unique=True,
+            hidden=True,
+        ),
+        call(
+            [("symbol", 1), ("tradeDate", -1)], name="idx_symbol_tradeDate_desc"
+        ),
+    ]
+
+
+def test_bulk_upsert_eod_prices_refuses_write_when_unique_index_fails(monkeypatch):
+    import sys
+    import types
+    from unittest.mock import MagicMock
+
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    class FakeUpdateOne:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    fake_pymongo = types.ModuleType("pymongo")
+    fake_pymongo.UpdateOne = FakeUpdateOne
+    monkeypatch.setitem(sys.modules, "pymongo", fake_pymongo)
+
+    service = MongoMarketDataService()
+    collection = MagicMock()
+    collection.list_indexes.return_value = [{"name": "_id_", "key": {"_id": 1}}]
+    collection.create_index.side_effect = RuntimeError("duplicate keys")
+    monkeypatch.setattr(service, "_get_collection", lambda name: collection)
+    monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
+
+    with pytest.raises(RuntimeError, match="unique index.*could not be ensured"):
+        import asyncio
+
+        asyncio.run(
+            service.bulk_upsert_eod_prices(
+                "VCI",
+                [{"tradeDate": datetime(2026, 6, 5), "close": 1}],
+            )
+        )
+
+    collection.bulk_write.assert_not_called()
+
+
+def test_ensure_eod_indexes_rejects_incompatible_named_index(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    service = MongoMarketDataService()
+    collection = MagicMock()
+    collection.list_indexes.return_value = [
+        {
+            "name": "uniq_symbol_tradeDate_source",
+            "key": {"symbol": 1, "tradeDate": 1, "source": 1},
+            "unique": False,
+        }
+    ]
+    monkeypatch.setattr(service, "_get_collection", lambda name: collection)
+    monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
+
+    with pytest.raises(RuntimeError, match="incompatible specification"):
+        service.ensure_eod_indexes()
+
+    collection.create_index.assert_not_called()
+
+
+def test_bulk_upsert_eod_prices_refuses_existing_index_build_failure(monkeypatch):
+    import sys
+    import types
+    from unittest.mock import MagicMock
+
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    class FakeUpdateOne:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    fake_pymongo = types.ModuleType("pymongo")
+    fake_pymongo.UpdateOne = FakeUpdateOne
+    monkeypatch.setitem(sys.modules, "pymongo", fake_pymongo)
+
+    service = MongoMarketDataService()
+    collection = MagicMock()
+    collection.list_indexes.return_value = [
+        {
+            "name": "legacy_eod_key",
+            "key": {"symbol": 1, "tradeDate": 1, "source": 1},
+            "unique": True,
+        }
+    ]
+    collection.create_index.side_effect = RuntimeError("index build incomplete")
+    monkeypatch.setattr(service, "_get_collection", lambda name: collection)
+    monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
+
+    with pytest.raises(RuntimeError, match="index build incomplete"):
+        import asyncio
+
+        asyncio.run(
+            service.bulk_upsert_eod_prices(
+                "VCI", [{"tradeDate": datetime(2026, 6, 5), "close": 1}]
+            )
+        )
+
+    collection.bulk_write.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "incompatible_option",
+    [
+        {"partialFilterExpression": {"source": {"$exists": True}}},
+        {"sparse": True},
+    ],
+)
+def test_ensure_eod_indexes_rejects_partial_or_sparse_unique_index(
+    monkeypatch, incompatible_option
+):
+    from unittest.mock import MagicMock
+
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    service = MongoMarketDataService()
+    collection = MagicMock()
+    collection.list_indexes.return_value = [
+        {
+            "name": "legacy_eod_key",
+            "key": {"symbol": 1, "tradeDate": 1, "source": 1},
+            "unique": True,
+            **incompatible_option,
+        }
+    ]
+    monkeypatch.setattr(service, "_get_collection", lambda name: collection)
+    monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
+
+    with pytest.raises(RuntimeError, match="incompatible specification"):
+        service.ensure_eod_indexes()
+
+    collection.create_index.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # MongoMarketDataService.bulk_upsert_eod_prices document shape
 # ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_bulk_upsert_eod_prices_propagates_bulk_write_failure(monkeypatch):
+    import sys
+    import types
+    from unittest.mock import MagicMock
+
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    class FakeUpdateOne:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    fake_pymongo = types.ModuleType("pymongo")
+    fake_pymongo.UpdateOne = FakeUpdateOne
+    monkeypatch.setitem(sys.modules, "pymongo", fake_pymongo)
+
+    service = MongoMarketDataService()
+    collection = MagicMock()
+    collection.find.return_value = []
+    collection.bulk_write.side_effect = RuntimeError("unordered bulk partially failed")
+    monkeypatch.setattr(service, "_get_collection", lambda name: collection)
+    monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
+    monkeypatch.setattr(service, "ensure_eod_indexes", lambda: ["uniq_symbol_tradeDate_source"])
+
+    with pytest.raises(RuntimeError, match="unordered bulk partially failed"):
+        await service.bulk_upsert_eod_prices(
+            "VCI", [{"tradeDate": datetime(2026, 6, 5), "close": 1}]
+        )
+
+
 @pytest.mark.asyncio
 async def test_bulk_upsert_eod_prices_builds_idempotent_ops(monkeypatch):
     import sys
@@ -152,6 +409,7 @@ async def test_bulk_upsert_eod_prices_builds_idempotent_ops(monkeypatch):
     fake_coll.find.return_value = []
     monkeypatch.setattr(svc, "_get_collection", lambda name: fake_coll)
     monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
+    monkeypatch.setattr(svc, "ensure_eod_indexes", lambda: ["uniq_symbol_tradeDate_source"])
 
     rows = [
         {"tradeDate": datetime(2026, 6, 5), "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 100, "value": 150.0},
@@ -207,6 +465,17 @@ async def test_bulk_upsert_eod_prices_skips_existing_vietcap_dates(monkeypatch):
 
     svc = MongoMarketDataService()
     fake_coll = MagicMock()
+    fake_coll.list_indexes.return_value = [
+        {
+            "name": "legacy_eod_key",
+            "key": {"symbol": 1, "tradeDate": 1, "source": 1},
+            "unique": True,
+        },
+        {
+            "name": "idx_symbol_tradeDate_desc",
+            "key": {"symbol": 1, "tradeDate": -1},
+        },
+    ]
     fake_coll.find.return_value = [{"tradeDate": datetime(2026, 6, 5, 7, 0, 0)}]
 
     def fake_bulk_write(ops, ordered=False):

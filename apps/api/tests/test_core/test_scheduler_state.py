@@ -18,6 +18,49 @@ from vnibb.services.data_pipeline import data_pipeline
 
 
 @pytest.mark.asyncio
+async def test_scheduled_mongo_sync_persists_failures_and_zero_write_recovery(test_engine, monkeypatch):
+    from vnibb.models.scheduler_state import SchedulerJobState
+    from vnibb.services import mongo_eod_sync
+
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(scheduler, "async_session_factory", sessions)
+    monkeypatch.setattr(scheduler, "_scheduler", AsyncIOScheduler(timezone="UTC"))
+    monkeypatch.setattr(scheduler, "_job_guards", {})
+    monkeypatch.setattr(scheduler.settings, "scheduler_lock_mode", "best_effort")
+
+    class UnavailableLock:
+        def __init__(self, *_):
+            pass
+
+        async def acquire(self):
+            return "unavailable"
+
+    monkeypatch.setattr(scheduler, "DistributedJobLock", UnavailableLock)
+    sync = AsyncMock(side_effect=[
+        {"symbols": 1, "rows": 2, "failures": 1},
+        {"symbols": 0, "rows": 0, "failures": 3},
+        {"symbols": 1, "rows": 0, "failures": 0},
+    ])
+    monkeypatch.setattr(mongo_eod_sync, "run_mongo_eod_sync", sync)
+    scheduler.configure_scheduler()
+    job = scheduler.get_scheduler().get_job("mongo_eod_sync")
+
+    try:
+        for expected_outcome, expected_count in [("failed", 1), ("failed", 2), ("ok", 0)]:
+            await job.func()
+            async with sessions() as session:
+                state = await session.get(SchedulerJobState, "mongo_eod_sync")
+                assert state.last_outcome == expected_outcome
+                assert state.consecutive_failures == expected_count
+                assert state.last_at is not None
+    finally:
+        async with sessions.begin() as session:
+            await session.execute(
+                SchedulerJobState.__table__.delete().where(SchedulerJobState.id == "mongo_eod_sync")
+            )
+
+
+@pytest.mark.asyncio
 async def test_api_reads_worker_outcome_from_separate_session(test_engine, monkeypatch):
     sessions = async_sessionmaker(test_engine, expire_on_commit=False)
     monkeypatch.setattr(scheduler, "async_session_factory", sessions)

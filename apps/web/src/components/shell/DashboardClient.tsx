@@ -170,6 +170,10 @@ function DashboardContent() {
     const [matrixDraft, setMatrixDraft] = useState<MatrixFollowupDraft | null>(null);
     const consumeMatrixDraft = useCallback(() => setMatrixDraft(null), []);
     const matrixDraftOwnerRef = useRef(user?.id);
+    const consumeCopilotStarter = useCallback(() => {
+        setCopilotStarterPrompt(undefined);
+        setCopilotStarterWorkflow(undefined);
+    }, []);
     const [sidebarWidth, setSidebarWidth] = useState(LEFT_SIDEBAR_DEFAULT_WIDTH);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [rightSidebarWidth, setRightSidebarWidth] = useState(RIGHT_SIDEBAR_DEFAULT_WIDTH);
@@ -1617,6 +1621,7 @@ function DashboardContent() {
                                         starterPrompt={copilotStarterPrompt}
                                         starterWorkflow={copilotStarterWorkflow}
                                         starterPromptRequestId={copilotStarterPromptRequestId}
+                                        onStarterConsumed={consumeCopilotStarter}
                                         matrixDraft={matrixDraft}
                                         onMatrixDraftConsumed={consumeMatrixDraft}
                                     />
@@ -1644,6 +1649,7 @@ function DashboardContent() {
                                 starterPrompt={copilotStarterPrompt}
                                 starterWorkflow={copilotStarterWorkflow}
                                 starterPromptRequestId={copilotStarterPromptRequestId}
+                                onStarterConsumed={consumeCopilotStarter}
                                 matrixDraft={matrixDraft}
                                 onMatrixDraftConsumed={consumeMatrixDraft}
                             />

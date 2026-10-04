@@ -1,15 +1,48 @@
+import asyncio
 import os
 from datetime import date, datetime
+from uuid import uuid4
 
 import pytest
-from sqlalchemy import inspect
+from sqlalchemy import inspect, select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from vnibb.models.company import Company
+from vnibb.models.stock import Stock
+from vnibb.services.cache_manager import CacheManager
 from vnibb.services.data_quality import complete_quality_run
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("POSTGRES_CONTRACT") != "1",
     reason="requires the PostgreSQL release-contract database",
 )
+@pytest.mark.postgres_contract
+@pytest.mark.asyncio
+async def test_concurrent_first_cache_writes_are_atomic_and_persisted(test_db):
+    symbol = f"C{uuid4().hex[:8]}".upper()
+    session_factory = async_sessionmaker(test_db.bind, expire_on_commit=False)
+
+    async def write_listing():
+        async with session_factory() as session:
+            return await CacheManager(session).store_listing_data(
+                [{"symbol": symbol, "company_name": "Listing Company"}]
+            )
+
+    async def write_profile():
+        async with session_factory() as session:
+            return await CacheManager(session).store_profile_data(
+                symbol, {"company_name": "Profile Company", "website": "https://example.test"}
+            )
+
+    try:
+        assert await asyncio.gather(write_listing(), write_listing()) == [1, 1]
+        assert await asyncio.gather(write_profile(), write_profile()) == [True, True]
+        assert (await test_db.execute(select(Stock.symbol).where(Stock.symbol == symbol))).scalar_one() == symbol
+        assert (await test_db.execute(select(Company.symbol).where(Company.symbol == symbol))).scalar_one() == symbol
+    finally:
+        await test_db.execute(Stock.__table__.delete().where(Stock.symbol == symbol))
+        await test_db.execute(Company.__table__.delete().where(Company.symbol == symbol))
+        await test_db.commit()
 
 
 @pytest.mark.postgres_contract

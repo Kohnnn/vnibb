@@ -109,6 +109,14 @@ Before cutover, clear the formerly stored platform admin key from every operator
 
 Production remains **BLOCKED** until operator UUID verification, key rotation, authenticated live acceptance (including completed sign-out/revocation), and documented Auth availability/latency operations are recorded. Acceptance must cover allowlisted draft/publish and published reload, non-allowlisted and expired/denied-session rejection, shared-key rejection on interactive routes, and rotated-key automation. See `docs/admin_global_system_layouts.md` for the full rollout checklist.
 
+### 2026-10-04 interrupted-session release recovery
+
+- The serving backend was verified at `e1399211a051efe0546546de511b7549e0ad9f23`; readiness, VNM profile/quote, screener, microstructure, CORS, and WebSocket smoke passed. This is the previous release, not proof that pending Copilot, MCP-depth, or ingestion-integrity fixes are deployed.
+- Release scope and evidence are tracked in [issue #97](https://github.com/Kohnnn/vnibb/issues/97). Existing untracked Matrix readability artifacts belong to a separate acceptance investigation and must not enter the release upload.
+- Cloud-01 SSH currently requires renewed Tailscale approval. Direct public port 22 timed out. Do not replace the live services until authorized SSH access, hosted release checks, and the immutable image manifest are available.
+- On cloud-01, preserve the premium runtime mount by including both `-f docker-compose.oracle.yml` and `-f deployment/docker-compose.oracle.runtime.yml`, plus `--env-file deployment/env.oracle`, in every rollout command. Keep existing database/proxy containers untouched. Back up the environment, pull the pinned digest, run the one-shot migration check, then replace only `api`, `mcp`, and the profiled `scheduler` with health-gated rollback.
+- The canonical frontend project is `apps/web/.vercel/project.json` (`vnibb-web`), not the obsolete root `.vercel` link. Verify the actual production browser and release identity after deployment.
+
 ### Build and publish the release image
 
 Build outside OCI. The release image is free-compatible when no premium secret is supplied. For a premium image, use BuildKit's secret mount and provide the installer SHA-256 out of band; never pass the API key with `--build-arg`.

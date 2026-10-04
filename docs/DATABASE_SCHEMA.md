@@ -22,6 +22,17 @@ Redis stores ephemeral scheduler lock keys only; no PostgreSQL or MongoDB schema
 
 ---
 
+## Ingestion Integrity
+
+- Listing and company-profile cache writes use atomic `ON CONFLICT` upserts on the existing unique symbol keys. Duplicate normalized listing symbols are applied in input order; the last nonempty value wins without rolling back other valid symbols. Successful listing counts reflect processed input records, not distinct symbols. Sparse updates preserve existing metadata and creation timestamps.
+- Mongo EOD writes require a verified, nonpartial, nonsparse unique index on `(symbol, tradeDate, source)`. A compatible index is reused regardless of name; reissuing its creation waits for any in-progress build rather than trusting `listIndexes`, which includes unfinished indexes. A failed build or incompatible index refuses ingestion. The service never drops indexes or removes duplicate data automatically; inspect and reconcile duplicates using the existing dry-run-first operator tooling before retrying.
+- Mongo unordered bulk writes are not transactions: accepted operations can persist even when another operation fails. The writer propagates failures, and the scheduled sync counts the affected symbol as failed while continuing with later symbols. Reported row counts exclude operations from failed bulks. Zero writes caused by existing Vietcap coverage remain a successful no-op, not a storage failure.
+- The scheduled Mongo EOD adapter checks the completed sync summary before the guarded job reports success. Any nonzero `failures` records `SchedulerJobState.last_outcome='failed'` and increments `consecutive_failures`; a subsequent failure-free run records `ok` and resets the counter, including valid zero-write runs. A disposable PostgreSQL smoke exercised the registered job and real sync loop: partial failure, all-symbol failure, and zero-write recovery persisted `failed/1`, `failed/2`, and `ok/0` respectively.
+- Verification on disposable PostgreSQL 17 and MongoDB 7 reproduced listing-batch loss and fail-open Mongo indexing before the fix. Afterward, 12 concurrent writers retained one natural-key row, sparse metadata survived, incompatible/duplicate indexes refused writes, and an actual validator-induced partial bulk produced a failed-symbol summary. A paused Mongo index build blocked ingestion until completion. This is local integration evidence, not a production rollout or corpus audit; no schema migration is required.
+- Recovery verification against disposable PostgreSQL 17 and MongoDB 7 exercised 12 concurrent first listing/profile writers, sparse metadata and creation-time preservation, duplicate listing inputs, 12 concurrent EOD natural-key writes, validator-induced bulk failure propagation, and the registered scheduler with the actual sync loop. Durable outcomes persisted `failed/1`, `failed/2`, then `ok/0`. These are local integration results; production identity and rollout remain separate gates.
+
+---
+
 ## Capacity And Limits
 
 VNIBB persistence runs on a self-hosted database stack. Capacity is governed by the host's provisioned resources rather than a managed-plan quota.

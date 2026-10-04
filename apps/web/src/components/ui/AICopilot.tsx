@@ -130,6 +130,8 @@ interface AICopilotProps {
     starterPromptRequestId?: number;
     starterWorkflow?: Pick<CuratedWorkflowSelection, 'id' | 'revision'>;
     matrixDraft?: MatrixFollowupDraft | null;
+    /** Called after a one-shot starter request is staged; the parent clears its retained props so an unmount/remount never restages it. */
+    onStarterConsumed?: () => void;
     onMatrixDraftConsumed?: () => void;
 }
 
@@ -458,6 +460,7 @@ export function AICopilot({
     starterWorkflow,
     matrixDraft,
     onMatrixDraftConsumed,
+    onStarterConsumed,
 }: AICopilotProps) {
     const { user } = useAuth();
     const matrixOwnerRef = useRef(user?.id);
@@ -600,8 +603,9 @@ export function AICopilot({
         } else {
             setIsPromptLibraryOpen(false);
             setIsComposerToolsOpen(false);
+            onStarterConsumed?.();
         }
-    }, [isOpen]);
+    }, [isOpen, onStarterConsumed]);
 
     useEffect(() => {
         if (!isOpen || promptLibraryRequestId <= 0) {
@@ -687,6 +691,7 @@ export function AICopilot({
         } : null);
         const prompt = DEFAULT_PROMPTS.find((item) => item.label.toLowerCase() === starterPrompt)?.prompt;
         if (prompt) setInput(prompt);
+        onStarterConsumed?.();
     }, [focusedSymbol, isOpen, sessionKey, starterPrompt, starterPromptRequestId, starterWorkflow]);
 
     useEffect(() => {

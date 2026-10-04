@@ -498,9 +498,14 @@ def configure_scheduler():
     async def guarded_mongo_eod_sync():
         from vnibb.services.mongo_eod_sync import run_mongo_eod_sync
 
+        async def sync_and_check_outcome():
+            summary = await run_mongo_eod_sync()
+            if summary["failures"]:
+                raise RuntimeError(f"Mongo EOD sync completed with {summary['failures']} failed symbols")
+
         await _run_guarded_job(
             "mongo_eod_sync",
-            run_mongo_eod_sync,
+            sync_and_check_outcome,
             MONGO_EOD_SYNC_TIMEOUT_SECONDS,
         )
 
