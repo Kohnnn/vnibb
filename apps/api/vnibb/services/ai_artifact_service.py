@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from vnibb.core.price_units import persisted_price_record
+
 CHART_COLORS = ["#22d3ee", "#60a5fa", "#34d399", "#f59e0b", "#f472b6"]
 
 
@@ -46,14 +48,19 @@ def _comparison_rows(
         price_context = snapshot.get("price_context") or {}
         ratios = snapshot.get("ratios") or {}
         company = snapshot.get("company") or {}
+        latest = persisted_price_record({"symbol": symbol, **(price_context.get("latest") or {})})
+        summary = price_context.get("summary") or {}
+        comparable = latest["price_unit"] == "VND"
         rows.append(
             {
                 "symbol": symbol,
                 "company": company.get("short_name") or company.get("company_name") or None,
-                "price": _coerce_number((price_context.get("latest") or {}).get("close")),
-                "change_20d_pct": _coerce_number(
-                    (price_context.get("summary") or {}).get("change_20d_pct")
-                ),
+                "price": _coerce_number(latest.get("close")) if comparable else None,
+                "price_unit": latest["price_unit"],
+                "price_source": latest.get("price_source") or latest.get("source"),
+                "change_20d_pct": _coerce_number(summary.get("change_20d_pct"))
+                if comparable and summary.get("price_unit") == "VND"
+                else None,
                 "pe_ratio": _coerce_number(ratios.get("pe_ratio")),
                 "pb_ratio": _coerce_number(ratios.get("pb_ratio")),
                 "roe": _coerce_number(ratios.get("roe")),
@@ -235,12 +242,20 @@ def _price_trend_chart(
         if not symbol or not recent_series:
             continue
 
-        valid_points = [
-            point
-            for point in recent_series
-            if _coerce_number(point.get("close")) not in (None, 0)
-            and str(point.get("time") or "").strip()
+        normalized_points = [
+            persisted_price_record({"symbol": symbol, **point}) for point in recent_series
         ]
+        units = {point["price_unit"] for point in normalized_points}
+        if "unknown" in units or len(units) != 1:
+            continue
+        valid_points = sorted(
+            [
+                point for point in normalized_points
+                if _coerce_number(point.get("close")) not in (None, 0)
+                and str(point.get("time") or "").strip()
+            ],
+            key=lambda point: str(point["time"]),
+        )
         if len(valid_points) < 2:
             continue
 
@@ -373,7 +388,8 @@ def build_table_artifacts(message: str, context: dict[str, Any]) -> list[dict[st
                 [
                     {"key": "symbol", "label": "Symbol", "kind": "text"},
                     {"key": "company", "label": "Company", "kind": "text"},
-                    {"key": "price", "label": "Price", "kind": "currency"},
+                    {"key": "price", "label": "Price (VND)", "kind": "currency"},
+                    {"key": "price_unit", "label": "Price Unit", "kind": "text"},
                     {"key": "change_20d_pct", "label": "20D %", "kind": "percent"},
                     {"key": "pe_ratio", "label": "P/E", "kind": "number"},
                     {"key": "pb_ratio", "label": "P/B", "kind": "number"},

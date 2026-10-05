@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.database import get_db_context
 from vnibb.models.stock import Stock, StockPrice
+from vnibb.core.price_units import normalize_price_record, persisted_price_source
 from vnibb.models.company import Company
 from vnibb.providers.vnstock.listing import VnstockListingFetcher
 from vnibb.providers.vnstock.equity_profile import VnstockProfileFetcher
@@ -146,16 +147,22 @@ class CompleteDataSyncPipeline:
                     return 0
                 
                 for candle in data.data:
+                    normalized = normalize_price_record(candle.model_dump(), symbol=symbol)
+                    if normalized["price_unit"] not in {"VND", "index_points"}:
+                        raise ValueError(f"Unknown price unit for {symbol}")
                     stmt = pg_insert(StockPrice).values(
                         stock_id=stock,
                         symbol=symbol,
                         time=candle.time,
-                        open=candle.open,
-                        high=candle.high,
-                        low=candle.low,
-                        close=candle.close,
+                        open=normalized["open"],
+                        high=normalized["high"],
+                        low=normalized["low"],
+                        close=normalized["close"],
                         volume=candle.volume,
+                        value=normalized.get("value"),
+                        adj_close=next((normalized.get(field) for field in ("adj_close", "adjusted_close", "adjClose") if normalized.get(field) is not None), None),
                         interval="1D",
+                        source=persisted_price_source(normalized),
                     ).on_conflict_do_nothing()
                     await db.execute(stmt)
                     count += 1

@@ -13,7 +13,8 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 import pandas as pd
 
-from vnibb.services.technical_analysis import get_ta_service
+from vnibb.core.price_units import PriceUnit
+from vnibb.services.technical_analysis import get_ta_service, normalize_history_frame
 
 
 router = APIRouter()
@@ -84,6 +85,7 @@ class MovingAveragesResponse(BaseModel):
     ema: Dict[str, float]
     signals: Dict[str, str]
     current_price: Optional[float] = None
+    price_unit: PriceUnit = "unknown"
 
 
 class RSIResponse(BaseModel):
@@ -99,6 +101,7 @@ class MACDResponse(BaseModel):
     """MACD response."""
 
     macd: Optional[float] = None
+    price_unit: PriceUnit = "unknown"
     signal_line: Optional[float] = None
     histogram: Optional[float] = None
     signal: str
@@ -112,6 +115,7 @@ class BollingerBandsResponse(BaseModel):
     middle: Optional[float] = None
     lower: Optional[float] = None
     current_price: Optional[float] = None
+    price_unit: PriceUnit = "unknown"
     percent_b: Optional[float] = None
     signal: str
     params: Dict[str, int]
@@ -153,6 +157,7 @@ class SupportResistanceResponse(BaseModel):
     support: List[float]
     resistance: List[float]
     current_price: Optional[float] = None
+    price_unit: PriceUnit = "unknown"
     nearest_support: Optional[float] = None
     nearest_resistance: Optional[float] = None
     support_proximity_pct: Optional[float] = None
@@ -166,6 +171,7 @@ class FibonacciResponse(BaseModel):
     period_high: Optional[float] = None
     period_low: Optional[float] = None
     current_price: Optional[float] = None
+    price_unit: PriceUnit = "unknown"
     trend: str
     lookback_days: int
 
@@ -189,6 +195,7 @@ class IchimokuSignalResponse(BaseModel):
 
 class IchimokuSeriesResponse(BaseModel):
     symbol: str
+    price_unit: PriceUnit = "unknown"
     period: str
     data: List[IchimokuPoint]
     signal: IchimokuSignalResponse
@@ -214,6 +221,7 @@ class NearestLevelResponse(BaseModel):
 
 class FibonacciRetracementResponse(BaseModel):
     symbol: str
+    price_unit: PriceUnit = "unknown"
     lookback_days: int
     direction: str
     swing_high: SwingPoint
@@ -252,6 +260,7 @@ class FullTechnicalAnalysis(BaseModel):
     """Complete technical analysis response."""
 
     symbol: str
+    price_unit: PriceUnit = "unknown"
     timeframe: Timeframe
     moving_averages: MovingAveragesResponse
     oscillators: OscillatorsResponse
@@ -651,6 +660,7 @@ async def get_ichimoku_series(
 
         return IchimokuSeriesResponse(
             symbol=upper_symbol,
+            price_unit=frame.iloc[-1].get("price_unit", "unknown"),
             period=period,
             data=payload,
             signal=_build_ichimoku_signal(payload),
@@ -693,7 +703,9 @@ async def get_fibonacci_retracement(
             )
 
         payload = _build_fibonacci_payload(frame, lookback_days, direction)
-        return payload.model_copy(update={"symbol": upper_symbol})
+        return payload.model_copy(update={
+            "symbol": upper_symbol, "price_unit": frame.iloc[-1].get("price_unit", "unknown"),
+        })
     except HTTPException:
         raise
     except Exception as exc:
@@ -737,10 +749,16 @@ async def get_technical_indicators_direct(
         df = q.history(start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"))
         if df is None or df.empty:
             return {"error": "No data available"}
+        df = normalize_history_frame(
+            df, symbol=symbol.upper(), source=source, provider=q,
+        )
+        if df.empty:
+            return {"error": "Price units unavailable", "price_unit": "unknown"}
 
         result = {
             "symbol": symbol.upper(),
             "source": source,
+            "price_unit": df.iloc[-1]["price_unit"],
             "period": period,
             "calculated_at": datetime.utcnow().isoformat(),
             "indicators": {},

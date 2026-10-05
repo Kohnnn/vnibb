@@ -32,7 +32,7 @@ async def test_signal_summary_respects_long_term_trend_context(monkeypatch):
         return {"value": 58.0, "signal": "sell", "period": 14}
 
     async def fake_macd(*_args, **_kwargs):
-        return {"macd": -0.1, "signal": "sell", "histogram": -0.08}
+        return {"macd": -100.0, "signal": "sell", "histogram": -80.0, "price_unit": "VND"}
 
     async def fake_bb(*_args, **_kwargs):
         return {"upper": 112.0, "percent_b": 0.46, "signal": "neutral"}
@@ -78,7 +78,7 @@ async def test_signal_summary_balances_category_weights(monkeypatch):
         return {"value": 74.0, "signal": "sell", "period": 14}
 
     async def fake_macd(*_args, **_kwargs):
-        return {"macd": -0.5, "signal": "sell", "histogram": -0.42}
+        return {"macd": -500.0, "signal": "sell", "histogram": -420.0, "price_unit": "VND"}
 
     async def fake_bb(*_args, **_kwargs):
         return {"upper": 112.0, "percent_b": 0.89, "signal": "sell"}
@@ -110,6 +110,7 @@ async def test_signal_summary_balances_category_weights(monkeypatch):
 @pytest.mark.asyncio
 async def test_full_analysis_loads_and_merges_quote_once(monkeypatch):
     monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
+    monkeypatch.setattr(settings, "vnstock_source", "KBS")
     history_calls = 0
     quote_calls = 0
     frame = pd.DataFrame(
@@ -139,7 +140,7 @@ async def test_full_analysis_loads_and_merges_quote_once(monkeypatch):
     async def fetch_quote(**_kwargs):
         nonlocal quote_calls
         quote_calls += 1
-        return SimpleNamespace(price=360.0, updated_at=datetime.now()), False
+        return SimpleNamespace(price=360000.0, price_unit="VND", updated_at=datetime.now()), False
 
     monkeypatch.setattr(runtime, "get_vnstock_class", lambda: Vnstock)
     monkeypatch.setattr(
@@ -151,6 +152,8 @@ async def test_full_analysis_loads_and_merges_quote_once(monkeypatch):
     assert history_calls == 1
     assert quote_calls == 1
     assert analysis["symbol"] == "VCI"
+    assert analysis["price_unit"] == "VND"
+    assert analysis["moving_averages"]["current_price"] == 360000.0
 
 
 @pytest.mark.asyncio
@@ -158,11 +161,15 @@ async def test_direct_indicators_uses_shared_asyncio_thread_pool(monkeypatch):
     calls = 0
 
     class Quote:
+        __module__ = "vnstock_data.explorer.kbs.quote"
+
         def __init__(self, **_kwargs):
             pass
 
         def history(self, **_kwargs):
-            return pd.DataFrame({"close": list(range(100, 130))})
+            frame = pd.DataFrame({"close": list(range(100000, 130000, 1000))})
+            frame.attrs["price_unit"] = "VND"
+            return frame
 
     original_to_thread = asyncio.to_thread
 
@@ -183,3 +190,6 @@ async def test_direct_indicators_uses_shared_asyncio_thread_pool(monkeypatch):
 
     assert calls == 1
     assert payload["symbol"] == "VCI"
+    assert payload["price_unit"] == "VND"
+    assert payload["indicators"]["sma"]["value"] == 122500.0
+    assert payload["indicators"]["rsi"]["value"] == 100.0

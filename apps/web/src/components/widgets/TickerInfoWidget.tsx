@@ -79,14 +79,17 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   const screenerRow = screenerData?.data?.[0]
   const profileData = profile?.data
   const historyRange = useMemo(() => {
-    const rows = oneYearHistory?.data || []
+    const rows = (oneYearHistory?.data || []).filter((row) =>
+      row.price_unit === 'VND' ||
+      (row.price_unit == null && oneYearHistory?.meta?.unit_status === 'confirmed_vnd')
+    )
     const highs = rows.map((row) => toPositiveNumber(row.high)).filter((value): value is number => value !== null)
     const lows = rows.map((row) => toPositiveNumber(row.low)).filter((value): value is number => value !== null)
     return {
       high: highs.length ? Math.max(...highs) : null,
       low: lows.length ? Math.min(...lows) : null,
     }
-  }, [oneYearHistory?.data])
+  }, [oneYearHistory?.data, oneYearHistory?.meta?.unit_status])
 
   useEffect(() => {
     onDataChange?.(
@@ -129,18 +132,20 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   const price = quote?.price
   const change = quote?.change
   const changePct = quote?.changePct
+  const priceDisplayConfig = quote?.price_unit === 'VND' || unitConfig.display !== 'USD'
+    ? unitConfig
+    : { ...unitConfig, display: 'raw' as const }
+  const priceUnitLabel = quote?.price_unit === 'VND'
+    ? unitConfig.display === 'USD' ? 'USD' : 'VND'
+    : quote?.price_unit === 'index_points' ? 'Index points' : 'Price unit unconfirmed'
 
   const screenerMarketCap = toPositiveNumber(screenerRow?.market_cap)
   const profileMarketCap = toPositiveNumber(profileData?.market_cap)
   const sharesOutstanding = toPositiveNumber(profileData?.outstanding_shares)
+  const confirmedVndPrice = quote?.price_unit === 'VND' ? toPositiveNumber(price) : null
   const derivedMarketCap =
-    sharesOutstanding && toPositiveNumber(price)
-      ? sharesOutstanding * (toPositiveNumber(price) || 0)
-      : null
-  // Prefer the backend-computed market cap (full VND) over the locally derived
-  // value, which multiplies shares by the quote price (thousands of VND) and is
-  // therefore ~1000x too small — this caused the "514.71B vs 514.71T" mismatch
-  // with TickerProfileWidget (DEF-06). Order: screener -> profile -> derived.
+    sharesOutstanding && confirmedVndPrice ? sharesOutstanding * confirmedVndPrice : null
+  // Reported market caps take precedence; derive only from an explicitly confirmed VND quote.
   const marketCap = screenerMarketCap ?? profileMarketCap ?? derivedMarketCap
   const marketCapSource = screenerMarketCap
     ? 'Screener'
@@ -178,7 +183,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   const rangeLow = firstPositiveNumber(tradingStats?.data?.low_52w, tradingStatsRow?.['52w_low'], tradingStatsRow?.low52w, screenerRowRecord?.low_52w, screenerRowRecord?.['52w_low'], historyRange.low)
   const rangeHigh = firstPositiveNumber(tradingStats?.data?.high_52w, tradingStatsRow?.['52w_high'], tradingStatsRow?.high52w, screenerRowRecord?.high_52w, screenerRowRecord?.['52w_high'], historyRange.high)
   const rangePrice = toPositiveNumber(price)
-  const hasRange = Boolean(rangeLow && rangeHigh && rangePrice && rangeHigh > rangeLow)
+  const hasRange = Boolean(quote?.price_unit === 'VND' && rangeLow && rangeHigh && rangePrice && rangeHigh > rangeLow)
   const rangePosition = hasRange
     ? clampPercent((((rangePrice as number) - (rangeLow as number)) / ((rangeHigh as number) - (rangeLow as number))) * 100)
     : 0
@@ -209,11 +214,13 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
           note={
             marketCapSource === 'Derived'
               ? 'Market cap derived from profile shares x quote'
-              : quote?.cached
-                ? 'Cached response'
-                : unitConfig.display === 'USD'
-                  ? 'Price and value fields shown in USD using current FX defaults'
-                  : undefined
+              : quote?.price_unit !== 'VND'
+                ? priceUnitLabel
+                : quote?.cached
+                  ? 'Cached response'
+                  : unitConfig.display === 'USD'
+                    ? 'Price and value fields shown in USD using current FX defaults'
+                    : undefined
           }
           sourceLabel="Quote + profile"
           className="justify-between"
@@ -225,8 +232,9 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               {symbol}
             </span>
             <span className="text-3xl font-black font-mono tracking-tighter text-[var(--text-primary)] tabular-nums drop-shadow-lg">
-              {formatPriceValueForUnit(price, unitConfig)}
+              {formatPriceValueForUnit(price, priceDisplayConfig)}
             </span>
+            <span className="text-[9px] text-[var(--text-muted)]">{priceUnitLabel}</span>
             <div
               className={cn(
                 'flex items-center gap-1.5 text-xs font-bold px-2 py-0.5 rounded-full w-fit border',
@@ -249,13 +257,13 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
 
         <div className="grid grid-cols-2 gap-2">
             {[
-            { label: 'Day High', value: formatPriceValueForUnit(dayHigh, unitConfig) },
-            { label: 'Day Low', value: formatPriceValueForUnit(dayLow, unitConfig) },
-            { label: '52W High', value: formatPriceValueForUnit(rangeHigh, unitConfig) },
-            { label: '52W Low', value: formatPriceValueForUnit(rangeLow, unitConfig) },
+            { label: 'Day High', value: formatPriceValueForUnit(dayHigh, priceDisplayConfig) },
+            { label: 'Day Low', value: formatPriceValueForUnit(dayLow, priceDisplayConfig) },
+            { label: '52W High', value: formatPriceValueForUnit(rangeHigh, priceDisplayConfig) },
+            { label: '52W Low', value: formatPriceValueForUnit(rangeLow, priceDisplayConfig) },
             { label: 'Volume', value: formatNumber(quote?.volume) },
-            { label: 'Prev Close', value: formatPriceValueForUnit(previousClose, unitConfig) },
-            { label: 'Open', value: formatPriceValueForUnit(openPrice, unitConfig) },
+            { label: 'Prev Close', value: formatPriceValueForUnit(previousClose, priceDisplayConfig) },
+            { label: 'Open', value: formatPriceValueForUnit(openPrice, priceDisplayConfig) },
             {
               label: 'Mkt Cap',
               value: formatCompactValueForUnit(marketCap, unitConfig, { decimals: 2 }),
@@ -295,9 +303,9 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               <div className="absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border border-white/50 bg-[var(--bg-primary)] shadow" style={{ left: `calc(${rangePosition}% - 6px)` }} />
             </div>
             <div className="mt-1.5 flex items-center justify-between text-[10px] font-mono text-[var(--text-secondary)] tabular-nums">
-              <span>{formatPriceValueForUnit(rangeLow, unitConfig)}</span>
-              <span className="text-[var(--text-primary)]">{formatPriceValueForUnit(rangePrice, unitConfig)}</span>
-              <span>{formatPriceValueForUnit(rangeHigh, unitConfig)}</span>
+              <span>{formatPriceValueForUnit(rangeLow, priceDisplayConfig)}</span>
+              <span className="text-[var(--text-primary)]">{formatPriceValueForUnit(rangePrice, priceDisplayConfig)}</span>
+              <span>{formatPriceValueForUnit(rangeHigh, priceDisplayConfig)}</span>
             </div>
           </div>
         )}

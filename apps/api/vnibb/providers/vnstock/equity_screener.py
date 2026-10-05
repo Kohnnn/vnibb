@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError, ProviderRateLimitError
+from vnibb.core.price_units import PriceUnit, history_price_records, normalize_price_record
 from vnibb.providers.vnstock import get_vnstock
 from concurrent.futures import ThreadPoolExecutor
 
@@ -165,6 +166,8 @@ class ScreenerData(BaseModel):
     # PRICE & VOLUME
     # ==========================================================================
     price: Optional[float] = Field(None, description="Current price")
+    price_unit: PriceUnit = "unknown"
+    price_source: Optional[str] = None
     volume: Optional[float] = Field(None, description="Trading volume")
     change_1d: Optional[float] = Field(
         None, alias="change1D", description="Daily price change percentage"
@@ -671,9 +674,11 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                                 end=end_date.strftime("%Y-%m-%d"),
                             )
                             if hist is not None and not hist.empty:
-                                latest = hist.iloc[-1]
+                                latest = history_price_records(hist, symbol=symbol_key, source=source, provider=screener.quote)[-1]
                                 latest_price = _to_float(latest.get("close"))
                                 record["price"] = latest_price
+                                record["price_source"] = latest.get("price_source")
+                                record["price_unit"] = latest["price_unit"]
                                 record["volume"] = latest.get("volume")
                                 if latest_price is not None:
                                     record["trade_date"] = _coerce_trade_date(
@@ -743,9 +748,11 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                                     end=end_date.strftime("%Y-%m-%d"),
                                 )
                                 if hist is not None and not hist.empty:
-                                    latest = hist.iloc[-1]
+                                    latest = history_price_records(hist, symbol=symbol, source=source, provider=stock_obj.quote)[-1]
                                     latest_price = _to_float(latest.get("close"))
                                     record["price"] = latest_price
+                                    record["price_source"] = latest.get("price_source")
+                                    record["price_unit"] = latest["price_unit"]
                                     record["volume"] = latest.get("volume")
                                     if latest_price is not None:
                                         record["trade_date"] = _coerce_trade_date(
@@ -1023,6 +1030,10 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                 # Ensure symbol is present
                 if "symbol" not in mapped:
                     mapped["symbol"] = row.get("ticker") or row.get("symbol") or "UNKNOWN"
+                normalized = normalize_price_record({**row, **mapped}, symbol=mapped["symbol"])
+                mapped["price"] = normalized.get("price")
+                mapped["price_unit"] = normalized["price_unit"]
+                mapped["price_source"] = normalized.get("price_source")
 
                 mapped["updated_at"] = datetime.utcnow()
 

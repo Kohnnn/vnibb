@@ -1,5 +1,11 @@
 # OpenBB workspace-polish patterns for VNIBB
 
+> **2026-10-05 update:** [OpenBB Workspace source](https://github.com/OpenBB-finance/workspace/tree/be00e95019a55d57af146919ee46b7e1a4859226)
+> is now public under Apache-2.0. The source-availability exclusion below is a
+> historical September observation, not a current licensing gate. Proprietary
+> dependencies, hosted-service access and provider data rights remain separate;
+> see [the current assessment update](../openbb-assessment.md).
+
 **Research date:** 2026-09-26. **Ticket:** [#44](https://github.com/Kohnnn/vnibb/issues/44), part of [workspace map #43](https://github.com/Kohnnn/vnibb/issues/43). **Decision status:** research only; no permission to import components or implement changes. VNIBB comparison is pinned to [`20fa4c392e22a42b2d150de22989bb2331a98adb`](https://github.com/Kohnnn/vnibb/tree/20fa4c392e22a42b2d150de22989bb2331a98adb), not the concurrently modified shared checkout. This is source inspection, **not** a browser verification of either product. “Possible fit risk” below means a testable hypothesis, not an observed failure.
 
 ## Source boundary and license

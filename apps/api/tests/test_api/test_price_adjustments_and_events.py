@@ -57,6 +57,7 @@ def test_apply_adjustment_mode_to_ohlc_falls_back_to_raw_when_adjustment_missing
 def test_apply_adjustment_mode_to_historical_row_scales_provider_ohlc():
     row = EquityHistoricalData(
         symbol="VNM",
+        price_unit="VND",
         time=date(2024, 1, 1),
         open=100,
         high=120,
@@ -76,12 +77,14 @@ def test_apply_adjustment_mode_to_historical_row_scales_provider_ohlc():
     assert adjusted.adjustment_applied is True
     assert (raw.open, raw.high, raw.low, raw.close) == (100, 120, 90, 110)
     assert raw.adjustment_applied is False
+    assert adjusted.price_unit == raw.price_unit == "VND"
 
 
 def test_historical_adjustment_meta_reports_partial_coverage():
     rows = [
         EquityHistoricalData(
             symbol="VNM",
+            price_unit="VND",
             time=date(2024, 1, day),
             open=100,
             high=110,
@@ -139,6 +142,7 @@ def test_apply_corporate_action_adjustments_applies_split_factor_backward():
     rows = [
         EquityHistoricalData(
             symbol="VNM",
+            price_unit="VND",
             time=date(2024, 1, 1),
             open=100,
             high=110,
@@ -149,6 +153,7 @@ def test_apply_corporate_action_adjustments_applies_split_factor_backward():
         ),
         EquityHistoricalData(
             symbol="VNM",
+            price_unit="VND",
             time=date(2024, 1, 5),
             open=102,
             high=112,
@@ -159,6 +164,7 @@ def test_apply_corporate_action_adjustments_applies_split_factor_backward():
         ),
         EquityHistoricalData(
             symbol="VNM",
+            price_unit="VND",
             time=date(2024, 1, 10),
             open=52,
             high=56,
@@ -184,12 +190,14 @@ def test_apply_corporate_action_adjustments_applies_split_factor_backward():
     assert adjusted[0].close == 50
     assert adjusted[1].close == 51
     assert adjusted[2].close == 50
+    assert all(row.price_unit == "VND" for row in adjusted)
 
 
 def test_apply_corporate_action_adjustments_applies_cash_dividend_backward():
     rows = [
         EquityHistoricalData(
             symbol="VNM",
+            price_unit="VND",
             time=date(2024, 1, 1),
             open=120,
             high=125,
@@ -200,6 +208,7 @@ def test_apply_corporate_action_adjustments_applies_cash_dividend_backward():
         ),
         EquityHistoricalData(
             symbol="VNM",
+            price_unit="VND",
             time=date(2024, 1, 2),
             open=98,
             high=103,
@@ -210,6 +219,7 @@ def test_apply_corporate_action_adjustments_applies_cash_dividend_backward():
         ),
         EquityHistoricalData(
             symbol="VNM",
+            price_unit="VND",
             time=date(2024, 1, 3),
             open=97,
             high=101,
@@ -235,3 +245,4 @@ def test_apply_corporate_action_adjustments_applies_cash_dividend_backward():
     assert adjusted[0].close == 117.6
     assert adjusted[1].close == 98.0
     assert adjusted[2].close == 98.0
+    assert all(row.price_unit == "VND" for row in adjusted)

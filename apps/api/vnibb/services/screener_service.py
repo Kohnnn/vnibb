@@ -9,11 +9,12 @@ from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from vnibb.core.database import async_session_maker
 from vnibb.core.config import settings
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.core.price_units import normalize_screener_record
 from vnibb.providers.vnstock.equity_screener import VnstockScreenerFetcher, StockScreenerParams
 
 logger = logging.getLogger(__name__)
@@ -97,18 +98,25 @@ class ScreenerService:
                         if roa is not None:
                             values["roa"] = roa
 
+                        values["price_unit"] = getattr(item, "price_unit", "unknown")
+                        values["price_source"] = getattr(item, "price_source", None)
+                        values = normalize_screener_record(values)
                         # Same ownership rule as `CacheManager.store_screener_data`:
                         # a scheduled sync must not blank a column another writer
                         # already populated, and `source` is insert-only so the
                         # row's provenance survives a second writer.
                         stmt = pg_insert(ScreenerSnapshot).values(**values)
+                        update_cols = {
+                            k: func.coalesce(stmt.excluded[k], ScreenerSnapshot.__table__.c[k])
+                            for k in values
+                            if k not in ("symbol", "snapshot_date", "source")
+                        }
+                        update_cols["extended_metrics"] = case(
+                            (stmt.excluded.price.is_(None), ScreenerSnapshot.extended_metrics),
+                            else_=stmt.excluded.extended_metrics,
+                        )
                         stmt = stmt.on_conflict_do_update(
-                            constraint="uq_screener_snapshot_symbol_date",
-                            set_={
-                                k: func.coalesce(stmt.excluded[k], ScreenerSnapshot.__table__.c[k])
-                                for k in values
-                                if k not in ("symbol", "snapshot_date", "source")
-                            },
+                            constraint="uq_screener_snapshot_symbol_date", set_=update_cols
                         )
 
                         await session.execute(stmt)

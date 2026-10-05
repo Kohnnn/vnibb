@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
+from vnibb.core.price_units import history_price_records
 from vnibb.models.technical_indicator import TechnicalIndicator
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
 
@@ -30,6 +31,16 @@ _full_analysis_frame: ContextVar[Any] = ContextVar("full_analysis_frame")
 # Type aliases
 Timeframe = Literal["D", "W", "M"]
 Signal = Literal["strong_buy", "buy", "neutral", "sell", "strong_sell"]
+
+def normalize_history_frame(
+    frame: pd.DataFrame, *, symbol: str, source: str, provider: Any = None,
+) -> pd.DataFrame:
+    normalized = history_price_records(frame, symbol=symbol, source=source, provider=provider)
+    if any(record["price_unit"] == "unknown" for record in normalized):
+        logger.warning("Skipping technical history with unknown price units: %s source=%s", symbol, source)
+        return pd.DataFrame()
+    return pd.DataFrame(normalized)
+
 
 
 class TechnicalAnalysisService:
@@ -93,15 +104,22 @@ class TechnicalAnalysisService:
             from vnstock_ta import DataSource, Indicator
 
             # Get OHLCV data
-            data = DataSource(
+            data_source = DataSource(
                 symbol=symbol,
                 start=start_date.strftime("%Y-%m-%d"),
                 end=end_date.strftime("%Y-%m-%d"),
                 interval="1D",
                 source=settings.vnstock_source,
-            ).get_data()
+            )
+            data = data_source.get_data()
 
             if data is None or data.empty:
+                return {}
+            data = normalize_history_frame(
+                data, symbol=symbol, source=settings.vnstock_source,
+                provider=data_source,
+            )
+            if data.empty:
                 return {}
 
             # Initialize indicator calculator
@@ -190,6 +208,12 @@ class TechnicalAnalysisService:
             )
 
             if df is None or df.empty:
+                return {}
+            df = normalize_history_frame(
+                df, symbol=symbol, source=settings.vnstock_source,
+                provider=stock.quote,
+            )
+            if df.empty:
                 return {}
 
             close = df["close"]
@@ -349,16 +373,23 @@ class TechnicalAnalysisService:
                     end=end_date.strftime("%Y-%m-%d"),
                     interval=interval,
                 )
-                return df if df is not None and not df.empty else None
+                if df is None or df.empty:
+                    return None
+                return normalize_history_frame(
+                    df, symbol=symbol, source=settings.vnstock_source,
+                    provider=stock.quote,
+                )
             except Exception as e:
                 logger.error(f"Failed to fetch OHLCV for {symbol}: {e}")
                 return None
 
         frame = await asyncio.to_thread(_fetch)
         if frame is None or frame.empty:
-            return frame
+            return None
 
         frame = self._clean_ohlcv_frame(frame)
+        if frame.empty:
+            return None
 
         try:
             quote, _ = await VnstockStockQuoteFetcher.fetch(
@@ -371,6 +402,14 @@ class TechnicalAnalysisService:
         quote_price = getattr(quote, "price", None)
         quote_time = getattr(quote, "updated_at", None)
         if quote_price is None or quote_time is None:
+            return frame
+        quote_unit = getattr(quote, "price_unit", "unknown")
+        history_units = set(frame["price_unit"])
+        if quote_unit == "unknown" or history_units != {quote_unit}:
+            logger.warning(
+                "Technical quote merge skipped for incompatible units: %s history=%s quote=%s",
+                symbol, sorted(history_units), quote_unit,
+            )
             return frame
 
         merged = frame.copy()
@@ -408,6 +447,7 @@ class TechnicalAnalysisService:
             ),
             "close": float(quote_price),
             "volume": float(getattr(quote, "volume", None) or last_row.get("volume") or 0),
+            "price_unit": quote_unit,
         }
 
         if quote_day == last_day:
@@ -500,6 +540,7 @@ class TechnicalAnalysisService:
                 result["signals"][f"ema_{period}"] = ema_signal
 
         result["current_price"] = current_price
+        result["price_unit"] = df.iloc[-1].get("price_unit", "unknown")
         return result
 
     async def get_rsi(
@@ -596,6 +637,7 @@ class TechnicalAnalysisService:
             signal = "neutral"
 
         return {
+            "price_unit": df.iloc[-1].get("price_unit", "unknown"),
             "macd": round(macd_val, 4),
             "signal_line": round(signal_val, 4),
             "histogram": round(hist_val, 4),
@@ -645,6 +687,7 @@ class TechnicalAnalysisService:
             signal = "neutral"
 
         return {
+            "price_unit": df.iloc[-1].get("price_unit", "unknown"),
             "upper": round(upper_val, 2),
             "middle": round(middle_val, 2),
             "lower": round(lower_val, 2),
@@ -776,6 +819,7 @@ class TechnicalAnalysisService:
         )
 
         return {
+            "price_unit": df.iloc[-1].get("price_unit", "unknown"),
             "support": [round(s, 2) for s in support_levels],
             "resistance": [round(r, 2) for r in resistance_levels],
             "current_price": round(current_price, 2),
@@ -827,6 +871,7 @@ class TechnicalAnalysisService:
             levels = {f"{int(r * 100)}%": round(period_low + (diff * r), 2) for r in fib_ratios}
 
         return {
+            "price_unit": df.iloc[-1].get("price_unit", "unknown"),
             "levels": levels,
             "period_high": round(period_high, 2),
             "period_low": round(period_low, 2),
@@ -1004,6 +1049,7 @@ class TechnicalAnalysisService:
         chikou_span = close.shift(-displacement)
 
         return {
+            "price_unit": df.iloc[-1].get("price_unit", "unknown"),
             "tenkan_sen": round(float(tenkan_sen.iloc[-1]), 2)
             if not pd.isna(tenkan_sen.iloc[-1])
             else None,
@@ -1141,10 +1187,12 @@ class TechnicalAnalysisService:
 
         if macd.get("macd") is not None:
             histogram_value = macd.get("histogram")
+            macd_unit = macd.get("price_unit")
+            fade_threshold = 350.0 if macd_unit == "VND" else 0.35 if macd_unit == "index_points" else None
             adjusted_macd_signal = contextualize_signal(
                 signal=macd["signal"],
-                bullish_fade_threshold=-0.35,
-                bearish_fade_threshold=0.35,
+                bullish_fade_threshold=-fade_threshold if fade_threshold is not None else None,
+                bearish_fade_threshold=fade_threshold,
                 raw_value=float(histogram_value) if histogram_value is not None else None,
             )
             add_indicator(
@@ -1315,6 +1363,7 @@ class TechnicalAnalysisService:
 
         return {
             "symbol": symbol.upper(),
+            "price_unit": frame.iloc[-1].get("price_unit", "unknown") if frame is not None and not frame.empty else "unknown",
             "timeframe": timeframe,
             "moving_averages": ma,
             "oscillators": {

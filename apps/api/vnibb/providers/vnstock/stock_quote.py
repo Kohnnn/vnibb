@@ -14,6 +14,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from vnibb.core.exceptions import ProviderError
+from vnibb.core.price_units import PriceUnit, history_price_records
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ class StockQuoteData(BaseModel):
     
     # Metadata
     updated_at: Optional[datetime] = Field(None, description="Quote timestamp")
+    price_unit: PriceUnit = Field(default="unknown", description="Canonical price unit")
     
     model_config = {"populate_by_name": True}
 
@@ -133,10 +135,11 @@ class VnstockStockQuoteFetcher:
         """
 
         symbol = symbol.upper().strip()
+        cache_key = f"{source.upper()}:{symbol}"
         
         # Check cache first
         if use_cache:
-            cached = QuoteCache.get(symbol)
+            cached = QuoteCache.get(cache_key)
             if cached:
                 data, _ = cached
                 return data, True
@@ -166,8 +169,7 @@ class VnstockStockQuoteFetcher:
                 if df is None or df.empty:
                     return None
                 
-                # Get the latest record (most recent trading day)
-                records = df.to_dict(orient="records")
+                records = history_price_records(df, symbol=symbol, source=source, provider=stock.quote)
                 if not records:
                     return None
                 
@@ -197,7 +199,7 @@ class VnstockStockQuoteFetcher:
             change = None
             change_pct = None
             
-            if prev:
+            if prev and prev["price_unit"] == latest["price_unit"] and latest["price_unit"] != "unknown":
                 raw_prev_close = prev.get("close")
                 if raw_prev_close is None:
                     raw_prev_close = prev.get("price")
@@ -208,6 +210,7 @@ class VnstockStockQuoteFetcher:
             
             quote_data = StockQuoteData(
                 symbol=symbol,
+                price_unit=latest["price_unit"],
                 price=price,
                 open=float(latest.get("open") or 0) if latest.get("open") else None,
                 high=float(latest.get("high") or 0) if latest.get("high") else None,
@@ -224,7 +227,7 @@ class VnstockStockQuoteFetcher:
             
             # Store in cache
             if use_cache and quote_data.price is not None:
-                QuoteCache.set(symbol, quote_data)
+                QuoteCache.set(cache_key, quote_data)
             
             return quote_data, False
             

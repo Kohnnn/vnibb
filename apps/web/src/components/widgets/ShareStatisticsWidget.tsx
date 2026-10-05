@@ -105,12 +105,20 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
     { value: profileData?.outstanding_shares, source: 'Profile+Quote', positiveOnly: true },
   ])
 
+  // Reported market cap is authoritative. The profile-shares × quote fallback is
+  // valid only when the quote is explicitly priced in VND: an `index_points` or
+  // `unknown` unit is a different scale and would fabricate a market cap.
+  const confirmedVndPrice =
+    quote && quote.price_unit === 'VND' && typeof quote.price === 'number' && Number.isFinite(quote.price) && quote.price > 0
+      ? quote.price
+      : null
+
   const marketCap = resolveMetric([
     { value: stock?.market_cap, source: 'Screener', positiveOnly: true },
     {
       value:
-        outstandingShares.value && quote?.price && quote.price > 0
-          ? outstandingShares.value * quote.price
+        outstandingShares.value && confirmedVndPrice
+          ? outstandingShares.value * confirmedVndPrice
           : null,
       source: 'Profile+Quote',
       positiveOnly: true,

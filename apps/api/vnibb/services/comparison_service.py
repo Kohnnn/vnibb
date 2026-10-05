@@ -19,10 +19,12 @@ from sqlalchemy import desc, select
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
+from vnibb.core.price_units import persisted_price_record, screener_price_record
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
+from vnibb.models.company import Company
 from vnibb.models.trading import FinancialRatio
 from vnibb.services.cache_manager import CacheManager
 
@@ -579,6 +581,22 @@ class ComparisonService:
                         .limit(1)
                     )
                 ).scalar_one_or_none()
+                company_row = (
+                    await session.execute(
+                        select(Company.outstanding_shares, Company.listed_shares)
+                        .where(Company.symbol == symbol)
+                        .limit(1)
+                    )
+                ).first()
+                latest_price_row = (
+                    await session.execute(
+                        select(StockPrice)
+                        .where(StockPrice.symbol == symbol, StockPrice.interval == "1D")
+                        .order_by(desc(StockPrice.time))
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                latest_price_record = persisted_price_record(latest_price_row) if latest_price_row is not None else {}
 
             if ratio_row is not None:
                 ratio_fallbacks = {
@@ -609,40 +627,21 @@ class ComparisonService:
                     if metrics_dict.get(key) is None and value is not None:
                         metrics_dict[key] = value
 
-            # QA-v4 F5: Recompute market_cap from outstanding_shares × the
-            # freshest StockPrice.close so the Comparison surface and the
-            # Profile/Overview surface (which already uses
-            # _resolve_profile_market_cap) stay aligned. The cached
-            # ScreenerSnapshot.market_cap that initially seeds metrics_dict
-            # lags the live quote by hours/days, producing the
-            # 28.23B vs 28.28B discrepancy noted in the QA report.
-            if stock_row is not None:
+            if company_row is not None:
                 try:
-                    shares_value = _to_float(
-                        getattr(stock_row, "outstanding_shares", None)
-                        or getattr(stock_row, "listed_shares", None)
+                    shares_value = _coerce_number(company_row[0]) or _coerce_number(company_row[1])
+                    latest_price = (
+                        _coerce_number(latest_price_record.get("close"))
+                        if latest_price_record.get("price_unit") == "VND"
+                        else None
                     )
-                    latest_price_row = (
-                        await session.execute(
-                            select(StockPrice.close)
-                            .where(
-                                StockPrice.symbol == symbol,
-                                StockPrice.interval == "1D",
-                            )
-                            .order_by(desc(StockPrice.time))
-                            .limit(1)
-                        )
-                    ).scalar_one_or_none()
-                    latest_price = _to_float(latest_price_row)
                     if shares_value and shares_value > 0 and latest_price and latest_price > 0:
-                        # Vietnamese price feeds carry close in thousand-VND
-                        # units; multiplier matches the heuristic used in
-                        # equity._resolve_profile_market_cap.
+                        # Preserve the existing share-count convention; price is canonical VND.
                         multiplier = 1.0 if shares_value >= 1_000_000 else 1_000_000.0
                         recomputed_market_cap = shares_value * multiplier * latest_price
                         # Only override when the recompute lands within
                         # 25% of the snapshot value (sanity-check).
-                        existing_market_cap = _to_float(metrics_dict.get("market_cap"))
+                        existing_market_cap = _coerce_number(metrics_dict.get("market_cap"))
                         if (
                             existing_market_cap is None
                             or existing_market_cap <= 0
@@ -727,7 +726,13 @@ class ComparisonService:
                 )
                 data = await VnstockEquityHistoricalFetcher.fetch(params)
                 if data:
-                    all_series[symbol] = {d.time.strftime("%Y-%m-%d"): d.close for d in data}
+                    series = {}
+                    for row in data:
+                        price = persisted_price_record(row.model_dump())
+                        if price["price_unit"] != "unknown":
+                            series[row.time.strftime("%Y-%m-%d")] = price["close"]
+                    if series:
+                        all_series[symbol] = series
             except Exception as e:
                 logger.warning(f"Performance fetch failed for {symbol}: {e}")
                 continue
@@ -818,6 +823,10 @@ class ComparisonService:
                     "roe",
                     "price",
                     "close",
+                    "price_unit",
+                    "priceUnit",
+                    "price_source",
+                    "extended_metrics",
                     "change_pct",
                     "changePct",
                     "price_change_1d_pct",
@@ -853,7 +862,8 @@ class ComparisonService:
                 return _to_float(_value(stock, "market_cap", "marketCap"))
 
             def _price(stock: Any) -> Optional[float]:
-                return _to_float(_value(stock, "price", "close"))
+                price = screener_price_record({**_as_payload(stock), "price": _value(stock, "price", "close")})
+                return _to_float(price.get("price")) if price["price_unit"] != "unknown" else None
 
             def _change_pct(stock: Any) -> Optional[float]:
                 return _to_float(
@@ -943,6 +953,7 @@ class ComparisonService:
                                 ScreenerSnapshot.pe,
                                 ScreenerSnapshot.roe,
                                 ScreenerSnapshot.price,
+                                ScreenerSnapshot.extended_metrics,
                             ).where(ScreenerSnapshot.snapshot_date == latest_snapshot_date)
                         )
                     ).all()
@@ -970,6 +981,7 @@ class ComparisonService:
                         pe,
                         roe,
                         price,
+                        extended_metrics,
                     ) in snapshot_rows:
                         if not snap_symbol:
                             continue
@@ -988,8 +1000,11 @@ class ComparisonService:
                             payload["pe"] = pe
                         if payload.get("roe") in (None, "") and roe is not None:
                             payload["roe"] = roe
-                        if payload.get("price") in (None, "") and price is not None:
-                            payload["price"] = price
+                        if _price(payload) is None and price is not None:
+                            snapshot_price = screener_price_record({"symbol": symbol_key, "price": price, "extended_metrics": extended_metrics})
+                            payload["price"] = snapshot_price.get("price")
+                            payload["price_unit"] = snapshot_price["price_unit"]
+                            payload["price_source"] = snapshot_price.get("price_source")
 
                         stock_sector, stock_industry, stock_exchange = stock_lookup.get(
                             symbol_key, (None, None, None)

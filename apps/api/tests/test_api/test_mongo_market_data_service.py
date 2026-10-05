@@ -247,6 +247,7 @@ def _bar(day: date, close: float) -> EquityHistoricalData:
     return EquityHistoricalData(
         symbol="VNM",
         time=day,
+        price_unit="VND",
         open=close,
         high=close,
         low=close,

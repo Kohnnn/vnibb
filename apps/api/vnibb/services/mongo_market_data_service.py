@@ -12,6 +12,7 @@ from functools import lru_cache
 from typing import Any
 
 from vnibb.core.config import settings
+from vnibb.core.price_units import normalize_price_record
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,6 @@ def _dedup_eod_rows(
         for row in deduped:
             row.pop("source", None)
             row.pop("sourceKey", None)
-            row.pop("priceUnit", None)
             for field in _EOD_LINEAGE_FIELDS:
                 row.pop(field, None)
     deduped.sort(key=lambda row: row.get("tradeDate") or datetime.min)
@@ -609,9 +609,13 @@ class MongoMarketDataService:
                     "close": 1,
                     "volume": 1,
                     "value": 1,
+                    "adjClose": 1,
+                    "adj_close": 1,
+                    "adjusted_close": 1,
                     "source": 1,
                     "sourceKey": 1,
                     "priceUnit": 1,
+                    "price_source": 1,
                     "updatedAt": 1,
                     "observedAt": 1,
                     "ingestedAt": 1,
@@ -655,9 +659,13 @@ class MongoMarketDataService:
                     "close": 1,
                     "volume": 1,
                     "value": 1,
+                    "adjClose": 1,
+                    "adj_close": 1,
+                    "adjusted_close": 1,
                     "source": 1,
                     "sourceKey": 1,
                     "priceUnit": 1,
+                    "price_source": 1,
                     "updatedAt": 1,
                     "observedAt": 1,
                     "ingestedAt": 1,
@@ -710,9 +718,11 @@ class MongoMarketDataService:
                     "value": 1,
                     "adjClose": 1,
                     "adj_close": 1,
+                    "adjusted_close": 1,
                     "source": 1,
                     "sourceKey": 1,
                     "priceUnit": 1,
+                    "price_source": 1,
                     "updatedAt": 1,
                     "observedAt": 1,
                     "ingestedAt": 1,
@@ -1014,10 +1024,9 @@ class MongoMarketDataService:
         The scheduled vnstock path is a fallback behind the Vietcap-primary
         corpus. Runtime reads filter only on ``symbol``/``tradeDate`` and ignore
         ``source``, so this writer must never create a vnstock row for a day that
-        already has a Vietcap bar. vnstock prices also arrive in thousand VND;
-        the corpus now uses raw VND, so OHLC values are multiplied by 1000 before
-        persisting and marked with ``priceUnit='VND'``. Rows must already be
-        normalized dicts carrying ``tradeDate`` (a naive ``datetime``) plus OHLCV
+        already has a Vietcap bar. Price units are normalized from explicit markers
+        or the retained vnstock history source contract, never numeric magnitude.
+        Rows carry ``tradeDate`` (a naive ``datetime``) plus OHLCV
         fields. Returns the number of upsert operations accepted by MongoDB. A bulk
         write exception propagates because unordered writes may partially persist.
         """
@@ -1053,7 +1062,10 @@ class MongoMarketDataService:
                     # An EOD bar without a close is unusable downstream; skip it
                     # rather than overwrite a good prior value with a null.
                     continue
-                normalized_rows.append({**raw, "tradeDate": trade_date})
+                normalized = normalize_price_record(raw, symbol=symbol_upper)
+                if normalized["price_unit"] == "unknown":
+                    raise ValueError(f"Unknown EOD price unit for {symbol_upper}")
+                normalized_rows.append({**normalized, "tradeDate": trade_date})
 
             if not normalized_rows:
                 return 0
@@ -1071,13 +1083,6 @@ class MongoMarketDataService:
                 if doc.get("tradeDate") is not None
             }
 
-            def _scale_price(value: Any) -> float | None:
-                if value is None:
-                    return None
-                try:
-                    return float(value) * 1000
-                except (TypeError, ValueError):
-                    return None
 
             ops: list[Any] = []
             for raw in normalized_rows:
@@ -1096,14 +1101,15 @@ class MongoMarketDataService:
                         f"vnstock-data:{symbol_upper}:eod:"
                         f"{trade_date.date().isoformat()}"
                     ),
-                    "open": _scale_price(raw.get("open")),
-                    "high": _scale_price(raw.get("high")),
-                    "low": _scale_price(raw.get("low")),
-                    "close": _scale_price(raw.get("close")),
+                    "open": raw.get("open"),
+                    "high": raw.get("high"),
+                    "low": raw.get("low"),
+                    "close": raw.get("close"),
                     "volume": raw.get("volume"),
                     "value": raw.get("value"),
-                    "priceUnit": "VND",
-                    "rescaledFromThousandVnd": True,
+                    "adj_close": next((raw.get(field) for field in ("adj_close", "adjusted_close", "adjClose") if raw.get(field) is not None), None),
+                    "priceUnit": raw["price_unit"],
+                    "price_source": raw.get("price_source"),
                     "updatedAt": synced_at,
                     "syncedAt": synced_at,
                     "schemaVersion": 1,

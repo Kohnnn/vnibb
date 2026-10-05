@@ -12,6 +12,8 @@ from vnibb.api.v1.screener import (
     _enrich_screener_metrics,
     _resolve_index_universe,
     _validated_target_reference,
+    _to_screener_data_row,
+    fill_market_cap,
 )
 from vnibb.providers.vnstock.equity_screener import ScreenerData
 
@@ -244,3 +246,92 @@ async def test_listing_age_uses_requested_as_of_date():
 
     assert rows[0].listing_date == date(2024, 1, 1)
     assert rows[0].listing_age_days == 366
+
+
+@pytest.mark.parametrize(
+    ("metrics", "price", "expected", "unit"),
+    [
+        ({"price_unit": "THOUSAND_VND"}, 73, 73_000, "VND"),
+        ({"price_unit": "VND"}, 80, 80, "VND"),
+        ({}, 73_000, None, "unknown"),
+    ],
+)
+def test_stored_screener_prices_require_provenance(metrics, price, expected, unit):
+    row = _to_screener_data_row(SimpleNamespace(symbol="FPT", price=price, extended_metrics=metrics))
+
+    assert row.price == expected
+    assert row.price_unit == unit
+
+
+def test_screener_market_cap_preserves_low_vnd_and_rejects_unknown_prices():
+    rows = fill_market_cap([
+        ScreenerData(symbol="LOW", price=80, price_unit="VND", shares_outstanding=1_000_000),
+        ScreenerData(symbol="BAD", price=80_000, price_unit="unknown", shares_outstanding=1_000_000),
+    ])
+
+    assert rows[0].market_cap == 80_000_000
+    assert rows[1].market_cap is None
+
+
+class _PriceEnrichmentDB:
+    def __init__(self, prices, *, dps=None):
+        self.prices = prices
+        self.dps = dps
+
+    async def execute(self, statement):
+        query = str(statement).lower()
+        if "stock_prices" in query:
+            return _FakeResult(self.prices)
+        if "financial_ratios" in query and self.dps is not None:
+            return _FakeResult([SimpleNamespace(
+                symbol="FPT", raw_data={}, roic=None, fiscal_year=None, fiscal_quarter=None,
+                updated_at=None, ev_ebitda=None, operating_margin=None, revenue_growth=None,
+                earnings_growth=None, debt_to_assets=None, dps=self.dps,
+            )])
+        return _FakeResult([])
+
+
+@pytest.mark.asyncio
+async def test_screener_performance_normalizes_each_persisted_source_and_filters_unknown():
+    db = _PriceEnrichmentDB([
+        SimpleNamespace(symbol="FPT", time=date(2025, 1, 3), close=999_000, source="vnstock"),
+        SimpleNamespace(symbol="FPT", time=date(2025, 1, 2), close=80, source="vnstock_vnd:KBS"),
+        SimpleNamespace(symbol="FPT", time=date(2025, 1, 1), close=0.1, source="KBS"),
+    ])
+    rows = await _enrich_screener_metrics([ScreenerData(symbol="FPT")], db)
+
+    assert rows[0].change_1d == pytest.approx(-20)
+    assert rows[0].updated_at == date(2025, 1, 2)
+
+
+@pytest.mark.asyncio
+async def test_screener_performance_preserves_large_legitimate_split():
+    db = _PriceEnrichmentDB([
+        SimpleNamespace(symbol="FPT", time=date(2025, 1, 2), close=100, source="vnstock_vnd:KBS"),
+        SimpleNamespace(symbol="FPT", time=date(2025, 1, 1), close=100_000, source="vnstock_vnd:KBS"),
+    ])
+    rows = await _enrich_screener_metrics([ScreenerData(symbol="FPT")], db)
+
+    assert rows[0].change_1d == pytest.approx(-99.9)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("unit", "expected"), [("VND", 10), ("unknown", None)])
+async def test_screener_dividend_yield_uses_only_canonical_vnd(unit, expected):
+    rows = await _enrich_screener_metrics(
+        [ScreenerData(symbol="FPT", price=80, price_unit=unit)],
+        _PriceEnrichmentDB([], dps=8),
+    )
+
+    assert rows[0].dividend_yield == expected
+
+
+def test_target_upside_preserves_low_canonical_vnd_price():
+    target, upside, source, _ = _validated_target_reference(
+        {"targetPrice": 100, "targetPriceUnit": "VND", "targetSource": "Vietcap"},
+        80,
+    )
+
+    assert target == 100
+    assert upside == 25
+    assert source == "Vietcap"

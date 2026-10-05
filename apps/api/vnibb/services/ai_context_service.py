@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import desc, select
 
 from vnibb.core.database import async_session_maker
+from vnibb.core.price_units import persisted_price_record
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.market import MarketSector, SectorPerformance
 from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
@@ -166,15 +167,25 @@ def _augment_ratio_aliases(ratios: dict[str, Any] | None) -> dict[str, Any] | No
     return ratios
 
 
-def _build_price_context(price_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _build_price_context(price_rows: Sequence[Any]) -> dict[str, Any] | None:
     normalized_rows = []
-    for row in price_rows:
+    for price_row in price_rows:
+        row = persisted_price_record(price_row)
         row_time = str(row.get("time") or "")[:10]
         close = _coerce_number(row.get("close"))
-        volume = _coerce_number(row.get("volume"))
         if not row_time or close is None:
             continue
-        normalized_rows.append({"time": row_time, "close": close, "volume": volume})
+        unit = row["price_unit"]
+        normalized_rows.append(
+            {
+                "time": row_time,
+                "close": close if unit != "unknown" else None,
+                "volume": _coerce_number(row.get("volume")),
+                "price_unit": unit,
+                "source": row.get("source"),
+                "price_source": row.get("price_source") or row.get("source"),
+            }
+        )
 
     if not normalized_rows:
         return None
@@ -182,23 +193,32 @@ def _build_price_context(price_rows: list[dict[str, Any]]) -> dict[str, Any] | N
     series = sorted(normalized_rows, key=lambda item: item["time"])
     latest = series[-1]
     latest_close = latest["close"]
+    latest_unit = latest["price_unit"]
 
     def percent_change(offset: int) -> float | None:
-        if len(series) <= offset:
+        if len(series) <= offset or latest_close is None:
             return None
-        previous = series[-(offset + 1)]["close"]
-        if previous in (None, 0):
+        window = series[-(offset + 1):]
+        if any(row["close"] is None or row["price_unit"] != latest_unit for row in window):
+            return None
+        previous = window[0]["close"]
+        if previous == 0:
             return None
         return round(((latest_close - previous) / previous) * 100, 2)
 
     recent_window = series[-PRICE_WINDOW:]
     recent_volumes = [row["volume"] for row in recent_window if row.get("volume") is not None]
-    low_20d = min((row["close"] for row in recent_window), default=None)
-    high_20d = max((row["close"] for row in recent_window), default=None)
+    comparable_closes = [
+        row["close"] for row in recent_window
+        if row["close"] is not None and row["price_unit"] == latest_unit
+    ]
+    low_20d = min(comparable_closes, default=None)
+    high_20d = max(comparable_closes, default=None)
 
     return {
         "latest": latest,
         "summary": {
+            "price_unit": latest_unit,
             "change_5d_pct": percent_change(5),
             "change_20d_pct": percent_change(20),
             "low_20d": low_20d,
@@ -208,6 +228,10 @@ def _build_price_context(price_rows: list[dict[str, Any]]) -> dict[str, Any] | N
             else None,
         },
         "recent_series": recent_window,
+        "excluded_unknown_unit_rows": sum(row["price_unit"] == "unknown" for row in series),
+        "limitations": ["Unknown price units are withheld; returns require a complete, coherent unit window."]
+        if any(row["price_unit"] == "unknown" for row in series)
+        else [],
     }
 
 
@@ -833,9 +857,9 @@ class AIContextService:
                 (
                     await session.execute(
                         select(StockPrice)
-                        .where(StockPrice.symbol == symbol)
+                        .where(StockPrice.symbol == symbol, StockPrice.interval == "1D")
                         .order_by(desc(StockPrice.time))
-                        .limit(PRICE_WINDOW)
+                        .limit(PRICE_WINDOW + 1)
                     )
                 )
                 .scalars()
@@ -980,16 +1004,7 @@ class AIContextService:
         ):
             return None
 
-        price_context = _build_price_context(
-            [
-                {
-                    "time": _iso_value(row.time),
-                    "close": row.close,
-                    "volume": row.volume,
-                }
-                for row in price_rows
-            ]
-        )
+        price_context = _build_price_context(price_rows)
 
         return {
             "symbol": symbol,

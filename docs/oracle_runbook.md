@@ -120,16 +120,15 @@ Production remains **BLOCKED** until operator UUID verification, key rotation, a
 - Durable scheduler status reports a running worker and 22 jobs. Startup logs contain prediction-source failures for PredictIt, Limitless and Manifold; durable status also retains `daily_sync` and `financial_ratios_sync` failures. These outcomes remain visible rather than being reported as successful ingestion. API and MCP startup logs had no error lines in the reviewed 15-minute window.
 - Production frontend readiness and a real Fundamental Analyst starter draft passed after backend replacement; no prompt was sent. Frontend deployment remains `dpl_789A8Gc5UziYCD4PxFc23dKPhaVZ`; subsequent documentation-only commits are not backend image revisions.
 
-**2026-10-05 financial-ratio natural-key repair (deployed):** Production
-`financial_ratios` only ever received the primary-key index;
-`uq_financial_ratio_symbol_period` (declared on the `FinancialRatio` model) never
-existed in the `vnibb` database (verified 2026-10-05: `pg_constraint` and
-`pg_indexes` show only `financial_ratios_pkey`). Because every ratio writer emits
-`INSERT ... ON CONFLICT (symbol, period, period_type)`, any natural-key upsert
-against that table fails with `InvalidColumnReferenceError: there is no unique or
-exclusion constraint matching the ON CONFLICT specification`. This is
-stamped-revision drift: no migration ever declared that constraint, and SQLAlchemy
-does not retro-fit model constraints onto an already-created table.
+**2026-10-05 financial-ratio natural-key repair (deployed):** Before the repair,
+a production census found only `financial_ratios_pkey` in `pg_constraint` and
+`pg_indexes` for `financial_ratios`; `uq_financial_ratio_symbol_period` was absent.
+The initial migration, `20260125_0842_1aaa2a1cf198_initial_schema.py:258`, already
+declares `UNIQUE (symbol, period, period_type)`. This establishes live-schema drift,
+not when or why it occurred. Without the constraint, the ratio writer's
+`INSERT ... ON CONFLICT (symbol, period, period_type)` fails with
+`InvalidColumnReferenceError: there is no unique or exclusion constraint matching
+the ON CONFLICT specification`.
 
 This is distinct from the recorded `financial_ratios_sync` durable failure above,
 whose `last_detail` is `exceeded 5400s` (a timeout, not a constraint error). The

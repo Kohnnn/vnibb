@@ -33,6 +33,7 @@ export interface WidgetRuntimeInput {
   /** Whether the served data is cached / stale (optional badges). */
   cached?: boolean
   stale?: boolean
+  warnings?: string[]
   /** Extra fields merged into the onDataChange payload (e.g. rows for export). */
   extra?: Record<string, unknown>
   exportData?: unknown
@@ -72,6 +73,7 @@ export function buildWidgetRuntime(input: WidgetRuntimeInput): WidgetDataPayload
     localOnly: input.derived || undefined,
     cached: input.cached,
     stale: input.stale,
+    warnings: input.warnings,
   }
   return {
     __widgetRuntime: {

@@ -44,6 +44,7 @@ export interface QuoteData {
     value: number | null;
     updatedAt: string | null;
     updated_at?: string | null;
+    price_unit?: 'VND' | 'index_points' | 'unknown';
 }
 
 export interface QuoteResponse {

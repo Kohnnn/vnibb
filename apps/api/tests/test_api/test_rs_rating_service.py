@@ -52,6 +52,7 @@ async def test_get_rs_leaders_falls_back_to_live_rankings_when_snapshots_missing
                 "rs_rating": 99,
                 "rs_rank": 1,
                 "price": 120000.0,
+                "price_unit": "VND",
                 "industry": "Technology",
                 "sector": "Technology",
             },
@@ -61,6 +62,7 @@ async def test_get_rs_leaders_falls_back_to_live_rankings_when_snapshots_missing
                 "rs_rating": 84,
                 "rs_rank": 2,
                 "price": 63100.0,
+                "price_unit": "VND",
                 "industry": "Food",
                 "sector": "Food",
             },
@@ -78,6 +80,7 @@ async def test_get_rs_leaders_falls_back_to_live_rankings_when_snapshots_missing
             "rs_rating": 99,
             "rs_rank": 1,
             "price": 120000.0,
+            "price_unit": "VND",
             "industry": "Technology",
         }
     ]

@@ -325,6 +325,7 @@ async def test_screener_smoke_returns_data(client, monkeypatch):
                 exchange="HOSE",
                 industry_name="Food",
                 price=75000,
+                price_unit="VND",
                 market_cap=150000000000,
                 updated_at=datetime(2026, 3, 14, 15, 0, 0),
             )
@@ -354,6 +355,7 @@ async def test_screener_smoke_without_trailing_slash_returns_data(client, monkey
                 exchange="HOSE",
                 industry_name="Food",
                 price=75000,
+                price_unit="VND",
                 market_cap=150000000000,
             )
         ]
@@ -456,7 +458,7 @@ async def test_profile_cache_backfills_sector_and_scales_market_cap(client, test
             close=36.5,
             volume=1_050_000,
             interval="1D",
-            source="vnstock",
+            source="KBS",
         )
     )
     await test_db.commit()
@@ -494,7 +496,7 @@ async def test_dividends_endpoint_falls_back_to_cached_dividend_rows(client, tes
             close=63.1,
             volume=2_050_000,
             interval="1D",
-            source="vnstock",
+            source="KBS",
         )
     )
     test_db.add(
@@ -537,6 +539,7 @@ async def test_quote_smoke_returns_data(client, monkeypatch):
         quote = StockQuoteData(
             symbol=symbol,
             price=75000,
+            price_unit="VND",
             open=74000,
             high=76000,
             low=73500,
@@ -557,6 +560,7 @@ async def test_quote_smoke_returns_data(client, monkeypatch):
     payload = response.json()
     assert payload["data"]["symbol"] == "VNM"
     assert payload["data"]["price"] == 75000
+    assert payload["data"]["price_unit"] == "VND"
     assert response.headers["X-API-Version"]
     assert response.headers["X-Data-Source"] == "postgres"
 
@@ -577,7 +581,7 @@ async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_sta
                 close=92.9,
                 volume=1_200_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
             StockPrice(
                 id=2,
@@ -590,7 +594,7 @@ async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_sta
                 close=90.5,
                 volume=1_100_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
             ScreenerSnapshot(
                 id=1,
@@ -599,7 +603,7 @@ async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_sta
                 price=77.0,
                 volume=9_026_000,
                 source="vnstock",
-                extended_metrics={"updated_at": "2026-03-14T13:18:00"},
+                extended_metrics={"updated_at": "2026-03-14T13:18:00", "price_unit": "THOUSAND_VND"},
             ),
         ]
     )
@@ -609,7 +613,8 @@ async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_sta
     assert response.status_code == 200
     payload = response.json()
     assert payload["data"]["symbol"] == "FPT"
-    assert payload["data"]["price"] == 77.0
+    assert payload["data"]["price"] == 77_000.0
+    assert payload["data"]["price_unit"] == "VND"
     assert payload["data"]["high"] is None
     assert payload["data"]["low"] is None
     assert payload["data"]["volume"] == 9026000
@@ -634,7 +639,7 @@ async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, t
                 close=24.5,
                 volume=5_000_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
             StockPrice(
                 id=12,
@@ -647,7 +652,7 @@ async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, t
                 close=24.7,
                 volume=4_800_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
             # Snapshot is same-day-fresh but has no live change metric (after close).
             ScreenerSnapshot(
@@ -657,7 +662,7 @@ async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, t
                 price=24.5,
                 volume=5_000_000,
                 source="vnstock_ratio",
-                extended_metrics={"updated_at": "2026-03-14T15:30:00"},
+                extended_metrics={"updated_at": "2026-03-14T15:30:00", "price_unit": "THOUSAND_VND"},
             ),
         ]
     )
@@ -667,8 +672,9 @@ async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, t
     assert response.status_code == 200
     payload = response.json()
     assert payload["data"]["symbol"] == "VCI"
-    # PREV CLOSE must come from the prior settled close (24.7), never null.
-    assert payload["data"]["prevClose"] == 24.7
+    # PREV CLOSE must come from the prior settled close in canonical VND.
+    assert payload["data"]["prevClose"] == 24_700
+    assert payload["data"]["price_unit"] == "VND"
 
 
 @pytest.mark.asyncio
@@ -689,7 +695,7 @@ async def test_trading_stats_backfills_52_week_range_from_price_history(
                 close=27.9,
                 volume=1_000_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
             StockPrice(
                 id=11,
@@ -702,7 +708,7 @@ async def test_trading_stats_backfills_52_week_range_from_price_history(
                 close=30.7,
                 volume=1_200_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
             StockPrice(
                 id=12,
@@ -715,7 +721,7 @@ async def test_trading_stats_backfills_52_week_range_from_price_history(
                 close=26.7,
                 volume=1_400_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
         ]
     )
@@ -732,8 +738,8 @@ async def test_trading_stats_backfills_52_week_range_from_price_history(
     response = await client.get("/api/v1/equity/VCI/trading-stats")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["data"]["high52w"] == pytest.approx(31.25)
-    assert payload["data"]["low52w"] == pytest.approx(22.45)
+    assert payload["data"]["high52w"] == pytest.approx(31_250)
+    assert payload["data"]["low52w"] == pytest.approx(22_450)
 
 
 @pytest.mark.asyncio
@@ -774,6 +780,7 @@ async def test_historical_smoke_returns_data(client, monkeypatch):
                 high=74000,
                 low=72500,
                 close=73500,
+                price_unit="VND",
                 volume=1250000,
             )
         ]
@@ -790,6 +797,8 @@ async def test_historical_smoke_returns_data(client, monkeypatch):
     payload = response.json()
     assert payload["meta"]["count"] == 1
     assert payload["data"][0]["symbol"] == "VNM"
+    assert payload["data"][0]["close"] == 73_500
+    assert payload["data"][0]["price_unit"] == "VND"
 
 
 @pytest.mark.asyncio
@@ -993,6 +1002,8 @@ async def test_historical_endpoint_uses_recent_price_cache(client, monkeypatch):
                     "low": 99.5,
                     "close": 100.8,
                     "volume": 1200,
+                    "price_unit": "VND",
+                    "price_source": "vnstock_history:VCI",
                 },
                 {
                     "time": "2026-03-11T00:00:00",
@@ -1001,6 +1012,17 @@ async def test_historical_endpoint_uses_recent_price_cache(client, monkeypatch):
                     "low": 100.0,
                     "close": 101.5,
                     "volume": 1500,
+                    "price_unit": "VND",
+                    "price_source": "vnstock_history:VCI",
+                },
+                {
+                    # Unconfirmed unit must be excluded from the consumer payload.
+                    "time": "2026-03-10T00:00:00",
+                    "open": 500.0,
+                    "high": 500.0,
+                    "low": 500.0,
+                    "close": 500.0,
+                    "volume": 100,
                 },
             ]
         return None
@@ -1016,8 +1038,10 @@ async def test_historical_endpoint_uses_recent_price_cache(client, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["meta"]["count"] == 2
-    assert payload["data"][0]["time"] == "2026-03-10"
+    assert [row["time"] for row in payload["data"]] == ["2026-03-10", "2026-03-11"]
     assert payload["data"][1]["close"] == 101.5
+    assert all(row["price_unit"] == "VND" for row in payload["data"])
+    assert 500.0 not in {row["close"] for row in payload["data"]}
 
 
 @pytest.mark.asyncio
@@ -1309,6 +1333,7 @@ async def test_transaction_flow_endpoint_returns_derived_domestic_flow(client, t
             close=35.7,
             volume=1_000_000,
             interval="1D",
+            source="vnstock_vnd:KBS",
         )
     )
     test_db.add(
@@ -1399,6 +1424,7 @@ async def test_transaction_flow_derives_missing_net_fields_from_buy_sell(client,
             close=120.5,
             volume=2_000_000,
             interval="1D",
+            source="vnstock_vnd:KBS",
         )
     )
     test_db.add(
@@ -1456,6 +1482,7 @@ async def test_transaction_flow_preserves_zero_bucket_inputs_for_domestic_deriva
                 close=10.0,
                 volume=1_000,
                 interval="1D",
+                source="vnstock_vnd:KBS",
             ),
             OrderFlowDaily(
                 id=902,
@@ -1591,6 +1618,7 @@ async def test_orderbook_endpoint_uses_latest_close_when_no_priced_snapshot(clie
             close=25.0,
             volume=1_000_000,
             interval="1D",
+            source="vnstock_vnd:KBS",
         )
     )
     await test_db.commit()
@@ -2353,6 +2381,7 @@ async def test_money_flow_trend_default_universe_returns_available_data(client, 
                 close=20 + index * 0.4,
                 volume=1_000_000,
                 interval="1D",
+                source="KBS",
             )
         )
     await test_db.commit()
@@ -2391,6 +2420,7 @@ async def test_money_flow_trend_returns_rrg_like_points(client, test_db):
                 close=20 + index * 0.4,
                 volume=1_000_000,
                 interval="1D",
+                source="KBS",
             )
         )
         test_db.add(
@@ -2405,6 +2435,7 @@ async def test_money_flow_trend_returns_rrg_like_points(client, test_db):
                 close=15 + index * 0.25,
                 volume=900_000,
                 interval="1D",
+                source="KBS",
             )
         )
     await test_db.commit()
@@ -2453,6 +2484,7 @@ async def test_correlation_matrix_returns_peer_matrix(client, test_db, monkeypat
                     close=close,
                     volume=1_000_000,
                     interval="1D",
+                    source="KBS",
                 )
             )
     await test_db.commit()
@@ -2504,6 +2536,7 @@ async def test_correlation_matrix_excludes_fabricated_stale_peer_returns(client,
                     close=close,
                     volume=1_000_000,
                     interval="1D",
+                    source="KBS",
                 )
             )
     await test_db.commit()
@@ -2551,6 +2584,7 @@ async def test_correlation_matrix_excludes_non_finite_close_before_returns(clien
                 close=close,
                 volume=1_000_000,
                 interval="1D",
+                source="KBS",
             )
         )
     for index, trade_date in enumerate(base_dates, start=1):
@@ -2567,6 +2601,7 @@ async def test_correlation_matrix_excludes_non_finite_close_before_returns(clien
                 close=close,
                 volume=1_000_000,
                 interval="1D",
+                source="KBS",
             )
         )
     await test_db.commit()

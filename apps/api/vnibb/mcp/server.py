@@ -22,6 +22,7 @@ from vnibb.core.auth import User, get_current_user
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, check_database_connection
 from vnibb.core.logging_config import setup_logging
+from vnibb.core.price_units import normalize_price_record, persisted_price_record
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.market import MarketSector, SectorPerformance
 from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
@@ -691,13 +692,37 @@ def _normalize_row_value(value: Any) -> Any:
     return value
 
 
-def _serialize_row(row: Any) -> dict[str, Any]:
-    return {key: _normalize_row_value(value) for key, value in dict(row).items()}
+def _serialize_row(row: Any, *, model: Any = None) -> dict[str, Any]:
+    payload = dict(row)
+    if model is StockPrice:
+        payload = persisted_price_record(payload)
+    return {key: _normalize_row_value(value) for key, value in payload.items()}
 
 
 def _model_columns(model: Any) -> list[Any]:
     """Ordered column list for a mapped model, which is the MCP row shape."""
     return list(model.__table__.columns)
+
+
+def _price_series_metadata(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    units = {row.get("price_unit") or "unknown" for row in rows}
+    unknown_count = sum(row.get("price_unit", "unknown") == "unknown" for row in rows)
+    comparable = bool(rows) and len(units) == 1 and "unknown" not in units
+    warnings = []
+    if unknown_count:
+        warnings.append(
+            "Rows with unknown price units are unscaled; do not compare or aggregate them "
+            "with known-unit prices."
+        )
+    if len(units) > 1:
+        warnings.append("Mixed price units do not form a comparable price series.")
+    return {
+        "price_unit": next(iter(units)) if comparable else "unknown",
+        "price_units": sorted(units),
+        "unknown_price_unit_count": unknown_count,
+        "prices_comparable": comparable,
+        "warnings": warnings,
+    }
 
 
 def _coerce_compared_value(column: Any, value: Any) -> Any:
@@ -789,7 +814,7 @@ async def list_collection_documents(
 
     async with async_session_maker() as session:
         result = await session.execute(statement)
-        return [_serialize_row(row) for row in result.mappings().all()]
+        return [_serialize_row(row, model=model) for row in result.mappings().all()]
 
 
 async def list_collection_documents_paginated(
@@ -825,7 +850,7 @@ async def list_collection_documents_paginated(
 
         async with async_session_maker() as session:
             result = await session.execute(statement)
-            page = [_serialize_row(row) for row in result.mappings().all()]
+            page = [_serialize_row(row, model=model) for row in result.mappings().all()]
 
         collected.extend(page)
         if len(page) < remaining:
@@ -945,6 +970,7 @@ async def query_database_collection_data(
         "filters_applied": applied_filters,
         "row_count": len(rows),
         "items": sanitize_context_value(rows),
+        **(_price_series_metadata(rows) if spec.collection == "stock_prices" else {}),
     }
 
 
@@ -1340,6 +1366,8 @@ async def get_symbol_prices(
     return {
         "symbol": normalized,
         "interval": _normalize_filter_value("interval", interval),
+        "source": "postgres:stock_prices",
+        **_price_series_metadata(rows),
         "row_count": len(rows),
         "start_date": start_date,
         "end_date": end_date,
@@ -1602,10 +1630,13 @@ async def get_eod_price_history(
             limit=bounded_limit,
         )
 
+    rows = [normalize_price_record(row, symbol=normalized) for row in rows]
+
     return {
         "symbol": normalized,
         "source": "mongodb:market_prices_eod",
         "row_count": len(rows),
+        **_price_series_metadata(rows),
         "start_date": start_date,
         "end_date": end_date,
         "items": sanitize_context_value(rows),

@@ -254,3 +254,202 @@ def test_new_workflow_prompt_templates_return_directive_text() -> None:
     assert "get_premium_dataset" in server.premium_dataset("vnm", "equity.foreign_flow", limit=10)
     assert "get_intraday_trades" in server.intraday_trades("vnm", lookback_days=3, limit=10)
     assert "get_price_depth" in server.price_depth("vnm", limit=50)
+
+
+@pytest.fixture
+def mock_price_sql(monkeypatch):
+    records = []
+    statements = []
+
+    class Result:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return records
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def execute(self, statement):
+            statements.append(statement)
+            return Result()
+
+    async def ensure_available():
+        return None
+
+    monkeypatch.setattr(server, "async_session_maker", Session)
+    monkeypatch.setattr(server, "_ensure_database_available", ensure_available)
+    return records, statements
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("paginated", [False, True])
+async def test_stock_price_sql_projects_source_and_normalizes_units(mock_price_sql, paginated):
+    records, statements = mock_price_sql
+    records.extend([
+        {"symbol": "VNM", "close": 65000.0, "source": "vnstock_vnd:VCI"},
+        {"symbol": "VNM", "close": 65.0, "source": "VCI"},
+        {"symbol": "VNM", "close": 65.0, "source": "vnstock"},
+        {"symbol": "VNM", "close": 65.0, "source": "ohlcv_backfill_full"},
+    ])
+    if paginated:
+        rows = await server.list_collection_documents_paginated("stock_prices", max_documents=4)
+    else:
+        rows = await server.list_collection_documents("stock_prices")
+
+    assert "source" in statements[0].selected_columns.keys()
+    assert [row["source"] for row in rows] == [row["source"] for row in records]
+    assert [row["close"] for row in rows] == [65000.0, 65000.0, 65.0, 65.0]
+    assert [row["price_unit"] for row in rows] == ["VND", "VND", "unknown", "unknown"]
+    assert records[1]["close"] == 65.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("generic_collection", [False, True])
+async def test_mcp_price_wrappers_warn_about_unknown_series(mock_price_sql, generic_collection):
+    records, _ = mock_price_sql
+    records.extend([
+        {"symbol": "VNM", "close": 65000.0, "source": "vnstock_vnd:VCI"},
+        {"symbol": "VNM", "close": 65.0, "source": "vnstock"},
+    ])
+    if generic_collection:
+        result = await server.query_database_collection(collection="stock_prices", symbol="VNM")
+    else:
+        result = await server.get_symbol_prices("VNM")
+
+    assert result["row_count"] == 2
+    assert result["price_unit"] == "unknown"
+    assert result["price_units"] == ["VND", "unknown"]
+    assert result["unknown_price_unit_count"] == 1
+    assert result["prices_comparable"] is False
+    assert result["warnings"]
+    assert result["items"][1]["price_unit"] == "unknown"
+    assert result["items"][1]["close"] == 65.0
+
+
+@pytest.mark.asyncio
+async def test_get_symbol_prices_reports_canonical_comparable_series(mock_price_sql):
+    records, _ = mock_price_sql
+    records.append({"symbol": "VNM", "close": 65000.0, "source": "vnstock_vnd:VCI"})
+
+    result = await server.get_symbol_prices("VNM")
+
+    assert result["source"] == "postgres:stock_prices"
+    assert result["price_unit"] == "VND"
+    assert result["prices_comparable"] is True
+    assert result["items"][0]["close"] == 65000.0
+    assert result["warnings"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("date_range", [False, True])
+@pytest.mark.parametrize(
+    "symbol,row,expected_close,expected_unit",
+    [
+        ("VNM", {"close": 65000.0, "priceUnit": "VND", "source": "VCI"}, 65000.0, "VND"),
+        ("VNM", {"close": 65.0, "priceUnit": "THOUSAND_VND"}, 65000.0, "VND"),
+        ("VNM", {"close": 65000.0, "price_unit": "VND", "source": "VCI"}, 65000.0, "VND"),
+        ("VNM", {"close": 65.0, "source": "KBS"}, 65.0, "unknown"),
+        ("VNM", {"close": 65.0, "source": "vnstock_history:KBS"}, 65000.0, "VND"),
+        ("VNM", {"close": 65.0, "source": "ohlcv_backfill_full"}, 65.0, "unknown"),
+        ("VNINDEX", {"close": 1300.0, "priceUnit": "index_points", "source": "VCI"}, 1300.0, "index_points"),
+        ("VNINDEX", {"close": 1300.0, "source": "VCI"}, 1300.0, "unknown"),
+        ("VNM", {"close": 65000.0, "source": "vnstock_vnd:KBS"}, 65000.0, "VND"),
+        ("VNM", {"close": 65.0, "source": "vnstock_vnd_bad"}, 65.0, "unknown"),
+    ],
+)
+async def test_eod_history_preserves_markers_and_normalizes_once(
+    monkeypatch, date_range, symbol, row, expected_close, expected_unit
+):
+    class MongoService(_FakeMongoService):
+        async def get_eod_prices(self, *_args, **_kwargs):
+            return [row]
+
+        async def get_eod_prices_between(self, *_args, **_kwargs):
+            return [row]
+
+    monkeypatch.setattr(server, "get_mongo_market_data_service", MongoService)
+    date_args = {"start_date": "2026-01-01", "end_date": "2026-02-01"} if date_range else {}
+
+    result = await server.get_eod_price_history(symbol, **date_args)
+
+    item = result["items"][0]
+    assert item["close"] == expected_close
+    assert item["price_unit"] == expected_unit
+    assert result["price_unit"] == expected_unit
+    assert result["prices_comparable"] is (expected_unit != "unknown")
+    assert result["unknown_price_unit_count"] == int(expected_unit == "unknown")
+    assert bool(result["warnings"]) is (expected_unit == "unknown")
+    if "priceUnit" in row:
+        assert item["priceUnit"] == row["priceUnit"]
+    if "source" in row:
+        assert item["source"] == row["source"]
+
+
+@pytest.mark.asyncio
+async def test_empty_price_history_does_not_claim_known_comparable_units(monkeypatch):
+    class MongoService(_FakeMongoService):
+        async def get_eod_prices(self, *_args, **_kwargs):
+            return []
+
+    monkeypatch.setattr(server, "get_mongo_market_data_service", MongoService)
+
+    result = await server.get_eod_price_history("VNM")
+
+    assert result["row_count"] == 0
+    assert result["price_unit"] == "unknown"
+    assert result["price_units"] == []
+    assert result["prices_comparable"] is False
+
+
+@pytest.mark.asyncio
+async def test_eod_history_retains_unknown_rows_without_claiming_comparable_series(monkeypatch):
+    rows = [
+        {"symbol": "VNM", "close": 65000.0, "priceUnit": "VND", "source": "VCI"},
+        {"symbol": "VNM", "close": 65.0, "source": "vnstock"},
+    ]
+
+    class MongoService(_FakeMongoService):
+        async def get_eod_prices(self, *_args, **_kwargs):
+            return rows
+
+    monkeypatch.setattr(server, "get_mongo_market_data_service", MongoService)
+
+    result = await server.get_eod_price_history("VNM")
+
+    assert result["row_count"] == 2
+    assert result["price_unit"] == "unknown"
+    assert result["price_units"] == ["VND", "unknown"]
+    assert result["unknown_price_unit_count"] == 1
+    assert result["prices_comparable"] is False
+    assert result["warnings"]
+    assert [item["close"] for item in result["items"]] == [65000.0, 65.0]
+    assert [item["price_unit"] for item in result["items"]] == ["VND", "unknown"]
+
+
+@pytest.mark.parametrize(
+    "row,expected_close,expected_unit",
+    [
+        ({"symbol": "VNINDEX", "close": 1300.0, "source": "VCI"}, 1300.0, "index_points"),
+        ({"symbol": "VNM", "close": 65.0, "price_unit": "unknown", "source": "VCI"}, 65.0, "unknown"),
+    ],
+)
+def test_stock_price_serialization_respects_index_and_explicit_unknown_units(
+    row, expected_close, expected_unit
+):
+    result = server._serialize_row(row, model=server.StockPrice)
+
+    assert result["close"] == expected_close
+    assert result["price_unit"] == expected_unit
+    assert result["source"] == row["source"]
+
+
+def test_non_price_collection_serialization_does_not_add_price_units():
+    row = {"symbol": "VNM", "source": "vnstock", "revenue": 1000.0}
+
+    assert server._serialize_row(row, model=server.IncomeStatement) == row

@@ -80,7 +80,7 @@ async def test_quote_uses_dated_stored_price_when_provider_is_down(client, test_
             close=42.0,
             volume=1000,
             interval="1D",
-            source="vnstock",
+            source="KBS",
         )
     )
     await test_db.commit()
@@ -88,7 +88,8 @@ async def test_quote_uses_dated_stored_price_when_provider_is_down(client, test_
     response = await client.get("/api/v1/equity/XYZ/quote?refresh=true")
 
     assert response.status_code == 200
-    assert response.json()["data"]["price"] == 42.0
+    assert response.json()["data"]["price"] == 42_000.0
+    assert response.json()["data"]["price_unit"] == "VND"
     assert response.json()["data"]["updated_at"].startswith("2025-01-09T00:00:00")
 
 
