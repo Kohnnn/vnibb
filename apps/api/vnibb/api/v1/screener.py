@@ -847,7 +847,7 @@ async def _enrich_screener_metrics(
                 payload.get("financial_ratio_issue_share"),
             )
 
-    normalized_price_series_by_symbol: dict[str, list[tuple[Any, float]]] = {}
+    normalized_price_series_by_symbol: dict[str, list[tuple[Any, float | None]]] = {}
     if price_symbols:
         ranked_prices = (
             select(
@@ -872,18 +872,20 @@ async def _enrich_screener_metrics(
             )
         ).scalars().all()
 
-        price_series_by_symbol: dict[str, list[tuple[Any, float]]] = {
+        price_series_by_symbol: dict[str, list[tuple[Any, float | None]]] = {
             symbol: [] for symbol in price_symbols
         }
         for price_row in price_rows:
             price_record = persisted_price_record(price_row)
-            if price_record["price_unit"] != "VND":
-                continue
+            close_value = (
+                _coerce_float(price_record.get("close"))
+                if price_record["price_unit"] == "VND"
+                else None
+            )
             symbol = price_record["symbol"]
             price_time = price_record["time"]
-            close_value = _coerce_float(price_record.get("close"))
-            if close_value in (None, 0):
-                continue
+            if close_value == 0:
+                close_value = None
             bucket = price_series_by_symbol.setdefault(symbol, [])
             if len(bucket) >= 260:
                 continue
@@ -891,15 +893,18 @@ async def _enrich_screener_metrics(
 
         normalized_price_series_by_symbol = price_series_by_symbol
 
-    def _build_performance_map(days: int) -> dict[str, float]:
-        perf_map: dict[str, float] = {}
+    def _build_performance_map(days: int) -> dict[str, float | None]:
+        perf_map: dict[str, float | None] = {}
         for symbol, series in normalized_price_series_by_symbol.items():
             if len(series) < 2:
                 continue
-            latest_price = series[0][1]
             lookback_index = min(days, len(series) - 1)
+            if any(close is None for _, close in series[: lookback_index + 1]):
+                perf_map[symbol] = None
+                continue
+            latest_price = series[0][1]
             base_price = series[lookback_index][1]
-            if base_price in (None, 0):
+            if latest_price is None or base_price in (None, 0):
                 continue
             perf_map[symbol] = ((latest_price - base_price) / base_price) * 100
         return perf_map
@@ -976,7 +981,9 @@ async def _enrich_screener_metrics(
 
         if row.updated_at is None:
             latest_price_point = normalized_price_series_by_symbol.get(symbol, [])
-            latest_price_time = latest_price_point[0][0] if latest_price_point else None
+            latest_price_time = next(
+                (time for time, close in latest_price_point if close is not None), None
+            )
             fallback_updated_at = latest_price_time or (ratio_row.updated_at if ratio_row else None)
             if fallback_updated_at is not None:
                 updates["updated_at"] = fallback_updated_at
@@ -1088,7 +1095,9 @@ async def _enrich_screener_metrics(
 
         normalized_change_1d = _normalize_pct_metric(row.change_1d)
         computed_change_1d = perf_1d_map.get(symbol)
-        if _should_use_computed_pct(
+        if symbol in perf_1d_map and computed_change_1d is None:
+            updates["change_1d"] = None
+        elif _should_use_computed_pct(
             normalized_change_1d,
             computed_change_1d,
             extreme_threshold=35,
@@ -1100,7 +1109,9 @@ async def _enrich_screener_metrics(
 
         normalized_perf_1w = _normalize_pct_metric(row.perf_1w)
         computed_perf_1w = perf_1w_map.get(symbol)
-        if _should_use_computed_pct(
+        if symbol in perf_1w_map and computed_perf_1w is None:
+            updates["perf_1w"] = None
+        elif _should_use_computed_pct(
             normalized_perf_1w,
             computed_perf_1w,
             extreme_threshold=70,
@@ -1112,7 +1123,9 @@ async def _enrich_screener_metrics(
 
         normalized_perf_1m = _normalize_pct_metric(row.perf_1m)
         computed_perf_1m = perf_1m_map.get(symbol)
-        if _should_use_computed_pct(
+        if symbol in perf_1m_map and computed_perf_1m is None:
+            updates["perf_1m"] = None
+        elif _should_use_computed_pct(
             normalized_perf_1m,
             computed_perf_1m,
             extreme_threshold=90,
@@ -1124,7 +1137,9 @@ async def _enrich_screener_metrics(
 
         normalized_perf_ytd = _normalize_pct_metric(row.perf_ytd)
         computed_perf_ytd = perf_ytd_map.get(symbol)
-        if _should_use_computed_pct(
+        if symbol in perf_ytd_map and computed_perf_ytd is None:
+            updates["perf_ytd"] = None
+        elif _should_use_computed_pct(
             normalized_perf_ytd,
             computed_perf_ytd,
             extreme_threshold=120,

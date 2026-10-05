@@ -2239,14 +2239,18 @@ def _build_quote_from_screener_snapshot(
         and latest_row.time is not None and latest_row.time >= snapshot_row.snapshot_date
     )
 
-    # RC-3 (data-quality remediation 2026-06-08): PREV CLOSE is a settled EOD value and
-    # must never be blank after market close. The live-session-derived `snapshot_prev_close`
-    # is null after-hours (no live change_pct). Prefer the actual previous settled close
-    # from StockPrice; fall back to the derived value only when no prior row exists.
-    settled_prev_close = (
-        previous.get("close")
-        if previous.get("price_unit") == snapshot["price_unit"]
-        else None
+    prior_session = snapshot_row.snapshot_date - timedelta(days=1)
+    while prior_session.weekday() >= 5:
+        prior_session -= timedelta(days=1)
+    settled_prev_close = next(
+        (
+            record.get("close")
+            for row, record in ((latest_row, latest), (previous_row, previous))
+            if row is not None
+            and row.time == prior_session
+            and record.get("price_unit") == snapshot["price_unit"]
+        ),
+        None,
     )
     prev_close = settled_prev_close if settled_prev_close is not None else snapshot_prev_close
     if prev_close is not None:
@@ -5326,7 +5330,10 @@ async def get_correlation_matrix(
         .order_by(StockPrice.symbol, StockPrice.time)
     )
     rows = [persisted_price_record(row) for row in prices_result.scalars().all()]
-    rows = [(row["symbol"], row["time"], row["close"]) for row in rows if row["price_unit"] == "VND"]
+    rows = [
+        (row["symbol"], row["time"], row["close"] if row["price_unit"] == "VND" else None)
+        for row in rows
+    ]
     if not rows:
         return StandardResponse(
             data=CorrelationMatrixPayload(
@@ -5343,8 +5350,8 @@ async def get_correlation_matrix(
     frame = pd.DataFrame(rows, columns=["symbol", "time", "close"])
     frame["time"] = pd.to_datetime(frame["time"], errors="coerce").dt.date
     frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
-    frame = frame.dropna(subset=["time", "close"])
-    frame = frame[np.isfinite(frame["close"])]
+    frame = frame.dropna(subset=["time"])
+    frame.loc[~np.isfinite(frame["close"]), "close"] = np.nan
     if frame.empty:
         return StandardResponse(
             data=CorrelationMatrixPayload(
@@ -5364,8 +5371,12 @@ async def get_correlation_matrix(
         observed_prices = prices.groupby("time")["close"].last().sort_index().tail(days + 1)
         if observed_prices.empty:
             continue
-        symbol_last_data_dates[ticker] = observed_prices.index.max()
-        observed_returns = observed_prices.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+        valid_prices = observed_prices.dropna()
+        if not valid_prices.empty:
+            symbol_last_data_dates[ticker] = valid_prices.index.max()
+        observed_returns = (
+            observed_prices.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan).dropna()
+        )
         if not observed_returns.empty:
             return_series[ticker] = observed_returns.tail(days)
 

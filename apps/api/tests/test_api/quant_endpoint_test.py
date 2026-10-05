@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pandas as pd
 import pytest
@@ -979,7 +980,55 @@ def test_quant_peer_prices_use_persisted_source_contract_not_magnitude():
 
     frame = quant._persisted_prices_to_frame(rows)
 
-    assert dict(zip(frame["symbol"], frame["close"], strict=True)) == {"FPT": 73_000, "LOW": 80}
+    canonical = frame.dropna(subset=["close"])
+    assert dict(zip(canonical["symbol"], canonical["close"], strict=True)) == {"FPT": 73_000, "LOW": 80}
+    assert frame.loc[frame["symbol"] == "BAD", "close"].isna().all()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["momentum", "relative_rotation"])
+async def test_peer_analytics_omit_unresolved_price_sessions(monkeypatch, endpoint):
+    frame = _build_price_frame(254)
+    frame.loc[239:241, "close"] = [100, 500, 110]
+    rows = [
+        SimpleNamespace(
+            symbol=symbol,
+            time=row.time.date(),
+            close=row.close,
+            source="unknown" if symbol == "FPT" and index == 240 else "vnstock_vnd:KBS",
+        )
+        for symbol in ("FPT", "LOW")
+        for index, row in enumerate(frame.itertuples())
+    ]
+    prices = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: rows))
+    if endpoint == "momentum":
+        monkeypatch.setattr(
+            quant, "_load_quant_frame_with_warning", AsyncMock(return_value=(frame, None))
+        )
+        results = [
+            SimpleNamespace(scalar_one_or_none=lambda: "Technology"),
+            SimpleNamespace(all=lambda: [("FPT",), ("LOW",)]),
+            prices,
+        ]
+        response = await quant.get_momentum_profile(
+            "FPT", period="3Y", source="KBS", adjustment_mode="raw",
+            db=SimpleNamespace(execute=AsyncMock(side_effect=results)),
+        )
+        symbols = [item["symbol"] for item in response.data["peer_distribution"]]
+    else:
+        benchmark = [(row.time.date(), 1000.0) for row in frame.itertuples()]
+        results = [prices, SimpleNamespace(all=lambda: benchmark)]
+        response = await quant.get_relative_rotation(
+            "FPT", lookback_days=260,
+            db=SimpleNamespace(execute=AsyncMock(side_effect=results)),
+        )
+        symbols = [item["symbol"] for item in response.data["universe"]]
+        assert response.data["selected"] is None
+        assert response.data["coverage"]["skipped_symbols"] == [
+            {"symbol": "FPT", "reason": "unresolved_price_sessions"}
+        ]
+
+    assert symbols == ["LOW"]
 
 
 @pytest.mark.asyncio

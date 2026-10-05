@@ -150,7 +150,7 @@ def _fetch_premium(symbol: str, start_date: date, end_date: date) -> list[dict[s
         if df is None or len(df) == 0:
             return []
         import pandas as pd
-        df = pd.DataFrame(history_price_records(df, symbol=symbol, source="KBS", provider=quote, asset_type=getattr(quote, "asset_type", None)))
+        df = pd.DataFrame(history_price_records(df, symbol=symbol, source="KBS", provider=quote, asset_type=getattr(quote, "asset_type", None)), index=df.index)
         if (df["price_unit"] == "unknown").any():
             return None
         df = df.rename(columns={c: c.lower() for c in df.columns})

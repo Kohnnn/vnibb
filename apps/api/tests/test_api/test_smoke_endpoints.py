@@ -1,6 +1,7 @@
 import asyncio
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -619,6 +620,36 @@ async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_sta
     assert payload["data"]["low"] is None
     assert payload["data"]["volume"] == 9026000
     assert payload["data"]["updated_at"].startswith("2026-03-14T13:18:00")
+
+
+@pytest.mark.parametrize(
+    "snapshot_day,latest_day,previous_day,latest_unit",
+    [(7, 6, 5, "vnstock_vnd:KBS"), (7, 5, 2, "vnstock_vnd:KBS"),
+     (7, 6, 5, "unknown"), (5, 2, 1, "vnstock_vnd:KBS")],
+)
+def test_snapshot_daily_change_uses_its_prior_session(
+    snapshot_day, latest_day, previous_day, latest_unit
+):
+    from vnibb.api.v1 import equity
+
+    snapshot = SimpleNamespace(
+        symbol="FPT", snapshot_date=date(2026, 10, snapshot_day), price=110,
+        volume=1000, source="vnstock_vnd:KBS",
+        extended_metrics={"price_unit": "VND", "change_pct": 10},
+    )
+    latest = SimpleNamespace(
+        symbol="FPT", time=date(2026, 10, latest_day), close=100, source=latest_unit
+    )
+    previous = SimpleNamespace(
+        symbol="FPT", time=date(2026, 10, previous_day), close=90, source="vnstock_vnd:KBS"
+    )
+
+    quote = equity._build_quote_from_screener_snapshot(snapshot, latest, previous)
+
+    assert quote.price == 110
+    assert quote.prev_close == pytest.approx(100)
+    assert quote.change == pytest.approx(10)
+    assert quote.change_pct == 10
 
 
 @pytest.mark.asyncio
@@ -2614,6 +2645,34 @@ async def test_correlation_matrix_excludes_non_finite_close_before_returns(clien
     assert data["symbols"] == ["VCI"]
     assert ("VCI", "SSI") not in correlations
     assert data["overlap_counts"].get("VCI:SSI") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unknown_session", [True, False])
+async def test_correlation_returns_do_not_cross_unresolved_sessions(monkeypatch, unknown_session):
+    from vnibb.api.v1 import equity
+
+    dates = [date(2026, 9, 7) + timedelta(days=offset) for offset in range(8)]
+    dates += [date(2026, 9, 18), date(2026, 9, 21)]
+    rows = [
+        SimpleNamespace(
+            symbol="FPT", time=day, close=100 if index < 8 else 110,
+            source="unknown" if unknown_session and index == 8 else "vnstock_vnd:KBS",
+        )
+        for index, day in enumerate(dates)
+    ]
+    monkeypatch.setattr(
+        equity.comparison_service, "get_peers",
+        AsyncMock(return_value=SimpleNamespace(peers=[], industry="Technology")),
+    )
+    db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: rows)
+    )))
+
+    response = await equity.get_correlation_matrix("FPT", days=20, top_n=5, db=db)
+
+    assert response.data.returns_count == (7 if unknown_session else 9)
+    assert response.data.symbol_last_data_dates["FPT"] == dates[-1]
 
 
 @pytest.mark.asyncio

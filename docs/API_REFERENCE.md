@@ -86,6 +86,15 @@ It tries trusted cache/provider replacements even when the last stored session i
 current. If those known excluded sessions remain unresolved, estimators report
 insufficient data rather than treating a multi-session move as a daily return.
 Weekends and other unobserved calendar dates do not create artificial gaps.
+Direct peer momentum and relative rotation omit unresolved price windows;
+correlation suppresses returns touching excluded sessions without forward-filling
+their closes. Snapshot daily changes use a matching previous settled session or
+the snapshot's supported change pair, never an unrelated earlier close.
+
+Screener performance enrichment retains original session positions. A lookback
+crossing an unresolved unit returns an unavailable metric and clears unsupported
+cached values when price history is loaded. Fully populated rows retain the
+existing no-query fast path; this is not a historical cache rewrite.
 
 ### Comparison / Screener / Sector
 - `GET /comparison/performance`

@@ -497,8 +497,12 @@ def _persisted_prices_to_frame(rows: list[Any]) -> pd.DataFrame:
     records = [persisted_price_record(row) for row in rows]
     return pd.DataFrame(
         [
-            {key: record.get(key) for key in ("symbol", "time", "close")}
-            for record in records if record["price_unit"] == "VND"
+            {
+                "symbol": record.get("symbol"),
+                "time": record.get("time"),
+                "close": record.get("close") if record["price_unit"] == "VND" else None,
+            }
+            for record in records
         ],
         columns=["symbol", "time", "close"],
     )
@@ -2973,12 +2977,14 @@ async def get_momentum_profile(
             peer_frame = _persisted_prices_to_frame(peer_prices_result.scalars().all())
             if not peer_frame.empty:
                 peer_frame["close"] = pd.to_numeric(peer_frame["close"], errors="coerce")
-                peer_frame = peer_frame.dropna(subset=["close"])
 
                 momentum_map: Dict[str, float] = {}
                 for peer_symbol, group in peer_frame.groupby("symbol"):
-                    peer_closes = group.sort_values("time")["close"].tolist()
-                    if len(peer_closes) <= 252 or peer_closes[-253] == 0 or peer_closes[-22] == 0:
+                    peer_closes = group.sort_values("time")["close"].tail(253)
+                    if len(peer_closes) <= 252 or peer_closes.isna().any():
+                        continue
+                    peer_closes = peer_closes.tolist()
+                    if peer_closes[-253] == 0 or peer_closes[-22] == 0:
                         continue
 
                     peer_r12 = ((peer_closes[-1] / peer_closes[-253]) - 1) * 100
@@ -3447,13 +3453,17 @@ async def get_relative_rotation(
         )
 
     price_frame["close"] = pd.to_numeric(price_frame["close"], errors="coerce")
-    price_frame = price_frame.dropna(subset=["close"])
     index_frame["close_index"] = pd.to_numeric(index_frame["close_index"], errors="coerce")
     index_frame = index_frame.dropna(subset=["close_index"])
 
     universe_points: List[Dict[str, Any]] = []
     skipped_symbols: List[Dict[str, Any]] = []
     for stock_symbol, group in price_frame.groupby("symbol"):
+        if group["close"].isna().any():
+            skipped_symbols.append(
+                {"symbol": stock_symbol, "reason": "unresolved_price_sessions"}
+            )
+            continue
         merged = group.merge(index_frame, on="time", how="inner")
         if len(merged) < min_overlap_days:
             skipped_symbols.append(

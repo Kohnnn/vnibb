@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -292,9 +292,8 @@ class _PriceEnrichmentDB:
 
 
 @pytest.mark.asyncio
-async def test_screener_performance_normalizes_each_persisted_source_and_filters_unknown():
+async def test_screener_performance_normalizes_each_persisted_source():
     db = _PriceEnrichmentDB([
-        SimpleNamespace(symbol="FPT", time=date(2025, 1, 3), close=999_000, source="vnstock"),
         SimpleNamespace(symbol="FPT", time=date(2025, 1, 2), close=80, source="vnstock_vnd:KBS"),
         SimpleNamespace(symbol="FPT", time=date(2025, 1, 1), close=0.1, source="KBS"),
     ])
@@ -302,6 +301,45 @@ async def test_screener_performance_normalizes_each_persisted_source_and_filters
 
     assert rows[0].change_1d == pytest.approx(-20)
     assert rows[0].updated_at == date(2025, 1, 2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize(
+    ("sessions", "unknown_index", "expected"),
+    [
+        (3, 1, (None, None, None, None)),
+        (3, 0, (None, None, None, None)),
+        (6, None, (10.0, 10.0, 10.0, 10.0)),
+        (7, 6, (10.0, 10.0, None, None)),
+        (23, 22, (10.0, 10.0, 10.0, None)),
+        (253, None, (10.0, 10.0, 10.0, 10.0)),
+    ],
+)
+async def test_screener_performance_preserves_original_session_windows(
+    cached, sessions, unknown_index, expected
+):
+    prices = []
+    session = date(2025, 1, 14)
+    for index in range(sessions):
+        while session.weekday() >= 5:
+            session -= timedelta(days=1)
+        prices.append(SimpleNamespace(
+            symbol="FPT", time=session, close=110 if index == 0 else 100,
+            source="vnstock" if index == unknown_index else "vnstock_vnd:KBS",
+        ))
+        session -= timedelta(days=1)
+
+    value = 10 if unknown_index is not None else None
+    metrics = {"change_1d": value, "perf_1w": value, "perf_1m": value}
+    row = (
+        _to_screener_data_row(SimpleNamespace(symbol="FPT", extended_metrics=metrics))
+        if cached
+        else ScreenerData(symbol="FPT", **metrics)
+    )
+    result = (await _enrich_screener_metrics([row], _PriceEnrichmentDB(prices)))[0]
+
+    assert (result.change_1d, result.perf_1w, result.perf_1m, result.perf_ytd) == expected
 
 
 @pytest.mark.asyncio

@@ -294,3 +294,45 @@ async def test_historical_api_discloses_unknown_omission_and_selected_units(clie
     assert payload["meta"]["unit_status"] == "confirmed_vnd"
     assert payload["meta"]["completeness_status"] == "partial"
     assert any("Excluded 1 row(s)" in warning for warning in payload["meta"]["warnings"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("date_layout", ["index", "named_index", "date_column"])
+async def test_premium_backfill_preserves_provider_trading_dates(monkeypatch, date_layout):
+    import sys
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock
+
+    import pandas as pd
+
+    from scripts import backfill_ohlcv_full as backfill
+
+    dates = pd.to_datetime(["2026-06-08", "2026-06-09"])
+    frame = pd.DataFrame([bar(close=0.5, adj_close=0.45), bar(close=0.6, adj_close=0.55)]).drop(columns="time")
+    if date_layout == "date_column":
+        frame["date"] = dates
+    else:
+        frame.index = dates.rename("date" if date_layout == "named_index" else None)
+    frame.attrs["price_unit"] = "THOUSAND_VND"
+    provider = SimpleNamespace(source="KBS", __module__="vnstock_data.explorer.kbs.quote",
+                               history=lambda **kwargs: frame)
+    monkeypatch.setitem(sys.modules, "vnstock_data", SimpleNamespace(Quote=lambda **kwargs: provider))
+    session = SimpleNamespace(execute=AsyncMock(), commit=AsyncMock())
+    @asynccontextmanager
+    async def session_maker():
+        yield session
+    monkeypatch.setattr(backfill, "async_session_maker", session_maker)
+
+    records = backfill._fetch_premium("XYZ", date(2026, 6, 8), date(2026, 6, 9))
+    assert records is not None
+    assert [row["time"] for row in records] == ["2026-06-08", "2026-06-09"]
+    assert [(row["price_unit"], row["close"], row["adj_close"], row["volume"], row["value"]) for row in records] == [
+        ("VND", 500, 450, 123, 5000), ("VND", 600, 550, 123, 5000),
+    ]
+    assert await backfill._persist_postgres(1, "XYZ", records) == 2
+    persisted = [call.args[0].compile().params for call in session.execute.await_args_list]
+    assert [(row["time"], row["close"], row["adj_close"], row["source"]) for row in persisted] == [
+        (date(2026, 6, 8), 500, 450, "vnstock_vnd:KBS"),
+        (date(2026, 6, 9), 600, 550, "vnstock_vnd:KBS"),
+    ]
+    session.commit.assert_awaited_once()
