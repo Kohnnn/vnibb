@@ -37,6 +37,7 @@ def screener_row():
         exchange="HOSE",
         industry_name="Food",
         price=75000,
+        price_unit="VND",
         updated_at=datetime(2026, 3, 14, 15),
     )
 
@@ -57,6 +58,7 @@ def quote_row():
     return StockQuoteData(
         symbol="VNM",
         price=75000,
+        price_unit="VND",
         open=74000,
         high=76000,
         low=73500,
@@ -74,6 +76,7 @@ def historical_row():
         high=76000,
         low=73500,
         close=75000,
+        price_unit="VND",
         volume=1_000_000,
     )
 

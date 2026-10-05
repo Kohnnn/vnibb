@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.core.database import get_db_context
 from vnibb.models.stock import Stock, StockIndex
 from vnibb.models.stock import StockPrice
+from vnibb.core.price_units import is_index_symbol, persisted_price_record, screener_price_record
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.core.config import settings
 from vnibb.providers.vnstock.equity_historical import (
@@ -239,7 +240,7 @@ class RSRatingService:
 
         # Fetch all prices for all stocks in one go
         result = await db.execute(
-            select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+            select(StockPrice)
             .where(
                 and_(
                     StockPrice.symbol.in_(symbols),
@@ -251,18 +252,25 @@ class RSRatingService:
             .order_by(StockPrice.symbol, StockPrice.time)
         )
 
-        # Organize prices by symbol
         stock_prices = {}
-        for row in result:
-            sym = row[0]
-            if sym not in stock_prices:
-                stock_prices[sym] = []
-            stock_prices[sym].append({"time": row[1], "close": row[2]})
+        unknown_symbols = set()
+        for row in result.scalars():
+            normalized = persisted_price_record(row)
+            if normalized["price_unit"] == "unknown":
+                unknown_symbols.add(row.symbol)
+                continue
+            stock_prices.setdefault(row.symbol, []).append(
+                {"time": row.time, "close": normalized["close"]}
+            )
+        if unknown_symbols:
+            logger.warning("Excluding RS histories with unknown price units: %s", sorted(unknown_symbols))
 
         stock_ratings = []
         stock_lookup = {s.symbol: s for s in stocks}
 
         for symbol, prices in stock_prices.items():
+            if symbol in unknown_symbols:
+                continue
             if len(prices) < max(self.PERIODS["3mo"], 20):
                 continue
 
@@ -483,7 +491,13 @@ class RSRatingService:
                         snapshot.company_name = seed.company_name
                         snapshot.exchange = seed.exchange
                         snapshot.trade_date = seed.trade_date
-                        snapshot.price = seed.price
+                        normalized_price = screener_price_record(seed)
+                        snapshot.price = normalized_price["price"]
+                        snapshot.extended_metrics = {
+                            **(seed.extended_metrics or {}),
+                            "price_unit": normalized_price["price_unit"],
+                            "price_source": normalized_price.get("price_source"),
+                        }
                         snapshot.volume = seed.volume
                         snapshot.market_cap = seed.market_cap
                         snapshot.pe = seed.pe
@@ -540,8 +554,7 @@ class RSRatingService:
 
         ranked_prices = (
             select(
-                StockPrice.symbol.label("symbol"),
-                StockPrice.close.label("close"),
+                StockPrice.id.label("id"),
                 func.row_number()
                 .over(
                     partition_by=StockPrice.symbol,
@@ -557,15 +570,19 @@ class RSRatingService:
         )
 
         result = await db.execute(
-            select(ranked_prices.c.symbol, ranked_prices.c.close).where(
-                ranked_prices.c.row_num == 1
-            )
+            select(StockPrice)
+            .join(ranked_prices, StockPrice.id == ranked_prices.c.id)
+            .where(ranked_prices.c.row_num == 1)
         )
-        return {
-            str(symbol): float(close)
-            for symbol, close in result.all()
-            if symbol and close is not None
-        }
+        prices = {}
+        for row in result.scalars():
+            normalized = persisted_price_record(row)
+            if normalized["price_unit"] == "unknown":
+                logger.warning("Excluding latest RS price with unknown unit: %s", row.symbol)
+                continue
+            if row.symbol and normalized["close"] is not None:
+                prices[row.symbol] = float(normalized["close"])
+        return prices
 
     def _filter_ranked_stocks(
         self, ranked_stocks: List[Dict[str, Any]], sector: Optional[str]
@@ -606,6 +623,7 @@ class RSRatingService:
                 "rs_rating": item.get("rs_rating"),
                 "rs_rank": item.get("rs_rank"),
                 "price": item.get("price"),
+                "price_unit": item.get("price_unit", "unknown"),
                 "industry": item.get("industry"),
             }
             for item in ordered[:limit]
@@ -642,6 +660,9 @@ class RSRatingService:
         )
         for item in ranked_stocks:
             item["price"] = latest_price_map.get(item["symbol"])
+            item["price_unit"] = (
+                "index_points" if is_index_symbol(item["symbol"]) else "VND"
+            ) if item["price"] is not None else "unknown"
 
         return ranked_stocks
 
@@ -743,7 +764,8 @@ class RSRatingService:
                     "company_name": s.company_name,
                     "rs_rating": s.rs_rating,
                     "rs_rank": s.rs_rank,
-                    "price": s.price,
+                    "price": (price_record := screener_price_record(s)).get("price"),
+                    "price_unit": price_record["price_unit"],
                     "industry": s.industry,
                 }
                 for s in snapshots
@@ -806,7 +828,8 @@ class RSRatingService:
                     "company_name": s.company_name,
                     "rs_rating": s.rs_rating,
                     "rs_rank": s.rs_rank,
-                    "price": s.price,
+                    "price": (price_record := screener_price_record(s)).get("price"),
+                    "price_unit": price_record["price_unit"],
                     "industry": s.industry,
                 }
                 for s in snapshots
@@ -879,7 +902,8 @@ class RSRatingService:
                             "rs_rating": current.rs_rating,
                             "rs_rating_prev": previous.rs_rating,
                             "rs_rating_change": change,
-                            "price": current.price,
+                            "price": (price_record := screener_price_record(current)).get("price"),
+                            "price_unit": price_record["price_unit"],
                             "industry": current.industry,
                         }
                     )

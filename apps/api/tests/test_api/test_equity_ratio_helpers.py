@@ -233,17 +233,17 @@ async def test_load_mongo_financial_ratio_rows_transforms_and_filters_raw_record
 async def test_compute_rolling_high_low_prefers_mongo_eod(monkeypatch):
     fake_service = FakeMongoMarketDataService(
         [
-            {"high": 10.0, "low": 8.0},
-            {"high": 15.0, "low": 7.5},
-            {"high": 12.0, "low": 9.0},
+            {"high": 10.0, "low": 8.0, "priceUnit": "THOUSAND_VND"},
+            {"high": 15.0, "low": 7.5, "priceUnit": "THOUSAND_VND"},
+            {"high": 12.0, "low": 9.0, "priceUnit": "THOUSAND_VND"},
         ]
     )
     monkeypatch.setattr("vnibb.api.v1.equity.get_mongo_market_data_service", lambda: fake_service)
 
     high, low = await _compute_rolling_high_low(None, "VCI", trading_days=252)  # type: ignore[arg-type]
 
-    assert high == pytest.approx(15.0)
-    assert low == pytest.approx(7.5)
+    assert high == pytest.approx(15_000.0)
+    assert low == pytest.approx(7_500.0)
     assert fake_service.requests[0]["dataset"] == "market_prices_eod"
 
 
@@ -618,6 +618,7 @@ async def test_enrich_missing_ratio_metrics_uses_period_end_price_for_valuation(
                 close=50.0,
                 volume=1000,
                 interval="1D",
+                source="KBS",
             ),
             StockPrice(
                 id=401,
@@ -630,6 +631,7 @@ async def test_enrich_missing_ratio_metrics_uses_period_end_price_for_valuation(
                 close=80.0,
                 volume=1000,
                 interval="1D",
+                source="KBS",
             ),
         ]
     )

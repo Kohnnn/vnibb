@@ -1,4 +1,4 @@
-"""Restore the financial-ratio natural-key constraint that prod never got.
+"""Restore the financial-ratio natural-key constraint missing from production.
 
 `FinancialRatio` declares
 ``UniqueConstraint("symbol", "period", "period_type", name="uq_financial_ratio_symbol_period")``,
@@ -6,18 +6,16 @@ and every writer calls
 ``get_upsert_stmt(FinancialRatio, ["symbol", "period", "period_type"], values)``,
 which emits ``INSERT ... ON CONFLICT (symbol, period, period_type) DO UPDATE``.
 
-The production database only ever received the primary-key index for
-`financial_ratios`; a constraint census on 2026-10-04 found
-``uq_financial_ratio_symbol_period`` absent (alongside two snapshot bucket
-uniques that *do* exist as concurrent indexes, so ``ON CONFLICT`` accepts them).
-The missing constraint makes every financial-ratio upsert fail with
-``InvalidColumnReferenceError: there is no unique or exclusion constraint
-matching the ON CONFLICT specification`` — the durable ``financial_ratios_sync``
-job has been failing for that reason.
+A production constraint census on 2026-10-04 found only the primary-key index
+for ``financial_ratios``; ``uq_financial_ratio_symbol_period`` was absent.
+The initial migration, ``20260125_0842_1aaa2a1cf198_initial_schema.py``, already
+declares this unique constraint. The census proves live-schema drift, but does
+not establish when or why the constraint became absent.
 
-This is stamped-revision drift, not a lost migration: no migration ever declared
-`uq_financial_ratio_symbol_period` for the table, and the model's declared
-constraints are not automatically applied to an already-created table.
+Without it, natural-key upserts fail with ``InvalidColumnReferenceError: there
+is no unique or exclusion constraint matching the ON CONFLICT specification``.
+The durable ``financial_ratios_sync`` record instead reports a 5400s timeout;
+no observed production log attributes that timeout to the missing constraint.
 
 The migration is idempotent and lossless for a database already holding the
 constraint. Where duplicates exist it keeps the newest row per key (highest

@@ -1,6 +1,15 @@
+import { renderHook, waitFor } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createElement, type ReactNode } from 'react';
 import { APIError, RateLimitError } from './api';
 import { createQueryClient } from './QueryProvider';
 import { queryRetryDelay, shouldRetryQuery } from './queryRetry';
+import { queryKeys, useHistoricalPrices } from './queries';
+import { useHistoricalPrices as useModularHistoricalPrices } from './queries/equity';
+import type { EquityHistoricalResponse } from '@/types/equity';
+
+jest.mock('./env', () => ({ env: { apiUrl: 'https://api.example.test' } }));
+jest.mock('./supabase', () => ({ isSupabaseConfigured: false, supabase: null }));
 
 describe('shouldRetryQuery', () => {
     it.each([
@@ -56,5 +65,73 @@ describe('createQueryClient', () => {
         await expect(mutation.execute(undefined)).rejects.toThrow('failed');
 
         expect(mutationFn).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe.each([
+    ['public', useHistoricalPrices],
+    ['modular', useModularHistoricalPrices],
+] as const)('%s historical query cancellation', (_name, useHistory) => {
+    it('aborts the obsolete symbol fetch and delivers the new symbol history', async () => {
+        const client = createQueryClient();
+        const originalFetch = globalThis.fetch;
+        const onObsoleteAbort = jest.fn();
+        let obsoleteSignal: AbortSignal | undefined;
+        let currentSignal: AbortSignal | undefined;
+        let finishObsolete: ((response: Response) => void) | undefined;
+        const history: EquityHistoricalResponse = {
+            data: [{ symbol: 'VNM', time: '2026-10-02', open: 63000, high: 65000, low: 62000, close: 64000, volume: 100000 }],
+            meta: { count: 1 },
+        };
+        const response = { ok: true, json: async () => history } as Response;
+        const fetchMock = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>((input, init) => {
+            const url = new URL(String(input));
+            expect(url.pathname).toBe('/api/v1/equity/historical');
+            const symbol = url.searchParams.get('symbol');
+            if (symbol === 'FPT') {
+                const requestSignal = init?.signal as AbortSignal;
+                obsoleteSignal = requestSignal;
+                return new Promise<Response>((resolve, reject) => {
+                    finishObsolete = resolve;
+                    requestSignal.addEventListener('abort', () => {
+                        onObsoleteAbort();
+                        reject(new DOMException('Request aborted', 'AbortError'));
+                    }, { once: true });
+                });
+            }
+            expect(symbol).toBe('VNM');
+            currentSignal = init?.signal as AbortSignal;
+            return Promise.resolve(response);
+        });
+        globalThis.fetch = fetchMock;
+        const wrapper = ({ children }: { children: ReactNode }) =>
+            createElement(QueryClientProvider, { client }, children);
+        const view = renderHook(({ symbol }) => useHistory(symbol, { interval: '1D', source: 'KBS' }), {
+            initialProps: { symbol: 'FPT' },
+            wrapper,
+        });
+
+        try {
+            await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+            expect(obsoleteSignal?.aborted).toBe(false);
+            expect(view.result.current.isFetching).toBe(true);
+
+            view.rerender({ symbol: 'VNM' });
+
+            await waitFor(() => expect(onObsoleteAbort).toHaveBeenCalledTimes(1));
+            expect(obsoleteSignal?.aborted).toBe(true);
+            await waitFor(() => expect(view.result.current.isSuccess).toBe(true));
+            expect(view.result.current.data).toEqual(history);
+            expect(currentSignal?.aborted).toBe(false);
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+            const obsoleteKey = queryKeys.historical('FPT', { interval: '1D', source: 'KBS' });
+            expect(client.getQueryData(obsoleteKey)).toBeUndefined();
+            expect(client.getQueryState(obsoleteKey)?.fetchStatus).toBe('idle');
+        } finally {
+            view.unmount();
+            finishObsolete?.(response);
+            client.clear();
+            globalThis.fetch = originalFetch;
+        }
     });
 });

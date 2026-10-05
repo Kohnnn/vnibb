@@ -374,7 +374,7 @@ async def test_bulk_upsert_eod_prices_propagates_bulk_write_failure(monkeypatch)
 
     with pytest.raises(RuntimeError, match="unordered bulk partially failed"):
         await service.bulk_upsert_eod_prices(
-            "VCI", [{"tradeDate": datetime(2026, 6, 5), "close": 1}]
+            "VCI", [{"tradeDate": datetime(2026, 6, 5), "close": 1, "price_unit": "VND"}]
         )
 
 
@@ -416,6 +416,7 @@ async def test_bulk_upsert_eod_prices_builds_idempotent_ops(monkeypatch):
         {"tradeDate": datetime(2026, 6, 6), "open": 1.5, "high": 2.5, "low": 1.0, "close": 2.0, "volume": 200, "value": 400.0},
         {"tradeDate": datetime(2026, 6, 7), "open": 2.0, "high": 2.0, "low": 2.0, "close": None, "volume": 0},  # dropped: null close
     ]
+    rows = [{**row, "price_source": "vnstock_history:VCI"} for row in rows]
     written = await svc.bulk_upsert_eod_prices("vci", rows)
     assert written == 2
 
@@ -440,7 +441,7 @@ async def test_bulk_upsert_eod_prices_builds_idempotent_ops(monkeypatch):
     assert doc["interval"] == "1D"
     assert doc["source"] == "vnstock-data"
     assert doc["priceUnit"] == "VND"
-    assert doc["rescaledFromThousandVnd"] is True
+    assert doc["price_source"] == "vnstock_history:VCI"
 
 
 @pytest.mark.asyncio
@@ -489,6 +490,7 @@ async def test_bulk_upsert_eod_prices_skips_existing_vietcap_dates(monkeypatch):
         {"tradeDate": datetime(2026, 6, 5), "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5},
         {"tradeDate": datetime(2026, 6, 6), "open": 1.5, "high": 2.5, "low": 1.0, "close": 2.0},
     ]
+    rows = [{**row, "price_source": "vnstock_history:VCI"} for row in rows]
 
     written = await svc.bulk_upsert_eod_prices("vci", rows)
     assert written == 1
@@ -554,3 +556,63 @@ def test_dedup_eod_rows_duplicate_same_rank_keeps_first():
     deduped = _dedup_eod_rows(rows)
     assert len(deduped) == 1
     assert deduped[0]["close"] == 1.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("symbol,marker,source,expected,unit", [
+    ("VCI", "VND", "vnstock_history:VCI", 1.5, "VND"),
+    ("VCI", None, "vnstock_history:KBS", 1500.0, "VND"),
+    ("VNINDEX", None, "vnstock_history:VCI", 1.5, "index_points"),
+])
+async def test_mongo_ingestion_uses_source_or_explicit_marker(monkeypatch, symbol, marker, source, expected, unit):
+    from unittest.mock import MagicMock
+
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    collection = MagicMock()
+    collection.find.return_value = []
+    service = MongoMarketDataService()
+    monkeypatch.setattr(service, "_get_collection", lambda name: collection)
+    monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
+    monkeypatch.setattr(service, "ensure_eod_indexes", lambda: [])
+    raw = {"tradeDate": datetime(2026, 6, 5), "open": 1, "high": 2, "low": 0.5,
+           "close": 1.5, "adjClose": 1.5, "value": 150, "volume": 100, "price_source": source}
+    if marker:
+        raw["price_unit"] = marker
+    await service.bulk_upsert_eod_prices(symbol, [raw])
+    doc = collection.bulk_write.call_args.args[0][0]._doc["$set"]
+    assert doc["close"] == expected
+    assert doc["priceUnit"] == unit
+    assert doc["price_source"] == source
+    assert doc["adj_close"] == expected
+    assert doc["value"] == 150
+
+
+@pytest.mark.asyncio
+async def test_mongo_ingestion_rejects_unknown_units_without_writing(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    collection = MagicMock()
+    service = MongoMarketDataService()
+    monkeypatch.setattr(service, "_get_collection", lambda name: collection)
+    monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
+    monkeypatch.setattr(service, "ensure_eod_indexes", lambda: [])
+    with pytest.raises(ValueError, match="Unknown EOD price unit"):
+        await service.bulk_upsert_eod_prices("VCI", [{"tradeDate": datetime(2026, 6, 5), "close": 60000}])
+    collection.bulk_write.assert_not_called()
+
+
+def test_frame_and_dedup_keep_unit_contract_without_full_provenance():
+    from vnibb.services.mongo_market_data_service import _dedup_eod_rows
+
+    frame = pd.DataFrame([{"time": "2026-06-05", "close": 60000, "price_unit": "VND",
+                           "adjusted_close": 59000, "price_source": "vnstock_history:VCI"}])
+    rows = mongo_eod_sync._frame_to_rows(frame)
+    assert rows[0]["price_unit"] == "VND"
+    assert rows[0]["price_source"] == "vnstock_history:VCI"
+    assert rows[0]["adj_close"] == 59000
+    deduped = _dedup_eod_rows([{**rows[0], "priceUnit": "VND", "source": "vnstock-data"}])
+    assert deduped[0]["priceUnit"] == "VND"
+    assert deduped[0]["price_source"] == "vnstock_history:VCI"

@@ -1,4 +1,5 @@
 import { fetchStockQuote } from './queries';
+import { fetchStockQuote as fetchSplitStockQuote } from './queries/equity';
 import { getQuote } from './api';
 
 jest.mock('./api', () => ({ getQuote: jest.fn() }));
@@ -23,5 +24,28 @@ describe('stock quote availability', () => {
     });
 
     await expect(fetchStockQuote('FPT')).resolves.toMatchObject({ price: 0, change: 0, changePct: 0 });
+  });
+});
+
+describe.each([
+  ['main quote adapter', fetchStockQuote],
+  ['split equity quote adapter', fetchSplitStockQuote],
+] as const)('%s price unit projection', (_name, fetchQuote) => {
+  afterEach(() => jest.clearAllMocks());
+
+  it.each(['VND', 'index_points', 'unknown'] as const)('preserves explicit %s units without changing price', async (price_unit) => {
+    mockGetQuote.mockResolvedValue({ data: {
+      symbol: 'FPT', price: 57.3, price_unit, open: null, high: null, low: null,
+      prevClose: null, change: null, changePct: null, volume: null, value: null, updatedAt: null,
+    } });
+    await expect(fetchQuote('FPT')).resolves.toMatchObject({ price: 57.3, price_unit });
+  });
+
+  it('marks a missing provider unit unknown instead of inferring it by price magnitude', async () => {
+    mockGetQuote.mockResolvedValue({ data: {
+      symbol: 'FPT', price: 57300, open: null, high: null, low: null,
+      prevClose: null, change: null, changePct: null, volume: null, value: null, updatedAt: null,
+    } });
+    await expect(fetchQuote('FPT')).resolves.toMatchObject({ price: 57300, price_unit: 'unknown' });
   });
 });

@@ -32,6 +32,15 @@ function formatShortDate(value: string) {
   return `${date.getMonth() + 1}/${String(date.getFullYear()).slice(-2)}`
 }
 
+type HistoryPriceUnit = 'VND' | 'index_points' | 'unknown'
+
+const PRICE_AXIS_LABELS: Record<HistoryPriceUnit, { raw: string; adjusted: string }> = {
+  VND: { raw: 'VND', adjusted: 'Adj. VND' },
+  index_points: { raw: 'Index points', adjusted: 'Adj. Index points' },
+  unknown: { raw: 'Price unit unconfirmed', adjusted: 'Price unit unconfirmed' }
+}
+
+
 interface HistoricalPriceChartProps {
   symbol: string
   timeframe?: keyof typeof TIMEFRAME_DAYS
@@ -72,6 +81,22 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
     () => buildChartEventMarkers(companyEventsQuery.data?.data || [], rows, timeframe === '5Y' ? 12 : 8),
     [companyEventsQuery.data?.data, rows, timeframe]
   )
+  // Explicit row markers win; `confirmed_vnd` metadata only fills a missing
+  // marker. The axis describes the whole series, so any unknown/mixed row
+  // keeps the label unconfirmed instead of mislabeling it as VND.
+  const historyUnit = useMemo<HistoryPriceUnit>(() => {
+    const units = new Set(
+      rows.map((row) =>
+        row.price_unit === 'VND' || row.price_unit === 'index_points'
+          ? row.price_unit
+          : row.price_unit == null && historyQuery.data?.meta?.unit_status === 'confirmed_vnd'
+            ? 'VND'
+            : 'unknown'
+      )
+    )
+    return units.size === 1 ? (units.values().next().value as HistoryPriceUnit) : 'unknown'
+  }, [rows, historyQuery.data?.meta?.unit_status])
+
 
   if (historyQuery.isLoading && !hasData) {
     return <WidgetSkeleton variant="chart" />
@@ -134,7 +159,7 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
               axisLine={false}
               tickLine={false}
               domain={['auto', 'auto']}
-              label={{ value: adjustmentMode === 'adjusted' ? 'Adj. VND' : 'VND', angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 10 }}
+              label={{ value: PRICE_AXIS_LABELS[historyUnit][adjustmentMode], angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 10 }}
             />
             <Tooltip
               contentStyle={{ background: 'var(--bg-tooltip)', border: '1px solid var(--border-default)', fontSize: '11px' }}

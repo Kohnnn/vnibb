@@ -92,12 +92,15 @@ def _frame_to_rows(frame: Any) -> list[dict[str, Any]]:
         rows.append(
             {
                 "tradeDate": trade_date,
+                "price_unit": record.get("price_unit", "unknown"),
+                "price_source": record.get("price_source"),
                 "open": _coerce_float(record.get("open")),
                 "high": _coerce_float(record.get("high")),
                 "low": _coerce_float(record.get("low")),
                 "close": _coerce_float(record.get("close")),
                 "volume": _coerce_int(record.get("volume")),
                 "value": _coerce_float(record.get("value")),
+                "adj_close": _coerce_float(next((record.get(field) for field in ("adj_close", "adjusted_close", "adjClose") if record.get(field) is not None), None)),
             }
         )
     return rows

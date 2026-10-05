@@ -26,6 +26,7 @@ from sqlalchemy import select, func, text
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, get_db
+from vnibb.core.price_units import persisted_price_record, screener_price_record
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
@@ -44,7 +45,6 @@ from vnibb.models.financials import IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
-from vnibb.models.technical_indicator import TechnicalIndicator
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.sector_service import SectorService
@@ -1179,6 +1179,7 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
         )
     )
     sector = _normalize_text(_first_non_none(payload.get("sector"), payload.get("sector_name")))
+    price_record = screener_price_record({**payload, "symbol": symbol, "price": _first_non_none(payload.get("price"), payload.get("close"))})
 
     return {
         "symbol": symbol,
@@ -1191,7 +1192,8 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
         "exchange": _normalize_text(payload.get("exchange")),
         "industry": industry,
         "sector": sector,
-        "price": _to_float(_first_non_none(payload.get("price"), payload.get("close"))),
+        "price": _to_float(price_record.get("price")) if price_record["price_unit"] != "unknown" else None,
+        "price_unit": price_record["price_unit"],
         "volume": _to_float(payload.get("volume")),
         "market_cap": _to_float(
             _first_non_none(payload.get("market_cap"), payload.get("marketCap"))
@@ -1403,6 +1405,7 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
                 select(
                     StockPrice.symbol.label("symbol"),
                     StockPrice.close.label("close"),
+                    StockPrice.source.label("source"),
                     func.row_number()
                     .over(partition_by=StockPrice.symbol, order_by=StockPrice.time.desc())
                     .label("rn"),
@@ -1412,16 +1415,18 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
             )
             price_rows = (
                 await session.execute(
-                    select(ranked_prices.c.symbol, ranked_prices.c.close, ranked_prices.c.rn).where(
+                    select(ranked_prices).where(
                         ranked_prices.c.rn <= 2
                     )
                 )
-            ).all()
+            ).mappings().all()
 
             price_lookup: Dict[str, Dict[int, float]] = defaultdict(dict)
-            for symbol, close, rn in price_rows:
-                close_value = _to_float(close)
-                if close_value is None:
+            for row in price_rows:
+                price = persisted_price_record(row)
+                symbol, rn = row["symbol"], row["rn"]
+                close_value = _to_float(price.get("close"))
+                if price["price_unit"] == "unknown" or close_value is None:
                     continue
                 price_lookup[_normalize_symbol(symbol)][int(rn)] = close_value
 
@@ -1437,6 +1442,7 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
                     select(
                         ScreenerSnapshot.symbol.label("symbol"),
                         ScreenerSnapshot.price.label("price"),
+                        ScreenerSnapshot.extended_metrics.label("extended_metrics"),
                         func.row_number()
                         .over(
                             partition_by=ScreenerSnapshot.symbol,
@@ -1452,18 +1458,16 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
                 )
                 snapshot_rows = (
                     await session.execute(
-                        select(
-                            ranked_snapshots.c.symbol,
-                            ranked_snapshots.c.price,
-                            ranked_snapshots.c.rn,
-                        ).where(ranked_snapshots.c.rn <= 2)
+                        select(ranked_snapshots).where(ranked_snapshots.c.rn <= 2)
                     )
-                ).all()
+                ).mappings().all()
 
                 snapshot_lookup: Dict[str, Dict[int, float]] = defaultdict(dict)
-                for symbol, price, rn in snapshot_rows:
-                    price_value = _to_float(price)
-                    if price_value is None:
+                for row in snapshot_rows:
+                    price = screener_price_record(row)
+                    symbol, rn = row["symbol"], row["rn"]
+                    price_value = _to_float(price.get("price"))
+                    if price["price_unit"] == "unknown" or price_value is None:
                         continue
                     snapshot_lookup[_normalize_symbol(symbol)][int(rn)] = price_value
 
@@ -1528,8 +1532,10 @@ async def _load_latest_snapshot_metrics(
             for symbol, price, volume, snapshot_date, created_at, extended_metrics in rows:
                 symbol_key = _normalize_symbol(symbol)
                 payload = extended_metrics if isinstance(extended_metrics, dict) else {}
+                price_record = screener_price_record({"symbol": symbol, "price": price, "extended_metrics": payload})
                 metrics_map[symbol_key] = {
-                    "price": _to_float(price),
+                    "price": _to_float(price_record.get("price")) if price_record["price_unit"] != "unknown" else None,
+                    "price_unit": price_record["price_unit"],
                     "volume": _to_float(volume),
                     "change_pct": _extract_snapshot_change_pct(payload),
                     "value": _extract_snapshot_value_traded(payload),
@@ -1706,6 +1712,16 @@ async def _fetch_market_screener_rows(limit: int = 1500) -> List[dict[str, Any]]
     return screener_rows
 
 
+def _canonical_price_frame(rows: List[Any]) -> pd.DataFrame:
+    prices = []
+    for row in rows:
+        price = persisted_price_record(row)
+        if price["price_unit"] == "unknown":
+            continue
+        prices.append({key: price.get(key) for key in ("symbol", "time", "close")})
+    return pd.DataFrame(prices, columns=["symbol", "time", "close"])
+
+
 async def _load_latest_technical_indicator_map(
     symbols: List[str],
 ) -> Dict[str, Dict[str, Optional[float]]]:
@@ -1714,38 +1730,28 @@ async def _load_latest_technical_indicator_map(
         return {}
 
     async with async_session_maker() as session:
-        ranked_indicators = (
-            select(
-                TechnicalIndicator.symbol.label("symbol"),
-                TechnicalIndicator.calc_date.label("calc_date"),
-                TechnicalIndicator.sma_20.label("sma_20"),
-                TechnicalIndicator.sma_50.label("sma_50"),
-                func.row_number()
-                .over(
-                    partition_by=TechnicalIndicator.symbol,
-                    order_by=TechnicalIndicator.calc_date.desc(),
-                )
-                .label("rn"),
-            )
-            .where(TechnicalIndicator.symbol.in_(unique_symbols))
-            .subquery()
-        )
-
         rows = (
-            (await session.execute(select(ranked_indicators).where(ranked_indicators.c.rn == 1)))
-            .mappings()
-            .all()
-        )
+            await session.execute(
+                select(StockPrice)
+                .where(
+                    StockPrice.symbol.in_(unique_symbols),
+                    StockPrice.interval == "1D",
+                    StockPrice.time >= date.today() - timedelta(days=120),
+                )
+                .order_by(StockPrice.symbol, StockPrice.time)
+            )
+        ).scalars().all()
 
-    return {
-        _normalize_symbol(row.get("symbol")): {
-            "calc_date": _serialize_datetime_like(row.get("calc_date")),
-            "sma_20": _to_float(row.get("sma_20")),
-            "sma_50": _to_float(row.get("sma_50")),
+    frame = _canonical_price_frame(rows)
+    indicators = {}
+    for symbol, group in frame.groupby("symbol"):
+        closes = pd.to_numeric(group["close"], errors="coerce").dropna()
+        indicators[_normalize_symbol(symbol)] = {
+            "calc_date": _serialize_datetime_like(group.iloc[-1]["time"]),
+            "sma_20": float(closes.iloc[-20:].mean()) if len(closes) >= 20 else None,
+            "sma_50": float(closes.iloc[-50:].mean()) if len(closes) >= 50 else None,
         }
-        for row in rows
-        if row.get("symbol")
-    }
+    return indicators
 
 
 async def _load_52_week_range_map(
@@ -1761,26 +1767,25 @@ async def _load_52_week_range_map(
     async with async_session_maker() as session:
         rows = (
             await session.execute(
-                select(
-                    StockPrice.symbol,
-                    func.max(StockPrice.high).label("high_52w"),
-                    func.min(StockPrice.low).label("low_52w"),
-                )
+                select(StockPrice)
                 .where(StockPrice.symbol.in_(unique_symbols))
                 .where(StockPrice.interval == "1D")
                 .where(StockPrice.time >= start_date)
-                .group_by(StockPrice.symbol)
             )
-        ).all()
+        ).scalars().all()
 
-    return {
-        _normalize_symbol(symbol): {
-            "high_52w": _to_float(high_52w),
-            "low_52w": _to_float(low_52w),
-        }
-        for symbol, high_52w, low_52w in rows
-        if symbol
-    }
+    ranges: Dict[str, Dict[str, Optional[float]]] = {}
+    for row in rows:
+        price = persisted_price_record(row)
+        if price["price_unit"] == "unknown":
+            continue
+        values = ranges.setdefault(_normalize_symbol(price["symbol"]), {"high_52w": None, "low_52w": None})
+        high, low = _to_float(price.get("high")), _to_float(price.get("low"))
+        if high is not None:
+            values["high_52w"] = max(values["high_52w"], high) if values["high_52w"] is not None else high
+        if low is not None:
+            values["low_52w"] = min(values["low_52w"], low) if values["low_52w"] is not None else low
+    return ranges
 
 
 def _build_market_breadth_rows(
@@ -1912,6 +1917,8 @@ def _apply_snapshot_metrics_to_movers(
         snapshot_price = metrics.get("price")
         if price_value in (None, 0) and snapshot_price not in (None, 0):
             item["last_price"] = snapshot_price
+            item["price_unit"] = metrics.get("price_unit", "unknown")
+            item["price_change"] = None
             price_value = snapshot_price
 
         volume_value = _to_float(item.get("volume"))
@@ -2050,6 +2057,7 @@ async def _build_last_session_top_movers(
                         close,
                         volume,
                         value,
+                        source,
                         ROW_NUMBER() OVER (
                             PARTITION BY symbol
                             ORDER BY time DESC
@@ -2058,7 +2066,7 @@ async def _build_last_session_top_movers(
                     WHERE interval = '1D'
                       AND time <= :latest_date
                 )
-                SELECT symbol, time, close, volume, value, rn
+                SELECT symbol, time, close, volume, value, source, rn
                 FROM ranked
                 WHERE rn <= 2
                 """
@@ -2071,11 +2079,12 @@ async def _build_last_session_top_movers(
             symbol = (row["symbol"] or "").upper()
             if not symbol:
                 continue
+            price = persisted_price_record(row)
             entry = per_symbol.setdefault(symbol, {"latest": None, "prev": None})
             if row["rn"] == 1:
-                entry["latest"] = row
+                entry["latest"] = price
             elif row["rn"] == 2:
-                entry["prev"] = row
+                entry["prev"] = price
 
         # Optional: filter by index / exchange. We resolve via the
         # `stocks` table; if an index allow-list isn't available we let
@@ -2096,7 +2105,7 @@ async def _build_last_session_top_movers(
         for symbol, parts in per_symbol.items():
             latest = parts.get("latest")
             prev = parts.get("prev")
-            if not latest:
+            if not latest or latest["price_unit"] == "unknown":
                 continue
 
             if exchange_allow:
@@ -2105,7 +2114,7 @@ async def _build_last_session_top_movers(
                     continue
 
             close = _to_float(latest["close"])
-            prev_close = _to_float(prev["close"]) if prev else None
+            prev_close = _to_float(prev["close"]) if prev and prev["price_unit"] == latest["price_unit"] else None
             change_pct = None
             price_change = None
             if (
@@ -2121,6 +2130,7 @@ async def _build_last_session_top_movers(
                     "symbol": symbol,
                     "index": index,
                     "last_price": close,
+                    "price_unit": latest["price_unit"],
                     "price_change": price_change,
                     "price_change_pct": change_pct,
                     "volume": _to_float(latest["volume"]),
@@ -2181,9 +2191,8 @@ async def _build_snapshot_top_movers(
             else {}
         )
 
-        price = _to_float(
-            _first_non_none(getattr(item, "price", None), extended_metrics.get("price"))
-        )
+        price_record = screener_price_record(item)
+        price = _to_float(price_record.get("price")) if price_record["price_unit"] != "unknown" else None
         volume = _to_float(
             _first_non_none(getattr(item, "volume", None), extended_metrics.get("volume"))
         )
@@ -2196,6 +2205,7 @@ async def _build_snapshot_top_movers(
             {
                 "symbol": symbol,
                 "price": price,
+                "price_unit": price_record["price_unit"],
                 "volume": volume,
                 "change_pct": change_pct,
                 "value": value,
@@ -2225,6 +2235,7 @@ async def _build_snapshot_top_movers(
                 "symbol": row["symbol"],
                 "price_change_pct": row.get("change_pct"),
                 "last_price": row.get("price"),
+                "price_unit": row.get("price_unit"),
                 "volume": row.get("volume"),
                 "value": row.get("value"),
             }
@@ -2252,6 +2263,7 @@ async def _build_snapshot_top_movers(
                 "symbol": row.get("symbol"),
                 "index": index,
                 "last_price": last_price,
+                "price_unit": row.get("price_unit"),
                 "price_change": price_change,
                 "price_change_pct": change_pct,
                 "volume": row.get("volume"),
@@ -2411,13 +2423,16 @@ async def get_heatmap_data(
                         extended_metrics = (
                             s.extended_metrics if isinstance(s.extended_metrics, dict) else {}
                         )
+                        price_record = screener_price_record(s)
                         screener_data.append(
                             ScreenerData(
                                 symbol=s.symbol,
                                 organ_name=s.company_name,
                                 exchange=s.exchange,
                                 industry_name=s.industry,
-                                price=s.price,
+                                price=price_record.get("price") if price_record["price_unit"] != "unknown" else None,
+                                price_unit=price_record["price_unit"],
+                                price_source=price_record.get("price_source"),
                                 volume=s.volume,
                                 market_cap=s.market_cap,
                                 pe=s.pe,
@@ -3479,7 +3494,7 @@ async def get_money_flow_trend(
     end_date = date.today()
     start_date = end_date - timedelta(days=max(config["lookback"] * 3, 200))
     prices_result = await db.execute(
-        select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+        select(StockPrice)
         .where(
             StockPrice.symbol.in_(universe_symbols),
             StockPrice.interval == "1D",
@@ -3498,7 +3513,7 @@ async def get_money_flow_trend(
         .order_by(StockIndex.time)
     )
 
-    price_frame = pd.DataFrame(prices_result.all(), columns=["symbol", "time", "close"])
+    price_frame = _canonical_price_frame(prices_result.scalars().all())
     index_frame = pd.DataFrame(index_result.all(), columns=["time", "close_index"])
     if index_frame.empty or len(index_frame.index) < config["lookback"] + 5:
         provider_index_frame = await _fetch_benchmark_history_from_provider(start_date, end_date)
@@ -3522,7 +3537,7 @@ async def get_money_flow_trend(
         })
         if broader_symbols and broader_symbols != universe_symbols:
             broader_result = await db.execute(
-                select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+                select(StockPrice)
                 .where(
                     StockPrice.symbol.in_(broader_symbols[:200]),
                     StockPrice.interval == "1D",
@@ -3531,9 +3546,7 @@ async def get_money_flow_trend(
                 )
                 .order_by(StockPrice.symbol, StockPrice.time)
             )
-            broader_frame = pd.DataFrame(
-                broader_result.all(), columns=["symbol", "time", "close"]
-            )
+            broader_frame = _canonical_price_frame(broader_result.scalars().all())
             if not broader_frame.empty:
                 logger.info(
                     "Money Flow universe broadened from VN30 (%d symbols) to "

@@ -55,6 +55,7 @@ async def test_heatmap_cached_sparse_retries_fresh_and_returns_cached_false(
         exchange="HOSE",
         industry="Food",
         price=0.0,
+        extended_metrics={"price_unit": "VND"},
         volume=1_000_000,
         market_cap=150_000_000_000.0,
         pe=15.0,
@@ -90,6 +91,7 @@ async def test_heatmap_cached_sparse_retries_fresh_and_returns_cached_false(
                 exchange="HOSE",
                 industry_name="Food",
                 price=100.0,
+                price_unit="VND",
                 change_1d=3.2,
                 market_cap=150_000_000_000.0,
                 volume=1_000_000,
@@ -148,6 +150,7 @@ async def test_heatmap_group_by_industry_groups_by_industry(client, monkeypatch)
                 exchange="HOSE",
                 industry_name="Food",
                 price=90.0,
+                price_unit="VND",
                 change_1d=1.5,
                 market_cap=100_000_000_000.0,
                 volume=500_000,
@@ -158,6 +161,7 @@ async def test_heatmap_group_by_industry_groups_by_industry(client, monkeypatch)
                 exchange="HOSE",
                 industry_name="Steel",
                 price=25.0,
+                price_unit="VND",
                 change_1d=-0.5,
                 market_cap=80_000_000_000.0,
                 volume=1_000_000,
@@ -216,6 +220,7 @@ async def test_heatmap_filters_rows_after_metadata_enrichment(client, monkeypatc
                 exchange=None,
                 industry_name=None,
                 price=25.0,
+                price_unit="VND",
                 change_1d=1.25,
                 market_cap=80_000_000_000.0,
                 volume=1_000_000,
@@ -256,7 +261,7 @@ async def test_heatmap_cached_snapshot_preserves_price_change_1d_pct_alias(clien
         market_cap=150_000_000_000.0,
         pe=15.0,
         pb=3.0,
-        extended_metrics={"price_change_1d_pct": 4.5},
+        extended_metrics={"price_change_1d_pct": 4.5, "price_unit": "VND"},
         source="KBS",
     )
 
@@ -302,6 +307,7 @@ async def test_heatmap_smoke_shape(client, monkeypatch):
                 exchange="HOSE",
                 industry_name="Food",
                 price=85.0,
+                price_unit="VND",
                 change_1d=2.0,
                 market_cap=120_000_000_000.0,
                 volume=300_000,
@@ -385,6 +391,7 @@ async def test_heatmap_reports_oldest_included_constituent_separately_from_price
             exchange="HOSE",
             industry="Food",
             price=100.0,
+            extended_metrics={"price_unit": "VND"},
             volume=1_000_000,
             market_cap=150_000_000_000.0,
             source="KBS",
@@ -429,6 +436,7 @@ async def test_heatmap_db_rows_do_not_call_old_trades_current(client, monkeypatc
         lambda **kwargs: _async([_normalize_screener_row({
             "symbol": "VNM", "company_name": "Vinamilk", "exchange": "HOSE", "industry_name": "Food",
             "price": 100.0, "volume": 1_000_000, "market_cap": 150_000_000_000.0,
+            "price_unit": "VND",
             "snapshot_date": today, "trade_date": old_day,
         })]),
     )
@@ -459,6 +467,7 @@ async def test_heatmap_current_provider_rows_keep_current_dates_without_cache(cl
                 symbol="VNM", organ_name="Vinamilk", exchange="HOSE",
                 industry_name="Food", price=100.0, volume=1_000_000,
                 market_cap=150_000_000_000.0, trade_date=today,
+                price_unit="VND",
             )
         ]),
     )

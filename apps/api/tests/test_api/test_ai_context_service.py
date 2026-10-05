@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
 
+from vnibb.models.stock import Stock, StockPrice
 from vnibb.services.ai_context_service import (
     AIContextService,
     _build_dividends_context,
     _build_flow_context,
+    _build_price_context,
 )
 
 
@@ -186,6 +189,85 @@ def test_build_dividends_context_keeps_recent_items_and_summary():
     assert context["summary"]["cash_dividend_total_recent"] == 2000.0
     assert context["summary"]["latest_issue_method"] == "cash"
 
+
+
+def test_price_context_normalizes_full_orm_lineage_before_returns():
+    rows = [
+        StockPrice(
+            symbol="VNM", time=date(2026, 4, 1) + timedelta(days=index),
+            close=70 + index if index < 10 else (70 + index) * 1000,
+            volume=100, source="VCI" if index < 10 else "vnstock_vnd:VCI",
+        )
+        for index in range(21)
+    ]
+
+    context = _build_price_context(list(reversed(rows)))
+
+    assert context["latest"]["close"] == 90000
+    assert context["latest"]["price_unit"] == "VND"
+    assert context["latest"]["source"] == "vnstock_vnd:VCI"
+    assert context["recent_series"][0]["price_source"] == "vnstock_history:VCI"
+    assert context["summary"]["change_5d_pct"] == 5.88
+    assert context["summary"]["change_20d_pct"] == 28.57
+    assert context["summary"]["low_20d"] == 71000
+    assert context["excluded_unknown_unit_rows"] == 0
+
+
+def test_price_context_discloses_unknown_rows_without_bridging_return_windows():
+    rows = [
+        {"time": f"2026-04-{index + 1:02}", "close": 70000 + index * 1000, "source": "vnstock_vnd:VCI"}
+        for index in range(6)
+    ]
+    rows[2].update(close=72, source="vnstock")
+
+    context = _build_price_context(rows)
+
+    assert context["summary"]["change_5d_pct"] is None
+    assert context["recent_series"][2]["close"] is None
+    assert context["recent_series"][2]["price_unit"] == "unknown"
+    assert context["excluded_unknown_unit_rows"] == 1
+    assert context["limitations"]
+
+    rows[-1]["source"] = "vnstock"
+    context = _build_price_context(rows)
+    assert context["latest"]["close"] is None
+    assert context["summary"]["high_20d"] is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_price_snapshot_loads_daily_rows_with_full_source(monkeypatch, test_db):
+    from vnibb.services import ai_context_service
+
+    class SessionContext:
+        async def __aenter__(self):
+            return test_db
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr(ai_context_service, "async_session_maker", SessionContext)
+    try:
+        test_db.add(Stock(
+            id=995100, symbol="MXA", company_name="Test MXA",
+            exchange="HOSE", is_active=1,
+        ))
+        for index, (interval, close, source) in enumerate((
+            ("1D", 72, "VCI"), ("1W", 999, "vnstock_vnd"),
+        )):
+            test_db.add(StockPrice(
+                id=995100 + index, stock_id=995100, symbol="MXA", time=date(2026, 4, 1),
+                interval=interval, open=close, high=close, low=close, close=close,
+                volume=100, source=source,
+            ))
+        await test_db.flush()
+
+        snapshot = await AIContextService()._build_postgres_snapshot("MXA")
+
+        assert snapshot["price_context"]["latest"]["close"] == 72000
+        assert snapshot["price_context"]["latest"]["source"] == "VCI"
+        assert len(snapshot["price_context"]["recent_series"]) == 1
+    finally:
+        await test_db.rollback()
 
 @pytest.mark.asyncio
 async def test_build_runtime_context_expands_single_symbol_with_peers_for_compare_prompts(

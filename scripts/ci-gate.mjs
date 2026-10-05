@@ -271,6 +271,7 @@ function ruffDiagnostics(files, config) {
     ['-m', 'ruff', 'check', '--config', config, '--output-format', 'json', ...files],
     {
       encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
       shell: isWindows && /\.(cmd|bat)$/i.test(pythonCommand),
     }
   )

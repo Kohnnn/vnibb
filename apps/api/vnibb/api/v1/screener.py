@@ -21,6 +21,7 @@ import pandas as pd
 
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
+from vnibb.core.price_units import persisted_price_record, screener_price_record
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.company import Company
 from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
@@ -176,6 +177,7 @@ def _to_screener_data_row(row: object) -> ScreenerData:
     extended_metrics = getattr(row, "extended_metrics", None)
     if not isinstance(extended_metrics, dict):
         extended_metrics = {}
+    price_record = screener_price_record(row)
 
     def _pick(*values: Any) -> Any:
         for value in values:
@@ -188,7 +190,9 @@ def _to_screener_data_row(row: object) -> ScreenerData:
         organ_name=getattr(row, "company_name", None),
         exchange=getattr(row, "exchange", None),
         industry_name=getattr(row, "industry", None),
-        price=getattr(row, "price", None),
+        price=price_record.get("price") if price_record["price_unit"] == "VND" else None,
+        price_unit=price_record["price_unit"],
+        price_source=price_record.get("price_source"),
         volume=getattr(row, "volume", None),
         trade_date=getattr(row, "trade_date", None),
         change_1d=_pick(
@@ -402,7 +406,9 @@ async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> 
 
         shares_for_market_cap = updates.get("shares_outstanding", row.shares_outstanding)
         if _is_missing(row.market_cap):
-            estimated_market_cap = _estimate_market_cap(row.price, shares_for_market_cap)
+            estimated_market_cap = _estimate_market_cap(
+                row.price if row.price_unit == "VND" else None, shares_for_market_cap
+            )
             if estimated_market_cap is not None:
                 updates["market_cap"] = estimated_market_cap
 
@@ -467,7 +473,7 @@ def _validated_target_reference(raw: dict[str, Any], price: Any) -> tuple[Option
     target_unit = str(raw.get("target_price_unit") or raw.get("targetPriceUnit") or "").upper()
     source = raw.get("target_source") or raw.get("targetSource") or raw.get("providerSource")
     recommendation = raw.get("recommendation") or raw.get("rating") or raw.get("action")
-    price_vnd = _price_to_vnd_units(price)
+    price_vnd = _coerce_float(price)
     if (
         target_price is None
         or not math.isfinite(target_price)
@@ -511,7 +517,9 @@ async def _enrich_discovery_fields(
         reference_date = as_of_date or _parse_date(row.updated_at) or date.today()
         listing_age_days = (reference_date - listing_date).days if listing_date and listing_date <= reference_date else None
         raw = raw_data if isinstance(raw_data, dict) else {}
-        target_price, target_upside_pct, target_source, recommendation = _validated_target_reference(raw, row.price)
+        target_price, target_upside_pct, target_source, recommendation = _validated_target_reference(
+            raw, row.price if row.price_unit == "VND" else None
+        )
         enriched.append(
             row.model_copy(
                 update={
@@ -654,47 +662,6 @@ def _normalize_dividend_yield(value: Any) -> Optional[float]:
     return normalized
 
 
-def _price_to_vnd_units(price: Any, dps_hint: Any = None) -> Optional[float]:
-    numeric = _coerce_float(price)
-    if numeric in (None, 0):
-        return None
-
-    if abs(numeric) >= 1000:
-        return numeric
-
-    dps_numeric = _coerce_float(dps_hint)
-    if dps_numeric is None or abs(dps_numeric) >= 1:
-        return numeric * 1000.0
-
-    return numeric
-
-
-def _normalize_price_series(series: list[tuple[Any, float]]) -> list[tuple[Any, float]]:
-    normalized: list[tuple[Any, float]] = []
-    anchor: Optional[float] = None
-
-    for point_time, raw_price in series:
-        price = _coerce_float(raw_price)
-        if price in (None, 0):
-            continue
-
-        adjusted = price
-        if anchor is not None and anchor > 0:
-            if anchor >= 1000 and adjusted < 100:
-                adjusted *= 1000.0
-            elif anchor < 1000 and adjusted >= 1000:
-                adjusted /= 1000.0
-
-            ratio = adjusted / anchor
-            if ratio > 50:
-                adjusted /= 1000.0
-            elif ratio < 0.02:
-                adjusted *= 1000.0
-
-        normalized.append((point_time, adjusted))
-        anchor = adjusted
-
-    return normalized
 
 
 async def _enrich_screener_metrics(
@@ -880,13 +847,11 @@ async def _enrich_screener_metrics(
                 payload.get("financial_ratio_issue_share"),
             )
 
-    normalized_price_series_by_symbol: dict[str, list[tuple[Any, float]]] = {}
+    normalized_price_series_by_symbol: dict[str, list[tuple[Any, float | None]]] = {}
     if price_symbols:
         ranked_prices = (
             select(
-                StockPrice.symbol.label("symbol"),
-                StockPrice.time.label("price_time"),
-                StockPrice.close.label("close"),
+                StockPrice.id.label("price_id"),
                 func.row_number()
                 .over(
                     partition_by=StockPrice.symbol,
@@ -900,42 +865,46 @@ async def _enrich_screener_metrics(
 
         price_rows = (
             await db.execute(
-                select(
-                    ranked_prices.c.symbol,
-                    ranked_prices.c.price_time,
-                    ranked_prices.c.close,
-                )
+                select(StockPrice)
+                .join(ranked_prices, ranked_prices.c.price_id == StockPrice.id)
                 .where(ranked_prices.c.row_num <= 260)
-                .order_by(ranked_prices.c.symbol.asc(), ranked_prices.c.price_time.desc())
+                .order_by(StockPrice.symbol.asc(), StockPrice.time.desc())
             )
-        ).all()
+        ).scalars().all()
 
-        price_series_by_symbol: dict[str, list[tuple[Any, float]]] = {
+        price_series_by_symbol: dict[str, list[tuple[Any, float | None]]] = {
             symbol: [] for symbol in price_symbols
         }
-        for symbol, price_time, close in price_rows:
-            close_value = _coerce_float(close)
-            if close_value in (None, 0):
-                continue
+        for price_row in price_rows:
+            price_record = persisted_price_record(price_row)
+            close_value = (
+                _coerce_float(price_record.get("close"))
+                if price_record["price_unit"] == "VND"
+                else None
+            )
+            symbol = price_record["symbol"]
+            price_time = price_record["time"]
+            if close_value == 0:
+                close_value = None
             bucket = price_series_by_symbol.setdefault(symbol, [])
             if len(bucket) >= 260:
                 continue
             bucket.append((price_time, close_value))
 
-        normalized_price_series_by_symbol = {
-            symbol: _normalize_price_series(series)
-            for symbol, series in price_series_by_symbol.items()
-        }
+        normalized_price_series_by_symbol = price_series_by_symbol
 
-    def _build_performance_map(days: int) -> dict[str, float]:
-        perf_map: dict[str, float] = {}
+    def _build_performance_map(days: int) -> dict[str, float | None]:
+        perf_map: dict[str, float | None] = {}
         for symbol, series in normalized_price_series_by_symbol.items():
             if len(series) < 2:
                 continue
-            latest_price = series[0][1]
             lookback_index = min(days, len(series) - 1)
+            if any(close is None for _, close in series[: lookback_index + 1]):
+                perf_map[symbol] = None
+                continue
+            latest_price = series[0][1]
             base_price = series[lookback_index][1]
-            if base_price in (None, 0):
+            if latest_price is None or base_price in (None, 0):
                 continue
             perf_map[symbol] = ((latest_price - base_price) / base_price) * 100
         return perf_map
@@ -1012,7 +981,9 @@ async def _enrich_screener_metrics(
 
         if row.updated_at is None:
             latest_price_point = normalized_price_series_by_symbol.get(symbol, [])
-            latest_price_time = latest_price_point[0][0] if latest_price_point else None
+            latest_price_time = next(
+                (time for time, close in latest_price_point if close is not None), None
+            )
             fallback_updated_at = latest_price_time or (ratio_row.updated_at if ratio_row else None)
             if fallback_updated_at is not None:
                 updates["updated_at"] = fallback_updated_at
@@ -1116,7 +1087,7 @@ async def _enrich_screener_metrics(
                     shares = _coerce_float(shares_by_symbol.get(symbol))
                     if dividends_paid is not None and shares not in (None, 0):
                         dps = abs(dividends_paid) / (shares * _shares_multiplier(shares))
-                price_vnd = _price_to_vnd_units(row.price, dps_hint=dps)
+                price_vnd = _coerce_float(row.price) if row.price_unit == "VND" else None
                 if dps is not None and price_vnd not in (None, 0):
                     dividend_yield = _normalize_dividend_yield((dps / price_vnd) * 100)
             if dividend_yield is not None:
@@ -1124,7 +1095,9 @@ async def _enrich_screener_metrics(
 
         normalized_change_1d = _normalize_pct_metric(row.change_1d)
         computed_change_1d = perf_1d_map.get(symbol)
-        if _should_use_computed_pct(
+        if symbol in perf_1d_map and computed_change_1d is None:
+            updates["change_1d"] = None
+        elif _should_use_computed_pct(
             normalized_change_1d,
             computed_change_1d,
             extreme_threshold=35,
@@ -1136,7 +1109,9 @@ async def _enrich_screener_metrics(
 
         normalized_perf_1w = _normalize_pct_metric(row.perf_1w)
         computed_perf_1w = perf_1w_map.get(symbol)
-        if _should_use_computed_pct(
+        if symbol in perf_1w_map and computed_perf_1w is None:
+            updates["perf_1w"] = None
+        elif _should_use_computed_pct(
             normalized_perf_1w,
             computed_perf_1w,
             extreme_threshold=70,
@@ -1148,7 +1123,9 @@ async def _enrich_screener_metrics(
 
         normalized_perf_1m = _normalize_pct_metric(row.perf_1m)
         computed_perf_1m = perf_1m_map.get(symbol)
-        if _should_use_computed_pct(
+        if symbol in perf_1m_map and computed_perf_1m is None:
+            updates["perf_1m"] = None
+        elif _should_use_computed_pct(
             normalized_perf_1m,
             computed_perf_1m,
             extreme_threshold=90,
@@ -1160,7 +1137,9 @@ async def _enrich_screener_metrics(
 
         normalized_perf_ytd = _normalize_pct_metric(row.perf_ytd)
         computed_perf_ytd = perf_ytd_map.get(symbol)
-        if _should_use_computed_pct(
+        if symbol in perf_ytd_map and computed_perf_ytd is None:
+            updates["perf_ytd"] = None
+        elif _should_use_computed_pct(
             normalized_perf_ytd,
             computed_perf_ytd,
             extreme_threshold=120,
@@ -1174,7 +1153,7 @@ async def _enrich_screener_metrics(
             shares = _coerce_float(row.shares_outstanding) or _coerce_float(
                 shares_by_symbol.get(symbol)
             )
-            price = _coerce_float(row.price)
+            price = _coerce_float(row.price) if row.price_unit == "VND" else None
             if shares not in (None, 0) and price not in (None, 0):
                 updates["market_cap"] = price * shares * _shares_multiplier(shares)
 
@@ -1244,7 +1223,7 @@ def apply_advanced_filters(
 
 def fill_market_cap(rows: List[ScreenerData]) -> List[ScreenerData]:
     for row in rows:
-        if row.market_cap is None and row.price is not None and row.shares_outstanding:
+        if row.price_unit == "VND" and row.market_cap is None and row.price is not None and row.shares_outstanding:
             multiplier = 1 if row.shares_outstanding >= 1_000_000 else 1_000_000
             row.market_cap = row.price * row.shares_outstanding * multiplier
     return rows

@@ -16,6 +16,7 @@ from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel, Field
 
+from vnibb.core.price_units import PriceUnit
 from vnibb.services.rs_rating_service import RSRatingService
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ class RSStockItem(BaseModel):
     rs_rating: int = Field(..., ge=1, le=99)
     rs_rank: Optional[int] = None
     price: Optional[float] = None
+    price_unit: PriceUnit = "unknown"
     industry: Optional[str] = None
 
 

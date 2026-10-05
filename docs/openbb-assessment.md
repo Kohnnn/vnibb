@@ -1,5 +1,82 @@
 # OpenBB-finance public repository assessment (for VNIBB)
 
+> **2026-10-05 update:** The September inventory below is historical, not a current
+> licensing or source-availability gate. [OpenBB Workspace](https://github.com/OpenBB-finance/workspace/tree/be00e95019a55d57af146919ee46b7e1a4859226)
+> now publishes frontend, backend, Lite packaging and Excel add-in source under
+> [Apache-2.0](https://github.com/OpenBB-finance/workspace/blob/be00e95019a55d57af146919ee46b7e1a4859226/LICENSE).
+> [GitHub metadata](https://api.github.com/repos/OpenBB-finance/workspace) reports
+> the repository as archived. Treat it as a pinned reference, not an actively
+> maintained dependency. Its [NOTICE](https://github.com/OpenBB-finance/workspace/blob/be00e95019a55d57af146919ee46b7e1a4859226/NOTICE)
+> excludes TradingView Advanced Charts, which requires its own license.
+> These facts supersede the Workspace-unavailable conclusions below; they do not
+> establish the current license of OpenBB Platform packages or grant data rights.
+>
+> The Excel add-in has a component-specific
+> [MIT license](https://github.com/OpenBB-finance/workspace/blob/be00e95019a55d57af146919ee46b7e1a4859226/excel-add-in/LICENSE).
+
+## Current Workspace adoption assessment — 2026-10-05
+
+Source inspection is pinned to `be00e95019a55d57af146919ee46b7e1a4859226`,
+the initial public snapshot. No upstream application was run and no upstream
+implementation was copied into VNIBB. Licensing permits independent adoption;
+literal incorporation requires the applicable licenses, notices and attribution.
+
+| Pattern | Executable upstream evidence | VNIBB decision |
+| --- | --- | --- |
+| Historical-query cancellation | [Query signal → endpoint → transport](https://github.com/OpenBB-finance/workspace/blob/be00e95019a55d57af146919ee46b7e1a4859226/terminalpro/src/lib/api/sdkComponents.ts#L8004-L8051) | Consume TanStack's signal in the existing `useHistoricalPrices`; retain native query keys, cache policy and transport. |
+| Capability-controlled retrieval/export | [Widget schema](https://github.com/OpenBB-finance/workspace/blob/be00e95019a55d57af146919ee46b7e1a4859226/terminalpro/src/utils/zodForms.ts#L145-L258) | Use the existing app-owned widget registry; no second catalog or generic external-widget host. |
+| Retrieval-bound citations | [Source envelopes](https://github.com/OpenBB-finance/workspace/blob/be00e95019a55d57af146919ee46b7e1a4859226/terminalpro/src/lib/state/copilot.ts#L132-L270) | Preserve VNIBB's server-authoritative evidence IDs. Source signatures support provenance; they are not a reranker or proof of correctness. |
+| Versioned transfer scope | [Account transfer registry](https://github.com/OpenBB-finance/workspace/blob/be00e95019a55d57af146919ee46b7e1a4859226/backend-api/backend/scripts/user_data_scope.py#L85-L194) | Keep native restore-as-copy and local-only imported dashboards. Account migration and workspace backup have different identity contracts. |
+| Spreadsheet contract projection | [Function generator](https://github.com/OpenBB-finance/workspace/blob/be00e95019a55d57af146919ee46b7e1a4859226/excel-add-in/src/functions/generator/spec_generator.py#L274-L338) | Possible future projection of VNIBB's existing endpoint catalog; not an Office add-in dependency. |
+
+VNIBB already implements workspace backup, linked ticker scopes, research
+starters, artifact placement, native widget registration and cancelable transport.
+The historical hook was the missing cancellation caller, not a missing engine.
+The native sync and observation-freshness improvements are now implemented
+locally: `globalMarketsSymbol`/`widgetGroups` survive optional backend dashboard
+sync, and ATR runtime metadata uses historical observation dates and quality
+warnings rather than query receipt time. No upstream implementation was copied.
+
+**Cancellation verification:** the existing `queryRetry.test.ts` suite passed
+23 tests, including both public and modular hooks through real TanStack Query
+and API transport: an obsolete FPT request aborts, VNM history succeeds and the
+obsolete request remains uncached. Changed-file ESLint and frontend typecheck
+passed. A separate local webpack **chart/transport smoke** held a 5-day request
+then selected 3 months: the old request produced `net::ERR_ABORTED`, the replacement
+completed and the selected range remained `3M`. `PriceChartWidget` renders
+`TradingViewAdvancedChart`, whose own AbortController bypasses both changed hooks;
+this smoke does not provide live verification of the hook change. The QueryClient
+regressions above cover those hooks. Browser screenshot confirmed the chart
+surface only. Turbopack could not resolve the local workspace's Next package;
+the webpack development preview was used instead. These are local checks, not a
+production release claim.
+
+An additional browser smoke mounted the actual `ATRRegimeWidget` historical-hook
+consumer: switching its local symbol from VNM to FPT aborted the held VNM fetch,
+and FPT history completed. This establishes client transport cancellation only,
+not cancellation of backend/provider work. The same consumer displayed old
+2025-02-19 observations as Stale with partial-coverage/fallback disclosure;
+native sync hooks sent and reconstructed `NASDAQ:AAPL` and group A `FPT` through
+intercepted transport, without production writes.
+
+**Observed data-trust defect:** live VNM quote returned `57.3` while the last
+historical close was `57300` (2026-10-02), with history declaring
+`unit_status=confirmed_vnd`. The browser chart displayed the inserted quote as
+`57.30`, and ticker range data used raw VND. Source tracing found that
+`TradingViewAdvancedChart.mergeQuote` inserts quote OHLC into history without a
+unit contract. Mongo EOD ingestion converts thousand-VND to VND, but Redis,
+PostgreSQL and live-provider quote paths do not consistently canonicalize those
+prices. History's unit certification reads Mongo metadata even for a merged
+payload. The local source-aware cutover now canonicalizes certified quote/history
+rows and preserves unknown legacy/sponsor units without magnitude guessing.
+An HTTP smoke through the real equity router and cache/history adapters returned
+quote and last history close of `57300` VND. The actual browser chart retained
+`57300` VND history when given an incompatible unknown-unit `57.3` quote.
+Storage/provider boundaries were injected for these local checks; fresh provider
+acquisition and production deployment are not claimed.
+
+---
+
 **Date:** 2026-09-26 (all timestamps UTC)
 **Method:** Read-only GitHub REST/`gh` API probes plus raw first-party file fetches from `raw.githubusercontent.com`, PyPI JSON API, and OpenBB docs. No repository was cloned, no OpenBB code was copied, and no build/test/lint/formatter was run. All figures are first-party (OpenBB-owned) or GitHub/PyPI metadata at the stated time.
 **Decision status:** none. This is inventory + assessment.

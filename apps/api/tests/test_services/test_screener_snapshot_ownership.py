@@ -285,3 +285,39 @@ async def test_oldest_trade_date_keeps_universe_stale(test_db):
     result = await CacheManager(db=test_db).get_screener_data(source=None)
     assert result.hit is True
     assert result.is_stale is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unit,price,expected", [("THOUSAND_VND", 60.3, 60300), ("VND", 60300, 60300)])
+async def test_screener_cache_write_persists_canonical_unit_provenance(test_db, unit, price, expected):
+    manager = CacheManager(db=test_db)
+    await manager.store_screener_data([
+        {"symbol": "VNM", "price": price, "price_unit": unit,
+         "price_source": "vnstock_history:VCI", "trade_date": TODAY}
+    ], source="request_writer")
+    row = await _stored(test_db, "VNM")
+    assert row.price == expected
+    assert row.extended_metrics["price_unit"] == "VND"
+    assert row.extended_metrics["price_source"] == "vnstock_history:VCI"
+
+
+@pytest.mark.asyncio
+async def test_screener_cache_does_not_guess_units_from_writer_or_magnitude(test_db):
+    manager = CacheManager(db=test_db)
+    await manager.store_screener_data([{"symbol": "VNM", "price": 60.3}], source="KBS")
+    row = await _stored(test_db, "VNM")
+    assert row.price == 60.3
+    assert row.extended_metrics["price_unit"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_sparse_screener_write_keeps_price_unit_coupled_to_retained_price(test_db):
+    manager = CacheManager(db=test_db)
+    await manager.store_screener_data([
+        {"symbol": "VNM", "price": 60300, "price_unit": "VND", "price_source": "vnstock_history:VCI"}
+    ])
+    await manager.store_screener_data([{"symbol": "VNM", "price": None, "pe": 12}])
+    row = await _stored(test_db, "VNM")
+    assert row.price == 60300
+    assert row.extended_metrics["price_unit"] == "VND"
+    assert row.extended_metrics["price_source"] == "vnstock_history:VCI"

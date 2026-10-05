@@ -11,13 +11,14 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Generic, List, Optional, TypeVar
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.cache_constants import DB_CACHE_TTLS
 from vnibb.core.database import async_session_factory
+from vnibb.core.price_units import normalize_screener_record
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
@@ -355,6 +356,10 @@ class CacheManager:
                     "quarter": record.get("quarter"),
                     "updated_at": updated_at_serialized,
                 }
+                extended_metrics.update(
+                    price_unit=record.get("price_unit") or record.get("priceUnit") or (record.get("extended_metrics") or {}).get("price_unit"),
+                    price_source=record.get("price_source") or (record.get("extended_metrics") or {}).get("price_source"),
+                )
                 compact_extended_metrics = {
                     key: value for key, value in extended_metrics.items() if value is not None
                 }
@@ -400,7 +405,7 @@ class CacheManager:
                     "source": source,
                     "created_at": now,
                 }
-                prep_data.append(values)
+                prep_data.append(normalize_screener_record(values))
 
             if not prep_data:
                 return 0
@@ -431,6 +436,10 @@ class CacheManager:
                 for k in prep_data[0].keys()
                 if k not in ["symbol", "snapshot_date", "source"]
             }
+            update_cols["extended_metrics"] = case(
+                (stmt.excluded.price.is_(None), ScreenerSnapshot.extended_metrics),
+                else_=stmt.excluded.extended_metrics,
+            )
 
             stmt = stmt.on_conflict_do_update(
                 index_elements=["symbol", "snapshot_date"], set_=update_cols

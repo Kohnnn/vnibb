@@ -19,9 +19,12 @@ from vnibb.core.cache_constants import (
     RECENT_PRICE_DAYS,
 )
 from vnibb.core.config import settings
+from vnibb.core.database import async_session_maker
 from vnibb.core.retry import with_retry
+from vnibb.core.price_units import history_price_records, persisted_price_record, persisted_price_source
 from vnibb.models.stock import Stock, StockPrice
-from vnibb.services.pipeline.base import BasePipeline, get_upsert_stmt
+from vnibb.services.data_pipeline import get_upsert_stmt
+from vnibb.services.pipeline.base import BasePipeline
 
 logger = logging.getLogger(__name__)
 
@@ -89,16 +92,14 @@ class PricePipeline(BasePipeline):
                 Quote = get_quote_class()
                 quote = Quote(symbol=symbol, source=_source)
                 history_callable = quote.history
-                if bypass_internal_retry:
-                    unwrapped_history = getattr(history_callable, "__wrapped__", None)
-                    if callable(unwrapped_history):
-                        return unwrapped_history(
-                            quote,
-                            start=start,
-                            end=end,
-                            interval=interval,
-                        )
-                return history_callable(start=start, end=end, interval=interval)
+                unwrapped_history = getattr(history_callable, "__wrapped__", None)
+                if bypass_internal_retry and callable(unwrapped_history):
+                    frame = unwrapped_history(quote, start=start, end=end, interval=interval)
+                else:
+                    frame = history_callable(start=start, end=end, interval=interval)
+                if isinstance(frame, pd.DataFrame):
+                    frame = pd.DataFrame(history_price_records(frame, symbol=symbol, source=_source, provider=quote, asset_type=getattr(quote, "asset_type", None)))
+                return frame
 
             try:
                 df = await asyncio.wait_for(
@@ -267,6 +268,8 @@ class PricePipeline(BasePipeline):
                             continue
 
                         for _, row in range_df.iterrows():
+                            if row.get("price_unit") not in {"VND", "index_points"}:
+                                raise ValueError(f"Unknown price unit for {symbol}")
                             row_time = (
                                 row["time"].date() if hasattr(row["time"], "date") else row["time"]
                             )
@@ -279,10 +282,12 @@ class PricePipeline(BasePipeline):
                                 "low": float(row["low"]),
                                 "close": float(row["close"]),
                                 "volume": int(row["volume"]),
+                                "value": row.get("value"),
+                                "adj_close": next((row.get(field) for field in ("adj_close", "adjusted_close", "adjClose") if row.get(field) is not None), None),
                                 "interval": "1D",
-                                "source": "vnstock",
+                                "source": persisted_price_source(row),
                             }
-                            stmt = get_upsert_stmt(StockPrice, ["symbol", "time", "interval"], val)
+                            stmt = get_upsert_stmt(StockPrice, ["symbol", "time", "interval"], val, preserve_existing_on_null={"value"})
                             await session.execute(stmt)
 
                         symbol_synced += len(range_df)
@@ -301,7 +306,11 @@ class PricePipeline(BasePipeline):
                         "low": float(latest_row.get("low")),
                         "close": float(latest_row.get("close")),
                         "volume": int(latest_row.get("volume")),
+                        "value": latest_row.get("value"),
+                        "adj_close": next((latest_row.get(field) for field in ("adj_close", "adjusted_close", "adjClose") if latest_row.get(field) is not None), None),
                         "interval": "1D",
+                        "price_unit": latest_row.get("price_unit", "unknown"),
+                        "price_source": latest_row.get("price_source"),
                     }
                     latest_key = build_cache_key("vnibb", "price", "latest", symbol)
                     await self._cache_set_json(latest_key, latest_payload, PIPELINE_TTL_PRICE_LATEST)
@@ -312,14 +321,7 @@ class PricePipeline(BasePipeline):
                         )
                         async with self._get_session() as session:
                             recent_rows_result = await session.execute(
-                                select(
-                                    StockPrice.time,
-                                    StockPrice.open,
-                                    StockPrice.high,
-                                    StockPrice.low,
-                                    StockPrice.close,
-                                    StockPrice.volume,
-                                )
+                                select(StockPrice)
                                 .where(
                                     StockPrice.symbol == symbol,
                                     StockPrice.interval == "1D",
@@ -328,17 +330,8 @@ class PricePipeline(BasePipeline):
                                 .order_by(StockPrice.time.asc())
                             )
                             recent_rows = [
-                                {
-                                    "time": row.time.isoformat()
-                                    if hasattr(row.time, "isoformat")
-                                    else row.time,
-                                    "open": float(row.open),
-                                    "high": float(row.high),
-                                    "low": float(row.low),
-                                    "close": float(row.close),
-                                    "volume": int(row.volume),
-                                }
-                                for row in recent_rows_result.fetchall()
+                                {**persisted_price_record(row), "time": row.time.isoformat()}
+                                for row in recent_rows_result.scalars().all()
                             ]
 
                         recent_key = build_cache_key("vnibb", "price", "recent", symbol)
@@ -427,6 +420,6 @@ class PricePipeline(BasePipeline):
 
         return total_synced
 
-    async def _get_session(self):
+    def _get_session(self):
         """Get a database session."""
-        return self._session_factory() if hasattr(self, '_session_factory') else async_session_maker()
+        return async_session_maker()

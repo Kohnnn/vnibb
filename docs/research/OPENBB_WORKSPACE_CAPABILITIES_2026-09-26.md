@@ -1,5 +1,11 @@
 # OpenBB workflow and widget capabilities for VNIBB's Local Workspace
 
+> **2026-10-05 status:** This is the September shortlist, not current gap evidence.
+> VNIBB now implements workspace backups, scoped ticker linking, research starters
+> and artifact placement. OpenBB also now publishes [Workspace UI/backend source](https://github.com/OpenBB-finance/workspace/tree/be00e95019a55d57af146919ee46b7e1a4859226)
+> under Apache-2.0; the source-unavailable statements below describe the earlier
+> inspection only. See the current update in [the assessment](../openbb-assessment.md).
+
 **Research date:** 2026-09-26. **Decision status:** shortlist for human review, not authorization to implement. **Scope:** [#45](https://github.com/Kohnnn/vnibb/issues/45) within [#43](https://github.com/Kohnnn/vnibb/issues/43). Workspace polish and layout/alignment correctness come first. The personal **Local Workspace** is browser-local by default; optional backend synchronization and admin-published system layouts exist but are not a mandate for cloud sync. No required OpenBB service, new paid chart/grid license, arbitrary HTML, executable widgets or new data-provider coverage. Matrix evidence/playbooks belong to [#35](https://github.com/Kohnnn/vnibb/issues/35); production data correctness/provenance to [#24](https://github.com/Kohnnn/vnibb/issues/24). This is not another OpenBB repository inventory; the broader inventory is `docs/openbb-assessment.md` in the working checkout.
 
 ## Evidence boundary and source pins

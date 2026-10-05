@@ -74,11 +74,12 @@ async def seed_screener():
                         'exchange': item.exchange or exchange,
                         'industry': item.industry_name,
                         'price': safe_float(item.price),
+                        'extended_metrics': {'price_unit': item.price_unit, 'price_source': item.price_source},
                         'pe': safe_float(item.pe),
                         'pb': safe_float(item.pb),
                         'roe': safe_float(item.roe),
                         'market_cap': safe_float(item.market_cap),
-                        'updated_at': datetime.utcnow(),
+                        'created_at': datetime.utcnow(),
                     }
                     
                     # Robust upsert logic
@@ -94,7 +95,7 @@ async def seed_screener():
                             'pb': record['pb'],
                             'roe': record['roe'],
                             'market_cap': record['market_cap'],
-                            'updated_at': record['updated_at'],
+                            'extended_metrics': record['extended_metrics'],
                         }
                     )
                     await session.execute(stmt)

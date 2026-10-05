@@ -18,7 +18,9 @@ interface BackendDashboardRecord {
     is_default?: boolean;
     layout_config?: {
         tabs?: Dashboard['tabs'];
+        globalMarketsSymbol?: Dashboard['globalMarketsSymbol'];
         syncGroups?: Dashboard['syncGroups'];
+        widgetGroups?: Dashboard['widgetGroups'];
         showGroupLabels?: boolean;
         folderId?: string;
         order?: number;
@@ -57,7 +59,9 @@ function toBackendPayload(dashboard: Dashboard): Record<string, unknown> {
         is_default: dashboard.isDefault,
         layout_config: {
             tabs: dashboard.tabs,
+            globalMarketsSymbol: dashboard.globalMarketsSymbol,
             syncGroups: dashboard.syncGroups,
+            widgetGroups: dashboard.widgetGroups,
             showGroupLabels: dashboard.showGroupLabels,
             folderId: dashboard.folderId,
             order: dashboard.order,
@@ -74,6 +78,7 @@ function toFrontendDashboard(record: BackendDashboardRecord): Dashboard {
         id: String(record.id),
         name: record.name,
         description: record.description ?? undefined,
+        globalMarketsSymbol: record.layout_config?.globalMarketsSymbol,
         isDefault: Boolean(record.is_default),
         isEditable: true,
         isDeletable: true,
@@ -82,6 +87,7 @@ function toFrontendDashboard(record: BackendDashboardRecord): Dashboard {
         order: record.layout_config?.order ?? 0,
         tabs: record.layout_config?.tabs ?? [],
         syncGroups: record.layout_config?.syncGroups ?? [],
+        widgetGroups: record.layout_config?.widgetGroups,
         createdAt: record.created_at || new Date().toISOString(),
         updatedAt: record.updated_at || new Date().toISOString(),
     };

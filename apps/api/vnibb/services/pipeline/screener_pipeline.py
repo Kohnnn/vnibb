@@ -15,9 +15,11 @@ from sqlalchemy import select, and_, func
 from vnibb.core.cache import build_cache_key
 from vnibb.core.cache_constants import PIPELINE_TTL_SCREENER
 from vnibb.core.config import settings
+from vnibb.core.database import async_session_maker
 from vnibb.core.retry import with_retry
 from vnibb.core.vn_sectors import resolve_sector_name
 from vnibb.models.stock import Stock, StockPrice
+from vnibb.core.price_units import normalize_screener_record
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.services.pipeline.base import BasePipeline, get_upsert_stmt
@@ -227,6 +229,11 @@ class ScreenerPipeline(BasePipeline):
                             "source": settings.vnstock_source or "KBS",
                             "created_at": date.today(),
                         }
+                        values = normalize_screener_record({
+                            **values,
+                            "price_unit": row.get("price_unit", "unknown"),
+                            "price_source": row.get("price_source"),
+                        })
 
                         async with self._get_session() as session:
                             stmt = get_upsert_stmt(
@@ -255,6 +262,6 @@ class ScreenerPipeline(BasePipeline):
         logger.info(f"Synced screener data for {total_synced} symbols")
         return total_synced
 
-    async def _get_session(self):
+    def _get_session(self):
         """Get a database session."""
-        return self._session_factory() if hasattr(self, '_session_factory') else async_session_maker()
+        return async_session_maker()

@@ -6,8 +6,9 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.stock import Stock
+from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.trading import FinancialRatio
 from vnibb.services.cache_manager import CacheResult
 from vnibb.services.comparison_service import ComparisonService, StockMetrics, get_comparison_data
@@ -175,7 +176,8 @@ async def test_get_peers_treats_zero_pe_as_missing_and_backfills_snapshot(
             market_cap=900.0,
             pe=12.3,
             roe=14.0,
-            price=28_000.0,
+            price=28.0,
+            extended_metrics={"price_unit": "THOUSAND_VND"},
             source="KBS",
             created_at=datetime.utcnow(),
         )
@@ -215,6 +217,7 @@ async def test_get_peers_treats_zero_pe_as_missing_and_backfills_snapshot(
     assert result.count == 1
     assert result.peers[0].symbol == "SSI"
     assert result.peers[0].pe_ratio == pytest.approx(12.3)
+    assert result.peers[0].price == 28_000.0
 
 
 @pytest.mark.asyncio
@@ -316,3 +319,57 @@ async def test_get_comparison_data_derives_missing_metrics_and_sanitizes_negativ
     assert metrics["fcf_yield"] == pytest.approx((130.0 / 2_500.0) * 100)
     assert metrics["ocf_sales"] == pytest.approx((210.0 / 1_200.0) * 100)
     assert metrics["debt_equity"] == pytest.approx(900.0 / 1_100.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "close", "expected_cap"),
+    [
+        ("vnstock_vnd:KBS", 32_000.0, 3_200_000_000_000.0),
+        ("KBS", 32.0, 3_200_000_000_000.0),
+        ("vnstock", 32.0, 3_000_000_000_000.0),
+        ("ohlcv_backfill_full", 32_000.0, 3_000_000_000_000.0),
+    ],
+)
+async def test_market_cap_recompute_requires_known_vnd_price(
+    test_engine, test_db, monkeypatch, source, close, expected_cap
+):
+    test_db.add(Stock(id=1, symbol="VCI", exchange="HOSE"))
+    test_db.add(Company(symbol="VCI", outstanding_shares=100_000_000))
+    test_db.add(StockPrice(
+        id=1, symbol="VCI", stock_id=1, time=date.today(), interval="1D", source=source,
+        open=close, high=close, low=close, close=close, volume=100,
+    ))
+    await test_db.commit()
+    service = ComparisonService()
+
+    async def fake_get_screener_data(*_args, **_kwargs):
+        return CacheResult(
+            data=[ScreenerSnapshot(symbol="VCI", snapshot_date=date.today(), market_cap=3_000_000_000_000)],
+            is_stale=False, cached_at=datetime.utcnow(), hit=True,
+        )
+
+    monkeypatch.setattr(service.cache_manager, "get_screener_data", fake_get_screener_data)
+    monkeypatch.setattr(
+        "vnibb.services.comparison_service.async_session_maker",
+        async_sessionmaker(test_engine, expire_on_commit=False),
+    )
+    result = await service.get_stock_metrics("VCI")
+    assert result.metrics["market_cap"] == pytest.approx(expected_cap)
+
+
+@pytest.mark.asyncio
+async def test_price_performance_excludes_unknown_units_and_preserves_points(monkeypatch):
+    from vnibb.providers.vnstock.equity_historical import EquityHistoricalData
+
+    async def fake_fetch(params):
+        unit = "index_points" if params.symbol == "VNINDEX" else "VND" if params.symbol == "VCI" else "unknown"
+        return [
+            EquityHistoricalData(symbol=params.symbol, time=day, price_unit=unit,
+                                 open=close, high=close, low=close, close=close, volume=100)
+            for day, close in [(date(2026, 9, 1), 100.0), (date(2026, 9, 2), 110.0)]
+        ]
+
+    monkeypatch.setattr("vnibb.providers.vnstock.equity_historical.VnstockEquityHistoricalFetcher.fetch", fake_fetch)
+    result = await ComparisonService().compare_price_performance(["VCI", "VNINDEX", "UNKNOWN"])
+    assert result[-1].values == {"VCI": pytest.approx(110.0), "VNINDEX": pytest.approx(110.0)}

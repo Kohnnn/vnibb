@@ -10,6 +10,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import and_, or_, select
+from vnibb.core.price_units import persisted_price_record
 
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.stock import Stock, StockPrice
@@ -68,7 +69,7 @@ def _identity(value: object) -> str:
 
 def _source_label(table: type, row: object) -> str:
     source = str(getattr(row, "source", None) or "unknown")
-    supplier = source if re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", source) else "unknown"
+    supplier = source if re.fullmatch(r"[A-Za-z0-9_.:-]{1,60}", source) else "unknown"
     return f"stored.sql.{table.__tablename__}:{supplier}"
 
 
@@ -395,19 +396,28 @@ async def _add_stored_closes(db, result: dict, symbols: list[str], year: int, qu
     month = quarter * 3 if quarter else 12
     end = date(year, month, calendar.monthrange(year, month)[1])
     start = date(year, month - 2 if quarter else 1, 1)
-    result["dimensions"].append({"dimension_id": "stored_close", "label": "Stored market close", "question": "What final stored daily close exists within the selected fiscal period?", "output_type": "number", "source_scope": "Retained SQL daily prices; unknown price scale is not normalized", "definition_revision": DEFINITION_REVISION})
+    result["dimensions"].append({"dimension_id": "stored_close", "label": "Stored market close", "question": "What final stored daily close exists within the selected fiscal period?", "output_type": "number", "source_scope": "Retained SQL daily prices; only source-certified units are normalized", "definition_revision": DEFINITION_REVISION})
     for symbol in symbols:
         price = (await db.execute(select(StockPrice).where(StockPrice.symbol == symbol, StockPrice.interval == "1D", StockPrice.time >= start, StockPrice.time <= end).order_by(StockPrice.time.desc(), StockPrice.id.desc()).limit(1))).scalars().first()
         metric = _metric("close", "Stored close", str(year) if not quarter else f"{year}-Q{quarter}", "No retained daily close within the requested fiscal period")
         evidence_ids = []
-        if price is not None and canonical_decimal(price.close) is not None:
-            value = canonical_decimal(price.close)
-            evidence = {"entity_id": symbol, "source": _source_label(StockPrice, price), "locator": f"stock_prices/row/{price.id}/trade-date/{price.time.isoformat()}", "field": "close", "value": value, "unit": "unknown unit", "period": metric["period"], "as_of": price.time.isoformat(), "captured_at": captured_at, "provenance": "stored_observation", "formula": None, "input_evidence_ids": [], "limitations": ["Price scale is not retained; VND versus thousand VND cannot be inferred.", f"Trade date is distinct from write date {_iso(price.created_at)}.", STORED_LIMIT]}
+        normalized = persisted_price_record(price) if price is not None else {}
+        value = canonical_decimal(normalized.get("close"))
+        unit = normalized.get("price_unit", "unknown")
+        certified = unit != "unknown"
+        unit = unit if certified else "unknown unit"
+        if value is not None:
+            limits = [f"Trade date is distinct from write date {_iso(price.created_at)}.", STORED_LIMIT]
+            if not certified:
+                limits.insert(0, "Price scale is not retained; VND versus thousand VND cannot be inferred.")
+            evidence = {"entity_id": symbol, "source": _source_label(StockPrice, price), "locator": f"stock_prices/row/{price.id}/trade-date/{price.time.isoformat()}", "field": "close", "value": value, "unit": unit, "period": metric["period"], "as_of": price.time.isoformat(), "captured_at": captured_at, "provenance": "stored_observation", "formula": None, "input_evidence_ids": [], "limitations": limits}
             evidence["evidence_id"] = f"e-{_identity(evidence)}"
             evidence_ids = [evidence["evidence_id"]]
             result["evidence"].append(evidence)
-            metric.update(value=value, display=display_decimal(value, "unknown unit"), as_of=price.time.isoformat(), basis="Stored daily close; unit unknown", evidence_ids=evidence_ids)
-        result["cells"].append(_cell(symbol, "stored_close", {"kind": "number", "metrics": [metric]}, state="non_comparable" if evidence_ids else "unavailable", evidence_ids=evidence_ids, limitations=[metric["basis"]]))
+            basis = "Stored daily close; source-certified unit" if certified else "Stored daily close; unit unknown"
+            metric.update(value=value, display=display_decimal(value, unit), unit=unit, as_of=price.time.isoformat(), basis=basis, evidence_ids=evidence_ids)
+        state = "supported" if evidence_ids and certified else "non_comparable" if evidence_ids else "unavailable"
+        result["cells"].append(_cell(symbol, "stored_close", {"kind": "number", "metrics": [metric]}, state=state, evidence_ids=evidence_ids, limitations=[metric["basis"], "Period-specific closes do not establish a common market observation date."]))
 
 
 def build_matrix_fixture() -> dict:

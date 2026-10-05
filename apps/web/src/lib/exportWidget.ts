@@ -16,6 +16,7 @@ export interface ExportProvenance {
   endpoint?: string;
   cached?: boolean;
   stale?: boolean;
+  warnings?: string[];
   updatedAt?: number | string | Date | null;
   adjustmentMode?: string;
   localOnly?: boolean;
@@ -55,6 +56,7 @@ export function provenanceToMarkdown(provenance?: ExportProvenance): string {
     ['Endpoint', provenance.endpoint],
     ['Data updated', provenance.updatedAt ? normalizeTimestamp(provenance.updatedAt) : null],
     ['Adjustment mode', provenance.adjustmentMode],
+    ['Warnings', provenance.warnings?.join(' · ') || null],
     [
       'Freshness',
       provenance.localOnly
@@ -126,6 +128,7 @@ export function exportToCSV(data: any, filename: string, provenance?: ExportProv
       ['endpoint', resolved.endpoint],
       ['data_updated', resolved.updatedAt],
       ['adjustment_mode', resolved.adjustmentMode],
+      ['warnings', resolved.warnings?.join(' · ') || undefined],
       ['freshness', resolved.localOnly ? 'local-only' : resolved.stale ? 'stale' : resolved.cached ? 'cached' : resolved.updatedAt ? 'live' : undefined],
       ['captured_at', resolved.capturedAt],
     ];

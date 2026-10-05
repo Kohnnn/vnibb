@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 import { RefreshCw } from 'lucide-react';
 import { getCompanyEvents, getHistoricalPrices, getQuote } from '@/lib/api';
+import type { QuoteData } from '@/lib/api';
 import { buildChartEventMarkers, type ChartEventMarker } from '@/lib/chartEventMarkers';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -27,6 +28,9 @@ interface ChartPoint {
   low: number;
   close: number;
   volume: number;
+  priceUnit: 'VND' | 'index_points' | 'unknown';
+  observedAt: number | null;
+  adjustmentApplied: boolean;
 }
 
 const REQUEST_TIMEOUT_MS = 20000;
@@ -108,44 +112,33 @@ function safeNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function normalizePoints(rows: Array<Record<string, unknown>>): ChartPoint[] {
-  // QA-v4: Aggressive dedup-by-date. Even when the API server returns
-  // duplicate rows for the same trading day (mixed raw/adjusted shapes
-  // in Mongo, or merged DB+cache results), lightweight-charts paints the
-  // second entry on top of the first with conflicting OHLC values which
-  // produces invisible candles. We keep the row whose absolute close is
-  // SMALLEST per date — that's typically the post-adjustment price that
-  // matches the rest of the dashboard's display convention.
+function normalizePoints(rows: Array<Record<string, unknown>>, unitStatus?: string | null): ChartPoint[] {
   const byDate = new Map<string, ChartPoint>();
-  rows
-    .map((row) => {
-      const time = String(row.time ?? '').slice(0, 10);
-      const open = safeNumber(row.open);
-      const high = safeNumber(row.high);
-      const low = safeNumber(row.low);
-      const close = safeNumber(row.close);
-      const volume = safeNumber(row.volume) ?? 0;
-      if (open === null || high === null || low === null || close === null || !time) {
-        return null;
-      }
-      return { time, open, high, low, close, volume };
-    })
-    .filter((row): row is ChartPoint => row !== null)
-    .forEach((row) => {
-      const existing = byDate.get(row.time);
-      if (!existing) {
-        byDate.set(row.time, row);
-        return;
-      }
-      // Prefer the row whose `close` is smaller — post-adjustment series
-      // for VN equities (e.g. VCI 23.22 vs raw 31.56 on 2024-01-02).
-      if (row.close < existing.close) {
-        byDate.set(row.time, row);
-      }
+  for (const row of rows) {
+    const rawTime = String(row.time ?? '');
+    const time = rawTime.slice(0, 10);
+    const timestamp = new Date(rawTime).getTime();
+    const open = safeNumber(row.open);
+    const high = safeNumber(row.high);
+    const low = safeNumber(row.low);
+    const close = safeNumber(row.close);
+    if (open === null || high === null || low === null || close === null || !time || !Number.isFinite(timestamp)) {
+      continue;
+    }
+    // The history endpoint owns source/adjustment precedence; retain its first valid row per day.
+    if (byDate.has(time)) continue;
+    const priceUnit = row.price_unit === 'VND' || row.price_unit === 'index_points'
+      ? row.price_unit
+      : row.price_unit == null && unitStatus === 'confirmed_vnd' ? 'VND' : 'unknown';
+    byDate.set(time, {
+      time, open, high, low, close,
+      volume: safeNumber(row.volume) ?? 0,
+      priceUnit,
+      observedAt: rawTime.length > 10 ? timestamp : null,
+      adjustmentApplied: row.adjustment_applied === true,
     });
-  return Array.from(byDate.values()).sort(
-    (left, right) => new Date(left.time).getTime() - new Date(right.time).getTime()
-  );
+  }
+  return Array.from(byDate.values()).sort((left, right) => left.time.localeCompare(right.time));
 }
 
 /**
@@ -165,61 +158,42 @@ function toBusinessDayString(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function mergeQuote(points: ChartPoint[], quote: Awaited<ReturnType<typeof getQuote>>['data'] | null): ChartPoint[] {
+function mergeQuote(points: ChartPoint[], quote: QuoteData | null): ChartPoint[] {
   const updatedAt = quote?.updatedAt ?? quote?.updated_at;
-  if (quote?.price == null || !updatedAt || points.length === 0) {
+  const priceUnit = quote?.price_unit;
+  if (quote?.price == null || !updatedAt || points.length === 0 ||
+      (priceUnit !== 'VND' && priceUnit !== 'index_points') ||
+      points.some((point) => point.priceUnit !== priceUnit)) {
     return points;
   }
 
   const quoteTime = new Date(updatedAt);
-  if (Number.isNaN(quoteTime.getTime())) {
-    return points;
-  }
-
   const quotePrice = safeNumber(quote.price);
-  if (quotePrice === null) {
+  if (!Number.isFinite(quoteTime.getTime()) || quotePrice === null) return points;
+
+  const latest = points[points.length - 1];
+  const quoteDay = toBusinessDayString(quoteTime);
+  if (quoteDay < latest.time ||
+      (latest.observedAt !== null && quoteTime.getTime() < latest.observedAt)) {
     return points;
   }
-
-  const next = [...points];
-  const latest = next[next.length - 1];
-  const latestTime = new Date(latest.time);
-  const quoteDay = new Date(quoteTime.getFullYear(), quoteTime.getMonth(), quoteTime.getDate()).getTime();
-  const latestDay = new Date(latestTime.getFullYear(), latestTime.getMonth(), latestTime.getDate()).getTime();
-
-  // For same-day merges, reuse the exact `time` of the historical bar so the
-  // string format never drifts. For new-day pushes, build a fresh
-  // `YYYY-MM-DD` business-day string from the quote's calendar day.
-  const mergedTime = quoteDay === latestDay ? latest.time : toBusinessDayString(quoteTime);
-
-  // Coerce optional quote fields, defaulting safely to the latest historical
-  // values (which are guaranteed non-null after normalizePoints). Never
-  // allow a null/NaN to land in the merged point.
-  const quoteOpen = safeNumber(quote.open) ?? latest.close ?? quotePrice;
-  const quoteHigh = safeNumber(quote.high) ?? Math.max(latest.high, quotePrice);
-  const quoteLow = safeNumber(quote.low) ?? Math.min(latest.low, quotePrice);
-  const quoteVolume = safeNumber(quote.volume) ?? latest.volume ?? 0;
+  const isSameDay = quoteDay === latest.time;
+  // A raw quote cannot replace a bar carrying a historical adjustment factor.
+  if (isSameDay && latest.adjustmentApplied) return points;
 
   const mergedPoint: ChartPoint = {
-    time: mergedTime,
-    open: quoteOpen,
-    high: quoteHigh,
-    low: quoteLow,
+    time: isSameDay ? latest.time : quoteDay,
+    open: safeNumber(quote.open) ?? (isSameDay ? latest.open : quotePrice),
+    high: safeNumber(quote.high) ?? (isSameDay ? Math.max(latest.high, quotePrice) : quotePrice),
+    low: safeNumber(quote.low) ?? (isSameDay ? Math.min(latest.low, quotePrice) : quotePrice),
     close: quotePrice,
-    volume: quoteVolume,
+    volume: safeNumber(quote.volume) ?? (isSameDay ? latest.volume : 0),
+    priceUnit,
+    observedAt: quoteTime.getTime(),
+    adjustmentApplied: false,
   };
 
-  if (quoteDay === latestDay) {
-    next[next.length - 1] = mergedPoint;
-    return next;
-  }
-
-  if (quoteDay < latestDay) {
-    return next;
-  }
-
-  next.push(mergedPoint);
-  return next;
+  return isSameDay ? [...points.slice(0, -1), mergedPoint] : [...points, mergedPoint];
 }
 
 export function TradingViewAdvancedChart({
@@ -281,10 +255,16 @@ export function TradingViewAdvancedChart({
             : Promise.resolve(null),
         ]);
 
-        const normalized = normalizePoints((historyResponse?.data || []) as unknown as Array<Record<string, unknown>>);
+        const normalized = normalizePoints(
+          (historyResponse?.data || []) as unknown as Array<Record<string, unknown>>,
+          historyResponse?.meta?.unit_status
+        );
         const merged = mergeQuote(normalized, quoteResponse?.data ?? null);
         setPoints(merged);
-        setComparePoints(normalizePoints((compareResponse?.data || []) as unknown as Array<Record<string, unknown>>));
+        setComparePoints(normalizePoints(
+          (compareResponse?.data || []) as unknown as Array<Record<string, unknown>>,
+          compareResponse?.meta?.unit_status
+        ));
         setEventMarkers(buildChartEventMarkers(eventsResponse?.data || [], merged, timeframe === '5Y' ? 12 : 8));
       } catch (fetchError) {
         if ((fetchError as Error)?.name === 'AbortError') {

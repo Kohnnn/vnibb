@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.price_units import PriceUnit, history_price_records, normalize_price_record
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,7 @@ class EquityHistoricalData(BaseModel):
     low: float = Field(..., description="Lowest price")
     close: float = Field(..., description="Closing price")
     volume: int = Field(..., description="Trading volume")
+    price_unit: PriceUnit = Field(default="unknown", description="Canonical price unit, independent of adjustment mode")
 
     # Optional extended fields from vnstock
     value: Optional[float] = Field(None, description="Trading value in VND")
@@ -197,8 +199,7 @@ class VnstockEquityHistoricalFetcher(
                     logger.warning(f"No data returned for {query['symbol']}")
                     return []
 
-                # Convert DataFrame to list of dicts
-                return df.to_dict("records")
+                return history_price_records(df, symbol=query["symbol"], source=query["source"], provider=stock.quote)
 
             except Exception as e:
                 logger.error(f"vnstock fetch error for {query['symbol']}: {e}")
@@ -234,6 +235,7 @@ class VnstockEquityHistoricalFetcher(
 
         for row in data:
             try:
+                row = normalize_price_record(row, symbol=params.symbol, source=row.get("price_source") or f"vnstock_history:{params.source.upper()}")
                 # Handle different column names from different sources
                 time_value = row.get("time") or row.get("date") or row.get("trading_date")
 
@@ -247,14 +249,15 @@ class VnstockEquityHistoricalFetcher(
                     EquityHistoricalData(
                         symbol=params.symbol.upper(),
                         time=time_value,
+                        price_unit=row["price_unit"],
                         open=float(row.get("open") or row.get("price") or 0),
                         high=float(row.get("high") or 0),
                         low=float(row.get("low") or 0),
                         close=float(row.get("close") or row.get("price") or 0),
                         volume=int(row.get("volume") or 0),
                         value=float(row["value"]) if row.get("value") else None,
-                        raw_close=float(row.get("close") or row.get("price") or 0),
-                        adjusted_close=float(row["adj_close"]) if row.get("adj_close") else None,
+                        raw_close=float(row.get("raw_close") if row.get("raw_close") is not None else row.get("close") or row.get("price") or 0),
+                        adjusted_close=float(row["adjusted_close"]) if row.get("adjusted_close") is not None else float(row["adj_close"]) if row.get("adj_close") is not None else None,
                     )
                 )
             except (KeyError, ValueError, TypeError) as e:

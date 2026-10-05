@@ -15,7 +15,6 @@ import pytest
 from vnibb.services.fundamental_valuation import (
     FundamentalInputs,
     ValuationConfig,
-    _canonical_eod_price,
     _normalize_statement_unit_outliers,
     compute_cagr,
     compute_dividend_years,
@@ -27,6 +26,7 @@ from vnibb.services.fundamental_valuation import (
     compute_moat,
     compute_moat_factors,
     compute_valuation_verdict,
+    load_fundamental_inputs,
     to_document,
 )
 
@@ -504,36 +504,62 @@ class TestToDocument:
         assert doc["valuationMethod"] == "dcf"
 
 
-# --- EOD price canonicalization ---------------------------------------------------------
+class _PriceCorpus:
+    def __init__(self, prices):
+        self.prices = prices
+
+    async def get_raw_dataset_records(self, _symbol, *, dataset, **_kwargs):
+        if dataset == "company.info":
+            return [{"raw": {"issue_share": 1_000_000}}]
+        return []
+
+    async def get_eod_prices(self, _symbol, **_kwargs):
+        return self.prices
 
 
-class TestCanonicalEodPrice:
-    def test_thousand_vnd_straggler_coerced_up(self) -> None:
-        # Window is raw VND (~70,800); selected close mis-stored as thousand-VND.
-        window = [70_800.0, 71_000.0, 70_500.0, 69_900.0, 70_200.0]
-        assert _canonical_eod_price(70.8, window) == pytest.approx(70_800.0)
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("record", "expected"),
+    [
+        ({"close": 70.8, "priceUnit": "THOUSAND_VND"}, 70_800),
+        ({"close": 70.8, "source": "vnstock_history:KBS"}, 70_800),
+        ({"close": 80, "priceUnit": "VND"}, 80),
+        ({"close": 70_800, "priceUnit": "VND"}, 70_800),
+    ],
+)
+async def test_valuation_reads_explicit_or_source_backed_vnd(record, expected):
+    inputs = await load_fundamental_inputs("FPT", _PriceCorpus([record]))
 
-    def test_raw_vnd_close_untouched(self) -> None:
-        window = [70_800.0, 71_000.0, 70_500.0, 69_900.0, 70_200.0]
-        assert _canonical_eod_price(70_800.0, window) == pytest.approx(70_800.0)
+    assert inputs.price == pytest.approx(expected)
+    assert inputs.market_cap == pytest.approx(expected * 1_000_000)
 
-    def test_raw_straggler_coerced_down(self) -> None:
-        # Window is thousand-VND (~70.8); selected close mis-stored as raw VND.
-        window = [70.8, 71.0, 70.5, 69.9, 70.2]
-        assert _canonical_eod_price(70_800.0, window) == pytest.approx(70.8)
 
-    def test_real_split_magnitude_ignored(self) -> None:
-        # A genuine ~2x gap (e.g. split) is not a unit error; leave untouched.
-        window = [70_000.0, 71_000.0, 69_000.0, 70_500.0, 70_200.0]
-        assert _canonical_eod_price(35_000.0, window) == pytest.approx(35_000.0)
+@pytest.mark.asyncio
+async def test_valuation_preserves_low_vnd_after_legitimate_split():
+    inputs = await load_fundamental_inputs("LOW", _PriceCorpus([
+        {"close": 100_000, "priceUnit": "VND"},
+        {"close": 100, "priceUnit": "VND", "volume": 50},
+    ]))
 
-    def test_empty_window_passthrough(self) -> None:
-        assert _canonical_eod_price(70.8, []) == pytest.approx(70.8)
+    assert inputs.price == 100
+    assert inputs.volume == 50
+    assert inputs.market_cap == 100_000_000
 
-    def test_zero_anchor_passthrough(self) -> None:
-        assert _canonical_eod_price(70.8, [0.0, 0.0]) == pytest.approx(70.8)
 
-    def test_nonpositive_selected_passthrough(self) -> None:
-        window = [70_800.0, 71_000.0, 70_500.0]
-        assert _canonical_eod_price(0.0, window) == pytest.approx(0.0)
-        assert _canonical_eod_price(-5.0, window) == pytest.approx(-5.0)
+@pytest.mark.asyncio
+async def test_valuation_skips_unknown_units_without_numeric_inference():
+    inputs = await load_fundamental_inputs("FPT", _PriceCorpus([
+        {"close": 80, "priceUnit": "VND"},
+        {"close": 80_000, "source": "vnstock"},
+    ]))
+
+    assert inputs.price == 80
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("record", [{"close": 80_000}, {"close": 1250, "priceUnit": "index_points"}])
+async def test_valuation_does_not_value_unknown_units_or_index_points(record):
+    inputs = await load_fundamental_inputs("FPT", _PriceCorpus([record]))
+
+    assert inputs.price is None
+    assert inputs.market_cap is None

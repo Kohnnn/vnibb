@@ -30,6 +30,7 @@ from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.core.cache import cached
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
+from vnibb.core.price_units import is_index_symbol, persisted_price_record
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.alerts import BlockTrade
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
@@ -432,21 +433,40 @@ def _normalize_provider_history_rows(
                 adjustment_applied=bool(
                     normalized_mode == "adjusted" and adjusted_close not in (None, 0)
                 ),
+                price_unit=getattr(row, "price_unit", "unknown"),
             )
         )
 
     return normalized_rows
 
 
+def _excluded_historical_dates(*collections: list[EquityHistoricalData]) -> set[date]:
+    return {
+        row.time
+        for collection in collections
+        for row in collection
+        if getattr(row, "price_unit", "unknown")
+        != ("index_points" if is_index_symbol(row.symbol) else "VND")
+    }
+
+
 def _merge_historical_rows(*collections: list[EquityHistoricalData]) -> list[EquityHistoricalData]:
     by_time: dict[date, EquityHistoricalData] = {}
     for collection in collections:
         for row in collection:
+            expected_unit = "index_points" if is_index_symbol(row.symbol) else "VND"
+            if getattr(row, "price_unit", "unknown") != expected_unit:
+                continue
             by_time[row.time] = row
     return [by_time[key] for key in sorted(by_time)]
 
 
 def _historical_rows_to_frame(rows: list[EquityHistoricalData]) -> pd.DataFrame:
+    rows = [
+        row for row in rows
+        if getattr(row, "price_unit", "unknown")
+        == ("index_points" if is_index_symbol(row.symbol) else "VND")
+    ]
     if not rows:
         return pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
 
@@ -473,117 +493,21 @@ def _historical_rows_to_frame(rows: list[EquityHistoricalData]) -> pd.DataFrame:
     return frame.reset_index(drop=True)
 
 
-# Order-of-magnitude band that cleanly separates a thousand-VND vs raw-VND
-# encoding of the SAME price (a 1000x gap). Real splits/dividends move price by
-# at most ~5x, and VN daily limits cap a single bar at ±15%, so nothing
-# legitimate ever lands inside [200, 5000]; the dead-zone (50, 200) is left
-# untouched and logged so a bad anchor is visible rather than silently rescaled.
-# Quant metrics are all returns/ratios, so the canonical unit only needs to be
-# internally consistent (whichever the recent-bar anchor implies), not a fixed
-# absolute scale.
-_PRICE_UNIT_RESCALE_LOW = 200.0
-_PRICE_UNIT_RESCALE_HIGH = 5000.0
-_PRICE_UNIT_ANCHOR_WINDOW = 60
-# Above the strictest VN daily price limit (UPCOM ±15%); a daily return whose
-# magnitude exceeds this is a data artifact (unit seam, bad tick, split) and is
-# dropped from return-based estimators rather than clipped (clipping biases vol).
-_MAX_SANE_DAILY_RETURN = 0.20
-
-
-def _normalize_price_unit_rows(
-    rows: list[EquityHistoricalData],
-    *,
-    symbol: str = "",
-) -> list[EquityHistoricalData]:
-    """Coerce mixed thousand-VND/raw-VND bars to one consistent unit per row.
-
-    Anchors on the recent-bar median, rescales only ~1000x discrepancies, and
-    leaves ambiguous dead-zone rows untouched. See the module constants above
-    for the rationale behind the rescale band and dead-zone.
-    """
-
-    if len(rows) < 2:
-        return rows
-
-    closes = np.array(
-        [float(r.close) for r in rows if r.close is not None and float(r.close) > 0],
-        dtype=float,
+def _persisted_prices_to_frame(rows: list[Any]) -> pd.DataFrame:
+    records = [persisted_price_record(row) for row in rows]
+    return pd.DataFrame(
+        [
+            {
+                "symbol": record.get("symbol"),
+                "time": record.get("time"),
+                "close": record.get("close") if record["price_unit"] == "VND" else None,
+            }
+            for record in records
+        ],
+        columns=["symbol", "time", "close"],
     )
-    if closes.size < 2:
-        return rows
-
-    anchor = float(np.median(closes[-_PRICE_UNIT_ANCHOR_WINDOW:]))
-    if not np.isfinite(anchor) or anchor <= 0:
-        return rows
-
-    # If the anchor window itself straddles the migration boundary its own
-    # max/min ratio will blow past ~50; flag it so a bad anchor is visible.
-    anchor_window = closes[-_PRICE_UNIT_ANCHOR_WINDOW:]
-    window_spread = float(np.max(anchor_window) / np.min(anchor_window))
-    if window_spread > 50:
-        logger.warning(
-            "Price-unit anchor window for %s is itself mixed-unit (spread=%.1f); "
-            "normalization may be unreliable.",
-            symbol or "?",
-            window_spread,
-        )
-
-    rescaled = 0
-    ambiguous = 0
-    normalized: list[EquityHistoricalData] = []
-    for row in rows:
-        close = float(row.close) if row.close is not None else None
-        if not close or close <= 0:
-            normalized.append(row)
-            continue
-
-        ratio = anchor / close
-        factor: float | None = None
-        if _PRICE_UNIT_RESCALE_LOW <= ratio <= _PRICE_UNIT_RESCALE_HIGH:
-            factor = 1000.0
-        elif (1.0 / _PRICE_UNIT_RESCALE_HIGH) <= ratio <= (1.0 / _PRICE_UNIT_RESCALE_LOW):
-            factor = 1.0 / 1000.0
-        elif 50.0 < ratio < _PRICE_UNIT_RESCALE_LOW or (
-            (1.0 / _PRICE_UNIT_RESCALE_LOW) < ratio < (1.0 / 50.0)
-        ):
-            ambiguous += 1
-
-        if factor is None:
-            normalized.append(row)
-            continue
-
-        rescaled += 1
-        raw_close = row.raw_close
-        normalized.append(
-            row.model_copy(
-                update={
-                    "open": float(row.open) * factor,
-                    "high": float(row.high) * factor,
-                    "low": float(row.low) * factor,
-                    "close": close * factor,
-                    "raw_close": (float(raw_close) * factor) if raw_close is not None else None,
-                }
-            )
-        )
-
-    if rescaled or ambiguous:
-        logger.info(
-            "Price-unit normalization for %s: rescaled=%d ambiguous=%d total=%d anchor=%.1f",
-            symbol or "?",
-            rescaled,
-            ambiguous,
-            len(rows),
-            anchor,
-        )
-
-    return normalized
 
 
-def _sanitize_daily_returns(returns: pd.Series) -> pd.Series:
-    """NaN-out daily returns above the max sane VN move (see constant above)."""
-
-    sanitized = pd.to_numeric(returns, errors="coerce")
-    return sanitized.where(sanitized.abs() <= _MAX_SANE_DAILY_RETURN)
 
 
 async def _merge_latest_quote_into_frame(
@@ -602,6 +526,9 @@ async def _merge_latest_quote_into_frame(
         return frame, None
 
     quote_price = getattr(quote, "price", None)
+    expected_unit = "index_points" if is_index_symbol(symbol) else "VND"
+    if getattr(quote, "price_unit", "unknown") != expected_unit:
+        return frame, "Skipped latest quote with unknown or incompatible price units."
     quote_time = getattr(quote, "updated_at", None)
     if quote_price is None or quote_time is None:
         return frame, None
@@ -733,6 +660,10 @@ async def _load_benchmark_frame(
                 )
                 continue
 
+            provider_rows = [
+                row for row in provider_rows
+                if getattr(row, "price_unit", "unknown") == "index_points"
+            ]
             if provider_rows:
                 frame = pd.DataFrame(
                     [{"time": row.time, "close": row.close} for row in provider_rows]
@@ -1665,32 +1596,35 @@ async def _load_price_frame(
             logger.warning("Quant price frame query failed for %s: %s", symbol, exc)
         rows = []
 
-    # Merge Mongo with Postgres immediately so the staleness check below sees the
-    # freshest available bar across both stores (Mongo wins ties by recency since
-    # _merge_historical_rows is last-write-by-time and we pass Postgres last).
-    if mongo_rows:
-        rows = _merge_historical_rows(mongo_rows, rows)
+    excluded_dates = _excluded_historical_dates(mongo_rows, rows)
+    rows = _merge_historical_rows(mongo_rows, rows)
+    unresolved_dates = excluded_dates - {row.time for row in rows}
 
-    if not rows:
+    if not rows or unresolved_dates:
         recent_cache_rows = await _load_historical_from_recent_cache(
             symbol=symbol,
-            start_date=start_date,
-            end_date=end_date,
+            start_date=min(unresolved_dates) if rows and unresolved_dates else start_date,
+            end_date=max(unresolved_dates) if rows and unresolved_dates else end_date,
             interval="1D",
             adjustment_mode="raw",
         )
+        excluded_dates.update(_excluded_historical_dates(recent_cache_rows))
         rows = _merge_historical_rows(rows, recent_cache_rows)
+        unresolved_dates = excluded_dates - {row.time for row in rows}
 
     frame = _historical_rows_to_frame(rows)
     latest_db_timestamp = _resolve_frame_last_timestamp(frame)
-    needs_provider_refresh = frame.empty
-    provider_start_date = start_date
+    needs_provider_refresh = frame.empty or bool(unresolved_dates)
+    provider_start_date = min(unresolved_dates) if unresolved_dates and not frame.empty else start_date
 
     if latest_db_timestamp is not None:
         latest_db_date = latest_db_timestamp.date()
         if (end_date - latest_db_date).days >= QUANT_STALE_DAYS_THRESHOLD:
             needs_provider_refresh = True
             provider_start_date = max(start_date, latest_db_date - timedelta(days=30))
+
+    if unresolved_dates:
+        provider_start_date = min(provider_start_date, min(unresolved_dates))
 
     if needs_provider_refresh:
         try:
@@ -1712,11 +1646,20 @@ async def _load_price_frame(
             adjustment_mode="raw",
         )
         rows = _merge_historical_rows(rows, normalized_provider_rows)
+        excluded_dates.update(_excluded_historical_dates(normalized_provider_rows))
+        unresolved_dates = excluded_dates - {row.time for row in rows}
+
+    if unresolved_dates:
+        logger.warning(
+            "Quant price history for %s has unresolved excluded sessions: %s",
+            symbol,
+            ", ".join(day.isoformat() for day in sorted(unresolved_dates)),
+        )
+        return _historical_rows_to_frame([])
 
     if not rows:
         return _historical_rows_to_frame(rows)
 
-    rows = _normalize_price_unit_rows(rows, symbol=symbol)
     rows = _apply_corporate_action_adjustments(rows, corporate_actions, normalized_mode)
     return _historical_rows_to_frame(rows)
 
@@ -2291,7 +2234,7 @@ def _compute_garch_volatility(frame: pd.DataFrame) -> Dict[str, Any]:
     if len(enriched) < 250:
         return _empty_garch_payload()
 
-    enriched["return_pct"] = _sanitize_daily_returns(enriched["close"].pct_change()) * 100
+    enriched["return_pct"] = pd.to_numeric(enriched["close"].pct_change(), errors="coerce") * 100
     enriched = enriched.dropna(subset=["return_pct"]).reset_index(drop=True)
     returns = enriched["return_pct"].to_numpy(dtype=float)
     returns = returns[np.isfinite(returns)]
@@ -3019,7 +2962,7 @@ async def get_momentum_profile(
 
         if peer_symbols:
             peer_prices_result = await db.execute(
-                select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+                select(StockPrice)
                 .where(
                     and_(
                         StockPrice.symbol.in_(peer_symbols),
@@ -3031,18 +2974,17 @@ async def get_momentum_profile(
                 .order_by(StockPrice.symbol, StockPrice.time)
             )
 
-            peer_frame = pd.DataFrame(
-                peer_prices_result.all(),
-                columns=["symbol", "time", "close"],
-            )
+            peer_frame = _persisted_prices_to_frame(peer_prices_result.scalars().all())
             if not peer_frame.empty:
                 peer_frame["close"] = pd.to_numeric(peer_frame["close"], errors="coerce")
-                peer_frame = peer_frame.dropna(subset=["close"])
 
                 momentum_map: Dict[str, float] = {}
                 for peer_symbol, group in peer_frame.groupby("symbol"):
-                    peer_closes = group.sort_values("time")["close"].tolist()
-                    if len(peer_closes) <= 252 or peer_closes[-253] == 0 or peer_closes[-22] == 0:
+                    peer_closes = group.sort_values("time")["close"].tail(253)
+                    if len(peer_closes) <= 252 or peer_closes.isna().any():
+                        continue
+                    peer_closes = peer_closes.tolist()
+                    if peer_closes[-253] == 0 or peer_closes[-22] == 0:
                         continue
 
                     peer_r12 = ((peer_closes[-1] / peer_closes[-253]) - 1) * 100
@@ -3465,7 +3407,7 @@ async def get_relative_rotation(
     universe_symbols.add(symbol_upper)
 
     prices_result = await db.execute(
-        select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+        select(StockPrice)
         .where(
             and_(
                 StockPrice.symbol.in_(sorted(universe_symbols)),
@@ -3488,7 +3430,7 @@ async def get_relative_rotation(
         .order_by(StockIndex.time)
     )
 
-    price_frame = pd.DataFrame(prices_result.all(), columns=["symbol", "time", "close"])
+    price_frame = _persisted_prices_to_frame(prices_result.scalars().all())
     index_frame = pd.DataFrame(index_result.all(), columns=["time", "close_index"])
 
     if price_frame.empty or index_frame.empty:
@@ -3511,13 +3453,17 @@ async def get_relative_rotation(
         )
 
     price_frame["close"] = pd.to_numeric(price_frame["close"], errors="coerce")
-    price_frame = price_frame.dropna(subset=["close"])
     index_frame["close_index"] = pd.to_numeric(index_frame["close_index"], errors="coerce")
     index_frame = index_frame.dropna(subset=["close_index"])
 
     universe_points: List[Dict[str, Any]] = []
     skipped_symbols: List[Dict[str, Any]] = []
     for stock_symbol, group in price_frame.groupby("symbol"):
+        if group["close"].isna().any():
+            skipped_symbols.append(
+                {"symbol": stock_symbol, "reason": "unresolved_price_sessions"}
+            )
+            continue
         merged = group.merge(index_frame, on="time", how="inner")
         if len(merged) < min_overlap_days:
             skipped_symbols.append(

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from vnibb.services.ai_artifact_service import build_chart_artifacts, build_table_artifacts
+from vnibb.services.ai_artifact_service import (
+    _comparison_rows,
+    _price_trend_chart,
+    build_chart_artifacts,
+    build_table_artifacts,
+)
 
 
 def test_build_table_artifacts_returns_comparison_snapshot_for_compare_prompt():
@@ -12,8 +17,8 @@ def test_build_table_artifacts_returns_comparison_snapshot_for_compare_prompt():
                     "symbol": "VNM",
                     "company": {"short_name": "Vinamilk"},
                     "price_context": {
-                        "latest": {"close": 72.4},
-                        "summary": {"change_20d_pct": 4.1},
+                        "latest": {"close": 72400, "price_unit": "VND"},
+                        "summary": {"change_20d_pct": 4.1, "price_unit": "VND"},
                     },
                     "ratios": {
                         "pe_ratio": 14.2,
@@ -27,8 +32,8 @@ def test_build_table_artifacts_returns_comparison_snapshot_for_compare_prompt():
                     "symbol": "FPT",
                     "company": {"short_name": "FPT"},
                     "price_context": {
-                        "latest": {"close": 128.9},
-                        "summary": {"change_20d_pct": 6.8},
+                        "latest": {"close": 128900, "price_unit": "VND"},
+                        "summary": {"change_20d_pct": 6.8, "price_unit": "VND"},
                     },
                     "ratios": {
                         "pe_ratio": 22.5,
@@ -48,6 +53,8 @@ def test_build_table_artifacts_returns_comparison_snapshot_for_compare_prompt():
     assert artifact["type"] == "table"
     assert artifact["columns"][0]["key"] == "symbol"
     assert [row["symbol"] for row in artifact["rows"]] == ["VNM", "FPT"]
+    assert [row["price"] for row in artifact["rows"]] == [72400, 128900]
+    assert [row["change_20d_pct"] for row in artifact["rows"]] == [4.1, 6.8]
     assert artifact["sourceIds"] == [
         "VNM-PROFILE",
         "VNM-PRICES",
@@ -134,8 +141,8 @@ def test_build_chart_artifacts_returns_compare_charts_for_compare_prompt():
                     "symbol": "VNM",
                     "price_context": {
                         "recent_series": [
-                            {"time": "2026-04-01", "close": 72.4},
-                            {"time": "2026-04-02", "close": 73.0},
+                            {"time": "2026-04-01", "close": 72400, "price_unit": "VND"},
+                            {"time": "2026-04-02", "close": 73000, "price_unit": "VND"},
                         ]
                     },
                     "ratios": {"roe": 18.6, "revenue_growth": 7.4},
@@ -145,8 +152,8 @@ def test_build_chart_artifacts_returns_compare_charts_for_compare_prompt():
                     "symbol": "FPT",
                     "price_context": {
                         "recent_series": [
-                            {"time": "2026-04-01", "close": 128.9},
-                            {"time": "2026-04-02", "close": 131.0},
+                            {"time": "2026-04-01", "close": 128900, "price_unit": "VND"},
+                            {"time": "2026-04-02", "close": 131000, "price_unit": "VND"},
                         ]
                     },
                     "ratios": {"roe": 21.2, "revenue_growth": 16.9},
@@ -216,3 +223,51 @@ def test_build_chart_artifacts_returns_sector_and_foreign_flow_charts():
     artifact_ids = [artifact["id"] for artifact in artifacts]
     assert "sector_change_chart" in artifact_ids
     assert "foreign_flow_chart" in artifact_ids
+
+
+def test_comparison_prices_normalize_certified_lineage_and_withhold_unknown():
+    rows, _ = _comparison_rows([
+        {"symbol": "VNM", "price_context": {
+            "latest": {"close": 72.4, "source": "VCI"},
+            "summary": {"change_20d_pct": 5},
+        }},
+        {"symbol": "FPT", "price_context": {
+            "latest": {"close": 128.9, "source": "vnstock"},
+            "summary": {"change_20d_pct": 100000, "price_unit": "unknown"},
+        }},
+        {"symbol": "VNINDEX", "price_context": {
+            "latest": {"close": 1500, "source": "vnstock_points"},
+        }},
+    ])
+
+    assert rows[0]["price"] == 72400
+    assert rows[0]["price_unit"] == "VND"
+    assert rows[0]["price_source"] == "vnstock_history:VCI"
+    assert rows[0]["change_20d_pct"] is None
+    assert rows[1]["price"] is None
+    assert rows[1]["change_20d_pct"] is None
+    assert rows[1]["price_unit"] == "unknown"
+    assert rows[2]["price"] is None
+
+
+def test_base100_normalizes_each_point_and_rejects_uncertified_or_incoherent_series():
+    rows, series, sources = _price_trend_chart([
+        {"symbol": "VNM", "available_source_ids": ["VNM-PRICES"], "price_context": {
+            "recent_series": [
+                {"time": "2026-04-02", "close": 73000, "source": "vnstock_vnd:VCI"},
+                {"time": "2026-04-01", "close": 72.4, "source": "VCI"},
+            ],
+        }},
+        {"symbol": "FPT", "price_context": {"recent_series": [
+            {"time": "2026-04-01", "close": 128.9, "source": "vnstock"},
+            {"time": "2026-04-02", "close": 131000, "source": "vnstock_vnd"},
+        ]}},
+        {"symbol": "VCB", "price_context": {"recent_series": [
+            {"time": "2026-04-01", "close": 70000, "price_unit": "VND"},
+            {"time": "2026-04-02", "close": 71, "price_unit": "index_points"},
+        ]}},
+    ])
+
+    assert [item["key"] for item in series] == ["VNM"]
+    assert rows == [{"date": "2026-04-01", "VNM": 100.0}, {"date": "2026-04-02", "VNM": 100.83}]
+    assert sources == ["VNM-PRICES"]

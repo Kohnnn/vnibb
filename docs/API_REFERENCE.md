@@ -60,6 +60,42 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 
 Quote responses distinguish unavailable data from zero-valued prices. An invalid symbol or a provider failure without a stored quote returns `data: null` with an error; a stored fallback retains its market timestamp and reports the live-source failure. Consumers must not turn `null` into a fabricated zero trade.
 
+Quote and historical rows expose `price_unit`: `VND`, `index_points`, or
+`unknown`. Confirmed equity OHLC, price, previous/raw/adjusted close and absolute
+change use VND; percentage change, volume and trading value are not rescaled.
+Explicit source unit markers take precedence. Verified free vnstock equity
+history lineage converts thousand-VND once; already-VND values and legitimate
+low-VND prices are preserved. Indices/futures retain points, not currency.
+
+Unmarked sponsor/premium records and generic legacy PostgreSQL/Redis values are
+not certified by their numeric magnitude. Canonical history excludes incompatible
+or unconfirmed rows and discloses excluded rows/partial coverage in `meta.warnings`.
+`meta.unit_status` describes selected returned rows, not only the Mongo source.
+This can reduce legacy coverage until trusted acquisition fills it; no automatic
+production data rewrite is part of this contract. Endpoint cache namespaces are
+versioned so old unitless full-response caches cannot bypass the cutover.
+
+Adjustment mode remains independent of currency units. Chart consumers splice
+quotes only when units are explicitly compatible and the quote is not older;
+raw quotes cannot overwrite same-day adjusted history. MCP raw-row tools retain
+unit provenance and disclose unknown-unit comparability instead of implying API
+history certification.
+
+Quant daily-return analysis retains dates excluded for unknown/incompatible units.
+It tries trusted cache/provider replacements even when the last stored session is
+current. If those known excluded sessions remain unresolved, estimators report
+insufficient data rather than treating a multi-session move as a daily return.
+Weekends and other unobserved calendar dates do not create artificial gaps.
+Direct peer momentum and relative rotation omit unresolved price windows;
+correlation suppresses returns touching excluded sessions without forward-filling
+their closes. Snapshot daily changes use a matching previous settled session or
+the snapshot's supported change pair, never an unrelated earlier close.
+
+Screener performance enrichment retains original session positions. A lookback
+crossing an unresolved unit returns an unavailable metric and clears unsupported
+cached values when price history is loaded. Fully populated rows retain the
+existing no-query fast path; this is not a historical cache rewrite.
+
 ### Comparison / Screener / Sector
 - `GET /comparison/performance`
 - `GET /comparison`

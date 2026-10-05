@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
+from vnibb.core.price_units import history_price_records, persisted_price_record
 from vnibb.models.stock import StockPrice
 
 logger = logging.getLogger(__name__)
@@ -37,13 +38,13 @@ def _compute_start_date(period: str) -> date:
     return date.today() - timedelta(days=days)
 
 
-# Simple in-memory cache keyed by (symbol, period)
+# Simple in-memory cache keyed by (symbol, period, source)
 _cache: Dict[str, Any] = {}
 _CACHE_MAX_SIZE = 50
 
 
-def _cache_key(symbol: str, period: str) -> str:
-    return f"{symbol}:{period}"
+def _cache_key(symbol: str, period: str, source: str) -> str:
+    return f"{symbol}:{period}:{source}"
 
 
 def _evict_oldest():
@@ -57,14 +58,7 @@ async def _fetch_chart_data_from_db(symbol: str, start_date: date) -> List[Dict[
     async with async_session_maker() as session:
         rows = (
             await session.execute(
-                select(
-                    StockPrice.time,
-                    StockPrice.open,
-                    StockPrice.high,
-                    StockPrice.low,
-                    StockPrice.close,
-                    StockPrice.volume,
-                )
+                select(StockPrice)
                 .where(
                     StockPrice.symbol == symbol,
                     StockPrice.interval == "1D",
@@ -72,18 +66,23 @@ async def _fetch_chart_data_from_db(symbol: str, start_date: date) -> List[Dict[
                 )
                 .order_by(StockPrice.time.asc())
             )
-        ).all()
+        ).scalars().all()
 
     records: List[Dict[str, Any]] = []
-    for time_value, open_v, high_v, low_v, close_v, volume_v in rows:
+    for row in rows:
+        normalized = persisted_price_record(row)
+        if normalized["price_unit"] == "unknown":
+            logger.warning("Excluding chart bar with unknown price unit: %s %s", symbol, row.time)
+            continue
         records.append(
             {
-                "time": time_value.isoformat(),
-                "open": float(open_v),
-                "high": float(high_v),
-                "low": float(low_v),
-                "close": float(close_v),
-                "volume": int(volume_v or 0),
+                "time": row.time.isoformat(),
+                "open": float(normalized["open"]),
+                "high": float(normalized["high"]),
+                "low": float(normalized["low"]),
+                "close": float(normalized["close"]),
+                "volume": int(normalized["volume"] or 0),
+                "price_unit": normalized["price_unit"],
             }
         )
 
@@ -104,7 +103,7 @@ async def fetch_chart_data(
         source: Data source (KBS, VCI, DNSE). Defaults to settings.
 
     Returns:
-        List of dicts with {time, open, high, low, close, volume}
+        List of dicts with {time, open, high, low, close, volume, price_unit}
         sorted ascending by time.
     """
     symbol = symbol.upper().strip()
@@ -112,7 +111,7 @@ async def fetch_chart_data(
         source = settings.vnstock_source
 
     # Check cache
-    key = _cache_key(symbol, period)
+    key = _cache_key(symbol, period, source)
     if key in _cache:
         logger.debug(f"Chart cache hit: {key}")
         return _cache[key]
@@ -139,21 +138,26 @@ async def fetch_chart_data(
                 return []
 
             records = []
-            for _, row in df.iterrows():
-                time_val = row.get("time") or row.get("date") or row.get("trading_date")
+            normalized_rows = history_price_records(df, symbol=symbol, source=source, provider=stock.quote)
+            for normalized in normalized_rows:
+                time_val = normalized.get("time") or normalized.get("date") or normalized.get("trading_date")
                 if hasattr(time_val, "isoformat"):
                     time_str = time_val.isoformat()[:10]
                 else:
                     time_str = str(time_val)[:10]
 
+                if normalized["price_unit"] == "unknown":
+                    logger.warning("Excluding chart bar with unknown price unit: %s %s", symbol, time_str)
+                    continue
                 records.append(
                     {
                         "time": time_str,
-                        "open": float(row.get("open", 0)),
-                        "high": float(row.get("high", 0)),
-                        "low": float(row.get("low", 0)),
-                        "close": float(row.get("close", 0)),
-                        "volume": int(row.get("volume", 0)),
+                        "open": float(normalized.get("open", 0)),
+                        "high": float(normalized.get("high", 0)),
+                        "low": float(normalized.get("low", 0)),
+                        "close": float(normalized.get("close", 0)),
+                        "volume": int(normalized.get("volume", 0)),
+                        "price_unit": normalized["price_unit"],
                     }
                 )
 

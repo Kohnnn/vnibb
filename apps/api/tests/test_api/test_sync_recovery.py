@@ -416,7 +416,9 @@ async def test_screener_modular_quote_and_failed_rerun_preserve_certified_row(te
             quote_calls.append(symbol)
 
         def history(self, **kwargs):
-            return pd.DataFrame([{"time": datetime.utcnow(), "close": 123, "volume": 456}])
+            frame = pd.DataFrame([{"time": datetime.utcnow(), "close": 123, "volume": 456}])
+            frame.attrs["price_unit"] = "VND"
+            return frame
 
     async def pace(bucket):
         return None

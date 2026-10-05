@@ -43,6 +43,7 @@ from vnibb.core.cache_constants import (
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, engine
 from vnibb.core.retry import with_retry
+from vnibb.core.price_units import history_price_records, normalize_price_record, persisted_price_record, persisted_price_source, screener_price_record
 from vnibb.core.vn_sectors import resolve_sector_name
 from vnibb.models.alerts import BlockTrade
 from vnibb.models.company import Company, Officer, Shareholder
@@ -314,17 +315,14 @@ class DataPipeline:
                 Quote = get_quote_class()
                 quote = Quote(symbol=symbol, source=_source)
                 history_callable = quote.history
-                if bypass_internal_retry:
-                    # vnstock retries every exception here, including ValueError payload failures.
-                    unwrapped_history = getattr(history_callable, "__wrapped__", None)
-                    if callable(unwrapped_history):
-                        return unwrapped_history(
-                            quote,
-                            start=start,
-                            end=end,
-                            interval=interval,
-                        )
-                return history_callable(start=start, end=end, interval=interval)
+                unwrapped_history = getattr(history_callable, "__wrapped__", None)
+                if bypass_internal_retry and callable(unwrapped_history):
+                    frame = unwrapped_history(quote, start=start, end=end, interval=interval)
+                else:
+                    frame = history_callable(start=start, end=end, interval=interval)
+                if isinstance(frame, pd.DataFrame):
+                    frame = pd.DataFrame(history_price_records(frame, symbol=symbol, source=_source, provider=quote, asset_type=getattr(quote, "asset_type", None)))
+                return frame
 
             try:
                 df = await asyncio.wait_for(
@@ -1304,27 +1302,21 @@ class DataPipeline:
             previous_snapshot_date = previous_date_result.scalar()
             if previous_snapshot_date:
                 previous_rows = await session.execute(
-                    select(
-                        ScreenerSnapshot.symbol,
-                        ScreenerSnapshot.company_name,
-                        ScreenerSnapshot.exchange,
-                        ScreenerSnapshot.industry,
-                        ScreenerSnapshot.price,
-                        ScreenerSnapshot.volume,
-                        ScreenerSnapshot.market_cap,
-                        ScreenerSnapshot.trade_date,
-                    ).where(
+                    select(ScreenerSnapshot).where(
                         ScreenerSnapshot.snapshot_date == previous_snapshot_date,
                         ScreenerSnapshot.symbol.in_(deduped_symbols),
                     )
                 )
-                for row in previous_rows.fetchall():
+                for row in previous_rows.scalars().all():
+                    normalized_price = screener_price_record(row)
                     previous_snapshot_fallback[str(row.symbol).upper()] = {
                         "company_name": row.company_name,
                         "exchange": row.exchange,
                         "industry": row.industry,
                         "trade_date": row.trade_date,
-                        "price": row.price,
+                        "price": normalized_price["price"],
+                        "price_unit": normalized_price["price_unit"],
+                        "price_source": normalized_price.get("price_source"),
                         "volume": row.volume,
                         "market_cap": row.market_cap,
                     }
@@ -1342,12 +1334,7 @@ class DataPipeline:
                 .subquery()
             )
             latest_price_rows = await session.execute(
-                select(
-                    StockPrice.symbol,
-                    StockPrice.time,
-                    StockPrice.close,
-                    StockPrice.volume,
-                ).join(
+                select(StockPrice).join(
                     latest_price_subquery,
                     and_(
                         StockPrice.symbol == latest_price_subquery.c.symbol,
@@ -1356,10 +1343,13 @@ class DataPipeline:
                     ),
                 )
             )
-            for row in latest_price_rows.fetchall():
+            for row in latest_price_rows.scalars().all():
+                normalized_price = persisted_price_record(row)
                 latest_price_fallback[str(row.symbol).upper()] = {
                     "trade_date": row.time,
-                    "price": _parse_float(row.close),
+                    "price": _parse_float(normalized_price["close"]),
+                    "price_unit": normalized_price["price_unit"],
+                    "price_source": normalized_price.get("price_source") or row.source,
                     "volume": _parse_float(row.volume),
                 }
 
@@ -1466,13 +1456,22 @@ class DataPipeline:
                                     end_date = datetime.now()
                                     start_date = end_date - timedelta(days=10)
                                     from vnibb.providers.vnstock.runtime import get_quote_class
-                                    history = get_quote_class()(symbol=sym, source=src).history(
+                                    quote = get_quote_class()(symbol=sym, source=src)
+                                    history = quote.history(
                                         start=start_date.strftime("%Y-%m-%d"),
                                         end=end_date.strftime("%Y-%m-%d"),
                                     )
                                     if history is not None and not history.empty:
-                                        latest = history.iloc[-1]
+                                        latest = history_price_records(
+                                            history,
+                                            symbol=sym,
+                                            source=src,
+                                            provider=quote,
+                                            asset_type=getattr(quote, "asset_type", None),
+                                        )[-1]
                                         ratio_row["price"] = latest.get("close")
+                                        ratio_row["price_unit"] = latest["price_unit"]
+                                        ratio_row["price_source"] = latest.get("price_source")
                                         ratio_row["volume"] = latest.get("volume")
                                         ratio_row["trade_date"] = self._parse_date_value(
                                             latest.get("time")
@@ -1514,6 +1513,7 @@ class DataPipeline:
                     listing_row = listing_metadata.get(symbol, {})
                     previous_row = previous_snapshot_fallback.get(symbol, {})
                     latest_price_row = latest_price_fallback.get(symbol, {})
+                    row = normalize_price_record(row, symbol=symbol)
                     row_price = _parse_float(row.get("price"))
                     row_trade_date = self._parse_date_value(
                         row.get("trade_date")
@@ -1524,19 +1524,49 @@ class DataPipeline:
                     previous_price = _parse_float(previous_row.get("price"))
                     previous_volume = _parse_float(previous_row.get("volume"))
                     latest_price = _parse_float(latest_price_row.get("price"))
-                    latest_volume = _parse_float(latest_price_row.get("volume"))
-                    if row_price is not None and row_trade_date is not None:
+                    certified_fallback = next(
+                        (
+                            candidate
+                            for candidate, candidate_price in (
+                                (latest_price_row, latest_price),
+                                (previous_row, previous_price),
+                            )
+                            if candidate_price is not None
+                            and candidate.get("price_unit") in ("VND", "index_points")
+                        ),
+                        None,
+                    )
+                    # Priority stays enrichment > latest > previous. A unit-unknown
+                    # enrichment row only wins when no certified row backs it.
+                    if (
+                        row_price is not None
+                        and row_trade_date is not None
+                        and (row["price_unit"] != "unknown" or certified_fallback is None)
+                    ):
                         price_value = row_price
                         volume_value = row_volume
                         trade_date_value = row_trade_date
-                    elif latest_price is not None:
+                        price_provenance = row
+                    elif latest_price is not None and (
+                        latest_price_row.get("price_unit") != "unknown"
+                        or certified_fallback is None
+                    ):
                         price_value = latest_price
-                        volume_value = latest_volume
+                        volume_value = _parse_float(latest_price_row.get("volume"))
                         trade_date_value = self._parse_date_value(latest_price_row.get("trade_date"))
+                        price_provenance = latest_price_row
+                    elif certified_fallback is not None:
+                        price_value = _parse_float(certified_fallback.get("price"))
+                        volume_value = _parse_float(certified_fallback.get("volume"))
+                        trade_date_value = self._parse_date_value(
+                            certified_fallback.get("trade_date")
+                        )
+                        price_provenance = certified_fallback
                     else:
                         price_value = previous_price
                         volume_value = previous_volume
                         trade_date_value = self._parse_date_value(previous_row.get("trade_date"))
+                        price_provenance = previous_row
                     market_cap_value = (
                         _parse_float(row.get("market_cap"))
                         or _parse_float(row.get("marketCap"))
@@ -1551,7 +1581,7 @@ class DataPipeline:
                     if not shares_for_market_cap:
                         shares_for_market_cap = _parse_float(row.get("shares_outstanding"))
 
-                    if not market_cap_value and shares_for_market_cap and price_value:
+                    if not market_cap_value and shares_for_market_cap and price_value and price_provenance.get("price_unit") == "VND":
                         market_cap_value = float(shares_for_market_cap) * float(price_value)
 
                     extended_metrics = {
@@ -1581,6 +1611,10 @@ class DataPipeline:
                     extended_metrics = {
                         key: value for key, value in extended_metrics.items() if value is not None
                     }
+                    extended_metrics.update(
+                        price_unit=price_provenance.get("price_unit", "unknown"),
+                        price_source=price_provenance.get("price_source"),
+                    )
 
                     values = {
                         "symbol": symbol,
@@ -1675,7 +1709,7 @@ class DataPipeline:
                         ["symbol", "snapshot_date"],
                         values,
                         preserve_existing_on_null={"trade_date"},
-                        preserve_columns_without=("trade_date", {"price", "volume"}),
+                        preserve_columns_without=("trade_date", {"price", "volume", "extended_metrics"}),
                     )
                     await session.execute(stmt)
                     count += 1
@@ -1688,6 +1722,8 @@ class DataPipeline:
                         "price": values.get("price"),
                         "volume": values.get("volume"),
                         "market_cap": values.get("market_cap"),
+                        "price_unit": extended_metrics["price_unit"],
+                        "price_source": extended_metrics.get("price_source"),
                     }
 
                     cache_batch.append(
@@ -1701,6 +1737,9 @@ class DataPipeline:
                             ),
                             "company_name": values.get("company_name"),
                             "price": values.get("price"),
+                            "volume": values.get("volume"),
+                            "price_unit": extended_metrics["price_unit"],
+                            "price_source": extended_metrics.get("price_source"),
                             "market_cap": values.get("market_cap"),
                             "pe": values.get("pe"),
                             "pb": values.get("pb"),
@@ -1823,8 +1862,13 @@ class DataPipeline:
                             ratio_payload.get("dps"),
                             ratio_payload.get("dividends_per_share"),
                         )
-                        price_value = _pick_float(screener_row.price)
-                        if dps_value is not None and price_value not in (None, 0):
+                        normalized_price = screener_price_record(screener_row)
+                        price_value = _pick_float(normalized_price.get("price"))
+                        if (
+                            normalized_price["price_unit"] == "VND"
+                            and dps_value is not None
+                            and price_value not in (None, 0)
+                        ):
                             dividend_yield_value = _normalize_dividend_yield(
                                 (dps_value / price_value) * 100
                             )
@@ -2059,6 +2103,8 @@ class DataPipeline:
                             raise RuntimeError(f"Empty price acquisition for {symbol} ({range_start_str} -> {range_end_str})")
 
                         for _, row in range_df.iterrows():
+                            if row.get("price_unit") not in {"VND", "index_points"}:
+                                raise ValueError(f"Unknown price unit for {symbol}")
                             row_time = (
                                 row["time"].date() if hasattr(row["time"], "date") else row["time"]
                             )
@@ -2071,10 +2117,12 @@ class DataPipeline:
                                 "low": float(row["low"]),
                                 "close": float(row["close"]),
                                 "volume": int(row["volume"]),
+                                "value": row.get("value"),
+                                "adj_close": next((row.get(field) for field in ("adj_close", "adjusted_close", "adjClose") if row.get(field) is not None), None),
                                 "interval": "1D",
-                                "source": "vnstock",
+                                "source": persisted_price_source(row),
                             }
-                            stmt = get_upsert_stmt(StockPrice, ["symbol", "time", "interval"], val)
+                            stmt = get_upsert_stmt(StockPrice, ["symbol", "time", "interval"], val, preserve_existing_on_null={"value"})
                             await session.execute(stmt)
 
                         symbol_synced += len(range_df)
@@ -2093,7 +2141,11 @@ class DataPipeline:
                         "low": float(latest_row.get("low")),
                         "close": float(latest_row.get("close")),
                         "volume": int(latest_row.get("volume")),
+                        "value": latest_row.get("value"),
+                        "adj_close": next((latest_row.get(field) for field in ("adj_close", "adjusted_close", "adjClose") if latest_row.get(field) is not None), None),
                         "interval": "1D",
+                        "price_unit": latest_row.get("price_unit", "unknown"),
+                        "price_source": latest_row.get("price_source"),
                     }
                     latest_key = build_cache_key("vnibb", "price", "latest", symbol)
                     await self._cache_set_json(latest_key, latest_payload, CACHE_TTL_PRICE_LATEST)
@@ -2104,14 +2156,7 @@ class DataPipeline:
                         )
                         async with async_session_maker() as session:
                             recent_rows_result = await session.execute(
-                                select(
-                                    StockPrice.time,
-                                    StockPrice.open,
-                                    StockPrice.high,
-                                    StockPrice.low,
-                                    StockPrice.close,
-                                    StockPrice.volume,
-                                )
+                                select(StockPrice)
                                 .where(
                                     StockPrice.symbol == symbol,
                                     StockPrice.interval == "1D",
@@ -2120,17 +2165,8 @@ class DataPipeline:
                                 .order_by(StockPrice.time.asc())
                             )
                             recent_rows = [
-                                {
-                                    "time": row.time.isoformat()
-                                    if hasattr(row.time, "isoformat")
-                                    else row.time,
-                                    "open": float(row.open),
-                                    "high": float(row.high),
-                                    "low": float(row.low),
-                                    "close": float(row.close),
-                                    "volume": int(row.volume),
-                                }
-                                for row in recent_rows_result.fetchall()
+                                {**persisted_price_record(row), "time": row.time.isoformat()}
+                                for row in recent_rows_result.scalars().all()
                             ]
 
                         recent_key = build_cache_key("vnibb", "price", "recent", symbol)
@@ -3597,30 +3633,27 @@ class DataPipeline:
                     company_raw.get("issue_share"),
                 )
 
-            latest_price = _coerce_float(
-                (
+            price_row = (
+                await session.execute(
+                    select(StockPrice)
+                    .where(StockPrice.symbol == symbol_value)
+                    .order_by(StockPrice.time.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            price_record = persisted_price_record(price_row) if price_row is not None else {}
+            latest_price = _coerce_float(price_record.get("close")) if price_record.get("price_unit") == "VND" else None
+            if latest_price in (None, 0):
+                snapshot_row = (
                     await session.execute(
-                        select(StockPrice.close)
-                        .where(StockPrice.symbol == symbol_value)
-                        .order_by(StockPrice.time.desc())
+                        select(ScreenerSnapshot)
+                        .where(ScreenerSnapshot.symbol == symbol_value, ScreenerSnapshot.price.is_not(None))
+                        .order_by(ScreenerSnapshot.snapshot_date.desc())
                         .limit(1)
                     )
                 ).scalar_one_or_none()
-            )
-            if latest_price in (None, 0):
-                latest_price = _coerce_float(
-                    (
-                        await session.execute(
-                            select(ScreenerSnapshot.price)
-                            .where(
-                                ScreenerSnapshot.symbol == symbol_value,
-                                ScreenerSnapshot.price.is_not(None),
-                            )
-                            .order_by(ScreenerSnapshot.snapshot_date.desc())
-                            .limit(1)
-                        )
-                    ).scalar_one_or_none()
-                )
+                snapshot_record = screener_price_record(snapshot_row) if snapshot_row is not None else {}
+                latest_price = _coerce_float(snapshot_record.get("price")) if snapshot_record.get("price_unit") == "VND" else None
 
             market_cap = None
             if outstanding_shares not in (None, 0) and latest_price not in (None, 0):

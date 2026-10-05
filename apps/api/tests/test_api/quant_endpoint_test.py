@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pandas as pd
 import pytest
@@ -616,6 +617,8 @@ async def test_load_price_frame_rolls_back_and_falls_back_to_provider_on_aborted
 ):
     provider_rows = [
         SimpleNamespace(
+            symbol="VNM",
+            price_unit="VND",
             time=date(2026, 3, 11),
             open=101.0,
             high=103.5,
@@ -624,6 +627,8 @@ async def test_load_price_frame_rolls_back_and_falls_back_to_provider_on_aborted
             volume=1_250_000,
         ),
         SimpleNamespace(
+            symbol="VNM",
+            price_unit="VND",
             time=date(2026, 3, 12),
             open=102.5,
             high=104.0,
@@ -695,7 +700,7 @@ async def test_load_price_frame_refreshes_stale_db_rows_with_provider_data(
                 close=101.5,
                 volume=1_150_000,
                 interval="1D",
-                source="vnstock",
+                source="vnstock_vnd:KBS",
             ),
             StockPrice(
                 id=2,
@@ -708,7 +713,7 @@ async def test_load_price_frame_refreshes_stale_db_rows_with_provider_data(
                 close=102.25,
                 volume=1_240_000,
                 interval="1D",
-                source="vnstock",
+                source="vnstock_vnd:KBS",
             ),
         ]
     )
@@ -716,6 +721,8 @@ async def test_load_price_frame_refreshes_stale_db_rows_with_provider_data(
 
     provider_rows = [
         SimpleNamespace(
+            symbol="VNM",
+            price_unit="VND",
             time=date(2026, 3, 13),
             open=102.5,
             high=104.0,
@@ -724,6 +731,8 @@ async def test_load_price_frame_refreshes_stale_db_rows_with_provider_data(
             volume=1_320_000,
         ),
         SimpleNamespace(
+            symbol="VNM",
+            price_unit="VND",
             time=date(2026, 3, 14),
             open=103.6,
             high=105.1,
@@ -760,11 +769,123 @@ async def test_load_price_frame_refreshes_stale_db_rows_with_provider_data(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("refill", ["cache", "provider", "unknown", "missing"])
+async def test_load_price_frame_refills_excluded_middle_with_current_trusted_tail(
+    test_db, monkeypatch, refill
+):
+    original = _build_price_frame(260)
+    excluded_index = 100
+    excluded_date = original.iloc[excluded_index]["time"].date()
+    test_db.add(Stock(id=1, symbol="VNM", exchange="HOSE", company_name="Vinamilk"))
+    test_db.add_all(
+        [
+            StockPrice(
+                id=index + 1,
+                stock_id=1,
+                symbol="VNM",
+                time=row.time.date(),
+                open=row.open,
+                high=row.high,
+                low=row.low,
+                close=row.close,
+                volume=int(row.volume),
+                interval="1D",
+                source="legacy" if index == excluded_index else "vnstock_vnd:KBS",
+            )
+            for index, row in enumerate(original.itertuples(index=False))
+        ]
+    )
+    await test_db.commit()
+
+    excluded_row = original.iloc[excluded_index]
+    replacement = EquityHistoricalData(
+        symbol="VNM", time=excluded_date,
+        open=excluded_row["open"], high=excluded_row["high"], low=excluded_row["low"],
+        close=excluded_row["close"], volume=int(excluded_row["volume"]),
+        price_unit="unknown" if refill == "unknown" else "VND",
+    )
+    cache_calls = []
+    provider_calls = []
+
+    async def empty_mongo(**_kwargs):
+        return []
+
+    async def load_cache(**kwargs):
+        cache_calls.append(kwargs)
+        return [replacement] if refill == "cache" else []
+
+    async def fetch(params):
+        provider_calls.append(params)
+        return [replacement] if refill in {"provider", "unknown"} else []
+
+    monkeypatch.setattr(quant, "_load_historical_from_mongo", empty_mongo)
+    monkeypatch.setattr(quant, "_load_historical_from_recent_cache", load_cache)
+    monkeypatch.setattr(quant.VnstockEquityHistoricalFetcher, "fetch", fetch)
+
+    frame = await quant._load_price_frame(
+        db=test_db, symbol="VNM", start_date=original["time"].min().date(),
+        end_date=original["time"].max().date(), source="KBS",
+    )
+
+    assert len(cache_calls) == 1
+    assert cache_calls[0]["start_date"] == excluded_date
+    assert cache_calls[0]["end_date"] == excluded_date
+    if refill == "cache":
+        assert provider_calls == []
+    else:
+        assert len(provider_calls) == 1
+        assert provider_calls[0].start_date == excluded_date
+
+    if refill in {"cache", "provider"}:
+        pd.testing.assert_frame_equal(frame, original, check_dtype=False)
+        assert quant._compute_sortino(frame) == quant._compute_sortino(original)
+        assert quant._compute_garch_volatility(frame) == quant._compute_garch_volatility(original)
+    else:
+        assert frame.empty
+        assert all(value is None for value in quant._compute_sortino(frame)["monthly_sortino"].values())
+        assert quant._compute_garch_volatility(frame)["omega"] is None
+        for endpoint in (quant.get_sortino_monthly_metric, quant.get_garch_volatility_metric):
+            response = await endpoint(
+                symbol="VNM", period="5Y", source="KBS", adjustment_mode="raw", db=test_db,
+            )
+            assert response.meta.count == 0
+            assert response.error == "Insufficient Data: Expected at least 30 sessions, got 0."
+
+
+@pytest.mark.asyncio
+async def test_load_price_frame_does_not_refill_unobserved_calendar_gaps(test_db, monkeypatch):
+    rows = [_history_row(73_000, day=3), _history_row(74_000, day=6)]
+
+    async def load_db(**_kwargs):
+        return rows
+
+    async def empty_mongo(**_kwargs):
+        return []
+
+    async def unexpected_fallback(*_args, **_kwargs):
+        pytest.fail("Trusted Friday-to-Monday history must not trigger gap refill")
+
+    monkeypatch.setattr(quant, "_load_historical_from_db", load_db)
+    monkeypatch.setattr(quant, "_load_historical_from_mongo", empty_mongo)
+    monkeypatch.setattr(quant, "_load_historical_from_recent_cache", unexpected_fallback)
+    monkeypatch.setattr(quant.VnstockEquityHistoricalFetcher, "fetch", unexpected_fallback)
+
+    frame = await quant._load_price_frame(
+        db=test_db, symbol="FPT", start_date=date(2025, 1, 3),
+        end_date=date(2025, 1, 6), source="KBS",
+    )
+
+    assert frame["time"].dt.date.tolist() == [date(2025, 1, 3), date(2025, 1, 6)]
+    assert quant._compute_sortino(frame)["monthly_sortino"]["Jan"] == 99.0
+
+
+@pytest.mark.asyncio
 async def test_load_price_frame_applies_adjustments_for_quant_history(test_db, monkeypatch):
     async def fake_load_historical_from_db(*_args, **_kwargs):
         return [
             EquityHistoricalData(
                 symbol="VNM",
+                price_unit="VND",
                 time=date(2026, 1, 2),
                 open=100.0,
                 high=101.0,
@@ -817,86 +938,97 @@ async def test_load_price_frame_applies_adjustments_for_quant_history(test_db, m
     assert frame["open"].tolist() == [90.0]
 
 
-def _mixed_unit_rows() -> list[EquityHistoricalData]:
-    rows: list[EquityHistoricalData] = []
-    for i in range(120):
-        thousand_unit = i < 60
-        base = 73.0 if thousand_unit else 73000.0
-        rows.append(
-            EquityHistoricalData(
-                symbol="FPT",
-                time=date(2025, 1, 1) + timedelta(days=i),
-                open=base,
-                high=base * 1.01,
-                low=base * 0.99,
-                close=base,
-                volume=1_000_000,
-                raw_close=base,
-                adjustment_mode="raw",
-                adjustment_applied=False,
-            )
-        )
-    return rows
+def _history_row(close: float, *, unit: str = "VND", day: int = 1, symbol: str = "FPT"):
+    return EquityHistoricalData(
+        symbol=symbol, time=date(2025, 1, day), open=close, high=close,
+        low=close, close=close, raw_close=close, adjusted_close=close / 2,
+        volume=1_000_000, price_unit=unit,
+    )
 
 
-def test_normalize_price_unit_rows_coerces_thousand_vnd_to_raw():
-    normalized = quant._normalize_price_unit_rows(_mixed_unit_rows(), symbol="FPT")
-    closes = [r.close for r in normalized]
+def test_quant_history_preserves_low_vnd_and_large_legitimate_split():
+    rows = [_history_row(100_000), _history_row(100, day=2), _history_row(80, day=3)]
+    frame = quant._historical_rows_to_frame(quant._merge_historical_rows(rows))
 
-    assert min(closes) > 70_000
-    assert max(closes) / min(closes) < 2
-    assert all(r.open == r.close for r in normalized)
-    assert all(r.high > r.close for r in normalized)
-
-
-def test_normalize_price_unit_rows_eliminates_seam_return():
-    normalized = quant._normalize_price_unit_rows(_mixed_unit_rows(), symbol="FPT")
-    frame = quant._historical_rows_to_frame(normalized)
-    max_abs_return = frame["close"].pct_change().abs().max()
-
-    assert max_abs_return < 0.20
+    assert frame["close"].tolist() == [100_000, 100, 80]
+    assert rows[1].raw_close == 100
+    assert rows[1].adjusted_close == 50
 
 
-def test_normalize_price_unit_rows_leaves_uniform_series_untouched():
+def test_quant_history_filters_unknown_units_before_merging_same_date():
+    canonical = _history_row(73_000)
+    unknown = _history_row(73, unit="unknown")
+
+    merged = quant._merge_historical_rows([canonical], [unknown])
+
+    assert merged == [canonical]
+    assert quant._historical_rows_to_frame([unknown]).empty
+
+
+def test_quant_history_preserves_index_points():
+    row = _history_row(1250, unit="index_points", symbol="VNINDEX")
+
+    assert quant._historical_rows_to_frame([row])["close"].tolist() == [1250]
+
+
+def test_quant_peer_prices_use_persisted_source_contract_not_magnitude():
     rows = [
-        EquityHistoricalData(
-            symbol="VCB",
-            time=date(2025, 1, 1) + timedelta(days=i),
-            open=76_000.0,
-            high=76_500.0,
-            low=75_500.0,
-            close=76_000.0,
-            volume=500_000,
-            raw_close=76_000.0,
-            adjustment_mode="raw",
-            adjustment_applied=False,
-        )
-        for i in range(80)
+        SimpleNamespace(symbol="FPT", time=date(2025, 1, 1), close=73, source="KBS"),
+        SimpleNamespace(symbol="LOW", time=date(2025, 1, 1), close=80, source="vnstock_vnd:KBS"),
+        SimpleNamespace(symbol="BAD", time=date(2025, 1, 1), close=73_000, source="vnstock"),
     ]
-    normalized = quant._normalize_price_unit_rows(rows, symbol="VCB")
 
-    assert [r.close for r in normalized] == [76_000.0] * 80
+    frame = quant._persisted_prices_to_frame(rows)
+
+    canonical = frame.dropna(subset=["close"])
+    assert dict(zip(canonical["symbol"], canonical["close"], strict=True)) == {"FPT": 73_000, "LOW": 80}
+    assert frame.loc[frame["symbol"] == "BAD", "close"].isna().all()
 
 
-def test_normalize_price_unit_rows_ignores_real_split_magnitude():
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["momentum", "relative_rotation"])
+async def test_peer_analytics_omit_unresolved_price_sessions(monkeypatch, endpoint):
+    frame = _build_price_frame(254)
+    frame.loc[239:241, "close"] = [100, 500, 110]
     rows = [
-        EquityHistoricalData(
-            symbol="ABC",
-            time=date(2025, 1, 1) + timedelta(days=i),
-            open=100_000.0 if i < 10 else 25_000.0,
-            high=100_000.0 if i < 10 else 25_000.0,
-            low=100_000.0 if i < 10 else 25_000.0,
-            close=100_000.0 if i < 10 else 25_000.0,
-            volume=500_000,
-            raw_close=100_000.0 if i < 10 else 25_000.0,
-            adjustment_mode="raw",
-            adjustment_applied=False,
+        SimpleNamespace(
+            symbol=symbol,
+            time=row.time.date(),
+            close=row.close,
+            source="unknown" if symbol == "FPT" and index == 240 else "vnstock_vnd:KBS",
         )
-        for i in range(80)
+        for symbol in ("FPT", "LOW")
+        for index, row in enumerate(frame.itertuples())
     ]
-    normalized = quant._normalize_price_unit_rows(rows, symbol="ABC")
+    prices = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: rows))
+    if endpoint == "momentum":
+        monkeypatch.setattr(
+            quant, "_load_quant_frame_with_warning", AsyncMock(return_value=(frame, None))
+        )
+        results = [
+            SimpleNamespace(scalar_one_or_none=lambda: "Technology"),
+            SimpleNamespace(all=lambda: [("FPT",), ("LOW",)]),
+            prices,
+        ]
+        response = await quant.get_momentum_profile(
+            "FPT", period="3Y", source="KBS", adjustment_mode="raw",
+            db=SimpleNamespace(execute=AsyncMock(side_effect=results)),
+        )
+        symbols = [item["symbol"] for item in response.data["peer_distribution"]]
+    else:
+        benchmark = [(row.time.date(), 1000.0) for row in frame.itertuples()]
+        results = [prices, SimpleNamespace(all=lambda: benchmark)]
+        response = await quant.get_relative_rotation(
+            "FPT", lookback_days=260,
+            db=SimpleNamespace(execute=AsyncMock(side_effect=results)),
+        )
+        symbols = [item["symbol"] for item in response.data["universe"]]
+        assert response.data["selected"] is None
+        assert response.data["coverage"]["skipped_symbols"] == [
+            {"symbol": "FPT", "reason": "unresolved_price_sessions"}
+        ]
 
-    assert {r.close for r in normalized} == {100_000.0, 25_000.0}
+    assert symbols == ["LOW"]
 
 
 @pytest.mark.asyncio
@@ -916,6 +1048,7 @@ async def test_load_quant_frame_with_warning_merges_latest_quote_snapshot(test_d
         )
 
     class DummyQuote:
+        price_unit = "VND"
         price = 103.2
         open = 101.2
         high = 104.0
@@ -1039,37 +1172,45 @@ def _build_garch_like_price_frame(rows: int = 620) -> pd.DataFrame:
     return _frame_from_returns(returns)
 
 
-def test_sanitize_daily_returns_drops_unit_seam_spikes():
-    series = pd.Series([0.01, -0.02, 9_870.0, 0.015, -0.05])
-    sanitized = quant._sanitize_daily_returns(series)
+@pytest.mark.asyncio
+async def test_quant_skips_unknown_quote_instead_of_splicing_units(monkeypatch):
+    frame = _build_price_frame(rows=2)
 
-    assert sanitized.isna().sum() == 1
-    assert sanitized.dropna().abs().max() <= 0.20
+    async def fetch_quote(**_kwargs):
+        return SimpleNamespace(price=73, price_unit="unknown", updated_at=pd.Timestamp.now()), False
+
+    monkeypatch.setattr(quant.VnstockStockQuoteFetcher, "fetch", fetch_quote)
+    result, warning = await quant._merge_latest_quote_into_frame(frame, symbol="FPT", source="KBS")
+
+    pd.testing.assert_frame_equal(result, frame)
+    assert "unknown or incompatible price units" in warning
 
 
-def test_garch_volatility_survives_unit_seam_in_close_series():
-    rng = _rng(7)
-    closes = [73_000.0]
-    for _ in range(400):
-        closes.append(closes[-1] * (1.0 + 0.01 * _gauss(rng)))
-    closes.insert(200, closes[200] / 1000.0)
-    dates = pd.date_range(end=pd.Timestamp.now(tz=None).normalize(), periods=len(closes), freq="B")
-    frame = pd.DataFrame(
-        {
-            "time": dates,
-            "open": closes,
-            "high": [c * 1.01 for c in closes],
-            "low": [c * 0.99 for c in closes],
-            "close": closes,
-            "volume": [1_000_000] * len(closes),
-        }
-    )
+def test_quant_provider_normalization_preserves_unit_and_adjusted_close():
+    row = _history_row(80)
+    normalized = quant._normalize_provider_history_rows([row], adjustment_mode="adjusted")
 
+    assert normalized[0].price_unit == "VND"
+    assert normalized[0].close == 80
+    assert normalized[0].adjusted_close == 40
+    assert normalized[0].adjustment_applied is True
+
+
+def test_garch_retains_legitimate_large_split_returns(monkeypatch):
+    frame = _build_price_frame(rows=260)
+    frame.loc[130:, "close"] /= 1000
+    observed = []
+
+    def fit(eps):
+        observed.extend(eps.tolist())
+        return 0.01, 0.1, 0.8, eps * 0 + 1
+
+    monkeypatch.setattr(quant, "_fit_garch_params", fit)
     payload = quant._compute_garch_volatility(frame)
 
+    assert len(observed) == 259
+    assert min(observed) < -90
     assert payload["current_conditional_vol_pct"] is not None
-    assert payload["current_conditional_vol_pct"] < 200
-    assert payload["omega"] < 100
 
 
 def test_garch_volatility_insufficient_data_returns_null_payload():

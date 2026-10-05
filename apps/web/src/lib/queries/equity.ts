@@ -405,6 +405,7 @@ export interface StockQuoteView {
     open: number | null;
     updatedAt: string | null;
     cached: boolean;
+    price_unit?: 'VND' | 'index_points' | 'unknown';
 }
 
 export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Promise<StockQuoteView> {
@@ -435,6 +436,7 @@ export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Pro
         open: quoteData.open ?? quoteData.day_open ?? null,
         updatedAt: quoteData.updatedAt ?? quoteData.updated_at ?? null,
         cached: response.cached ?? false,
+        price_unit: quoteData.price_unit ?? 'unknown',
     };
 }
 
@@ -504,7 +506,7 @@ export function useHistoricalPrices(
 
     return useQuery({
         queryKey: historicalQueryKey(symbol, historyParams),
-        queryFn: () => api.getHistoricalPrices(symbol, { ...options, source }),
+        queryFn: ({ signal }) => api.getHistoricalPrices(symbol, { ...options, source, signal }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         gcTime: 15 * 60 * 1000,

@@ -25,6 +25,7 @@ from vnibb.core.cache import build_cache_key, cached, redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
 from vnibb.core.exceptions import ProviderTimeoutError
+from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.company import Company, Shareholder
 
@@ -1272,87 +1273,16 @@ def _apply_adjustment_mode_to_historical_row(
     )
 
 
-def _to_historical_data(row: StockPrice, *, adjustment_mode: str = "raw") -> EquityHistoricalData:
-
-    adjusted_open, adjusted_high, adjusted_low, adjusted_close_value, factor, applied = (
-        _apply_adjustment_mode_to_ohlc(
-            open_value=row.open,
-            high_value=row.high,
-            low_value=row.low,
-            close_value=row.close,
-            adjusted_close=row.adj_close,
-            adjustment_mode=adjustment_mode,
-        )
-    )
-
-    return EquityHistoricalData(
-        symbol=row.symbol,
-        time=row.time,
-        open=adjusted_open,
-        high=adjusted_high,
-        low=adjusted_low,
-        close=adjusted_close_value,
-        volume=row.volume,
-        value=row.value,
-        raw_close=row.close,
-        adjusted_close=row.adj_close,
-        adjustment_factor=factor,
-        adjustment_mode=str(adjustment_mode or "raw").strip().lower() or "raw",
-        adjustment_applied=applied,
-    )
+def _to_historical_data(row: StockPrice, *, adjustment_mode: str = "raw") -> Optional[EquityHistoricalData]:
+    return _to_historical_data_from_payload(persisted_price_record(row), adjustment_mode=adjustment_mode)
 
 
 def _to_historical_data_from_mongo(
     row: dict[str, Any], *, adjustment_mode: str = "raw"
 ) -> Optional[EquityHistoricalData]:
-    time_value = row.get("tradeDate") or row.get("time") or row.get("date")
-    if isinstance(time_value, datetime):
-        parsed_time = time_value.date()
-    elif isinstance(time_value, date):
-        parsed_time = time_value
-    elif isinstance(time_value, str):
-        try:
-            parsed_time = date.fromisoformat(time_value[:10])
-        except ValueError:
-            return None
-    else:
-        return None
-
-    open_value = _coerce_optional_float(row.get("open"))
-    high_value = _coerce_optional_float(row.get("high"))
-    low_value = _coerce_optional_float(row.get("low"))
-    close_value = _coerce_optional_float(row.get("close"))
-    volume_value = _coerce_optional_int(row.get("volume"))
-    adj_close_value = _coerce_optional_float(row.get("adj_close") or row.get("adjClose"))
-
-    if None in {open_value, high_value, low_value, close_value, volume_value}:
-        return None
-
-    adjusted_open, adjusted_high, adjusted_low, adjusted_close_resolved, factor, applied = (
-        _apply_adjustment_mode_to_ohlc(
-            open_value=open_value,
-            high_value=high_value,
-            low_value=low_value,
-            close_value=close_value,
-            adjusted_close=adj_close_value,
-            adjustment_mode=adjustment_mode,
-        )
-    )
-
-    return EquityHistoricalData(
-        symbol=str(row.get("symbol") or "").upper(),
-        time=parsed_time,
-        open=adjusted_open,
-        high=adjusted_high,
-        low=adjusted_low,
-        close=adjusted_close_resolved,
-        volume=volume_value,
-        value=_coerce_optional_float(row.get("value")),
-        raw_close=close_value,
-        adjusted_close=adj_close_value,
-        adjustment_factor=factor,
-        adjustment_mode=str(adjustment_mode or "raw").strip().lower() or "raw",
-        adjustment_applied=applied,
+    return _to_historical_data_from_payload(
+        {**row, "time": row.get("tradeDate") or row.get("time") or row.get("date")},
+        adjustment_mode=adjustment_mode,
     )
 
 
@@ -1377,7 +1307,7 @@ async def _load_historical_from_db(
     )
 
     rows = (await db.execute(stmt)).scalars().all()
-    return [_to_historical_data(row, adjustment_mode=adjustment_mode) for row in rows]
+    return [item for row in rows if (item := _to_historical_data(row, adjustment_mode=adjustment_mode)) is not None]
 
 
 async def _load_historical_from_mongo(
@@ -1423,12 +1353,16 @@ def _time_to_date(value: Any) -> Optional[date]:
 def _to_historical_data_from_payload(
     doc: dict[str, Any], *, adjustment_mode: str = "raw"
 ) -> Optional[EquityHistoricalData]:
+    try:
+        doc = normalize_price_record(doc)
+    except (TypeError, ValueError):
+        return None
     time_value = _time_to_date(doc.get("time"))
     open_value = _coerce_optional_float(doc.get("open"))
     high_value = _coerce_optional_float(doc.get("high"))
     low_value = _coerce_optional_float(doc.get("low"))
     close_value = _coerce_optional_float(doc.get("close"))
-    adj_close_value = _coerce_optional_float(doc.get("adj_close") or doc.get("adjClose"))
+    adj_close_value = _pick_optional_float(doc.get("adjusted_close"), doc.get("adj_close"), doc.get("adjClose"))
     volume_value = _coerce_optional_int(doc.get("volume"))
 
     if not time_value or None in {open_value, high_value, low_value, close_value, volume_value}:
@@ -1447,6 +1381,7 @@ def _to_historical_data_from_payload(
 
     return EquityHistoricalData(
         symbol=str(doc.get("symbol") or "").upper(),
+        price_unit=doc["price_unit"],
         time=time_value,
         open=adjusted_open,
         high=adjusted_high,
@@ -1772,6 +1707,9 @@ def _merge_historical_rows(
     for source_name, rows in source_rows:
         source_rank = _HISTORICAL_SOURCE_RANK.get(source_name, len(_HISTORICAL_SOURCE_RANK))
         for row in rows:
+            expected_unit = "index_points" if is_index_symbol(row.symbol) else "VND"
+            if row.price_unit != expected_unit:
+                continue
             row_key = json.dumps(row.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
             candidate = (source_rank, row_key)
             existing = selected.get(row.time)
@@ -1840,14 +1778,11 @@ def _historical_resolution_meta(
                 warnings.append("requested-range boundary gaps detected; exchange-calendar certainty is limited")
         elif not holidays:
             warnings.append("business-day completeness excludes unconfigured exchange holidays")
-    mongo_units = {str(doc.get("priceUnit") or "").strip().upper() for doc in mongo_docs}
+    selected_units = {row.price_unit for row in rows}
     unit_status = (
-        "not_applicable"
-        if not mongo_units
-        else "confirmed_vnd"
-        if mongo_units == {"VND"}
-        else "mixed"
-        if "VND" in mongo_units
+        "not_applicable" if not selected_units or selected_units == {"index_points"}
+        else "confirmed_vnd" if selected_units == {"VND"}
+        else "mixed" if len(selected_units) > 1
         else "unconfirmed"
     )
     return _historical_adjustment_meta(
@@ -1878,6 +1813,7 @@ async def _load_rolling_price_window(
     start_date = end_date - timedelta(days=max(380, trading_days + 30))
 
     rows = await _load_historical_from_db(db, symbol, start_date, end_date, "1D")
+    rows = [row for row in rows if row.price_unit == "VND"]
 
     if len(rows) > trading_days:
         rows = rows[-trading_days:]
@@ -1898,7 +1834,8 @@ async def _compute_rolling_high_low(
         limit=max(trading_days + 30, 320),
     ) if mongo_service.enabled else []
     if mongo_rows:
-        recent_rows = mongo_rows[-trading_days:]
+        recent_rows = [normalize_price_record(row, symbol=symbol) for row in mongo_rows[-trading_days:]]
+        recent_rows = [row for row in recent_rows if row["price_unit"] == "VND"]
         mongo_highs = [_coerce_optional_float(row.get("high")) for row in recent_rows]
         mongo_lows = [_coerce_optional_float(row.get("low")) for row in recent_rows]
         highs = [value for value in mongo_highs if value is not None]
@@ -1966,20 +1903,27 @@ async def _load_quote_from_price_cache(symbol: str) -> Optional[StockQuoteData]:
 
     if not isinstance(latest_payload, dict):
         return None
+    latest_payload = normalize_price_record(latest_payload, symbol=symbol)
+    if latest_payload["price_unit"] == "unknown":
+        return None
 
     latest_close = _coerce_optional_float(latest_payload.get("close"))
     if latest_close is None:
         return None
 
     normalized_recent = (
-        [row for row in recent_rows if isinstance(row, dict)]
+        [normalize_price_record(row, symbol=symbol) for row in recent_rows if isinstance(row, dict)]
         if isinstance(recent_rows, list)
         else []
     )
     normalized_recent.sort(key=lambda row: str(row.get("time") or ""))
 
     prev_close: Optional[float] = None
-    for row in reversed(normalized_recent[:-1] if len(normalized_recent) > 1 else []):
+    latest_date = _time_to_date(latest_payload.get("time"))
+    for row in reversed(normalized_recent):
+        row_date = _time_to_date(row.get("time"))
+        if row["price_unit"] != latest_payload["price_unit"] or not latest_date or not row_date or row_date >= latest_date:
+            continue
         prev_close = _coerce_optional_float(row.get("close"))
         if prev_close is not None:
             break
@@ -1999,6 +1943,7 @@ async def _load_quote_from_price_cache(symbol: str) -> Optional[StockQuoteData]:
 
     return StockQuoteData(
         symbol=symbol.upper(),
+        price_unit=latest_payload["price_unit"],
         price=latest_close,
         open=_coerce_optional_float(latest_payload.get("open")),
         high=_coerce_optional_float(latest_payload.get("high")),
@@ -2206,25 +2151,6 @@ def _resolve_listed_share_count(
     return listed_shares
 
 
-def _price_to_vnd_units(price: Any, dps_hint: Any = None) -> Optional[float]:
-    """
-    Normalize quote/snapshot price to VND units.
-
-    Local datasets can store price in thousands of VND (e.g. 68.2 for 68,200 VND).
-    Dividend and DPS metrics are in VND, so price must be scaled before yield math.
-    """
-    numeric = _coerce_optional_float(price)
-    if numeric in (None, 0):
-        return None
-
-    if abs(numeric) >= 1000:
-        return numeric
-
-    dps_value = _coerce_optional_float(dps_hint)
-    if dps_value is None or abs(dps_value) >= 1:
-        return numeric * 1000.0
-
-    return numeric
 
 
 def _serialize_meta_datetime(value: Any) -> Optional[str]:
@@ -2281,6 +2207,12 @@ def _build_quote_from_screener_snapshot(
 ) -> Optional[StockQuoteData]:
     if snapshot_row.price is None:
         return None
+    snapshot = screener_price_record(snapshot_row)
+    if snapshot["price_unit"] == "unknown":
+        return None
+    price = snapshot["price"]
+    latest = persisted_price_record(latest_row) if latest_row else {}
+    previous = persisted_price_record(previous_row) if previous_row else {}
 
     snapshot_metrics = (
         snapshot_row.extended_metrics if isinstance(snapshot_row.extended_metrics, dict) else {}
@@ -2294,8 +2226,8 @@ def _build_quote_from_screener_snapshot(
     snapshot_prev_close = None
     snapshot_change = None
     if snapshot_change_pct not in (None, -100):
-        snapshot_prev_close = snapshot_row.price / (1 + (snapshot_change_pct / 100))
-        snapshot_change = snapshot_row.price - snapshot_prev_close
+        snapshot_prev_close = price / (1 + (snapshot_change_pct / 100))
+        snapshot_change = price - snapshot_prev_close
 
     snapshot_updated_at = (
         _coerce_meta_datetime(snapshot_metrics.get("updated_at"))
@@ -2303,42 +2235,47 @@ def _build_quote_from_screener_snapshot(
         or datetime.combine(snapshot_row.snapshot_date, datetime.min.time())
     )
     latest_row_is_current = bool(
-        latest_row and latest_row.time is not None and latest_row.time >= snapshot_row.snapshot_date
+        latest_row and latest.get("price_unit") == snapshot["price_unit"]
+        and latest_row.time is not None and latest_row.time >= snapshot_row.snapshot_date
     )
 
-    # RC-3 (data-quality remediation 2026-06-08): PREV CLOSE is a settled EOD value and
-    # must never be blank after market close. The live-session-derived `snapshot_prev_close`
-    # is null after-hours (no live change_pct). Prefer the actual previous settled close
-    # from StockPrice; fall back to the derived value only when no prior row exists.
-    settled_prev_close = (
-        float(previous_row.close)
-        if previous_row is not None and previous_row.close is not None
-        else None
+    prior_session = snapshot_row.snapshot_date - timedelta(days=1)
+    while prior_session.weekday() >= 5:
+        prior_session -= timedelta(days=1)
+    settled_prev_close = next(
+        (
+            record.get("close")
+            for row, record in ((latest_row, latest), (previous_row, previous))
+            if row is not None
+            and row.time == prior_session
+            and record.get("price_unit") == snapshot["price_unit"]
+        ),
+        None,
     )
     prev_close = settled_prev_close if settled_prev_close is not None else snapshot_prev_close
-    if snapshot_change is None and prev_close is not None:
-        snapshot_change = snapshot_row.price - prev_close
-        if snapshot_change_pct is None and prev_close not in (0, None):
-            snapshot_change_pct = (snapshot_change / prev_close) * 100
+    if prev_close is not None:
+        snapshot_change = price - prev_close
+        snapshot_change_pct = (snapshot_change / prev_close) * 100 if prev_close else None
 
     # OPEN/HIGH/LOW are session-specific. Only surface them when the settled price row
     # actually corresponds to (or is newer than) the snapshot session; otherwise leave
     # them null rather than show stale OHLC that contradicts a fresher snapshot price.
     return StockQuoteData(
         symbol=str(snapshot_row.symbol or "").upper(),
-        price=snapshot_row.price,
+        price=price,
+        price_unit=snapshot["price_unit"],
         open=(
-            float(latest_row.open)
-            if latest_row_is_current and latest_row.open is not None
+            latest.get("open")
+            if latest_row_is_current
             else None
         ),
         high=(
-            float(latest_row.high)
-            if latest_row_is_current and latest_row.high is not None
+            latest.get("high")
+            if latest_row_is_current
             else None
         ),
         low=(
-            float(latest_row.low) if latest_row_is_current and latest_row.low is not None else None
+            latest.get("low") if latest_row_is_current else None
         ),
         prev_close=prev_close,
         change=snapshot_change,
@@ -2393,7 +2330,7 @@ def _should_prefer_screener_quote(
 ) -> bool:
     if screener_quote is None:
         return False
-    if primary_quote is None:
+    if primary_quote is None or primary_quote.price is None or primary_quote.price_unit == "unknown":
         return True
 
     primary_timestamp = _quote_effective_timestamp(primary_quote)
@@ -2644,7 +2581,7 @@ def _merge_ratio_row_collections(
 
 def _derive_dividend_yield_from_dps(dps: Any, latest_price: Any) -> Optional[float]:
     dps_value = _coerce_optional_float(dps)
-    price_vnd = _price_to_vnd_units(latest_price, dps_hint=dps_value)
+    price_vnd = _coerce_optional_float(latest_price)
     if dps_value is None or price_vnd in (None, 0):
         return None
     return (dps_value / price_vnd) * 100
@@ -2838,9 +2775,8 @@ async def _resolve_profile_market_cap(
                 symbol=symbol,
                 source=settings.vnstock_source,
             )
-            latest_price = _pick_optional_float(
-                latest_price, quote_data.price, quote_data.prev_close
-            )
+            if quote_data.price_unit == "VND":
+                latest_price = _pick_optional_float(latest_price, quote_data.price, quote_data.prev_close)
         except BaseException as exc:
             if _is_control_flow_exception(exc):
                 raise
@@ -2848,7 +2784,7 @@ async def _resolve_profile_market_cap(
                 "Quote fallback failed while resolving market cap for %s: %s", symbol, exc
             )
 
-    latest_price_vnd = _price_to_vnd_units(latest_price, dps_hint=1.0)
+    latest_price_vnd = _coerce_optional_float(latest_price)
 
     if shares_value not in (None, 0) and latest_price_vnd not in (None, 0):
         multiplier = 1.0 if shares_value >= 1_000_000 else 1_000_000.0
@@ -2917,27 +2853,27 @@ async def _get_outstanding_shares(db: AsyncSession, symbol: str) -> Optional[flo
 
 
 async def _get_latest_price(db: AsyncSession, symbol: str) -> Optional[float]:
-    latest_close = (
+    latest_row = (
         await db.execute(
-            select(StockPrice.close)
+            select(StockPrice)
             .where(StockPrice.symbol == symbol)
             .order_by(StockPrice.time.desc())
             .limit(1)
         )
     ).scalar_one_or_none()
-    latest_price = _coerce_optional_float(latest_close)
-    if latest_price not in (None, 0):
-        return latest_price
-
-    latest_snapshot_price = (
+    latest = persisted_price_record(latest_row) if latest_row else {}
+    if latest.get("price_unit") == "VND" and latest.get("close") not in (None, 0):
+        return float(latest["close"])
+    snapshot_row = (
         await db.execute(
-            select(ScreenerSnapshot.price)
+            select(ScreenerSnapshot)
             .where(ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.price.is_not(None))
             .order_by(ScreenerSnapshot.snapshot_date.desc())
             .limit(1)
         )
     ).scalar_one_or_none()
-    return _coerce_optional_float(latest_snapshot_price)
+    snapshot = screener_price_record(snapshot_row) if snapshot_row else {}
+    return _coerce_optional_float(snapshot.get("price")) if snapshot.get("price_unit") == "VND" else None
 
 
 async def _get_latest_financial_row(
@@ -3965,7 +3901,7 @@ async def _enrich_missing_ratio_metrics(
     if period_end_targets:
         max_target = max(period_end_targets.values())
         price_history_stmt = (
-            select(StockPrice.time, StockPrice.close)
+            select(StockPrice)
             .where(
                 StockPrice.symbol == symbol,
                 StockPrice.interval == "1D",
@@ -3973,11 +3909,11 @@ async def _enrich_missing_ratio_metrics(
             )
             .order_by(StockPrice.time.asc())
         )
-        price_history_rows = (await db.execute(price_history_stmt)).all()
-        price_dates = [row.time for row in price_history_rows if row.time is not None]
-        price_closes = [
-            _coerce_optional_float(row.close) for row in price_history_rows if row.time is not None
-        ]
+        price_history_rows = (await db.execute(price_history_stmt)).scalars().all()
+        price_records = [persisted_price_record(row) for row in price_history_rows]
+        price_records = [row for row in price_records if row["price_unit"] == "VND" and row["time"] is not None]
+        price_dates = [row["time"] for row in price_records]
+        price_closes = [_coerce_optional_float(row["close"]) for row in price_records]
 
         if price_dates and price_closes:
             share_multiplier = (
@@ -4192,7 +4128,7 @@ async def _enrich_missing_ratio_metrics(
         period_price = period_price_lookup.get(key)
         valuation_price = _pick_optional_float(period_price, latest_price)
         valuation_market_cap = _pick_optional_float(period_market_cap_lookup.get(key), market_cap)
-        price_vnd = _price_to_vnd_units(valuation_price, dps_hint=item.dps or item.eps)
+        price_vnd = _coerce_optional_float(valuation_price)
         if item.pe is None and price_vnd not in (None, 0) and item.eps not in (None, 0):
             item.pe = price_vnd / item.eps
         if item.pb is None and price_vnd not in (None, 0) and item.bvps not in (None, 0):
@@ -4454,7 +4390,7 @@ async def _enrich_missing_ratio_metrics(
         )
 
         if item.dps is None and item.dividend_yield is not None:
-            price_vnd = _price_to_vnd_units(valuation_price, dps_hint=1.0)
+            price_vnd = _coerce_optional_float(valuation_price)
             if price_vnd not in (None, 0):
                 item.dps = (item.dividend_yield / 100) * price_vnd
 
@@ -4489,7 +4425,7 @@ async def _enrich_missing_ratio_metrics(
 
 
 @router.get("/historical", response_model=StandardResponse[list[EquityHistoricalData]])
-@cached(key_prefix="historical_v3")
+@cached(key_prefix="historical_v4_vnd")
 async def get_historical_prices(
     symbol: str = Query(..., min_length=1, max_length=10),
     start_date: date = Query(default_factory=lambda: date.today() - timedelta(days=365)),
@@ -4531,7 +4467,7 @@ async def get_historical_prices(
         allow_stale=True,
     )
     cache_data = (
-        [_to_historical_data(row, adjustment_mode=adjustment_mode) for row in cache_result.data]
+        [item for row in cache_result.data if (item := _to_historical_data(row, adjustment_mode=adjustment_mode)) is not None]
         if cache_result.hit and cache_result.data
         else []
     )
@@ -4592,6 +4528,11 @@ async def get_historical_prices(
         source_rows.append(("db", fallback_data))
         merged, _ = _merge_historical_rows(source_rows)
 
+    expected_unit = "index_points" if is_index_symbol(symbol_upper) else "VND"
+    excluded_count = sum(row.price_unit != expected_unit for _, rows in source_rows for row in rows)
+    if excluded_count:
+        warnings.append(f"Excluded {excluded_count} row(s) with incompatible or unconfirmed price units; legacy provenance may be insufficient.")
+
     if merged:
         merged, source_counts = _merge_historical_rows(source_rows)
         merged = _apply_corporate_action_adjustments(merged, corporate_actions, adjustment_mode)
@@ -4633,7 +4574,7 @@ async def get_historical_prices(
 
 
 @router.get("/{symbol}/quote", response_model=StandardResponse[Optional[StockQuoteData]])
-@cached(ttl=30, key_prefix="quote")
+@cached(ttl=30, key_prefix="quote_v2_vnd")
 async def get_quote(
     symbol: str,
     source: str = Query(default="VCI"),
@@ -4671,8 +4612,12 @@ async def get_quote(
             return None
 
         # get_eod_prices sorts ascending by tradeDate, so the last element is newest.
-        latest = docs[-1]
-        previous = docs[-2] if len(docs) > 1 else None
+        latest = normalize_price_record(docs[-1], symbol=symbol_upper)
+        if latest["price_unit"] == "unknown":
+            return None
+        previous = normalize_price_record(docs[-2], symbol=symbol_upper) if len(docs) > 1 else None
+        if previous and previous["price_unit"] != latest["price_unit"]:
+            previous = None
         latest_close = _coerce_optional_float(latest.get("close"))
         if latest_close is None:
             return None
@@ -4691,6 +4636,7 @@ async def get_quote(
         updated_at = _coerce_meta_datetime(trade_date)
         return StockQuoteData(
             symbol=symbol_upper,
+            price_unit=latest["price_unit"],
             price=latest_close,
             open=_coerce_optional_float(latest.get("open")),
             high=_coerce_optional_float(latest.get("high")),
@@ -4722,13 +4668,15 @@ async def get_quote(
 
             latest_row = price_rows[0] if price_rows else None
             previous_row = price_rows[1] if len(price_rows) > 1 else None
+            latest = persisted_price_record(latest_row) if latest_row else {}
+            previous = persisted_price_record(previous_row) if previous_row else {}
 
             latest_close = (
-                float(latest_row.close) if latest_row and latest_row.close is not None else None
+                latest.get("close") if latest.get("price_unit") in {"VND", "index_points"} else None
             )
             prev_close = (
-                float(previous_row.close)
-                if previous_row and previous_row.close is not None
+                previous.get("close")
+                if previous.get("price_unit") == latest.get("price_unit") and latest_close is not None
                 else None
             )
             db_change = (
@@ -4752,15 +4700,18 @@ async def get_quote(
             )
 
             if snapshot_is_fresher and snapshot_row and snapshot_row.price is not None:
-                return _build_quote_from_screener_snapshot(snapshot_row, latest_row, previous_row)
+                snapshot_quote = _build_quote_from_screener_snapshot(snapshot_row, latest_row, previous_row)
+                if snapshot_quote is not None:
+                    return snapshot_quote
 
             if latest_row and latest_close is not None:
                 return StockQuoteData(
                     symbol=symbol_upper,
+                    price_unit=latest["price_unit"],
                     price=latest_close,
-                    open=float(latest_row.open) if latest_row.open is not None else None,
-                    high=float(latest_row.high) if latest_row.high is not None else None,
-                    low=float(latest_row.low) if latest_row.low is not None else None,
+                    open=latest.get("open"),
+                    high=latest.get("high"),
+                    low=latest.get("low"),
                     prev_close=prev_close,
                     change=db_change,
                     change_pct=round(db_change_pct, 2) if db_change_pct is not None else None,
@@ -4811,8 +4762,8 @@ async def get_quote(
         screener_quote = await _get_screener_snapshot_quote()
         if _should_prefer_screener_quote(data, screener_quote):
             data = screener_quote
-        if data.price is None:
-            raise ValueError("Quote price unavailable from provider")
+        if data.price is None or data.price_unit == "unknown":
+            raise ValueError("Quote price or unit unavailable from provider")
         return StandardResponse(data=data, meta=MetaData(count=1))
     except Exception:
         logger.warning("Live quote failed for %s", symbol_upper, exc_info=True)
@@ -5369,7 +5320,7 @@ async def get_correlation_matrix(
     start_date = end_date - timedelta(days=max(days * 2, days + 30))
 
     prices_result = await db.execute(
-        select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+        select(StockPrice)
         .where(
             StockPrice.symbol.in_(universe_symbols),
             StockPrice.interval == "1D",
@@ -5378,7 +5329,11 @@ async def get_correlation_matrix(
         )
         .order_by(StockPrice.symbol, StockPrice.time)
     )
-    rows = prices_result.all()
+    rows = [persisted_price_record(row) for row in prices_result.scalars().all()]
+    rows = [
+        (row["symbol"], row["time"], row["close"] if row["price_unit"] == "VND" else None)
+        for row in rows
+    ]
     if not rows:
         return StandardResponse(
             data=CorrelationMatrixPayload(
@@ -5395,8 +5350,8 @@ async def get_correlation_matrix(
     frame = pd.DataFrame(rows, columns=["symbol", "time", "close"])
     frame["time"] = pd.to_datetime(frame["time"], errors="coerce").dt.date
     frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
-    frame = frame.dropna(subset=["time", "close"])
-    frame = frame[np.isfinite(frame["close"])]
+    frame = frame.dropna(subset=["time"])
+    frame.loc[~np.isfinite(frame["close"]), "close"] = np.nan
     if frame.empty:
         return StandardResponse(
             data=CorrelationMatrixPayload(
@@ -5416,8 +5371,12 @@ async def get_correlation_matrix(
         observed_prices = prices.groupby("time")["close"].last().sort_index().tail(days + 1)
         if observed_prices.empty:
             continue
-        symbol_last_data_dates[ticker] = observed_prices.index.max()
-        observed_returns = observed_prices.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+        valid_prices = observed_prices.dropna()
+        if not valid_prices.empty:
+            symbol_last_data_dates[ticker] = valid_prices.index.max()
+        observed_returns = (
+            observed_prices.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan).dropna()
+        )
         if not observed_returns.empty:
             return_series[ticker] = observed_returns.tail(days)
 

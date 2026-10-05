@@ -14,6 +14,7 @@ export interface EquityHistoricalData {
   adjustment_factor?: number | null;
   adjustment_mode?: 'raw' | 'adjusted';
   adjustment_applied?: boolean;
+  price_unit?: 'VND' | 'index_points' | 'unknown';
 }
 
 export interface EquityHistoricalResponse {
@@ -21,6 +22,18 @@ export interface EquityHistoricalResponse {
   meta?: {
     count: number;
     last_data_date?: string | null;
+    freshness_as_of?: string | null;
+    requested_start_date?: string | null;
+    requested_end_date?: string | null;
+    returned_start_date?: string | null;
+    returned_end_date?: string | null;
+    logical_day_count?: number | null;
+    completeness_status?: 'complete' | 'partial' | 'unknown' | null;
+    unit_status?: 'confirmed_vnd' | 'mixed' | 'unconfirmed' | 'not_applicable' | null;
+    source_mode?: string | null;
+    source_counts?: Record<string, number> | null;
+    fallback_used?: boolean | null;
+    warnings?: string[] | null;
     adjustment_mode?: 'raw' | 'adjusted';
     adjustment_requested_count?: number;
     adjustment_applied_count?: number;

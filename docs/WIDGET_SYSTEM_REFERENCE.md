@@ -552,6 +552,11 @@ Use **Backup workspaces** in the sidebar to download personal dashboard configur
 
 Restore accepts the versioned `vnibb-personal-workspace` JSON format up to 5 MB, validates it, previews names/counts, and imports fresh local copies only after confirmation. Existing dashboards remain unchanged. Imported IDs are excluded from backend synchronization; their ticker groups and linked TradingView ticker are scoped independently of system layouts. Retired widget type aliases are normalized to canonical ids during import so restored widgets resolve in the registry. Invalid versions, unknown widgets, impossible geometry, unsafe configuration and storage failures are reported rather than silently dropping content.
 
+Optional backend dashboard synchronization preserves the native linked
+`globalMarketsSymbol` and global/A–D `widgetGroups` inside `layout_config`, on
+create, update and reload. Older records without those fields retain shared/app
+defaults; imported `import-` copies remain excluded from synchronization.
+
 System/admin layouts, authentication, settings, saved templates and unrelated browser storage are not exported. Widget configuration and user-entered content are included; review a backup before sharing. Known credential keys are rejected, but the backup is not an encrypted vault or a complete browser-profile backup. Notes or artifacts stored outside widget configuration are outside this export.
 
 ### Artifact Placement
@@ -584,6 +589,11 @@ Widget chrome (view toggles, parameters, period controls) must remain accessible
 - `WidgetMeta` can render explicit health badges such as cached snapshot, stale snapshot, limited history, coverage gap, and awaiting snapshot.
 - `WidgetEmpty` can render the same health labels plus a short explanatory detail line.
 - Use these explicit states when the widget is functioning correctly but the upstream feed is sparse, stale, cached, or not yet published.
+- ATR Regime reports the historical observation date (`freshness_as_of`, then
+  `last_data_date`, then the final bar time), not query receipt time. Missing
+  observation dates remain unknown. Partial coverage, unconfirmed/mixed units,
+  source fallback and refresh failures appear in the existing widget note and
+  runtime/export provenance; receiving old observations now does not make them live.
 
 Current first-wave coverage includes:
 
