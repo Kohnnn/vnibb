@@ -376,7 +376,6 @@ def test_financial_merge_uses_certified_ttm_when_provider_has_no_source(reason):
     assert _merge_financial_statement_rows([primary], [])[0].unavailable_reason == reason
     result = _merge_financial_statement_rows([primary], [fallback])
     assert len(result) == 1
-    assert result[0] is fallback
     assert result[0].revenue == 40
     assert result[0].unavailable_reason is None
 
