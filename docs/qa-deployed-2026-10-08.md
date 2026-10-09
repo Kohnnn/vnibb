@@ -52,6 +52,8 @@ Oracle runtime and smoke scripts now use certificate-validating HTTPS. The basel
 
 The final local release gate (`PYTHON=apps/api/.venv/bin/python CI_BASE_SHA=306f9cbf4c947d2ce49bceeceb2de43994832baa node scripts/ci-gate.mjs`) passed all nine steps in 377.6 seconds: **157 suites/1,044 frontend tests** and **1,610 backend tests, four skipped**. TypeScript, production build, generated-changelog check and changed-line Ruff passed. ESLint retained zero errors and 79 baseline/generated warnings; pytest retained two NumPy correlation warnings. A direct HTTP smoke through the real financial router returned HTTP 200 with the explicit missing-source TTM envelope and null revenue/source.
 
+The [final-revision hosted run](https://github.com/Kohnnn/vnibb/actions/runs/37931495455) passed secret scan, PostgreSQL contracts and Chromium smoke, but its typecheck rejected the `createElement` retry-test wrapper (`TS2322`, then unknown hook result). The test now uses the repository's native JSX provider wrapper in `queryRetry.test.tsx`, with no casts or suppressed diagnostics. Local TypeScript, all 23 retry/cancellation tests and focused ESLint passed; hosted re-verification is required before release.
+
 
 
 ## Historical QA record — superseded by the follow-up above

@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { createElement, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { APIError, RateLimitError } from './api';
 import { createQueryClient } from './QueryProvider';
 import { queryRetryDelay, shouldRetryQuery } from './queryRetry';
@@ -105,7 +105,7 @@ describe.each([
         });
         globalThis.fetch = fetchMock;
         const wrapper = ({ children }: { children: ReactNode }) =>
-            createElement(QueryClientProvider, { client }, children);
+            <QueryClientProvider client={client}>{children}</QueryClientProvider>;
         const view = renderHook(({ symbol }) => useHistory(symbol, { interval: '1D', source: 'KBS' }), {
             initialProps: { symbol: 'FPT' },
             wrapper,
