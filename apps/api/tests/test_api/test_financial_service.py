@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 
 import pytest
@@ -361,3 +362,51 @@ def test_financial_merge_keeps_unknown_provider_basis_unavailable():
     assert result.operating_cash_flow is None
     assert result.unavailable_reason == "unknown_source_unit"
     assert result.raw_data == primary.raw_data
+
+
+@pytest.mark.asyncio
+async def test_get_financials_with_ttm_keeps_requested_identity_when_provider_empty(monkeypatch):
+    async def fake_fetch(params):
+        return []
+
+    monkeypatch.setattr(
+        "vnibb.services.financial_service.VnstockFinancialsFetcher.fetch", fake_fetch
+    )
+
+    data = await get_financials_with_ttm(symbol="VNM", statement_type="income", period="TTM")
+
+    assert len(data) == 1
+    row = data[0]
+    assert (row.symbol, row.period, row.statement_type) == ("VNM", "TTM", "income")
+    assert row.unavailable_reason
+    assert row.revenue is None
+    assert row.source is None
+
+
+@pytest.mark.asyncio
+async def test_get_financials_with_ttm_keeps_reason_when_calculation_aborts(monkeypatch):
+    async def fake_calculate_ttm(symbol, statement_type):
+        raise ValueError("provider exploded")
+
+    monkeypatch.setattr(
+        "vnibb.services.financial_service.calculate_ttm", fake_calculate_ttm
+    )
+
+    data = await get_financials_with_ttm(symbol="VNM", statement_type="income", period="TTM")
+
+    assert len(data) == 1
+    assert data[0].unavailable_reason == "ttm_calculation_failed"
+    assert data[0].net_income is None
+
+
+@pytest.mark.asyncio
+async def test_get_financials_with_ttm_propagates_cancellation(monkeypatch):
+    async def fake_calculate_ttm(symbol, statement_type):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(
+        "vnibb.services.financial_service.calculate_ttm", fake_calculate_ttm
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await get_financials_with_ttm(symbol="VNM", statement_type="income", period="TTM")

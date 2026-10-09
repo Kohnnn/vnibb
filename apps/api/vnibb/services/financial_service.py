@@ -348,7 +348,14 @@ async def get_financials_with_ttm(
                 statement_type,
                 exc,
             )
-            return []
+            return [
+                FinancialStatementData(
+                    symbol=symbol.upper(),
+                    period="TTM",
+                    statement_type=statement_type,
+                    unavailable_reason="ttm_calculation_failed",
+                )
+            ]
 
     # Map periods like Q1, Q2, Q3, Q4 to quarter and filter
     actual_period = "quarter" if is_specific_quarter else period
@@ -501,4 +508,16 @@ async def calculate_ttm(symbol: str, statement_type: str) -> list[FinancialState
         return [FinancialStatementData(symbol=symbol.upper(), period="TTM", statement_type=statement_type,
             unavailable_reason=f"financial_source_fetch_failed: {exc}")]
 
-    return build_ttm_statement_rows(quarters, statement_type)
+    rows = build_ttm_statement_rows(quarters, statement_type)
+    if rows:
+        return rows
+    # #101: the provider returned no usable quarterly rows, so the reason is
+    # carried on the requested symbol/type/period instead of an empty list.
+    return [
+        FinancialStatementData(
+            symbol=symbol.upper(),
+            period="TTM",
+            statement_type=statement_type,
+            unavailable_reason="missing_quarterly_source_data",
+        )
+    ]

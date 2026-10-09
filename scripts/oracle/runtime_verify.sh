@@ -61,7 +61,7 @@ PY
 
 echo "Runtime verification target: ${BASE_URL}"
 
-health_json="$($CURL_BIN -ksS --max-time "$TIMEOUT" "${BASE_URL}/health/")"
+health_json="$($CURL_BIN -sS --max-time "$TIMEOUT" "${BASE_URL}/health/")"
 printf 'health payload -> %s\n' "$health_json"
 
 data_backend="$(read_json_field "$health_json" "providers.data_backend")"
@@ -113,7 +113,7 @@ if [[ -n "$EXPECTED_IMAGE_REPOSITORY$EXPECTED_IMAGE_DIGEST" ]]; then
   fi
 fi
 
-dashboard_code="$($CURL_BIN -ksS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" \
+dashboard_code="$($CURL_BIN -sS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" \
   -H "X-VNIBB-Client-ID: ${DASHBOARD_CLIENT_ID}" \
   "${BASE_URL}/api/v1/dashboard/" || true)"
 printf 'dashboard anon endpoint    -> %s\n' "$dashboard_code"
@@ -123,7 +123,7 @@ if [[ "$dashboard_code" != "200" ]]; then
   status=1
 fi
 
-cors_headers="$($CURL_BIN -ksS -D - -o "$NULL_SINK" --max-time "$TIMEOUT" \
+cors_headers="$($CURL_BIN -sS -D - -o "$NULL_SINK" --max-time "$TIMEOUT" \
   -X OPTIONS "${BASE_URL}/api/v1/dashboard/" \
   -H "Origin: ${CORS_TEST_ORIGIN}" \
   -H "Access-Control-Request-Method: GET" \
@@ -142,7 +142,7 @@ if ! printf '%s\n' "$cors_headers" | grep -qi "access-control-allow-headers: .*x
 fi
 
 if [[ -n "${MCP_HEALTH_URL:-}" ]]; then
-  mcp_code="$($CURL_BIN -ksS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" \
+  mcp_code="$($CURL_BIN -sS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" \
     "${MCP_HEALTH_URL}" || true)"
   printf 'mcp health endpoint        -> %s\n' "$mcp_code"
   if [[ "$mcp_code" != "200" ]]; then

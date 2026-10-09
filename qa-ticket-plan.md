@@ -1,6 +1,6 @@
 # QA ticket implementation plan
 
-Source: [QA map #111](https://github.com/Kohnnn/vnibb/issues/111), issues #98 and #100–#110, and `docs/qa-deployed-2026-10-08.md`. Existing uncommitted repairs are the starting point, not deployed acceptance. Preserve unrelated changes and staged glossary renames. Commit only QA-owned changes on `codex/98-price-unit-workspace-release`; no push, deployment, production writes, TLS bypass, paid calls, or issue closure.
+Source: [QA map #111](https://github.com/Kohnnn/vnibb/issues/111), issues #98 and #100–#110, and `docs/qa-deployed-2026-10-08.md`. Existing uncommitted repairs were the starting point, not deployed acceptance. Preserve unrelated changes and staged glossary renames. The user now authorizes finishing QA improvements, committing, publishing and redeploying the release. Production data repair, security-policy changes, TLS bypass, paid calls and issue closure remain outside this release.
 
 ## Implementation and acceptance
 
@@ -27,3 +27,12 @@ User-approved public seams: API financial/price/news endpoints; `units`/`financi
 Freeze source before runtime acceptance. Run targeted existing tests and frontend typecheck at integration checkpoints. Then lint, production build, whole frontend Jest and whole backend pytest once. Exercise the real production UI and isolated read-only API, including five financial UI contracts and the two-tab/local-ticker/fixed-width/retry workflow. Perform separate standards/spec reviews, resolve findings, update this plan and QA report with exact evidence, then commit the QA-owned work to the current branch.
 
 Executed verification: TypeScript and production build passed; ESLint had zero errors and 79 baseline warnings; changed-line Ruff passed. The whole backend run had 1,605 passes, four skips and one comparison-fixture failure, then all 12 comparison tests and the 139-test API/news/comparison set passed after fixture repair. Whole frontend Jest timed out after 42 passing suites; the remaining 115 suites passed 620 tests separately. All suites were exercised, but no uninterrupted whole-suite pass is claimed. Final financial/heatmap checks passed 70 tests and detached-chart recovery passed 22. Runtime acceptance above is separate from provider truth and deployment acceptance.
+
+## Release completion
+
+- [x] Preserve explicit unavailable TTM reasons for empty source results and ordinary calculation failures; the before/after service smoke failed/passed and all 29 financial-service tests passed. Cancellation propagation and null metrics remain intact.
+- [x] Preserve HTTPS certificate verification in the existing Oracle runtime/smoke scripts; public baseline smoke passed and an invalid trust bundle was rejected.
+- [x] Run the uninterrupted release gate on frozen source: all nine steps passed, 157 suites/1,044 frontend tests and 1,610 backend tests with four skips. Review the scoped changes since `a7a301a` before commit.
+- [ ] Commit only release-owned changes; publish and merge through the existing CI-controlled release workflow.
+- [ ] Capture the current API image and Vercel rollback target, publish a revision-pinned image and deploy API/MCP/scheduler plus the canonical `vnibb-web` project.
+- [ ] Verify live revision identity, health, price guards, financial unavailable states, navigation and warm reload; retain provider/data limits separately.
