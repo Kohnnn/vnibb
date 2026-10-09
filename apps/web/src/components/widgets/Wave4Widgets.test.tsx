@@ -14,7 +14,7 @@ const setLinkedSymbol = jest.fn();
 
 jest.mock('@/hooks/useWidgetSymbolLink', () => ({ useWidgetSymbolLink: () => ({ setLinkedSymbol }) }));
 jest.mock('@/components/ui/WidgetContainer', () => ({ WidgetContainer: ({ children, title }: { children: ReactNode; title: string }) => <section><h2>{title}</h2>{children}</section> }));
-jest.mock('@/components/ui/WidgetMeta', () => ({ WidgetMeta: ({ sourceLabel, updatedAt, note }: { sourceLabel?: string; updatedAt?: string | number; note?: string }) => <div>{sourceLabel}|{String(updatedAt)}|{note}</div> }));
+jest.mock('@/components/ui/WidgetMeta', () => ({ WidgetMeta: ({ sourceLabel, note }: { sourceLabel?: string; note?: string }) => <div>{sourceLabel}|{note}</div> }));
 jest.mock('@/components/ui/widget-skeleton', () => ({ WidgetSkeleton: () => <div>Loading</div> }));
 jest.mock('@/components/ui/widget-states', () => ({ WidgetEmpty: ({ message, detail }: { message: string; detail?: string }) => <div>{message}{detail}</div>, WidgetError: ({ error }: { error: Error }) => <div>{error.message}</div> }));
 
@@ -99,7 +99,7 @@ describe('Wave 4 widgets', () => {
     render(<WatchlistLimitsMonitorWidget id="limits" widgetGroup="A" config={{ watchlistSymbols: manualSymbols }} />);
     const expected = [...dashboardSymbols, 'SHR'];
     expect(priceBoardQuery).toHaveBeenCalledWith(expected, { enabled: true });
-    expect(screen.getByText('KBS|2026-01-02T09:00:00Z|Dashboard 50 · Manual 3 · Deduplicated 52 · Capped 2 · Query 50/50')).toBeInTheDocument();
+    expect(screen.getByText(/Dashboard 50 · Manual 3 · Deduplicated 52 · Capped 2 · Query 50\/50/)).toBeInTheDocument();
     expect(screen.getByText('At ceiling')).toBeInTheDocument();
     expect(screen.getByText('At floor')).toBeInTheDocument();
     expect(screen.getByText('Unavailable')).toBeInTheDocument();

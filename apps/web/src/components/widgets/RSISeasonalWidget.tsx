@@ -54,6 +54,14 @@ export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetPro
         oversold_pct?: Record<string, number | null>
       }
     | undefined
+  const quality = data?.meta
+  const unitStatus = quality?.unit_status ?? ''
+  const derivedWithheld = Boolean(data?.data) && (!['confirmed_vnd', 'index_points', 'not_applicable'].includes(unitStatus)
+    || Boolean(quality?.unresolved_excluded_dates?.length)
+    || Boolean(data?.error))
+  const unavailableReason = unitStatus === 'mixed' || unitStatus === 'unconfirmed'
+    ? 'RSI seasonality unavailable: historical price units were not certified.'
+    : 'RSI seasonality unavailable: source quality is unresolved.'
 
   const avgRsi = metric?.monthly_avg_rsi || {}
   const overbought = metric?.overbought_pct || {}
@@ -64,7 +72,7 @@ export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetPro
     overbought: Number(overbought[month] ?? 0),
     oversold: Number(oversold[month] ?? 0),
   }))
-  const hasData = rows.some((row) => row.rsi > 0)
+  const hasData = !derivedWithheld && rows.some((row) => row.rsi > 0)
   const currentRsi = Number(metric?.current_rsi ?? 0)
   const quantWarning = extractQuantWarning(data, 'rsi_seasonal')
 
@@ -74,14 +82,15 @@ export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetPro
       apiGroup: '/quant',
       endpoint: `/quant/${upperSymbol}?period=${period}&metrics=rsi_seasonal`,
       sourceLabel: 'RSI seasonality',
-      lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt,
+      lastDataDate: data?.data?.last_data_date ?? null,
+      fetchedAt: dataUpdatedAt,
       adjustmentMode: data?.data?.adjustment_mode,
-      extra: {
+      extra: hasData ? {
         months: rows.length,
         currentRsi,
-      },
+      } : undefined,
     }))
-  }, [currentRsi, data?.data?.adjustment_mode, data?.data?.computed_at, data?.data?.last_data_date, dataUpdatedAt, hasData, onDataChange, period, rows.length, upperSymbol])
+  }, [currentRsi, data?.data?.adjustment_mode, data?.data?.last_data_date, dataUpdatedAt, hasData, derivedWithheld, onDataChange, period, rows.length, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view RSI seasonality" icon={<Signal size={18} />} />
@@ -107,7 +116,7 @@ export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetPro
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} RSI(14)`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} RSI(14)`} align="right" />
         </div>
       </div>
 
@@ -115,6 +124,8 @@ export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetPro
         <WidgetSkeleton lines={8} />
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
+      ) : derivedWithheld ? (
+        <WidgetEmpty message={unavailableReason} icon={<Signal size={18} />} />
       ) : !hasData ? (
         <WidgetEmpty message="No RSI seasonal data" icon={<Signal size={18} />} />
       ) : (

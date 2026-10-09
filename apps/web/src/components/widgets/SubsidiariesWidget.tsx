@@ -43,10 +43,14 @@ export function SubsidiariesWidget({ symbol, onDataChange }: SubsidiariesWidgetP
             apiGroup: '/equity',
             endpoint: `/api/v1/equity/${symbol}/subsidiaries`,
             sourceLabel: 'Subsidiaries',
+            // Subsidiary rows expose no source observation date, so freshness
+            // stays unknown and the query receipt is reported separately.
+            lastDataDate: null,
+            fetchedAt: dataUpdatedAt,
             stale: isFallback,
             extra: { subsidiaryCount: subsidiaries.length },
         }));
-    }, [hasData, isFallback, onDataChange, subsidiaries.length, symbol]);
+    }, [dataUpdatedAt, hasData, isFallback, onDataChange, subsidiaries.length, symbol]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view subsidiaries" icon={<Building size={18} />} />;
@@ -60,7 +64,8 @@ export function SubsidiariesWidget({ symbol, onDataChange }: SubsidiariesWidgetP
                     <span>{subsidiaries.length} subsidiaries</span>
                 </div>
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     align="right"

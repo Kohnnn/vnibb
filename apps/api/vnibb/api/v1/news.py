@@ -59,7 +59,11 @@ logger = logging.getLogger(__name__)
 class NewsArticle(BaseModel):
     """News article with AI sentiment."""
 
-    id: int | None = None
+    # Hydrated fallback rows carry a provider-scoped string id ("VNM-0",
+    # news_service.py:432); declaring int-only made /news/feed raise a
+    # ValidationError (HTTP 500) whenever that fallback ran. The web client
+    # already types this as `number | string | null`.
+    id: int | str | None = None
     title: str
     summary: str | None = None
     content: str | None = None

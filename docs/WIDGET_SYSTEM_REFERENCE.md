@@ -35,6 +35,14 @@ Layout note:
 - Widget-library size badges are derived from that contract so the displayed size matches actual widget insertion behavior.
 - `widgetDefinitions.ts` and `WidgetRegistry.ts` keep mirrored defaults for discoverability, but the layout contract remains the operative source of truth.
 
+## News Association Labels
+
+Company and related-news ranking is rule-based, not a calibrated probability. The UI shows the association reason and `rank N/100`; peer and sector matches are indirect, and a provider-related symbol is provider metadata rather than independent verification.
+
+Ticker matches require complete case-insensitive tokens in article title/body. Company-name matches require the complete stored short name or company name (without its legal prefix), not isolated words such as `high` or `tech`. Exact body mentions remain supported even when the title does not name the ticker. Broad sector context remains explicitly indirect; no score threshold was raised to hide uncertain rows.
+
+The October 2026 investigation of issue #107 confirmed MSR Apple/MDP/air-purifier articles had no MSR/company-name evidence in their primary bodies. Lowercase substring boundaries also allowed VNM football articles to match peer ticker `ANT` inside ordinary words. Provider entity tags, generic industry classifications, and archived article freshness are not certified by these local matching repairs.
+
 ## Canonical Widget IDs
 
 Use canonical IDs in templates, migrations, docs, and runtime logic.
@@ -323,13 +331,13 @@ ManifoldWidget) is now a one-liner.
 
 ### One-shot populate (Phase v2.x)
 
-`apps/api/vnibb/services/populate_prediction_markets.py`
-runs a sequenced pass over every source, falls back to offline seed
-fixtures when a live API is unreachable, fires the nightly + intraday
-snapshot jobs, and backfills the snapshot table when fewer than 100 rows
-exist. It's scheduled by the scheduler boot guard as a one-shot job,
-and exposed via `populate_prediction_markets_now()` so deployments can
-invoke it from a CLI script (see
+`apps/api/vnibb/services/populate_prediction_markets.py` runs a sequenced
+live-provider pass over Polymarket, Kalshi, PredictIt, Limitless and Manifold,
+then attempts nightly and intraday snapshots. Failed providers return a zero
+ingest count and appear in `failed_sources`; outages never insert offline
+fixtures as market observations. Snapshot failures are logged separately.
+The one-shot scheduler job and CLI entry point call
+`populate_prediction_markets_now()` (see
 `apps/api/vnibb/scripts/populate_prediction_markets.py`).
 
 ## Dashboard Persistence Hardening (Phase 0)

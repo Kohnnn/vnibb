@@ -40,6 +40,7 @@ function setQuantResponse(metrics?: Record<string, unknown>, error: Error | null
         computed_at: '2026-09-01T00:00:00Z',
         metrics,
       },
+      meta: { unit_status: 'confirmed_vnd', unresolved_excluded_dates: [] },
     } : undefined,
     error,
     isLoading: false,
@@ -52,6 +53,7 @@ test('reports quant data transitions once despite parent state updates on cold a
   mockUseQuantRegime.mockReturnValue({
     ...summary,
     hasData: false,
+    derivedWithheld: false,
     isLoading: false,
     isFetching: false,
     error: null,
@@ -95,7 +97,7 @@ test('reports quant data transitions once despite parent state updates on cold a
   expect(onUpdate.mock.lastCall?.[0]).toMatchObject({
     metrics: 2,
     __widgetRuntime: {
-      provenance: { updatedAt: '2026-09-01T00:00:00Z' },
+      provenance: { updatedAt: null, fetchedAt: '2026-09-01T00:00:00Z' },
     },
   })
   expect(screen.getByText('January')).toBeInTheDocument()
@@ -111,4 +113,37 @@ test('reports quant data transitions once despite parent state updates on cold a
 
   rerender(<Parent />)
   expect(onUpdate).toHaveBeenCalledTimes(3)
+})
+
+
+test.each([
+  undefined,
+  { unit_status: 'mixed' },
+  { unit_status: 'confirmed_vnd', unresolved_excluded_dates: ['2026-10-08'] },
+])('withholds legacy or unresolved quant summary %j', (meta) => {
+  mockUseQuantRegime.mockReturnValue({ ...summary, hasData: true, derivedWithheld: false, isLoading: false, refetch: jest.fn() })
+  setQuantResponse({ drawdown_recovery: { max_drawdown_from_52w_high_pct: -99.9 } })
+  mockUseQuantMetrics.mockReturnValue({ ...mockUseQuantMetrics(), data: { ...mockUseQuantMetrics().data, meta } })
+  const onDataChange = jest.fn()
+  render(<QuantSummaryWidget id="quant-summary" symbol="MSR" onDataChange={onDataChange} />)
+
+  expect(screen.getByText(/Quant summary unavailable:/)).toBeInTheDocument()
+  expect(screen.queryByText('Risk Score')).not.toBeInTheDocument()
+  expect(onDataChange.mock.lastCall?.[0]).not.toHaveProperty('compositeRiskScore')
+  expect(onDataChange.mock.lastCall?.[0]).not.toHaveProperty('regime')
+})
+
+test('preserves certified genuine extreme metrics and benign warnings', () => {
+  mockUseQuantRegime.mockReturnValue({ ...summary, hasData: true, derivedWithheld: false, isLoading: false, refetch: jest.fn() })
+  setQuantResponse({ calmar: { annualized_return_pct: -69.2 }, benchmark_risk: { current_tracking_error_30d_pct: 161.35 } })
+  mockUseQuantMetrics.mockReturnValue({ ...mockUseQuantMetrics(), data: {
+    ...mockUseQuantMetrics().data,
+    data: { ...mockUseQuantMetrics().data.data, warning: 'Latest history is stale.' },
+  } })
+  render(<QuantSummaryWidget id="quant-summary" symbol="MSR" />)
+
+  expect(screen.getByText('Risk Score')).toBeInTheDocument()
+  expect(screen.getByText('-69.20%')).toBeInTheDocument()
+  expect(screen.getByText('+161.35%')).toBeInTheDocument()
+  expect(screen.getByText('Latest history is stale.')).toBeInTheDocument()
 })

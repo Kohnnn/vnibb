@@ -40,6 +40,7 @@ export function VWAPBandsWidget({ symbol, onDataChange }: VWAPBandsWidgetProps) 
   const hasData = points.length > 0;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
   const latest = points[points.length - 1];
+  const lastDataDate = null;
   const recent = points.slice(-20);
   const values = recent.flatMap((point) => [point.lower2, point.upper2]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
   const minValue = values.length ? Math.min(...values) : 0;
@@ -53,11 +54,12 @@ export function VWAPBandsWidget({ symbol, onDataChange }: VWAPBandsWidgetProps) 
         apiGroup: '/microstructure',
         endpoint: `/microstructure/${upperSymbol}?features=vwap&interval=5m&lookback_days=7`,
         sourceLabel: 'VWAP bands · trade ticks',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate,
+        fetchedAt: dataUpdatedAt,
         extra: hasData ? { points: points.length, quality: vwapStatus } : undefined,
       }),
     );
-  }, [onDataChange, hasData, dataUpdatedAt, upperSymbol, points.length, vwapStatus]);
+  }, [onDataChange, hasData, lastDataDate, dataUpdatedAt, upperSymbol, points.length, vwapStatus]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view VWAP bands" icon={<Activity size={18} />} />;
@@ -95,7 +97,7 @@ export function VWAPBandsWidget({ symbol, onDataChange }: VWAPBandsWidgetProps) 
           <Activity size={12} className="text-cyan-400" />
           <span>VWAP Bands</span>
         </div>
-        <WidgetMeta updatedAt={dataUpdatedAt} isFetching={isFetching && hasData} note="Mongo trade ticks" align="right" />
+        <WidgetMeta updatedAt={lastDataDate} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note="Mongo trade ticks" align="right" />
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-[10px] mb-2">

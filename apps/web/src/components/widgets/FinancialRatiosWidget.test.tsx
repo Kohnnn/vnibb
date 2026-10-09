@@ -163,7 +163,7 @@ describe('FinancialRatiosWidget period columns', () => {
     expect(mockUseIncomeStatement).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'year', enabled: true }));
   });
 
-  test('shows TTM ratios after switching from FY with cached annual statement headings', async () => {
+  test('discloses unsupported TTM instead of showing cached or latest-period ratios', async () => {
     mockUseFinancialRatios.mockImplementation((_symbol, options) => queryResult(
       options?.period === 'TTM'
         ? { symbol: 'FPT', count: 1, data: [{ period: 'TTM-2026', pe: 22.75 }] }
@@ -175,9 +175,10 @@ describe('FinancialRatiosWidget period columns', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'TTM' }));
 
-    await waitFor(() => expect(headerLabels()).toContain('TTM 2026'));
-    expect(rowValues(screen.getByText(/^P\/E$/i))).toContain('22.75');
-    expect(screen.queryByText('No renderable ratio metrics for FPT')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('TTM ratios are not supported')).toBeInTheDocument());
+    expect(headerLabels()).toEqual([]);
+    expect(screen.queryByText('22.75')).not.toBeInTheDocument();
+    expect(mockUseFinancialRatios).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'TTM', enabled: false }));
     expect(mockUseIncomeStatement).toHaveBeenCalledWith('FPT', expect.objectContaining({ enabled: false }));
   });
 });

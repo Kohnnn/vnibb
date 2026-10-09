@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle } from 'lucide-react';
 import { useQuantBacktest } from '@/lib/queries';
-import { buildQuantRuntime, extractQuantWarning } from '@/lib/quantWidgetHelpers';
+import { buildQuantRuntime, describeQuantBasis, extractQuantWarning } from '@/lib/quantWidgetHelpers';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -35,6 +35,11 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
     enabled: Boolean(upperSymbol) && !invalidWindows,
   });
   const payload = data?.data;
+  const certifiedUnits = ['confirmed_vnd', 'index_points', 'not_applicable'].includes(data?.meta?.unit_status ?? '');
+  const derivedWithheld = Boolean(payload) && (!certifiedUnits || Boolean(data?.meta?.unresolved_excluded_dates?.length) || Boolean(data?.error));
+  const unavailableReason = !certifiedUnits
+    ? 'Backtest unavailable: historical price units were not certified.'
+    : data?.error || 'Backtest unavailable: source quality is unresolved.';
   const metrics = payload?.metrics ?? {};
   const trades = payload?.trades ?? [];
   const warnings = payload?.warnings ?? [];
@@ -43,7 +48,8 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
     [data, warnings],
   );
   const warning = displayWarnings[0] ?? null;
-  const hasData = Boolean(payload);
+  const hasData = Boolean(payload) && !derivedWithheld;
+  const basisNote = describeQuantBasis(payload?.basis);
 
   useEffect(() => {
     onDataChange?.(buildQuantRuntime({
@@ -52,17 +58,17 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
       endpoint: `/quant/${upperSymbol}/backtest`,
       sourceLabel: 'VNIBB quant backtest',
       response: data,
-      extra: {
+      fetchedAt: dataUpdatedAt,
+      extra: hasData ? {
         period,
         as_of_date: payload?.as_of_date ?? asOfDate,
         execution: 'next_session_open',
-        fast_window: fastWindow,
-        slow_window: slowWindow,
         trade_count: metrics.trade_count ?? null,
+        basis: payload?.basis ?? null,
         warning,
-      },
+      } : undefined,
     }));
-  }, [asOfDate, data, dataUpdatedAt, fastWindow, hasData, metrics.trade_count, onDataChange, payload?.as_of_date, payload?.last_data_date, period, slowWindow, upperSymbol, warning]);
+  }, [asOfDate, data, dataUpdatedAt, fastWindow, hasData, metrics.trade_count, onDataChange, payload?.as_of_date, payload?.basis, payload?.last_data_date, period, slowWindow, upperSymbol, warning]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to run a backtest" icon={<Activity size={18} />} />;
@@ -80,13 +86,17 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
     return <WidgetError title="Backtest unavailable" error={error as Error} onRetry={() => refetch()} />;
   }
 
+  if (derivedWithheld) {
+    return <WidgetEmpty message={unavailableReason} icon={<AlertTriangle size={18} />} />;
+  }
+
   if (!hasData) {
     return <WidgetEmpty message={`No backtest data for ${upperSymbol}`} icon={<Activity size={18} />} />;
   }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <WidgetMeta updatedAt={payload?.last_data_date || dataUpdatedAt} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note={`MA crossover backtest · ${payload?.adjustment_mode || 'adjusted'} history requested`} align="right" />
+      <WidgetMeta updatedAt={payload?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note={`MA crossover backtest · ${payload?.adjustment_mode || 'adjusted'} history requested`} align="right" />
 
       <div className="mb-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
         <Select label="Period" value={period} onChange={(value) => setPeriod(value as QuantPeriod)} options={['1Y', '3Y', '5Y', 'ALL']} />
@@ -130,6 +140,11 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
       <p className="mt-2 text-[9px] leading-3 text-[var(--text-muted)]">
         Educational schema-based backtest. Signals use each session close; orders execute at the next available session open. All-in/all-out, fees included. Not trading advice.
       </p>
+      {basisNote && (
+        <p className="mt-1 text-[9px] leading-3 text-[var(--text-muted)]">
+          Basis: {basisNote}. Compare against the sweep only at identical parameters and sessions.
+        </p>
+      )}
     </div>
   );
 }

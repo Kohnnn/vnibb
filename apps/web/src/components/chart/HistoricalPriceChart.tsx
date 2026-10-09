@@ -32,12 +32,11 @@ function formatShortDate(value: string) {
   return `${date.getMonth() + 1}/${String(date.getFullYear()).slice(-2)}`
 }
 
-type HistoryPriceUnit = 'VND' | 'index_points' | 'unknown'
+type CertifiedHistoryUnit = 'VND' | 'index_points'
 
-const PRICE_AXIS_LABELS: Record<HistoryPriceUnit, { raw: string; adjusted: string }> = {
+const PRICE_AXIS_LABELS: Record<CertifiedHistoryUnit, { raw: string; adjusted: string }> = {
   VND: { raw: 'VND', adjusted: 'Adj. VND' },
-  index_points: { raw: 'Index points', adjusted: 'Adj. Index points' },
-  unknown: { raw: 'Price unit unconfirmed', adjusted: 'Price unit unconfirmed' }
+  index_points: { raw: 'Index points', adjusted: 'Adj. Index points' }
 }
 
 
@@ -81,21 +80,18 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
     () => buildChartEventMarkers(companyEventsQuery.data?.data || [], rows, timeframe === '5Y' ? 12 : 8),
     [companyEventsQuery.data?.data, rows, timeframe]
   )
-  // Explicit row markers win; `confirmed_vnd` metadata only fills a missing
-  // marker. The axis describes the whole series, so any unknown/mixed row
-  // keeps the label unconfirmed instead of mislabeling it as VND.
-  const historyUnit = useMemo<HistoryPriceUnit>(() => {
-    const units = new Set(
-      rows.map((row) =>
-        row.price_unit === 'VND' || row.price_unit === 'index_points'
-          ? row.price_unit
-          : row.price_unit == null && historyQuery.data?.meta?.unit_status === 'confirmed_vnd'
-            ? 'VND'
-            : 'unknown'
-      )
-    )
-    return units.size === 1 ? (units.values().next().value as HistoryPriceUnit) : 'unknown'
-  }, [rows, historyQuery.data?.meta?.unit_status])
+  // Only per-row markers certify the series. The response-level `unit_status` is
+  // deliberately NOT used to fill a missing marker: deployed payloads have been
+  // observed reporting `confirmed_vnd` alongside mixed-magnitude rows, so metadata
+  // alone cannot certify the axis. A series that is not uniformly certified is
+  // refused whole — dropping the unmarked bars and joining the survivors would
+  // fabricate continuity across the excluded sessions.
+  const historyUnit = useMemo<CertifiedHistoryUnit | null>(() => {
+    if (rows.length === 0) return null
+    const first = rows[0].price_unit
+    if (first !== 'VND' && first !== 'index_points') return null
+    return rows.every((row) => row.price_unit === first) ? first : null
+  }, [rows])
 
 
   if (historyQuery.isLoading && !hasData) {
@@ -108,6 +104,15 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
 
   if (!hasData) {
     return <WidgetEmpty message="No historical price data available." />
+  }
+
+  if (historyUnit === null) {
+    return (
+      <WidgetEmpty
+        message="Historical price unit unconfirmed."
+        detail="Unmarked sessions are excluded from the chart; certified VND or index-point rows are required."
+      />
+    )
   }
 
   return (

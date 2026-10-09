@@ -7,6 +7,7 @@ import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods
 import type { SeasonalityGranularity } from '@/lib/api'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
@@ -111,6 +112,27 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
   const hasData = rows.length > 0 && columns.length > 0
   const isFallback = Boolean(error && hasData)
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
+  const meta = data?.meta as (NonNullable<typeof data>['meta'] & {
+    unit_status?: string; unresolved_excluded_dates?: string[]; unresolved_session_count?: number;
+    quality_status?: string; unavailable?: boolean; warnings?: string[]; adjustment_warning?: string;
+    fallback_used?: boolean; completeness_status?: string;
+  }) | undefined
+  const RESOLVED_UNIT_STATUSES = ['confirmed_vnd', 'index_points', 'not_applicable']
+  const legacyQualityUnknown = hasData && !RESOLVED_UNIT_STATUSES.includes(meta?.unit_status ?? '')
+  const degraded = Boolean(data?.error || meta?.unavailable) || legacyQualityUnknown
+    || Boolean(meta?.unit_status && !RESOLVED_UNIT_STATUSES.includes(meta.unit_status))
+    || Boolean(meta?.unresolved_excluded_dates?.length || meta?.unresolved_session_count)
+    || ['unavailable', 'error', 'unresolved', 'unconfirmed', 'mixed'].includes(meta?.quality_status ?? '')
+  const warnings = [
+    payload?.warning, payload?.data_quality_note, data?.error, ...(meta?.warnings ?? []), meta?.adjustment_warning,
+    meta?.fallback_used ? 'Historical source fallback used' : null,
+    meta?.completeness_status === 'partial' ? 'Partial historical coverage' : null,
+    isFallback ? 'Latest seasonality refresh failed; showing previous observations' : null,
+    degraded ? legacyQualityUnknown
+      ? 'Legacy quality unknown: historical price units were not certified; seasonality metrics withheld.'
+      : 'Seasonality metrics withheld: source quality is unavailable or unresolved.' : null,
+  ].filter((message): message is string => Boolean(message))
+  const bannerWarning = warnings.length ? [...new Set(warnings)].join(' · ') : null
 
   const visibleRows = useMemo(() => {
     const rowKeys = [...new Set(rows.map((row) => row.row_key))].sort((a, b) => b.localeCompare(a))
@@ -201,7 +223,8 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
             ))}
           </div>
           <WidgetMeta
-            updatedAt={payload?.last_data_date ?? payload?.computed_at ?? dataUpdatedAt}
+            updatedAt={payload?.last_data_date}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note={`${period} ${note}`}
@@ -210,23 +233,25 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
         </div>
       </div>
 
+      <QuantWarningBanner warning={bannerWarning} className="mb-2" />
+
       <div className="mb-2 grid grid-cols-4 gap-2 text-[10px]">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Best Avg</div>
-          <div className="mt-1 text-sm font-mono font-semibold text-emerald-300">{stripWeekPrefix(payload?.best_period)}</div>
+          <div className="mt-1 text-sm font-mono font-semibold text-emerald-300">{degraded ? '-' : stripWeekPrefix(payload?.best_period)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Worst Avg</div>
-          <div className="mt-1 text-sm font-mono font-semibold text-rose-300">{stripWeekPrefix(payload?.worst_period)}</div>
+          <div className="mt-1 text-sm font-mono font-semibold text-rose-300">{degraded ? '-' : stripWeekPrefix(payload?.worst_period)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Hit Rate</div>
-          <div className="mt-1 text-sm font-mono font-semibold text-cyan-300">{formatPct(payload?.hit_rate_pct)}</div>
+          <div className="mt-1 text-sm font-mono font-semibold text-cyan-300">{degraded ? '-' : formatPct(payload?.hit_rate_pct)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Latest</div>
           <div className="mt-1 truncate text-sm font-mono font-semibold text-[var(--text-primary)]">
-            {payload?.current_period ? `${stripWeekPrefix(payload.current_period.label)} ${formatPct(payload.current_period.return_pct)}` : '-'}
+            {degraded ? '-' : payload?.current_period ? `${stripWeekPrefix(payload.current_period.label)} ${formatPct(payload.current_period.return_pct)}` : '-'}
           </div>
         </div>
       </div>
@@ -245,17 +270,18 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
           <WidgetSkeleton lines={8} />
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />
-        ) : data?.error && !hasData ? (
-          <WidgetEmpty message={data.error} icon={<CalendarDays size={18} />} />
+        ) : degraded ? (
+          <WidgetEmpty
+            message="Seasonality metrics withheld"
+            detail={data?.error ?? (legacyQualityUnknown
+              ? 'Legacy quality unknown: historical price units were not certified.'
+              : 'Historical units or excluded sessions remain unresolved.')}
+            icon={<CalendarDays size={18} />}
+          />
         ) : !hasData ? (
           <WidgetEmpty message="Insufficient data for the selected seasonality mode" icon={<CalendarDays size={18} />} />
         ) : (
           <div className={compactCells ? 'min-w-[980px] space-y-1' : 'min-w-[560px] space-y-2'}>
-            {payload?.warning ? (
-              <div className="rounded-md border border-blue-500/20 bg-blue-500/10 px-2 py-1 text-[10px] text-blue-200">
-                {payload.warning}
-              </div>
-            ) : null}
             <div
               className="grid gap-1 text-[10px] text-[var(--text-muted)]"
               style={{ gridTemplateColumns: `${compactCells ? '72px' : '64px'} repeat(${columns.length}, minmax(0, 1fr))` }}

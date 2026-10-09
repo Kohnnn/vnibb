@@ -248,11 +248,12 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                     sourceLabel: 'Foreign trading',
                     apiGroup: '/equity',
                     endpoint: `/equity/${symbol}/foreign-trading`,
-                    updatedAt: dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined,
+                    updatedAt: data?.meta?.last_data_date ?? null,
+                    fetchedAt: dataUpdatedAt || null,
                 },
             },
         });
-    }, [hasData, onDataChange, symbol, dataUpdatedAt]);
+    }, [hasData, onDataChange, symbol, data?.meta?.last_data_date, dataUpdatedAt]);
 
     return (
         <WidgetContainer
@@ -287,7 +288,8 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                         ))}
                     </div>
                     <WidgetMeta
-                        updatedAt={data?.meta?.last_data_date || dataUpdatedAt}
+                        updatedAt={data?.meta?.last_data_date ?? null}
+                        fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         health={healthState}
                         note={`${flowWindow} net position`}

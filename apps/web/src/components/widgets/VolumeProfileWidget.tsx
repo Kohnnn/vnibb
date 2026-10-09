@@ -105,7 +105,17 @@ export function VolumeProfileWidget({ symbol, onDataChange }: VolumeProfileWidge
     enabled: Boolean(upperSymbol),
   });
 
-  const candles = ((data?.data || []) as OHLCData[])
+  const historyUnitStatus = data?.meta?.unit_status ?? '';
+  const historyExpectedUnit = historyUnitStatus === 'confirmed_vnd' ? 'VND' : 'index_points';
+  // Only per-row `price_unit` markers certify the OHLC fallback; a response-level
+  // `unit_status` cannot certify rows that carry no marker (QA #98).
+  const historyWithheld = Boolean(data) && !(
+    (data?.data?.length ?? 0) > 0
+    && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(historyUnitStatus)
+    && (data?.data ??[]).every((row) => row.price_unit === historyExpectedUnit)
+  );
+
+  const candles = ((historyWithheld ?[] : data?.data || []) as OHLCData[])
     .map((row) => {
       const close = Number(row.close);
       if (!Number.isFinite(close)) return null;
@@ -126,6 +136,10 @@ export function VolumeProfileWidget({ symbol, onDataChange }: VolumeProfileWidge
 
   const microProfile = microstructure?.data?.volume_profile;
   const hasMicroProfile = Boolean(microProfile?.bins?.length);
+  const lastDataDate = hasMicroProfile
+    ? null
+    : data?.meta?.freshness_as_of ?? data?.meta?.last_data_date ?? candles[candles.length - 1]?.time ?? null;
+  const fetchedAt = hasMicroProfile ? microUpdatedAt : dataUpdatedAt;
   const profile = hasMicroProfile
     ? ((microProfile?.bins || []).map((bin) => ({ price: Number(bin.price), volume: Number(bin.volume) })) as VolumeBin[])
     : (calculateVolumeProfile(candles, 24) as VolumeBin[]);
@@ -160,13 +174,14 @@ export function VolumeProfileWidget({ symbol, onDataChange }: VolumeProfileWidge
           ? `/microstructure/${upperSymbol}?interval=5m&lookback_days=7&value_area_pct=0.7`
           : `/equity/historical?symbol=${upperSymbol}`,
         sourceLabel: hasMicroProfile ? 'Volume profile · trade ticks' : 'Volume profile (derived)',
-        lastDataDate: hasMicroProfile ? microUpdatedAt : dataUpdatedAt,
+        lastDataDate,
+        fetchedAt,
         stale: isFallback,
         derived: !hasMicroProfile,
         extra: hasData ? { bins: profile.length, pocPrice } : undefined,
       }),
     );
-  }, [onDataChange, hasData, hasMicroProfile, isFallback, microUpdatedAt, dataUpdatedAt, upperSymbol, profile.length, pocPrice]);
+  }, [onDataChange, hasData, hasMicroProfile, isFallback, lastDataDate, fetchedAt, upperSymbol, profile.length, pocPrice]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view volume profile" icon={<BarChart2 size={18} />} />;
@@ -195,7 +210,14 @@ export function VolumeProfileWidget({ symbol, onDataChange }: VolumeProfileWidge
   }
 
   if (!hasData) {
-    return <WidgetEmpty message="No volume profile data" icon={<BarChart2 size={18} />} />;
+    return (
+      <WidgetEmpty
+        message={historyWithheld
+          ? 'Volume profile unavailable: historical price units were not certified.'
+          : 'No volume profile data'}
+        icon={<BarChart2 size={18} />}
+      />
+    );
   }
 
   return (
@@ -219,7 +241,8 @@ export function VolumeProfileWidget({ symbol, onDataChange }: VolumeProfileWidge
             ))}
           </div>
           <WidgetMeta
-            updatedAt={hasMicroProfile ? microUpdatedAt : dataUpdatedAt}
+            updatedAt={lastDataDate}
+            fetchedAt={fetchedAt}
             isFetching={(hasMicroProfile ? isMicroFetching : isFetching) && hasData}
             isCached={isFallback}
             note={hasMicroProfile ? `Mongo • ${microProfile?.quality || 'profile'}` : `${period} • 24 bins`}

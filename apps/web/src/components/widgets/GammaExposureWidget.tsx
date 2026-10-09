@@ -32,7 +32,16 @@ export function GammaExposureWidget({ symbol, onDataChange }: GammaExposureWidge
     enabled: Boolean(upperSymbol),
   })
 
-  const payload = data?.data
+  const quality = data?.meta as (NonNullable<typeof data>['meta'] & {
+    unit_status?: string | null
+    unresolved_excluded_dates?: string[] | null
+  }) | undefined
+  // Only a certified unit status admits the derived volatility/gamma proxy; an
+  // absent or mixed/unconfirmed status must not render ordinary-looking values
+  // (QA #98).
+  const derivedWithheld = Boolean(data) && (!['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+    || Boolean(quality?.unresolved_excluded_dates?.length))
+  const payload = derivedWithheld ? undefined : data?.data
 
   const vol30 = Number(payload?.current_realized_vol_30d_pct ?? NaN)
   const zScore = Number(payload?.regime_z_score ?? NaN)
@@ -57,7 +66,8 @@ export function GammaExposureWidget({ symbol, onDataChange }: GammaExposureWidge
       apiGroup: '/quant',
       endpoint: `/quant/${upperSymbol}/gamma-exposure?period=${period}`,
       sourceLabel: 'Gamma exposure proxy',
-      lastDataDate: payload?.last_data_date ?? payload?.computed_at ?? dataUpdatedAt,
+      lastDataDate: payload?.last_data_date ?? null,
+      fetchedAt: dataUpdatedAt,
       adjustmentMode: payload?.adjustment_mode,
       derived: true,
       extra: {
@@ -67,7 +77,7 @@ export function GammaExposureWidget({ symbol, onDataChange }: GammaExposureWidge
         regime: regime.label,
       },
     }))
-  }, [dataUpdatedAt, hasData, netGamma, onDataChange, payload?.adjustment_mode, payload?.computed_at, payload?.last_data_date, period, regime.label, upperSymbol, vol30, zScore])
+  }, [dataUpdatedAt, hasData, netGamma, onDataChange, payload?.adjustment_mode, payload?.last_data_date, period, regime.label, upperSymbol, vol30, zScore])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view gamma exposure proxy" icon={<Atom size={18} />} />
@@ -97,7 +107,7 @@ export function GammaExposureWidget({ symbol, onDataChange }: GammaExposureWidge
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} proxy · ${(payload?.adjustment_mode || 'adjusted')} history`} align="right" />
+          <WidgetMeta updatedAt={payload?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} proxy · ${(payload?.adjustment_mode || 'adjusted')} history`} align="right" />
         </div>
       </div>
 
@@ -107,7 +117,9 @@ export function GammaExposureWidget({ symbol, onDataChange }: GammaExposureWidge
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
         <WidgetEmpty
-          message="No volatility proxy available for gamma estimate"
+          message={derivedWithheld
+            ? 'Gamma exposure unavailable: historical price units were not certified.'
+            : 'No volatility proxy available for gamma estimate'}
           icon={<Atom size={18} />}
         />
       ) : (

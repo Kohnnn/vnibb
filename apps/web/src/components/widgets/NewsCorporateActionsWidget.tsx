@@ -12,6 +12,8 @@ import { formatNumber, formatPercent, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { addNotebookItem } from '@/lib/researchNotebook';
+import { newsItemObservation, newsObservationProvenance } from '@/lib/newsTime';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface NewsCorporateActionsWidgetProps {
   id: string;
@@ -98,7 +100,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
       title: item.title,
       body: item.summary || item.ai_summary || undefined,
       symbol,
-      sources: [{ label: item.source, sourceName: item.source, url: item.url, publishedAt: item.published_at || item.published_date }],
+      sources: [{ label: item.source, sourceName: item.source, url: item.url, publishedAt: item.published_at || item.published_date || undefined }],
       dedupeKey: `company-news:${symbol}:${item.url}`,
       provenance: { sourceLabel: item.source, apiGroup: '/equity', endpoint: `/api/v1/equity/${symbol}/news` },
     });
@@ -126,30 +128,54 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
   const isFetching = newsFetching || dividendsFetching || insiderFetching;
   const error = newsError || dividendsError || insiderError;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
-
-  const updatedAt = [newsUpdatedAt, dividendsUpdatedAt, insiderUpdatedAt]
+  // Source observation only: the newest genuine company-news publication date.
+  // Query receipt times and corporate-action event dates (which may be future
+  // calendar dates) are not observations of what the source published.
+  const observation = useMemo(
+    () => newsObservationProvenance(news, { receiptAt: newsUpdatedAt }),
+    [news, newsUpdatedAt],
+  );
+  const fetchedAt = [newsUpdatedAt, dividendsUpdatedAt, insiderUpdatedAt]
     .filter(Boolean)
     .sort((a, b) => Number(b) - Number(a))[0];
   const recentNewsCount = useMemo(() => {
     const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
     return news.filter((item) => {
-      const rawDate = item.published_at || item.published_date;
-      if (!rawDate) return false;
-      const parsed = new Date(rawDate).getTime();
-      return Number.isFinite(parsed) && parsed >= cutoff;
+      const parsed = newsItemObservation(item);
+      return parsed !== null && new Date(parsed).getTime() >= cutoff;
     }).length;
   }, [news]);
 
   useEffect(() => {
-    onDataChange?.({
-      __widgetRuntime: {
-        layoutHint: {
-          empty: !hasData,
-          compactHeight: 4,
-        },
-      },
-    });
-  }, [hasData, onDataChange]);
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        compactHeight: 4,
+        apiGroup: '/equity',
+        endpoint: `/equity/${symbol}/news`,
+        sourceLabel: 'Company news + actions',
+        lastDataDate: observation.lastDataDate,
+        fetchedAt,
+        coverage: observation.coverage,
+        cached: Boolean(error && hasData),
+        stale: Boolean(error && hasData),
+        warnings: observation.warning ? [observation.warning] : undefined,
+        extra: { recentNewsCount, dividends: dividends.length, insiderDeals: insiderDeals.length },
+      }),
+    );
+  }, [
+    hasData,
+    onDataChange,
+    observation.lastDataDate,
+    observation.coverage,
+    observation.warning,
+    fetchedAt,
+    error,
+    symbol,
+    recentNewsCount,
+    dividends.length,
+    insiderDeals.length,
+  ]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view news and actions" />;
@@ -172,7 +198,8 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
       <div aria-label="News and corporate actions" className="h-full flex flex-col bg-[var(--bg-primary)]">
         <div className="px-3 py-2 border-b border-[var(--border-color)]">
           <WidgetMeta
-            updatedAt={updatedAt}
+            updatedAt={observation.lastDataDate}
+            fetchedAt={fetchedAt}
             isFetching={isFetching && hasData}
             isCached={Boolean(error && hasData)}
             note="Company news + actions"
@@ -240,14 +267,17 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                           {typeof item.sentiment_score === 'number' ? ` ${Math.round(item.sentiment_score)}` : ''}
                         </span>
                         {typeof item.relevance_score === 'number' && item.relevance_score > 0 ? (
-                          <span className="rounded border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 font-semibold uppercase text-blue-300">
-                            {(item.relevance_score * 100).toFixed(0)}% match
+                          <span
+                            className="rounded border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 font-semibold uppercase text-blue-300"
+                            title="Rule-based ranking score, not a probability of company relevance. Peer and sector matches are indirect."
+                          >
+                            {item.match_reason?.replaceAll('_', ' ') || 'Association unverified'} · rank {Math.round(item.relevance_score * 100)}/100
                           </span>
                         ) : null}
                       </div>
                       <div className="mt-1 flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
                         {item.source && <span>{item.source}</span>}
-                        {item.published_at && <span>• {formatTimestamp(item.published_at)}</span>}
+                        {newsItemObservation(item) && <span>• {formatTimestamp(newsItemObservation(item)!)}</span>}
                       </div>
                     </div>
                     );

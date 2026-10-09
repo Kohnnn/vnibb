@@ -44,7 +44,7 @@ function formatDividendValue(row: DividendRecord): string {
     return '-';
 }
 
-export function DividendPaymentWidget({ symbol }: DividendPaymentWidgetProps) {
+export function DividendPaymentWidget({ symbol, onDataChange }: DividendPaymentWidgetProps) {
     const isEnabled = Boolean(symbol);
     const {
         data,
@@ -64,6 +64,21 @@ export function DividendPaymentWidget({ symbol }: DividendPaymentWidgetProps) {
     );
     const hasData = rows.length > 0;
     const isFallback = Boolean(error && hasData);
+    // Dividend ex/record/payment dates are action schedules, not source
+    // observations, so freshness stays unknown and receipts go to fetchedAt.
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/equity',
+            endpoint: `/equity/${symbol}/dividends`,
+            sourceLabel: 'Dividend payment history',
+            lastDataDate: null,
+            fetchedAt: dataUpdatedAt,
+            stale: isFallback,
+            extra: { rows: rows.length },
+        }));
+    }, [data?.data, dataUpdatedAt, hasData, isFallback, onDataChange, rows.length, symbol]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view dividends" icon={<Calendar size={18} />} />;
@@ -73,7 +88,8 @@ export function DividendPaymentWidget({ symbol }: DividendPaymentWidgetProps) {
         <div aria-label="Dividend payment history" className="h-full flex flex-col">
             <div className="pb-2 border-b border-[var(--border-subtle)]">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     note="Yield uses latest close"

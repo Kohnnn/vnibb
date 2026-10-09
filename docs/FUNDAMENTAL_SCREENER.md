@@ -25,7 +25,7 @@ Compute valuation + quality fields (intrinsic value, margin of safety, moat, div
 ### Implementation notes discovered during integration (vs original contract)
 
 - Real dataset names have NO `.year` suffix: annual vs quarterly rows share dataset `finance.income_statement` etc. and are split by the `datasetVariant` field (`finance.income_statement.year` / `.quarter`). `get_raw_dataset_records` gained an optional `variant=` filter for this.
-- `market_prices_eod` closes are in thousand VND (VNM 58.4 = 58,400 VND) while statements are VND; loader multiplies close by `EOD_PRICE_MULTIPLIER = 1000`.
+- EOD prices use retained `price_unit` or a source-backed price contract and normalize once to VND; explicit VND is never multiplied by 1,000. Statement money and absolute share counts require declared unit metadata. Missing units suppress monetary valuation/comparison instead of guessing from magnitude.
 - Bank statements use different keys: equity = `viii_capital_and_funds`, no `revenue` (loader falls back to `net_interest_income`), liabilities = `liabilities`. Non-financial VAS sheets carry equity in `owners_equity` and liabilities under the Vietnamese section label `C. NỢ PHẢI TRẢ`.
 - `finance.ratio` year rows store pe/pb/ps/ev_ebitda as strings and dividend_yield as a fraction; engine coerces and normalizes.
 
@@ -42,7 +42,7 @@ One doc per `{symbol, snapshotDate}` (upsert, idempotent). Flat fields for query
   "symbol": "VNM",
   "snapshotDate": "2026-06-10",          // YYYY-MM-DD string
   "source": "vnibb-fundamental-engine",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "observedAt": ISODate, "updatedAt": ISODate,
 
   // read-through fields
@@ -65,7 +65,10 @@ One doc per `{symbol, snapshotDate}` (upsert, idempotent). Flat fields for query
   "inputs": {
     "periodsUsed": [2021, 2022, 2023, 2024, 2025],
     "discountRate": 0.12, "terminalGrowth": 0.03,
-    "baseFcf": 1.0e13, "growthRate": 0.05, "horizonYears": 10
+    "baseFcf": 1.0e13, "growthRate": 0.05, "horizonYears": 10,
+    "unitQuality": "verified",
+    "comparisonUnavailableReason": null,
+    "unitLineage": { /* retained source units, values and normalization */ }
   },
   "computedFields": ["roe", "roa", "..."]
 }
@@ -94,7 +97,8 @@ class FundamentalInputs:
 async def load_fundamental_inputs(symbol: str, svc: MongoMarketDataService) -> FundamentalInputs
     # datasets: finance.income_statement / finance.balance_sheet / finance.cash_flow /
     # finance.ratio / company.info / reference.listings, via get_raw_dataset_records.
-    # MUST dedup by (symbol, yearReport/period) keeping newest observedAt; sort ascending.
+    # Group annual rows by fiscal year; conflicting monetary observations are unavailable.
+    # Retrieval timestamps are not issuer revision precedence.
     # Price/market cap from get_eod_prices(limit small) + shares.
 
 @dataclass
@@ -149,6 +153,6 @@ Moat heuristic (model-derived, must be labeled as such in API docs/description):
 
 ## Notes / risks
 
-- `market_vnstock_premium_records` has duplicate period rows (VNM 142 → ~71 after dedup) — loader dedup is mandatory.
+- Duplicate fiscal periods need compatible basis/revision evidence. Conflicting monetary values or unit declarations suppress valuation; neither the newest fetch nor the largest number establishes an authoritative revision. Legacy snapshots without unit-quality metadata remain unverified.
 - Discount rates drive IV: keep them in `ValuationConfig`, echo them in `inputs` provenance.
 - vnstock raw rows may use Vietnamese or snake_case English keys depending on source; loader must try multiple key aliases per concept (document the alias lists in code).

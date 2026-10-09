@@ -1,10 +1,22 @@
 export type FinancialPeriodMode = 'year' | 'quarter' | 'ttm'
 
+/**
+ * Label options. There is deliberately no `index`/`total`: a fiscal year is only
+ * ever read from the period value itself. Inferring a year from row position
+ * fabricated years for undated rows (issue #103).
+ */
 interface PeriodLabelOptions {
   mode?: FinancialPeriodMode
-  index?: number
-  total?: number
 }
+
+/**
+ * Shared-period sync group used by the "Financial Period View" banner and every
+ * widget it advertises. The banner and the widgets must agree on one constant or
+ * a widget can silently stay on its own period while the banner claims it synced.
+ */
+export const FUNDAMENTAL_PERIOD_SYNC_GROUP = 'fundamental-core'
+
+export const FUNDAMENTAL_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const
 
 const YEAR_REGEX = /(20\d{2})/
 const QUARTER_REGEX = /Q([1-4])/
@@ -29,6 +41,14 @@ export function normalizeFinancialPeriod(raw: string | null | undefined): string
 
   if (/^20\d{2}$/.test(upper)) {
     return upper
+  }
+
+  // A provider row can label a full year with an explicit FY marker ("2025FY",
+  // "FY 2025"). The year is stated in the label, so reading it invents nothing,
+  // while dropping the row left every annual chart and table empty (issue #103).
+  const annualMarker = upper.match(/^(?:FY\s*)?(20\d{2})(?:\s*FY)?$/)
+  if (annualMarker) {
+    return annualMarker[1]
   }
 
   const quarterFirst = upper.match(/^Q([1-4])[-_/ ]?(20\d{2})$/)
@@ -73,16 +93,90 @@ export function isCanonicalQuarterPeriod(period: string | null | undefined): boo
   return normalized ? CANONICAL_QUARTER_REGEX.test(normalized) : false
 }
 
-function inferYearFromIndex(index?: number, total?: number, quarterMode = false): number | null {
-  if (!Number.isFinite(index) || !Number.isFinite(total) || (total as number) <= 0) return null
 
-  const safeIndex = Math.max(0, Math.trunc(index as number))
-  const safeTotal = Math.max(1, Math.trunc(total as number))
-  const yearsBack = quarterMode
-    ? Math.floor((safeTotal - safeIndex - 1) / 4)
-    : Math.max(0, safeTotal - safeIndex - 1)
+/**
+ * Reduce provider rows to at most one row per canonical fiscal period.
+ *
+ * The provider can return the same fiscal period more than once (a revision, or a
+ * consolidated/separate pair). There is no field in the payload that proves which
+ * of two different rows is authoritative, so this never picks one: rows that are
+ * byte-identical after period normalization collapse to one (a harmless repeat),
+ * while rows that disagree are treated as an ambiguous period and excluded
+ * entirely. Excluding is deliberate - silently choosing either would replace a
+ * real balance with a different basis. Both cases are reported so the caller can
+ * disclose them instead of hiding the collision (issue #103).
+ *
+ * Rows whose period cannot be normalized have no fiscal identity at all; they are
+ * counted (not dropped silently) and excluded so they never fabricate a year.
+ */
+export interface CanonicalPeriodIssue {
+  period: string
+  rawPeriods: string[]
+  reason: 'duplicate-identical' | 'ambiguous-basis'
+}
 
-  return new Date().getFullYear() - yearsBack
+export interface CanonicalPeriodRows<T extends { period?: string | null }> {
+  rows: T[]
+  issues: CanonicalPeriodIssue[]
+  invalidPeriodCount: number
+}
+
+function rowsAreIdentical<T extends { period?: string | null }>(left: T, right: T): boolean {
+  const serialize = (value: T): string | null => {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return null
+    }
+  }
+  const leftText = serialize(left)
+  return leftText !== null && leftText === serialize(right)
+}
+
+export function canonicalPeriodRows<T extends { period?: string | null }>(
+  rows: T[] | null | undefined
+): CanonicalPeriodRows<T> {
+  const groups = new Map<string, { rows: T[]; rawPeriods: string[] }>()
+  const issues: CanonicalPeriodIssue[] = []
+  let invalidPeriodCount = 0
+
+  for (const row of rows ?? []) {
+    const raw = String(row?.period ?? '').trim()
+    const key = normalizeFinancialPeriod(row?.period)
+    if (!key) {
+      invalidPeriodCount += 1
+      continue
+    }
+
+    const group = groups.get(key)
+    if (group) {
+      group.rows.push(row)
+      if (raw) group.rawPeriods.push(raw)
+    } else {
+      groups.set(key, { rows: [row], rawPeriods: raw ? [raw] :[] })
+    }
+  }
+
+  const canonical: T[] = []
+  for (const [period, group] of groups) {
+    if (group.rows.length === 1) {
+      canonical.push(group.rows[0])
+      continue
+    }
+
+    const identical = group.rows.every((row) => rowsAreIdentical(
+      { ...row, period }, { ...group.rows[0], period }
+    ))
+    if (identical) {
+      canonical.push(group.rows[0])
+      issues.push({ period, rawPeriods: group.rawPeriods, reason: 'duplicate-identical' })
+      continue
+    }
+
+    issues.push({ period, rawPeriods: group.rawPeriods, reason: 'ambiguous-basis' })
+  }
+
+  return { rows: canonical, issues, invalidPeriodCount }
 }
 
 function normalizeUnknown(value: string): string {
@@ -137,9 +231,6 @@ export function formatFinancialPeriodLabel(
       return String(Math.trunc(numeric))
     }
 
-    const inferredYear = inferYearFromIndex(options.index, options.total)
-    if (inferredYear) return String(inferredYear)
-
     return safe
   }
 
@@ -153,8 +244,7 @@ export function formatFinancialPeriodLabel(
   }
 
   if (quarterMatch) {
-    const inferredYear = inferYearFromIndex(options.index, options.total, true)
-    return inferredYear ? `Q${quarterMatch[1]} ${inferredYear}` : `Q${quarterMatch[1]}`
+    return `Q${quarterMatch[1]}`
   }
 
   if (yearMatch) {
@@ -167,8 +257,7 @@ export function formatFinancialPeriodLabel(
     }
 
     const quarter = ((Math.max(1, Math.trunc(numeric)) - 1) % 4) + 1
-    const inferredYear = inferYearFromIndex(options.index, options.total, true)
-    return inferredYear ? `Q${quarter} ${inferredYear}` : `Q${quarter}`
+    return `Q${quarter}`
   }
 
   return safe
@@ -196,4 +285,37 @@ export function latestByFinancialPeriod<T extends { period?: string | null }>(ro
   return [...(rows ?? [])]
     .filter((row) => Boolean(normalizeFinancialPeriod(row.period)))
     .sort((left, right) => periodSortKey(right.period) - periodSortKey(left.period))[0]
+}
+
+/**
+ * A statement row the API could not certify carries `unavailable_reason` and has
+ * every numeric field nulled. Such a row is not a row of zeroes: it must render
+ * its reason, never a column of dashes that reads as "reported as zero"
+ * (issue #103). A row that merely has some null fields is untouched - missing is
+ * not the same as uncertified.
+ */
+export function isUnavailableStatementRow(row: { unavailable_reason?: unknown } | null | undefined): boolean {
+  const reason = row?.unavailable_reason
+  return typeof reason === 'string' && reason.trim().length > 0
+}
+
+/** The visible note for reason-bearing rows, grouped by reason, or null when there are none. */
+export function describeUnavailableStatementRows(
+  rows: Array<{ period?: string | null; unavailable_reason?: unknown }> | null | undefined
+): string | null {
+  const groups = new Map<string, string[]>()
+
+  for (const row of rows ?? []) {
+    const reason = row?.unavailable_reason
+    if (typeof reason !== 'string' || !reason.trim()) continue
+    const normalized = normalizeFinancialPeriod(row.period)
+    const label = normalized || String(row.period ?? '').trim() || 'unknown period'
+    groups.set(reason.trim(), [...(groups.get(reason.trim()) ??[]), label])
+  }
+
+  if (groups.size === 0) return null
+
+  return Array.from(groups)
+    .map(([reason, periods]) => `Unavailable: ${periods.join(', ')} returned no certified value (${reason}), so no value is shown.`)
+    .join(' ')
 }

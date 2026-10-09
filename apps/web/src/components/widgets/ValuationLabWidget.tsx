@@ -35,8 +35,8 @@ const DEFAULTS = {
 export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
 
-  const { data: ttm, isLoading: ttmLoading } = useTTMSnapshot(upperSymbol, Boolean(upperSymbol))
-  const { data: quote } = useStockQuote(upperSymbol, Boolean(upperSymbol))
+  const { data: ttm, isLoading: ttmLoading, dataUpdatedAt: ttmUpdatedAt } = useTTMSnapshot(upperSymbol, Boolean(upperSymbol))
+  const { data: quote, dataUpdatedAt: quoteUpdatedAt } = useStockQuote(upperSymbol, Boolean(upperSymbol))
 
   // Seed base FCF from TTM cash flow (operating cash flow minus capex), with
   // graceful fallbacks. All values are user-editable below.
@@ -114,12 +114,16 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
   useEffect(() => {
     onDataChange?.({
       __widgetRuntime: {
-        layoutHint: { empty: false, compactHeight: 7 },
+        layoutHint: { empty:false, compactHeight: 7 },
         provenance: {
           sourceLabel: 'Valuation Lab (user assumptions + TTM)',
           apiGroup: '/equity',
           endpoint: `/equity/${upperSymbol}/ttm`,
-          localOnly: true,
+          // Source observation is not exposed by the TTM/quote endpoints, so the
+          // as-of stays unknown; only the retrieval receipt is recorded.
+          updatedAt: null,
+          fetchedAt: Math.max(ttmUpdatedAt || 0, quoteUpdatedAt || 0) || null,
+          localOnly:true,
         },
       },
       assumptions,
@@ -133,7 +137,7 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
         impliedGrowth,
       },
     })
-  }, [onDataChange, upperSymbol, assumptions, result, rawPrice, quotePriceUnit, upside, impliedGrowth])
+  }, [onDataChange, upperSymbol, assumptions, result, rawPrice, quotePriceUnit, upside, impliedGrowth, ttmUpdatedAt, quoteUpdatedAt])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to value" icon={<Calculator size={18} />} />
@@ -218,7 +222,7 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
         </p>
       </div>
 
-      <WidgetMeta className="px-1 pt-1" sourceLabel="TTM + user assumptions" align="right" />
+      <WidgetMeta updatedAt={null} fetchedAt={Math.max(ttmUpdatedAt || 0, quoteUpdatedAt || 0) || null} className="px-1 pt-1" sourceLabel="TTM + user assumptions" align="right" />
     </div>
   )
 }

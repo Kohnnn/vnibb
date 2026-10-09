@@ -11,6 +11,7 @@ export interface PositionWithPrice {
     change: number | null;
     changePct: number | null;
     updatedAt: string | null;
+    fetchedAt: number | null;
     isLoading: boolean;
     error: Error | null;
 }
@@ -55,6 +56,7 @@ export function usePortfolioPrices(symbols: string[]): PortfolioPricesResult {
             change: data?.change ?? null,
             changePct: data?.changePct ?? null,
             updatedAt: data?.updatedAt ?? null,
+            fetchedAt: query.dataUpdatedAt || null,
             isLoading: query.isLoading,
             error: query.error as Error | null,
         });

@@ -771,6 +771,9 @@ export interface FreshnessBucket {
     last_data_date: string | null;
     raw_last_data_date?: string | null;
     settled_last_data_date?: string | null;
+    timestamp_basis?: string;
+    scope?: string;
+    fetched_at?: string | null;
     age_days: number | null;
     status: 'fresh' | 'stale' | 'critical' | 'unknown';
     reason?: 'latest_sync_unsettled' | null;
@@ -795,6 +798,9 @@ export interface DataSourceEntry {
     label: string;
     description: string;
     last_updated: string | null;
+    timestamp_basis?: string;
+    scope?: string;
+    fetched_at?: string | null;
     age_days: number | null;
     status: 'fresh' | 'stale' | 'critical' | 'unknown';
     next_sync: string | null;
@@ -1200,11 +1206,29 @@ export interface TTMSnapshotResponse {
     error?: string | null;
 }
 
+export interface GrowthComparisonDetail {
+    value?: number | null;
+    current?: number | null;
+    previous?: number | null;
+    negative_base?: boolean;
+    transition?: 'loss_to_profit' | 'profit_to_loss' | null;
+    unavailable_reason?: string | null;
+    current_period?: string | null;
+    previous_period?: string | null;
+    basis_status?: 'confirmed' | 'legacy_basis_unconfirmed' | 'incompatible';
+}
+
 export interface GrowthRatesResponse {
     data: {
         symbol: string;
         yoy: Record<string, number | null>;
         qoq: Record<string, number | null>;
+        growth_convention?: 'absolute_prior_denominator';
+        growth_formula?: string;
+        comparisons?: {
+            yoy?: Record<string, GrowthComparisonDetail>;
+            qoq?: Record<string, GrowthComparisonDetail>;
+        };
         as_of: {
             annual?: string | null;
             quarter?: string | null;
@@ -2147,7 +2171,7 @@ export interface QuantResponse {
     }
     meta?: {
         count?: number
-    }
+    } & QuantPriceDiagnostics
     error?: string | null
 }
 
@@ -2176,6 +2200,7 @@ export interface SeasonalityMatrixResponse {
         hit_rate_pct?: number | null
         current_period?: SeasonalityMatrixRow | null
         warning?: string | null
+        data_quality_note?: string | null
     }
     meta?: {
         count?: number
@@ -2210,6 +2235,34 @@ export interface QuantBacktestTrade {
     status?: string | null
 }
 
+export interface QuantBasis {
+    include_latest_quote?: boolean
+    period?: string
+    start_date?: string
+    end_date?: string
+    adjustment_mode?: string
+    source?: string
+    objective?: string
+    fast_windows?: number[]
+    slow_windows?: number[]
+    // Server-stated run parameters (issue #106): a backtest and a sweep cell are
+    // only comparable when these match.
+    initial_capital?: number
+    fee_bps?: number
+    execution?: string
+    fast_window?: number
+    slow_window?: number
+    sharpe_convention?: string
+}
+
+export interface QuantPriceDiagnostics {
+    unit_status?: string | null
+    observed_session_count?: number | null
+    excluded_session_count?: number | null
+    excluded_price_unit_dates?: string[] | null
+    unresolved_excluded_dates?: string[] | null
+}
+
 export interface QuantBacktestResponse {
     data: {
         symbol: string
@@ -2230,12 +2283,13 @@ export interface QuantBacktestResponse {
         }
         trades: QuantBacktestTrade[]
         warnings?: string[]
+        basis?: QuantBasis
     }
     meta?: {
         count?: number
         data_points?: number
         last_data_date?: string | null
-    }
+    } & QuantPriceDiagnostics
     error?: string | null
 }
 
@@ -2277,12 +2331,13 @@ export interface QuantSweepResponse {
         best?: QuantSweepCell | null
         cells: QuantSweepCell[]
         warnings?: string[]
+        basis?: QuantBasis
     }
     meta?: {
         count?: number
         data_points?: number
         last_data_date?: string | null
-    }
+    } & QuantPriceDiagnostics
     error?: string | null
 }
 
@@ -2395,7 +2450,7 @@ export interface GammaExposurePayload {
 
 export interface GammaExposureResponse {
     data: GammaExposurePayload;
-    meta?: { count?: number };
+    meta?: { count?: number } & QuantPriceDiagnostics;
     error?: string | null;
 }
 
@@ -2488,7 +2543,7 @@ export interface SmartMoneyPayload {
 
 export interface SmartMoneyResponse {
     data: SmartMoneyPayload;
-    meta?: { count?: number };
+    meta?: { count?: number } & QuantPriceDiagnostics;
     error?: string | null;
 }
 
@@ -3915,6 +3970,8 @@ export interface ChartDataPoint {
     low: number;
     close: number;
     volume: number;
+    price_unit?: 'VND' | 'index_points' | 'unknown';
+    price_source?: string | null;
 }
 
 export interface ChartDataResponse {

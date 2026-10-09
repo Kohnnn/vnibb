@@ -71,7 +71,8 @@ async def get_financials(
     ## Periods
     - **year**: Annual statements
     - **quarter**: Quarterly statements
-    - **TTM**: Trailing Twelve Months (sum of last 4 quarters)
+    - **TTM**: Latest balance snapshot or four consecutive compatible quarterly flows;
+      missing source data or unsupported basis returns an explicit unavailable reason.
     """
     try:
         data = await get_financials_with_ttm(

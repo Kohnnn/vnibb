@@ -44,7 +44,7 @@ export function generateId(): string {
 
 export type DashboardAction =
     | { type: 'LOAD_STATE'; payload: { dashboards: Dashboard[]; folders: DashboardFolder[]; activeDashboardId: string | null; activeTabId: string | null } }
-    | { type: 'SET_ACTIVE_DASHBOARD'; payload: { dashboardId: string } }
+    | { type: 'SET_ACTIVE_DASHBOARD'; payload: { dashboardId: string; tabId?: string | null } }
     | { type: 'ADD_DASHBOARD'; payload: { dashboard: Dashboard } }
     | { type: 'UPDATE_DASHBOARD'; payload: { dashboardId: string; updates: Partial<Dashboard> } }
     | { type: 'UPDATE_DASHBOARD_RUNTIME'; payload: { dashboardId: string; updates: Partial<Dashboard> } }
@@ -105,7 +105,11 @@ export interface DashboardMigrationNotice {
 export interface DashboardContextValue {
     state: DashboardState;
     localStateReady: boolean;
-    setActiveDashboard: (id: string) => void;
+    // #102: increments only when a *user* selects a workspace or tab. Lets the
+    // URL-sync hook tell a real navigation apart from bundled seeding or a late
+    // backend snapshot moving the active workspace on its own.
+    userNavigationSeq: number;
+    setActiveDashboard: (id: string, options?: { programmatic?: boolean }) => void;
     createDashboard: (data: DashboardCreate) => Dashboard;
     exportWorkspace: (groups?: Dashboard['widgetGroups'], linkedGlobalMarketsSymbol?: string) => WorkspaceBackup;
     restoreWorkspace: (backup: WorkspaceBackup) => void;
@@ -117,7 +121,7 @@ export interface DashboardContextValue {
     updateFolder: (id: string, updates: Partial<DashboardFolder>) => void;
     deleteFolder: (id: string) => void;
     toggleFolder: (id: string) => void;
-    setActiveTab: (id: string) => void;
+    setActiveTab: (id: string, options?: { programmatic?: boolean }) => void;
     createTab: (dashboardId: string, name: string) => DashboardTab;
     updateTab: (dashboardId: string, tabId: string, updates: Partial<DashboardTab>) => void;
     deleteTab: (dashboardId: string, tabId: string) => void;

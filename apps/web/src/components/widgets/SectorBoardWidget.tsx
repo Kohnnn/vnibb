@@ -83,11 +83,12 @@ function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardW
         apiGroup: '/market',
         endpoint: `/market/sector-board?sort_by=${sortBy}&limit_per_sector=12`,
         sourceLabel: 'Sector board',
-        lastDataDate: data?.updated_at || dataUpdatedAt,
+        lastDataDate: null,
+        fetchedAt: dataUpdatedAt,
         extra: hasData ? { sortBy, sectorCount: sectors.length } : undefined,
       }),
     );
-  }, [hasData, data?.updated_at, dataUpdatedAt, sortBy, sectors.length, onDataChange]);
+  }, [hasData, dataUpdatedAt, sortBy, sectors.length, onDataChange]);
 
   const scroll = (direction: 'left' | 'right') => {
     scrollRef.current?.scrollBy({
@@ -151,7 +152,8 @@ function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardW
               ))}
             </div>
               <WidgetMeta
-                updatedAt={data?.updated_at || dataUpdatedAt}
+                updatedAt={null}
+                fetchedAt={dataUpdatedAt}
                 isFetching={isFetching && hasData}
                 note={unitConfig.display === 'USD' ? `Sorted by ${sortBy.replace('_', ' ')} · USD for price/value fields` : `Sorted by ${sortBy.replace('_', ' ')}`}
                 align="right"

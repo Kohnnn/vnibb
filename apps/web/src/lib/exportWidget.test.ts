@@ -33,6 +33,24 @@ describe('historical warnings provenance', () => {
   });
 });
 
+describe('source and retrieval provenance', () => {
+  it('keeps old source data stale in exported metadata after a new fetch', () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-08T03:00:00Z').getTime());
+    try {
+      const markdown = provenanceToMarkdown({
+        updatedAt: '2026-09-21T15:00:00Z', fetchedAt: '2026-10-08T03:00:00Z',
+        cached: true, coverage: 'partial', capturedAt: '2026-10-08T03:00:00Z',
+      });
+      expect(markdown).toContain('- Source as of: 2026-09-21T15:00:00.000Z');
+      expect(markdown).toContain('- Fetched at: 2026-10-08T03:00:00.000Z');
+      expect(markdown).toContain('- Coverage: partial');
+      expect(markdown).toContain('- Data status: Stale');
+    } finally {
+      now.mockRestore();
+    }
+  });
+});
+
 describe('rowsToCSV', () => {
   it('keeps the first-seen union of fields across every row', () => {
     expect(rowsToCSV([

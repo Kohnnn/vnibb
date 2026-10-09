@@ -256,7 +256,10 @@ async def test_quant_backtest_returns_metrics_summary_and_trades(client, monkeyp
 
 @pytest.mark.asyncio
 async def test_quant_sweep_returns_cells_and_best_combo(client, monkeypatch):
-    async def fake_load_quant_frame_with_warning(**_kwargs):
+    captured: dict = {}
+
+    async def fake_load_quant_frame_with_warning(**kwargs):
+        captured.update(kwargs)
         frame = _build_price_frame(220)
         midpoint = len(frame) // 2
         frame.loc[:midpoint, "close"] = [120 - (index * 0.25) for index in range(midpoint + 1)]
@@ -292,6 +295,68 @@ async def test_quant_sweep_returns_cells_and_best_combo(client, monkeypatch):
     assert data["best"]["fast_window"] in {5, 10}
     assert data["best"]["slow_window"] in {20, 40}
     assert payload["meta"]["count"] == 4
+    # Sweep must run on settled sessions, on the same basis as the backtest.
+    assert captured["include_latest_quote"] is False
+    assert data["basis"]["include_latest_quote"] is False
+    assert data["basis"]["adjustment_mode"] == "adjusted"
+    assert data["basis"]["fast_windows"] == [5, 10]
+    assert data["basis"]["slow_windows"] == [20, 40]
+
+
+@pytest.mark.asyncio
+async def test_sweep_and_backtest_share_sharpe_basis_on_settled_sessions(client, monkeypatch):
+    """Same strategy/window over the same settled frame must yield the same Sharpe.
+
+    Regression for the sweep defaulting to include_latest_quote=True while the
+    backtest used False, which silently changed the Sharpe basis.
+    """
+    def _settled_frame():
+        frame = _build_price_frame(220)
+        midpoint = len(frame) // 2
+        frame.loc[:midpoint, "close"] = [120 - (index * 0.25) for index in range(midpoint + 1)]
+        frame.loc[midpoint + 1 :, "close"] = [
+            85 + (index * 0.8) for index in range(len(frame) - midpoint - 1)
+        ]
+        frame["open"] = frame["close"] - 0.2
+        frame["high"] = frame["close"] + 0.8
+        frame["low"] = frame["close"] - 0.8
+        return frame
+
+    async def fake_load_quant_frame_with_warning(**_kwargs):
+        return _settled_frame(), None
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.quant._load_quant_frame_with_warning", fake_load_quant_frame_with_warning
+    )
+
+    backtest = await client.post(
+        "/api/v1/quant/VNM/backtest",
+        json={
+            "period": "1Y",
+            "as_of_date": "2026-03-13",
+            "initial_capital": 1000000,
+            "fee_bps": 10,
+            "strategy": {"type": "moving_average_crossover", "fast_window": 5, "slow_window": 20},
+        },
+    )
+    sweep = await client.post(
+        "/api/v1/quant/VNM/sweep",
+        json={
+            "period": "1Y",
+            "initial_capital": 1000000,
+            "fee_bps": 10,
+            "fast_windows": [5],
+            "slow_windows": [20],
+            "objective": "sharpe_daily_rf0",
+        },
+    )
+
+    assert backtest.status_code == 200
+    assert sweep.status_code == 200
+    backtest_sharpe = backtest.json()["data"]["metrics"]["sharpe_daily_rf0"]
+    sweep_cell = sweep.json()["data"]["cells"][0]
+    assert sweep_cell["fast_window"] == 5 and sweep_cell["slow_window"] == 20
+    assert sweep_cell["sharpe_daily_rf0"] == backtest_sharpe
 
 
 @pytest.mark.asyncio

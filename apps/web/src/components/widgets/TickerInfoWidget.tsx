@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useEffect, useMemo } from 'react';
-import { useStockQuote, useProfile, useScreenerData, useTradingStats, useHistoricalPrices } from '@/lib/queries';
+import { useStockQuote, useProfile, useScreenerData, useHistoricalPrices } from '@/lib/queries';
 import { useUnit } from '@/contexts/UnitContext';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -40,7 +40,6 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     isFetching: profileFetching,
     error: profileError,
     refetch: refetchProfile,
-    dataUpdatedAt: profileUpdatedAt,
   } = useProfile(symbol);
 
   const {
@@ -53,7 +52,6 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     limit: 1,
     enabled: Boolean(symbol),
   });
-  const { data: tradingStats } = useTradingStats(symbol, Boolean(symbol));
   const historyEndDate = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const historyStartDate = useMemo(() => {
     const start = new Date()
@@ -74,22 +72,27 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   const error = quoteError || profileError || screenerError;
   const hasQuote = Boolean(quote?.symbol);
   const isFallback = Boolean(error && hasQuote);
-  const updatedAt = quoteUpdatedAt || profileUpdatedAt;
+  // Source observation only. The TanStack receipt time is reported separately as fetchedAt.
+  const sourceUpdatedAt = quote?.updatedAt ?? null;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasQuote, { timeoutMs: 8_000 })
   const screenerRow = screenerData?.data?.[0]
   const profileData = profile?.data
+  // Strict per-row certification: every history row must carry an explicit `price_unit`
+  // of 'VND'. The response-level `unit_status` is deliberately NOT used to fill a missing
+  // row marker — deployed payloads have been observed reporting confirmed_vnd alongside
+  // mixed-magnitude rows, so metadata alone cannot certify the range.
   const historyRange = useMemo(() => {
-    const rows = (oneYearHistory?.data || []).filter((row) =>
-      row.price_unit === 'VND' ||
-      (row.price_unit == null && oneYearHistory?.meta?.unit_status === 'confirmed_vnd')
-    )
+    const rows = oneYearHistory?.data ?? []
+    if (rows.length === 0 || !rows.every((row) => row.price_unit === 'VND')) {
+      return { high: null as number | null, low: null as number | null }
+    }
     const highs = rows.map((row) => toPositiveNumber(row.high)).filter((value): value is number => value !== null)
     const lows = rows.map((row) => toPositiveNumber(row.low)).filter((value): value is number => value !== null)
     return {
       high: highs.length ? Math.max(...highs) : null,
       low: lows.length ? Math.min(...lows) : null,
     }
-  }, [oneYearHistory?.data, oneYearHistory?.meta?.unit_status])
+  }, [oneYearHistory?.data])
 
   useEffect(() => {
     onDataChange?.(
@@ -98,11 +101,12 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
         apiGroup: '/equity',
         endpoint: `/equity/quote?symbol=${symbol}`,
         sourceLabel: 'Quote + profile',
-        lastDataDate: quoteUpdatedAt ?? profileUpdatedAt,
+        lastDataDate: sourceUpdatedAt,
+        fetchedAt: quoteUpdatedAt,
         extra: { quote, profile: profileData, screener: screenerRow },
       }),
     )
-  }, [onDataChange, profileData, quote, screenerRow, hasQuote, symbol, quoteUpdatedAt, profileUpdatedAt])
+  }, [onDataChange, profileData, quote, screenerRow, hasQuote, symbol, quoteUpdatedAt, sourceUpdatedAt])
 
   const handleRetry = () => {
     refetchQuote();
@@ -173,17 +177,22 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     null
 
   const quoteRow = quote as unknown as Record<string, unknown>
-  const screenerRowRecord = screenerRow as Record<string, unknown> | undefined
-  const tradingStatsRow = tradingStats?.data as unknown as Record<string, unknown> | undefined
 
-  const dayHigh = firstPositiveNumber(quote?.high, quoteRow.day_high, quoteRow.high_price, screenerRowRecord?.high, screenerRowRecord?.day_high)
-  const dayLow = firstPositiveNumber(quote?.low, quoteRow.day_low, quoteRow.low_price, screenerRowRecord?.low, screenerRowRecord?.day_low)
-  const openPrice = firstPositiveNumber(quote?.open, quoteRow.day_open, quoteRow.open_price, screenerRowRecord?.open, screenerRowRecord?.day_open)
-  const previousClose = firstPositiveNumber(quote?.prevClose, quoteRow.prev_close, quoteRow.reference_price, quoteRow.ref_price, screenerRowRecord?.prev_close, screenerRowRecord?.reference_price)
-  const rangeLow = firstPositiveNumber(tradingStats?.data?.low_52w, tradingStatsRow?.['52w_low'], tradingStatsRow?.low52w, screenerRowRecord?.low_52w, screenerRowRecord?.['52w_low'], historyRange.low)
-  const rangeHigh = firstPositiveNumber(tradingStats?.data?.high_52w, tradingStatsRow?.['52w_high'], tradingStatsRow?.high52w, screenerRowRecord?.high_52w, screenerRowRecord?.['52w_high'], historyRange.high)
+  // Day-range fields come from the quote itself (same certified unit). Screener rows and
+  // trading-stats 52w values expose no unit marker, so they never feed these cells.
+
+  const dayHigh = firstPositiveNumber(quote?.high, quoteRow.day_high)
+  const dayLow = firstPositiveNumber(quote?.low, quoteRow.day_low)
+  const openPrice = firstPositiveNumber(quote?.open, quoteRow.day_open)
+  const previousClose = firstPositiveNumber(quote?.prevClose, quoteRow.prev_close, quoteRow.reference_price, quoteRow.ref_price)
+
+  // The 52W range is published only when the strictly VND-certified history bounds and the
+  // displayed quote share the VND unit. Both the range cards and the range bar read these
+  // gated values, so an incompatible range can never be relabelled into another currency.
+  const rangeLow = quote?.price_unit === 'VND' ? historyRange.low : null
+  const rangeHigh = quote?.price_unit === 'VND' ? historyRange.high : null
   const rangePrice = toPositiveNumber(price)
-  const hasRange = Boolean(quote?.price_unit === 'VND' && rangeLow && rangeHigh && rangePrice && rangeHigh > rangeLow)
+  const hasRange = Boolean(rangeLow && rangeHigh && rangePrice && rangeHigh > rangeLow)
   const rangePosition = hasRange
     ? clampPercent((((rangePrice as number) - (rangeLow as number)) / ((rangeHigh as number) - (rangeLow as number))) * 100)
     : 0
@@ -193,7 +202,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   const ChangeIcon = changeDirection === 'up' ? TrendingUp : changeDirection === 'down' ? TrendingDown : Activity;
   const changeLabel =
     change !== null && change !== undefined && changePct !== null && changePct !== undefined
-      ? `${changeDirectionLabel} ${change > 0 ? '+' : ''}${change.toLocaleString()} (${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%)`
+      ? `${changeDirectionLabel} ${change > 0 ? '+' : ''}${formatPriceValueForUnit(change, priceDisplayConfig)} (${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%)`
       : '--';
 
   return (
@@ -208,7 +217,8 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     >
       <div className="flex flex-col h-full space-y-2">
         <WidgetMeta
-          updatedAt={updatedAt}
+          updatedAt={sourceUpdatedAt}
+          fetchedAt={quoteUpdatedAt}
           isFetching={isFetching && hasQuote}
           isCached={Boolean(quote?.cached) || isFallback}
           note={

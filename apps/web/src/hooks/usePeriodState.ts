@@ -46,10 +46,15 @@ export function usePeriodState({
   const resolveStoredPeriod = useCallback((): ExtendedPeriod => {
     if (!persist) return defaultPeriod;
 
-    const sharedPeriod = sharedStorageKey
-      ? readStoredPeriod(sharedStorageKey, validPeriods)
-      : null;
-    if (sharedPeriod) return sharedPeriod;
+    // A configured group is the instance's single source of truth. Its private
+    // key only mirrors what `setPeriod` last wrote, so reading it as a fallback
+    // let a period stored before the instance joined the group outlive the
+    // banner: the banner showed FY while this widget stayed on Q, which is the
+    // desynchronised state the shared group exists to prevent (issue #101).
+    // Ungrouped instances (`periodSyncGroup: null`) still read their own key.
+    if (sharedStorageKey) {
+      return readStoredPeriod(sharedStorageKey, validPeriods) ?? defaultPeriod;
+    }
 
     return readStoredPeriod(widgetStorageKey, validPeriods) ?? defaultPeriod;
   }, [defaultPeriod, persist, sharedStorageKey, validPeriods, widgetStorageKey]);

@@ -372,6 +372,8 @@ export function WidgetWrapper({
             stale: publishedProvenance.stale,
             localOnly: publishedProvenance.localOnly,
             updatedAt: publishedProvenance.updatedAt,
+            coverage: publishedProvenance.coverage,
+            marketClosed: publishedProvenance.marketClosed,
             sourceLabel: publishedProvenance.sourceLabel,
         });
     }, [publishedProvenance]);
@@ -384,6 +386,9 @@ export function WidgetWrapper({
                 apiGroup: publishedProvenance?.apiGroup,
                 endpoint: publishedProvenance?.endpoint,
                 updatedAt: publishedProvenance?.updatedAt,
+                fetchedAt: publishedProvenance?.fetchedAt,
+                cached: publishedProvenance?.cached,
+                coverage: publishedProvenance?.coverage,
                 adjustmentMode: publishedProvenance?.adjustmentMode,
             }}
         />
@@ -920,7 +925,10 @@ export function WidgetWrapper({
                 title={`${displaySymbol ? `${displaySymbol} - ` : ''}${title}`}
                 contentRef={maximizedContentRef}
             />
-            {widgetHost && isContentVisible && !isCollapsed && createPortal(
+            {/* Mount Suspense before deferred DOM attachment: cached lazy imports stranded
+                React 19 retry lanes on reload. ponytail: first fetches start off-screen;
+                gate them by visibility if eager fetching becomes costly. */}
+            {widgetHost && !isCollapsed && createPortal(
                 <WidgetHeaderVisibilityProvider hideHeader>
                     <WidgetErrorBoundary widgetName={title} onError={(error) => logClientError(`Widget ${id} (${title}) crashed:`, error)}>
                         {withResolvedWidgetProps(children, { id, symbol: displaySymbol, widgetGroup, onDataChange: setInternalData })}

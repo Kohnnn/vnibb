@@ -37,6 +37,62 @@ const REQUEST_TIMEOUT_MS = 20000;
 const MIN_CHART_DIMENSION_PX = 8;
 const MAX_CHART_SIZE_RETRIES = 90;
 
+interface ExcludedSession {
+  time: string;
+}
+
+/** A renderer point: a certified bar, or whitespace marking an excluded session. */
+type ChartSeriesPoint = ChartPoint | ExcludedSession;
+
+function isChartPoint(point: ChartSeriesPoint): point is ChartPoint {
+  return 'close' in point;
+}
+
+/**
+ * The single certified unit shared by every marked session, or `null` when no
+ * session is marked or marked sessions disagree (VND vs index points cannot
+ * share one price axis). Unmarked sessions are tolerated and later excluded —
+ * they are never guessed into a unit. The response-level `unit_status` is
+ * deliberately unused: deployed payloads reported `confirmed_vnd` alongside
+ * mixed-magnitude rows.
+ */
+function certifiedUnit(points: ChartPoint[]): 'VND' | 'index_points' | null {
+  const marked = points.filter((point) => point.priceUnit !== 'unknown');
+  if (marked.length === 0) return null;
+  const first = marked[0].priceUnit;
+  if (first === 'unknown') return null;
+  return marked.every((point) => point.priceUnit === first) ? first : null;
+}
+
+/**
+ * Explicit unavailable reason plus excluded coverage for a series that certifies
+ * no single unit. The chart is withheld rather than plotting only the marked
+ * subset, which would join the excluded sessions into one line.
+ */
+function uncertifiedNotice(points: ChartPoint[]): string {
+  const unmarked = points.filter((point) => point.priceUnit === 'unknown').length;
+  const reason = unmarked === points.length
+    ? 'no session carries a price-unit marker'
+    : unmarked > 0
+      ? `${unmarked} of ${points.length} sessions carry no price-unit marker`
+      : 'certified sessions mix VND and index points, which cannot share one price axis';
+  return `No certified price series: ${reason}. All ${points.length} sessions excluded from the chart.`;
+}
+
+/**
+ * Keep excluded sessions in the series as whitespace so the renderer leaves a
+ * gap there. Dropping them and joining the certified bars would draw one
+ * continuous line across sessions the source never certified.
+ */
+function withExcludedGaps(points: ChartPoint[], unit: 'VND' | 'index_points'): ChartSeriesPoint[] {
+  return points.map((point) => (point.priceUnit === unit ? point : { time: point.time }));
+}
+
+/** Degraded disclosure naming the excluded coverage of an otherwise certified series. */
+function excludedCoverageNotice(excluded: number, total: number): string {
+  return `${excluded} of ${total} sessions excluded: price unit unconfirmed.`;
+}
+
 function getSafeChartSize(element: HTMLElement | null): { width: number; height: number } | null {
   if (!element) return null;
 
@@ -112,7 +168,7 @@ function safeNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function normalizePoints(rows: Array<Record<string, unknown>>, unitStatus?: string | null): ChartPoint[] {
+function normalizePoints(rows: Array<Record<string, unknown>>): ChartPoint[] {
   const byDate = new Map<string, ChartPoint>();
   for (const row of rows) {
     const rawTime = String(row.time ?? '');
@@ -127,9 +183,12 @@ function normalizePoints(rows: Array<Record<string, unknown>>, unitStatus?: stri
     }
     // The history endpoint owns source/adjustment precedence; retain its first valid row per day.
     if (byDate.has(time)) continue;
+    // The row marker is the only certification source. The response-level
+    // `unit_status` cannot fill a missing marker: deployed payloads reported
+    // `confirmed_vnd` alongside mixed-magnitude rows.
     const priceUnit = row.price_unit === 'VND' || row.price_unit === 'index_points'
       ? row.price_unit
-      : row.price_unit == null && unitStatus === 'confirmed_vnd' ? 'VND' : 'unknown';
+      : 'unknown';
     byDate.set(time, {
       time, open, high, low, close,
       volume: safeNumber(row.volume) ?? 0,
@@ -210,11 +269,12 @@ export function TradingViewAdvancedChart({
   const mainSeriesRef = useRef<ISeriesApi<'Candlestick'> | ISeriesApi<'Line'> | ISeriesApi<'Area'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
-  const [points, setPoints] = useState<ChartPoint[]>([]);
+  const [points, setPoints] = useState<ChartSeriesPoint[]>([]);
   const [comparePoints, setComparePoints] = useState<ChartPoint[]>([]);
   const [eventMarkers, setEventMarkers] = useState<ChartEventMarker[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [excludedNotice, setExcludedNotice] = useState<string | null>(null);
   const [adjustmentMode, setAdjustmentMode] = useState<'raw' | 'adjusted'>('adjusted');
 
   const dateRange = useMemo(() => resolveDateRange(timeframe), [timeframe]);
@@ -257,15 +317,43 @@ export function TradingViewAdvancedChart({
 
         const normalized = normalizePoints(
           (historyResponse?.data || []) as unknown as Array<Record<string, unknown>>,
-          historyResponse?.meta?.unit_status
         );
         const merged = mergeQuote(normalized, quoteResponse?.data ?? null);
-        setPoints(merged);
-        setComparePoints(normalizePoints(
-          (compareResponse?.data || []) as unknown as Array<Record<string, unknown>>,
-          compareResponse?.meta?.unit_status
-        ));
-        setEventMarkers(buildChartEventMarkers(eventsResponse?.data || [], merged, timeframe === '5Y' ? 12 : 8));
+        const unit = certifiedUnit(merged);
+        if (merged.length === 0) {
+          setPoints([]);
+          setComparePoints([]);
+          setEventMarkers([]);
+          setExcludedNotice(null);
+        } else if (unit === null) {
+          // No certified unit covers the response (every row unmarked, or marked
+          // rows disagree on VND vs index points), so no honest series can be
+          // drawn. Withhold the chart and name the excluded coverage instead of
+          // plotting the marked subset as if it were continuous certified history.
+          setPoints([]);
+          setComparePoints([]);
+          setEventMarkers([]);
+          setExcludedNotice(null);
+          setError(uncertifiedNotice(merged));
+        } else {
+          const excluded = merged.filter((point) => point.priceUnit !== unit).length;
+          // Unmarked sessions keep their slot as whitespace so the renderer breaks
+          // the line there instead of joining across them.
+          setPoints(withExcludedGaps(merged, unit));
+          // The compare series is drawn on its own scale, so an unmarked or mixed
+          // compare history would still read as continuous certified history.
+          const compareNormalized = normalizePoints(
+            (compareResponse?.data || []) as unknown as Array<Record<string, unknown>>,
+          );
+          const compareUnit = certifiedUnit(compareNormalized);
+          setComparePoints(
+            compareUnit !== null && compareNormalized.every((point) => point.priceUnit === compareUnit)
+              ? compareNormalized
+              : [],
+          );
+          setEventMarkers(buildChartEventMarkers(eventsResponse?.data || [], merged, timeframe === '5Y' ? 12 : 8));
+          setExcludedNotice(excluded > 0 ? excludedCoverageNotice(excluded, merged.length) : null);
+        }
       } catch (fetchError) {
         if ((fetchError as Error)?.name === 'AbortError') {
           return;
@@ -274,6 +362,7 @@ export function TradingViewAdvancedChart({
         setPoints([]);
         setComparePoints([]);
         setEventMarkers([]);
+        setExcludedNotice(null);
       } finally {
         window.clearTimeout(timeoutId);
         setIsLoading(false);
@@ -423,14 +512,18 @@ export function TradingViewAdvancedChart({
         // arrives non-finite. normalizePoints + mergeQuote already guard,
         // but we filter once more here right before setData so any future
         // upstream regression cannot crash the chart.
-        const safePoints = points.filter(
-          (point) =>
-            !!point.time &&
-            Number.isFinite(point.open) &&
-            Number.isFinite(point.high) &&
-            Number.isFinite(point.low) &&
-            Number.isFinite(point.close)
-        );
+        //
+        // `points` may also carry whitespace entries for sessions excluded for
+        // an unconfirmed unit. They are kept in every series so the renderer
+        // draws a gap there rather than one continuous line across them.
+        const isRenderablePoint = (point: ChartSeriesPoint): point is ChartPoint =>
+          isChartPoint(point) &&
+          !!point.time &&
+          Number.isFinite(point.open) &&
+          Number.isFinite(point.high) &&
+          Number.isFinite(point.low) &&
+          Number.isFinite(point.close);
+        const safePoints = points.filter(isRenderablePoint);
         const safeComparePoints = comparePoints.filter(
           (point) =>
             !!point.time &&
@@ -457,7 +550,9 @@ export function TradingViewAdvancedChart({
               crosshairMarkerVisible: true,
               crosshairMarkerRadius: 4,
             });
-            series.setData(safePoints.map((point) => ({ time: point.time, value: point.close })));
+            series.setData(points.map((point) => (
+              isRenderablePoint(point) ? { time: point.time, value: point.close } : { time: point.time }
+            )));
           } else if (effectiveMode === 'area') {
             series = chart.addAreaSeries({
               topColor: 'rgba(56, 189, 248, 0.35)',
@@ -465,7 +560,9 @@ export function TradingViewAdvancedChart({
               lineColor: '#38bdf8',
               lineWidth: 2,
             });
-            series.setData(safePoints.map((point) => ({ time: point.time, value: point.close })));
+            series.setData(points.map((point) => (
+              isRenderablePoint(point) ? { time: point.time, value: point.close } : { time: point.time }
+            )));
           } else {
             series = chart.addCandlestickSeries({
               upColor: upColor,
@@ -476,13 +573,11 @@ export function TradingViewAdvancedChart({
               wickDownColor: downColor,
             });
             series.setData(
-              safePoints.map((point) => ({
-                time: point.time,
-                open: point.open,
-                high: point.high,
-                low: point.low,
-                close: point.close,
-              }))
+              points.map((point) => (
+                isRenderablePoint(point)
+                  ? { time: point.time, open: point.open, high: point.high, low: point.low, close: point.close }
+                  : { time: point.time }
+              ))
             );
           }
         } catch (setDataError) {
@@ -545,11 +640,15 @@ export function TradingViewAdvancedChart({
           scaleMargins: { top: 0.8, bottom: 0 },
         });
         volumeSeries.setData(
-          safePoints.map((point) => ({
-            time: point.time,
-            value: Number.isFinite(point.volume) ? point.volume : 0,
-            color: point.close >= point.open ? hexToRgba(upColor, 0.35) : hexToRgba(downColor, 0.35),
-          }))
+          points.map((point) => (
+            isRenderablePoint(point)
+              ? {
+                  time: point.time,
+                  value: Number.isFinite(point.volume) ? point.volume : 0,
+                  color: point.close >= point.open ? hexToRgba(upColor, 0.35) : hexToRgba(downColor, 0.35),
+                }
+              : { time: point.time }
+          ))
         );
         volumeSeriesRef.current = volumeSeries;
 
@@ -559,12 +658,12 @@ export function TradingViewAdvancedChart({
         // (QA-v2 CC1/T1). setVisibleLogicalRange keeps the user's
         // chosen timeframe queryable while ensuring candles render at a
         // readable size.
-        const visibleBars = Math.min(safePoints.length, 180);
+        const visibleBars = Math.min(points.length, 180);
         if (visibleBars > 0) {
           try {
             chart.timeScale().setVisibleLogicalRange({
-              from: Math.max(0, safePoints.length - visibleBars),
-              to: safePoints.length - 1,
+              from: Math.max(0, points.length - visibleBars),
+              to: points.length - 1,
             });
           } catch (rangeError) {
             // QA-v3 F4/T1: if setVisibleLogicalRange rejects the range
@@ -601,6 +700,13 @@ export function TradingViewAdvancedChart({
 
       const chart = chartRef.current;
       if (!chart) {
+        // A positive-size observation is real progress, not another blind frame:
+        // when the host mounts detached the container is 0x0, so the RAF budget
+        // in scheduleRenderRetry can be spent before it is ever attached and the
+        // chart stays blank until unrelated state changes. Resetting here keeps
+        // the retries bounded pre-attachment while letting the actual size change
+        // start the chart.
+        retryCount = 0;
         scheduleRenderRetry();
         return;
       }
@@ -665,6 +771,15 @@ export function TradingViewAdvancedChart({
       {activeCompareSymbol && comparePoints.length > 0 ? (
         <div className="pointer-events-none absolute right-3 top-3 z-10 rounded-lg border border-amber-500/25 bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200 backdrop-blur">
           Compare {activeCompareSymbol}
+        </div>
+      ) : null}
+
+      {!isLoading && !error && excludedNotice ? (
+        <div
+          role="status"
+          className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-xs rounded-lg border border-amber-500/25 bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-amber-200 backdrop-blur"
+        >
+          {excludedNotice}
         </div>
       ) : null}
 

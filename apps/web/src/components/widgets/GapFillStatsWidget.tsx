@@ -7,6 +7,7 @@ import type { OHLCData } from '@/lib/chartUtils';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
@@ -87,11 +88,47 @@ export function GapFillStatsWidget({ symbol, onDataChange }: GapFillStatsWidgetP
     enabled: Boolean(upperSymbol),
   });
 
-  const candles = (data?.data || []) as OHLCData[];
-  const events = calculateGapEvents(candles, 0.5, 20);
-  const hasData = events.length > 0;
+  const rows = data?.data ?? [];
+  const candles = rows as OHLCData[];
+  const meta = data?.meta as (NonNullable<typeof data>['meta'] & {
+    unresolved_excluded_dates?: string[]; unresolved_session_count?: number;
+    quality_status?: string; unavailable?: boolean;
+  }) | undefined;
+  const unitStatus = meta?.unit_status ?? null;
+  const RESOLVED_UNIT_STATUSES = ['confirmed_vnd', 'index_points', 'not_applicable'];
+  // The aggregate meta unit_status is only a claim about the range; the derived
+  // gaps are only comparable when every consumed row itself carries the matching
+  // explicit price_unit. A confirmed_vnd meta over markerless rows is unproven.
+  const expectedUnit = unitStatus === 'confirmed_vnd' ? 'VND' : 'index_points';
+  const certifiedUnits = rows.length > 0
+    && RESOLVED_UNIT_STATUSES.includes(unitStatus ?? '')
+    && rows.every((row) => row.price_unit === expectedUnit);
+  const legacyQualityUnknown = rows.length > 0 && !unitStatus;
+  const unitsUnresolved = unitStatus !== null && !RESOLVED_UNIT_STATUSES.includes(unitStatus);
+  const rowsMissingUnitProof = rows.length > 0 && !legacyQualityUnknown && !unitsUnresolved && !certifiedUnits;
+  const payloadUnavailable = Boolean(data?.error || meta?.unavailable);
+  const derivedWithheld = payloadUnavailable || unitsUnresolved || legacyQualityUnknown || rowsMissingUnitProof
+    || Boolean(meta?.unresolved_excluded_dates?.length || meta?.unresolved_session_count)
+    || ['unavailable', 'error', 'unresolved', 'unconfirmed', 'mixed'].includes(meta?.quality_status ?? '');
+  const events = derivedWithheld ?[] : calculateGapEvents(candles, 0.5, 20);
+  const hasData = candles.length > 0;
   const isFallback = Boolean(error && hasData);
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+  const lastDataDate = [meta?.freshness_as_of, meta?.last_data_date, candles.at(-1)?.time]
+    .find((value) => value != null && value !== '' && !Number.isNaN(new Date(value).getTime())) ?? null;
+  const qualityWarnings = [
+    ...(meta?.warnings ?? []),
+    meta?.adjustment_warning ?? null,
+    data?.error ?? null,
+    unitStatus === 'mixed' ? 'Mixed historical price units' : null,
+    unitStatus === 'unconfirmed' ? 'Historical price units unconfirmed' : null,
+    legacyQualityUnknown ? 'Legacy quality unknown: historical price units were not certified.' : null,
+    meta?.completeness_status === 'partial' ? 'Partial historical coverage' : null,
+    meta?.fallback_used ? 'Historical source fallback used' : null,
+    isFallback ? 'Latest historical refresh failed; showing previous observations' : null,
+    derivedWithheld ? 'Gap statistics withheld: source quality is unavailable or unresolved' : null,
+  ].filter((message): message is string => Boolean(message));
+  const quantWarning = qualityWarnings.length ? [...new Set(qualityWarnings)].join(' · ') : null;
 
   const filledEvents = events.filter((event) => event.filled);
   const fillRate = events.length > 0 ? (filledEvents.length / events.length) * 100 : 0;
@@ -118,13 +155,14 @@ export function GapFillStatsWidget({ symbol, onDataChange }: GapFillStatsWidgetP
         apiGroup: '/equity',
         endpoint: `/equity/historical?symbol=${upperSymbol}`,
         sourceLabel: 'Gap fill stats (derived)',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate,
+        fetchedAt: dataUpdatedAt,
         stale: isFallback,
         derived: true,
-        extra: hasData ? { gaps: events.length, fillRate } : undefined,
+        extra: hasData && !derivedWithheld ? { gaps: events.length, fillRate } : undefined,
       }),
     );
-  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, events.length, fillRate]);
+  }, [onDataChange, hasData, derivedWithheld, isFallback, dataUpdatedAt, lastDataDate, upperSymbol, events.length, fillRate]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view gap fill stats" icon={<CalendarClock size={18} />} />;
@@ -151,7 +189,8 @@ export function GapFillStatsWidget({ symbol, onDataChange }: GapFillStatsWidgetP
             ))}
           </div>
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={lastDataDate}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note={`${period} • 0.5%+ gaps`}
@@ -160,83 +199,99 @@ export function GapFillStatsWidget({ symbol, onDataChange }: GapFillStatsWidgetP
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Gaps</div>
-          <div className="text-cyan-300 font-mono">{events.length}</div>
-        </div>
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Fill Rate</div>
-          <div className="text-emerald-300 font-mono">{fillRate.toFixed(1)}%</div>
-        </div>
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Avg Fill</div>
-          <div className="text-amber-300 font-mono">{avgDays.toFixed(1)}d</div>
-        </div>
-      </div>
+      <QuantWarningBanner warning={quantWarning} className="mb-2" />
 
-      <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Up Fill</div>
-          <div className="text-emerald-300 font-mono">{upFillRate.toFixed(1)}%</div>
-          <div className="mt-1 h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
-            <div className="h-full bg-emerald-500/80" style={{ width: `${Math.max(4, upFillRate)}%` }} />
+      {derivedWithheld ? (
+        <WidgetEmpty
+          message={payloadUnavailable ? 'Gap statistics unavailable' : 'Gap statistics withheld'}
+          detail={payloadUnavailable
+            ? data?.error ?? 'Source marked this historical range unavailable.'
+            : legacyQualityUnknown
+              ? 'Legacy quality unknown: historical price units were not certified.'
+              : 'Historical units or excluded sessions remain unresolved, so gaps cannot be compared.'}
+          icon={<CalendarClock size={18} />}
+        />
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Gaps</div>
+              <div className="text-cyan-300 font-mono">{events.length}</div>
+            </div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Fill Rate</div>
+              <div className="text-emerald-300 font-mono">{fillRate.toFixed(1)}%</div>
+            </div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Avg Fill</div>
+              <div className="text-amber-300 font-mono">{avgDays.toFixed(1)}d</div>
+            </div>
           </div>
-        </div>
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Down Fill</div>
-          <div className="text-red-300 font-mono">{downFillRate.toFixed(1)}%</div>
-          <div className="mt-1 h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
-            <div className="h-full bg-rose-500/80" style={{ width: `${Math.max(4, downFillRate)}%` }} />
-          </div>
-        </div>
-      </div>
 
-      <div className="flex-1 overflow-auto space-y-1 pr-1">
-        {timedOut && isLoading && !hasData ? (
-          <WidgetError
-            title="Loading timed out"
-            error={new Error('Gap fill statistics took too long to load.')}
-            onRetry={() => {
-              resetTimeout();
-              refetch();
-            }}
-          />
-        ) : isLoading && !hasData ? (
-          <WidgetSkeleton lines={8} />
-        ) : error && !hasData ? (
-          <WidgetError error={error as Error} onRetry={() => refetch()} />
-        ) : !hasData ? (
-          <WidgetEmpty message="No qualifying gaps in lookback window" icon={<CalendarClock size={18} />} size="compact" />
-        ) : (
-          recentEvents.map((event, index) => {
-            const isUp = event.direction === 'up';
-            return (
-              <div key={`${event.date}-${index}`} className="flex items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1">
-                <div className="w-12 text-[10px] text-[var(--text-muted)] shrink-0">{toLabelDate(event.date)}</div>
-                <div className="w-5 shrink-0">
-                  {isUp ? (
-                    <ArrowUpCircle size={11} className="text-emerald-400" />
-                  ) : (
-                    <ArrowDownCircle size={11} className="text-red-400" />
-                  )}
-                </div>
-                <div className={`w-16 text-[10px] font-mono ${isUp ? 'text-emerald-300' : 'text-red-300'}`}>
-                  {event.gapPct >= 0 ? '+' : ''}
-                  {event.gapPct.toFixed(2)}%
-                </div>
-                <div className="flex-1 text-right text-[10px]">
-                  {event.filled ? (
-                    <span className="text-cyan-300">Filled {event.daysToFill}d</span>
-                  ) : (
-                    <span className="text-[var(--text-secondary)]">Unfilled</span>
-                  )}
-                </div>
+          <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Up Fill</div>
+              <div className="text-emerald-300 font-mono">{upFillRate.toFixed(1)}%</div>
+              <div className="mt-1 h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
+                <div className="h-full bg-emerald-500/80" style={{ width: `${Math.max(4, upFillRate)}%` }} />
               </div>
-            );
-          })
-        )}
-      </div>
+            </div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Down Fill</div>
+              <div className="text-red-300 font-mono">{downFillRate.toFixed(1)}%</div>
+              <div className="mt-1 h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
+                <div className="h-full bg-rose-500/80" style={{ width: `${Math.max(4, downFillRate)}%` }} />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-auto space-y-1 pr-1">
+            {timedOut && isLoading && !hasData ? (
+              <WidgetError
+                title="Loading timed out"
+                error={new Error('Gap fill statistics took too long to load.')}
+                onRetry={() => {
+                  resetTimeout();
+                  refetch();
+                }}
+              />
+            ) : isLoading && !hasData ? (
+              <WidgetSkeleton lines={8} />
+            ) : error && !hasData ? (
+              <WidgetError error={error as Error} onRetry={() => refetch()} />
+            ) : !hasData || events.length === 0 ? (
+              <WidgetEmpty message={data?.error || 'No qualifying gaps in lookback window'} icon={<CalendarClock size={18} />} size="compact" />
+            ) : (
+              recentEvents.map((event, index) => {
+                const isUp = event.direction === 'up';
+                return (
+                  <div key={`${event.date}-${index}`} className="flex items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1">
+                    <div className="w-12 text-[10px] text-[var(--text-muted)] shrink-0">{toLabelDate(event.date)}</div>
+                    <div className="w-5 shrink-0">
+                      {isUp ? (
+                        <ArrowUpCircle size={11} className="text-emerald-400" />
+                      ) : (
+                        <ArrowDownCircle size={11} className="text-red-400" />
+                      )}
+                    </div>
+                    <div className={`w-16 text-[10px] font-mono ${isUp ? 'text-emerald-300' : 'text-red-300'}`}>
+                      {event.gapPct >= 0 ? '+' : ''}
+                      {event.gapPct.toFixed(2)}%
+                    </div>
+                    <div className="flex-1 text-right text-[10px]">
+                      {event.filled ? (
+                        <span className="text-cyan-300">Filled {event.daysToFill}d</span>
+                      ) : (
+                        <span className="text-[var(--text-secondary)]">Unfilled</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

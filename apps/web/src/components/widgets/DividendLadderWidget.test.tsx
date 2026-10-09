@@ -65,10 +65,7 @@ test('publishes bounded runtime updates through cold, error, empty, and changed 
   mockDividends({ data: [{ ex_date: '2099-01-01', payment_date: '2099-01-03', cash_dividend: 1000, dividend_type: 'cash' }] })
   rerender(<Parent />)
   expect(publications).toHaveLength(4)
-  expect(publications[3]).toMatchObject({
-    __widgetRuntime: { layoutHint: { empty: false }, provenance: { updatedAt: '2099-01-01' } },
-    events: 2,
-  })
+  expect(publications[3]).toMatchObject({ events: 2 })
   expect(screen.getByText('Dividend Ladder')).toBeInTheDocument()
   expect(screen.getByText('Ex-Date')).toBeInTheDocument()
   expect(screen.getByText('Payment')).toBeInTheDocument()
@@ -80,10 +77,7 @@ test('publishes bounded runtime updates through cold, error, empty, and changed 
   mockDividends({ data: [{ record_date: '2099-02-01', stock_dividend: 10, dividend_type: 'stock' }] })
   rerender(<Parent />)
   expect(publications).toHaveLength(5)
-  expect(publications[4]).toMatchObject({
-    __widgetRuntime: { layoutHint: { empty: false }, provenance: { updatedAt: '2099-02-01' } },
-    events: 1,
-  })
+  expect(publications[4]).toMatchObject({ events: 1 })
   expect(screen.queryByText('Ex-Date')).not.toBeInTheDocument()
   expect(screen.getByText('Record Date')).toBeInTheDocument()
   expect(screen.getByText('Stock')).toBeInTheDocument()

@@ -42,7 +42,7 @@ VARIANT_YEAR_SUFFIX = ".year"
 
 
 ENGINE_SOURCE = "vnibb-fundamental-engine"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # --- key alias tuples (first non-null match wins) -------------------------
 
@@ -196,7 +196,12 @@ class ValuationConfig:
 
 @dataclass
 class FundamentalInputs:
-    """Raw material for one symbol; statements are annual, deduped, ascending by year."""
+    """Annual inputs; monetary comparisons require declared VND and share-count units.
+
+    Direct callers may declare canonical ``statement_unit='VND'``. Loaded raw
+    rows instead retain field-specific units and source lineage; absent units
+    never imply a currency scale.
+    """
 
     symbol: str
     sector: str | None = None
@@ -211,6 +216,10 @@ class FundamentalInputs:
     company_name: str | None = None
     exchange: str | None = None
     volume: float | None = None
+    price_unit: str | None = None
+    shares_unit: str | None = None
+    statement_unit: str | None = None
+    unit_lineage: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -290,44 +299,65 @@ def _to_float(value: Any) -> float | None:
         return None
     return result
 
-
-def _median_abs(values: Sequence[float]) -> float | None:
-    finite = sorted(abs(value) for value in values if math.isfinite(value) and value != 0)
-    if not finite:
-        return None
-    midpoint = len(finite) // 2
-    if len(finite) % 2:
-        return finite[midpoint]
-    return (finite[midpoint - 1] + finite[midpoint]) / 2
+_CURRENCY_SCALES = {"vnd": 1, "thousand vnd": 1000, "million vnd": 1_000_000,
+                    "billion vnd": 1_000_000_000, "bn vnd": 1_000_000_000}
 
 
+def _declared_unit(row: dict[str, Any], key: str) -> Any:
+    units = row.get("units")
+    return units.get(key) if isinstance(units, dict) and key in units else row.get("currency_unit") or row.get("unit")
 
-def _normalize_statement_unit_outliers(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Repair isolated 1000x raw statement rows before fundamental derivation."""
 
-    normalized_rows = [dict(row) for row in rows]
-    if len(normalized_rows) < 3:
-        return normalized_rows
-
-    for field_name in _STATEMENT_UNIT_FIELDS:
-        values = [
-            value
-            for row in normalized_rows
-            if (value := _to_float(row.get(field_name))) is not None
-        ]
-        baseline = _median_abs(values)
-        if baseline is None or baseline <= 0:
-            continue
-        for row in normalized_rows:
-            value = _to_float(row.get(field_name))
+def _normalize_statement_rows(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = _dedup_annual_rows(records)
+    normalized = []
+    fields = _STATEMENT_UNIT_FIELDS | set(GROSS_PROFIT_ALIASES + EBIT_ALIASES + INTEREST_EXPENSE_ALIASES)
+    for raw in rows:
+        row = dict(raw)
+        lineage = {}
+        for key in fields & raw.keys():
+            value = _to_float(raw[key])
             if value is None:
                 continue
-            abs_value = abs(value)
-            scaled_abs = abs_value / 1000
-            if abs_value > baseline * 100 and baseline / 5 <= scaled_abs <= baseline * 5:
-                row[field_name] = value / 1000
+            unit = _declared_unit(raw, key)
+            scale = _CURRENCY_SCALES.get(str(unit or "").strip().lower().replace("_", " "))
+            lineage[key] = {"rawValue": raw[key], "rawUnit": unit, "scaleToVnd": scale}
+            if scale is not None:
+                row[key] = value * scale
+        row["_valuation_unit_lineage"] = lineage
+        normalized.append(row)
+    return normalized
 
-    return normalized_rows
+
+def _has_vnd_field(row: dict[str, Any], aliases: tuple[str, ...], declared: str | None) -> bool:
+    if _pick_float(row, *aliases) is None:
+        return True
+    if declared == "VND":
+        return True
+    lineage = row.get("_valuation_unit_lineage", {})
+    for alias in aliases:
+        if _pick(row, alias) is not None:
+            return lineage.get(alias, {}).get("scaleToVnd") is not None
+    return False
+
+
+def _valuation_unit_reason(inputs: FundamentalInputs, financial: bool) -> str | None:
+    relevant_rows = inputs.income_statements + inputs.balance_sheets + inputs.cash_flows
+    if any(row.get("_valuation_conflicting_observations") for row in relevant_rows):
+        return "Conflicting annual statement observations have no established revision order; intrinsic comparison is unavailable."
+    if inputs.shares_unit != "shares":
+        return "Share-count unit is unknown; equity/cash flow per share cannot be established."
+    if financial:
+        groups = [(inputs.income_statements[-1:], NPAT_ALIASES), (inputs.balance_sheets[-2:], EQUITY_ALIASES)]
+    else:
+        groups = [(inputs.income_statements[-5:], NPAT_ALIASES), (inputs.income_statements[-5:], REVENUE_ALIASES),
+                  (inputs.cash_flows[-3:], OCF_ALIASES), (inputs.cash_flows[-3:], CAPEX_ALIASES)]
+    for rows, aliases in groups:
+        for row in rows:
+            if not _has_vnd_field(row, aliases, inputs.statement_unit):
+                return f"Statement currency/scale is unknown for {aliases[0]} ({_report_year(row)}); intrinsic value in VND cannot be established."
+    return None
+
 
 
 def _pick_float(row: Any, *aliases: str) -> float | None:
@@ -360,6 +390,7 @@ def _dedup_annual_rows(records: Sequence[dict[str, Any]] | None) -> list[dict[st
     The corpus is known to contain duplicate period rows, so this step is
     mandatory before any derivation. Returns raw rows sorted ascending by year.
     """
+    observations: dict[int, list[dict[str, Any]]] = {}
 
     best: dict[int, tuple[datetime, dict[str, Any]]] = {}
     for record in records or []:
@@ -372,10 +403,32 @@ def _dedup_annual_rows(records: Sequence[dict[str, Any]] | None) -> list[dict[st
         if year is None:
             continue
         observed = _observed_sort_key(record.get("observedAt") or record.get("updatedAt"))
+        observations.setdefault(year, []).append(raw)
         current = best.get(year)
         if current is None or observed >= current[0]:
+            raw = dict(raw)
+            for key in ("units", "unit", "currency_unit"):
+                if key not in raw and record.get(key) is not None:
+                    raw[key] = record[key]
+            raw["_valuation_source"] = {
+                "dataset": record.get("dataset"), "variant": record.get("datasetVariant"),
+                "source": record.get("source"), "provider": record.get("provider"),
+                "observedAt": record.get("observedAt"), "updatedAt": record.get("updatedAt"),
+            }
             best[year] = (observed, raw)
-    return [raw for _, (_, raw) in sorted(best.items())]
+    result = []
+    for year, (_, raw) in sorted(best.items()):
+        conflicting = []
+        for field_name in _STATEMENT_UNIT_FIELDS:
+            values = {(_to_float(row.get(field_name)), str(_declared_unit(row, field_name)))
+                      for row in observations[year] if _to_float(row.get(field_name)) is not None}
+            if len(values) > 1:
+                conflicting.append(field_name)
+        if conflicting:
+            raw["_valuation_observations"] = observations[year]
+            raw["_valuation_conflicting_observations"] = conflicting
+        result.append(raw)
+    return result
 
 
 def _is_financial(sector: str | None, industry: str | None) -> bool:
@@ -849,8 +902,9 @@ def compute_fundamental_snapshot(
     growth_rate: float | None = None
     intrinsic_value: float | None = None
     valuation_method: str | None = None
+    unit_reason = _valuation_unit_reason(inputs, financial)
 
-    if financial:
+    if financial and unit_reason is None:
         bvps: float | None = None
         if balance and inputs.shares_outstanding is not None and inputs.shares_outstanding > 0:
             equity = _pick_float(balance[-1], *EQUITY_ALIASES)
@@ -867,7 +921,7 @@ def compute_fundamental_snapshot(
         )
         if intrinsic_value is not None:
             valuation_method = "rim"
-    else:
+    elif not financial and unit_reason is None:
         fcf_values: list[float] = []
         for row in cash[-3:]:
             ocf = _pick_float(row, *OCF_ALIASES)
@@ -891,8 +945,11 @@ def compute_fundamental_snapshot(
         )
         if intrinsic_value is not None:
             valuation_method = "dcf"
+    comparison_reason = unit_reason
+    if comparison_reason is None and inputs.price_unit != "VND":
+        comparison_reason = "Price currency/scale is unknown; margin of safety cannot be compared in VND."
 
-    margin_of_safety = _safe(compute_margin_of_safety, intrinsic_value, inputs.price)
+    margin_of_safety = None if comparison_reason else _safe(compute_margin_of_safety, intrinsic_value, inputs.price)
     valuation_verdict = compute_valuation_verdict(margin_of_safety)
 
     periods_used = sorted(
@@ -905,6 +962,12 @@ def compute_fundamental_snapshot(
         "base_fcf": base_fcf,
         "growth_rate": growth_rate,
         "horizon_years": cfg.horizon_years,
+        "unit_quality": "unknown" if comparison_reason else "verified",
+        "comparison_unavailable_reason": comparison_reason,
+        "unit_lineage": inputs.unit_lineage or {
+            "price": {"unit": inputs.price_unit}, "shares": {"unit": inputs.shares_unit},
+            "statements": {"unit": inputs.statement_unit},
+        },
     }
 
     snapshot = FundamentalSnapshot(
@@ -1008,6 +1071,9 @@ def to_document(snapshot: FundamentalSnapshot, snapshot_date: date) -> dict[str,
             "baseFcf": snapshot.inputs.get("base_fcf"),
             "growthRate": snapshot.inputs.get("growth_rate"),
             "horizonYears": snapshot.inputs.get("horizon_years"),
+            "unitQuality": snapshot.inputs.get("unit_quality"),
+            "comparisonUnavailableReason": snapshot.inputs.get("comparison_unavailable_reason"),
+            "unitLineage": snapshot.inputs.get("unit_lineage", {}),
         },
         "computedFields": list(snapshot.computed_fields),
     }
@@ -1057,9 +1123,9 @@ async def load_fundamental_inputs(symbol: str, svc: Any) -> FundamentalInputs:
         symbol_upper, dataset=DATASET_LISTINGS, limit=5
     )
 
-    income_statements = _normalize_statement_unit_outliers(_dedup_annual_rows(income_records))
-    balance_sheets = _normalize_statement_unit_outliers(_dedup_annual_rows(balance_records))
-    cash_flows = _normalize_statement_unit_outliers(_dedup_annual_rows(cash_records))
+    income_statements = _normalize_statement_rows(income_records)
+    balance_sheets = _normalize_statement_rows(balance_records)
+    cash_flows = _normalize_statement_rows(cash_records)
     ratio_rows = _dedup_annual_rows(ratio_records)
     ratios = ratio_rows[-1] if ratio_rows else {}
 
@@ -1067,7 +1133,12 @@ async def load_fundamental_inputs(symbol: str, svc: Any) -> FundamentalInputs:
         for record in records or []:
             raw = record.get("raw") if isinstance(record, dict) else None
             if isinstance(raw, dict):
-                return raw
+                result = dict(raw)
+                for key in ("units", "shares_unit"):
+                    if key not in result and record.get(key) is not None:
+                        result[key] = record[key]
+                result["_valuation_source"] = {key: record.get(key) for key in ("source", "provider", "observedAt", "updatedAt")}
+                return result
         return {}
 
     info = _first_raw(info_records)
@@ -1077,12 +1148,27 @@ async def load_fundamental_inputs(symbol: str, svc: Any) -> FundamentalInputs:
     industry = _pick(info, *INDUSTRY_ALIASES) or _pick(listing, *INDUSTRY_ALIASES)
     company_name = _pick(listing, *COMPANY_NAME_ALIASES) or _pick(info, *COMPANY_NAME_ALIASES)
     exchange = _pick(info, *EXCHANGE_ALIASES) or _pick(listing, *EXCHANGE_ALIASES)
-    shares = _pick_float(info, *SHARES_ALIASES) or _pick_float(listing, *SHARES_ALIASES)
-    if shares is None:
-        shares = _pick_float(ratios, *SHARES_ALIASES)
+    shares = None
+    share_unit = None
+    share_lineage = {}
+    for raw, dataset in ((info, DATASET_COMPANY_INFO), (listing, DATASET_LISTINGS), (ratios, DATASET_RATIO)):
+        for key in SHARES_ALIASES:
+            value = _pick_float(raw, key)
+            if value is None or value <= 0:
+                continue
+            units = raw.get("units")
+            unit = units.get(key, raw.get("shares_unit")) if isinstance(units, dict) else raw.get("shares_unit")
+            share_unit = "shares" if str(unit or "").lower() == "shares" else None
+            shares = value
+            share_lineage = {"dataset": dataset, "field": key, "rawValue": value, "rawUnit": unit,
+                             "source": raw.get("_valuation_source", {})}
+            break
+        if shares is not None:
+            break
 
     price: float | None = None
     volume: float | None = None
+    price_lineage = {}
     eod_rows = await svc.get_eod_prices(symbol_upper, lookback_days=45, limit=60)
     for row in reversed(eod_rows or []):
         if not isinstance(row, dict):
@@ -1094,9 +1180,13 @@ async def load_fundamental_inputs(symbol: str, svc: Any) -> FundamentalInputs:
         if close is not None and close > 0:
             price = close
             volume = _to_float(record.get("volume"))
+            price_lineage = {"dataset": "market_prices_eod", "field": "close", "rawValue": row.get("close"),
+                             "rawUnit": row.get("price_unit") or row.get("priceUnit"),
+                             "source": row.get("price_source") or row.get("source"),
+                             "observationDate": row.get("time") or row.get("date"), "unit": "VND"}
             break
 
-    market_cap = price * shares if price is not None and shares is not None else None
+    market_cap = price * shares if price is not None and shares is not None and share_unit == "shares" else None
 
     return FundamentalInputs(
         symbol=symbol_upper,
@@ -1112,4 +1202,12 @@ async def load_fundamental_inputs(symbol: str, svc: Any) -> FundamentalInputs:
         company_name=str(company_name) if company_name is not None else None,
         exchange=str(exchange) if exchange is not None else None,
         volume=volume,
+        price_unit="VND" if price is not None else None,
+        shares_unit=share_unit,
+        unit_lineage={"price": price_lineage, "shares": share_lineage,
+                      "statements": [{"period": _report_year(row), "source": row.get("_valuation_source", {}),
+                                      "fields": row.get("_valuation_unit_lineage", {}),
+                                      "conflictingFields": row.get("_valuation_conflicting_observations", []),
+                                      "observations": row.get("_valuation_observations", [])}
+                                     for row in income_statements + balance_sheets + cash_flows]},
     )

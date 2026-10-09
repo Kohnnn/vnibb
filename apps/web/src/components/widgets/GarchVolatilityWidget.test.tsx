@@ -97,7 +97,9 @@ function makeQuantResponse(metric: GarchMetricPayload | null, error: string | nu
       last_data_date: '2026-06-23',
       metrics: metric ? { garch_volatility: metric } : {},
     },
-    meta: { count: metric ? 1 : 0 },
+    // Canonical fixture: a certified VND frame, so the unit gate admits the
+    // derived GARCH series (QA #98).
+    meta: { count: metric ? 1 : 0, unit_status: 'confirmed_vnd' },
     error,
   };
 }

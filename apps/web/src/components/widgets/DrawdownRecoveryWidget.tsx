@@ -70,6 +70,12 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
       }
     | undefined
   const backendError = typeof data?.error === 'string' ? data.error : ''
+  const quality = data?.meta as { unit_status?: string; unresolved_excluded_dates?: string[]; unresolved_session_count?: number } | undefined
+  const certifiedUnits = ['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+  const derivedWithheld = Boolean(data) && (!certifiedUnits || Boolean(quality?.unresolved_excluded_dates?.length || quality?.unresolved_session_count) || Boolean(backendError))
+  const unavailableReason = !certifiedUnits
+    ? 'Drawdown profile unavailable: historical price units were not certified.'
+    : backendError || 'Drawdown profile unavailable: source quality is unresolved.'
 
   const series = (metric?.underwater_series || []).map((row) => ({
     date: row.date,
@@ -77,7 +83,7 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
     drawdown52w: Number(row.drawdown_52w_pct ?? 0),
   }))
   const episodes = metric?.episodes || []
-  const hasData = series.length > 30
+  const hasData = !derivedWithheld && series.length > 30
   const quantWarning = extractQuantWarning(data, 'drawdown_recovery')
 
   useEffect(() => {
@@ -86,15 +92,16 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
       apiGroup: '/quant',
       endpoint: `/quant/${upperSymbol}?period=${period}&metrics=drawdown_recovery`,
       sourceLabel: 'Drawdown recovery',
-      lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt,
+      lastDataDate: data?.data?.last_data_date ?? null,
+      fetchedAt: dataUpdatedAt,
       adjustmentMode: data?.data?.adjustment_mode,
-      extra: {
+      extra: hasData ? {
         points: series.length,
         episodes: episodes.length,
         currentDrawdownPct: metric?.current_drawdown_pct ?? null,
-      },
+      } : undefined,
     }))
-  }, [data?.data?.adjustment_mode, data?.data?.computed_at, data?.data?.last_data_date, dataUpdatedAt, episodes.length, hasData, metric?.current_drawdown_pct, onDataChange, period, series.length, upperSymbol])
+  }, [data?.data?.adjustment_mode, data?.data?.last_data_date, dataUpdatedAt, episodes.length, hasData, metric?.current_drawdown_pct, onDataChange, period, series.length, upperSymbol])
 
   // C1: overlay corporate-action markers (dividends/splits/rights) on the
   // date-indexed underwater curve, reusing the shared chart-event-marker logic.
@@ -130,7 +137,7 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} underwater · ${(data?.data?.adjustment_mode || 'adjusted')} history`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} underwater · ${(data?.data?.adjustment_mode || 'adjusted')} history`} align="right" />
         </div>
       </div>
 
@@ -138,6 +145,8 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
         <WidgetSkeleton lines={8} />
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
+      ) : derivedWithheld ? (
+        <WidgetEmpty message={unavailableReason} icon={<ShieldAlert size={18} />} />
       ) : !hasData ? (
         <WidgetEmpty message={backendError || 'No drawdown profile available'} icon={<ShieldAlert size={18} />} />
       ) : (

@@ -4233,6 +4233,9 @@ async def get_flow_coverage(
 
 class FreshnessBucket(BaseModel):
     label: str
+    timestamp_basis: str
+    scope: str
+    fetched_at: Optional[datetime] = None
     last_data_date: Optional[date] = None
     raw_last_data_date: Optional[date] = None
     settled_last_data_date: Optional[date] = None
@@ -4258,13 +4261,24 @@ def _classify_age(days: Optional[float], stale_threshold: float, critical_thresh
     return "fresh"
 
 
+async def _load_market_news_freshness(
+    db: AsyncSession,
+) -> tuple[Optional[datetime], Optional[datetime]]:
+    from vnibb.models.market_news import MarketNews
+
+    result = await db.execute(
+        select(func.max(MarketNews.published_date), func.max(MarketNews.crawled_at))
+    )
+    published_at, fetched_at = result.one()
+    return published_at, fetched_at
+
+
 @router.get("/freshness", response_model=FreshnessResponse)
 @cached(ttl=300, key_prefix="market_freshness")
 async def get_market_freshness(
     db: AsyncSession = Depends(get_db),
 ) -> FreshnessResponse:
     from vnibb.models.trading import ForeignTrading
-    from vnibb.models.market_news import MarketNews
 
     today = date.today()
 
@@ -4295,28 +4309,7 @@ async def get_market_freshness(
         else None
     )
 
-    news_dt = (
-        await db.execute(
-            select(func.max(MarketNews.published_date)).where(
-                MarketNews.published_date.is_not(None)
-            )
-        )
-    ).scalar_one_or_none()
-
-    # B1 fix — when `published_date` is uniformly NULL across recent rows
-    # (the KBS source URL pattern only contains /YYYY/MM/, so the URL date
-    # parser can't reconstruct the day), the freshness query reports the
-    # last non-null timestamp from months ago even though the crawler is
-    # actively writing new rows every hour. Fall back to MAX(crawled_at)
-    # so the banner reflects "the crawler is working" rather than "news
-    # data is 35 days old". The Settings → Data Sources panel still uses
-    # `published_date` for finer-grained reporting on the underlying gap.
-    news_crawled_dt = (
-        await db.execute(select(func.max(MarketNews.crawled_at)))
-    ).scalar_one_or_none()
-    if news_crawled_dt is not None:
-        if news_dt is None or news_crawled_dt > news_dt:
-            news_dt = news_crawled_dt
+    news_dt, news_crawled_dt = await _load_market_news_freshness(db)
 
     def _age(value) -> Optional[float]:
         if value is None:
@@ -4339,6 +4332,8 @@ async def get_market_freshness(
     buckets = [
         FreshnessBucket(
             label="Daily prices",
+            timestamp_basis="time",
+            scope="daily_observations",
             last_data_date=prices_dt.date() if hasattr(prices_dt, "date") else prices_dt,
             age_days=prices_age,
             status=_classify_age(prices_age, stale_threshold=2, critical_threshold=7),
@@ -4348,6 +4343,8 @@ async def get_market_freshness(
         ),
         FreshnessBucket(
             label="Foreign trading",
+            timestamp_basis="trade_date",
+            scope="validated_trade_dates",
             last_data_date=foreign_dt,
             raw_last_data_date=raw_foreign_dt,
             settled_last_data_date=foreign_dt,
@@ -4362,6 +4359,9 @@ async def get_market_freshness(
         ),
         FreshnessBucket(
             label="Market news",
+            timestamp_basis="published_date",
+            scope="published_articles",
+            fetched_at=news_crawled_dt,
             last_data_date=news_dt.date() if hasattr(news_dt, "date") else news_dt,
             age_days=news_age,
             status=_classify_age(news_age, stale_threshold=1, critical_threshold=3),
@@ -4400,6 +4400,9 @@ class DataSourceEntry(BaseModel):
     key: str
     label: str
     description: str
+    timestamp_basis: str
+    scope: str
+    fetched_at: Optional[datetime] = None
     last_updated: Optional[datetime] = None
     age_days: Optional[float] = None
     status: str  # "fresh" | "stale" | "critical" | "unknown"
@@ -4427,6 +4430,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Powers price charts, correlation matrix, beta 63D, and most quant widgets.",
         "table": "stock_prices",
         "timestamp_column": "time",
+        "scope": "daily_observations",
         "filter": "interval='1D'",
         "stale": 2,
         "critical": 7,
@@ -4438,6 +4442,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Foreign Flow widget and Transaction Flow buckets.",
         "table": "foreign_trading",
         "timestamp_column": "trade_date",
+        "scope": "raw_stored_rows",
         "stale": 2,
         "critical": 7,
         "next_sync": "Daily 09:20 UTC + intraday every 5 min during market hours",
@@ -4448,6 +4453,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Vietnam market news feed (News & Events tab).",
         "table": "market_news",
         "timestamp_column": "published_date",
+        "scope": "published_articles",
         "stale": 1,
         "critical": 3,
         "next_sync": "Every hour at :00 UTC",
@@ -4458,6 +4464,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Per-symbol news cards on Fundamentals tabs.",
         "table": "company_news",
         "timestamp_column": "published_date",
+        "scope": "published_articles",
         "stale": 2,
         "critical": 7,
         "next_sync": "Daily 10:30 UTC supplemental sync",
@@ -4468,6 +4475,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "P/E, ROE, valuation ratios used in screening, peer comparison, and risk dashboard.",
         "table": "financial_ratios",
         "timestamp_column": "updated_at",
+        "scope": "sync_storage_timestamps",
         "stale": 30,
         "critical": 90,
         "next_sync": "Daily 09:00 UTC",
@@ -4483,6 +4491,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         # every later probe in this list report `null`.
         "table": "screener_snapshots",
         "timestamp_column": "snapshot_date",
+        "scope": "stored_snapshots",
         "filter": "rs_rating IS NOT NULL",
         "stale": 2,
         "critical": 7,
@@ -4494,6 +4503,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Screening universe used for peer lookup and quant filters.",
         "table": "screener_snapshots",
         "timestamp_column": "snapshot_date",
+        "scope": "stored_snapshots",
         "stale": 2,
         "critical": 7,
         "next_sync": "Daily 09:00 UTC",
@@ -4504,6 +4514,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Dividends, AGMs, and splits in Events Calendar.",
         "table": "company_events",
         "timestamp_column": "event_date",
+        "scope": "scheduled_events",
         "stale": 14,
         "critical": 60,
         "next_sync": "Daily 10:30 UTC supplemental sync",
@@ -4514,6 +4525,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Major shareholder disclosures.",
         "table": "shareholders",
         "timestamp_column": "updated_at",
+        "scope": "sync_storage_timestamps",
         "stale": 30,
         "critical": 180,
         "next_sync": "Daily 10:30 UTC supplemental sync",
@@ -4539,14 +4551,18 @@ async def get_data_sources_freshness(
 
     for spec in _PUBLIC_SOURCES:
         last_value: Optional[datetime] = None
+        fetched_at: Optional[datetime] = None
         try:
-            sql = (
-                f'SELECT MAX("{spec["timestamp_column"]}") FROM "{spec["table"]}"'
-            )
-            if spec.get("filter"):
-                sql += f' WHERE {spec["filter"]}'
-            res = await db.execute(text(sql))
-            last_value = res.scalar()
+            if spec["key"] == "market_news":
+                last_value, fetched_at = await _load_market_news_freshness(db)
+            else:
+                sql = (
+                    f'SELECT MAX("{spec["timestamp_column"]}") FROM "{spec["table"]}"'
+                )
+                if spec.get("filter"):
+                    sql += f' WHERE {spec["filter"]}'
+                res = await db.execute(text(sql))
+                last_value = res.scalar()
         except Exception as e:
             logger.warning(
                 "data-sources freshness probe failed for %s: %s", spec["table"], e
@@ -4586,6 +4602,9 @@ async def get_data_sources_freshness(
                 key=spec["key"],
                 label=spec["label"],
                 description=spec["description"],
+                timestamp_basis=spec["timestamp_column"],
+                scope=spec["scope"],
+                fetched_at=fetched_at,
                 last_updated=last_dt,
                 age_days=age_days,
                 status=status,

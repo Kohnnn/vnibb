@@ -1,0 +1,38 @@
+# QA ticket implementation plan
+
+Source: [QA map #111](https://github.com/Kohnnn/vnibb/issues/111), issues #98 and #100–#110, and `docs/qa-deployed-2026-10-08.md`. Existing uncommitted repairs were the starting point, not deployed acceptance. Preserve unrelated changes and staged glossary renames. The user now authorizes finishing QA improvements, committing, publishing and redeploying the release. Production data repair, security-policy changes, TLS bypass, paid calls and issue closure remain outside this release.
+
+## Implementation and acceptance
+
+- [x] **#98 — price safety:** row-level certification and excluded-session continuity covered by the existing tests and real HTTP smoke. Direct production-browser MSR replay withheld Momentum, Signal, Gap Fill, Backtest, Sweep, Quant Summary and ATR on uncertified inputs. Genuine large moves remain valid; no provider truth or deployment pass is claimed.
+- [x] **#100 — currency:** VNM FY2023 table/tooltip matched `396.35M USD` at `23,850`; the local override and reset worked. Quote `57,900 VND` became `2.32 USD`. EPS/BVPS used each fiscal year's rate: FY2022 BVPS `15,702.02` became `0.67`, not global-rate `0.63`; dimensionless ratios stayed unchanged.
+- [x] **#101 — shared period:** FY/Q/TTM made distinct requests; symbol changes, refresh and reload retained state. Unsupported TTM ratios issued no query. Final same-request/DOM replay retained cash-flow `unknown_source_unit` and income `unknown_quarterly_flow_basis`; balance TTM matched the latest quarter.
+- [x] **#103 — fiscal identity/nulls:** three conflicting quarter pairs were explicitly excluded, leaving only Q3-2025; no invented years or averaged conflicts. Missing cells retained the empty glyph. Explicit zeros belonged to withheld conflicts, so live zero-versus-null contrast remains a fixture-only check.
+- [x] **#104 — growth convention:** absolute-prior and negative-base/transition regressions passed; observed negative-base labels were consistent. Live loss-to-profit remained unavailable and is not claimed as audited earnings.
+- [x] **#105 — freshness:** News + Corporate Actions retained the publication as-of across reload while fetched-at advanced; empty-store sources stayed UNKNOWN. The global delay indicator disclosed unknown ages.
+- [x] **#107 — coverage/news:** industry forwarding, ticker boundaries and unavailable sector/heatmap states were exercised. Final real news feed returned HTTP 200 with `VNM-0` and rendered its weak association basis; empty heatmap displayed no zero-stock/group counters.
+- [x] **#106 — numerical investigation:** actual balance TTM matched the latest quarter; unsupported flow/share basis stayed unavailable. Identical backtest/sweep parameters returned Sharpe `0.0485`. Original peer cohort and Sharpe parameters remain unknown. Review closed alias-derived monetary certification and deterministic alias precedence; 96 focused backend tests passed.
+- [x] **#102 — workspace navigation:** the provider omits unresolved tab IDs until the reducer can select from current tabs. Final no-tab/invalid/foreign-tab links, valid Overview links and real Back/Forward passed with no navigation spinner; symbol VCI survived. Activation was keyboard-based, not universal pointer coverage.
+- [x] **#109 — workspace UX:** no-match/Clear search/Escape/opener focus and transient 503 recovery passed; signed footer fixtures passed. The disposable empty workspace displayed Add tab and created Tab 1; system workspaces exposed no Add tab.
+- [x] **#110 — fallback/docs/smoke:** migration 27 and live-only docs are updated. The corrected body-only smoke passed 40 navigation checks and warm reload ended with zero pending, nine unavailable and one unknown; the runnable self-check passed 12 cases. Provider availability remains separate from navigation.
+- [x] **#108 — geometry:** controlled active-layout rendering eliminated the reproduced cache oscillation: 20/20 stable samples and zero mutations in ten seconds. Desktop pointer/keyboard edits persisted; medium-width view-only attempts left storage unchanged. Local MSR/global VNM and two-tab configuration survived reload. The below-fold chart painted certified real VNM data without click/key interaction.
+- [x] **#111 — evidence:** current per-ticket outcomes, historical failures, runtime identity and untested-surface limits are recorded in the QA report. Separate Standards and Spec reviews have zero unresolved blocking findings. Deployed issues stay open.
+
+## Dependencies and verification
+
+Price certification gates derived-data acceptance. Currency, fiscal identity and period state have one owner. News/freshness has one owner. Workspace changes are independent. Numerical investigations may produce an evidenced difference rather than a patch.
+
+User-approved public seams: API financial/price/news endpoints; `units`/`financialPeriods` helpers; dashboard provider/navigation and widget consumer behavior. Reuse these seams for minimal behavioral regressions. No new framework or implementation-coupled tests.
+
+Freeze source before runtime acceptance. Run targeted existing tests and frontend typecheck at integration checkpoints. Then lint, production build, whole frontend Jest and whole backend pytest once. Exercise the real production UI and isolated read-only API, including five financial UI contracts and the two-tab/local-ticker/fixed-width/retry workflow. Perform separate standards/spec reviews, resolve findings, update this plan and QA report with exact evidence, then commit the QA-owned work to the current branch.
+
+Executed verification: TypeScript and production build passed; ESLint had zero errors and 79 baseline warnings; changed-line Ruff passed. The whole backend run had 1,605 passes, four skips and one comparison-fixture failure, then all 12 comparison tests and the 139-test API/news/comparison set passed after fixture repair. Whole frontend Jest timed out after 42 passing suites; the remaining 115 suites passed 620 tests separately. All suites were exercised, but no uninterrupted whole-suite pass is claimed. Final financial/heatmap checks passed 70 tests and detached-chart recovery passed 22. Runtime acceptance above is separate from provider truth and deployment acceptance.
+
+## Release completion
+
+- [x] Preserve explicit unavailable TTM reasons for empty source results and ordinary calculation failures; the before/after service smoke failed/passed and all 29 financial-service tests passed. Cancellation propagation and null metrics remain intact.
+- [x] Preserve HTTPS certificate verification in the existing Oracle runtime/smoke scripts; public baseline smoke passed and an invalid trust bundle was rejected.
+- [x] Run the uninterrupted release gate on frozen source: all nine steps passed, 157 suites/1,044 frontend tests and 1,610 backend tests with four skips. Review the scoped changes since `a7a301a` before commit.
+- [ ] Commit only release-owned changes; publish and merge through the existing CI-controlled release workflow.
+- [ ] Capture the current API image and Vercel rollback target, publish a revision-pinned image and deploy API/MCP/scheduler plus the canonical `vnibb-web` project.
+- [ ] Verify live revision identity, health, price guards, financial unavailable states, navigation and warm reload; retain provider/data limits separately.

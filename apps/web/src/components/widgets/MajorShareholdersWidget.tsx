@@ -8,6 +8,7 @@ import { useShareholders } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface MajorShareholdersWidgetProps {
@@ -74,15 +75,18 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
     useEffect(() => {
-        onDataChange?.({
-            __widgetRuntime: {
-                layoutHint: {
-                    empty: !hasData,
-                    compactHeight: 3,
-                },
-            },
-        });
-    }, [hasData, onDataChange]);
+        // Shareholder rows expose no source observation date, so freshness
+        // stays unknown and the query receipt is reported separately.
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/equity',
+            endpoint: `/equity/${symbol}/shareholders`,
+            sourceLabel: 'Major shareholders',
+            lastDataDate: null,
+            fetchedAt: dataUpdatedAt,
+            stale: isFallback,
+        }));
+    }, [dataUpdatedAt, hasData, isFallback, onDataChange, symbol]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view shareholders" icon={<Users size={18} />} />;
@@ -96,7 +100,8 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
                     <span>{shareholders.length} shareholders</span>
                 </div>
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     align="right"

@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { Sidebar, Header, TabBar, RightSidebar, MobileNav, FreshnessBanner, WhatsNewPanel } from '@/components/layout';
 import { ResponsiveDashboardGrid, type LayoutItem } from '@/components/layout/DashboardGrid';
 import { useDashboard } from '@/contexts/DashboardContext';
+import { canEditDashboard } from '@/contexts/DashboardContext/helpers';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { WidgetWrapper, widgetRegistry } from '@/components/widgets';
 import { DashboardSkeleton } from '@/components/shell/DashboardSkeleton';
@@ -42,6 +43,7 @@ import { MATRIX_FOLLOWUP_EVENT, readMatrixFollowupDraft, type MatrixFollowupDraf
 import { useAuth } from '@/contexts/AuthContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
+import { FUNDAMENTAL_PERIOD_SYNC_GROUP } from '@/lib/financialPeriods';
 import {
     readAdminLayoutControlsVisible,
     subscribeAdminLayoutKey,
@@ -55,6 +57,7 @@ import {
     dispatchOnboardingMeaningfulAction,
     markDashboardWalkthroughCompleted,
     selectOnboardingGoal,
+    normalizeTabKey,
     shouldShowDashboardWalkthrough,
     type OnboardingGoalId,
 } from '@/lib/userPreferences';
@@ -94,7 +97,8 @@ const TECHNICAL_DASHBOARD_ID = 'default-technical';
 const QUANT_DASHBOARD_ID = 'default-quant';
 const GLOBAL_MARKETS_DASHBOARD_ID = 'default-global-markets';
 const FUNDAMENTALS_TAB_NAME = 'Fundamentals';
-const FUNDAMENTALS_PERIOD_SYNC_GROUP = 'fundamental-core';
+// One shared key for the banner and every widget it advertises (issue #101).
+const FUNDAMENTALS_PERIOD_SYNC_GROUP = FUNDAMENTAL_PERIOD_SYNC_GROUP;
 type TemplateApplyStatus = {
     message: string;
     tone: 'success' | 'warning';
@@ -131,6 +135,7 @@ function DashboardContent() {
     const {
         state,
         localStateReady,
+        userNavigationSeq,
         activeDashboard,
         activeTab,
         setActiveTab,
@@ -509,10 +514,25 @@ function DashboardContent() {
 
     // URL deep-linking: ?dashboard=&tab=&symbol= for shareable/bookmarkable
     // views and browser back/forward support. Self-contained (see useUrlSync).
-    const getTabIds = useCallback(
-        (dashboardId: string) =>
-            state.dashboards.find((d) => d.id === dashboardId)?.tabs.map((t) => t.id) ?? [],
+    // #102: a deep link may name a tab by its stable preference slug (e.g.
+    // `news-events`) rather than its generated id. Resolve it the same way the
+    // app does elsewhere: exact id, then normalized tab-name match.
+    const resolveTabId = useCallback(
+        (dashboardId: string, slug: string): string | null => {
+            const tabs = state.dashboards.find((d) => d.id === dashboardId)?.tabs ?? [];
+            if (tabs.some((tab) => tab.id === slug)) return slug;
+            const normalizedSlug = normalizeTabKey(slug);
+            const byName = tabs.find((tab) => normalizeTabKey(tab.name) === normalizedSlug);
+            return byName?.id ?? null;
+        },
         [state.dashboards],
+    );
+    // #102: stable identity — a fresh closure per render made every consumer of
+    // this callback (URL restore, symbol hold) re-run on every render, which is
+    // the churn that preceded the fresh-profile update-depth failure.
+    const applyUrlSymbol = useCallback(
+        (nextSymbol: string) => applySelectedSymbol(nextSymbol),
+        [applySelectedSymbol],
     );
     const dashboardIds = useMemo(() => state.dashboards.map((d) => d.id), [state.dashboards]);
     useUrlSync({
@@ -521,10 +541,11 @@ function DashboardContent() {
         activeTabId: activeTab?.id ?? null,
         symbol: stockGlobalSymbol,
         dashboardIds,
-        getTabIds,
+        resolveTabId,
+        userNavigationSeq,
         applyDashboard: setActiveDashboard,
         applyTab: setActiveTab,
-        applySymbol: (sym) => applySelectedSymbol(sym),
+        applySymbol: applyUrlSymbol,
     });
 
     const isSystemFundamentalsTab =
@@ -1445,6 +1466,20 @@ function DashboardContent() {
                                     </div>
                                 </div>
                             ) : null}
+                            {isEditing && canEditCurrentDashboard && !isGridEditable ? (
+                                // #108: below ~1024px of *content* width the grid
+                                // drops to a derived, view-only layout and every
+                                // resize handle / move label disappears silently.
+                                // Say why, so narrow content reads as intentional
+                                // rather than a broken editor.
+                                <div
+                                    role="status"
+                                    className="mb-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)]"
+                                >
+                                    Layout editing needs at least 1024px of workspace width. Collapse the sidebar or widen
+                                    the window to move or resize widgets; your saved layout is unchanged.
+                                </div>
+                            ) : null}
                             {activeTab.widgets.length > 0 ? (
                                 <ResponsiveDashboardGrid
                                     layouts={memoizedLayouts}
@@ -1576,14 +1611,45 @@ function DashboardContent() {
                             )}
                         </div>
                                 </>
-                            ) : (
-                                state.dashboards.length === 0 ? (
-                                    <EmptyDashboardState onCreateWorkspace={handleCreateWorkspace} />
+                            ) : activeDashboard ? (
+                                activeDashboard.tabs.length === 0 ? (
+                                    <EmptyWorkspaceTabsState
+                                        dashboardName={activeDashboard.name}
+                                        editable={canEditDashboard(activeDashboard)}
+                                        onCreateTab={() => {
+                                            const tab = createTab(activeDashboard.id, 'Tab 1');
+                                            setActiveTab(tab.id);
+                                        }}
+                                    />
                                 ) : (
                                     <div className="flex items-center justify-center h-full">
                                         <RefreshCw className="animate-spin text-blue-500" />
                                     </div>
                                 )
+                            ) : state.dashboards.length === 0 ? (
+                                <EmptyDashboardState onCreateWorkspace={handleCreateWorkspace} />
+                            ) : (
+                                <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+                                    <AlertCircle size={32} className="text-amber-400" />
+                                    <div className="space-y-1">
+                                        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Workspace unavailable</h2>
+                                        <p className="text-sm text-[var(--text-muted)]">
+                                            This workspace is no longer in your library. Pick one below to continue.
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center justify-center gap-2">
+                                        {state.dashboards.slice(0, 6).map((dashboard) => (
+                                            <button
+                                                key={dashboard.id}
+                                                type="button"
+                                                onClick={() => setActiveDashboard(dashboard.id)}
+                                                className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                                            >
+                                                {dashboard.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
                             )}
                         </div>
 
@@ -1716,6 +1782,54 @@ function EmptyDashboardState({ onCreateWorkspace }: { onCreateWorkspace: () => v
                 <PlusCircle size={16} />
                 Create Workspace
             </button>
+        </div>
+    );
+}
+
+// #102/#109: a dashboard with zero tabs used to render the loading spinner
+// forever. Split the two cases honestly — an editable workspace can be given a
+// tab, a read-only/system workspace must not be mutated and is waiting on its
+// published layout.
+function EmptyWorkspaceTabsState({
+    dashboardName,
+    editable,
+    onCreateTab,
+}: {
+    dashboardName: string;
+    editable: boolean;
+    onCreateTab: () => void;
+}) {
+    return (
+        <div className="flex h-full flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)]/50 px-6 text-center">
+            <div className="space-y-2">
+                <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+                    {editable ? `${dashboardName} has no tabs yet` : `${dashboardName} has no tabs available`}
+                </h2>
+                <p className="text-sm text-[var(--text-muted)]">
+                    {editable
+                        ? 'Add a tab to this workspace, then place widgets in it.'
+                        : 'This workspace is read-only and no layout is loaded for it. Reload to retry; its layout is managed elsewhere.'}
+                </p>
+            </div>
+            {editable ? (
+                <button
+                    type="button"
+                    onClick={onCreateTab}
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+                >
+                    <PlusCircle size={16} />
+                    Add tab
+                </button>
+            ) : (
+                <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                >
+                    <RefreshCw size={16} />
+                    Reload workspace
+                </button>
+            )}
         </div>
     );
 }

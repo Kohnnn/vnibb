@@ -169,6 +169,16 @@ export function Header({
     if (quote?.changePct != null) return quote.changePct
 
     const points = historyQuery.data?.data || []
+    // The history fallback is only comparable when every row carries the same
+    // explicit price unit; a response-level `unit_status` cannot certify
+    // markerless rows (QA #98).
+    const unitStatus = historyQuery.data?.meta?.unit_status ?? ''
+    const expectedUnit = unitStatus === 'confirmed_vnd' ? 'VND' : 'index_points'
+    const certified = points.length > 0
+      && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(unitStatus)
+      && points.every((point) => point.price_unit === expectedUnit)
+    if (!certified) return null
+
     const recentPoints = points.filter(
       (point) => Number.isFinite(point?.close)
     )
@@ -181,7 +191,7 @@ export function Header({
     }
 
     return ((latest - previous) / previous) * 100
-  }, [historyQuery.data?.data, quote?.changePct])
+  }, [historyQuery.data?.data, historyQuery.data?.meta?.unit_status, quote?.changePct])
 
   const quoteDirection = getMovementDirection(displayQuoteChangePct)
   // Token-backed price-direction classes (see lib/priceColor.ts + globals.css).

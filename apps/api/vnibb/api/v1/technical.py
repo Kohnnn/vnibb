@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Type aliases
 Timeframe = Literal["D", "W", "M"]
-Signal = Literal["strong_buy", "buy", "neutral", "sell", "strong_sell"]
+Signal = Literal["strong_buy", "buy", "neutral", "sell", "strong_sell", "unavailable"]
 
 
 class TechnicalIndicators(BaseModel):
@@ -76,6 +76,7 @@ class SignalSummary(BaseModel):
     total_indicators: int
     indicators: List[IndicatorDetail]
     trend_strength: str
+    data_quality: Optional[Dict[str, Any]] = None
 
 
 class MovingAveragesResponse(BaseModel):
@@ -652,6 +653,8 @@ async def get_ichimoku_series(
             )
 
         frame = _normalize_price_frame(df)
+        units = set(frame["price_unit"]) if "price_unit" in frame else set()
+        price_unit = next(iter(units)) if units in ({"VND"}, {"index_points"}) else "unknown"
         payload = _build_ichimoku_payload(frame)
         if not payload:
             raise HTTPException(
@@ -660,7 +663,7 @@ async def get_ichimoku_series(
 
         return IchimokuSeriesResponse(
             symbol=upper_symbol,
-            price_unit=frame.iloc[-1].get("price_unit", "unknown"),
+            price_unit=price_unit,
             period=period,
             data=payload,
             signal=_build_ichimoku_signal(payload),
@@ -697,6 +700,8 @@ async def get_fibonacci_retracement(
             )
 
         frame = _normalize_price_frame(df)
+        units = set(frame["price_unit"]) if "price_unit" in frame else set()
+        price_unit = next(iter(units)) if units in ({"VND"}, {"index_points"}) else "unknown"
         if len(frame) < 30:
             raise HTTPException(
                 status_code=404, detail=f"Not enough price history for {upper_symbol}"
@@ -704,7 +709,7 @@ async def get_fibonacci_retracement(
 
         payload = _build_fibonacci_payload(frame, lookback_days, direction)
         return payload.model_copy(update={
-            "symbol": upper_symbol, "price_unit": frame.iloc[-1].get("price_unit", "unknown"),
+            "symbol": upper_symbol, "price_unit": price_unit,
         })
     except HTTPException:
         raise

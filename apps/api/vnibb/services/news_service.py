@@ -1,6 +1,7 @@
 import logging
 import re
-from datetime import datetime, timedelta
+import unicodedata
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -29,7 +30,7 @@ class NewsItem(BaseModel):
     title: str
     summary: str | None = None
     source: str
-    published_at: datetime
+    published_at: datetime | None = None
     url: str
     symbols: list[str] = []
     sector: str | None = None
@@ -95,21 +96,38 @@ def _normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def _extract_keywords(*values: Any) -> list[str]:
+def _fold_diacritics(token: str) -> str:
+    """ASCII-fold a token so GENERIC_KEYWORDS matches Vietnamese text.
+
+    The generic set is unaccented ("ngan", "hang", ...) while `_normalize_text`
+    keeps diacritics, so the filter never matched a Vietnamese word and generic
+    fragments like "hàng"/"ngân" became sector keywords (issue #107).
+    """
+    decomposed = unicodedata.normalize("NFD", token)
+    return "".join(char for char in decomposed if not unicodedata.combining(char)).replace("đ", "d")
+
+
+def _extract_keywords(*values: Any, whole_names: bool = False) -> list[str]:
     keywords: list[str] = []
     seen: set[str] = set()
 
     for value in values:
         normalized = _normalize_text(value)
+        if whole_names:
+            normalized = re.sub(
+                r"^(?:ctcp|công ty cổ phần|công ty cp|joint stock company)\s+", "", normalized
+            )
         if not normalized:
             continue
 
         if normalized not in seen and len(normalized) >= 4:
             seen.add(normalized)
             keywords.append(normalized)
+        if whole_names:
+            continue
 
         for token in re.split(r"[^a-z0-9]+", normalized):
-            if len(token) < 4 or token in GENERIC_KEYWORDS or token.isdigit():
+            if len(token) < 4 or token.isdigit() or _fold_diacritics(token) in GENERIC_KEYWORDS:
                 continue
             if token in seen:
                 continue
@@ -119,7 +137,7 @@ def _extract_keywords(*values: Any) -> list[str]:
     return keywords
 
 
-def _parse_published_at(value: Any) -> datetime:
+def _parse_published_at(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         return value
 
@@ -136,14 +154,17 @@ def _parse_published_at(value: Any) -> datetime:
                 year = int(dmy.group(3))
                 if year < 100:
                     year += 2000
-                return datetime(
-                    year,
-                    int(dmy.group(2)),
-                    int(dmy.group(1)),
-                    int(dmy.group(4) or 0),
-                    int(dmy.group(5) or 0),
-                    int(dmy.group(6) or 0),
-                )
+                try:
+                    return datetime(
+                        year,
+                        int(dmy.group(2)),
+                        int(dmy.group(1)),
+                        int(dmy.group(4) or 0),
+                        int(dmy.group(5) or 0),
+                        int(dmy.group(6) or 0),
+                    )
+                except ValueError:
+                    return None
 
             lower = normalized.lower()
             relative_match = re.match(
@@ -151,17 +172,29 @@ def _parse_published_at(value: Any) -> datetime:
                 lower,
             )
             if relative_match:
-                amount = int(relative_match.group(1))
-                unit = relative_match.group(2)
-                now = datetime.now()
-                if unit in {"phut", "phút", "min", "minute", "minutes"}:
-                    return now - timedelta(minutes=amount)
-                if unit in {"gio", "giờ", "hour", "hours"}:
-                    return now - timedelta(hours=amount)
-                if unit in {"ngay", "ngày", "day", "days"}:
-                    return now - timedelta(days=amount)
+                try:
+                    amount = int(relative_match.group(1))
+                    unit = relative_match.group(2)
+                    now = datetime.now()
+                    if unit in {"phut", "phút", "min", "minute", "minutes"}:
+                        return now - timedelta(minutes=amount)
+                    if unit in {"gio", "giờ", "hour", "hours"}:
+                        return now - timedelta(hours=amount)
+                    if unit in {"ngay", "ngày", "day", "days"}:
+                        return now - timedelta(days=amount)
+                except (ValueError, OverflowError):
+                    return None
 
-    return datetime.now()
+    return None
+
+
+def _publication_sort_key(row: dict[str, Any]) -> datetime:
+    value = _parse_published_at(row.get("published_date") or row.get("published_at"))
+    if value is None:
+        return datetime.min.replace(tzinfo=UTC)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
 
 
 def _to_news_item(row: dict[str, Any]) -> NewsItem:
@@ -233,19 +266,22 @@ async def _enrich_sentiment_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
         inferred_symbols = _parse_symbols(sentiment.get("symbols"))
         if inferred_symbols:
             # QA-v3 F11: Filter NLP-inferred symbols against the article
-            # title only. Inference from body text generated false
-            # positives (e.g. AGR/TIN/HCM tagged on Arsenal football
-            # articles because the words appeared in unrelated context).
-            # We additionally require either a sentiment confidence
-            # >= 0.7 OR the ticker to be already in `existing_symbols`
-            # (i.e. confirmed elsewhere) before we surface it.
+            # title only. Body-text inference produced spurious matches
+            # (e.g. AGR/TIN/HCM tagged on Arsenal football articles because
+            # the words appeared in unrelated context).
+            # We additionally require either a high sentiment confidence OR
+            # the ticker to be already in `existing_symbols` (i.e. confirmed
+            # elsewhere) before we surface it. `sentiment_analyzer` reports
+            # confidence on a 0-100 scale (clamped; neutral default 50), so the
+            # gate is 70 — the previous `>= 0.7` compared a 0-100 score against
+            # a fraction and never rejected anything.
             confidence = (
                 sentiment.get("confidence")
                 if isinstance(sentiment.get("confidence"), (int, float))
                 else 0.0
             )
             title_text = str(row.get("title") or "").upper()
-            high_confidence = float(confidence or 0.0) >= 0.7
+            high_confidence = float(confidence or 0.0) >= 70
 
             def _accept(sym: str) -> bool:
                 if not sym:
@@ -253,10 +289,9 @@ async def _enrich_sentiment_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
                 upper = sym.upper()
                 if upper in existing_symbols:
                     return True
-                appears_in_title = bool(
-                    re.search(rf"(?<![A-Z0-9]){re.escape(upper)}(?![A-Z0-9])", title_text)
-                )
-                return appears_in_title and high_confidence
+                # Same word-boundary rule as `_contains_symbol`: a ticker inside a
+                # longer word ("ANTWERP", "ANTạ") is not a mention (issue #107).
+                return high_confidence and _contains_symbol(title_text, upper)
 
             filtered_symbols = [s for s in inferred_symbols if _accept(s)]
             if filtered_symbols:
@@ -329,12 +364,14 @@ async def _load_symbol_context(symbol: str) -> dict[str, Any]:
             "symbol": upper_symbol,
             "peer_symbols": peer_symbols,
             "sector_keywords": _extract_keywords(stock.sector, stock.industry),
-            "company_keywords": _extract_keywords(stock.short_name, stock.company_name),
+            "company_keywords": _extract_keywords(
+                stock.short_name, stock.company_name, whole_names=True
+            ),
         }
 
 
 def _contains_symbol(text: str, symbol: str) -> bool:
-    return bool(re.search(rf"(?<![A-Z0-9]){re.escape(symbol.lower())}(?![A-Z0-9])", text))
+    return bool(re.search(rf"(?<!\w){re.escape(symbol)}(?!\w)", text, re.IGNORECASE))
 
 
 def _score_news_row(row: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -365,7 +402,7 @@ def _score_news_row(row: dict[str, Any], context: dict[str, Any]) -> dict[str, A
 
     if score < 0.9:
         for keyword in context.get("company_keywords", []):
-            if keyword and (keyword in title or keyword in body):
+            if keyword and (_contains_symbol(title, keyword) or _contains_symbol(body, keyword)):
                 score = max(score, 0.84)
                 reason = reason or "company_keyword"
                 if symbol and symbol not in matched_symbols:
@@ -388,7 +425,7 @@ def _score_news_row(row: dict[str, Any], context: dict[str, Any]) -> dict[str, A
 
     sector_hits = 0
     for keyword in context.get("sector_keywords", []):
-        if keyword and (keyword in title or keyword in body):
+        if keyword and (_contains_symbol(title, keyword) or _contains_symbol(body, keyword)):
             sector_hits += 1
     if sector_hits:
         score = max(score, min(0.58, 0.42 + (sector_hits * 0.06)))
@@ -476,7 +513,7 @@ async def get_company_news_rows(symbol: str, limit: int = 20) -> list[dict[str, 
     provider_rows.sort(
         key=lambda row: (
             float(row.get("relevance_score") or 0),
-            _parse_published_at(row.get("published_date") or row.get("published_at")),
+            _publication_sort_key(row),
         ),
         reverse=True,
     )
@@ -519,7 +556,7 @@ async def get_company_news_rows(symbol: str, limit: int = 20) -> list[dict[str, 
     merged_rows.sort(
         key=lambda row: (
             float(row.get("relevance_score") or 0),
-            _parse_published_at(row.get("published_date") or row.get("published_at")),
+            _publication_sort_key(row),
         ),
         reverse=True,
     )
@@ -529,22 +566,10 @@ async def get_company_news_rows(symbol: str, limit: int = 20) -> list[dict[str, 
     # rows alongside fresh stories purely because the older row had a
     # higher relevance score (QA-v2 F7).
     if merged_rows:
-        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-
-        def _published_utc(row: dict[str, Any]) -> _dt:
-            value = _parse_published_at(
-                row.get("published_date") or row.get("published_at")
-            )
-            if not isinstance(value, _dt):
-                return _dt.min.replace(tzinfo=_tz.utc)
-            if value.tzinfo is None:
-                return value.replace(tzinfo=_tz.utc)
-            return value
-
-        cutoff = _dt.now(_tz.utc) - _td(days=90)
-        any_fresh = any(_published_utc(row) >= cutoff for row in merged_rows)
+        cutoff = datetime.now(UTC) - timedelta(days=90)
+        any_fresh = any(_publication_sort_key(row) >= cutoff for row in merged_rows)
         if any_fresh:
-            merged_rows = [row for row in merged_rows if _published_utc(row) >= cutoff]
+            merged_rows = [row for row in merged_rows if _publication_sort_key(row) >= cutoff]
 
     return await _enrich_sentiment_rows(merged_rows[:limit])
 
@@ -579,7 +604,7 @@ async def get_ranked_news_rows(
             relevant_rows.sort(
                 key=lambda row: (
                     float(row.get("relevance_score") or 0),
-                    _parse_published_at(row.get("published_date") or row.get("published_at")),
+                    _publication_sort_key(row),
                 ),
                 reverse=True,
             )

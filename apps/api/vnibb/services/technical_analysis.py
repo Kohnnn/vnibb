@@ -36,10 +36,30 @@ def normalize_history_frame(
     frame: pd.DataFrame, *, symbol: str, source: str, provider: Any = None,
 ) -> pd.DataFrame:
     normalized = history_price_records(frame, symbol=symbol, source=source, provider=provider)
-    if any(record["price_unit"] == "unknown" for record in normalized):
-        logger.warning("Skipping technical history with unknown price units: %s source=%s", symbol, source)
-        return pd.DataFrame()
-    return pd.DataFrame(normalized)
+    unresolved_units = sorted(
+        {
+            record.get("price_source") or "unknown"
+            for record in normalized
+            if record["price_unit"] == "unknown"
+        }
+    )
+    if unresolved_units:
+        logger.warning(
+            "Skipping technical history with unknown price units: %s source=%s unresolved=%s",
+            symbol,
+            source,
+            unresolved_units,
+        )
+        excluded = pd.DataFrame()
+        excluded.attrs["unit_exclusion"] = {
+            "reason": "unresolved_price_units",
+            "excluded_count": len(normalized),
+            "unresolved_sources": unresolved_units,
+        }
+        return excluded
+    frame_out = pd.DataFrame(normalized)
+    frame_out.attrs["unit_exclusion"] = None
+    return frame_out
 
 
 
@@ -341,23 +361,35 @@ class TechnicalAnalysisService:
     # NEW: Full Technical Analysis Methods
     # =========================================================================
 
-    async def get_ohlcv_data(
+    async def _load_ohlcv_frame(
         self,
         symbol: str,
         start_date: date,
         end_date: date,
         interval: str = "1D",
     ) -> Optional[pd.DataFrame]:
-        """Fetch OHLCV data for a symbol. Returns None if no data."""
+        """Load cleaned OHLCV without the latest-quote merge.
+
+        Returns ``None`` when no usable rows exist. When every row was dropped
+        for an unresolved price unit, returns an empty frame carrying
+        ``frame.attrs['unit_exclusion']`` so callers can disclose the exact
+        reason without guessing.
+        """
         cached_frame = _full_analysis_frame.get(_missing_full_analysis_frame)
         if cached_frame is not _missing_full_analysis_frame:
             if cached_frame is None:
                 return None
+            if cached_frame.empty or "time" not in cached_frame.columns:
+                empty = cached_frame.copy()
+                empty.attrs["unit_exclusion"] = cached_frame.attrs.get("unit_exclusion")
+                return empty
             start_timestamp = pd.Timestamp(start_date)
             end_timestamp = pd.Timestamp(end_date) + pd.Timedelta(days=1)
-            return cached_frame[
+            window = cached_frame[
                 (cached_frame["time"] >= start_timestamp) & (cached_frame["time"] < end_timestamp)
             ].reset_index(drop=True)
+            window.attrs["unit_exclusion"] = cached_frame.attrs.get("unit_exclusion")
+            return window
 
         import asyncio
 
@@ -384,13 +416,24 @@ class TechnicalAnalysisService:
                 return None
 
         frame = await asyncio.to_thread(_fetch)
-        if frame is None or frame.empty:
+        if frame is None:
             return None
-
-        frame = self._clean_ohlcv_frame(frame)
         if frame.empty:
-            return None
+            return frame
+        cleaned = self._clean_ohlcv_frame(frame)
+        cleaned.attrs["unit_exclusion"] = frame.attrs.get("unit_exclusion")
+        return cleaned
 
+    async def _merge_latest_quote(
+        self, frame: pd.DataFrame, symbol: str
+    ) -> pd.DataFrame:
+        """Merge the latest quote into an already-loaded history frame.
+
+        The merge is refused unless the quote carries the same confirmed unit as
+        every history row, so an unconfirmed or incompatible quote is never
+        appended as an ordinary session. Entry points that share one frame across
+        many indicators merge once here instead of re-fetching per indicator.
+        """
         try:
             quote, _ = await VnstockStockQuoteFetcher.fetch(
                 symbol=symbol, source=settings.vnstock_source
@@ -455,7 +498,30 @@ class TechnicalAnalysisService:
         else:
             merged = pd.concat([merged, pd.DataFrame([appended_row])], ignore_index=True)
 
+        # ``concat`` drops ``attrs``; re-attach the unit-exclusion record so
+        # downstream disclosure still sees why rows were dropped.
+        merged.attrs["unit_exclusion"] = frame.attrs.get("unit_exclusion")
         return merged
+
+    async def get_ohlcv_data(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        interval: str = "1D",
+    ) -> Optional[pd.DataFrame]:
+        """Fetch OHLCV data for a symbol. Returns None if no data."""
+        frame = await self._load_ohlcv_frame(
+            symbol, start_date, end_date, interval=interval
+        )
+        if frame is None or frame.empty:
+            return None
+        if _full_analysis_frame.get(_missing_full_analysis_frame) is not _missing_full_analysis_frame:
+            # A shared full-analysis frame is active, so the entry point already
+            # performed the single latest-quote merge. Re-fetching the quote here
+            # would issue one provider call per indicator.
+            return frame
+        return await self._merge_latest_quote(frame, symbol)
 
     @staticmethod
     def _clean_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -480,14 +546,25 @@ class TechnicalAnalysisService:
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days)
         raw = await self.get_ohlcv_data(symbol, start_date, end_date)
+        cached_frame = _full_analysis_frame.get(_missing_full_analysis_frame)
         if raw is None or raw.empty:
             return {
                 "status": "no_data",
                 "bars": 0,
                 "issues": [f"No OHLCV rows returned for {symbol.upper()}"],
+                "unit_status": "unconfirmed",
+                "unresolved_session_count": int(
+                    (getattr(cached_frame, "attrs", {}).get("unit_exclusion") or {}).get("excluded_count", 0)
+                ),
             }
-        cached_frame = _full_analysis_frame.get(_missing_full_analysis_frame)
         frame = raw if cached_frame is not _missing_full_analysis_frame else self._clean_ohlcv_frame(raw)
+        units = set(frame["price_unit"]) if "price_unit" in frame else set()
+        unit_status = (
+            "confirmed_vnd" if units == {"VND"}
+            else "index_points" if units == {"index_points"}
+            else "mixed" if len(units) > 1
+            else "unconfirmed"
+        )
         issues: List[str] = []
         if len(frame) < 60:
             issues.append(f"Only {len(frame)} clean bars available; most indicators need at least 60.")
@@ -504,6 +581,8 @@ class TechnicalAnalysisService:
             "bars": int(len(frame)),
             "latest_date": latest_date,
             "issues": issues,
+            "unit_status": unit_status,
+            "unresolved_session_count": 0,
         }
 
     async def get_moving_averages(
@@ -1079,9 +1158,27 @@ class TechnicalAnalysisService:
         lookback_days: int = 200,
     ) -> Dict[str, Any]:
         """Aggregate all indicators into a buy/sell signal summary."""
-        # Fetch all indicators in parallel
         import asyncio
+        from datetime import timedelta
 
+        # Resolve the frame once so the unit-exclusion reason is captured
+        # locally (ContextVar writes do not propagate back across asyncio
+        # tasks). When already inside a shared analysis frame, reuse it.
+        exclusion: Optional[Dict[str, Any]] = None
+        frame_token = None
+        cached_frame = _full_analysis_frame.get(_missing_full_analysis_frame)
+        if cached_frame is _missing_full_analysis_frame:
+            end_date = date.today()
+            start_date = end_date - timedelta(days=lookback_days + 26)
+            loaded = await self._load_ohlcv_frame(symbol, start_date, end_date)
+            if loaded is not None and not loaded.empty:
+                # Merge the latest quote exactly once here; the indicators below
+                # reuse this shared frame instead of re-fetching the quote each.
+                loaded = await self._merge_latest_quote(loaded, symbol)
+            exclusion = loaded.attrs.get("unit_exclusion") if loaded is not None else None
+            frame_token = _full_analysis_frame.set(loaded)
+        else:
+            exclusion = cached_frame.attrs.get("unit_exclusion") if cached_frame is not None else None
         ma_task = self.get_moving_averages(symbol, [10, 20, 50, 200], lookback_days)
         rsi_task = self.get_rsi(symbol, 14, lookback_days)
         macd_task = self.get_macd(symbol, 12, 26, 9, lookback_days)
@@ -1090,9 +1187,13 @@ class TechnicalAnalysisService:
         adx_task = self.get_adx(symbol, 14, lookback_days)
         volume_task = self.get_volume_analysis(symbol, 20, lookback_days)
 
-        ma, rsi, macd, bb, stoch, adx, vol = await asyncio.gather(
-            ma_task, rsi_task, macd_task, bb_task, stoch_task, adx_task, volume_task
-        )
+        try:
+            ma, rsi, macd, bb, stoch, adx, vol = await asyncio.gather(
+                ma_task, rsi_task, macd_task, bb_task, stoch_task, adx_task, volume_task
+            )
+        finally:
+            if frame_token is not None:
+                _full_analysis_frame.reset(frame_token)
 
         indicator_signals: List[str] = []
         category_weighted_signals: Dict[str, List[tuple[str, float]]] = {
@@ -1251,6 +1352,43 @@ class TechnicalAnalysisService:
         neutral_count = indicator_signals.count("neutral")
         total = len(indicator_signals)
 
+        if total == 0:
+            # Zero indicators means no directional evidence could be computed.
+            # That does NOT by itself prove an unresolved-unit cause: it may be
+            # insufficient history or a provider outage. Only claim
+            # ``unresolved_price_units`` when a unit exclusion was actually
+            # observed during the fetch; otherwise report insufficient source
+            # data. Return an explicit unavailable contract instead of a
+            # synthetic neutral label or zero-filled score.
+            # ``exclusion`` is captured locally from the resolved frame, not
+            # from any context/global state.
+            if exclusion:
+                reason = "unresolved_price_units"
+                note = (
+                    "Signal summary unavailable: history was excluded because a "
+                    "confirmed price unit could not be resolved "
+                    f"(excluded {exclusion.get('excluded_count', 0)} row(s); "
+                    f"sources: {', '.join(exclusion.get('unresolved_sources', [])) or 'unknown'}); "
+                    "no directional label is emitted."
+                )
+            else:
+                reason = "insufficient_source_data"
+                note = (
+                    "Signal summary unavailable: no sufficient source-backed history "
+                    "was available to compute any indicator; no directional label is emitted."
+                )
+            return {
+                "symbol": symbol.upper(),
+                "overall_signal": "unavailable",
+                "buy_count": 0,
+                "sell_count": 0,
+                "neutral_count": 0,
+                "total_indicators": 0,
+                "indicators": [],
+                "trend_strength": "unavailable",
+                "data_quality": {"status": "no_data", "reason": reason, "note": note},
+            }
+
         category_weights = {"trend": 1.0, "oscillator": 1.0, "volume": 0.6}
         weighted_categories: List[tuple[float, float]] = []
         for category, signals in category_weighted_signals.items():
@@ -1324,11 +1462,15 @@ class TechnicalAnalysisService:
             lookback_days = lookback_days * 20  # ~16 years of monthly data
 
         end_date = date.today()
-        frame = await self.get_ohlcv_data(
+        frame = await self._load_ohlcv_frame(
             symbol,
             end_date - timedelta(days=lookback_days + 26),
             end_date,
         )
+        if frame is not None and not frame.empty:
+            # Single latest-quote merge for the whole analysis; the indicator
+            # tasks below share this frame and must not re-fetch the quote.
+            frame = await self._merge_latest_quote(frame, symbol)
         token = _full_analysis_frame.set(frame)
         try:
             quality_task = self.get_data_quality_summary(symbol, lookback_days)

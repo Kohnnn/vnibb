@@ -336,3 +336,104 @@ async def test_premium_backfill_preserves_provider_trading_dates(monkeypatch, da
         (date(2026, 6, 9), 600, 550, "vnstock_vnd:KBS"),
     ]
     session.commit.assert_awaited_once()
+
+
+def test_historical_meta_never_certifies_unadjusted_history_as_raw():
+    """A plain read cannot claim a raw session basis.
+
+    No resolved source contract documents that its stored history is
+    unadjusted (Vietcap's ``raw`` marker denotes VND denomination, not an
+    unadjusted series), so an unadjusted read is disclosed as ``unverified``
+    rather than certified as ``raw``.
+    """
+    rows = [equity._to_historical_data_from_payload(bar(price_unit="VND"))]
+    warnings: list[str] = []
+    meta = equity._historical_resolution_meta(
+        rows,
+        "raw",
+        start_date=date(2026, 6, 8),
+        end_date=date(2026, 6, 8),
+        interval="1D",
+        source_counts={"mongo": 1},
+        mongo_docs=[],
+        warnings=warnings,
+    )
+    assert meta.unit_status == "confirmed_vnd"
+    assert meta.session_basis == "unverified"
+    assert any("session price basis unverified" in warning for warning in meta.warnings)
+
+
+def test_historical_meta_marks_applied_adjustment_as_adjusted_basis():
+    row = equity._to_historical_data_from_payload(
+        bar(price_unit="VND", adj_close=0.45), adjustment_mode="adjusted"
+    )
+    assert row.adjustment_applied is True
+    meta = equity._historical_resolution_meta(
+        [row],
+        "adjusted",
+        start_date=date(2026, 6, 8),
+        end_date=date(2026, 6, 8),
+        interval="1D",
+        source_counts={"mongo": 1},
+        mongo_docs=[],
+        warnings=[],
+    )
+    assert meta.session_basis == "adjusted"
+
+
+def test_historical_meta_index_basis_is_not_applicable():
+    row = equity._to_historical_data_from_payload(
+        bar(symbol="VNINDEX", price_unit="index_points", close=1200)
+    )
+    meta = equity._historical_resolution_meta(
+        [row],
+        "raw",
+        start_date=date(2026, 6, 8),
+        end_date=date(2026, 6, 8),
+        interval="1D",
+        source_counts={"mongo": 1},
+        mongo_docs=[],
+        warnings=[],
+    )
+    assert meta.unit_status == "not_applicable"
+    assert meta.session_basis == "not_applicable"
+
+
+def test_quant_failed_frame_discloses_unresolved_sessions():
+    """The quant diagnostics meta survives on an empty unresolved frame."""
+    import pandas as pd
+    from vnibb.api.v1 import quant
+
+    frame = pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
+    frame.attrs["price_diagnostics"] = {
+        "unit_status": "unconfirmed",
+        "observed_session_count": 2,
+        "excluded_session_count": 3,
+        "excluded_price_unit_dates": ["2026-06-01", "2026-06-02", "2026-06-03"],
+        "unresolved_excluded_dates": ["2026-06-02"],
+    }
+    meta = quant._price_diagnostics_meta(frame)
+    assert meta["unit_status"] == "unconfirmed"
+    assert meta["excluded_session_count"] == 3
+    assert meta["unresolved_excluded_dates"] == ["2026-06-02"]
+    assert quant._price_diagnostics_meta(None) == {}
+    assert quant._price_diagnostics_meta(pd.DataFrame()) == {}
+
+
+def test_quant_price_unit_warning_names_unresolved_sessions():
+    from vnibb.api.v1 import quant
+
+    warning = quant._build_price_unit_warning(
+        {
+            "unresolved_excluded_dates": ["2026-06-02"],
+            "excluded_session_count": 3,
+            "observed_session_count": 2,
+            "requested_start_date": "2026-06-01",
+            "requested_end_date": "2026-06-03",
+        }
+    )
+    assert warning is not None
+    assert "2026-06-02" in warning
+    assert "derived analytics withheld" in warning
+    assert quant._build_price_unit_warning({"unresolved_excluded_dates":[]}) is None
+    assert quant._build_price_unit_warning(None) is None

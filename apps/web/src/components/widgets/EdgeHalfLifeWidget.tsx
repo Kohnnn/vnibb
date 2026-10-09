@@ -47,16 +47,23 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
     enabled: Boolean(upperSymbol),
   })
 
+  const meta = data?.meta
+  // Only per-row `price_unit` markers certify the series; a response-level
+  // `unit_status` cannot certify rows that carry no marker (QA #98).
+  const expectedUnit = meta?.unit_status === 'confirmed_vnd' ? 'VND' : 'index_points'
+  const certifiedUnits = Boolean(data?.data?.length)
+    && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(meta?.unit_status ?? '')
+    && (data?.data ??[]).every((row) => row.price_unit === expectedUnit)
+  const derivedWithheld = Boolean(data) && !certifiedUnits
   const stats = useMemo(() => {
-    const bars = toDatedCloses(data?.data || [])
+    const bars = derivedWithheld ?[] : toDatedCloses(data?.data || [])
     return computeRollingSharpe(bars, window)
-  }, [data, window])
-
-  const hasData = stats.series.length > 0
+  }, [data, window, derivedWithheld])
   const chartData = useMemo(
     () => stats.series.map((point) => ({ date: point.date.slice(0, 10), sharpe: Number(point.sharpe.toFixed(3)) })),
     [stats.series],
   )
+  const hasData = stats.series.length > 0
 
   useEffect(() => {
     onDataChange?.({
@@ -67,7 +74,8 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
           apiGroup: '/equity',
           endpoint: `/equity/historical?symbol=${upperSymbol}`,
           adjustmentMode: 'adjusted',
-          updatedAt: data?.meta?.last_data_date ?? (dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined),
+          updatedAt: data?.meta?.last_data_date ?? null,
+          fetchedAt: dataUpdatedAt,
         },
       },
       rows: hasData
@@ -130,9 +138,13 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
         <WidgetEmpty
-          message="Not enough history for rolling Sharpe"
+          message={derivedWithheld
+            ? 'Rolling Sharpe unavailable: historical price units were not certified.'
+            : 'Not enough history for rolling Sharpe'}
           icon={<TrendingDown size={18} />}
-          detail={`Needs at least ${window + 2} adjusted daily bars in the selected period.`}
+          detail={derivedWithheld
+            ? 'Unmarked sessions are excluded; certified VND rows are required.'
+            : `Needs at least ${window + 2} adjusted daily bars in the selected period.`}
         />
       ) : (
         <>
@@ -184,7 +196,8 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
 
           <WidgetMeta
             className="px-1 pt-1"
-            updatedAt={data?.meta?.last_data_date ?? dataUpdatedAt}
+            updatedAt={data?.meta?.last_data_date}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             note={`${period} adjusted history`}
             align="right"

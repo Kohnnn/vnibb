@@ -122,8 +122,19 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
     // QA-v3 F6: Pull Beta 63D from the same source that powers the
     // Quant tab Risk Dashboard.
     const quantBeta63d = (() => {
-        const benchmarkRisk = (quantMetrics as any)?.data?.metrics?.benchmark_risk;
-        const value = benchmarkRisk?.current_beta_63d;
+        // Beta 63D is derived from the same price frame as the Quant tab. Only a
+        // certified unit status admits it; an absent or mixed/unconfirmed status
+        // must not surface an ordinary-looking risk number (QA #98).
+        const quality = quantMetrics?.meta;
+        const certified = ['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+            && !quality?.unresolved_excluded_dates?.length;
+        if (!certified) return null;
+        // `metrics` is `Record<string, unknown>`: narrow the one field consumed.
+        const benchmarkRisk = quantMetrics?.data?.metrics?.benchmark_risk;
+        if (!benchmarkRisk || typeof benchmarkRisk !== 'object' || !('current_beta_63d' in benchmarkRisk)) {
+            return null;
+        }
+        const value = benchmarkRisk.current_beta_63d;
         return typeof value === 'number' && Number.isFinite(value) ? value : null;
     })();
     const quantWarning = extractQuantWarning(quantMetrics, 'benchmark_risk');
@@ -242,7 +253,10 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                 apiGroup: '/screener',
                 endpoint: `/screener/?symbol=${symbol}&limit=1`,
                 sourceLabel: 'Key metrics',
-                lastDataDate: dataUpdatedAt,
+                // Screener meta.last_data_date is a serving/sync receipt (trade date or row
+                // store timestamp), not a reliable source observation; only the query receipt is used.
+                lastDataDate: null,
+                fetchedAt: dataUpdatedAt || null,
                 stale: isFallback,
                 extra: hasData ? { metrics: mergedStock } : undefined,
             }),
@@ -288,7 +302,8 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
         >
             <div className="space-y-2">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt || null}
                     isFetching={(isFetching || historyFetching) && hasData}
                     isCached={isFallback}
                     note={metricMap.marketCap.source === 'Profile+Quote' ? 'Market cap derived from profile shares x quote' : 'Ratios & health'}

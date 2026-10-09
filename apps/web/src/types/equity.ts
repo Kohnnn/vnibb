@@ -15,6 +15,7 @@ export interface EquityHistoricalData {
   adjustment_mode?: 'raw' | 'adjusted';
   adjustment_applied?: boolean;
   price_unit?: 'VND' | 'index_points' | 'unknown';
+  price_source?: string | null;
 }
 
 export interface EquityHistoricalResponse {
@@ -30,6 +31,7 @@ export interface EquityHistoricalResponse {
     logical_day_count?: number | null;
     completeness_status?: 'complete' | 'partial' | 'unknown' | null;
     unit_status?: 'confirmed_vnd' | 'mixed' | 'unconfirmed' | 'not_applicable' | null;
+    session_basis?: 'adjusted' | 'unverified' | 'not_applicable' | null;
     source_mode?: string | null;
     source_counts?: Record<string, number> | null;
     fallback_used?: boolean | null;
@@ -74,8 +76,8 @@ export interface CompanyNewsData {
   symbol: string;
   title: string;
   source?: string;
-  published_at?: string;
-   published_date?: string;
+  published_at?: string | null;
+  published_date?: string | null;
   url?: string;
   summary?: string;
   category?: string;
@@ -84,6 +86,7 @@ export interface CompanyNewsData {
   ai_summary?: string | null;
   relevance_score?: number | null;
   matched_symbols?: string[];
+  match_reason?: string | null;
   is_market_wide_fallback?: boolean;
 }
 
@@ -164,7 +167,7 @@ export interface FundamentalValuation {
   ps?: number | null;
   ev_ebitda?: number | null;
   as_of?: string | null;
-  inputs?: Record<string, number | string | string[] | null | undefined> | null;
+  inputs?: Record<string, unknown> | null;
   source?: string | null;
   note?: string | null;
 }
@@ -435,6 +438,10 @@ export interface BalanceSheetData {
   period?: string;
   updated_at?: string;
   raw_data?: Record<string, unknown>;
+  // Set by the API when the provider lineage refused to certify the row; every
+  // numeric field is null in that case, which is not the same as a reported zero
+  // (issue #103).
+  unavailable_reason?: string | null;
   total_assets?: number;
   current_assets?: number;
   fixed_assets?: number;
@@ -467,6 +474,7 @@ export interface IncomeStatementData {
   period?: string;
   updated_at?: string;
   raw_data?: Record<string, unknown>;
+  unavailable_reason?: string | null;
   revenue?: number;
   cost_of_revenue?: number;
   gross_profit?: number;
@@ -507,6 +515,7 @@ export interface CashFlowData {
   dividends_paid?: number;
   debt_repayment?: number;
   stock_repurchased?: number;
+  unavailable_reason?: string | null;
 }
 
 export interface CashFlowResponse {

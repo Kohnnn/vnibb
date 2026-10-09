@@ -194,9 +194,22 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
     enabled: Boolean(upperSymbol),
   })
 
-  const candles = (data?.data || []) as OHLCData[]
+  const historyUnitStatus = data?.meta?.unit_status ?? ''
+  const historyExpectedUnit = historyUnitStatus === 'confirmed_vnd' ? 'VND' : 'index_points'
+  // Only per-row `price_unit` markers certify the OHLC fallback; a response-level
+  // `unit_status` cannot certify rows that carry no marker (QA #98).
+  const historyWithheld = Boolean(data) && !(
+    (data?.data?.length ?? 0) > 0
+    && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(historyUnitStatus)
+    && (data?.data ??[]).every((row) => row.price_unit === historyExpectedUnit)
+  )
+  const candles = (historyWithheld ?[] : data?.data || []) as OHLCData[]
   const microBars = microstructure?.data?.deep_trades?.bars || []
   const hasMicroData = microBars.length > 0
+  const lastDataDate = hasMicroData
+    ? null
+    : data?.meta?.freshness_as_of ?? data?.meta?.last_data_date ?? candles[candles.length - 1]?.time ?? null
+  const fetchedAt = hasMicroData ? microUpdatedAt : dataUpdatedAt
   const deltaSeries = hasMicroData ? aggregateMicroBars(microBars) : calculateVolumeDelta(candles)
   const hasData = hasMicroData ? deltaSeries.length > 0 : deltaSeries.length > 30
   const isFallback = Boolean((error || microError || !hasMicroData) && hasData)
@@ -228,13 +241,14 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
           ? `/microstructure/${upperSymbol}?interval=5m&lookback_days=7`
           : `/equity/historical?symbol=${upperSymbol}`,
         sourceLabel: hasMicroData ? 'Volume delta · trade ticks' : 'Volume delta (derived)',
-        lastDataDate: hasMicroData ? microUpdatedAt : dataUpdatedAt,
+        lastDataDate,
+        fetchedAt,
         stale: isFallback,
         derived: !hasMicroData,
         extra: hasData ? { cumulativeDelta: lastPoint?.cumulativeDelta ?? 0 } : undefined,
       }),
     )
-  }, [onDataChange, hasData, hasMicroData, isFallback, microUpdatedAt, dataUpdatedAt, upperSymbol, lastPoint?.cumulativeDelta])
+  }, [onDataChange, hasData, hasMicroData, isFallback, lastDataDate, fetchedAt, upperSymbol, lastPoint?.cumulativeDelta])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view volume delta" icon={<Scale size={18} />} />
@@ -248,7 +262,8 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
           <span>{hasMicroData ? 'Volume Delta (Mongo)' : `Volume Delta (${LOOKBACK_DAYS}D)`}</span>
         </div>
         <WidgetMeta
-          updatedAt={hasMicroData ? microUpdatedAt : dataUpdatedAt}
+          updatedAt={lastDataDate}
+          fetchedAt={fetchedAt}
           isFetching={(hasMicroData ? isMicroFetching : isFetching) && hasData}
           isCached={isFallback}
           note={hasMicroData ? 'Mongo match-type proxy' : 'OHLC proxy'}
@@ -272,7 +287,13 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
         ) : (microError || error) && !hasData ? (
           <WidgetError error={(microError || error) as Error} onRetry={() => { refetchMicro(); refetch() }} />
         ) : !hasData ? (
-          <WidgetEmpty message="Not enough historical candles" icon={<Scale size={18} />} size="compact" />
+          <WidgetEmpty
+            message={historyWithheld
+              ? 'Volume delta unavailable: historical price units were not certified.'
+              : 'Not enough historical candles'}
+            icon={<Scale size={18} />}
+            size="compact"
+          />
         ) : (
           <>
             <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">

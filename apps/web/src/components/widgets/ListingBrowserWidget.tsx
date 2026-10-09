@@ -32,6 +32,13 @@ type SortMode = 'symbol' | 'company' | 'industry'
 
 const GROUP_OPTIONS: GroupFilter[] = ['ALL', 'VN30', 'VN100', 'HNX30']
 
+/**
+ * The listing payload only carries an industry when the provider/cache row has one.
+ * A missing industry is not a sector: it is bucketed as "Unclassified" and the
+ * filter reports how many rows fall in it (issue #107).
+ */
+const UNCLASSIFIED_INDUSTRY = 'Unclassified'
+
 export function ListingBrowserWidget({
   id,
   hideHeader,
@@ -63,16 +70,15 @@ export function ListingBrowserWidget({
     const normalizedSearch = search.trim().toLowerCase()
 
     const filtered = base.filter((item) => {
-      if (exchange !== 'ALL' && item.exchange !== exchange) return false
-      if (group !== 'ALL' && !groupSymbols.has(item.symbol)) return false
-      if (industry !== 'ALL' && (item.industry || 'Unknown') !== industry) return false
-      if (!normalizedSearch) return true
-
-      return item.symbol.toLowerCase().includes(normalizedSearch)
+      const matchesExchange = exchange === 'ALL' || item.exchange === exchange
+      const matchesGroup = group === 'ALL' || groupSymbols.has(item.symbol)
+      const matchesIndustry = industry === 'ALL' || (item.industry || UNCLASSIFIED_INDUSTRY) === industry
+      const matchesSearch = !normalizedSearch
+        || item.symbol.toLowerCase().includes(normalizedSearch)
         || String(item.organ_name || '').toLowerCase().includes(normalizedSearch)
         || String(item.industry || '').toLowerCase().includes(normalizedSearch)
+      return Boolean(matchesExchange && matchesGroup && matchesIndustry && matchesSearch)
     })
-
     return filtered.sort((left, right) => {
       if (sortMode === 'company') {
         return String(left.organ_name || '').localeCompare(String(right.organ_name || ''))
@@ -84,8 +90,9 @@ export function ListingBrowserWidget({
     })
   }, [exchange, group, groupSymbols, industry, search, sortMode, symbolsQuery.data?.data])
 
-  const industries = useMemo(() => {
-    const unique = new Set((symbolsQuery.data?.data || []).map((item) => item.industry || 'Unknown'))
+  const industryOptions = useMemo(() => {
+    const listingRows = symbolsQuery.data?.data ?? []
+    const unique = new Set(listingRows.map((item) => item.industry || UNCLASSIFIED_INDUSTRY))
     return ['ALL', ...Array.from(unique).sort()]
   }, [symbolsQuery.data?.data])
 
@@ -101,7 +108,7 @@ export function ListingBrowserWidget({
   const hasData = rows.length > 0
   const isLoading = symbolsQuery.isLoading || groupQuery.isLoading
   const error = symbolsQuery.error || (group !== 'ALL' ? groupQuery.error : null)
-  const updatedAt = Math.max(symbolsQuery.dataUpdatedAt, groupQuery.dataUpdatedAt)
+  const fetchedAt = Math.max(symbolsQuery.dataUpdatedAt, groupQuery.dataUpdatedAt)
   const hasActiveFilters = exchange !== 'ALL' || group !== 'ALL' || industry !== 'ALL' || search.trim() !== '' || sortMode !== 'symbol'
   const viewInput = { exchange, group, industry, search, sortMode }
   const filterSummary = buildListingBrowserFilterSummary(viewInput)
@@ -113,9 +120,13 @@ export function ListingBrowserWidget({
       endpoint: group === 'ALL' ? '/api/v1/symbols' : `/api/v1/symbols/group/${group}`,
       sourceLabel: 'VNIBB listing universe',
       derived: hasActiveFilters,
+      // The listing universe exposes no source observation date, so freshness
+      // stays unknown and the query receipt is reported separately.
+      lastDataDate: null,
+      fetchedAt,
       extra: { count: rows.length, group, exchange },
     }))
-  }, [exchange, group, hasActiveFilters, hasData, onDataChange, rows.length])
+  }, [exchange, fetchedAt, group, hasActiveFilters, hasData, onDataChange, rows.length])
 
   const clearFilters = () => {
     setExchange('ALL')
@@ -175,7 +186,7 @@ export function ListingBrowserWidget({
                 className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] outline-none focus:border-blue-500"
               />
             </div>
-            <WidgetMeta updatedAt={updatedAt} isFetching={isLoading && hasData} note={`${rows.length} matches`} align="right" />
+            <WidgetMeta updatedAt={null} fetchedAt={fetchedAt} isFetching={isLoading && hasData} note={`${rows.length} matches`} align="right" />
           </div>
 
           <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
@@ -197,9 +208,16 @@ export function ListingBrowserWidget({
               ))}
             </select>
 
-            <select value={industry} onChange={(event) => setIndustry(event.target.value)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500">
-              {industries.map((option) => (
-                <option key={option} value={option}>{option === 'ALL' ? 'All industries' : option}</option>
+            <select
+              value={industry}
+              onChange={(event) => setIndustry(event.target.value)}
+              aria-label="Industry filter"
+              className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500"
+            >
+              {industryOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option === 'ALL' ? 'All industries' : option}
+                </option>
               ))}
             </select>
 

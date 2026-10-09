@@ -14,7 +14,11 @@ from sqlalchemy import select
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
-from vnibb.core.price_units import history_price_records, persisted_price_record
+from vnibb.core.price_units import (
+    history_price_records,
+    persisted_price_record,
+    persisted_price_source,
+)
 from vnibb.models.stock import StockPrice
 
 logger = logging.getLogger(__name__)
@@ -83,6 +87,7 @@ async def _fetch_chart_data_from_db(symbol: str, start_date: date) -> List[Dict[
                 "close": float(normalized["close"]),
                 "volume": int(normalized["volume"] or 0),
                 "price_unit": normalized["price_unit"],
+                "price_source": persisted_price_source(normalized),
             }
         )
 
@@ -158,6 +163,7 @@ async def fetch_chart_data(
                         "close": float(normalized.get("close", 0)),
                         "volume": int(normalized.get("volume", 0)),
                         "price_unit": normalized["price_unit"],
+                        "price_source": normalized.get("price_source") or persisted_price_source(normalized),
                     }
                 )
 

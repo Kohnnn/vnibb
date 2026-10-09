@@ -16,6 +16,9 @@ jest.mock('@/components/ui/WidgetMeta', () => ({ WidgetMeta: () => null }))
 const mockUseHistoricalPrices = jest.mocked(useHistoricalPrices)
 
 function history(count: number) {
+  // Canonical fixture: the widget certifies each row by its own `price_unit`
+  // marker, so the fixture states VND per row plus the matching response-level
+  // status (QA #98).
   return {
     data: {
       data: Array.from({ length: count }, (_, index) => ({
@@ -25,7 +28,9 @@ function history(count: number) {
         low: 99 + index,
         close: 101 + index + Math.sin(index / 3),
         volume: 1_000,
+        price_unit: 'VND',
       })),
+      meta: { count, unit_status: 'confirmed_vnd' },
     },
     isLoading: false,
     error: null,

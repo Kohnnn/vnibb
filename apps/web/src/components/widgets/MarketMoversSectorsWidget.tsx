@@ -10,6 +10,7 @@ import { useSectorPerformance } from '@/lib/queries';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetGroupId } from '@/types/widget';
+import { toNumber } from './utils';
 
 interface MarketMoversSectorsWidgetProps {
   id: string;
@@ -67,7 +68,8 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataCha
         apiGroup: '/market',
         endpoint: '/market/sector-performance',
         sourceLabel: 'Sector performance',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate: null,
+        fetchedAt: dataUpdatedAt,
         stale: isFallback,
         extra: hasData ? { sectorCount: sectors.length } : undefined,
       }),
@@ -86,7 +88,8 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataCha
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={null}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note="Sector performance"
@@ -170,8 +173,10 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataCha
               </div>
               <div className="space-y-2">
                 {sortedSectors.map((sector) => {
-                  const change = sector.changePct ?? 0;
-                  const isUp = change >= 0;
+                  // Missing change rows stay missing; "0.00%" would read as a
+                  // measured flat session (issue #107).
+                  const change = toNumber(sector.changePct);
+                  const isUp = (change ?? 0) >= 0;
                   const name = sector.sectorName || sector.sectorNameEn || sector.sectorId;
                   return (
                     <div
@@ -182,8 +187,8 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataCha
                         <div className="text-xs font-semibold text-[var(--text-primary)]">{name}</div>
                         <div className="text-[10px] text-[var(--text-muted)]">{sector.totalStocks} stocks</div>
                       </div>
-                      <div className={`text-xs font-bold ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {isUp ? '+' : ''}{change.toFixed(2)}%
+                      <div className={`text-xs font-bold ${change === null ? 'text-[var(--text-muted)]' : isUp ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {change === null ? '—' : `${isUp ? '+' : ''}${change.toFixed(2)}%`}
                       </div>
                     </div>
                   );

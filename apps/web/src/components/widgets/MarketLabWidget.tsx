@@ -42,10 +42,20 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
     enabled: Boolean(upperSymbol),
   })
 
+  const meta = data?.meta
+  // Only per-row `price_unit` markers certify the series; a response-level
+  // `unit_status` cannot certify rows that carry no marker (QA #98).
+  const expectedUnit = meta?.unit_status === 'confirmed_vnd' ? 'VND' : 'index_points'
+  const certifiedUnits = Boolean(data?.data?.length)
+    && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(meta?.unit_status ?? '')
+    && (data?.data ??[]).every((row) => row.price_unit === expectedUnit)
+  // An empty history response is a coverage gap, not an uncertified frame:
+  // withholding is claimed only when rows exist that fail certification.
+  const derivedWithheld = Boolean(data?.data?.length) && !certifiedUnits
   const bars = useMemo<MarketLabBar[]>(() => {
-    const rows = data?.data || []
+    const rows = derivedWithheld ?[] : data?.data || []
     return rows.map((bar) => ({ time: bar.time, close: bar.close, volume: bar.volume }))
-  }, [data])
+  }, [data, derivedWithheld])
 
   const stats = useMemo(() => (bars.length ? computeMarketLabStats(upperSymbol, bars) : null), [bars, upperSymbol])
   const adjustmentWarning = data?.meta?.adjustment_warning ?? null
@@ -61,7 +71,8 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
           endpoint: `/equity/historical?symbol=${upperSymbol}`,
           adjustmentMode: data?.meta?.adjustment_mode ?? 'adjusted',
           stale: Boolean(error && hasData),
-          updatedAt: data?.meta?.last_data_date ?? (dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined),
+          updatedAt: data?.meta?.last_data_date ?? null,
+          fetchedAt: dataUpdatedAt,
         },
       },
       ...(stats ? { stats, rows: marketLabStatsToRows(stats) } : {}),
@@ -81,9 +92,13 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
   if (!hasData) {
     return (
       <WidgetEmpty
-        message={`Not enough history for ${upperSymbol}`}
+        message={derivedWithheld
+          ? 'Market Lab unavailable: historical price units were not certified.'
+          : `Not enough history for ${upperSymbol}`}
         icon={<FlaskConical size={18} />}
-        detail="Market Lab needs a few weeks of adjusted EOD bars to compute return and risk statistics."
+        detail={derivedWithheld
+          ? 'Unmarked sessions are excluded; certified VND rows are required.'
+          : 'Market Lab needs a few weeks of adjusted EOD bars to compute return and risk statistics.'}
       />
     )
   }
@@ -175,7 +190,8 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
       <WidgetMeta
         className="px-1 pt-1"
         isFetching={isFetching}
-        updatedAt={data?.meta?.last_data_date ?? dataUpdatedAt}
+        updatedAt={data?.meta?.last_data_date}
+        fetchedAt={dataUpdatedAt}
         isCached={Boolean(error && hasData)}
         sourceLabel="Adjusted EOD · derived"
         align="right"

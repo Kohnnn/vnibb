@@ -45,7 +45,7 @@ export function MarketOverviewWidget({ onRemove, onDataChange }: MarketOverviewW
   const hasData = indices.length > 0;
   const isFallback = Boolean(error && hasData);
   const sourceUpdatedAt =
-    getLatestTimestampValue([data?.updated_at, ...indices.map((item) => item.time)]) ?? dataUpdatedAt;
+    getLatestTimestampValue(indices.map((item) => item.time)) ?? null;
   // QA-v4 M-1: When the data was published 2 days ago and we are
   // currently on a weekend (or pre-open before any trading session),
   // the staleness is canonical, not a defect. Use a softer label so
@@ -73,11 +73,12 @@ export function MarketOverviewWidget({ onRemove, onDataChange }: MarketOverviewW
         endpoint: '/market/indices',
         sourceLabel,
         lastDataDate: sourceUpdatedAt,
+        fetchedAt: dataUpdatedAt,
         stale: isFallback,
         extra: hasData ? { indexCount: indices.length } : undefined,
       }),
     );
-  }, [hasData, sourceUpdatedAt, isFallback, sourceLabel, indices.length, onDataChange]);
+  }, [hasData, sourceUpdatedAt, dataUpdatedAt, isFallback, sourceLabel, indices.length, onDataChange]);
 
   return (
     <WidgetContainer
@@ -91,6 +92,7 @@ export function MarketOverviewWidget({ onRemove, onDataChange }: MarketOverviewW
         <div className="px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]">
           <WidgetMeta
             updatedAt={sourceUpdatedAt}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note={sourceLabel}

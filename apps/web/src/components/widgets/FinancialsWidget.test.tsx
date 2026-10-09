@@ -2,6 +2,8 @@ import { render, screen, act, waitFor } from '@testing-library/react';
 import { useIncomeStatement, useBalanceSheet, useCashFlow, useFinancialRatios } from '@/lib/queries';
 import { FinancialsWidget } from '@/components/widgets/FinancialsWidget';
 import { UnitProvider } from '@/contexts/UnitContext';
+import type { UseQueryResult } from '@tanstack/react-query';
+import type { IncomeStatementResponse } from '@/types/equity';
 
 jest.mock('@/lib/queries', () => ({
   useIncomeStatement: jest.fn(),
@@ -269,5 +271,32 @@ describe('FinancialsWidget', () => {
       const headers = Array.from(headerRow.querySelectorAll('th')).map((th) => th.textContent?.trim() ?? '');
       expect(headers).toEqual(['Metric', '2018', '2019']);
     });
+  });
+  test('uses backend TTM statements and discloses unsupported ratio TTM', async () => {
+    // The fixture supplies only the fields consumed by the widget, not React Query internals.
+    const result = makeQueryResult({ symbol: 'FPT', count: 1, data: [{ period: 'TTM-2025', revenue: 15 }] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>;
+    mockUseIncomeStatement.mockReturnValue(result);
+    renderWithProviders(<FinancialsWidget id="financial-ttm" symbol="FPT" config={{ periodSyncGroup: null }} />);
+    act(() => screen.getByRole('button', { name: 'TTM' }).click());
+    expect(mockUseIncomeStatement).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'TTM', enabled: true }));
+    await waitFor(() => expect(screen.getByText('TTM 2025')).toBeInTheDocument());
+    act(() => screen.getByRole('button', { name: /ratios/i }).click());
+    expect(screen.getByText('TTM ratios are not supported')).toBeInTheDocument();
+    expect(mockUseFinancialRatios).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'TTM', enabled: false }));
+    expect(document.querySelector('table')).toBeNull();
+  });
+
+  test('excludes conflicting fiscal rows instead of overwriting their values', async () => {
+    // The fixture supplies only the fields consumed by the widget, not React Query internals.
+    const result = makeQueryResult({ symbol: 'FPT', count: 3, data: [
+      { period: '2020', revenue: 10 },
+      { period: '2020', revenue: 20 },
+      { period: '2021', revenue: 30 },
+    ] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>;
+    mockUseIncomeStatement.mockReturnValue(result);
+    renderWithProviders(<FinancialsWidget id="financial-conflict" symbol="FPT" config={{ periodSyncGroup: null }} />);
+    expect(screen.getByText(/1 conflicting periods excluded/)).toBeInTheDocument();
+    expect(screen.queryByText('2020')).not.toBeInTheDocument();
+    expect(screen.getByText('2021')).toBeInTheDocument();
   });
 });

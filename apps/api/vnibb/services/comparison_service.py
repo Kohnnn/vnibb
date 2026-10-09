@@ -81,19 +81,23 @@ PERCENT_METRIC_LIMITS = {
 
 
 def _normalize_comparison_metric(metric_key: str, value: Any) -> Optional[float]:
+    """Coerce a stored comparison value without inferring a magnitude.
+
+    Storage contract (issue #106): every percent metric in
+    `vnibb.models.comparison.COMPARISON_METRICS` is declared `format="percent"`
+    and is produced already scaled to percent — `_build_comparison_backfill`
+    multiplies ratios by 100, and `PERCENT_METRIC_LIMITS` bounds the stored
+    magnitude. Nothing proves a stored fraction means "multiply by 100", and
+    some provider enrichment paths emit a fraction for the same metric key, so
+    the value is passed through as stored; one outside the plausible percent
+    bound is unknown rather than rescaled by an inferred factor.
+    """
     numeric = _coerce_number(value)
     if numeric is None:
         return None
 
     if metric_key in PERCENT_METRIC_LIMITS:
-        if 0 < abs(numeric) <= 1:
-            numeric *= 100
-
-        limit = PERCENT_METRIC_LIMITS[metric_key]
-        while abs(numeric) > limit and abs(numeric / 100) <= limit:
-            numeric /= 100
-
-        if abs(numeric) > limit:
+        if abs(numeric) > PERCENT_METRIC_LIMITS[metric_key]:
             return None
 
     if metric_key == "debt_to_equity" and (numeric <= 0 or abs(numeric) > 1000):
@@ -108,6 +112,26 @@ def _first_metric_value(metric_key: str, *values: Any) -> Optional[float]:
         if normalized is not None:
             return normalized
     return None
+
+# `ocf_sales` and `fcf_yield` have no `FinancialRatio` column, so the stored
+# number only ever reaches the comparison table through `FinancialRatio.raw_data`
+# JSON. The writer that produces it (`DataPipeline._enrich_ratio_rows`) stores a
+# fraction — `operating_cash_flow / revenue` and `free_cash_flow / market_cap` —
+# while `vnibb.models.comparison.COMPARISON_METRICS` declares both
+# `format="percent"`. The conversion below is keyed by metric name, never by
+# magnitude, so a percent stored by any other path is passed through untouched
+# (issue #106).
+_RATIO_JSON_FRACTION_KEYS = frozenset({"ocf_sales", "fcf_yield"})
+
+
+def _ratio_json_metric(metric_key: str, raw_data: Any, *aliases: str) -> Optional[float]:
+    """Read a percent metric that is carried only in `FinancialRatio.raw_data`."""
+    if not isinstance(raw_data, dict):
+        return None
+    value = _coerce_number(_record_value(raw_data, metric_key, *aliases))
+    if value is None:
+        return None
+    return value * 100 if metric_key in _RATIO_JSON_FRACTION_KEYS else value
 
 
 def _normalize_ratio_period(period: str) -> tuple[str, Optional[int], bool]:
@@ -138,14 +162,13 @@ def _metric_from_ratio_row(row: Any, metric_key: str) -> Optional[float]:
         "debt_assets": "debt_to_assets",
     }
     attribute = attribute_map.get(metric_key, metric_key)
-    raw_payload = getattr(row, "raw_data", None)
-    raw_data = raw_payload if isinstance(raw_payload, dict) else {}
-
+    column_value = getattr(row, attribute, None)
+    if column_value is not None:
+        return _first_metric_value(metric_key, column_value)
+    # No column: `ocf_sales`/`fcf_yield` exist only in `raw_data`, where the
+    # local writer stores a fraction (see `_ratio_json_metric`).
     return _first_metric_value(
-        metric_key,
-        getattr(row, attribute, None),
-        raw_data.get(metric_key),
-        raw_data.get(attribute),
+        metric_key, _ratio_json_metric(metric_key, getattr(row, "raw_data", None), attribute)
     )
 
 
@@ -187,13 +210,44 @@ def _build_statement_snapshot(
     if len(recent_rows) < 4:
         return None
 
+    # A four-row sum is only a TTM window when the rows are consecutive quarters of
+    # a certified single-quarter flow. The previous code summed whatever rows were
+    # present, so a gap, a legacy unknown-unit row, or a cumulative YTD series
+    # produced a total labelled TTM that no source supports; withhold it instead
+    # (issues #101/#106). Cumulative series are differenced by
+    # `financial_service.build_ttm_statement_rows`, not re-derived here.
+    if not _consecutive_quarter_rows(recent_rows):
+        return None
+    for row in recent_rows:
+        lineage = _statement_row_lineage(row)
+        if lineage.get("value_unit") != "VND" or lineage.get("flow_basis") != "single_quarter":
+            return None
+
     snapshot: dict[str, Optional[float]] = {}
     for metric_key in metric_keys:
         values = [_coerce_number(getattr(row, metric_key, None)) for row in recent_rows]
-        valid_values = [value for value in values if value is not None]
-        snapshot[metric_key] = sum(valid_values) if valid_values else None
+        snapshot[metric_key] = sum(values) if all(value is not None for value in values) else None
 
     return snapshot
+
+
+def _statement_row_lineage(row: Any) -> dict[str, Any]:
+    """Read the unit/basis lineage the pipeline persists beside a statement row."""
+    raw_data = getattr(row, "raw_data", None)
+    if not isinstance(raw_data, dict):
+        return {}
+    lineage = raw_data.get("_financial_lineage")
+    return lineage if isinstance(lineage, dict) else {}
+
+
+def _consecutive_quarter_rows(rows: List[Any]) -> bool:
+    ordinals = []
+    for row in rows:
+        year, quarter = getattr(row, "fiscal_year", None), getattr(row, "fiscal_quarter", None)
+        if not year or not quarter:
+            return False
+        ordinals.append(int(year) * 4 + int(quarter))
+    return all(left == right + 1 for left, right in zip(ordinals, ordinals[1:], strict=False))
 
 
 async def _load_statement_rows(
@@ -618,8 +672,8 @@ class ComparisonService:
                     "quick_ratio": ratio_row.quick_ratio,
                     "asset_turnover": getattr(ratio_row, "asset_turnover", None),
                     "interest_coverage": getattr(ratio_row, "interest_coverage", None),
-                    "fcf_yield": _record_value(ratio_row.raw_data or {}, "fcf_yield", "fcfYield"),
-                    "ocf_sales": _record_value(ratio_row.raw_data or {}, "ocf_sales", "ocfSales"),
+                    "fcf_yield": _ratio_json_metric("fcf_yield", ratio_row.raw_data, "fcfYield"),
+                    "ocf_sales": _ratio_json_metric("ocf_sales", ratio_row.raw_data, "ocfSales"),
                     "eps": ratio_row.eps,
                     "bvps": ratio_row.bvps,
                 }

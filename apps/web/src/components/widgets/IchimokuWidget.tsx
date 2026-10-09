@@ -91,21 +91,27 @@ export function IchimokuWidget({ symbol, onDataChange }: IchimokuWidgetProps) {
 
   const latest = chartData[chartData.length - 1]
   const hasData = chartData.length > 1
+  const derivedWithheld = Boolean(data) && !['VND', 'index_points'].includes(data?.price_unit ?? '')
   const isFallback = Boolean(error && hasData)
+  const lastDataDate = (data?.data || [])
+    .map((point) => point.date)
+    .filter((value) => value != null && value !== '' && !Number.isNaN(new Date(value).getTime()))
+    .at(-1) ?? null
 
   useEffect(() => {
     onDataChange?.(
       buildWidgetRuntime({
-        empty: !hasData,
+        empty: !hasData || derivedWithheld,
         apiGroup: '/technical',
         endpoint: `/analysis/ta/${upperSymbol}/ichimoku?period=${period}`,
         sourceLabel: 'Ichimoku',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate,
+        fetchedAt: dataUpdatedAt,
         stale: isFallback,
-        extra: data?.signal ? { signal: data.signal } : undefined,
+        extra: !derivedWithheld && data?.signal ? { signal: data.signal } : undefined,
       }),
     )
-  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, period, data?.signal])
+  }, [onDataChange, hasData, derivedWithheld, isFallback, dataUpdatedAt, lastDataDate, upperSymbol, period, data?.signal])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Ichimoku cloud" icon={<CloudSun size={18} />} />
@@ -136,7 +142,8 @@ export function IchimokuWidget({ symbol, onDataChange }: IchimokuWidgetProps) {
             ))}
           </div>
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={lastDataDate}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note={period}
@@ -149,6 +156,8 @@ export function IchimokuWidget({ symbol, onDataChange }: IchimokuWidgetProps) {
         <WidgetSkeleton lines={8} />
       ) : error && !hasData ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
+      ) : derivedWithheld ? (
+        <WidgetEmpty message="Ichimoku unavailable: historical price units were not certified." icon={<CloudSun size={18} />} />
       ) : !hasData ? (
         <WidgetEmpty message="No Ichimoku data available." icon={<CloudSun size={18} />} />
       ) : (

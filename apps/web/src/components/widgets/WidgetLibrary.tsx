@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useCallback, memo } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, memo } from 'react';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { getWidgetDefinition, getWidgetLibrarySectionId, normalizeWidgetType, widgetDefinitions, widgetLibrarySections } from '@/data/widgetDefinitions';
 import {
@@ -125,28 +125,55 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
     const { activeDashboard, activeTab, addWidget } = useDashboard();
     const dashboardEditable = activeDashboard?.adminUnlocked === true || (activeDashboard?.isEditable ?? true) !== false;
     const [searchQuery, setSearchQuery] = useState('');
+    const searchInputRef = useRef<HTMLInputElement>(null);
     const [activeCategory, setActiveCategory] = useState<string | null>(null);
     const [selectedWidgetTypes, setSelectedWidgetTypes] = useState<WidgetType[]>([]);
 
     useEffect(() => {
         if (!isOpen) return;
 
+        // Capture phase + stopPropagation, matching PromptsLibrary/WidgetToolbar.
+        // Without it the dashboard-level window handler also fired, so one Escape
+        // closed the drawer *and* the Apps library, template selector, widget
+        // settings and copilot (#109).
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                event.preventDefault();
-                onClose();
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            onClose();
+        };
+
+        window.addEventListener('keydown', handleKeyDown,true);
+        return () => window.removeEventListener('keydown', handleKeyDown,true);
+    }, [isOpen, onClose]);
+
+    // Dismissal semantics match Templates/Apps/command palette: Escape closes
+    // the drawer (handler above) and focus returns to the control that opened
+    // it. Tracked through focusin because the search input autofocuses during
+    // commit, before effects run (#109).
+    const lastFocusedRef = useRef<HTMLElement | null>(null);
+    useEffect(() => {
+        const trackFocus = (event: FocusEvent) => {
+            const target = event.target;
+            if (target instanceof HTMLElement && !target.closest('[role="dialog"]')) {
+                lastFocusedRef.current = target;
             }
         };
 
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isOpen, onClose]);
+        document.addEventListener('focusin', trackFocus);
+        return () => document.removeEventListener('focusin', trackFocus);
+    }, []);
 
     useEffect(() => {
         if (isOpen) return;
         setSearchQuery('');
         setActiveCategory(null);
         setSelectedWidgetTypes([]);
+        const previous = lastFocusedRef.current;
+        lastFocusedRef.current = null;
+        if (previous?.isConnected) {
+            previous.focus();
+        }
     }, [isOpen]);
 
     useEffect(() => {
@@ -293,6 +320,8 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
 
                     {/* Sidebar */}
                     <motion.div
+                        role="dialog"
+                        aria-label="Add widgets"
                         initial={{ x: -350, opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
                         exit={{ x: -350, opacity: 0 }}
@@ -321,6 +350,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                             <div className="relative">
                                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
                                 <input
+                                    ref={searchInputRef}
                                     type="text"
                                     autoFocus
                                     value={searchQuery}
@@ -551,6 +581,27 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                     </div>
                                 );
                             })}
+
+                            {/* No-results recovery (#109) */}
+                            {filteredCategories.length === 0 && (
+                                <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+                                    <Search size={20} className="text-[var(--text-muted)]" />
+                                    <p className="text-xs text-[var(--text-secondary)]">
+                                        No widgets match “{searchQuery.trim()}”.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSearchQuery('');
+                                            setActiveCategory(null);
+                                            searchInputRef.current?.focus();
+                                        }}
+                                        className="rounded-lg border border-[var(--border-default)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                                    >
+                                        Clear search
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
                         {/* Footer */}

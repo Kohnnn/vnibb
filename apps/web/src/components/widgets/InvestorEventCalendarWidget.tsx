@@ -52,10 +52,24 @@ export function InvestorEventCalendarWidget({ id, config, widgetGroup, onDataCha
     const failedSymbols = symbols.filter((_, index) => eventQueries[index]?.isError);
     const loading = eventQueries.some((query) => query.isLoading);
     const error = eventQueries.find((query) => query.error)?.error;
+    // Event dates here are action schedules, not source observations, so
+    // freshness stays unknown and the query receipts are reported separately.
+    const fetchedAt = eventQueries.reduce((latest, query) => Math.max(latest, query.dataUpdatedAt || 0), 0) || null;
 
     useEffect(() => {
-        onDataChange?.({ __widgetRuntime: { data: { eventCount: events.length, symbolCount: symbols.length, unavailableSymbols: failedSymbols } } });
-    }, [events.length, failedSymbols, onDataChange, symbols.length]);
+        onDataChange?.({
+            __widgetRuntime: {
+                provenance: {
+                    sourceLabel: 'Company events',
+                    apiGroup: '/equity',
+                    endpoint: '/equity/:symbol/events',
+                    updatedAt: null,
+                    fetchedAt,
+                },
+                data: { eventCount: events.length, symbolCount: symbols.length, unavailableSymbols: failedSymbols },
+            },
+        });
+    }, [events.length, failedSymbols, fetchedAt, onDataChange, symbols.length]);
 
     if (loading && events.length === 0) return <WidgetLoading message="Loading event coverage..." />;
     if (error && events.length === 0) return <WidgetError error={error as Error} />;

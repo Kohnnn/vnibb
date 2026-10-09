@@ -53,6 +53,7 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
     error,
     refetch,
     isFetching,
+    dataUpdatedAt,
   } = useHistoricalPrices(upperSymbol, {
     startDate: new Date(Date.now() - 260 * 24 * 60 * 60 * 1000)
       .toISOString()
@@ -61,10 +62,19 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
   });
 
   const candles = (data?.data || []) as OHLCData[];
-  const atrSeries = calculateATR(candles, 14);
+  const meta = data?.meta;
+  const quality = meta as (typeof meta & { unresolved_excluded_dates?: string[]; unresolved_session_count?: number });
+  const expectedUnit = meta?.unit_status === 'confirmed_vnd' ? 'VND' : 'index_points';
+  const certifiedUnits = ['confirmed_vnd', 'index_points', 'not_applicable'].includes(meta?.unit_status ?? '')
+    && Boolean(data?.data.length)
+    && data!.data.every((row) => row.price_unit === expectedUnit);
+  const derivedWithheld = Boolean(data) && (!certifiedUnits || Boolean(quality?.unresolved_excluded_dates?.length || quality?.unresolved_session_count));
+  const unavailableReason = !certifiedUnits
+    ? 'ATR regime unavailable: historical price units were not certified.'
+    : 'ATR regime unavailable: source quality is unresolved.';
+  const atrSeries = derivedWithheld ? [] : calculateATR(candles, 14);
   const hasData = atrSeries.length > 20;
   const isFallback = Boolean(error && hasData);
-  const meta = data?.meta;
   const lastDataDate = [meta?.freshness_as_of, meta?.last_data_date, candles[candles.length - 1]?.time]
     .find((value) => value != null && value !== '' && !Number.isNaN(new Date(value).getTime())) ?? null;
   const health = deriveWidgetHealth({ updatedAt: lastDataDate, stale: isFallback });
@@ -78,8 +88,9 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
     if (meta?.adjustment_warning) messages.push(meta.adjustment_warning);
     if (isFallback) messages.push('Latest historical refresh failed; showing previous observations');
     if (hasData && !lastDataDate) messages.push('Historical observation date unavailable');
+    if (derivedWithheld) messages.push(unavailableReason);
     return [...new Set(messages)];
-  }, [meta, isFallback, hasData, lastDataDate]);
+  }, [meta, isFallback, hasData, lastDataDate, derivedWithheld, unavailableReason]);
 
   useEffect(() => {
     onDataChange?.(
@@ -89,6 +100,7 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
         endpoint: `/equity/historical?symbol=${upperSymbol}`,
         sourceLabel: 'ATR regime (derived)',
         lastDataDate,
+        fetchedAt: dataUpdatedAt,
         stale: isStale,
         cached: isFallback,
         warnings,
@@ -97,7 +109,7 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
         extra: hasData ? { bars: atrSeries.length } : undefined,
       }),
     );
-  }, [onDataChange, hasData, isStale, isFallback, lastDataDate, warnings, meta?.adjustment_mode, upperSymbol, atrSeries.length]);
+  }, [onDataChange, hasData, isStale, isFallback, lastDataDate, dataUpdatedAt, warnings, meta?.adjustment_mode, upperSymbol, atrSeries.length]);
 
   const lastAtr = atrSeries[atrSeries.length - 1]?.value ?? 0;
   const lastClose = candles[candles.length - 1]?.close ?? 0;
@@ -137,6 +149,7 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
         </div>
         <WidgetMeta
           updatedAt={lastDataDate}
+          fetchedAt={dataUpdatedAt}
           isFetching={isFetching && hasData}
           isCached={isFallback}
           isStale={isStale}
@@ -146,6 +159,16 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
         />
       </div>
 
+      {isLoading && !hasData ? (
+        <WidgetSkeleton lines={8} />
+      ) : error && !hasData ? (
+        <WidgetError error={error as Error} onRetry={() => refetch()} />
+      ) : derivedWithheld ? (
+        <WidgetEmpty message={unavailableReason} icon={<ShieldAlert size={18} />} />
+      ) : !hasData ? (
+        <WidgetEmpty message="Not enough ATR history" icon={<ShieldAlert size={18} />} />
+      ) : (
+        <>
       <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">ATR</div>
@@ -179,14 +202,7 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
       </div>
 
       <div className="flex-1 overflow-auto space-y-1 pr-1">
-        {isLoading && !hasData ? (
-          <WidgetSkeleton lines={8} />
-        ) : error && !hasData ? (
-          <WidgetError error={error as Error} onRetry={() => refetch()} />
-        ) : !hasData ? (
-          <WidgetEmpty message="Not enough ATR history" icon={<ShieldAlert size={18} />} />
-        ) : (
-          recentAtr.map((point, index) => {
+        {recentAtr.map((point, index) => {
             const prev = recentAtr[index - 1]?.value ?? point.value;
             const isRising = point.value >= prev;
             const widthPct = (point.value / maxRecentAtr) * 100;
@@ -209,8 +225,10 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
               </div>
             );
           })
-        )}
+        }
       </div>
+        </>
+      )}
     </div>
   );
 }

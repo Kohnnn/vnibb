@@ -11,6 +11,7 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { useMarketHeatmap } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { cn } from '@/lib/utils';
+import { toNumber } from './utils';
 
 interface SectorBreakdownWidgetProps {
   id: string;
@@ -42,17 +43,20 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
   const totalCap = sectors.reduce((sum, sector) => sum + (sector.total_market_cap || 0), 0);
 
   const chartData = useMemo(() => {
+    // `avg_change_pct` is absent when the sector has no usable change rows.
+    // Coercing that to 0 printed a fabricated "+0.00%" neutral read (issue #107);
+    // `toNumber` keeps a genuine 0 and leaves a missing change null.
     const baseRows = sectors.map((sector, index) => ({
       name: sector.sector,
       value: sector.total_market_cap || 0,
       share: totalCap ? (sector.total_market_cap / totalCap) * 100 : 0,
-      changePct: sector.avg_change_pct || 0,
+      changePct: toNumber(sector.avg_change_pct),
       stockCount: sector.stock_count || 0,
       color: COLORS[index % COLORS.length],
     }));
 
     const sortedRows = [...baseRows].sort((left, right) => {
-      if (metric === 'change') return right.changePct - left.changePct;
+      if (metric === 'change') return (right.changePct ?? -Infinity) - (left.changePct ?? -Infinity);
       if (metric === 'count') return right.stockCount - left.stockCount;
       return right.share - left.share;
     });
@@ -66,9 +70,11 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
     const otherShare = remaining.reduce((sum, row) => sum + row.share, 0);
     const otherValue = remaining.reduce((sum, row) => sum + row.value, 0);
     const otherCount = remaining.reduce((sum, row) => sum + row.stockCount, 0);
-    const weightedChange = otherValue > 0
-      ? remaining.reduce((sum, row) => sum + row.changePct * row.value, 0) / otherValue
-      : 0;
+    const pricedRemaining = remaining.filter((row) => row.changePct !== null && row.value > 0);
+    const pricedValue = pricedRemaining.reduce((sum, row) => sum + row.value, 0);
+    const weightedChange = pricedValue > 0
+      ? pricedRemaining.reduce((sum, row) => sum + (row.changePct as number) * row.value, 0) / pricedValue
+      : null;
 
     return [
       ...visible,
@@ -97,13 +103,14 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
         apiGroup: '/market',
         endpoint: '/market/heatmap?group_by=sector&exchange=HOSE&limit=300',
         sourceLabel: 'Sector breakdown',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate: data?.price_updated_at ?? null,
+        fetchedAt: dataUpdatedAt,
         stale: isFallback,
         derived: true,
         extra: hasData ? { metric, sectorCount: sectors.length } : undefined,
       }),
     );
-  }, [hasData, dataUpdatedAt, isFallback, metric, sectors.length, onDataChange]);
+  }, [hasData, data?.price_updated_at, dataUpdatedAt, isFallback, metric, sectors.length, onDataChange]);
 
   return (
     <WidgetContainer title="Market Sector Breakdown" onRefresh={() => refetch()} onClose={onRemove} isLoading={isLoading && !hasData}>
@@ -146,7 +153,8 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
                 ))}
               </div>
               <WidgetMeta
-                updatedAt={dataUpdatedAt}
+                updatedAt={data?.price_updated_at ?? null}
+                fetchedAt={dataUpdatedAt}
                 isFetching={isFetching && hasData}
                 isCached={isFallback}
                 note={metricNote}
@@ -179,7 +187,7 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
                       itemStyle={{ color: 'var(--text-primary)', fontSize: '10px' }}
                       formatter={(value: any, _name, props: any) => {
                         const payload = props?.payload;
-                        if (metric === 'change') return [`${Number(value).toFixed(2)}%`, 'Avg Change'];
+                        if (metric === 'change') return [payload?.changePct === null || payload?.changePct === undefined ? '—' : `${Number(payload.changePct).toFixed(2)}%`, 'Avg Change'];
                         if (metric === 'count') return [String(payload?.stockCount || 0), 'Stocks'];
                         return [`${payload?.share ? payload.share.toFixed(1) : '0.0'}%`, 'Share'];
                       }}
@@ -205,9 +213,11 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
                           <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
                           <span className="truncate text-sm font-medium text-[var(--text-primary)]">{entry.name}</span>
                         </div>
-                        <span className={cn('text-sm font-semibold', metric === 'change' ? (entry.changePct >= 0 ? 'text-emerald-300' : 'text-rose-300') : 'text-blue-300')}>
+                        <span className={cn('text-sm font-semibold', metric === 'change' ? (entry.changePct === null ? 'text-[var(--text-muted)]' : entry.changePct >= 0 ? 'text-emerald-300' : 'text-rose-300') : 'text-blue-300')}>
                           {metric === 'change'
-                            ? `${entry.changePct >= 0 ? '+' : ''}${entry.changePct.toFixed(2)}%`
+                            ? entry.changePct === null
+                              ? '—'
+                              : `${entry.changePct >= 0 ? '+' : ''}${entry.changePct.toFixed(2)}%`
                             : metric === 'count'
                               ? entry.stockCount.toLocaleString()
                               : `${entry.share.toFixed(1)}%`}
@@ -215,7 +225,7 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
                       </div>
                       <div className="mt-1 flex items-center justify-between text-[11px] text-[var(--text-muted)]">
                         <span>{entry.stockCount} stocks</span>
-                        <span>{entry.changePct >= 0 ? '+' : ''}{entry.changePct.toFixed(2)}%</span>
+                        <span>{entry.changePct === null ? 'Change —' : `${entry.changePct >= 0 ? '+' : ''}${entry.changePct.toFixed(2)}%`}</span>
                       </div>
                     </div>
                   ))}

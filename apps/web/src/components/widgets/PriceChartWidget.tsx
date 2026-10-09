@@ -215,7 +215,8 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
             <WidgetMeta
               sourceLabel={exchange || 'VNIBB'}
               note={`${selectedTimeframe} lightweight chart`}
-              updatedAt={metricsUpdatedAt}
+              updatedAt={null}
+              fetchedAt={metricsUpdatedAt}
               isFetching={metricsFetching && hasMetrics}
               align="right"
             />
@@ -242,7 +243,8 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
               Fundamentals Snapshot
             </span>
             <WidgetMeta
-              updatedAt={metricsUpdatedAt}
+              updatedAt={null}
+              fetchedAt={metricsUpdatedAt}
               isFetching={metricsFetching && hasMetrics}
               note="Ratios prioritized"
               align="right"

@@ -154,6 +154,8 @@ bash scripts/oracle/build_release_image.sh registry.example.com/vnibb/api:<relea
 
 After publishing, resolve the registry's manifest digest and set `VNIBB_API_IMAGE_REPOSITORY=registry.example.com/vnibb/api` plus `VNIBB_API_IMAGE_DIGEST=sha256:<published-digest>` in `deployment/env.oracle`. Compose joins these fields as `repository@digest`, so a mutable tag cannot enter the release path. The image stores its build revision in `/app/.release-revision`; stale `RELEASE_REVISION` runtime keys cannot override health, logs, or Sentry. The identical image value is used by API, MCP, scheduler, and the one-shot migration service.
 
+Release smoke scripts use normal HTTPS certificate validation. A certificate or trust-chain failure blocks verification; repair the certificate/trust configuration instead of adding `--insecure`. `CURL_CA_BUNDLE` can select an explicitly trusted CA bundle when the deployment uses a private CA.
+
 ### Release the stack
 
 ```bash

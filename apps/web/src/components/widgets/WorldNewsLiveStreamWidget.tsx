@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Clock, ExternalLink, Globe2, Newspaper, Radio, Rss, Zap } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -10,6 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatTimestamp } from '@/lib/format';
 import { getAdaptiveRefetchInterval } from '@/lib/pollingPolicy';
+import { newsObservationProvenance } from '@/lib/newsTime';
 import {
   getWorldNews,
   type WorldNewsArticle,
@@ -139,6 +140,21 @@ function WorldNewsLiveStreamWidgetComponent({
     tags: article.tags.join(', '),
   }));
   const latestArticle = articles[0];
+  const fetchedAt = data?.fetched_at ?? dataUpdatedAt;
+  // `lastDataDate` is the newest genuine article publication date; the envelope
+  // `fetched_at` is retrieval evidence and stays separate from source freshness.
+  const observation = useMemo(
+    () => newsObservationProvenance(articles, { receiptAt: fetchedAt }),
+    [articles, fetchedAt],
+  );
+  // Envelope-level feed failures degrade coverage even when rows look current.
+  const coverage = data?.failed_feed_count ? ('partial' as const) : observation.coverage;
+  const warnings = [
+    observation.warning,
+    data?.failed_feed_count
+      ? `${data.failed_feed_count} of ${data.feed_count} RSS feeds failed on the last fetch`
+      : undefined,
+  ].filter((value): value is string => Boolean(value));
 
   useEffect(() => {
     onDataChange?.(
@@ -147,12 +163,25 @@ function WorldNewsLiveStreamWidgetComponent({
         apiGroup: '/news',
         endpoint: '/news/world',
         sourceLabel: 'World news live stream',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate: observation.lastDataDate,
+        fetchedAt,
+        coverage,
         stale: isFallback,
+        cached: isFallback,
+        warnings: warnings.length ? warnings : undefined,
         extra: { count: articles.length },
       }),
     );
-  }, [onDataChange, hasData, dataUpdatedAt, isFallback, articles.length]);
+  }, [
+    onDataChange,
+    hasData,
+    fetchedAt,
+    isFallback,
+    articles.length,
+    observation.lastDataDate,
+    coverage,
+    warnings,
+  ]);
 
   return (
     <WidgetContainer
@@ -174,7 +203,8 @@ function WorldNewsLiveStreamWidgetComponent({
               Polling Stream
             </div>
             <WidgetMeta
-              updatedAt={dataUpdatedAt}
+              updatedAt={observation.lastDataDate}
+              fetchedAt={fetchedAt}
               isFetching={isFetching && hasData}
               isCached={isFallback}
               note={sourceNote}

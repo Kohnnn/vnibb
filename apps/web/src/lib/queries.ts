@@ -6,6 +6,7 @@
 
 import { logClientError } from './clientLogger';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from './pollingPolicy';
+import { shouldRetryQuery } from './queryRetry';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from './api';
 import { queryKeys } from './queries/legacy';
@@ -1469,7 +1470,11 @@ export function useMomentumProfile(
         queryFn: () => api.getMomentumProfile(symbol, { period, source, adjustmentMode }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
-        retry: 2,
+        // #109: a fixed `retry: 2` overrode the global policy, so deterministic
+        // failures (400/404/429) were retried twice with exponential backoff —
+        // "Try Again" looked dead and success looked delayed. Use the shared
+        // policy: retry only transient errors, stop on deterministic ones.
+        retry: shouldRetryQuery,
     });
 }
 

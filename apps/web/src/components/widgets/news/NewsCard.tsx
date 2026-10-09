@@ -12,7 +12,7 @@ interface NewsCardProps {
     title: string;
     summary?: string;
     source: string;
-    published_at: string;
+    published_at?: string | null;
     published_date?: string | null;
     publishedDate?: string | null;
     created_at?: string | null;
@@ -22,6 +22,7 @@ interface NewsCardProps {
     sentiment: 'positive' | 'negative' | 'neutral' | 'bullish' | 'bearish';
     matched_symbols?: string[];
     relevance_score?: number | null;
+    match_reason?: string | null;
     is_market_wide_fallback?: boolean;
   };
 }
@@ -58,9 +59,9 @@ function NewsCardComponent({ news }: NewsCardProps) {
             {news.title}
           </h4>
 
-          {news.matched_symbols && news.matched_symbols.length > 0 && (
+          {((news.matched_symbols?.length ?? 0) > 0 || (news.relevance_score ?? 0) > 0) && (
             <div className="mb-1.5 flex flex-wrap gap-1">
-              {news.matched_symbols.slice(0, 3).map((symbol) => (
+              {news.matched_symbols?.slice(0, 3).map((symbol) => (
                 <span
                   key={`${news.id}-${symbol}`}
                   className="rounded border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-blue-300"
@@ -69,8 +70,11 @@ function NewsCardComponent({ news }: NewsCardProps) {
                 </span>
               ))}
               {typeof news.relevance_score === 'number' && !news.is_market_wide_fallback && (
-                <span className="rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-300">
-                  {(news.relevance_score * 100).toFixed(0)}% match
+                <span
+                  className="rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-300"
+                  title="Rule-based ranking score, not a probability of company relevance. Peer and sector matches are indirect."
+                >
+                  {news.match_reason?.replaceAll('_', ' ') || 'Association unverified'} · rank {Math.round(news.relevance_score * 100)}/100
                 </span>
               )}
             </div>
