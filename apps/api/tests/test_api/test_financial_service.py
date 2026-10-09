@@ -364,6 +364,46 @@ def test_financial_merge_keeps_unknown_provider_basis_unavailable():
     assert result.raw_data == primary.raw_data
 
 
+@pytest.mark.parametrize("reason", ["missing_quarterly_source_data", "ttm_calculation_failed"])
+def test_financial_merge_uses_certified_ttm_when_provider_has_no_source(reason):
+    primary = FinancialStatementData(symbol="VNM", period="TTM", statement_type="income",
+        unavailable_reason=reason)
+    quarters = [FinancialStatementData(symbol="VNM", period=f"Q{quarter}-2025", statement_type="income",
+        source="VCI", value_unit="VND", consolidation_basis="Consolidated", flow_basis="single_quarter",
+        revenue=10) for quarter in (4, 3, 2, 1)]
+    fallback = _build_ttm_financial_statement_rows(quarters, statement_type="income")[0]
+
+    assert _merge_financial_statement_rows([primary], [])[0].unavailable_reason == reason
+    result = _merge_financial_statement_rows([primary], [fallback])
+    assert len(result) == 1
+    assert result[0] is fallback
+    assert result[0].revenue == 40
+    assert result[0].unavailable_reason is None
+
+
+@pytest.mark.parametrize("primary_update,fallback_update", [
+    ({"source": "VCI"}, {}),
+    ({"raw_data": {"source_rows": [{"revenue": 10}]}}, {}),
+    ({"unavailable_reason": "unknown_source_unit"}, {}),
+    ({}, {"symbol": "MSR"}),
+    ({}, {"statement_type": "cashflow"}),
+    ({}, {"value_unit": None}),
+    ({}, {"consolidation_basis": None}),
+])
+def test_financial_merge_keeps_ttm_unavailable_for_rejected_or_unsafe_fallback(primary_update, fallback_update):
+    primary = FinancialStatementData(symbol="VNM", period="TTM", statement_type="income",
+        unavailable_reason="missing_quarterly_source_data").model_copy(update=primary_update)
+    fallback = FinancialStatementData(symbol="VNM", period="TTM", statement_type="income",
+        source="VCI", value_unit="VND", consolidation_basis="Consolidated", flow_basis="trailing_twelve_months",
+        aggregation_basis="four_quarter_flow_sum", source_periods=[f"Q{quarter}-2025" for quarter in (4, 3, 2, 1)],
+        revenue=40).model_copy(update=fallback_update)
+
+    result = _merge_financial_statement_rows([primary], [fallback])
+    assert result == [primary]
+    assert result[0].revenue is None
+    assert result[0].unavailable_reason == primary.unavailable_reason
+
+
 @pytest.mark.asyncio
 async def test_get_financials_with_ttm_keeps_requested_identity_when_provider_empty(monkeypatch):
     async def fake_fetch(params):

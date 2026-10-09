@@ -40,6 +40,7 @@ live in \`docs/\`.
 
 ### Fixed
 - React Query resolves its consumer's React types explicitly, avoiding CI type failures caused by unrelated React 18 workspace types being hoisted into the React 19 frontend.
+- Certified stored TTM statements remain available when the live provider has no usable source or calculation fails; rejected or conflicting provider statements still cannot regain withheld values through fallback merging.
 - Empty or unusable TTM source results retain an explicit unavailable reason and null metrics; calculation failures no longer disappear into a generic empty response. Deployment smoke checks validate HTTPS certificates instead of bypassing trust.
 - Deferred published tabs are discarded when Back/Forward leaves their workspace. Unsupported statement rows show their source reason instead of blank TTM sections, and date-only observations use a day-granular freshness window.
 - Wide-row financial aliases pass through the same unit normalization and lineage checks as canonical metrics; a missing lineage entry cannot certify a monetary field as VND.

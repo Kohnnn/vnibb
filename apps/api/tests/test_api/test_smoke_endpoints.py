@@ -3168,7 +3168,8 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
 
 
 @pytest.mark.asyncio
-async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_db, monkeypatch):
+@pytest.mark.parametrize("reason", [None, "missing_quarterly_source_data", "ttm_calculation_failed"])
+async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_db, monkeypatch, reason):
     test_db.add_all(
         [
             IncomeStatement(
@@ -3228,7 +3229,8 @@ async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_d
     await test_db.commit()
 
     async def fake_get_financials_with_ttm(*args, **kwargs):
-        return []
+        return [FinancialStatementData(symbol="VNM", period="TTM", statement_type="income",
+            unavailable_reason=reason)] if reason else []
 
     monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", fake_get_financials_with_ttm)
 

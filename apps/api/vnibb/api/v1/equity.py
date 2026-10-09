@@ -595,6 +595,25 @@ def _merge_financial_statement_rows(
         if fallback is None:
             merged.append(item)
             continue
+        if (item.symbol.upper(), item.statement_type) != (fallback.symbol.upper(), fallback.statement_type):
+            merged.append(item)
+            continue
+        if (
+            identity[0] == "TTM"
+            and item.unavailable_reason in {"missing_quarterly_source_data", "ttm_calculation_failed"}
+            and not (item.source or item.value_unit or item.source_periods or item.raw_data or item.unit_metadata)
+            and not fallback.unavailable_reason
+            and fallback.source
+            and fallback.value_unit == "VND"
+            and fallback.consolidation_basis is not None
+            and fallback.source_periods
+            and (
+                (fallback.aggregation_basis, fallback.flow_basis) == ("four_quarter_flow_sum", "trailing_twelve_months")
+                or (item.statement_type == "balance" and fallback.aggregation_basis == "latest_quarter_snapshot")
+            )
+        ):
+            merged.append(fallback)
+            continue
         if item.unavailable_reason or fallback.unavailable_reason:
             merged.append(item)
             continue
