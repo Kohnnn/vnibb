@@ -26,7 +26,7 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
   const queryClient = useQueryClient();
   const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'alert_notification_panel' });
 
-  const { data: alerts = [], isLoading } = useQuery({
+  const { data: alerts = [], isLoading, dataUpdatedAt } = useQuery({
     queryKey: ['insider-alerts', userId, showUnreadOnly],
     queryFn: () => getInsiderAlerts({ userId, unreadOnly: showUnreadOnly, limit: 50 }),
     refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.alerts),
@@ -72,13 +72,15 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
       apiGroup: '/alerts',
       endpoint: '/api/v1/alerts/insider',
       sourceLabel: 'Browser activity + insider API',
+      lastDataDate: null,
+      fetchedAt: dataUpdatedAt,
       extra: {
         alertCount: activity.length,
         unreadCount,
         serverBackedCount: activity.filter((item) => item.serverBacked).length,
       },
     }));
-  }, [activity, onDataChange, unreadCount]);
+  }, [activity, dataUpdatedAt, onDataChange, unreadCount]);
 
   // Request browser notification permission
   useEffect(() => {

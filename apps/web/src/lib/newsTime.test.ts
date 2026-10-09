@@ -1,4 +1,9 @@
-import { normalizeNewsItemTimestamp, normalizeNewsTimestamp } from './newsTime'
+import {
+  newsItemObservation,
+  newsObservationProvenance,
+  normalizeNewsItemTimestamp,
+  normalizeNewsTimestamp,
+} from './newsTime'
 
 describe('newsTime', () => {
   it('normalizes unix seconds and milliseconds to ISO strings', () => {
@@ -18,5 +23,48 @@ describe('newsTime', () => {
 
   it('returns null for missing timestamps', () => {
     expect(normalizeNewsItemTimestamp({ title: 'No date' })).toBeNull()
+  })
+
+  it('ignores crawl/ingest aliases when reading a source observation', () => {
+    expect(newsItemObservation({ created_at: '2026-05-01T09:00:00Z', timestamp: 1_700_000_000 })).toBeNull()
+    expect(newsItemObservation({ published_date: '2026-05-01T09:00:00Z' })).toBe('2026-05-01T09:00:00.000Z')
+  })
+
+  describe('newsObservationProvenance', () => {
+    it('keeps an old article old when it is re-fetched now', () => {
+      const receiptAt = '2026-10-08T12:00:00Z'
+      const result = newsObservationProvenance(
+        [{ published_at: '2026-05-01T09:00:00Z' }],
+        { receiptAt },
+      )
+      expect(result.lastDataDate).toBe('2026-05-01T09:00:00.000Z')
+      expect(result.coverage).toBeUndefined()
+      expect(result.warning).toBeUndefined()
+    })
+
+    it('reports unknown, not fresh, when no displayed row carries a date', () => {
+      const result = newsObservationProvenance([{ title: 'No date' }, { created_at: '2026-10-08T11:59:00Z' }])
+      expect(result.lastDataDate).toBeNull()
+      expect(result.coverage).toBeUndefined()
+      expect(result.warning).toContain('2 of 2')
+    })
+
+    it('marks mixed dated/undated rows partial and names the undated count', () => {
+      const result = newsObservationProvenance([
+        { published_at: '2026-05-01T09:00:00Z' },
+        { title: 'No date' },
+      ])
+      expect(result.lastDataDate).toBe('2026-05-01T09:00:00.000Z')
+      expect(result.coverage).toBe('partial')
+      expect(result.warning).toContain('1 of 2')
+    })
+
+    it('rejects a timestamp dated after retrieval as not a source observation', () => {
+      const result = newsObservationProvenance(
+        [{ published_at: '2026-10-08T12:00:05Z' }],
+        { receiptAt: '2026-10-08T12:00:00Z' },
+      )
+      expect(result.lastDataDate).toBeNull()
+    })
   })
 })

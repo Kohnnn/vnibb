@@ -23,11 +23,14 @@ import {
 import {
     convertFinancialValueForUnit,
     formatAxisValue,
+    formatConvertedValue,
     formatNumber,
+    formatRawValuePlain,
     formatUnitValuePlain,
     getUnitCaption,
     getUnitLegend,
     resolveUnitScale,
+    toFiniteNumber,
 } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
@@ -35,7 +38,7 @@ import { usePeriodState } from '@/hooks/usePeriodState';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
-import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { buildIncomeSankeyModel } from '@/lib/financialVisualizations';
 import { IncomeSankeyChart } from '@/components/widgets/charts/IncomeSankeyChart';
@@ -83,7 +86,15 @@ const CHARTED_SERIES_BY_METRIC: Record<string, string> = {
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
 function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemove, onDataChange }: IncomeStatementWidgetProps) {
-    const periodSyncGroup = typeof config?.periodSyncGroup === 'string' ? config.periodSyncGroup : undefined;
+    // Default to the shared group the "Financial Period View" banner writes; a
+    // widget-level `periodSyncGroup` overrides it and an explicit `null` opts out
+    // so the period stays widget-local (issue #101).
+    const configuredSyncGroup = config?.periodSyncGroup;
+    const periodSyncGroup = configuredSyncGroup === null
+        ? undefined
+        : typeof configuredSyncGroup === 'string' && configuredSyncGroup.trim()
+            ? configuredSyncGroup
+            : FUNDAMENTAL_PERIOD_SYNC_GROUP;
     const defaultPeriod =
         config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
             ? (config.defaultPeriod as 'Q' | 'TTM')
@@ -118,36 +129,83 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
     } = useIncomeStatement(symbol, { period: apiPeriod, limit: visiblePeriodLimit });
 
     const items = data?.data || [];
-    const orderedItems = useMemo(
-        () => [...items].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
+    // Provider payloads can repeat a fiscal period or emit rows with no fiscal
+    // identity at all. `canonicalPeriodRows` never picks between conflicting rows
+    // (nothing in the payload proves which basis is authoritative) - it excludes
+    // them and reports the reason, so a duplicate is disclosed rather than shown as
+    // two columns labelled "2020" (issue #103).
+    const { rows: canonicalItems, issues: periodIssues, invalidPeriodCount } = useMemo(
+        () => canonicalPeriodRows(items),
         [items]
     );
-    const displayItems = useMemo(
+    const orderedItems = useMemo(
+        () => [...canonicalItems].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
+        [canonicalItems]
+    );
+    // The TTM branch returns a single TTM row today (financial_service
+    // .build_ttm_statement_rows), and this filter guarantees the TTM view can
+    // never render a quarter row under a TTM header if a payload carries one
+    // (issue #101).
+    const periodItems = useMemo(
         () => periodMode === 'quarter'
             ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
-            : orderedItems,
+            : periodMode === 'ttm'
+                ? orderedItems.filter((item) => String(item.period ?? '').toUpperCase().includes('TTM'))
+                : orderedItems,
         [orderedItems, periodMode]
+    );
+    // A row the API returned without certification carries every numeric field as
+    // null plus `unavailable_reason`. Rendering it as a column of dashes reads as a
+    // reported zero, so reason-bearing rows are held out of the table/chart and
+    // disclosed in the note instead; a row that merely has some null fields is a
+    // valid partial row and stays (issue #103).
+    const unavailableNote = useMemo(() => describeUnavailableStatementRows(periodItems), [periodItems]);
+    const displayItems = useMemo(
+        () => periodItems.filter((item) => !isUnavailableStatementRow(item)),
+        [periodItems]
+    );
+    const duplicatePeriodNote = useMemo(() => {
+        const notes: string[] = [];
+        const ambiguous = periodIssues.filter((issue) => issue.reason === 'ambiguous-basis');
+        if (ambiguous.length > 0) {
+            notes.push(
+                `Unavailable: ${ambiguous.map((issue) => issue.period).join(', ')} returned conflicting rows with no basis field, so no value is shown.`
+            );
+        }
+        if (invalidPeriodCount > 0) {
+            notes.push(`${invalidPeriodCount} provider row${invalidPeriodCount === 1 ? '' : 's'} without a fiscal period excluded.`);
+        }
+        return notes.length > 0 ? notes.join(' ') : null;
+    }, [periodIssues, invalidPeriodCount]);
+    const statementNote = useMemo(
+        () => [duplicatePeriodNote, unavailableNote].filter(Boolean).join(' ') || null,
+        [duplicatePeriodNote, unavailableNote]
     );
     const hasData = displayItems.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
+    // One FX boundary: convert once here; axis/tooltip format without converting
+    // again (issue #100). A missing raw value stays `null` so the chart draws a gap
+    // instead of a fabricated zero (issue #103).
     const chartData = useMemo(() => {
         if (!displayItems.length) return [];
-        return displayItems.map((d, index) => ({
-            period: formatFinancialPeriodLabel(d.period, {
-                mode: periodMode,
-                index,
-                total: displayItems.length,
-            }),
-            revenue: convertFinancialValueForUnit(d.revenue || 0, unitConfig, d.period) || 0,
-            grossProfit: convertFinancialValueForUnit(d.gross_profit || 0, unitConfig, d.period) || 0,
-            operatingIncome: convertFinancialValueForUnit(d.operating_income || 0, unitConfig, d.period) || 0,
-            netIncome: convertFinancialValueForUnit(d.net_income || 0, unitConfig, d.period) || 0,
-            grossMargin: d.revenue && d.gross_profit ? (d.gross_profit / d.revenue) * 100 : 0,
-            operatingMargin: d.revenue && d.operating_income ? (d.operating_income / d.revenue) * 100 : 0,
-            netMargin: d.revenue && d.net_income ? (d.net_income / d.revenue) * 100 : 0,
-        }));
+        return displayItems.map((d) => {
+            const revenue = convertFinancialValueForUnit(d.revenue ?? null, unitConfig, d.period);
+            const grossProfit = convertFinancialValueForUnit(d.gross_profit ?? null, unitConfig, d.period);
+            const operatingIncome = convertFinancialValueForUnit(d.operating_income ?? null, unitConfig, d.period);
+            const netIncome = convertFinancialValueForUnit(d.net_income ?? null, unitConfig, d.period);
+            return {
+                period: formatFinancialPeriodLabel(d.period, { mode: periodMode }),
+                revenue,
+                grossProfit,
+                operatingIncome,
+                netIncome,
+                grossMargin: revenue && grossProfit !== null ? (grossProfit / revenue) * 100 : null,
+                operatingMargin: revenue && operatingIncome !== null ? (operatingIncome / revenue) * 100 : null,
+                netMargin: revenue && netIncome !== null ? (netIncome / revenue) * 100 : null,
+            };
+        });
     }, [displayItems, periodMode, unitConfig]);
 
     const tableScale = useMemo(() => {
@@ -171,19 +229,15 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(
-        () => `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS • First available period is the base period`,
-        [unitLegend, symbol]
+        () => `Note: ${unitLegend}; per-share values (EPS) are ${unitConfig.display === 'USD' ? 'USD' : 'VND'} per share • Reporting Standard: VAS • First available period is the base period`,
+        [unitLegend, unitConfig.display]
     );
 
     const tableColumns = useMemo(
         () =>
             displayItems.slice(-visiblePeriodLimit).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
-                label: formatFinancialPeriodLabel(entry.period, {
-                    mode: periodMode,
-                    index,
-                    total: Math.min(displayItems.length, visiblePeriodLimit),
-                }),
+                label: formatFinancialPeriodLabel(entry.period, { mode: periodMode }),
                 align: 'right' as const,
             })),
         [displayItems, periodMode, visiblePeriodLimit]
@@ -228,7 +282,8 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 empty: !hasData,
                 endpoint: `/equity/${symbol}/income-statement?period=${apiPeriod}`,
                 sourceLabel: 'Income statement',
-                lastDataDate: dataUpdatedAt,
+                lastDataDate: null,
+                fetchedAt: dataUpdatedAt,
                 stale: isFallback,
                 extra: hasData
                     ? {
@@ -373,7 +428,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             storageKey={`income:${id}:${symbol}:${period}`}
             footerNote={unitNote}
             valueFormatter={(value, row) => {
-                if (row.id === 'eps') {
+                if (row.id === 'eps' || row.id === 'eps_diluted') {
                     return formatNumber(value as number | null | undefined, { decimals: 2 });
                 }
                 return formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig);
@@ -442,7 +497,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                         sankeyModel ? (
                             <IncomeSankeyChart
                                 model={sankeyModel}
-                                formatValue={(value) => formatUnitValuePlain(value, tableScale, unitConfig)}
+                                formatValue={(value) => formatRawValuePlain(value, tableScale, unitConfig, sankeyModel.period)}
                             />
                         ) : (
                             <div className="flex h-full items-center justify-center text-[var(--text-muted)]">Flow data unavailable</div>
@@ -455,7 +510,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                                     <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
                                     <YAxis
-                                        tickFormatter={(value) => formatAxisValue(value, unitConfig)}
+                                        tickFormatter={(value) => formatAxisValue(value, unitConfig, { converted:true })}
                                         tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
                                         axisLine={false}
                                         tickLine={false}
@@ -469,6 +524,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                             fontSize: '11px',
                                         }}
                                         itemStyle={{ padding: '0px' }}
+                                        formatter={(value: unknown) => formatConvertedValue(toFiniteNumber(value), unitConfig)}
                                     />
                                     {chartedSeries.some((entry) => entry.key === 'revenue') ? (
                                         <Bar dataKey="revenue" name="Revenue" fill="#3b82f6" radius={[2, 2, 0, 0]} />
@@ -580,10 +636,11 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                         {showPeriodToggle ? <PeriodToggle value={period} onChange={setPeriod} compact options={[...STATEMENT_PERIOD_OPTIONS]} /> : null}
                     </div>
                     <WidgetMeta
-                        updatedAt={dataUpdatedAt}
+                        updatedAt={null}
+                        fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right'}
+                        note={statementNote ?? (period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right')}
                         sourceLabel="Income statement"
                         align="right"
                     />
@@ -604,7 +661,10 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !hasData ? (
                         <WidgetEmpty
-                            message={`No income statement data for ${symbol} (${period === 'FY' ? 'Annual' : period}).`}
+                            message={unavailableNote
+                                ? `Income statement unavailable for ${symbol} (${period === 'FY' ? 'Annual' : period}).`
+                                : `No income statement data for ${symbol} (${period === 'FY' ? 'Annual' : period}).`}
+                            detail={unavailableNote ?? undefined}
                             icon={<TrendingUp size={18} />}
                             action={{ label: 'Retry', onClick: () => refetch() }}
                         />

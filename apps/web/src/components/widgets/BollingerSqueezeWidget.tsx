@@ -52,6 +52,14 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
       }
     | undefined
 
+  const quality = data?.meta
+  const unitStatus = quality?.unit_status ?? ''
+  const derivedWithheld = Boolean(data?.data) && (!['confirmed_vnd', 'index_points', 'not_applicable'].includes(unitStatus)
+    || Boolean(quality?.unresolved_excluded_dates?.length)
+    || Boolean(data?.error))
+  const unavailableReason = unitStatus === 'mixed' || unitStatus === 'unconfirmed'
+    ? 'Bollinger squeeze unavailable: historical price units were not certified.'
+    : 'Bollinger squeeze unavailable: source quality is unresolved.'
   const bbPct = Number(metric?.current_bb_pct ?? 0)
   const bbWidth = Number(metric?.current_bb_width_pct ?? 0)
   const threshold = Number(metric?.squeeze_threshold_pct ?? 0)
@@ -62,7 +70,7 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
       bbWidth: Number(row.bb_width_pct ?? 0),
       close: Number(row.close ?? 0),
     }))
-  const hasData = bbWidth > 0 || widthSeries.length > 0
+  const hasData = !derivedWithheld && (bbWidth > 0 || widthSeries.length > 0)
   const bbPctProgress = Math.max(0, Math.min(100, bbPct * 100))
   const quantWarning = extractQuantWarning(data, 'bollinger')
 
@@ -73,12 +81,13 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
         apiGroup: '/quant',
         endpoint: `/quant/${upperSymbol}?metrics=bollinger&period=${period}`,
         sourceLabel: 'Bollinger squeeze',
-        lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt,
+        lastDataDate: data?.data?.last_data_date ?? null,
+        fetchedAt: dataUpdatedAt,
         adjustmentMode: 'adjusted',
-        extra: metric ? { squeezeActive: Boolean(metric.squeeze_active), bbWidth } : undefined,
+        extra: hasData && metric ? { squeezeActive: Boolean(metric.squeeze_active), bbWidth } : undefined,
       }),
     )
-  }, [onDataChange, hasData, upperSymbol, period, data?.data?.last_data_date, data?.data?.computed_at, dataUpdatedAt, metric, bbWidth])
+  }, [onDataChange, hasData, derivedWithheld, upperSymbol, period, data?.data?.last_data_date, dataUpdatedAt, metric, bbWidth])
 
   // E: client-side threshold sweep over the returned width series. Shows how
   // the squeeze definition shifts across percentile choices — the backend's
@@ -126,7 +135,7 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} BB(20,2)`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} BB(20,2)`} align="right" />
         </div>
       </div>
 
@@ -134,6 +143,8 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
         <WidgetSkeleton lines={8} />
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
+      ) : derivedWithheld ? (
+        <WidgetEmpty message={unavailableReason} icon={<Minimize2 size={18} />} />
       ) : !hasData ? (
         <WidgetEmpty message="No Bollinger data" icon={<Minimize2 size={18} />} />
       ) : (

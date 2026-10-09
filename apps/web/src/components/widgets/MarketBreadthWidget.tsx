@@ -31,7 +31,6 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
   const isFetching = breadthQuery.isFetching;
   const error = breadthQuery.error;
   const unavailable = breadthQuery.data?.error;
-  const updatedAt = breadthQuery.data?.updated_at || breadthQuery.dataUpdatedAt;
   // QA-v4 Market Breadth: 8s budget was too aggressive for cold cache and
   // caused intermittent "Loading timed out" even when the request was
   // mid-flight. Raise to 15s and gate timedOut on `!isFetching` so an
@@ -52,12 +51,13 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
         apiGroup: '/market',
         endpoint: '/market/breadth',
         sourceLabel: 'A/D + trend breadth',
-        lastDataDate: updatedAt,
+        lastDataDate: null,
+        fetchedAt: breadthQuery.dataUpdatedAt,
         stale: Boolean(error && hasData),
         extra: hasData ? { exchangeCount: rows.length } : undefined,
       }),
     );
-  }, [hasData, updatedAt, error, rows.length, onDataChange]);
+  }, [hasData, breadthQuery.dataUpdatedAt, error, rows.length, onDataChange]);
 
   return (
     <WidgetContainer
@@ -74,7 +74,8 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
-            updatedAt={updatedAt}
+            updatedAt={null}
+            fetchedAt={breadthQuery.dataUpdatedAt}
             isFetching={isFetching && hasData}
             health={healthState}
             note="A/D + trend breadth"

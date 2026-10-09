@@ -58,6 +58,16 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 - `GET /equity/{symbol}/ttm` (V50)
 - `GET /equity/{symbol}/growth` (V50)
 
+Financial statement units and fiscal basis:
+- Installed free KBS financial parsing already converts its `unit=1000` response into VND. VNIBB does not multiply it again. This contract applies to the actual KBS implementation, not unmarked sponsor/VCI records. Original values, labels, report `Head`, source dates, consolidation and normalization remain in the retained lineage.
+- Unknown unit or conflicting observations produce null monetary fields and an explicit `unavailable_reason`; missing data is not zero. Persisted canonical values are read from `raw_data._financial_lineage`, not guessed from raw field magnitudes. Legacy annual values retain an unconfirmed-basis disclosure.
+- Accepted wide-row aliases pass through the same unit normalization as mapped metrics, retain selected-field lineage, and follow deterministic field precedence. Unit rejection cannot fall through to a lower-priority alias.
+- TTM balance sheets use the latest confirmed quarterly snapshot, not a sum. Income/cash flows require four consecutive quarters with matching units and consolidation. Explicit cumulative-YTD observations are differenced against the preceding quarter; unsupported EPS/share aggregation is unavailable. Incomplete or ambiguous TTM returns a null-valued row explaining the cause.
+- `/equity/{symbol}/ratios?period=TTM` returns an empty `data` array and an explicit unsupported-period error. Quarterly EPS/DPS are not summed and inherited ratios are not relabelled as TTM; use FY or Q.
+- `/growth` uses `((current - previous) / abs(previous)) * 100`, with negative-base and sign-transition metadata separate. Zero/missing prior values are unavailable. Annual income statements and growth retain the same persisted earnings source; the historical `qoq` field compares the same quarter of the preceding year, not adjacent quarters. This is not a new convention for unrelated screener/Matrix metrics.
+- Statement payloads retain provider report `Head` and raw values once per statement in source reports, rather than repeating the entire report for every metric/row. Compact serialization does not certify otherwise unknown units or basis.
+- Comparison percentage values are not rescaled by magnitude. The stored `raw_data` keys `ocf_sales` and `fcf_yield` are explicitly fraction-valued in the local ratio writer and convert to percent once at that boundary. Loaded-peer means are not the API's industry-wide `sector_averages` cohort.
+
 Quote responses distinguish unavailable data from zero-valued prices. An invalid symbol or a provider failure without a stored quote returns `data: null` with an error; a stored fallback retains its market timestamp and reports the live-source failure. Consumers must not turn `null` into a fabricated zero trade.
 
 Quote and historical rows expose `price_unit`: `VND`, `index_points`, or
@@ -90,11 +100,19 @@ Direct peer momentum and relative rotation omit unresolved price windows;
 correlation suppresses returns touching excluded sessions without forward-filling
 their closes. Snapshot daily changes use a matching previous settled session or
 the snapshot's supported change pair, never an unrelated earlier close.
+Backtest and sweep expose their settled-session replay basis: source, dates, adjustment, strategy windows, capital, fees, next-session-open execution and daily zero-risk-free Sharpe convention. Comparable parameters can be replayed; the basis metadata does not establish the cause of a historical deployed discrepancy.
+
 
 Screener performance enrichment retains original session positions. A lookback
 crossing an unresolved unit returns an unavailable metric and clears unsupported
 cached values when price history is loaded. Fully populated rows retain the
 existing no-query fast path; this is not a historical cache rewrite.
+
+Read-only contract smoke (no authentication, writes or security exceptions):
+`python scripts/qa_data_contract_smoke.py --base-url http://127.0.0.1:8000 --symbol VNM --start 2026-09-14 --end 2026-09-21`.
+It checks the served revision, session uniqueness, finite observations and per-row
+unit declarations against aggregate certification. It does not independently
+certify market prices, corporate-action adjustments or production deployment parity.
 
 ### Comparison / Screener / Sector
 - `GET /comparison/performance`
@@ -129,6 +147,12 @@ Heatmap responses separate `price_updated_at` from `constituents_as_of`, and ret
 - `GET /news/world`
 - `GET /news/world/map`
 - `GET /news/world/sources`
+
+`/news/flow` uses `published_at` for source publication time, or `null` when
+missing/unparseable. Receipt, crawl and storage-update timestamps never replace
+publication time; refetching an unchanged article does not renew its source age.
+Widget/export provenance separates source `updatedAt` from `fetchedAt`, cached
+delivery, coverage and market closure. Missing source dates remain As-of unknown.
 
 World news monitor notes:
 - `GET /news/world` returns live RSS/Atom headlines from the maintained Vietnam and global source registry, with optional request-scoped custom RSS via `custom_feed_url` and `custom_source_name`.

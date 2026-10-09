@@ -16,20 +16,28 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { Sparkline } from '@/components/ui/Sparkline';
 import { useUnit } from '@/contexts/UnitContext';
 import {
+    canonicalPeriodRows,
+    describeUnavailableStatementRows,
     formatFinancialPeriodLabel,
+    FUNDAMENTAL_PERIOD_OPTIONS,
+    FUNDAMENTAL_PERIOD_SYNC_GROUP,
     isCanonicalQuarterPeriod,
     matchesFinancialQuarterSelection,
     normalizeFinancialPeriod,
     periodSortKey,
 } from '@/lib/financialPeriods';
+import { usePeriodState } from '@/hooks/usePeriodState';
 import {
+    EMPTY_VALUE,
     formatNumber,
     formatPercent,
     formatUnitValuePlain,
     getUnitLegend,
+    percentChangeDetail,
     resolveUnitScale,
     convertFinancialValueForUnit,
 } from '@/lib/units';
+import type { ExtendedPeriod } from '@/components/ui/PeriodToggle';
 
 // Ratio columns follow the adjacent statements' fiscal-period window. Ratio-only
 // years are excluded; statement-only periods remain with empty ratio cells.
@@ -43,11 +51,22 @@ function buildStatementAlignedPeriods(
     return Array.from(new Set(statementPeriods)).sort((a, b) => periodSortKey(a) - periodSortKey(b));
 }
 
+/** Narrow an unvalidated provider cell to a finite number, else null. */
+function toFiniteNumber(value: unknown): number | null {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+}
+
 type FinancialTab = 'balance_sheet' | 'income_statement' | 'cash_flow' | 'ratios';
 
 interface FinancialsWidgetProps {
     id: string;
     symbol: string;
+    config?: Record<string, unknown>;
     hideHeader?: boolean;
     onRemove?: () => void;
     onDataChange?: (data: WidgetDataPayload) => void;
@@ -227,24 +246,6 @@ const STATEMENT_LABELS: Record<'income_statement' | 'balance_sheet' | 'cash_flow
     ],
 };
 
-const RATIO_METRIC_KEYS = [
-    'pe',
-    'pb',
-    'roe',
-    'roa',
-    'eps',
-    'bvps',
-    'debt_equity',
-    'current_ratio',
-    'quick_ratio',
-    'gross_margin',
-    'operating_margin',
-    'net_margin',
-    'asset_turnover',
-    'inventory_turnover',
-    'dividend_yield',
-    'payout_ratio',
-];
 
 const RATIO_METRIC_ALIASES: Record<string, string[]> = {
     pe: ['pe', 'pe_ratio', 'priceToEarning'],
@@ -290,9 +291,32 @@ function readRatioValue(row: Record<string, any>, key: string): any {
     return null;
 }
 
-function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataChange }: FinancialsWidgetProps) {
+function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, onDataChange }: FinancialsWidgetProps) {
     const [activeTab, setActiveTab] = useState<FinancialTab>('income_statement');
-    const [period, setPeriod] = useState('FY');
+    // "Financial Period View" and every widget it advertises share one localStorage
+    // key, so this widget follows the banner instead of holding a private 'FY'
+    // (issue #101). A widget-level `periodSyncGroup` overrides the shared group; an
+    // explicit `null` opts out and keeps the period widget-local.
+    const configuredSyncGroup = config?.periodSyncGroup;
+    const periodSyncGroup = configuredSyncGroup === null
+        ? undefined
+        : typeof configuredSyncGroup === 'string' && configuredSyncGroup.trim()
+            ? configuredSyncGroup
+            : FUNDAMENTAL_PERIOD_SYNC_GROUP;
+    const periodOptions: ExtendedPeriod[] = useMemo(
+        () => (periodSyncGroup ? [...FUNDAMENTAL_PERIOD_OPTIONS] : ['FY', 'Q', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM']),
+        [periodSyncGroup],
+    );
+    const defaultPeriod: ExtendedPeriod =
+        config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
+            ? config.defaultPeriod
+            : 'FY';
+    const { period, setPeriod } = usePeriodState({
+        widgetId: id || 'unified_financials',
+        defaultPeriod,
+        validPeriods: periodOptions,
+        sharedKey: periodSyncGroup ? `${periodSyncGroup}:${symbol.toUpperCase()}` : undefined,
+    });
     const { config: unitConfig } = useUnit();
 
     const tabs = [
@@ -310,11 +334,11 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             : 'quarter';
     const periodLabel = period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period === 'Q' ? 'Quarterly' : `${period} Quarterly`;
 
-    // Backend `limit` caps at 80. We always request the maximum so the
-    // table can render the full multi-year history that the user
-    // expects to see when they scroll. Per-quarter selectors filter
-    // client-side so the same payload covers Q1..Q4/TTM views.
-    const requestLimit = 80;
+    // The provider caps `limit` at 40 (FinancialsQueryParams.limit le=40). A larger
+    // value fails provider validation, the fetch aborts, and the endpoint silently
+    // serves stale DB rows — so the newest quarter vanishes. Request the 40 max;
+    // per-quarter selectors filter client-side over the same payload.
+    const requestLimit = 40;
     const incomeQuery = useIncomeStatement(symbol, { period: requestPeriod, limit: requestLimit, enabled: activeTab === 'income_statement' });
     const balanceQuery = useBalanceSheet(symbol, { period: requestPeriod, limit: requestLimit, enabled: activeTab === 'balance_sheet' });
     // The statement panels beside this widget request 20 fiscal periods. The provider
@@ -327,7 +351,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     });
 
     const cashFlowQuery = useCashFlow(symbol, { period: requestPeriod, limit: requestLimit, enabled: activeTab === 'cash_flow' });
-    const ratiosQuery = useFinancialRatios(symbol, { period: requestPeriod, enabled: activeTab === 'ratios' });
+    const ratiosQuery = useFinancialRatios(symbol, { period: requestPeriod, enabled: activeTab === 'ratios' && period !== 'TTM' });
 
     const activeQuery = useMemo(() => {
         switch (activeTab) {
@@ -339,21 +363,17 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     }, [activeTab, incomeQuery, balanceQuery, cashFlowQuery, ratiosQuery]);
 
     const tableData = useMemo(() => {
-        if (!activeQuery?.data) return null;
+        if (!activeQuery?.data || (activeTab === 'ratios' && period === 'TTM')) return null;
         const rawData = activeQuery.data.data || [];
 
-        const selectedMetricKeys = activeTab === 'ratios'
-            ? RATIO_METRIC_KEYS
-            : STATEMENT_METRIC_KEYS[activeTab as 'income_statement' | 'balance_sheet' | 'cash_flow'];
 
-        const normalizedRows = rawData
-            .map((row: any) => ({
-                ...row,
-                __period: normalizeFinancialPeriod(
-                    row?.period ?? row?.fiscal_year ?? row?.fiscalYear ?? row?.year ?? row?.yearReport
-                ),
-            }))
-            .filter((row: any) => Boolean(row.__period));
+        const periodResolution = canonicalPeriodRows(rawData.map((row) => {
+            // Typed API rows are objects; legacy fiscal keys are not declared on their interfaces.
+            const record = row as unknown as Record<string, unknown>;
+            const rawPeriod = record.period ?? record.fiscal_year ?? record.fiscalYear ?? record.year ?? record.yearReport;
+            return { ...record, period: normalizeFinancialPeriod(typeof rawPeriod === 'string' || typeof rawPeriod === 'number' ? String(rawPeriod) : null) };
+        }));
+        const normalizedRows = periodResolution.rows.map((row) => ({ ...row, __period: row.period }));
 
         const sortedData = [...normalizedRows].sort((a: any, b: any) => {
             return periodSortKey(a?.__period) - periodSortKey(b?.__period);
@@ -371,29 +391,11 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
 
         let displayRows = normalizedRows;
         if (periodMode === 'quarter') {
-            const quarterRows = quarterOnlyRows;
-
-            if (period === 'TTM') {
-                const ttmRows: any[] = [];
-                for (let i = 3; i < quarterRows.length; i += 1) {
-                    const windowRows = quarterRows.slice(i - 3, i + 1);
-                    const aggregated: any = { __period: `TTM-${quarterRows[i].__period}` };
-                    selectedMetricKeys.forEach((key) => {
-                        const values = windowRows
-                            .map((row: any) => Number(row[key]))
-                            .filter((value: number) => !Number.isNaN(value) && Number.isFinite(value));
-                        aggregated[key] = values.length ? values.reduce((sum, value) => sum + value, 0) : null;
-                    });
-                    ttmRows.push(aggregated);
-                }
-                displayRows = ttmRows;
-            } else if (period === 'Q') {
-                displayRows = quarterRows;
-            } else {
-                displayRows = quarterRows.filter((row: any) =>
+            displayRows = period === 'Q'
+                ? quarterOnlyRows
+                : quarterOnlyRows.filter((row: { __period: string | null }) =>
                     matchesFinancialQuarterSelection(row.__period, period as 'Q1' | 'Q2' | 'Q3' | 'Q4')
                 );
-            }
         } else if (periodMode === 'ttm') {
             displayRows = normalizedRows.filter((row: any) => String(row.__period).toUpperCase().includes('TTM'));
         }
@@ -472,36 +474,52 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
 
         return {
             periods: columns,
+            periodIssues: periodResolution.issues,
+            invalidPeriodCount: periodResolution.invalidPeriodCount,
             rows: metrics.map(m => {
-                const values: Record<string, any> = {};
-                    displayRows.forEach((d: any) => {
-                        const periodLabel = d.__period;
-                        if (!periodLabel) {
-                            return;
-                        }
-                        const currentVal = activeTab === 'ratios'
-                            ? readRatioValue(d, m.key)
-                            : convertFinancialValueForUnit(readMetricValue(d, m.key), unitConfig, periodLabel);
-                        const periodIndex = sortedPeriodIndex.get(periodLabel) ?? -1;
-                        const prevRow = periodIndex > 0 ? (comparisonRows[periodIndex - 1] as any) : null;
-                        const prevValRaw = prevRow
-                            ? activeTab === 'ratios'
-                                ? readRatioValue(prevRow, m.key)
-                                : readMetricValue(prevRow, m.key)
-                            : null;
-                        const prevVal = activeTab === 'ratios'
-                            ? prevValRaw
-                            : convertFinancialValueForUnit(prevValRaw, unitConfig, comparisonRows[periodIndex - 1]?.__period);
-
-                    let growth = null;
-                    if (prevVal && prevVal !== 0 && currentVal !== null) {
-                        growth = ((currentVal - prevVal) / Math.abs(prevVal)) * 100;
+                const values: Record<string, { val: number | null; growth: number | null; negativeBase: boolean; growthLabel: string | null }> = {};
+                displayRows.forEach((d: any) => {
+                    const periodLabel = d.__period;
+                    if (!periodLabel) {
+                        return;
                     }
+                    const currentVal = toFiniteNumber(
+                        activeTab === 'ratios'
+                            ? PER_SHARE_METRIC_KEYS.has(m.key) ? convertFinancialValueForUnit(readRatioValue(d, m.key), unitConfig, periodLabel) : readRatioValue(d, m.key)
+                            : convertFinancialValueForUnit(readMetricValue(d, m.key), unitConfig, periodLabel)
+                    );
+                    const periodIndex = sortedPeriodIndex.get(periodLabel) ?? -1;
+                    const prevRow: Record<string, unknown> | null = periodIndex > 0 ? comparisonRows[periodIndex - 1] : null;
+                    const prevVal = toFiniteNumber(
+                        activeTab === 'ratios'
+                            ? prevRow ? PER_SHARE_METRIC_KEYS.has(m.key) ? convertFinancialValueForUnit(readRatioValue(prevRow, m.key), unitConfig, prevRow.__period as string | null) : readRatioValue(prevRow, m.key) : null
+                            : convertFinancialValueForUnit(
+                                prevRow ? readMetricValue(prevRow, m.key) : null,
+                                unitConfig,
+                                comparisonRows[periodIndex - 1]?.__period,
+                            )
+                    );
+                    // One convention for the statement tables, the Growth Bridge and
+                    // the API's `_growth_rate`: divide by the ABSOLUTE prior value
+                    // (issue #104). A negative endpoint still makes the sign
+                    // unreadable as ordinary growth, so the pair is classified
+                    // (loss to profit / narrowed / widened) instead of calling every
+                    // negative pair a turnaround.
+                    const growthDetail = percentChangeDetail(currentVal, prevVal);
 
-                    values[periodLabel] = { val: currentVal, growth };
+                    values[periodLabel] = {
+                        val: currentVal,
+                        growth: growthDetail.change,
+                        negativeBase: growthDetail.hasNegativeBase,
+                        growthLabel: growthDetail.label,
+                    };
                 });
                 return { label: m.label, isPct: m.isPct, metricKey: m.key, values };
-            })
+            }),
+            // A row the API returned without certification has every metric null plus
+            // `unavailable_reason`, so the table would otherwise render an all-empty
+            // column and hide why (issue #103).
+            unavailableNote: describeUnavailableStatementRows(displayRows),
         };
     }, [activeQuery?.data, ratiosReferenceQuery.data?.data, activeTab, periodMode, period, unitConfig]);
 
@@ -544,7 +562,8 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
                 apiGroup: '/equity',
                 endpoint: endpointPath,
                 sourceLabel,
-                lastDataDate: activeQuery?.dataUpdatedAt,
+                lastDataDate: null,
+                fetchedAt: activeQuery?.dataUpdatedAt,
                 stale: isFallback,
                 extra: hasData ? { tab: activeTab, periods: tableData?.periods.length ?? 0 } : undefined,
             }),
@@ -565,13 +584,9 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const denseColumns = useMemo<DenseTableColumn[]>(() => {
         if (!tableData) return []
-        return tableData.periods.map((periodLabel, index) => ({
+        return tableData.periods.map((periodLabel) => ({
             key: periodLabel,
-            label: formatFinancialPeriodLabel(periodLabel, {
-                mode: periodMode,
-                index,
-                total: tableData.periods.length,
-            }),
+            label: formatFinancialPeriodLabel(periodLabel, { mode: periodMode }),
             align: 'right',
         }))
     }, [periodMode, tableData])
@@ -587,6 +602,19 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             }, {}),
         }))
     }, [activeTab, tableData])
+    // Disclose the negative-base comparisons actually present, using the same
+    // classification as the statement tables (issue #104).
+    const negativeBaseLabels = useMemo(() => {
+        if (!tableData) return[] as string[]
+        const labels = new Set<string>()
+        for (const row of tableData.rows) {
+            for (const periodLabel of tableData.periods) {
+                const label = row.values[periodLabel]?.growthLabel
+                if (label) labels.add(label)
+            }
+        }
+        return Array.from(labels).sort()
+    }, [tableData])
 
     const denseRowMeta = useMemo(() => {
         if (!tableData) return new Map<string, { isPct?: boolean; isPerShare?: boolean }>()
@@ -637,7 +665,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
 
                     <div className="flex items-center gap-2 ml-auto">
                         <div className="flex bg-muted/30 rounded p-0.5 gap-0.5">
-                            {['FY', 'Q', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM'].map((opt) => (
+                            {periodOptions.map((opt) => (
                                 <button
                                     key={opt}
                                     onClick={() => setPeriod(opt)}
@@ -651,7 +679,8 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
                             ))}
                         </div>
                         <WidgetMeta
-                            updatedAt={activeQuery.dataUpdatedAt}
+                            updatedAt={null}
+                            fetchedAt={activeQuery.dataUpdatedAt}
                             isFetching={activeQuery.isFetching && hasData}
                             isCached={isFallback}
                             note={`${periodLabel} · newest on right`}
@@ -664,7 +693,25 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
 
                 {/* Table Area with Horizontal Scroll */}
                 <div className="flex-1 overflow-auto p-0.5 scrollbar-thin scrollbar-thumb-[var(--border-color)]">
-                    {activeQuery.isLoading && !hasData ? (
+                    {tableData && (tableData.periodIssues.length > 0 || tableData.invalidPeriodCount > 0) && (
+                        <div className="px-2 py-1 text-[10px] text-amber-300">
+                            Fiscal period resolution: {tableData.periodIssues.filter((issue) => issue.reason === 'ambiguous-basis').length} conflicting periods excluded; {tableData.periodIssues.filter((issue) => issue.reason === 'duplicate-identical').length} identical repeats collapsed; {tableData.invalidPeriodCount} undated rows excluded.
+                        </div>
+                    )}
+                    {tableData?.unavailableNote && (
+                        // Rendered next to the table, not only in the empty state: an uncertified
+                        // period must disclose its reason even when other periods are populated,
+                        // or the table silently shows fewer periods than the API returned (#103).
+                        <div className="px-2 py-1 text-[10px] text-amber-300">
+                            {tableData.unavailableNote}
+                        </div>
+                    )}
+                    {activeTab === 'ratios' && period === 'TTM' ? (
+                        <WidgetEmpty
+                            message="TTM ratios are not supported"
+                            detail="The provider does not supply ratios recomputed from a verified twelve-month window. Latest-period ratios and EPS/DPS sums are not shown as TTM. Select FY or Q."
+                        />
+                    ) : activeQuery.isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={6} />
                     ) : activeQuery.error && !hasData ? (
                         <WidgetError error={activeQuery.error as Error} onRetry={() => activeQuery.refetch()} />
@@ -676,6 +723,8 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
                     ) : !hasRenderableData ? (
                         <WidgetEmpty
                             message={`${tabs.find((tab) => tab.id === activeTab)?.label || 'Financial'} periods loaded, but tracked metrics are empty for ${symbol} (${periodLabel}).`}
+                            // The API's own reason is shown in the note above the table, so it is
+                            // not repeated here (issue #103).
                             action={{ label: 'Refresh data', onClick: () => activeQuery.refetch() }}
                         />
                     ) : (
@@ -693,7 +742,9 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
                                 showTrend={false}
                                 initialScrollPosition="end"
                                 storageKey={`financials:${symbol}:${activeTab}:${period}`}
-                                footerNote={activeTab !== 'ratios' ? `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS` : undefined}
+                                footerNote={activeTab !== 'ratios'
+                                    ? `Note: ${unitLegend}; per-share values (EPS/BVPS/DPS) are ${unitConfig.display === 'USD' ? 'USD' : 'VND'} per share • Reporting Standard: VAS${negativeBaseLabels.length > 0 ? ` • Growth divides by the absolute prior-period value; negative-base comparisons are labelled (${negativeBaseLabels.join(', ')}), not ordinary growth` : ''}`
+                                    : `Note: Ratio history by ${period}. EPS/BVPS/DPS are ${unitConfig.display === 'USD' ? 'USD' : 'VND'} per share; dimensionless ratios are not currency-converted. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
                                 valueFormatter={(value, row) => {
                                     const meta = denseRowMeta.get(row.id)
                                     // `null` must stay null. Number(null) is 0, and 0 is finite, so
@@ -708,8 +759,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
                                         return formatRatio(Number.isFinite(numericValue) ? numericValue : null)
                                     }
                                     if (meta?.isPerShare) {
-                                        // Per-share values (EPS/BVPS/DPS) are absolute VND-per-share;
-                                        // format with plain 2-decimal numbers, NOT the billions scale.
+                                        // Per-share values use display currency without the table's billions scale.
                                         return formatNumber(Number.isFinite(numericValue) ? numericValue : null, { decimals: 2 })
                                     }
                                     return formatUnitValuePlain(Number.isFinite(numericValue) ? numericValue : null, tableScale, unitConfig)

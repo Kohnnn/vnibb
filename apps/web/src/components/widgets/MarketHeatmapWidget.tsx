@@ -46,8 +46,14 @@ function clampLabelSize(width: number, height: number): number {
     return Math.max(10, Math.min(18, Math.min(width / 7.5, height / 2.4)));
 }
 
-// Color scale based on Phase 20 MD
-function getHeatmapColor(change: number): string {
+// Color scale based on Phase 20 MD. A group whose change is unknown is not a flat
+// 0% group: coercing a missing change to 0 painted the neutral band and printed
+// "+0.00%", a fabricated neutral market read (issue #107). Unknown gets its own
+// slate colour and a "—" label.
+const UNKNOWN_CHANGE_COLOR = 'rgb(71, 85, 105)'; // slate-600
+
+function getHeatmapColor(change: number | null | undefined): string {
+    if (change === null || change === undefined || !Number.isFinite(change)) return UNKNOWN_CHANGE_COLOR;
     if (change >= 6.9) return 'rgb(6, 182, 212)'; // cyan-500 (Ceiling)
     if (change >= 4) return 'rgb(34, 197, 94)';   // green-500
     if (change >= 2) return 'rgb(22, 163, 74)';   // green-600
@@ -99,7 +105,10 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
     });
 
     const treemapData = useMemo(() => {
-        if (!data?.sectors) return null;
+        // An empty sector list means the endpoint had no coverage, not a flat market:
+        // rendering it produced a treemap with "0 stocks / 0 groups" and a
+        // fabricated neutral read (issue #107). Unavailable stays unavailable.
+        if (!data?.sectors?.length) return null;
 
         if (selectedGroup) {
             const group = data.sectors.find((sector: SectorGroup) => sector.sector === selectedGroup);
@@ -226,12 +235,17 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                 endpoint: heatmapEndpoint,
                 sourceLabel: 'Market heatmap',
                 lastDataDate: constituentDate ?? null,
+                fetchedAt: dataUpdatedAt,
                 cached: Boolean(data?.cached) || isFallback,
-                stale: isFallback || Boolean(data?.constituents_stale) || Boolean(data?.partial),
+                // Incomplete universe coverage is a coverage fact, not source age:
+                // report it as `partial` so the health chip says "Partial coverage"
+                // instead of claiming the stored observation is stale (issue #107).
+                coverage: data?.partial ? 'partial' : undefined,
+                stale: isFallback || Boolean(data?.constituents_stale),
                 extra: hasData ? { groupBy, exchange, groupCount: data?.sectors?.length ?? 0, endpoint: heatmapEndpoint } : undefined,
             }),
         );
-    }, [hasData, constituentDate, data?.cached, data?.constituents_stale, data?.partial, isFallback, groupBy, exchange, data?.sectors?.length, onDataChange, heatmapEndpoint]);
+    }, [hasData, constituentDate, dataUpdatedAt, data?.cached, data?.constituents_stale, data?.partial, isFallback, groupBy, exchange, data?.sectors?.length, onDataChange, heatmapEndpoint]);
 
     return (
         <WidgetContainer
@@ -295,7 +309,11 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                                 {treemapLayout.leaves().map((node: any) => {
                                                     const width = node.x1 - node.x0;
                                                     const height = node.y1 - node.y0;
-                                                    const changePct = node.data.changePct || 0;
+                                                    const rawChange = node.data.changePct;
+                                                    const changePct =
+                                                        typeof rawChange === 'number' && Number.isFinite(rawChange)
+                                                            ? rawChange
+                                                            : null;
                                                     const color = getHeatmapColor(changePct);
                                                     const labelSize = clampLabelSize(width, height);
                                                     const detailSize = Math.max(9, Math.min(12, labelSize - 2));
@@ -327,7 +345,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                                                 <title>
                                                                     {node.data.symbol || node.data.name}
                                                                     {node.data.sector ? `\nSector: ${node.data.sector}` : ''}
-                                                                    {'\n'}Change: {changePct.toFixed(2)}%
+                                                                    {'\n'}Change: {changePct === null ? '—' : `${changePct.toFixed(2)}%`}
                                                                     {'\n'}Value: {formatCompactValueForUnit(node.data.value || 0, unitConfig, { decimals: 1 })}
                                                                     {!selectedGroup && node.data.stockCount ? `\nStocks: ${node.data.stockCount}` : ''}
                                                                 </title>
@@ -352,7 +370,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                                                         fill="rgba(255,255,255,0.86)"
                                                                         style={{ fontSize: detailSize }}
                                                                     >
-                                                                        {`${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
+                                                                        {changePct === null ? '—' : `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
                                                                     </text>
                                                                 </>
                                                             )}
@@ -396,7 +414,9 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                         <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tighter">-7% to +7%</span>
                     </div>
                     <div className="flex items-center gap-3">
-                        {data && (
+                        {/* An empty universe already says "Market data unavailable";
+                            printing 0 Stocks • 0 Groups beside it reads as a flat market. */}
+                        {hasData && data && (
                             <div className="flex items-center gap-2 text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                                 <span className="text-[var(--text-secondary)]">{data.count}</span> Stocks
                                 <span className="text-[var(--text-muted)]">•</span>
@@ -404,7 +424,8 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                             </div>
                         )}
                         <WidgetMeta
-                            updatedAt={data?.price_updated_at ?? data?.updated_at ?? dataUpdatedAt}
+                            updatedAt={data?.price_updated_at ?? null}
+                            fetchedAt={dataUpdatedAt}
                             isFetching={isFetching && hasData}
                             isCached={Boolean(data?.cached) || isFallback}
                             isStale={isFallback && !data?.cached}

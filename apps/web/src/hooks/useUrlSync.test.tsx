@@ -10,8 +10,10 @@ type UrlSyncHarnessProps = {
   symbol: string;
   dashboardIds: string[];
   tabIdsByDashboard: Record<string, string[]>;
-  applyDashboard: (id: string) => void;
-  applyTab: (id: string) => void;
+  tabNamesByDashboard?: Record<string, Record<string, string>>;
+  userNavigationSeq?: number;
+  applyDashboard: (id: string, options?: { programmatic?: boolean }) => void;
+  applyTab: (id: string, options?: { programmatic?: boolean }) => void;
   applySymbol: (symbol: string) => void;
 };
 
@@ -22,7 +24,14 @@ function UrlSyncHarness(props: UrlSyncHarnessProps) {
     activeTabId: props.activeTabId,
     symbol: props.symbol,
     dashboardIds: props.dashboardIds,
-    getTabIds: (dashboardId) => props.tabIdsByDashboard[dashboardId] ?? [],
+    resolveTabId: (dashboardId, slug) => {
+      const ids = props.tabIdsByDashboard[dashboardId] ?? [];
+      if (ids.includes(slug)) return slug;
+      const names = props.tabNamesByDashboard?.[dashboardId] ?? {};
+      const entry = Object.entries(names).find(([, name]) => name === slug);
+      return entry ? entry[0] : null;
+    },
+    userNavigationSeq: props.userNavigationSeq ?? 0,
     applyDashboard: props.applyDashboard,
     applyTab: props.applyTab,
     applySymbol: props.applySymbol,
@@ -36,8 +45,80 @@ describe('useUrlSync deep-link restore', () => {
     window.history.pushState(null, '', '/dashboard?dashboard=custom-dashboard&tab=custom-tab&symbol=vci');
   });
 
-  it('applies requested dashboard and tab after dashboards load behind the initial ready render', () => {
-    // Given: the URL names a dashboard and tab before persisted dashboards are available.
+  it('defers the deep link until the requested workspace hydrates, then applies it (fresh profile)', () => {
+    // Fresh profile: the URL is the only source of truth and nothing is loaded yet.
+    const applyDashboard = jest.fn();
+    const applyTab = jest.fn();
+    const applySymbol = jest.fn();
+    const initialProps: UrlSyncHarnessProps = {
+      ready: true,
+      activeDashboardId: 'default-dashboard',
+      activeTabId: 'default-tab',
+      symbol: 'VNM',
+      dashboardIds: [],
+      tabIdsByDashboard: {},
+      applyDashboard,
+      applyTab,
+      applySymbol,
+    };
+
+    const { rerender } = render(<UrlSyncHarness {...initialProps} />);
+    // Not loaded yet: the request is held, not dropped.
+    expect(applyDashboard).not.toHaveBeenCalled();
+
+    // Bundled/held layouts hydrate, then the requested workspace appears.
+    rerender(
+      <UrlSyncHarness
+        {...initialProps}
+        dashboardIds={['default-dashboard', 'custom-dashboard']}
+        tabIdsByDashboard={{ 'custom-dashboard': ['custom-tab'] }}
+      />,
+    );
+
+    expect(applyDashboard).toHaveBeenCalledWith('custom-dashboard', { programmatic: true });
+    expect(applyTab).toHaveBeenCalledWith('custom-tab', { programmatic: true });
+  });
+
+  it('waits for a published tab to register even when its dashboard already exists', () => {
+    // Fresh profile: `default-fundamental` is a bundled dashboard, but its
+    // published `news-events` tab has not loaded yet. The dashboard being
+    // present must not let the restore apply before the tab exists.
+    const applyDashboard = jest.fn();
+    const applyTab = jest.fn();
+    const applySymbol = jest.fn();
+    window.history.pushState(
+      null,
+      '',
+      '/dashboard?dashboard=default-fundamental&tab=news-events&symbol=VNM',
+    );
+    const initialProps: UrlSyncHarnessProps = {
+      ready: true,
+      activeDashboardId: 'default-fundamental',
+      activeTabId: 'overview',
+      symbol: 'VNM',
+      dashboardIds: ['default-fundamental'],
+      tabIdsByDashboard: { 'default-fundamental': ['overview'] },
+      applyDashboard,
+      applyTab,
+      applySymbol,
+    };
+
+    const { rerender } = render(<UrlSyncHarness {...initialProps} />);
+    // Dashboard exists but the tab does not: nothing applied yet.
+    expect(applyTab).not.toHaveBeenCalled();
+
+    // The published template lands and registers the tab.
+    rerender(
+      <UrlSyncHarness
+        {...initialProps}
+        tabIdsByDashboard={{ 'default-fundamental': ['overview', 'news-events'] }}
+      />,
+    );
+
+    expect(applyTab).toHaveBeenCalledWith('news-events', { programmatic: true });
+  });
+
+  it('abandons a deferred deep link when the user navigates before it resolves', () => {
     const applyDashboard = jest.fn();
     const applyTab = jest.fn();
     const applySymbol = jest.fn();
@@ -48,37 +129,149 @@ describe('useUrlSync deep-link restore', () => {
       symbol: 'HPG',
       dashboardIds: [],
       tabIdsByDashboard: {},
+      userNavigationSeq: 0,
       applyDashboard,
       applyTab,
       applySymbol,
     };
 
-    // When: valid dashboard and tab ids become available on the next render.
     const { rerender } = render(<UrlSyncHarness {...initialProps} />);
+
+    // The user picks another workspace before the requested one hydrates. The
+    // context signals that with a bumped navigation sequence — not a state diff,
+    // which cannot tell hydration churn from a real click.
     rerender(
       <UrlSyncHarness
         {...initialProps}
+        activeTabId="a-user-chosen-tab"
+        userNavigationSeq={1}
         dashboardIds={['default-dashboard', 'custom-dashboard']}
         tabIdsByDashboard={{ 'custom-dashboard': ['custom-tab'] }}
       />,
     );
 
-    // Then: the original URL still drives the requested dashboard, tab, and symbol.
-    expect(applyDashboard).toHaveBeenCalledWith('custom-dashboard');
-    expect(applyTab).toHaveBeenCalledWith('custom-tab');
-    expect(applySymbol).not.toHaveBeenCalled();
+    expect(applyDashboard).not.toHaveBeenCalled();
+    expect(applyTab).not.toHaveBeenCalled();
+  });
+
+  it('does not treat hydration churn as user navigation', () => {
+    // The bundled seed moves the active workspace on its own while the deep link
+    // is still pending. The sequence is unchanged, so the held request must
+    // survive and apply once the requested workspace finally registers.
+    const applyDashboard = jest.fn();
+    const applyTab = jest.fn();
+    const applySymbol = jest.fn();
+    const initialProps: UrlSyncHarnessProps = {
+      ready: true,
+      activeDashboardId: 'default-dashboard',
+      activeTabId: 'default-tab',
+      symbol: 'VNM',
+      dashboardIds: [],
+      tabIdsByDashboard: {},
+      userNavigationSeq: 0,
+      applyDashboard,
+      applyTab,
+      applySymbol,
+    };
+
+    const { rerender } = render(<UrlSyncHarness {...initialProps} />);
+    // Seed settles onto an unrelated tab — not a user action, seq stays 0.
+    rerender(
+      <UrlSyncHarness {...initialProps} activeTabId="some-other-tab" />,
+    );
+    expect(applyDashboard).not.toHaveBeenCalled();
+
+    // The requested workspace finally hydrates; the held request still applies.
     rerender(
       <UrlSyncHarness
         {...initialProps}
-        activeDashboardId="custom-dashboard"
-        activeTabId="custom-tab"
+        activeTabId="some-other-tab"
         dashboardIds={['default-dashboard', 'custom-dashboard']}
         tabIdsByDashboard={{ 'custom-dashboard': ['custom-tab'] }}
       />,
     );
+    expect(applyDashboard).toHaveBeenCalledWith('custom-dashboard', { programmatic: true });
+    expect(applyTab).toHaveBeenCalledWith('custom-tab', { programmatic: true });
+  });
+
+  it('restores dashboard, tab and symbol when dashboards are already hydrated', () => {
+    const applyDashboard = jest.fn();
+    const applyTab = jest.fn();
+    const applySymbol = jest.fn();
+    const props: UrlSyncHarnessProps = {
+      ready: true,
+      activeDashboardId: 'default-dashboard',
+      activeTabId: 'default-tab',
+      symbol: 'HPG',
+      dashboardIds: ['default-dashboard', 'custom-dashboard'],
+      tabIdsByDashboard: { 'custom-dashboard': ['custom-tab'] },
+      applyDashboard,
+      applyTab,
+      applySymbol,
+    };
+
+    const { rerender } = render(<UrlSyncHarness {...props} />);
+
+    expect(applyDashboard).toHaveBeenCalledWith('custom-dashboard', { programmatic: true });
+    expect(applyTab).toHaveBeenCalledWith('custom-tab', { programmatic: true });
+
+    rerender(
+      <UrlSyncHarness
+        {...props}
+        activeDashboardId="custom-dashboard"
+        activeTabId="custom-tab"
+      />,
+    );
     expect(applySymbol).toHaveBeenCalledWith('VCI');
   });
+
+
+  it('drops a deferred tab slug when Back/Forward lands on another workspace first', () => {
+    // The deep link names a published tab that has not registered yet, so the
+    // slug is deferred. The user then goes Back to a different workspace before
+    // the tab arrives. Applying the deferral afterwards would set a tab id that
+    // belongs to the workspace they left onto the current one.
+    const applyDashboard = jest.fn();
+    const applyTab = jest.fn();
+    const applySymbol = jest.fn();
+    window.history.pushState(
+      null,
+      '',
+      '/dashboard?dashboard=custom-dashboard&tab=custom-tab&symbol=vci',
+    );
+    const initialProps: UrlSyncHarnessProps = {
+      ready:true,
+      activeDashboardId: 'default-dashboard',
+      activeTabId: 'default-tab',
+      symbol: 'VNM',
+      dashboardIds: ['default-dashboard', 'custom-dashboard'],
+      tabIdsByDashboard: { 'custom-dashboard':[] },
+      applyDashboard,
+      applyTab,
+      applySymbol,
+    };
+
+    const { rerender } = render(<UrlSyncHarness {...initialProps} />);
+    expect(applyDashboard).toHaveBeenCalledWith('custom-dashboard', { programmatic:true });
+    expect(applyTab).not.toHaveBeenCalled();
+
+    act(() => {
+      window.history.replaceState(null, '', '/dashboard?dashboard=default-dashboard&tab=default-tab');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+
+    // The published layout finally registers `custom-tab`. The history move
+    // already abandoned it, so the live workspace keeps its own tab.
+    rerender(
+      <UrlSyncHarness
+        {...initialProps}
+        tabIdsByDashboard={{ 'custom-dashboard': ['custom-tab'] }}
+      />,
+    );
+    expect(applyTab).not.toHaveBeenCalledWith('custom-tab', { programmatic:true });
+  });
 });
+
 
 function ScopedUrlHarness() {
   const [dashboard, setDashboard] = useState('original');
@@ -90,7 +283,8 @@ function ScopedUrlHarness() {
     activeTabId: `${dashboard}-tab`,
     symbol,
     dashboardIds: ['original', 'imported'],
-    getTabIds: id => [`${id}-tab`],
+    resolveTabId: (id, slug) => (slug === `${id}-tab` ? slug : null),
+    userNavigationSeq: 0,
     applyDashboard: setDashboard,
     applyTab: () => {},
     applySymbol: next => setSymbols(previous => ({ ...previous, [dashboard]: next })),

@@ -81,6 +81,7 @@ function renderSidebarWithDashboards(dashboards: readonly [Dashboard, Dashboard]
 
   mockUseDashboard.mockReturnValue({
     localStateReady: true,
+    userNavigationSeq: 0,
     state: {
       dashboards: [...dashboards],
       folders: emptyFolders,

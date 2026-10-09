@@ -61,10 +61,11 @@ export function DerivativesPriceHistoryWidget({
       apiGroup: '/derivatives',
       endpoint: `/api/v1/derivatives/history/${symbol || ':symbol'}`,
       sourceLabel: 'VNIBB derivatives history',
-      lastDataDate: latest?.time,
+      lastDataDate: latest?.time ?? null,
+      fetchedAt: historyQuery.dataUpdatedAt,
       extra: { symbol: symbol || null, count: historyQuery.data?.count ?? chartData.length },
     }))
-  }, [chartData.length, historyQuery.data?.count, latest?.time, onDataChange, symbol])
+  }, [chartData.length, historyQuery.data?.count, historyQuery.dataUpdatedAt, latest?.time, onDataChange, symbol])
 
   return (
     <WidgetContainer
@@ -101,7 +102,8 @@ export function DerivativesPriceHistoryWidget({
               </datalist>
             </div>
             <WidgetMeta
-              updatedAt={historyQuery.dataUpdatedAt}
+              updatedAt={latest?.time ?? null}
+              fetchedAt={historyQuery.dataUpdatedAt}
               isFetching={historyQuery.isFetching && chartData.length > 0}
               note={symbol || 'Select contract'}
               align="right"

@@ -114,6 +114,44 @@ describe('income_sankey saved dashboard widget', () => {
     expect(screen.getByText('TTM 2025', { exact: false })).toBeInTheDocument();
   });
 
+  it('does not chart a quarterly flow as TTM when the response carries no TTM row', async () => {
+    showIncome([{ ...row, period: 'Q3-2025', revenue: 800, cost_of_revenue: 450, gross_profit: 350, operating_income: 250, pre_tax_profit: 230, net_income: 200 }]);
+    fireEvent.click(screen.getByRole('button', { name: 'TTM' }));
+
+    expect(await screen.findByText('No flow visualization available for FPT')).toBeInTheDocument();
+    expect(screen.queryByText('800.00')).not.toBeInTheDocument();
+  });
+
+  it('discloses an uncertified TTM row instead of rendering a blank flow', async () => {
+    showIncome([{
+      ...row, period: 'TTM-2025', revenue: undefined, cost_of_revenue: undefined, gross_profit: undefined,
+      operating_income: undefined, pre_tax_profit: undefined, net_income: undefined,
+      unavailable_reason: 'unknown_source_unit',
+    } as unknown as typeof row]);
+    await screen.findByRole('region', { name: 'Income Sankey' });
+    fireEvent.click(screen.getByRole('button', { name: 'TTM' }));
+
+    expect(await screen.findByText('Income flow unavailable for FPT')).toBeInTheDocument();
+    expect(screen.getAllByText(/TTM-2025 returned no certified value \(unknown_source_unit\)/).length).toBeGreaterThan(0);
+  });
+
+  it('discloses an uncertified period while still charting the certified ones', async () => {
+    showIncome([
+      { ...row, period: '2024', revenue: 900, cost_of_revenue: 500, gross_profit: 400, operating_income: 300, pre_tax_profit: 280, net_income: 250 },
+      {
+        ...row, period: '2025', revenue: undefined, cost_of_revenue: undefined, gross_profit: undefined,
+        operating_income: undefined, pre_tax_profit: undefined, net_income: undefined,
+        unavailable_reason: 'conflicting_duplicate_period',
+      } as unknown as typeof row,
+    ]);
+
+    const widget = await screen.findByRole('region', { name: 'Income Sankey' });
+    // The certified period is still charted ...
+    expect(widget.querySelectorAll('svg[viewBox="0 0 1120 420"] path').length).toBeGreaterThan(0);
+    // ... and the uncertified period's reason is visible rather than silently dropped.
+    expect(screen.getAllByText(/2025 returned no certified value \(conflicting_duplicate_period\)/).length).toBeGreaterThan(0);
+  });
+
   it('reports an unavailable selected quarter rather than charting a different usable quarter', async () => {
     const onDataChange = showIncome([
       { ...row, period: 'Q1-2025', revenue: 700 },

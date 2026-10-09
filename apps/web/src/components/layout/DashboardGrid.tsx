@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Responsive, noCompactor } from 'react-grid-layout';
-import type { Layout, ResponsiveProps } from 'react-grid-layout';
+import { GridLayout, noCompactor, getBreakpointFromWidth } from 'react-grid-layout';
+import type { Layout, GridLayoutProps } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import { DASHBOARD_GRID_BREAKPOINTS } from '@/lib/responsive';
 import { autoFitGridItems } from '@/lib/dashboardLayout';
@@ -198,28 +198,29 @@ export function DashboardGrid({
         };
     }, [layouts]);
 
-    const [currentBreakpoint, setCurrentBreakpoint] = useState('lg');
-
-    const persistInteraction = useCallback(
-        (nextLayout: Layout) => {
-            if (isEditing && currentBreakpoint === 'lg' && width >= BREAKPOINTS.lg) {
-                onLayoutChange?.(nextLayout as LayoutItem[]);
-            }
-        },
-        [currentBreakpoint, isEditing, onLayoutChange, width]
-    );
-
-    const handleBreakpointChange = useCallback((breakpoint: string) => {
-        setCurrentBreakpoint(breakpoint);
-    }, []);
-
-    const gridSpacing = GRID_GAP[currentBreakpoint as keyof typeof GRID_GAP] ?? GRID_GAP.lg;
-    const gridMargin: [number, number] = [gridSpacing, gridSpacing];
+    // The grid is a controlled `GridLayout`, so the breakpoint is ours: derived
+    // from the measured width with RGL's own rule, then handed one layout array.
+    // `Responsive` kept a private breakpoint/cols/layouts cache that could serve
+    // the derived md projection at lg geometry (#108).
+    const currentBreakpoint = getBreakpointFromWidth(BREAKPOINTS, width);
 
     // Editing is only allowed at `lg`, the single persisted layout. At md/sm/xs
     // the layout is derived (view-only), so drag/resize is disabled there to
     // avoid implying edits that won't be saved.
-    const canEdit = isEditing && currentBreakpoint === 'lg' && width >= BREAKPOINTS.lg;
+    const canEdit = isEditing && currentBreakpoint === 'lg';
+
+    const persistInteraction = useCallback(
+        (nextLayout: Layout) => {
+            if (canEdit) {
+                onLayoutChange?.(nextLayout as LayoutItem[]);
+            }
+        },
+        [canEdit, onLayoutChange]
+    );
+
+    const gridSpacing = GRID_GAP[currentBreakpoint as keyof typeof GRID_GAP] ?? GRID_GAP.lg;
+    const gridMargin: [number, number] = [gridSpacing, gridSpacing];
+
     useEffect(() => {
         onEditableChange?.(canEdit);
         return () => onEditableChange?.(false);
@@ -231,23 +232,24 @@ export function DashboardGrid({
 
     // View-only layouts retain the authored desktop coordinates, including deliberate
     // gaps. Responsive projections are disposable and never become saved geometry.
-    const effectiveLayouts = useMemo(() => canEdit ? responsiveLayouts : {
-        lg: responsiveLayouts.lg.map(item => ({ ...item, static: true })),
-        md: responsiveLayouts.md.map(item => ({ ...item, static: true })),
-        sm: responsiveLayouts.sm.map(item => ({ ...item, static: true })),
-        xs: responsiveLayouts.xs.map(item => ({ ...item, static: true })),
-    }, [canEdit, responsiveLayouts]);
+    const activeLayout = responsiveLayouts[currentBreakpoint];
+    const effectiveLayout = useMemo(() => {
+        if (canEdit) return activeLayout;
+        return activeLayout.map(item => ({ ...item, static:true }));
+    }, [canEdit, activeLayout]);
 
     // Disable passive compaction in both modes: only a deliberate drag/resize or
     // the workspace's explicit auto-fit action may rewrite authored geometry.
     const gridProps = {
         className: 'layout',
-        layouts: effectiveLayouts,
-        breakpoints: BREAKPOINTS,
-        cols: COLS,
-        rowHeight,
+        layout: effectiveLayout,
         width,
-        onBreakpointChange: handleBreakpointChange,
+        gridConfig: {
+            cols: COLS[currentBreakpoint],
+            rowHeight,
+            margin: gridMargin,
+            containerPadding: [0, 0] as [number, number],
+        },
         onDragStop: persistInteraction,
         onResizeStop: persistInteraction,
         dragConfig: {
@@ -256,17 +258,15 @@ export function DashboardGrid({
             cancel: 'button, input, select, textarea, a, [role="dialog"], [data-dropdown-menu-content]',
         },
         resizeConfig: { enabled: canEdit, handles: ['se', 'e', 's'] },
-        dropConfig: { enabled: false },
+        dropConfig: { enabled:false },
         compactor: COLLISION_SAFE_COMPACTOR,
-        margin: gridMargin,
-        containerPadding: [0, 0] as [number, number],
-    } satisfies Omit<ResponsiveProps, 'children'>;
+    } satisfies Omit<GridLayoutProps, 'children'>;
 
     return (
         <div ref={containerRef} data-grid-editable={canEdit} className="dashboard-grid w-full">
-            <Responsive {...gridProps}>
+            <GridLayout {...gridProps}>
                 {children as any}
-            </Responsive>
+            </GridLayout>
         </div>
     );
 }

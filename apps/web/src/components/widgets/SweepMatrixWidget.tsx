@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Grid3X3, AlertTriangle } from 'lucide-react';
 import { useQuantSweep } from '@/lib/queries';
-import { buildQuantRuntime, extractQuantWarning } from '@/lib/quantWidgetHelpers';
+import { buildQuantRuntime, describeQuantBasis, extractQuantWarning } from '@/lib/quantWidgetHelpers';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -55,10 +55,16 @@ export function SweepMatrixWidget({ symbol, onDataChange }: SweepMatrixWidgetPro
     enabled: Boolean(upperSymbol) && hasValidCombo,
   });
   const payload = data?.data;
+  const certifiedUnits = ['confirmed_vnd', 'index_points', 'not_applicable'].includes(data?.meta?.unit_status ?? '');
+  const derivedWithheld = Boolean(payload) && (!certifiedUnits || Boolean(data?.meta?.unresolved_excluded_dates?.length) || Boolean(data?.error));
+  const unavailableReason = !certifiedUnits
+    ? 'Sweep unavailable: historical price units were not certified.'
+    : data?.error || 'Sweep unavailable: source quality is unresolved.';
   const cells = payload?.cells ?? [];
   const warnings = payload?.warnings ?? [];
   const warning = useMemo(() => extractQuantWarning(data) || warnings[0] || null, [data, warnings]);
-  const hasData = Boolean(payload);
+  const hasData = Boolean(payload) && !derivedWithheld;
+  const basisNote = describeQuantBasis(payload?.basis);
 
   useEffect(() => {
     onDataChange?.(buildQuantRuntime({
@@ -67,16 +73,18 @@ export function SweepMatrixWidget({ symbol, onDataChange }: SweepMatrixWidgetPro
       endpoint: `/quant/${upperSymbol}/sweep`,
       sourceLabel: 'VNIBB quant sweep',
       response: data,
-      extra: {
+      fetchedAt: dataUpdatedAt,
+      extra: hasData ? {
         period,
         preset,
         objective,
         cell_count: cells.length,
         best: payload?.best ?? null,
+        basis: payload?.basis ?? null,
         warning,
-      },
+      } : undefined,
     }));
-  }, [cells.length, data, dataUpdatedAt, hasData, objective, onDataChange, payload?.best, period, preset, upperSymbol, warning]);
+  }, [cells.length, data, dataUpdatedAt, hasData, objective, onDataChange, payload?.basis, payload?.best, period, preset, upperSymbol, warning]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to run a sweep" icon={<Grid3X3 size={18} />} />;
@@ -94,13 +102,17 @@ export function SweepMatrixWidget({ symbol, onDataChange }: SweepMatrixWidgetPro
     return <WidgetError title="Sweep unavailable" error={error as Error} onRetry={() => refetch()} />;
   }
 
+  if (derivedWithheld) {
+    return <WidgetEmpty message={unavailableReason} icon={<AlertTriangle size={18} />} />;
+  }
+
   if (!hasData) {
     return <WidgetEmpty message={`No sweep data for ${upperSymbol}`} icon={<Grid3X3 size={18} />} />;
   }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <WidgetMeta updatedAt={payload?.last_data_date || dataUpdatedAt} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note="MA parameter sweep" align="right" />
+      <WidgetMeta updatedAt={payload?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note="MA parameter sweep" align="right" />
 
       <div className="mb-2 grid grid-cols-3 gap-2 text-[11px]">
         <Select label="Period" value={period} onChange={(value) => setPeriod(value as QuantPeriod)} options={['1Y', '3Y', '5Y', 'ALL']} />
@@ -159,6 +171,11 @@ export function SweepMatrixWidget({ symbol, onDataChange }: SweepMatrixWidgetPro
       <p className="mt-2 text-[9px] leading-3 text-[var(--text-muted)]">
         Educational bounded grid search over moving-average parameters. Descriptive only, not trading advice.
       </p>
+      {basisNote && (
+        <p className="mt-1 text-[9px] leading-3 text-[var(--text-muted)]">
+          Basis: {basisNote}. Every cell shares this basis; compare with the backtest only at identical parameters and sessions.
+        </p>
+      )}
     </div>
   );
 }

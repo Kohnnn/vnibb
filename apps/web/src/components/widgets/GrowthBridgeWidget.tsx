@@ -59,7 +59,8 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
         apiGroup: '/equity',
         endpoint: `/equity/${upperSymbol}/growth`,
         sourceLabel: 'Growth bridge',
-        lastDataDate: query.dataUpdatedAt,
+        lastDataDate: null,
+        fetchedAt: query.dataUpdatedAt,
         stale: Boolean(query.error && hasData),
         extra: hasData ? { points: availableGrowthPoints } : undefined,
       }),
@@ -87,7 +88,7 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
           <div className="text-[11px] text-[var(--text-secondary)]">
             Compares annual YoY growth with the latest comparable quarter for core earnings drivers.
           </div>
-          <WidgetMeta updatedAt={query.dataUpdatedAt} isFetching={query.isFetching && hasData} note={`${annualLabel} vs ${quarterLabel}`} health={growthHealth} align="right" />
+          <WidgetMeta updatedAt={null} fetchedAt={query.dataUpdatedAt} isFetching={query.isFetching && hasData} note={`${annualLabel} vs ${quarterLabel}`} health={growthHealth} align="right" />
         </div>
 
         {query.isLoading && !hasData ? (
@@ -121,6 +122,7 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
                         <span>{annualLabel}</span>
                         <span className={row.annual !== null && row.annual >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
                           {formatPercent(row.annual, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}
+                          {row.annualLabel && <span className="ml-1 text-[10px] text-amber-300">({row.annualLabel})</span>}
                         </span>
                       </div>
                     </div>
@@ -136,6 +138,7 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
                         <span>{quarterLabel}</span>
                         <span className={row.quarter !== null && row.quarter >= 0 ? 'text-cyan-300' : 'text-amber-300'}>
                           {formatPercent(row.quarter, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}
+                          {row.quarterLabel && <span className="ml-1 text-[10px] text-amber-300">({row.quarterLabel})</span>}
                         </span>
                       </div>
                     </div>
@@ -143,6 +146,9 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
                 </div>
               </div>
             ))}
+            <div className="text-[10px] text-[var(--text-muted)]">
+              Growth divides by the absolute prior-period value. Transition labels come from the source comparison, not the percentage sign.
+            </div>
           </div>
         )}
       </div>

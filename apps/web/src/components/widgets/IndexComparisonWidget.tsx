@@ -9,6 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { getLatestTimestampValue } from '@/lib/dataFreshness';
 
 const INDICES = [
   { symbol: 'VNINDEX', name: 'VN-Index' },
@@ -20,6 +21,7 @@ const INDICES = [
 function IndexComparisonWidgetComponent({ onDataChange }: { onDataChange?: (data: WidgetDataPayload) => void }) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMarketOverview();
   const dataList = data?.data || [];
+  const sourceUpdatedAt = getLatestTimestampValue(dataList.map((item) => item.time)) ?? null;
   const hasData = dataList.length > 0;
   const isFallback = Boolean(error && hasData);
 
@@ -29,16 +31,19 @@ function IndexComparisonWidgetComponent({ onDataChange }: { onDataChange?: (data
       apiGroup: '/equity',
       endpoint: '/api/v1/market/overview',
       sourceLabel: 'VNIBB market overview',
+      lastDataDate: sourceUpdatedAt,
+      fetchedAt: dataUpdatedAt,
       extra: { count: dataList.length },
     }))
-  }, [dataList.length, hasData, onDataChange]);
+  }, [dataList.length, hasData, sourceUpdatedAt, dataUpdatedAt, onDataChange]);
 
   return (
     <WidgetContainer title="Index Comparison" onRefresh={() => refetch()} isLoading={isLoading && !hasData}>
       <div className="h-full flex flex-col">
         <div className="border-b border-[var(--border-subtle)] pb-2">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={sourceUpdatedAt}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note="Major indices"

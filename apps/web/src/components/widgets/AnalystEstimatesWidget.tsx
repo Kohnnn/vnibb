@@ -48,10 +48,13 @@ export function AnalystEstimatesWidget({ symbol, onDataChange }: AnalystEstimate
       apiGroup: '/equity',
       endpoint: `/equity/${symbol}/estimates`,
       sourceLabel: payload?.source || 'vnstock',
+      // Endpoint serves no source observation date (coverage unavailable in VN market).
+      lastDataDate: null,
+      fetchedAt: dataUpdatedAt || null,
       stale: Boolean(error && hasRows),
       extra: { rows: rows.length },
     }));
-  }, [error, hasRows, onDataChange, payload?.source, rows.length, symbol]);
+  }, [dataUpdatedAt, error, hasRows, onDataChange, payload?.source, rows.length, symbol]);
 
   if (!symbol) {
     return (
@@ -66,7 +69,8 @@ export function AnalystEstimatesWidget({ symbol, onDataChange }: AnalystEstimate
     <div className="h-full flex flex-col">
       <div className="pb-2 border-b border-[var(--border-subtle)]">
         <WidgetMeta
-          updatedAt={dataUpdatedAt}
+          updatedAt={null}
+          fetchedAt={dataUpdatedAt || null}
           isFetching={isFetching && hasRows}
           note="Consensus estimates"
           align="right"

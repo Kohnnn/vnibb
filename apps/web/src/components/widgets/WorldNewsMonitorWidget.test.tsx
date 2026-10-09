@@ -46,7 +46,7 @@ describe('WorldNewsMonitorWidget', () => {
           },
         ],
         total: 1,
-        fetched_at: '2026-05-01T09:01:00Z',
+        fetched_at: '2026-05-29T09:01:00Z',
         source_count: 1,
         feed_count: 1,
         failed_feed_count: 0,
@@ -82,5 +82,16 @@ describe('WorldNewsMonitorWidget', () => {
       'href',
       'https://vnexpress.net/rss/kinh-doanh.rss'
     )
+  })
+
+  test('reports the article observation as as-of, not the query receipt', () => {
+    const onDataChange = jest.fn()
+    render(<WorldNewsMonitorWidget id="world-news" onDataChange={onDataChange} />)
+
+    const runtime = onDataChange.mock.calls.at(-1)![0].__widgetRuntime.provenance
+    // As-of is the newest genuine article date; fetchedAt is the retrieval time
+    // that follows it. Re-fetching the same article must not move the as-of.
+    expect(runtime.updatedAt).toBe(new Date(2026, 4, 28, 17, 5, 0).toISOString())
+    expect(runtime.fetchedAt).toBe('2026-05-29T09:01:00Z')
   })
 })

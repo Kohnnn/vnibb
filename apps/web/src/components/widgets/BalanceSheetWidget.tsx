@@ -19,7 +19,7 @@ import {
     Legend,
     CartesianGrid,
 } from 'recharts';
-import { convertFinancialValueForUnit, formatAxisValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale } from '@/lib/units';
+import { convertFinancialValueForUnit, formatAxisValue, formatConvertedValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale, toFiniteNumber } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
@@ -27,7 +27,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { cn } from '@/lib/utils';
-import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_OPTIONS, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 
 interface BalanceSheetWidgetProps {
@@ -62,10 +62,18 @@ const labels: Record<string, string> = {
 
 const TABLE_YEAR_LIMIT = 20;
 const QUARTER_PERIOD_LIMIT = 40;
-const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
+const STATEMENT_PERIOD_OPTIONS = FUNDAMENTAL_PERIOD_OPTIONS;
 
 function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, onDataChange }: BalanceSheetWidgetProps) {
-    const periodSyncGroup = typeof config?.periodSyncGroup === 'string' ? config.periodSyncGroup : undefined;
+    // Default to the shared group the "Financial Period View" banner writes; a
+    // widget-level `periodSyncGroup` overrides it and an explicit `null` opts out
+    // so the period stays widget-local (issue #101).
+    const configuredSyncGroup = config?.periodSyncGroup;
+    const periodSyncGroup = configuredSyncGroup === null
+        ? undefined
+        : typeof configuredSyncGroup === 'string' && configuredSyncGroup.trim()
+            ? configuredSyncGroup
+            : FUNDAMENTAL_PERIOD_SYNC_GROUP;
     const defaultPeriod =
         config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
             ? (config.defaultPeriod as 'Q' | 'TTM')
@@ -94,15 +102,57 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
     } = useBalanceSheet(symbol, { period: apiPeriod, limit: visiblePeriodLimit });
 
     const items = data?.data || [];
-    const orderedItems = useMemo(
-        () => [...items].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
+    // Provider payloads can repeat a fiscal period or emit rows with no fiscal
+    // identity at all. `canonicalPeriodRows` never picks between conflicting rows
+    // (nothing in the payload proves which basis is authoritative) - it excludes
+    // them and reports the reason, so a duplicate is disclosed rather than shown as
+    // two columns labelled "2020" (issue #103).
+    const { rows: canonicalItems, issues: periodIssues, invalidPeriodCount } = useMemo(
+        () => canonicalPeriodRows(items),
         [items]
     );
-    const displayItems = useMemo(
+    const orderedItems = useMemo(
+        () => [...canonicalItems].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
+        [canonicalItems]
+    );
+    // The TTM branch returns a single TTM row today (financial_service
+    // .build_ttm_statement_rows), and this filter guarantees the TTM view can
+    // never render a quarter row under a TTM header if a payload carries one
+    // (issue #101).
+    const periodItems = useMemo(
         () => periodMode === 'quarter'
             ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
-            : orderedItems,
+            : periodMode === 'ttm'
+                ? orderedItems.filter((item) => String(item.period ?? '').toUpperCase().includes('TTM'))
+                : orderedItems,
         [orderedItems, periodMode]
+    );
+    // A row the API returned without certification carries every numeric field as
+    // null plus `unavailable_reason`. Rendering it as a column of dashes reads as a
+    // reported zero, so reason-bearing rows are held out of the table/chart and
+    // disclosed in the note instead; a row that merely has some null fields is a
+    // valid partial row and stays (issue #103).
+    const unavailableNote = useMemo(() => describeUnavailableStatementRows(periodItems), [periodItems]);
+    const displayItems = useMemo(
+        () => periodItems.filter((item) => !isUnavailableStatementRow(item)),
+        [periodItems]
+    );
+    const duplicatePeriodNote = useMemo(() => {
+        const notes: string[] = [];
+        const ambiguous = periodIssues.filter((issue) => issue.reason === 'ambiguous-basis');
+        if (ambiguous.length > 0) {
+            notes.push(
+                `Unavailable: ${ambiguous.map((issue) => issue.period).join(', ')} returned conflicting rows with no basis field, so no value is shown.`
+            );
+        }
+        if (invalidPeriodCount > 0) {
+            notes.push(`${invalidPeriodCount} provider row${invalidPeriodCount === 1 ? '' : 's'} without a fiscal period excluded.`);
+        }
+        return notes.length > 0 ? notes.join(' ') : null;
+    }, [periodIssues, invalidPeriodCount]);
+    const statementNote = useMemo(
+        () => [duplicatePeriodNote, unavailableNote].filter(Boolean).join(' ') || null,
+        [duplicatePeriodNote, unavailableNote]
     );
     const hasData = displayItems.length > 0;
     const isFallback = Boolean(error && hasData);
@@ -115,33 +165,44 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                 apiGroup: '/equity',
                 endpoint: `/equity/${symbol}/balance-sheet?period=${apiPeriod}`,
                 sourceLabel: 'Balance sheet',
-                lastDataDate: dataUpdatedAt,
+                lastDataDate: null,
+                fetchedAt: dataUpdatedAt,
                 stale: isFallback,
                 extra: hasData ? { periods: displayItems.length } : undefined,
             }),
         );
     }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
 
+    // One FX conversion boundary: values below are ALREADY in display units. The
+    // axis and tooltip format these without converting again (issue #100), and a
+    // missing raw value stays `null` so the chart draws a gap instead of a fake
+    // zero (issue #103).
     const chartData = useMemo(() => {
         if (!displayItems.length) return [];
-        return displayItems.map((d, index) => {
-            const equityValue = convertFinancialValueForUnit(d.total_equity ?? d.equity ?? 0, unitConfig, d.period) ?? 0
-            const liabilities = convertFinancialValueForUnit(d.total_liabilities ?? 0, unitConfig, d.period) ?? 0
+        return displayItems.map((d) => {
+            const equityValue = convertFinancialValueForUnit(d.total_equity ?? d.equity ?? null, unitConfig, d.period)
+            const liabilities = convertFinancialValueForUnit(d.total_liabilities ?? null, unitConfig, d.period)
             return {
                 equityValue,
-                period: formatFinancialPeriodLabel(d.period, {
-                    mode: periodMode,
-                    index,
-                    total: displayItems.length,
-                }),
-                totalAssets: convertFinancialValueForUnit(d.total_assets || 0, unitConfig, d.period) || 0,
+                period: formatFinancialPeriodLabel(d.period, { mode: periodMode }),
+                totalAssets: convertFinancialValueForUnit(d.total_assets ?? null, unitConfig, d.period),
                 totalLiabilities: liabilities,
                 equity: equityValue,
-                cash: convertFinancialValueForUnit(d.cash || 0, unitConfig, d.period) || 0,
-                debtToEquity: liabilities > 0 && equityValue !== 0 ? liabilities / equityValue : 0,
+                cash: convertFinancialValueForUnit(d.cash ?? null, unitConfig, d.period),
+                debtToEquity: liabilities !== null && equityValue !== null && equityValue !== 0
+                    ? liabilities / equityValue
+                    : null,
             }
         });
     }, [displayItems, periodMode, unitConfig]);
+
+    const chartScale = useMemo(
+        () => resolveUnitScale(
+            chartData.flatMap((point) => [point.totalAssets, point.totalLiabilities, point.equity]),
+            unitConfig,
+        ),
+        [chartData, unitConfig],
+    );
 
     const tableScale = useMemo(() => {
         const values = displayItems.flatMap((item) => [
@@ -167,7 +228,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(
-        () => `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS • First available period is the base period`,
+        () => `Note: ${unitLegend}; per-share values (BVPS) are VND per share and are not converted • Reporting Standard: VAS • First available period is the base period`,
         [unitLegend]
     );
 
@@ -175,11 +236,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
         () =>
             displayItems.slice(-visiblePeriodLimit).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
-                label: formatFinancialPeriodLabel(entry.period, {
-                    mode: periodMode,
-                    index,
-                    total: Math.min(displayItems.length, visiblePeriodLimit),
-                }),
+                label: formatFinancialPeriodLabel(entry.period, { mode: periodMode }),
                 align: 'right' as const,
             })),
         [displayItems, periodMode, visiblePeriodLimit]
@@ -293,7 +350,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                                     <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
                                     <YAxis
-                                        tickFormatter={(value) => formatAxisValue(value, unitConfig)}
+                                        tickFormatter={(value) => formatAxisValue(value, unitConfig, { converted:true })}
                                         tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
                                         axisLine={false}
                                         tickLine={false}
@@ -306,6 +363,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                                             borderRadius: '8px',
                                             fontSize: '11px',
                                         }}
+                                        formatter={(value: unknown) => formatConvertedValue(toFiniteNumber(value), unitConfig)}
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                     <Bar dataKey="totalAssets" name="Assets" fill="#3b82f6" radius={[2, 2, 0, 0]} />
@@ -318,7 +376,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                                     <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
                                     <YAxis
                                         yAxisId="left"
-                                        tickFormatter={(value) => formatAxisValue(value, unitConfig)}
+                                        tickFormatter={(value) => formatAxisValue(value, unitConfig, { converted:true })}
                                         tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
                                         axisLine={false}
                                         tickLine={false}
@@ -339,6 +397,12 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                                             border: '1px solid var(--border-default)',
                                             borderRadius: '8px',
                                             fontSize: '11px',
+                                        }}
+                                        formatter={(value: unknown, name: unknown) => {
+                                            const numeric = toFiniteNumber(value)
+                                            return name === 'D/E Ratio'
+                                                ? `${numeric === null ? '—' : numeric.toFixed(2)}x`
+                                                : formatConvertedValue(numeric, unitConfig)
                                         }}
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
@@ -401,10 +465,11 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
             <div className="h-full flex flex-col px-2 py-1.5">
                 <div className="pb-1 border-b border-[var(--border-subtle)]">
                     <WidgetMeta
-                        updatedAt={dataUpdatedAt}
+                        updatedAt={null}
+                        fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right'}
+                        note={statementNote ?? (period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right')}
                         sourceLabel="Balance sheet"
                         align="right"
                     />
@@ -425,7 +490,10 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !hasData ? (
                         <WidgetEmpty
-                            message={`No balance sheet data for ${symbol}. Try switching period or refresh.`}
+                            message={unavailableNote
+                                ? `Balance sheet unavailable for ${symbol}.`
+                                : `No balance sheet data for ${symbol}. Try switching period or refresh.`}
+                            detail={unavailableNote ?? undefined}
                             icon={<Scale size={18} />}
                             action={{ label: 'Retry', onClick: () => refetch() }}
                         />

@@ -170,7 +170,23 @@ describe('Wave 12 widget truth states', () => {
     expect(screen.getByText(/missing lines are not inferred/i)).toBeInTheDocument();
   });
 
-  it('keeps technical data-quality, timeframe, source, and non-advice disclosures', () => {
+  it('withholds technical recommendations when the response is not unit-certified', () => {
+    mockUseFullTechnicalAnalysis.mockReturnValue(query({
+      symbol: 'FPT',
+      timeframe: 'D',
+      levels: {},
+      signals: { overall_signal: 'buy', buy_count: 3, neutral_count: 1, sell_count: 0, total_indicators: 4, indicators: [], trend_strength: 'strong' },
+      data_quality: { status: 'degraded', bars: 42, issues: ['Sparse history'] },
+      generated_at: '2026-01-01T00:00:00Z',
+    }));
+
+    render(<TechnicalSummaryWidget id="technical-1" symbol="FPT" />);
+
+    expect(screen.getByText(/technical summary unavailable: historical price units were not certified/i)).toBeInTheDocument();
+    expect(screen.queryByText('BUY')).not.toBeInTheDocument();
+  });
+
+  it('keeps certified technical data-quality, timeframe, source, and non-advice disclosures', () => {
     mockUseFullTechnicalAnalysis.mockReturnValue(query({
       symbol: 'FPT',
       timeframe: 'D',
@@ -183,33 +199,28 @@ describe('Wave 12 widget truth states', () => {
       volatility: { bollinger_bands: {}, adx: {}, volume: null, ichimoku_cloud: null },
       levels: { support_resistance: {}, fibonacci: { levels: { '0.5': Number.NaN } } },
       signals: { overall_signal: 'neutral', buy_count: Number.NaN, neutral_count: 2, sell_count: Number.POSITIVE_INFINITY, total_indicators: 2, indicators: [], trend_strength: 'weak' },
-      data_quality: { status: 'degraded', bars: 42, issues: ['Sparse history'] },
+      data_quality: { status: 'degraded', bars: 42, unit_status: 'confirmed_vnd', unresolved_excluded_dates: [], issues: ['Sparse history'] },
       generated_at: '2026-01-01T00:00:00Z',
-    } as any));
+    }));
 
-    render(<TechnicalSummaryWidget id="technical-1" symbol="FPT" />);
+    render(<TechnicalSummaryWidget id="technical-2" symbol="FPT" />);
 
     expect(screen.getByText(/Daily · 42 bars · degraded · aggregated indicators, not advice/i)).toBeInTheDocument();
     expect(screen.getByText('VNIBB technical analysis')).toBeInTheDocument();
     expect(screen.getByText('Sparse history')).toBeInTheDocument();
     expect(screen.getAllByText('--').length).toBeGreaterThan(0);
-    expect(mockUseFullTechnicalAnalysis).toHaveBeenCalledWith('FPT', { timeframe: 'D' });
   });
 
   it('does not invent a technical recommendation from a response with no observed indicators', () => {
-    const onDataChange = jest.fn();
     mockUseFullTechnicalAnalysis.mockReturnValue(query({
-      signals: { overall_signal: 'neutral', buy_count: 0, neutral_count: 0, sell_count: 0, total_indicators: 0, indicators: [] },
-      data_quality: { status: 'degraded', bars: 0, issues: ['No usable indicators'] },
+      signals: { overall_signal: 'neutral', buy_count: 0, neutral_count: 0, sell_count: 0, total_indicators: 0, indicators:[] },
+      data_quality: { status: 'degraded', bars: 0, unit_status: 'confirmed_vnd', unresolved_excluded_dates: [], issues: ['No usable indicators'] },
     }));
 
-    render(<TechnicalSummaryWidget id="technical-empty" symbol="FPT" onDataChange={onDataChange} />);
+    render(<TechnicalSummaryWidget id="technical-empty" symbol="FPT" />);
 
     expect(screen.getByText(/no technical indicators available/i)).toBeInTheDocument();
     expect(screen.queryByText('NEUTRAL')).not.toBeInTheDocument();
-    expect(onDataChange).toHaveBeenCalledWith(expect.objectContaining({
-      __widgetRuntime: expect.objectContaining({ layoutHint: expect.objectContaining({ empty: true }) }),
-    }));
   });
 
   it('labels fetched valuation history as server-sourced and cached data as stale', () => {

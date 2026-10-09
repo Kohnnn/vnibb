@@ -4,7 +4,7 @@ from datetime import date
 import pytest
 
 from vnibb.api.v1.schemas import StandardResponse
-from vnibb.api.v1.equity import _normalize_statement_unit_outliers, _ratio_has_metric_value, _to_ratio_data
+from vnibb.api.v1.equity import _enrich_financial_statement_rows, _ratio_has_metric_value, _to_ratio_data
 from vnibb.api.v1.equity import _enrich_missing_ratio_metrics
 from vnibb.api.v1.equity import _compute_rolling_high_low, _load_mongo_financial_ratio_rows, _load_mongo_financial_statement_rows
 from vnibb.api.v1.equity import get_fundamental_analysis
@@ -100,17 +100,17 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch):
     assert response.error == "Partial data unavailable"
 
 
-def test_normalize_statement_unit_outliers_repairs_single_1000x_row():
+def test_statement_enrichment_does_not_guess_scale_from_other_periods():
     rows = [
         FinancialStatementData(symbol="FPT", period="Q1-2025", statement_type="balance", total_assets=73_997_673_121_789, cash=5_342_746_710_936),
         FinancialStatementData(symbol="FPT", period="Q2-2025", statement_type="balance", total_assets=81_266_075_455_371, cash=7_755_450_852_909),
         FinancialStatementData(symbol="FPT", period="Q3-2025", statement_type="balance", total_assets=81_601_597_008_000_000, cash=7_755_450_853_000_000),
     ]
 
-    normalized = _normalize_statement_unit_outliers(rows)
+    normalized = _enrich_financial_statement_rows(rows)
 
-    assert normalized[2].total_assets == 81_601_597_008_000
-    assert normalized[2].cash == 7_755_450_853_000
+    assert normalized[2].total_assets == 81_601_597_008_000_000
+    assert normalized[2].cash == 7_755_450_853_000_000
 
 def make_ratio_row(**overrides):
     base = {
@@ -185,6 +185,7 @@ async def test_load_mongo_financial_statement_rows_transforms_raw_records(monkey
             {
                 "raw": {
                     "yearReport": 2024,
+                    "_value_unit": "VND",
                     "revenue": 1200.0,
                     "netIncome": 180.0,
                 }
@@ -192,6 +193,7 @@ async def test_load_mongo_financial_statement_rows_transforms_raw_records(monkey
             {
                 "raw": {
                     "yearReport": 2023,
+                    "_value_unit": "VND",
                     "revenue": 1000.0,
                     "netIncome": 150.0,
                 }

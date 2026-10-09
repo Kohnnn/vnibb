@@ -73,12 +73,16 @@ async def get_all_symbols(
     cache_result = await cache_manager.get_listing_data(source=source)
     
     if cache_result.is_fresh:
-        # Convert Stock models to SymbolData
+        # Convert Stock models to SymbolData. `industry` is carried through when the
+        # cache row has one: dropping it left the Listing Browser's industry filter
+        # with only its "Unclassified" bucket (issue #107). A row with no stored
+        # industry stays null rather than being labelled with a guessed sector.
         data = [
             SymbolData(
                 symbol=stock.symbol,
                 organ_name=stock.company_name,
                 exchange=stock.exchange,
+                industry=stock.industry,
             )
             for stock in cache_result.data
         ]
@@ -115,6 +119,7 @@ async def get_all_symbols(
                     symbol=stock.symbol,
                     organ_name=stock.company_name,
                     exchange=stock.exchange,
+                    industry=stock.industry,
                 )
                 for stock in cache_result.data
             ]

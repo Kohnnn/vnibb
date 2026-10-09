@@ -22,7 +22,12 @@ jest.mock('@/components/ui/widget-skeleton', () => ({
 }))
 
 jest.mock('@/components/ui/widget-states', () => ({
-  WidgetEmpty: ({ message }: { message: string }) => <div>{message}</div>
+  WidgetEmpty: ({ message, detail }: { message: string; detail?: string }) => (
+    <div>
+      <div>{message}</div>
+      <div>{detail}</div>
+    </div>
+  )
 }))
 
 // Keep the real chart component and assert the axis label rendered by Recharts.
@@ -83,19 +88,26 @@ describe('HistoricalPriceChart axis price unit', () => {
     expect(screen.getByTestId('price-axis-label').textContent).toBe('VND')
   })
 
-  test('uses confirmed_vnd metadata only when the row marker is missing', () => {
+  test('refuses rows without a unit marker even when metadata claims confirmed_vnd', () => {
     mockUseHistoricalPrices.mockReturnValue(historyQuery([row({ price_unit: undefined })], 'confirmed_vnd'))
-    expect(renderChart()).toBe('Adj. VND')
+    render(<HistoricalPriceChart symbol="FPT" timeframe="1M" />)
+    expect(screen.getByText('Historical price unit unconfirmed.')).toBeTruthy()
+    // The unmarked bar must not reach the series: plotting it would certify a
+    // magnitude the API never declared.
+    expect(mockLineChartData).not.toHaveBeenCalled()
   })
 
   test('does not label an explicit unknown row marker as VND even with confirmed_vnd metadata', () => {
     mockUseHistoricalPrices.mockReturnValue(historyQuery([row({ price_unit: 'unknown' })], 'confirmed_vnd'))
-    expect(renderChart()).toBe('Price unit unconfirmed')
+    render(<HistoricalPriceChart symbol="FPT" timeframe="1M" />)
+    expect(screen.getByText('Historical price unit unconfirmed.')).toBeTruthy()
+    expect(mockLineChartData).not.toHaveBeenCalled()
   })
 
   test('keeps genuinely unconfirmed history off the VND label', () => {
     mockUseHistoricalPrices.mockReturnValue(historyQuery([row({ price_unit: undefined })], 'unconfirmed'))
-    expect(renderChart()).toBe('Price unit unconfirmed')
+    render(<HistoricalPriceChart symbol="FPT" timeframe="1M" />)
+    expect(screen.getByText('Historical price unit unconfirmed.')).toBeTruthy()
   })
 
   test('preserves index point units and adjusted semantics', () => {
@@ -106,13 +118,17 @@ describe('HistoricalPriceChart axis price unit', () => {
     expect(mockLineChartData).toHaveBeenLastCalledWith([{ date: '2026-10-02', close: 1210 }])
   })
 
-  test('keeps a mixed-unit series unconfirmed rather than defaulting to VND', () => {
+  test('refuses a mixed-unit series instead of joining the certified bars into one line', () => {
     mockUseHistoricalPrices.mockReturnValue(
       historyQuery(
         [row({ time: '2026-10-01', price_unit: 'VND' }), row({ time: '2026-10-02', price_unit: 'unknown' })],
         'mixed'
       )
     )
-    expect(renderChart()).toBe('Price unit unconfirmed')
+    render(<HistoricalPriceChart symbol="FPT" timeframe="1M" />)
+    expect(screen.getByText('Historical price unit unconfirmed.')).toBeTruthy()
+    // A line drawn through only the VND row would present the excluded session as
+    // continuous certified history.
+    expect(mockLineChartData).not.toHaveBeenCalled()
   })
 })

@@ -11,7 +11,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useUnit } from '@/contexts/UnitContext';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { useBalanceSheet, useCashFlow, useFinancialRatios, useIncomeStatement, useProfile } from '@/lib/queries';
-import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { describeUnavailableStatementRows, formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { convertFinancialValueForUnit, formatNumber, formatPercent, formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { BalanceSheetData, CashFlowData, FinancialRatioData, IncomeStatementData } from '@/types/equity';
@@ -202,6 +202,13 @@ function formatSnapshotPeriodLabel(periodKey: string, mode: FinancialPeriodMode)
 function buildPeriodMap<T extends { period?: string }>(rows: T[], mode: FinancialPeriodMode): Map<string, T> {
     const map = new Map<string, T>();
     rows.forEach((row) => {
+        // Only a row that actually says TTM may be keyed as a TTM period; the
+        // normalizer otherwise derives a TTM key from any row in TTM mode, which
+        // relabelled a quarter (and the ratio feed, which has no TTM at all) as a
+        // trailing-twelve-month period (issue #103).
+        if (mode === 'ttm' && !String(row.period ?? '').toUpperCase().includes('TTM')) {
+            return;
+        }
         const normalized = normalizeStatementPeriod(row.period, mode);
         if (normalized) {
             map.set(normalized, row);
@@ -601,12 +608,17 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
     const periodMode: FinancialPeriodMode = period === 'FY' ? 'year' : period === 'Q' ? 'quarter' : 'ttm';
     const periodLimit = period === 'Q' ? QUARTER_PERIOD_LIMIT : ANNUAL_PERIOD_LIMIT;
     const statementPeriod = period === 'FY' ? 'year' : period === 'Q' ? 'quarter' : 'TTM';
-    const ratioPeriod = period === 'FY' ? 'FY' : period === 'Q' ? 'Q' : 'TTM';
+    // Ratios are the one section with no certified TTM: the provider only offers
+    // sums of four quarters (including summed per-share values), which is the
+    // mislabel #101 forbids. The ratios query is therefore not issued in TTM mode
+    // and the section renders an explicit unsupported state, exactly like the
+    // FinancialRatiosWidget and FinancialsWidget ratio surfaces.
+    const ratioPeriod = period === 'FY' ? 'FY' : 'Q';
 
     const incomeQuery = useIncomeStatement(symbol, { period: statementPeriod, limit: periodLimit });
     const balanceQuery = useBalanceSheet(symbol, { period: statementPeriod, limit: periodLimit });
     const cashFlowQuery = useCashFlow(symbol, { period: statementPeriod, limit: periodLimit });
-    const ratiosQuery = useFinancialRatios(symbol, { period: ratioPeriod });
+    const ratiosQuery = useFinancialRatios(symbol, { period: ratioPeriod, enabled: period !== 'TTM' });
     const profileQuery = useProfile(symbol, Boolean(symbol));
 
     const incomeRows = useMemo(
@@ -690,10 +702,19 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
         && balanceRows.length === 0
         && cashRows.length === 0
         && ratioRows.length === 0;
+    // The API's own uncertified-row reason per section, so a section that is empty
+    // because the provider refused the values says why instead of only "no data"
+    // (issue #103).
+    const sectionUnavailableNotes = useMemo<Record<string, string | null>>(() => ({
+        pl: describeUnavailableStatementRows(incomeRows),
+        bs: describeUnavailableStatementRows(balanceRows),
+        cf: describeUnavailableStatementRows(cashRows),
+        ratios: describeUnavailableStatementRows(ratioRows),
+    }), [incomeRows, balanceRows, cashRows, ratioRows]);
     const hasPeriods = periods.length > 0;
     const isFetching = incomeQuery.isFetching || balanceQuery.isFetching || cashFlowQuery.isFetching || ratiosQuery.isFetching;
     const combinedError = incomeQuery.error || balanceQuery.error || cashFlowQuery.error || ratiosQuery.error;
-    const updatedAt = Math.max(
+    const fetchedAt = Math.max(
         incomeQuery.dataUpdatedAt,
         balanceQuery.dataUpdatedAt,
         cashFlowQuery.dataUpdatedAt,
@@ -705,14 +726,17 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
             buildWidgetRuntime({
                 empty: !hasPeriods,
                 apiGroup: '/equity',
-                endpoint: `/equity/${symbol}/income-statement,balance-sheet,cash-flow,ratios?period=${ratioPeriod}`,
+                endpoint: period === 'TTM'
+                    ? `/equity/${symbol}/income-statement,balance-sheet,cash-flow?period=${statementPeriod} (ratios not requested: TTM unsupported)`
+                    : `/equity/${symbol}/income-statement,balance-sheet,cash-flow,ratios?period=${statementPeriod}`,
                 sourceLabel: 'Financial snapshot',
-                lastDataDate: updatedAt,
+                lastDataDate: null,
+                fetchedAt,
                 stale: Boolean(combinedError && hasPeriods),
                 extra: hasPeriods ? { periods: periods.length } : undefined,
             }),
         );
-    }, [onDataChange, hasPeriods, combinedError, updatedAt, symbol, ratioPeriod, periods.length]);
+    }, [onDataChange, hasPeriods, combinedError, fetchedAt, symbol, statementPeriod, period, periods.length]);
 
     return (
         <WidgetContainer
@@ -735,7 +759,8 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
                     <PeriodToggle value={period} onChange={setPeriod} compact options={[...SNAPSHOT_PERIOD_OPTIONS]} />
                     <div className="ml-auto">
                         <WidgetMeta
-                            updatedAt={updatedAt}
+                            updatedAt={null}
+                            fetchedAt={fetchedAt}
                             isFetching={isFetching && hasPeriods}
                             note={period === 'FY' ? 'Annual · newest on right' : period === 'Q' ? 'Quarterly · newest on right' : 'TTM · newest on right'}
                             align="right"
@@ -768,6 +793,15 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
                                         <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--text-primary)]">{section.title}</div>
                                         <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">{unitLegend}</div>
                                     </div>
+                                    {sectionUnavailableNotes[section.id] && (
+                                        // An uncertified row must disclose its reason even when the
+                                        // section still has other values: the table below would show
+                                        // the populated periods and hide that one period is missing
+                                        // rather than zero (#103).
+                                        <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+                                            {sectionUnavailableNotes[section.id]}
+                                        </div>
+                                    )}
                                     {sectionHasValues ? (
                                         <DenseFinancialTable
                                             columns={tableColumns}
@@ -795,8 +829,19 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
                                         />
                                     ) : (
                                         <WidgetEmpty
-                                            message={`No ${section.title.toLowerCase()} data for ${symbol}.`}
-                                            detail="The endpoint returned periods, but no populated fields for this section."
+                                            message={sectionUnavailableNotes[section.id]
+                                                ? `${section.title} unavailable for ${symbol}.`
+                                                : period === 'TTM' && section.id === 'ratios'
+                                                    ? 'TTM ratios are not supported'
+                                                    : `No ${section.title.toLowerCase()} data for ${symbol}.`}
+                                            // The reason sentence is already shown above the section, so
+                                            // it is not repeated here; the other two cases keep their
+                                            // existing detail text.
+                                            detail={sectionUnavailableNotes[section.id]
+                                                ? undefined
+                                                : period === 'TTM' && section.id === 'ratios'
+                                                    ? 'The provider does not publish ratios recomputed from a verified twelve-month window, so the quarterly ratio rows are not shown as TTM. Select FY or Q.'
+                                                    : 'The endpoint returned periods, but no populated fields for this section.'}
                                             size="compact"
                                         />
                                     )}

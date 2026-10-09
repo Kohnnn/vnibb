@@ -54,7 +54,7 @@ export function WatchlistLimitsMonitorWidget({ id, config, widgetGroup, onRemove
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = usePriceBoard(symbols, { enabled: symbols.length > 0 });
   const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'watchlist_limits_monitor' });
   const rows = data?.data ?? [];
-  const refreshedAt = rows[0]?.refreshedAt ?? dataUpdatedAt;
+  const fetchedAt = dataUpdatedAt || rows[0]?.refreshedAt || null;
   const source = rows[0]?.source ?? 'Price board';
 
   useEffect(() => {
@@ -63,17 +63,18 @@ export function WatchlistLimitsMonitorWidget({ id, config, widgetGroup, onRemove
       apiGroup: '/trading',
       endpoint: '/trading/price-board',
       sourceLabel: source,
-      lastDataDate: refreshedAt,
+      lastDataDate: null,
+      fetchedAt,
       stale: Boolean(error && rows.length),
       extra: { requestedSymbols: symbols.length, returnedSymbols: rows.length, snapshot: 'live', ...symbolSummary },
     }));
-  }, [error, onDataChange, refreshedAt, rows.length, source, symbolSummary, symbols.length]);
+  }, [error, onDataChange, fetchedAt, rows.length, source, symbolSummary, symbols.length]);
 
   return (
     <WidgetContainer title="Watchlist Ceiling/Floor" widgetId={id} onRefresh={() => refetch()} onClose={onRemove} isLoading={isLoading && !rows.length} noPadding>
       <div className="flex h-full flex-col bg-[var(--bg-primary)]">
         <div className="border-b border-[var(--border-subtle)] px-3 py-2">
-          <WidgetMeta updatedAt={refreshedAt} isFetching={isFetching && Boolean(rows.length)} sourceLabel={source} note={`Dashboard ${symbolSummary.dashboardCount} · Manual ${symbolSummary.manualCount} · Deduplicated ${symbolSummary.deduplicatedCount} · Capped ${symbolSummary.cappedCount} · Query ${symbols.length}/50`} align="right" />
+          <WidgetMeta updatedAt={null} fetchedAt={fetchedAt} isFetching={isFetching && Boolean(rows.length)} sourceLabel={source} note={`Dashboard ${symbolSummary.dashboardCount} · Manual ${symbolSummary.manualCount} · Deduplicated ${symbolSummary.deduplicatedCount} · Capped ${symbolSummary.cappedCount} · Query ${symbols.length}/50`} align="right" />
         </div>
         <div className="flex-1 overflow-auto p-3">
           {!symbols.length ? <WidgetEmpty message="Your watchlist is empty" detail="Add symbols in the Watchlist widget to monitor provider ceiling and floor fields." /> : isLoading && !rows.length ? <WidgetSkeleton lines={7} /> : error && !rows.length ? <WidgetError error={error as Error} onRetry={() => refetch()} /> : !rows.length ? <WidgetEmpty message="No live price-board rows are available" detail="The price board did not return a snapshot for the requested watchlist symbols." /> : <div className="space-y-2">{rows.map((row) => <LimitRow key={row.symbol} row={row} onSelect={setLinkedSymbol} />)}</div>}

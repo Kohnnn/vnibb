@@ -373,3 +373,104 @@ async def test_price_performance_excludes_unknown_units_and_preserves_points(mon
     monkeypatch.setattr("vnibb.providers.vnstock.equity_historical.VnstockEquityHistoricalFetcher.fetch", fake_fetch)
     result = await ComparisonService().compare_price_performance(["VCI", "VNINDEX", "UNKNOWN"])
     assert result[-1].values == {"VCI": pytest.approx(110.0), "VNINDEX": pytest.approx(110.0)}
+
+
+def test_normalize_comparison_metric_never_infers_a_magnitude():
+    """#106: stored comparison percents are canonical; no magnitude heuristics.
+
+    The canonical percent values are already scaled (the derived backfill
+    multiplies by 100). A stored fraction must not be silently promoted, and an
+    out-of-bound value is unknown rather than divided down to fit.
+    """
+    from vnibb.services.comparison_service import _normalize_comparison_metric
+
+    # Whole-unit percent stays exactly as stored (fixture unit is whole).
+    assert _normalize_comparison_metric("ocf_sales", 1) == 1
+    assert _normalize_comparison_metric("ocf_sales", 21.5) == 21.5
+    # A fraction is no longer promoted to 100x.
+    assert _normalize_comparison_metric("roe", 0.25) == 0.25
+    # A value above the plausible percent bound is unknown, not rescaled.
+    assert _normalize_comparison_metric("roe", 25_000.0) is None
+    # Non-numeric and missing stay missing.
+    assert _normalize_comparison_metric("roe", None) is None
+    assert _normalize_comparison_metric("roe", "") is None
+
+
+def test_ratio_json_percent_keys_follow_the_writer_fraction_contract():
+    """#106: raw-JSON `ocf_sales`/`fcf_yield` are stored as fractions.
+
+    `_build_ratio_enrichment` writes `operating_cash_flow / revenue` and
+    `free_cash_flow / market_cap`, while the comparison contract declares
+    `format="percent"`. The read site converts by key name so one metric cannot
+    render 100x apart depending on which fallback supplied it. No other key and
+    no column is rescaled.
+    """
+    from types import SimpleNamespace
+
+    from vnibb.services.comparison_service import _metric_from_ratio_row, _ratio_json_metric
+
+    raw_data = {"ocf_sales": 0.001, "fcf_yield": 0.052, "roe": 0.25}
+    assert _ratio_json_metric("ocf_sales", raw_data, "ocfSales") == pytest.approx(0.1)
+    assert _ratio_json_metric("fcf_yield", raw_data, "fcfYield") == pytest.approx(5.2)
+    # A key with no fraction writer keeps its stored magnitude.
+    assert _ratio_json_metric("roe", raw_data) == pytest.approx(0.25)
+
+    row = SimpleNamespace(pe_ratio=12.0, raw_data=raw_data)
+    assert _metric_from_ratio_row(row, "ocf_sales") == pytest.approx(0.1)
+    # A column value is returned as stored, never rescaled.
+    assert _metric_from_ratio_row(row, "pe") == pytest.approx(12.0)
+
+
+def test_ttm_statement_snapshot_requires_consecutive_certified_single_quarters():
+    """#106: a four-row sum is only TTM when the rows are certified consecutive quarters."""
+    from types import SimpleNamespace
+
+    from vnibb.services.comparison_service import _build_statement_snapshot
+
+    def quarter(year: int, quarter_number: int, revenue: float, *, flow_basis="single_quarter", unit="VND"):
+        return SimpleNamespace(
+            fiscal_year=year,
+            fiscal_quarter=quarter_number,
+            revenue=revenue,
+            gross_profit=None,
+            operating_income=None,
+            net_income=None,
+            interest_expense=None,
+            operating_cash_flow=None,
+            free_cash_flow=None,
+            debt_repayment=None,
+            raw_data={"_financial_lineage": {"value_unit": unit, "flow_basis": flow_basis}},
+        )
+
+    # `_load_statement_rows` orders `desc(fiscal_year), desc(fiscal_quarter)`, so the
+    # window arrives newest-first; the TTM guard reads it in that order.
+    consecutive = [
+        quarter(2024, 4, 40.0),
+        quarter(2024, 3, 30.0),
+        quarter(2024, 2, 20.0),
+        quarter(2024, 1, 10.0),
+    ]
+    assert _build_statement_snapshot(consecutive, "income", ttm=True)["revenue"] == pytest.approx(100.0)
+
+    # A cumulative YTD series is not a four-quarter flow; summing it double counts.
+    # Same window, so only the basis guard can reject it.
+    cumulative = [quarter(2024, 4, 400.0, flow_basis="cumulative_ytd"), *consecutive[1:]]
+    assert _build_statement_snapshot(cumulative, "income", ttm=True) is None
+
+    # A legacy row with no certified unit lineage is withheld, not summed.
+    unknown_unit = [quarter(2024, 4, 40.0, unit="unknown"), *consecutive[1:]]
+    assert _build_statement_snapshot(unknown_unit, "income", ttm=True) is None
+
+    # A gap means the window is not four consecutive quarters.
+    gapped = [consecutive[0], consecutive[1], quarter(2023, 2, 20.0), quarter(2023, 1, 10.0)]
+    assert _build_statement_snapshot(gapped, "income", ttm=True) is None
+
+    # The balance sheet is a latest-quarter snapshot in every mode, never a sum.
+    balance = SimpleNamespace(
+        fiscal_year=2024,
+        fiscal_quarter=4,
+        total_assets=1.0,
+        total_liabilities=2.0,
+        total_equity=3.0,
+    )
+    assert _build_statement_snapshot([balance], "balance", ttm=True)["total_assets"] == pytest.approx(1.0)

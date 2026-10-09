@@ -26,6 +26,7 @@ const liveBadgeStyle = {
 function getPresentation(status: WidgetHealthState['status']) {
   switch (status) {
     case 'awaiting_update':
+    case 'unknown':
       return { icon: Clock, style: infoBadgeStyle };
     case 'cached':
       return { icon: Database, style: warningBadgeStyle };
@@ -46,6 +47,9 @@ export interface WidgetHealthChipDetails {
   apiGroup?: string;
   endpoint?: string;
   updatedAt?: number | string | Date | null;
+  fetchedAt?: number | string | Date | null;
+  cached?: boolean;
+  coverage?: 'complete' | 'partial' | 'unknown';
   adjustmentMode?: string;
 }
 
@@ -70,6 +74,7 @@ export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
   const presentation = getPresentation(health.status);
   const Icon = presentation.icon;
   const updatedDate = toDate(details?.updatedAt);
+  const fetchedDate = toDate(details?.fetchedAt);
 
   return (
     <Popover>
@@ -115,12 +120,30 @@ export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
               <span className="text-right font-mono text-[9px] text-slate-100/90">{details.endpoint}</span>
             </div>
           )}
-          {updatedDate && (
+          <div className="flex justify-between gap-2">
+            <span className="text-slate-400">Source as of</span>
+            <span className="text-right text-slate-100/90" suppressHydrationWarning title={updatedDate ? formatTime(updatedDate, true) : undefined}>
+              {updatedDate ? formatAbsoluteTimestamp(updatedDate) : 'Unknown'}
+            </span>
+          </div>
+          {fetchedDate && (
             <div className="flex justify-between gap-2">
-              <span className="text-slate-400">Updated</span>
-              <span className="text-right text-slate-100/90" suppressHydrationWarning title={formatTime(updatedDate, true)}>
-                {formatAbsoluteTimestamp(updatedDate)}
+              <span className="text-slate-400">Fetched at</span>
+              <span className="text-right text-slate-100/90" suppressHydrationWarning title={formatTime(fetchedDate, true)}>
+                {formatAbsoluteTimestamp(fetchedDate)}
               </span>
+            </div>
+          )}
+          {details?.cached !== undefined && (
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-400">Delivery</span>
+              <span>{details.cached ? 'Cached snapshot' : 'Not marked cached'}</span>
+            </div>
+          )}
+          {details?.coverage && (
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-400">Coverage</span>
+              <span>{details.coverage}</span>
             </div>
           )}
           {details?.adjustmentMode && (

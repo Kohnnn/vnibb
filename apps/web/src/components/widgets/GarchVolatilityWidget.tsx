@@ -41,8 +41,14 @@ export function GarchVolatilityWidget({ symbol, onDataChange }: GarchVolatilityW
     enabled: Boolean(upperSymbol),
   })
 
+  const quality = garchState?.status === 'ok' ? garchState.response.meta : undefined
+  // Only a certified unit status admits the fitted volatility series; an absent
+  // or mixed/unconfirmed status must not render ordinary-looking values
+  // (QA #98).
+  const derivedWithheld = Boolean(garchState?.status === 'ok') && (!['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+    || Boolean(quality?.unresolved_excluded_dates?.length))
   const response = garchState?.status === 'ok' ? garchState.response : undefined
-  const metric = garchState?.status === 'ok' ? garchState.metric : null
+  const metric = garchState?.status === 'ok' && !derivedWithheld ? garchState.metric : null
   const backendError = garchState?.status === 'ok' && typeof garchState.error === 'string' ? garchState.error : ''
   const unavailableMessage = garchState?.status === 'not_deployed' ? 'GARCH volatility is unavailable until Wave 5.1 deploys.' : ''
   const series = metric?.series ?? []
@@ -56,7 +62,8 @@ export function GarchVolatilityWidget({ symbol, onDataChange }: GarchVolatilityW
       apiGroup: '/quant',
       endpoint: `/quant/${upperSymbol}?period=${period}&metrics=garch_volatility`,
       sourceLabel: 'GARCH volatility',
-      lastDataDate: response?.data.last_data_date ?? response?.data.computed_at ?? dataUpdatedAt,
+      lastDataDate: response?.data.last_data_date ?? null,
+      fetchedAt: dataUpdatedAt,
       adjustmentMode: response?.data.adjustment_mode,
       extra: hasData ? {
         points: series.length,
@@ -64,7 +71,7 @@ export function GarchVolatilityWidget({ symbol, onDataChange }: GarchVolatilityW
         conditionalVolPct: metric?.current_conditional_vol_pct ?? null,
       } : undefined,
     }))
-  }, [dataUpdatedAt, hasData, metric?.current_conditional_vol_pct, metric?.persistence, onDataChange, period, response?.data.adjustment_mode, response?.data.computed_at, response?.data.last_data_date, series.length, upperSymbol])
+  }, [dataUpdatedAt, hasData, metric?.current_conditional_vol_pct, metric?.persistence, onDataChange, period, response?.data.adjustment_mode, response?.data.last_data_date, series.length, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view GARCH volatility" icon={<Activity size={18} />} />
@@ -92,7 +99,7 @@ export function GarchVolatilityWidget({ symbol, onDataChange }: GarchVolatilityW
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={response?.data.last_data_date ?? response?.data.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} GARCH(1,1)`} align="right" />
+          <WidgetMeta updatedAt={response?.data.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} GARCH(1,1)`} align="right" />
         </div>
       </div>
 
@@ -110,7 +117,13 @@ export function GarchVolatilityWidget({ symbol, onDataChange }: GarchVolatilityW
       ) : error ? (
         <WidgetError error={queryError} onRetry={() => refetch()} />
       ) : !hasData ? (
-        <WidgetEmpty message={unavailableMessage || backendError || 'No GARCH volatility data'} icon={<Activity size={18} />} size="compact" />
+        <WidgetEmpty
+          message={derivedWithheld
+            ? 'GARCH volatility unavailable: historical price units were not certified.'
+            : unavailableMessage || backendError || 'No GARCH volatility data'}
+          icon={<Activity size={18} />}
+          size="compact"
+        />
       ) : (
         <>
           <QuantWarningBanner warning={quantWarning} className="mb-2" />

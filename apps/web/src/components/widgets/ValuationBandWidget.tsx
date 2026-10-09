@@ -106,7 +106,8 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
       apiGroup: '/equity',
       endpoint: `/equity/${upperSymbol}/ratios/history?ratios=pe,pb,ps,ev_ebitda,ev_sales&period=year&limit=60`,
       sourceLabel: 'Ratio history',
-      lastDataDate: rows.at(-1)?.period ?? dataUpdatedAt,
+      lastDataDate: null,
+      fetchedAt: dataUpdatedAt,
       stale: isFallback,
       extra: {
         periods: rows.length,
@@ -154,7 +155,8 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
             ))}
           </div>
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={null}
+            fetchedAt={dataUpdatedAt}
             isCached={isFallback}
             isFetching={isFetching && hasData}
             note={`Annual · ${seriesValues.length} positive observations · descriptive only`}

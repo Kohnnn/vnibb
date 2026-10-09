@@ -19,6 +19,17 @@
  *    pushState). This keeps the URL shareable without creating extra history
  *    entries that the Next App Router cannot reconcile (which caused a blank
  *    screen on browser Back — DEF-15).
+ *  - An inbound URL (deep link or Back/Forward) wins until the state it asked
+ *    for is actually on screen (#102). State updates are committed
+ *    asynchronously, so without that hold the write effect published the
+ *    *pre-apply* state over the URL it had just read, erasing `?tab=` and
+ *    leaving the body on a no-tab spinner.
+ *
+ * All effects depend only on values that actually describe the view
+ * (`ready`, the workspace list, the resolved tab). The apply callbacks are read
+ * through a ref so a host that rebuilds them per render (as DashboardClient
+ * does, because they close over `state.dashboards`) cannot make these effects
+ * re-run on every render (#102 fresh-profile churn).
  */
 
 import { useCallback, useEffect, useRef } from 'react';
@@ -32,10 +43,21 @@ interface UseUrlSyncParams {
   symbol: string;
   /** Valid dashboard ids, used to ignore stale/invalid deep links. */
   dashboardIds: string[];
-  /** Returns valid tab ids for a dashboard id (for deep-link validation). */
-  getTabIds: (dashboardId: string) => string[];
-  applyDashboard: (id: string) => void;
-  applyTab: (id: string) => void;
+  /**
+   * Resolves a URL tab slug to an actual tab id for a dashboard (#102). The URL
+   * may carry a stable preference slug (e.g. `news-events`) that is not a raw
+   * tab id; the host resolves it by id then normalized tab name.
+   */
+  resolveTabId: (dashboardId: string, slug: string) => string | null;
+  /**
+   * Increments only on a genuine user selection (#102). Captured when an
+   * inbound URL is applied; if it advances before that state lands, the user
+   * took over and the URL hold is released. Programmatic writes (bundled
+   * seeding, backend snapshot, the hook's own apply) never bump it.
+   */
+  userNavigationSeq: number;
+  applyDashboard: (id: string, options?: { programmatic?: boolean }) => void;
+  applyTab: (id: string, options?: { programmatic?: boolean }) => void;
   applySymbol: (symbol: string) => void;
 }
 
@@ -74,17 +96,42 @@ export function useUrlSync({
   activeTabId,
   symbol,
   dashboardIds,
-  getTabIds,
+  resolveTabId,
+  userNavigationSeq,
   applyDashboard,
   applyTab,
   applySymbol,
 }: UseUrlSyncParams) {
   const hasRestoredRef = useRef(false);
-  // Suppress the write-effect for one cycle right after we apply an inbound
-  // URL change (deep-link restore or popstate), so we don't immediately
-  // overwrite the URL we just read from.
-  const suppressWriteRef = useRef(false);
   const pendingSymbolRef = useRef<{ dashboardId: string | null; symbol: string; applied: boolean } | null>(null);
+  // #102: the inbound URL that was applied but whose state has not landed yet.
+  // The write effect publishes the live state into the address bar and the
+  // applied state arrives in a later commit; publishing in between overwrote the
+  // deep-linked `?tab=` with the pre-apply tab — the reported "URL loses its tab
+  // parameter and the body spins forever" symptom. The hold is released as soon
+  // as the requested workspace/tab is active, when the user navigates
+  // (userNavigationSeq), or when the URL moves on for another reason.
+  const intentRef = useRef<{
+    href: string;
+    dashboardId: string | null;
+    /** `null` when the URL named no tab (the dashboard resolves its own). */
+    tabId: string | null;
+    capturedSeq: number;
+  } | null>(null);
+  // A deep link whose workspace has not hydrated yet. Published layouts (and the
+  // backend snapshot) land after the first paint, so the request is held rather
+  // than dropped.
+  const requestedRef = useRef<
+    | { dashboard: string | null; tab: string | null; symbol: string | null; capturedSeq: number }
+    | null
+  >(null);
+  // A URL tab slug that named a real tab *later* than the workspace itself —
+  // e.g. `?dashboard=default-fundamental&tab=news-events`, where `news-events`
+  // is a published tab. The workspace is applied immediately (so the body never
+  // sits on a no-tab spinner) and the slug is applied once it registers. If it
+  // never registers the live (valid) tab stands and the write effect republishes
+  // it, so a genuinely invalid slug cannot leave a stale `?tab=` behind.
+  const deferredTabRef = useRef<{ dashboardId: string; slug: string; capturedSeq: number } | null>(null);
 
   const applyFromSearch = useCallback(
     (search: string) => {
@@ -94,37 +141,60 @@ export function useUrlSync({
       const urlSymbol = params.get(PARAM_SYMBOL);
       pendingSymbolRef.current = null;
 
-      let applied = false;
+      let applied =false;
+      let targetDashboardId: string | null = null;
+      let targetTabId: string | null = null;
 
       const resolvedDashboard = urlDashboard
         ? resolveDashboardSlug(urlDashboard, dashboardIds)
         : null;
+      // Resolve the URL tab slug to a real tab id for the target dashboard.
+      const resolvedTab = urlTab && resolvedDashboard
+        ? resolveTabId(resolvedDashboard, urlTab)
+        : urlTab && activeDashboardId
+          ? resolveTabId(activeDashboardId, urlTab)
+          : null;
 
       if (resolvedDashboard && resolvedDashboard !== activeDashboardId) {
-        applyDashboard(resolvedDashboard);
-        applied = true;
-        if (urlTab && getTabIds(resolvedDashboard).includes(urlTab)) {
-          applyTab(urlTab);
-        }
-      } else if (
-        urlTab &&
-        activeDashboardId &&
-        getTabIds(activeDashboardId).includes(urlTab) &&
-        urlTab !== activeTabId
-      ) {
-        applyTab(urlTab);
-        applied = true;
+        applyDashboard(resolvedDashboard, { programmatic:true });
+        applied =true;
+        targetDashboardId = resolvedDashboard;
+        // A resolvable named tab is the target; a URL without `tab` leaves the
+        // tab to the dashboard's own remembered/first-tab resolution.
+        targetTabId = resolvedTab;
+        // #102: selecting the workspace alone is not enough — the workspace
+        // resolves its *remembered* tab, not the one the URL named, and the
+        // intent hold waits for the named tab to become active. Apply the
+        // resolved tab in the same pass so the URL keeps its `tab` and the body
+        // never lands on the wrong tab. When the slug is not resolvable yet the
+        // tab stays null and the deferred effect applies it on registration.
+        if (resolvedTab) applyTab(resolvedTab, { programmatic:true });
+      } else if (activeDashboardId && resolvedTab && resolvedTab !== activeTabId) {
+        applyTab(resolvedTab, { programmatic:true });
+        applied =true;
+        targetDashboardId = activeDashboardId;
+        targetTabId = resolvedTab;
       }
 
       const normalized = normalizeTickerSymbol(urlSymbol);
       if (normalized) {
-        const targetDashboardId = resolvedDashboard ?? activeDashboardId;
-        if (targetDashboardId !== activeDashboardId || normalized !== symbol.toUpperCase()) {
-          const scopeIsActive = targetDashboardId === activeDashboardId;
-          pendingSymbolRef.current = { dashboardId: targetDashboardId, symbol: normalized, applied: scopeIsActive };
+        const symbolDashboardId = resolvedDashboard ?? activeDashboardId;
+        if (symbolDashboardId !== activeDashboardId || normalized !== symbol.toUpperCase()) {
+          const scopeIsActive = symbolDashboardId === activeDashboardId;
+          pendingSymbolRef.current = { dashboardId: symbolDashboardId, symbol: normalized, applied: scopeIsActive };
           if (scopeIsActive) applySymbol(normalized);
-          applied = true;
+          applied =true;
+          targetDashboardId = targetDashboardId ?? symbolDashboardId;
         }
+      }
+
+      if (applied) {
+        intentRef.current = {
+          href: window.location.href,
+          dashboardId: targetDashboardId,
+          tabId: targetTabId,
+          capturedSeq: userNavigationSeq,
+        };
       }
 
       return applied;
@@ -134,38 +204,96 @@ export function useUrlSync({
       activeTabId,
       symbol,
       dashboardIds,
-      getTabIds,
+      resolveTabId,
+      userNavigationSeq,
       applyDashboard,
       applyTab,
       applySymbol,
     ],
   );
 
-  // One-time deep-link restore on mount.
+  // Latest apply, read through a ref: the effects below must re-run when the
+  // view description changes, not when a host rebuilds its callbacks. The ref
+  // is refreshed in an effect declared *before* its readers, so every reader
+  // sees the callbacks from the current commit (and the initial render's
+  // callbacks via the `useRef` initializer).
+  const applyFromSearchRef = useRef(applyFromSearch);
+  useEffect(() => {
+    applyFromSearchRef.current = applyFromSearch;
+  }, [applyFromSearch]);
+
+  // Deep-link restore.
+  //
+  // #102: on a fresh profile the URL is the only source of truth for which
+  // workspace to open, but the app hydrates asynchronously — bundled layouts are
+  // seeded first, published (cloud) tabs arrive later, and the backend snapshot
+  // can move the active workspace on its own. Bailing out on the first ready
+  // pass dropped the deep link entirely (fresh profile landed on the bundled
+  // overview with the wrong symbol). Waiting "until the state stops changing"
+  // is unsafe: it cannot tell the app's own hydration churn from a real user
+  // navigation, so it either cancels too early or overwrites the user later.
+  //
+  // Contract: hold the requested workspace/symbol until the named workspace
+  // exists, then apply exactly once. The named tab does not gate the apply —
+  // waiting for a published tab would freeze the address bar forever when the
+  // slug is genuinely invalid; instead the workspace is selected immediately
+  // (never a no-tab spinner) and the tab slug is resolved either now or, if it
+  // registers later, through `deferredTabRef`. Abandon the request only when the
+  // user actually navigates: "the user navigated" is a positive signal, not a
+  // state diff. The context bumps `userNavigationSeq` only from its user-facing
+  // actions, never from hydration, snapshot reconciliation, or our own apply.
   useEffect(() => {
     if (!ready || hasRestoredRef.current) return;
     if (typeof window === 'undefined') return;
 
     const params = new URLSearchParams(window.location.search);
-    if (params.has(PARAM_DASHBOARD) && dashboardIds.length === 0) return;
+    const urlDashboard = params.get(PARAM_DASHBOARD);
+    const urlTab = params.get(PARAM_TAB);
+    const urlSymbol = params.get(PARAM_SYMBOL);
 
-    hasRestoredRef.current = true;
-    const applied = applyFromSearch(window.location.search);
-    if (applied) {
-      suppressWriteRef.current = true;
+    const resolvedDashboard = urlDashboard
+      ? resolveDashboardSlug(urlDashboard, dashboardIds)
+      : null;
+    const dashboardReady = !urlDashboard || resolvedDashboard !== null;
+
+    if (requestedRef.current) {
+      // A request is pending. The user wins only if they actually navigated
+      // since we captured the sequence — hydration churn does not bump it.
+      if (userNavigationSeq !== requestedRef.current.capturedSeq) {
+        requestedRef.current = null;
+        hasRestoredRef.current =true;
+        return;
+      }
+      if (!dashboardReady) return; // still pending
+    } else if (!dashboardReady) {
+      // First pass and the target is not ready: hold it for a later hydration.
+      requestedRef.current = { dashboard: urlDashboard, tab: urlTab, symbol: urlSymbol, capturedSeq: userNavigationSeq };
+      return;
     }
-  }, [ready, dashboardIds.length, applyFromSearch]);
 
-  // Browser back/forward.
+    requestedRef.current = null;
+    hasRestoredRef.current =true;
+    if (urlTab && resolvedDashboard && resolveTabId(resolvedDashboard, urlTab) === null) {
+      deferredTabRef.current = { dashboardId: resolvedDashboard, slug: urlTab, capturedSeq: userNavigationSeq };
+    }
+    applyFromSearchRef.current(window.location.search);
+  }, [ready, dashboardIds, resolveTabId, userNavigationSeq]);
+
+  // Apply a deep-linked tab that registered after its workspace did.
   useEffect(() => {
-    if (!ready || typeof window === 'undefined') return;
-    const handlePopState = () => {
-      suppressWriteRef.current = true;
-      applyFromSearch(window.location.search);
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, [ready, applyFromSearch]);
+    const deferred = deferredTabRef.current;
+    if (!ready || !deferred) return;
+    // The user took over: the deferred slug no longer describes what should be
+    // open. (Hydration churn does not bump the sequence.)
+    if (userNavigationSeq !== deferred.capturedSeq) {
+      deferredTabRef.current = null;
+      return;
+    }
+    const resolved = resolveTabId(deferred.dashboardId, deferred.slug);
+    if (!resolved) return;
+    deferredTabRef.current = null;
+    applyTab(resolved, { programmatic:true });
+  }, [ready, resolveTabId, userNavigationSeq, applyTab]);
 
   useEffect(() => {
     const pending = pendingSymbolRef.current;
@@ -175,21 +303,31 @@ export function useUrlSync({
       return;
     }
     if (!pending.applied) {
-      pending.applied = true;
+      pending.applied =true;
       applySymbol(pending.symbol);
     }
   }, [ready, activeDashboardId, symbol, applySymbol]);
 
-  // Write current state into the URL when it changes.
-  useEffect(() => {
-    if (!ready || !hasRestoredRef.current) return;
-    if (typeof window === 'undefined') return;
-    if (pendingSymbolRef.current) return;
+  // Publish the live state into the URL. Used by the write effect below and by a
+  // Back/Forward that landed on a URL we could not apply.
+  const writeStateToUrl = useCallback(() => {
+    if (!ready || typeof window === 'undefined') return;
 
-    if (suppressWriteRef.current) {
-      suppressWriteRef.current = false;
-      return;
+    const intent = intentRef.current;
+    if (intent) {
+      const stateLanded = activeDashboardId === intent.dashboardId
+        && (intent.tabId === null || activeTabId === intent.tabId);
+      const superseded = userNavigationSeq !== intent.capturedSeq;
+      // Hold only while the URL is still the one we applied *and* the user has
+      // not taken over; otherwise the hold would freeze the address bar.
+      if (!stateLanded && !superseded && window.location.href === intent.href) return;
+      intentRef.current = null;
     }
+
+    // A deep-linked symbol that has not landed yet describes the URL we already
+    // have; publishing now would replace it with the departing ticker.
+    const pending = pendingSymbolRef.current;
+    if (pending && activeDashboardId === pending.dashboardId) return;
 
     const params = new URLSearchParams(window.location.search);
 
@@ -222,7 +360,46 @@ export function useUrlSync({
       // entry only — keeping deep-links shareable/bookmarkable — without adding
       // navigations that confuse the router. Browser Back/Forward then behaves
       // as normal document navigation.
-      window.history.replaceState(window.history.state, '', next);
+      //
+      // #102: reusing `window.history.state` verbatim left the App Router's
+      // cached `url` pointing at the previous search string, so a later router
+      // action restored `?dashboard=default-fundamental&tab=overview` in the
+      // address bar while React state (and the rendered widgets) stayed on the
+      // workspace the user chose. Carry the router's state forward but point its
+      // url at what we actually wrote, so the URL and state cannot diverge.
+      const rawState: unknown = window.history.state;
+      const previousState: Record<string, unknown> =
+        typeof rawState === 'object' && rawState !== null ? { ...rawState } : {};
+      window.history.replaceState({ ...previousState, url: next, as: next }, '', next);
     }
-  }, [ready, activeDashboardId, activeTabId, symbol]);
+  }, [ready, activeDashboardId, activeTabId, symbol, userNavigationSeq]);
+
+  // Browser back/forward.
+  useEffect(() => {
+    if (!ready || typeof window === 'undefined') return;
+    const handlePopState = () => {
+      // Back/Forward replaces whatever a held deep link asked for: drop both the
+      // pending request and a deferred tab slug so neither can re-apply over the
+      // entry just reached. Without clearing the deferral, a tab published after
+      // the history move would be applied to the *new* workspace as a foreign
+      // `SET_ACTIVE_TAB` (the slug belongs to the workspace the user left).
+      requestedRef.current = null;
+      deferredTabRef.current = null;
+      hasRestoredRef.current =true;
+      if (!applyFromSearchRef.current(window.location.search)) {
+        // The entry could not be applied (unknown workspace, removed tab).
+        // Publish the live state so the address bar never describes a view that
+        // is not on screen.
+        writeStateToUrl();
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [ready, writeStateToUrl]);
+
+  // Write current state into the URL when it changes.
+  useEffect(() => {
+    if (!ready || !hasRestoredRef.current) return;
+    writeStateToUrl();
+  }, [ready, writeStateToUrl]);
 }

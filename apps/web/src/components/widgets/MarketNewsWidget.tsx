@@ -10,7 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { API_BASE_URL } from '@/lib/api';
 import { formatTimestamp } from '@/lib/format';
-import { normalizeNewsItemTimestamp } from '@/lib/newsTime';
+import { normalizeNewsItemTimestamp, newsObservationProvenance } from '@/lib/newsTime';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 
 function decodeHtml(value: string | null | undefined): string {
@@ -75,6 +75,7 @@ interface MarketNewsArticle {
   url: string | null;
   matchedSymbols: string[];
   relevanceScore: number | null;
+  matchReason: string | null;
   isMarketWideFallback: boolean;
 }
 
@@ -133,6 +134,7 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
             ? item.matched_symbols.map((value: string) => String(value).toUpperCase())
             : [],
           relevanceScore: typeof item.relevance_score === 'number' ? item.relevance_score : null,
+          matchReason: typeof item.match_reason === 'string' && item.match_reason ? item.match_reason : null,
           isMarketWideFallback: Boolean(item.is_market_wide_fallback),
         })),
         fallbackUsed: Boolean(data?.fallback_used),
@@ -153,6 +155,13 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
     : mode === 'related' && upperSymbol
       ? `Related to ${upperSymbol}`
       : 'Global feed';
+  // Source observation only: latest genuine article publication date. Receipt
+  // time (dataUpdatedAt) is retrieval evidence and never becomes freshness, and
+  // undated rows keep the feed at partial coverage rather than looking fresh.
+  const observation = useMemo(
+    () => newsObservationProvenance(news?.articles, { receiptAt: dataUpdatedAt }),
+    [news?.articles, dataUpdatedAt],
+  );
 
   const exportRows = useMemo(
     () => articles.map((item: MarketNewsArticle) => ({ ...item, matchedSymbols: item.matchedSymbols.join(', ') })),
@@ -166,12 +175,26 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
         apiGroup: '/news',
         endpoint: '/news/feed',
         sourceLabel: feedNote,
-        lastDataDate: dataUpdatedAt,
+        lastDataDate: observation.lastDataDate,
+        fetchedAt: dataUpdatedAt,
+        coverage: observation.coverage,
         stale: isFallback,
+        cached: isFallback,
+        warnings: observation.warning ? [observation.warning] : undefined,
         extra: { count: articles.length },
       }),
     );
-  }, [onDataChange, hasData, dataUpdatedAt, isFallback, feedNote, articles.length]);
+  }, [
+    onDataChange,
+    hasData,
+    dataUpdatedAt,
+    isFallback,
+    feedNote,
+    articles.length,
+    observation.lastDataDate,
+    observation.coverage,
+    observation.warning,
+  ]);
 
   const widgetTitle = mode === 'related' && upperSymbol ? `${upperSymbol} Market News` : 'Global Market News';
 
@@ -212,7 +235,8 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
             </button>
           </div>
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={observation.lastDataDate}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note={feedNote}
@@ -256,8 +280,11 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
                       </span>
                     ))}
                     {item.relevanceScore !== null && mode === 'related' && !item.isMarketWideFallback && (
-                      <span className="rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-300">
-                        {(item.relevanceScore * 100).toFixed(0)}% match
+                      <span
+                        className="rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-300"
+                        title="Rule-based ranking score, not a probability of company relevance. Peer and sector matches are indirect."
+                      >
+                        {item.matchReason?.replaceAll('_', ' ') || 'Association unverified'} · rank {Math.round(item.relevanceScore * 100)}/100
                       </span>
                     )}
                     {item.isMarketWideFallback && (

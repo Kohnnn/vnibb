@@ -155,10 +155,11 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange 
       apiGroup: '/admin',
       endpoint: selectedTable ? `/api/v1/admin/database/sample/${selectedTable}` : '/api/v1/admin/database/stats',
       sourceLabel: 'VNIBB admin database inspector',
-      lastDataDate: operatorId ? stats?.last_sync : undefined,
+      lastDataDate: null,
+      fetchedAt: operatorId ? dataUpdatedAt || stats?.last_sync || null : null,
       extra: { tables: operatorId ? stats?.tables?.length ?? 0 : 0, selected: operatorId ? selectedTable : null },
     }))
-  }, [hasTables, onDataChange, operatorId, selectedTable, stats?.last_sync, stats?.tables?.length]);
+  }, [dataUpdatedAt, hasTables, onDataChange, operatorId, selectedTable, stats?.last_sync, stats?.tables?.length]);
 
   return (
     <WidgetContainer
@@ -171,10 +172,11 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange 
       <div className="flex flex-col h-full overflow-hidden">
         <div className="px-3 pt-2">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={null}
+            fetchedAt={operatorId ? dataUpdatedAt || stats?.last_sync || null : null}
             isFetching={Boolean(operatorId && isFetching && hasTables)}
             isCached={Boolean(operatorId && statsError && hasTables)}
-            note="Admin stats"
+            note={stats?.last_sync ? `Admin stats · Last sync ${stats.last_sync}` : 'Admin stats'}
             align="right"
           />
         </div>

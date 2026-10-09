@@ -17,6 +17,9 @@ jest.mock('@/hooks/useLoadingTimeout', () => ({
 
 const mockUseHistoricalPrices = jest.mocked(useHistoricalPrices)
 
+// Canonical fixture: the widget certifies each row by its own `price_unit`
+// marker, so the fixture states VND per row plus the matching response-level
+// status (QA #98).
 const candles = Array.from({ length: 35 }, (_, index) => ({
   time: new Date(Date.UTC(2024, 0, index + 1)).toISOString().slice(0, 10),
   open: 100 + index,
@@ -24,11 +27,12 @@ const candles = Array.from({ length: 35 }, (_, index) => ({
   low: 99 + index,
   close: index === 5 ? 80 : 100 + index,
   volume: 1_000,
+  price_unit: 'VND',
 })).reverse()
 
 function mockHistory(rows: typeof candles) {
   mockUseHistoricalPrices.mockReturnValue({
-    data: { data: rows },
+    data: { data: rows, meta: { count: rows.length, unit_status: 'confirmed_vnd' } },
     isLoading: false,
     error: null,
     refetch: jest.fn(),

@@ -88,6 +88,17 @@ export function buildTTMSnapshotCards(
   return cards.filter((card) => card.value !== '—')
 }
 
+interface GrowthComparisonLabel {
+  negative_base?: boolean
+  transition?: 'loss_to_profit' | 'profit_to_loss' | null
+}
+
+export function growthComparisonLabel(detail?: GrowthComparisonLabel): string | null {
+  if (detail?.transition === 'loss_to_profit') return 'loss to profit'
+  if (detail?.transition === 'profit_to_loss') return 'profit to loss'
+  return detail?.negative_base ? 'negative base' : null
+}
+
 export interface GrowthBridgeRow {
   key: string
   label: string
@@ -98,6 +109,10 @@ export interface GrowthBridgeRow {
 export function buildGrowthBridgeRows(payload: {
   yoy?: Record<string, number | null>
   qoq?: Record<string, number | null>
+  comparisons?: {
+    yoy?: Record<string, GrowthComparisonLabel>
+    qoq?: Record<string, GrowthComparisonLabel>
+  }
 }) {
   return [
     { key: 'revenue_growth', label: 'Revenue', annual: payload.yoy?.revenue_growth ?? null, quarter: payload.qoq?.revenue_growth ?? null },
@@ -105,5 +120,9 @@ export function buildGrowthBridgeRows(payload: {
     { key: 'eps_growth', label: 'EPS', annual: payload.yoy?.eps_growth ?? null, quarter: payload.qoq?.eps_growth ?? null },
     { key: 'ebitda_growth', label: 'EBITDA', annual: payload.yoy?.ebitda_growth ?? null, quarter: payload.qoq?.ebitda_growth ?? null },
     { key: 'asset_growth', label: 'Assets', annual: payload.yoy?.asset_growth ?? null, quarter: null },
-  ] satisfies GrowthBridgeRow[]
+  ].map((row) => ({
+    ...row,
+    annualLabel: growthComparisonLabel(payload.comparisons?.yoy?.[row.key]),
+    quarterLabel: growthComparisonLabel(payload.comparisons?.qoq?.[row.key]),
+  })) satisfies Array<GrowthBridgeRow & { annualLabel: string | null; quarterLabel: string | null }>
 }

@@ -338,10 +338,12 @@ function ComparisonAnalysisWidgetComponent({
       apiGroup: '/comparison',
       endpoint: '/api/v1/comparison/stocks + /api/v1/comparison/performance + /api/v1/equity/ratios/:symbol',
       sourceLabel: 'VNIBB comparison analysis',
+      lastDataDate: null,
+      fetchedAt: comparisonQuery.dataUpdatedAt || null,
       derived: true,
       extra: { symbols: symbols.length, period, stocks: comparisonStocks.length },
     }))
-  }, [comparisonStocks.length, hasData, onDataChange, period, symbols.length])
+  }, [comparisonQuery.dataUpdatedAt, comparisonStocks.length, hasData, onDataChange, period, symbols.length])
 
   const filteredMetrics = useMemo(() => {
     const selected = CATEGORY_DEFINITIONS.find((category) => category.id === activeCategory)
@@ -475,7 +477,8 @@ function ComparisonAnalysisWidgetComponent({
             <div className="ml-auto flex items-center gap-2">
               <PeriodToggle value={period} onChange={setPeriod} compact options={COMPARISON_PERIOD_OPTIONS} />
               <WidgetMeta
-                updatedAt={comparisonQuery.dataUpdatedAt}
+                updatedAt={null}
+                fetchedAt={comparisonQuery.dataUpdatedAt || null}
                 isFetching={(comparisonQuery.isFetching || performanceQuery.isFetching) && hasData}
                 isCached={isFallback}
                 note={`${period} fundamentals`}

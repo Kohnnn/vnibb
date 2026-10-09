@@ -77,4 +77,40 @@ describe('ShareStatisticsWidget confirmed-unit market cap', () => {
     expect(within(screen.getByText('Market Cap').parentElement!).getByText('Screener')).toBeInTheDocument();
     expect(screen.queryByText('MCap derived')).not.toBeInTheDocument();
   });
+
+  test.each([
+    ['null', { pe: null, pb: null }],
+    ['blank string', { pe: '', pb: ' ' }],
+  ])(
+    'uses the ratios source for P/E and P/B when the screener value is %s (issue #106)',
+    (_label, metrics) => {
+      mockScreener.mockReturnValue({
+        data: { data: [{ ticker: 'MSR', ...metrics }] },
+        isLoading:false, isFetching:false, error: null, refetch: jest.fn(), dataUpdatedAt: 0,
+      });
+      mockRatios.mockReturnValue({
+        // Canonical API period (`2024`), not `FY-2024`: the ratios endpoint only
+        // emits `YYYY` / `Qn-YYYY` / `TTM`, and an unrecognised period is dropped
+        // by latestByFinancialPeriod so the fallback would never be reached.
+        data: { data: [{ period: '2024', pe: 2394.64, pb: 2.22 }] },
+        isLoading:false, isFetching:false, error: null, refetch: jest.fn(),
+      });
+      render(<ShareStatisticsWidget id="share-1" symbol="MSR" />);
+      const peRow = within(screen.getByText('P/E Ratio').parentElement!);
+      expect(peRow.getByText('2394.64')).toBeInTheDocument();
+      expect(peRow.getByText('Ratios')).toBeInTheDocument();
+      expect(within(screen.getByText('P/B Ratio').parentElement!).getByText('2.22')).toBeInTheDocument();
+      expect(peRow.queryByText('0.00')).not.toBeInTheDocument();
+    },
+  );
+
+  test('shows P/E as unavailable when no source reports a value', () => {
+    mockScreener.mockReturnValue({
+      data: { data: [{ ticker: 'MSR', pe: null, pb: null }] },
+      isLoading:false, isFetching:false, error: null, refetch: jest.fn(), dataUpdatedAt: 0,
+    });
+    render(<ShareStatisticsWidget id="share-1" symbol="MSR" />);
+    expect(within(screen.getByText('P/E Ratio').parentElement!).getByText('-')).toBeInTheDocument();
+    expect(within(screen.getByText('P/B Ratio').parentElement!).getByText('-')).toBeInTheDocument();
+  });
 });

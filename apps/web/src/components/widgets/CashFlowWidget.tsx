@@ -21,7 +21,7 @@ import {
     CartesianGrid,
     ReferenceLine,
 } from 'recharts';
-import { convertFinancialValueForUnit, formatAxisValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale } from '@/lib/units';
+import { convertFinancialValueForUnit, formatAxisValue, formatConvertedValue, formatRawValuePlain, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale, toFiniteNumber } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
@@ -29,7 +29,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { cn } from '@/lib/utils';
-import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { buildTableInsightContext, describeSelection, seriesFromSelection, toggleSelection, type ChartableColumn, type TableSelection } from '@/lib/tableInsight';
 import { buildCashFlowWaterfallModel } from '@/lib/financialVisualizations';
@@ -121,7 +121,15 @@ function getRawMetric(entry: CashFlowData, metricKey: string): number | null {
 }
 
 function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDataChange }: CashFlowWidgetProps) {
-    const periodSyncGroup = typeof config?.periodSyncGroup === 'string' ? config.periodSyncGroup : undefined;
+    // Default to the shared group the "Financial Period View" banner writes; a
+    // widget-level `periodSyncGroup` overrides it and an explicit `null` opts out
+    // so the period stays widget-local (issue #101).
+    const configuredSyncGroup = config?.periodSyncGroup;
+    const periodSyncGroup = configuredSyncGroup === null
+        ? undefined
+        : typeof configuredSyncGroup === 'string' && configuredSyncGroup.trim()
+            ? configuredSyncGroup
+            : FUNDAMENTAL_PERIOD_SYNC_GROUP;
     const defaultPeriod =
         config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
             ? (config.defaultPeriod as 'Q' | 'TTM')
@@ -154,34 +162,75 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
     } = useCashFlow(symbol, { period: apiPeriod, limit: visiblePeriodLimit });
 
     const items = data?.data || [];
-    const orderedItems = useMemo(
-        () => [...items].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
+    // Provider payloads can repeat a fiscal period or emit rows with no fiscal
+    // identity at all. `canonicalPeriodRows` never picks between conflicting rows
+    // (nothing in the payload proves which basis is authoritative) - it excludes
+    // them and reports the reason, so a duplicate is disclosed rather than shown as
+    // two columns labelled "2020" (issue #103).
+    const { rows: canonicalItems, issues: periodIssues, invalidPeriodCount } = useMemo(
+        () => canonicalPeriodRows(items),
         [items]
     );
-    const displayItems = useMemo(
+    const orderedItems = useMemo(
+        () => [...canonicalItems].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
+        [canonicalItems]
+    );
+    // The TTM branch returns a single TTM row today (financial_service
+    // .build_ttm_statement_rows), and this filter guarantees the TTM view can
+    // never render a quarter row under a TTM header if a payload carries one
+    // (issue #101).
+    const periodItems = useMemo(
         () => periodMode === 'quarter'
             ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
-            : orderedItems,
+            : periodMode === 'ttm'
+                ? orderedItems.filter((item) => String(item.period ?? '').toUpperCase().includes('TTM'))
+                : orderedItems,
         [orderedItems, periodMode]
+    );
+    // A row the API returned without certification carries every numeric field as
+    // null plus `unavailable_reason`. Rendering it as a column of dashes reads as a
+    // reported zero, so reason-bearing rows are held out of the table/chart and
+    // disclosed in the note instead; a row that merely has some null fields is a
+    // valid partial row and stays (issue #103).
+    const unavailableNote = useMemo(() => describeUnavailableStatementRows(periodItems), [periodItems]);
+    const displayItems = useMemo(
+        () => periodItems.filter((item) => !isUnavailableStatementRow(item)),
+        [periodItems]
+    );
+    const duplicatePeriodNote = useMemo(() => {
+        const notes: string[] = [];
+        const ambiguous = periodIssues.filter((issue) => issue.reason === 'ambiguous-basis');
+        if (ambiguous.length > 0) {
+            notes.push(
+                `Unavailable: ${ambiguous.map((issue) => issue.period).join(', ')} returned conflicting rows with no basis field, so no value is shown.`
+            );
+        }
+        if (invalidPeriodCount > 0) {
+            notes.push(`${invalidPeriodCount} provider row${invalidPeriodCount === 1 ? '' : 's'} without a fiscal period excluded.`);
+        }
+        return notes.length > 0 ? notes.join(' ') : null;
+    }, [periodIssues, invalidPeriodCount]);
+    const statementNote = useMemo(
+        () => [duplicatePeriodNote, unavailableNote].filter(Boolean).join(' ') || null,
+        [duplicatePeriodNote, unavailableNote]
     );
     const hasData = displayItems.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
 
+    // One FX boundary: convert once here; axis/tooltip format without converting
+    // again (issue #100). A missing raw value stays `null` so the chart draws a gap
+    // instead of a fabricated zero (issue #103).
     const chartData = useMemo(() => {
         if (!displayItems.length) return [];
-        return displayItems.map((d, index) => ({
-            period: formatFinancialPeriodLabel(d.period, {
-                mode: periodMode,
-                index,
-                total: displayItems.length,
-            }),
-            operatingCF: convertFinancialValueForUnit(d.operating_cash_flow || 0, unitConfig, d.period) || 0,
-            investingCF: convertFinancialValueForUnit(d.investing_cash_flow || 0, unitConfig, d.period) || 0,
-            financingCF: convertFinancialValueForUnit(d.financing_cash_flow || 0, unitConfig, d.period) || 0,
-            freeCashFlow: convertFinancialValueForUnit(d.free_cash_flow || 0, unitConfig, d.period) || 0,
-            netCashFlow: convertFinancialValueForUnit(d.net_change_in_cash ?? d.net_cash_flow ?? 0, unitConfig, d.period) || 0,
+        return displayItems.map((d) => ({
+            period: formatFinancialPeriodLabel(d.period, { mode: periodMode }),
+            operatingCF: convertFinancialValueForUnit(d.operating_cash_flow ?? null, unitConfig, d.period),
+            investingCF: convertFinancialValueForUnit(d.investing_cash_flow ?? null, unitConfig, d.period),
+            financingCF: convertFinancialValueForUnit(d.financing_cash_flow ?? null, unitConfig, d.period),
+            freeCashFlow: convertFinancialValueForUnit(d.free_cash_flow ?? null, unitConfig, d.period),
+            netCashFlow: convertFinancialValueForUnit(d.net_change_in_cash ?? d.net_cash_flow ?? null, unitConfig, d.period),
         }));
     }, [displayItems, periodMode, unitConfig]);
 
@@ -215,7 +264,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(
-        () => `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS • First available period is the base period`,
+        () => `Note: ${unitLegend}; per-share values (DPS) are VND per share and are not converted • Reporting Standard: VAS • First available period is the base period`,
         [unitLegend]
     );
 
@@ -223,11 +272,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
         () =>
             displayItems.slice(-visiblePeriodLimit).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
-                label: formatFinancialPeriodLabel(entry.period, {
-                    mode: periodMode,
-                    index,
-                    total: Math.min(displayItems.length, visiblePeriodLimit),
-                }),
+                label: formatFinancialPeriodLabel(entry.period, { mode: periodMode }),
                 align: 'right' as const,
             })),
         [displayItems, periodMode, visiblePeriodLimit]
@@ -276,7 +321,8 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
             empty: !hasData,
             endpoint: `/equity/${symbol}/cash-flow?period=${apiPeriod}`,
             sourceLabel: 'Cash flow',
-            lastDataDate: dataUpdatedAt,
+            lastDataDate: null,
+            fetchedAt: dataUpdatedAt,
             stale: isFallback,
             extra: hasData ? { periods: displayItems.length, tableInsight: chartInsight } : undefined,
         }));
@@ -461,7 +507,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                         waterfallModel ? (
                             <CashFlowWaterfallChart
                                 model={waterfallModel}
-                                formatValue={(value) => formatUnitValuePlain(value, tableScale, unitConfig)}
+                                formatValue={(value) => formatRawValuePlain(value, tableScale, unitConfig, waterfallModel.period)}
                             />
                         ) : (
                             <div className="flex h-full items-center justify-center text-[var(--text-muted)]">Waterfall data unavailable</div>
@@ -474,7 +520,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                                     <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
                                     <YAxis
-                                        tickFormatter={(value) => formatAxisValue(value, unitConfig)}
+                                        tickFormatter={(value) => formatAxisValue(value, unitConfig, { converted:true })}
                                         tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
                                         axisLine={false}
                                         tickLine={false}
@@ -488,6 +534,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                                             borderRadius: '8px',
                                             fontSize: '11px',
                                         }}
+                                        formatter={(value: unknown) => formatConvertedValue(toFiniteNumber(value), unitConfig)}
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                     {(drawOverview && chartedSeries.some((entry) => entry.key === 'operatingCF')) ? (
@@ -505,7 +552,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                                     <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
                                     <YAxis
-                                        tickFormatter={(value) => formatAxisValue(value, unitConfig)}
+                                        tickFormatter={(value) => formatAxisValue(value, unitConfig, { converted:true })}
                                         tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
                                         axisLine={false}
                                         tickLine={false}
@@ -519,6 +566,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                                             borderRadius: '8px',
                                             fontSize: '11px',
                                         }}
+                                        formatter={(value: unknown) => formatConvertedValue(toFiniteNumber(value), unitConfig)}
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                     {chartedSeries.some((entry) => entry.key === 'freeCashFlow') ? (
@@ -597,10 +645,11 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                         {showPeriodToggle ? <PeriodToggle value={period} onChange={setPeriod} compact options={[...STATEMENT_PERIOD_OPTIONS]} /> : null}
                     </div>
                     <WidgetMeta
-                        updatedAt={dataUpdatedAt}
+                        updatedAt={null}
+                        fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right'}
+                        note={statementNote ?? (period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right')}
                         sourceLabel="Cash flow"
                         align="right"
                     />
@@ -621,7 +670,10 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !hasData ? (
                         <WidgetEmpty
-                            message={`No cash flow data for ${symbol}. Try switching period or refresh.`}
+                            message={unavailableNote
+                                ? `Cash flow unavailable for ${symbol}.`
+                                : `No cash flow data for ${symbol}. Try switching period or refresh.`}
+                            detail={unavailableNote ?? undefined}
                             icon={<Banknote size={18} />}
                             action={{ label: 'Retry', onClick: () => refetch() }}
                         />

@@ -218,6 +218,51 @@ def test_technical_frame_actual_source_overrides_requested_source():
 
 
 @pytest.mark.asyncio
+async def test_signal_summary_unavailable_reason_insufficient_when_no_exclusion(monkeypatch):
+    """Zero indicators without an observed unit exclusion must NOT claim unresolved units."""
+    service = TechnicalAnalysisService()
+    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
+
+    async def no_frame(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service, "_load_ohlcv_frame", no_frame)
+
+    summary = await service.get_signal_summary("FPT", lookback_days=200)
+
+    assert summary["overall_signal"] == "unavailable"
+    assert summary["total_indicators"] == 0
+    assert summary["data_quality"]["reason"] == "insufficient_source_data"
+    assert "unresolved_price_units" not in summary["data_quality"]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_signal_summary_unavailable_reason_unresolved_when_exclusion_observed(monkeypatch):
+    """Only an observed unit exclusion yields the unresolved_price_units reason."""
+    service = TechnicalAnalysisService()
+    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
+
+    async def excluded_frame(*args, **kwargs):
+        frame = pd.DataFrame()
+        frame.attrs["unit_exclusion"] = {
+            "reason": "unresolved_price_units",
+            "excluded_count": 3,
+            "unresolved_sources": ["vnstock_history:KBS"],
+        }
+        return frame
+
+    monkeypatch.setattr(service, "_load_ohlcv_frame", excluded_frame)
+
+    summary = await service.get_signal_summary("FPT", lookback_days=200)
+
+    assert summary["overall_signal"] == "unavailable"
+    assert summary["total_indicators"] == 0
+    assert summary["data_quality"]["reason"] == "unresolved_price_units"
+    assert "excluded 3" in summary["data_quality"]["note"]
+    assert "vnstock_history:KBS" in summary["data_quality"]["note"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("unit,scale", [("VND", 1000), ("index_points", 1)])
 @pytest.mark.parametrize("signal,direction", [("sell", -1), ("buy", 1)])
 @pytest.mark.parametrize("magnitude,expected", [(0.34, "unchanged"), (0.35, "neutral"), (0.36, "neutral")])
@@ -251,3 +296,25 @@ async def test_macd_fade_threshold_preserves_semantics_by_price_unit(
     macd_detail = next(item for item in summary["indicators"] if item["name"] == "MACD")
 
     assert macd_detail["signal"] == (signal if expected == "unchanged" else expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unit,expected", [("VND", "confirmed_vnd"), ("index_points", "index_points"), (None, "unconfirmed")])
+async def test_full_technical_quality_certifies_actual_frame_units(monkeypatch, unit, expected):
+    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
+    service = TechnicalAnalysisService()
+    frame = _frame(close=100000, periods=240)
+    frame.loc[1, "close"] = 50000
+    if unit:
+        frame["price_unit"] = unit
+
+    async def history(*args, **kwargs):
+        return frame
+
+    monkeypatch.setattr(service, "get_ohlcv_data", history)
+    quality = await service.get_data_quality_summary("FPT")
+
+    assert quality["unit_status"] == expected
+    assert quality["unresolved_session_count"] == 0
+    assert quality["bars"] == 240
+    assert frame["close"].iloc[:2].tolist() == [100000, 50000]

@@ -23,7 +23,7 @@ jest.mock('@/components/ui/WidgetContainer', () => ({
 }));
 
 jest.mock('@/components/ui/WidgetMeta', () => ({
-    WidgetMeta: ({ updatedAt, isCached, note }: { updatedAt?: Date | null; isCached?: boolean; note?: string }) => <div>{`${note ?? ''}|${updatedAt ? 'Received' : 'No receipt'}|${isCached ? 'Cached' : 'Current'}`}</div>,
+    WidgetMeta: ({ updatedAt, fetchedAt, isCached, note }: { updatedAt?: Date | null; fetchedAt?: Date | null; isCached?: boolean; note?: string }) => <div>{`${note ?? ''}|${fetchedAt ? 'Received' : 'No receipt'}|${isCached ? 'Cached' : 'Current'}|${updatedAt ? 'Known as-of' : 'As-of unknown'}`}</div>,
 }));
 
 jest.mock('@/components/ui/widget-states', () => ({
@@ -70,7 +70,7 @@ describe('WatchlistWidget quotes', () => {
         expect(screen.getByText('Unavailable')).toBeInTheDocument();
         expect(screen.getAllByText('—')).toHaveLength(2);
         expect(screen.queryByText('0')).not.toBeInTheDocument();
-        expect(screen.getByText('Disconnected · Unavailable|No receipt|Current')).toBeInTheDocument();
+        expect(screen.getByText('Disconnected · Unavailable|No receipt|Current|As-of unknown')).toBeInTheDocument();
     });
 
     it('shows observed values and the global quote receipt status', () => {
@@ -82,7 +82,7 @@ describe('WatchlistWidget quotes', () => {
 
         expect(screen.getByText('42')).toBeInTheDocument();
         expect(screen.getByText('+2.38%')).toBeInTheDocument();
-        expect(screen.getByText('Live feed · Last quote received|Received|Current')).toBeInTheDocument();
+        expect(screen.getByText('Live feed · Last quote received|Received|Current|As-of unknown')).toBeInTheDocument();
     });
 
     it('retains and labels the last observed quote after disconnect', () => {
@@ -93,7 +93,7 @@ describe('WatchlistWidget quotes', () => {
         renderWatchlist(['VCI']);
 
         expect(screen.getByText('42')).toBeInTheDocument();
-        expect(screen.getByText('Disconnected · Cached quote receipt|Received|Cached')).toBeInTheDocument();
+        expect(screen.getByText('Disconnected · Cached quote receipt|Received|Cached|As-of unknown')).toBeInTheDocument();
     });
 
     it('sorts unavailable prices last in both directions', () => {

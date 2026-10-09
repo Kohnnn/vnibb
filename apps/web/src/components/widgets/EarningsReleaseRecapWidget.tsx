@@ -206,7 +206,7 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
     const hasData = Boolean(latestIncome || latestCash || earningsQualityQuery.data?.data || newsQuery.data?.data?.length || eventsQuery.data?.data?.length);
     const isLoading = incomeQuery.isLoading && cashFlowQuery.isLoading && newsQuery.isLoading && eventsQuery.isLoading;
     const combinedError = incomeQuery.error || cashFlowQuery.error || newsQuery.error || eventsQuery.error || earningsQualityQuery.error;
-    const updatedAt = Math.max(
+    const fetchedAt = Math.max(
         incomeQuery.dataUpdatedAt,
         cashFlowQuery.dataUpdatedAt,
         newsQuery.dataUpdatedAt,
@@ -220,12 +220,13 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
             apiGroup: '/equity',
             endpoint: `/equity/${symbol}/income-statement?period=quarter&limit=8`,
             sourceLabel: 'vnstock',
-            lastDataDate: latestIncome?.period ?? latestCash?.period,
-            derived: true,
+            lastDataDate: null,
+            fetchedAt,
+            derived:true,
             stale: Boolean(combinedError && hasData),
             extra: { feeds: 5 },
         }));
-    }, [combinedError, hasData, latestCash?.period, latestIncome?.period, onDataChange, symbol]);
+    }, [combinedError, fetchedAt, hasData, onDataChange, symbol]);
 
     return (
         <WidgetContainer
@@ -255,7 +256,7 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
                                 {narrative || 'Use this recap to review the latest quarter before drilling into the full statements.'}
                             </div>
                         </div>
-                        <WidgetMeta updatedAt={updatedAt} isFetching={incomeQuery.isFetching || cashFlowQuery.isFetching || newsQuery.isFetching || eventsQuery.isFetching} note="Quarter recap" align="right" />
+                        <WidgetMeta updatedAt={null} fetchedAt={fetchedAt} isFetching={incomeQuery.isFetching || cashFlowQuery.isFetching || newsQuery.isFetching || eventsQuery.isFetching} note="Quarter recap" align="right" />
                     </div>
 
                     <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">

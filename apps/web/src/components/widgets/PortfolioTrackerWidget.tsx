@@ -42,6 +42,7 @@ interface PositionWithPL extends Position {
     dayChange: number | null;
     dayChangePct: number | null;
     quoteUpdatedAt: string | null;
+    quoteFetchedAt: number | null;
     isLoading: boolean;
 }
 
@@ -367,6 +368,7 @@ export function PortfolioTrackerWidget({
                 dayChange: priceData?.change ?? null,
                 dayChangePct: priceData?.changePct ?? null,
                 quoteUpdatedAt: priceData?.updatedAt ?? null,
+                quoteFetchedAt: priceData?.fetchedAt ?? null,
                 isLoading: priceData?.isLoading ?? true,
             };
         });
@@ -404,6 +406,9 @@ export function PortfolioTrackerWidget({
     const latestQuoteUpdatedAt = useMemo(() => enrichedPositions.reduce<string | null>((latest, position) => (
         position.quoteUpdatedAt && (!latest || position.quoteUpdatedAt > latest) ? position.quoteUpdatedAt : latest
     ), null), [enrichedPositions]);
+    const latestQuoteFetchedAt = useMemo(() => enrichedPositions.reduce<number | null>((latest, position) => (
+        position.quoteFetchedAt && (!latest || position.quoteFetchedAt > latest) ? position.quoteFetchedAt : latest
+    ), null), [enrichedPositions]);
 
     useEffect(() => {
         onDataChange?.(buildWidgetRuntime({
@@ -412,6 +417,7 @@ export function PortfolioTrackerWidget({
             endpoint: '/api/v1/market/quotes/batch',
             sourceLabel: 'Local portfolio',
             lastDataDate: latestQuoteUpdatedAt,
+            fetchedAt: latestQuoteFetchedAt,
             derived: true,
             extra: {
                 positionCount: positions.length,
@@ -425,7 +431,7 @@ export function PortfolioTrackerWidget({
                 unrealizedPL: totals.unrealizedPL,
             },
         }));
-    }, [latestQuoteUpdatedAt, onDataChange, positions.length, sectors.size, symbols.length, totals.marketValue, totals.quotedMarketValue, totals.unpricedCostBasis, totals.unrealizedPL, totals.quotedPositionCount, totals.positionCount]);
+    }, [latestQuoteUpdatedAt, latestQuoteFetchedAt, onDataChange, positions.length, sectors.size, symbols.length, totals.marketValue, totals.quotedMarketValue, totals.unpricedCostBasis, totals.unrealizedPL, totals.quotedPositionCount, totals.positionCount]);
 
     useEffect(() => {
         if (!pricesLoading && positions.length > 0 && totals.marketValue !== null) {
@@ -531,6 +537,7 @@ export function PortfolioTrackerWidget({
                 <div className="flex items-center gap-2">
                     <WidgetMeta
                         updatedAt={latestQuoteUpdatedAt}
+                        fetchedAt={latestQuoteFetchedAt}
                         isFetching={pricesLoading}
                         note="Local holdings"
                         align="right"

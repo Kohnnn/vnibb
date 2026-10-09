@@ -122,6 +122,14 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
   )
 
   const history = data?.data
+  const meta = data?.meta
+  // Only per-row `price_unit` markers certify the series; a response-level
+  // `unit_status` cannot certify rows that carry no marker (QA #98).
+  const expectedUnit = meta?.unit_status === 'confirmed_vnd' ? 'VND' : 'index_points'
+  const certifiedUnits = Boolean(history?.length)
+    && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(meta?.unit_status ?? '')
+    && (history ??[]).every((row) => row.price_unit === expectedUnit)
+  const derivedWithheld = Boolean(data) && !certifiedUnits
   const candles = useMemo(
     () => ((history ?? []) as OHLCData[])
       .slice()
@@ -130,9 +138,9 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
   )
 
   const closes = useMemo(
-    () => candles.map((candle) => Number(candle.close))
-      .filter((close) => Number.isFinite(close) && close > 0),
-    [candles],
+    () => (derivedWithheld ?[] : candles.map((candle) => Number(candle.close))
+      .filter((close) => Number.isFinite(close) && close > 0)),
+    [candles, derivedWithheld],
   )
 
   const returns = closes.slice(1).map((close, index) => (close / closes[index]) - 1)
@@ -142,6 +150,8 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
   const hasData = closes.length > 120
   const adjustmentWarning = data?.meta?.adjustment_warning ?? null
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
+  const lastDataDate = [data?.meta?.freshness_as_of, data?.meta?.last_data_date, candles.at(-1)?.time]
+    .find((value) => value != null && value !== '' && !Number.isNaN(new Date(value).getTime())) ?? null
 
 
   const rollingWindows = useMemo(() => {
@@ -169,7 +179,8 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
       apiGroup: '/equity',
       endpoint: `/equity/historical?symbol=${upperSymbol}&start_date=${getQuantPeriodStartDate(period)}&adjustment_mode=adjusted`,
       sourceLabel: 'Historical prices',
-      lastDataDate: candles.at(-1)?.time ?? dataUpdatedAt,
+      lastDataDate,
+      fetchedAt: dataUpdatedAt,
 
       adjustmentMode: 'adjusted',
       derived: true,
@@ -184,7 +195,7 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
 
       },
     }))
-  }, [adjustmentWarning, candles, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, dataUpdatedAt, hasData, hurst, lag1, onDataChange, period, upperSymbol])
+  }, [adjustmentWarning, candles, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, dataUpdatedAt, hasData, hurst, lag1, lastDataDate, onDataChange, period, upperSymbol])
 
 
   if (!upperSymbol) {
@@ -211,7 +222,7 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} • R/S method`} align="right" />
+          <WidgetMeta updatedAt={lastDataDate} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} • R/S method`} align="right" />
         </div>
       </div>
 
@@ -230,7 +241,13 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />
         ) : !hasData ? (
-          <WidgetEmpty message="Not enough historical data for Hurst estimation" icon={<Sigma size={18} />} size="compact" />
+          <WidgetEmpty
+            message={derivedWithheld
+              ? 'Hurst estimate unavailable: historical price units were not certified.'
+              : 'Not enough historical data for Hurst estimation'}
+            icon={<Sigma size={18} />}
+            size="compact"
+          />
         ) : (
           <div className="space-y-2">
             <QuantWarningBanner warning={adjustmentWarning} />

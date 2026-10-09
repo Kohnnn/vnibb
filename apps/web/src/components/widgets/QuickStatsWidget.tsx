@@ -29,15 +29,24 @@ export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps
     const latestQuote = quoteQuery.data;
     const latestRatio = latestByFinancialPeriod(ratiosQuery.data?.data);
 
-    const latest = priceData[priceData.length - 1];
-    const prev = priceData[priceData.length - 2];
+    // Only per-row `price_unit` markers certify the history window; a
+    // response-level `unit_status` cannot certify rows that carry no marker (QA #98).
+    const historyUnitStatus = pricesQuery.data?.meta?.unit_status ?? '';
+    const historyExpectedUnit = historyUnitStatus === 'confirmed_vnd' ? 'VND' : 'index_points';
+    const historyCertified = priceData.length > 0
+        && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(historyUnitStatus)
+        && priceData.every((row) => row.price_unit === historyExpectedUnit);
+    const derivedWithheld = Boolean(pricesQuery.data) && !historyCertified;
+
+    const latest = derivedWithheld ? undefined : priceData[priceData.length - 1];
+    const prev = derivedWithheld ? undefined : priceData[priceData.length - 2];
     const change = latestQuote?.changePct ?? (latest && prev ? ((latest.close - prev.close) / prev.close * 100) : null);
 
-    const closes = priceData.map((p) => p.close || 0);
-    const high30 = Math.max(...closes);
-    const low30 = Math.min(...closes.filter((c) => c > 0));
+    const closes = derivedWithheld ?[] : priceData.map((p) => p.close || 0);
+    const high30 = closes.length > 0 ? Math.max(...closes) : 0;
+    const low30 = closes.length > 0 ? Math.min(...closes.filter((c) => c > 0)) : 0;
 
-    const volumes = priceData.map((p) => p.volume || 0);
+    const volumes = derivedWithheld ?[] : priceData.map((p) => p.volume || 0);
     const avgVol = volumes.length > 0 ? volumes.reduce((a, b) => a + b, 0) / volumes.length : 0;
 
     const isLoading = pricesQuery.isLoading || quoteQuery.isLoading || ratiosQuery.isLoading;
@@ -50,6 +59,13 @@ export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps
     const hasData = Boolean(latest || latestQuote || latestRatio);
     const isFallback = Boolean(error && hasData);
 
+    const lastDataDate = [
+        pricesQuery.data?.meta?.freshness_as_of,
+        pricesQuery.data?.meta?.last_data_date,
+        latest?.time,
+        latestQuote?.updatedAt,
+    ].find((value) => value != null && value !== '' && !Number.isNaN(new Date(value).getTime())) ?? null;
+
     useEffect(() => {
         onDataChange?.(
             buildWidgetRuntime({
@@ -57,7 +73,8 @@ export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps
                 apiGroup: '/equity',
                 endpoint: `/equity/historical?symbol=${symbol}`,
                 sourceLabel: '30-day window',
-                lastDataDate: dataUpdatedAt,
+                lastDataDate,
+                fetchedAt: dataUpdatedAt,
                 stale: isFallback,
                 derived: true,
                 extra: hasData
@@ -65,7 +82,7 @@ export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps
                     : undefined,
             }),
         );
-    }, [hasData, dataUpdatedAt, isFallback, symbol, latestQuote?.price, latest?.close, latestRatio?.pe, onDataChange]);
+    }, [hasData, dataUpdatedAt, isFallback, lastDataDate, symbol, latestQuote?.price, latest?.close, latestRatio?.pe, onDataChange]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view quick stats" />;
@@ -119,7 +136,8 @@ export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps
 
             <div className="border-b border-[var(--border-default)] pb-2">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={lastDataDate}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     note="30-day window"

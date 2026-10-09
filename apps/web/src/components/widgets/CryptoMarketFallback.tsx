@@ -7,6 +7,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { getLatestTimestampValue } from '@/lib/dataFreshness';
 
 interface CryptoCoin {
   id: string;
@@ -17,6 +18,7 @@ interface CryptoCoin {
   market_cap_rank: number;
   price_change_percentage_24h: number | null;
   total_volume: number;
+  last_updated?: string | null;
 }
 
 interface CryptoMarketFallbackProps {
@@ -53,7 +55,7 @@ export function CryptoMarketFallback({ id, onRemove, onDataChange }: CryptoMarke
   const [coins, setCoins] = useState<CryptoCoin[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const [updatedAt, setUpdatedAt] = useState<number>(0);
+  const [fetchedAt, setFetchedAt] = useState<number>(0);
 
   const load = async () => {
     setLoading(true);
@@ -65,7 +67,7 @@ export function CryptoMarketFallback({ id, onRemove, onDataChange }: CryptoMarke
       }
       const json = (await res.json()) as CryptoCoin[];
       setCoins(json);
-      setUpdatedAt(Date.now());
+      setFetchedAt(Date.now());
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Failed to load crypto market data'));
     } finally {
@@ -78,6 +80,7 @@ export function CryptoMarketFallback({ id, onRemove, onDataChange }: CryptoMarke
   }, []);
 
   const hasData = coins.length > 0;
+  const sourceUpdatedAt = getLatestTimestampValue(coins.map((coin) => coin.last_updated)) ?? null;
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -85,14 +88,15 @@ export function CryptoMarketFallback({ id, onRemove, onDataChange }: CryptoMarke
       apiGroup: 'external',
       endpoint: 'https://api.coingecko.com/api/v3/...',
       sourceLabel: COINGECKO_SOURCE_LABEL,
-      lastDataDate: updatedAt || undefined,
+      lastDataDate: sourceUpdatedAt,
+      fetchedAt: fetchedAt || null,
       derived: true,
       stale: Boolean(error && hasData),
       extra: {
         rows: coins,
       },
     }));
-  }, [coins, error, hasData, onDataChange, updatedAt]);
+  }, [coins, error, hasData, onDataChange, sourceUpdatedAt, fetchedAt]);
 
   return (
     <WidgetContainer
@@ -109,7 +113,7 @@ export function CryptoMarketFallback({ id, onRemove, onDataChange }: CryptoMarke
             <Coins size={12} className="text-amber-300" />
             <span>Top {coins.length} by market cap · CoinGecko</span>
           </div>
-          <WidgetMeta updatedAt={updatedAt} note="TradingView fallback" align="right" />
+          <WidgetMeta updatedAt={sourceUpdatedAt} fetchedAt={fetchedAt} note="TradingView fallback" align="right" />
         </div>
 
         {loading && !hasData ? (

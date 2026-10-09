@@ -118,6 +118,8 @@ export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: Div
 
   const displayEvents = upcoming.length > 0 ? upcoming : events;
   const hasData = displayEvents.length > 0;
+  // Dividend ex/record/payment dates are action schedules, not source
+  // observations, so freshness stays unknown and receipts go to fetchedAt.
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -125,11 +127,12 @@ export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: Div
       apiGroup: '/equity',
       endpoint: `/equity/${symbol}/dividends`,
       sourceLabel: 'vnstock',
-      lastDataDate: displayEvents[0]?.date,
+      lastDataDate: null,
+      fetchedAt: dataUpdatedAt,
       stale: Boolean(error && hasData),
       extra: { events: displayEvents.length },
     }));
-  }, [displayEvents, error, hasData, onDataChange, symbol]);
+  }, [dataUpdatedAt, displayEvents, error, hasData, onDataChange, symbol]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view dividends" />;
@@ -148,7 +151,8 @@ export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: Div
       <div aria-label="Dividend ladder timeline" className="h-full flex flex-col bg-[var(--bg-primary)]">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={null}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={Boolean(error && hasData)}
             note={upcoming.length > 0 ? 'Upcoming events' : 'Latest events'}

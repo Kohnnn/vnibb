@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { DollarSign } from 'lucide-react';
 import { useForexRates } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { getLatestTimestampValue } from '@/lib/dataFreshness';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
@@ -21,6 +22,7 @@ export function ForexRatesWidget({ onDataChange }: ForexRatesWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useForexRates();
 
     const rows = data?.data || [];
+    const sourceUpdatedAt = getLatestTimestampValue(rows.map((row) => row.date)) ?? null;
     const hasData = rows.length > 0;
     const isFallback = Boolean(data?.error);
 
@@ -30,16 +32,19 @@ export function ForexRatesWidget({ onDataChange }: ForexRatesWidgetProps) {
             apiGroup: '/market',
             endpoint: '/market/forex-rates?limit=12',
             sourceLabel: data?.source || 'vnstock',
+            lastDataDate: sourceUpdatedAt,
+            fetchedAt: dataUpdatedAt,
             stale: isFallback,
             extra: { rows: rows.length },
         }));
-    }, [data?.source, hasData, isFallback, onDataChange, rows.length]);
+    }, [data?.source, hasData, sourceUpdatedAt, dataUpdatedAt, isFallback, onDataChange, rows.length]);
 
     return (
         <div className="h-full flex flex-col">
             <div className="pb-2 border-b border-[var(--border-subtle)]">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={sourceUpdatedAt}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     note={data?.source || 'vnstock'}

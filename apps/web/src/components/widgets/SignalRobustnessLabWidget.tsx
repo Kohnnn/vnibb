@@ -63,7 +63,7 @@ export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolCli
   const [comparator, setComparator] = useState<'gte' | 'lte'>('lte')
   const [threshold, setThreshold] = useState<number>(15)
 
-  const { data, isLoading, error, refetch, isFetching } = useScreenerData({ limit: 300 })
+  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useScreenerData({ limit: 300 })
 
   // When the signal field changes, reset comparator/threshold to its defaults.
   const handleSignalChange = (key: SignalKey) => {
@@ -141,7 +141,8 @@ export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolCli
           sourceLabel: 'Screener universe (descriptive test)',
           apiGroup: '/screener',
           endpoint: '/screener/',
-          updatedAt: data?.meta?.last_data_date ?? undefined,
+          updatedAt: null,
+          fetchedAt: dataUpdatedAt,
         },
       },
       signal: { field: signalKey, comparator, threshold },
@@ -157,7 +158,7 @@ export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolCli
       return_reads: evaluation.returnReads,
       rows: evaluation.passes,
     })
-  }, [hasData, onDataChange, signalKey, comparator, threshold, evaluation, robustness, data?.meta?.last_data_date])
+  }, [hasData, onDataChange, signalKey, comparator, threshold, evaluation, robustness, dataUpdatedAt])
 
   if (isLoading && !hasData) return <WidgetSkeleton />
   if (error && !hasData) return <WidgetError title="Failed to load screener universe" onRetry={() => refetch()} />
@@ -359,7 +360,7 @@ export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolCli
         walk-forward.
       </p>
 
-      <WidgetMeta className="px-1 pt-1" isFetching={isFetching} sourceLabel="Screener snapshot" align="right" />
+      <WidgetMeta className="px-1 pt-1" updatedAt={null} fetchedAt={dataUpdatedAt} isFetching={isFetching} sourceLabel="Screener snapshot" align="right" />
 
       <QuantRunHistoryPanel
         widget="signal_robustness_lab"

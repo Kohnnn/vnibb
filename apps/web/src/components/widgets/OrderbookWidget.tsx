@@ -74,6 +74,7 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
   const isStale = Boolean(orderbook?.data?.is_stale);
   const marketStatus = orderbook?.data?.market_status || null;
   const snapshotTime = orderbook?.data?.snapshot_time || null;
+  const fetchedAt = dataUpdatedAt || snapshotTime;
   const priceSource = orderbook?.data?.price_source || null;
   const hasReferencePrices = priceSource === 'latest_price'
     || entries.some((entry) => (entry as DepthEntry & Record<string, unknown>).price_status === 'reference');
@@ -169,11 +170,12 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
           endpoint: `/equity/${symbol}/orderbook`,
           stale: isStale,
           localOnly: false,
-          updatedAt: snapshotTime || (dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined),
+          updatedAt: null,
+          fetchedAt,
         },
       },
     });
-  }, [hasData, onDataChange, symbol, isStale, snapshotTime, dataUpdatedAt]);
+  }, [hasData, onDataChange, symbol, isStale, fetchedAt]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view order book" />;
@@ -190,7 +192,8 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
       <div className="h-full flex flex-col">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={null}
+            fetchedAt={fetchedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback && !healthState}
             isStale={isStale && !healthState}

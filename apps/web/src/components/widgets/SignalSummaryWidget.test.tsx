@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import type { UseQueryResult } from '@tanstack/react-query'
 
 import { useFullTechnicalAnalysis } from '@/lib/queries'
 import type { FullTechnicalAnalysis } from '@/types/technical'
@@ -17,6 +18,40 @@ jest.mock('@/components/ui/WidgetMeta', () => ({
 }))
 
 const mockUseFullTechnicalAnalysis = jest.mocked(useFullTechnicalAnalysis)
+
+function createQueryResult(data: FullTechnicalAnalysis) {
+  let result: UseQueryResult<FullTechnicalAnalysis, Error>
+  const refetch: UseQueryResult<FullTechnicalAnalysis, Error>['refetch'] = async () => result
+  result = {
+    data,
+    dataUpdatedAt: 1,
+    error: null,
+    errorUpdatedAt: 0,
+    failureCount: 0,
+    failureReason: null,
+    errorUpdateCount: 0,
+    isError: false,
+    isFetched: true,
+    isFetchedAfterMount: true,
+    isFetching: false,
+    isLoading: false,
+    isPending: false,
+    isLoadingError: false,
+    isInitialLoading: false,
+    isPaused: false,
+    isPlaceholderData: false,
+    isRefetchError: false,
+    isRefetching: false,
+    isStale: false,
+    isSuccess: true,
+    isEnabled: true,
+    refetch,
+    status: 'success',
+    fetchStatus: 'idle',
+    promise: Promise.resolve(data),
+  } satisfies UseQueryResult<FullTechnicalAnalysis, Error>
+  return result
+}
 
 const technicalAnalysis: FullTechnicalAnalysis = {
   symbol: 'FPT',
@@ -64,19 +99,13 @@ const technicalAnalysis: FullTechnicalAnalysis = {
     ],
     trend_strength: 'moderate',
   },
+  data_quality: { status: 'ok', unit_status: 'confirmed_vnd', unresolved_session_count: 0 },
   generated_at: '2026-07-16T00:00:00Z',
 }
 
 describe('SignalSummaryWidget', () => {
   beforeEach(() => {
-    mockUseFullTechnicalAnalysis.mockReturnValue({
-      data: technicalAnalysis,
-      isLoading: false,
-      error: null,
-      refetch: jest.fn(),
-      isFetching: false,
-      dataUpdatedAt: 1,
-    } as unknown as ReturnType<typeof useFullTechnicalAnalysis>)
+    mockUseFullTechnicalAnalysis.mockReturnValue(createQueryResult(technicalAnalysis))
   })
 
   it('uses the selected timeframe and explains indicator evidence', () => {
@@ -90,5 +119,37 @@ describe('SignalSummaryWidget', () => {
     fireEvent.click(screen.getByRole('button', { name: /RSI \(14\)/ }))
     expect(screen.getByText('RSI below 30 is commonly oversold; above 70 is commonly overbought.')).toBeInTheDocument()
     expect(screen.getByText('Observed: 58.00 · Classification: neutral')).toBeInTheDocument()
+  })
+
+  it.each([
+    undefined,
+    { status: 'ok' },
+    { status: 'ok', unit_status: 'mixed' },
+    { status: 'ok', unit_status: 'confirmed_vnd', unresolved_excluded_dates: ['2026-07-15'] },
+  ])('withholds directional evidence for uncertified or unresolved history %j', (data_quality) => {
+    mockUseFullTechnicalAnalysis.mockReturnValue(createQueryResult({ ...technicalAnalysis, data_quality }))
+    const onDataChange = jest.fn()
+    render(<SignalSummaryWidget symbol="FPT" onDataChange={onDataChange} />)
+
+    expect(screen.getByText(/Signal summary unavailable:/)).toBeInTheDocument()
+    expect(screen.queryByText('Consensus')).not.toBeInTheDocument()
+    expect(screen.queryByText('Entry Zones')).not.toBeInTheDocument()
+    expect(onDataChange.mock.calls.at(-1)?.[0]).not.toHaveProperty('overallSignal')
+  })
+
+  it('keeps certified directional evidence with benign coverage warnings and large genuine prices', () => {
+    mockUseFullTechnicalAnalysis.mockReturnValue(createQueryResult({
+        ...technicalAnalysis,
+        data_quality: { status: 'degraded', unit_status: 'confirmed_vnd', issues: ['Latest clean bar is old.'] },
+        levels: {
+          ...technicalAnalysis.levels,
+          support_resistance: { ...technicalAnalysis.levels.support_resistance, current_price: 110_000 },
+        },
+    }))
+    render(<SignalSummaryWidget symbol="FPT" />)
+
+    expect(screen.getByText('Consensus')).toBeInTheDocument()
+    expect(screen.getByText('67%')).toBeInTheDocument()
+    expect(screen.queryByText(/Signal summary unavailable:/)).not.toBeInTheDocument()
   })
 })

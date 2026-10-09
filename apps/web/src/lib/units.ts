@@ -137,7 +137,14 @@ export function formatPriceValueForUnit(
   return formatNumber(converted, { decimals: options.decimals ?? 2, locale: options.locale, useGrouping: options.useGrouping })
 }
 
-export function formatUnitValue(
+/**
+ * Format a value that is ALREADY expressed in the configured display unit.
+ *
+ * The FX boundary is `convertFinancialValueForUnit`: callers convert once and then
+ * format here. Formatting must never divide by the rate again, or one quantity
+ * renders at two magnitudes (axis vs tooltip vs table).
+ */
+export function formatDisplayValue(
   value: number | null | undefined,
   config: UnitConfig = DEFAULT_UNIT_CONFIG
 ): string {
@@ -166,16 +173,7 @@ export function formatUnitValue(
       return formatScaled(1e6, 'M')
     case 'B':
       return formatScaled(1e9, 'B')
-    case 'USD': {
-      const usdValue = convertFinancialValueForUnit(value, config)
-      if (usdValue === null) return EMPTY_VALUE
-      const usdAbs = Math.abs(usdValue)
-      const usdSign = usdValue < 0 ? '-' : ''
-      if (usdAbs >= 1e9) return `${usdSign}${(usdAbs / 1e9).toFixed(decimals)}B`
-      if (usdAbs >= 1e6) return `${usdSign}${(usdAbs / 1e6).toFixed(decimals)}M`
-      if (usdAbs >= 1e3) return `${usdSign}${(usdAbs / 1e3).toFixed(decimals)}K`
-      return `${usdSign}${formatRaw(usdAbs)}`
-    }
+    case 'USD':
     case 'auto':
     default:
       if (abs >= 1e9) return formatScaled(1e9, 'B')
@@ -183,6 +181,35 @@ export function formatUnitValue(
       if (abs >= 1e3) return formatScaled(1e3, 'K')
       return `${sign}${formatRaw(abs)}`
   }
+}
+
+/**
+ * Convert a raw (VND) value once and format it in the configured display unit.
+ * Use this for raw payload values; use `formatDisplayValue` for values that a
+ * caller has already converted (chart series, tooltips, table cells).
+ */
+export function formatUnitValue(
+  value: number | null | undefined,
+  config: UnitConfig = DEFAULT_UNIT_CONFIG
+): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE
+  return formatDisplayValue(convertFinancialValueForUnit(value, config), config)
+}
+
+/** Currency suffix for an already-converted value (e.g. ' USD'). */
+export function getConvertedUnitSuffix(config: UnitConfig = DEFAULT_UNIT_CONFIG): string {
+  const normalized = normalizeUnitConfig(config)
+  if (normalized.display === 'USD') return ' USD'
+  return normalized.currency ? ` ${normalized.currency}` : ''
+}
+
+/** Compact label for an already-converted value, e.g. `2.09 B USD`. */
+export function formatConvertedValue(
+  value: number | null | undefined,
+  config: UnitConfig = DEFAULT_UNIT_CONFIG
+): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE
+  return `${formatDisplayValue(value, config)}${getConvertedUnitSuffix(config)}`
 }
 
 export interface UnitScale {
@@ -222,6 +249,26 @@ export function formatUnitValuePlain(
   })
 }
 
+/**
+ * Format a RAW (VND) value against a scale resolved from already-converted
+ * values: convert once here, then divide. The flow charts (income Sankey, cash
+ * waterfall) build their model from raw statement rows, so formatting those
+ * values with `formatUnitValuePlain` divided raw VND by a USD-derived scale and
+ * overstated the magnitude by the FX rate (issue #100).
+ *
+ * `periodOrYear` is the fiscal period of the row being formatted. Without it the
+ * conversion falls back to the current FX rate, so a fiscal-2025 value would be
+ * formatted at a different rate than the scale it is divided by.
+ */
+export function formatRawValuePlain(
+  value: number | null | undefined,
+  scale: UnitScale,
+  config: UnitConfig = DEFAULT_UNIT_CONFIG,
+  periodOrYear?: string | number | null
+): string {
+  return formatUnitValuePlain(convertFinancialValueForUnit(value, config, periodOrYear), scale, config)
+}
+
 export function getUnitLegend(scale: UnitScale, config: UnitConfig): string {
   const currency = config.currency ? ` ${config.currency}` : ''
   if (!scale.suffix) return `Values in${currency}`.trim()
@@ -235,8 +282,19 @@ export function getUnitLegend(scale: UnitScale, config: UnitConfig): string {
   return `Values in ${label}${currency}`
 }
 
-export function formatAxisValue(value: number, config: UnitConfig = DEFAULT_UNIT_CONFIG): string {
-  const formatted = formatUnitValue(value, { ...config, decimalPlaces: 2 })
+/**
+ * Axis tick label. Pass `{ converted:true }` when the tick value already came
+ * out of `convertFinancialValueForUnit` (chart series), so it is not converted twice.
+ */
+export function formatAxisValue(
+  value: number,
+  config: UnitConfig = DEFAULT_UNIT_CONFIG,
+  options: { converted?: boolean } = {}
+): string {
+  const scaledConfig = { ...config, decimalPlaces: 2 }
+  const formatted = options.converted
+    ? formatDisplayValue(value, scaledConfig)
+    : formatUnitValue(value, scaledConfig)
   return formatted.replace(/([0-9])([KMB])$/, '$1 $2')
 }
 
@@ -284,6 +342,21 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+/**
+ * Narrow an unvalidated value (chart tooltip payload, provider cell) to a finite
+ * number, else null. Tooltip callbacks receive `string | number | Array<...> |
+ * undefined`, so callers must not assume a number.
+ */
+export function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  if (Array.isArray(value)) return value.length > 0 ? toFiniteNumber(value[0]) : null
+  return null
+}
+
 export function clampPercentage(
   value: number | null | undefined,
   type: 'yoy_change' | 'margin' | 'yield' | 'ratio' = 'yoy_change'
@@ -327,6 +400,23 @@ export function normalizePercentValue(
   return options.clamp ? clampPercentage(normalized, options.clamp) : normalized
 }
 
+/**
+ * Percent change using the absolute prior-period value as the denominator - the
+ * project convention, and the one the API's growth payload uses. Dividing by
+ * `|previous|` makes a swing from a negative base to a positive one read as a
+ * POSITIVE number. Dividing by the signed `previous` instead disagrees in sign
+ * whenever the prior value is negative, which is how one fiscal year rendered as
+ * +100.7% in the statement table and -100.7% in the growth widget (issue #104).
+ *
+ * The absolute denominator is deliberately the only option: a second convention
+ * in this helper is what let the two surfaces drift apart.
+ *
+ * A negative prior value still makes the percentage unreadable as ordinary
+ * growth, so `percentChangeDetail` classifies the pair and callers MUST render
+ * that classification rather than labelling every negative-base cell as one
+ * undifferentiated "turnaround": a loss that narrowed is not a loss that flipped
+ * to profit.
+ */
 export function calculatePercentChange(
   current: number | null | undefined,
   previous: number | null | undefined,
@@ -342,6 +432,82 @@ export function calculatePercentChange(
 
   const change = ((current - previous) / Math.abs(previous)) * 100
   return options.clamp ? clampPercentage(change, options.clamp) : change
+}
+
+/** How a comparison reads once a negative endpoint is accounted for. */
+export type PercentChangeBasis =
+  | 'growth'
+  | 'loss-to-profit'
+  | 'loss-narrowed'
+  | 'loss-widened'
+  | 'profit-to-loss'
+
+export interface PercentChangeDetail {
+  change: number | null
+  /** True when an endpoint was negative, so the sign is not ordinary growth. */
+  hasNegativeBase: boolean
+  basis: PercentChangeBasis
+  /** Short visible tag for `basis`, or null for ordinary same-sign growth. */
+  label: string | null
+}
+
+const PERCENT_CHANGE_LABELS: Record<PercentChangeBasis, string | null> = {
+  growth: null,
+  'loss-to-profit': 'to profit',
+  'loss-narrowed': 'loss narrowed',
+  'loss-widened': 'loss widened',
+  'profit-to-loss': 'to loss',
+}
+
+function classifyPercentChange(current: number, previous: number): PercentChangeBasis {
+  if (previous < 0 && current > 0) return 'loss-to-profit'
+  if (previous < 0) {
+    if (current === previous) return 'growth'
+    return current > previous ? 'loss-narrowed' : 'loss-widened'
+  }
+  if (current < 0) return 'profit-to-loss'
+  return 'growth'
+}
+
+export function percentChangeDetail(
+  current: number | null | undefined,
+  previous: number | null | undefined,
+  options: {
+    minimumBase?: number
+    clamp?: 'yoy_change' | 'margin' | 'yield' | 'ratio'
+  } = {}
+): PercentChangeDetail {
+  const hasNegativeBase = isFiniteNumber(previous) && (previous < 0 || (previous > 0 && isFiniteNumber(current) && current < 0))
+  const basis = isFiniteNumber(current) && isFiniteNumber(previous)
+    ? classifyPercentChange(current, previous)
+    : 'growth'
+  return {
+    change: calculatePercentChange(current, previous, options),
+    hasNegativeBase,
+    basis,
+    label: hasNegativeBase ? PERCENT_CHANGE_LABELS[basis] : null,
+  }
+}
+
+/**
+ * Hover text for a classified change. Returns undefined for ordinary growth so
+ * callers can omit the attribute entirely.
+ */
+export function describePercentChange(detail: PercentChangeDetail): string | undefined {
+  if (!detail.hasNegativeBase) return undefined
+  const denominator = 'This percentage divides by the absolute prior value.'
+  switch (detail.basis) {
+    case 'loss-to-profit':
+      return `Prior period was a loss and the current period is profitable (loss to profit). ${denominator}`
+    case 'loss-narrowed':
+      return `Both periods are losses and the loss narrowed. ${denominator}`
+    case 'loss-widened':
+      return `Both periods are losses and the loss widened. ${denominator}`
+    case 'profit-to-loss':
+      return `Prior period was profitable and the current period is a loss (profit to loss). ${denominator}`
+    default:
+      return `Prior period was negative. ${denominator}`
+  }
 }
 
 export function formatNumber(

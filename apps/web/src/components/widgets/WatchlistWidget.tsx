@@ -206,7 +206,8 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                 apiGroup: '/ws',
                 endpoint: '/api/v1/ws/prices',
                 sourceLabel: 'WebSocket',
-                lastDataDate: lastUpdate,
+                lastDataDate: null,
+                fetchedAt: lastUpdate,
                 stale: showCached,
                 extra: hasSymbols ? { symbolCount: symbols.length } : undefined,
             }),
@@ -295,7 +296,8 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
 
                 <div className="px-3 py-1.5 border-b border-[var(--border-color)]/70 bg-[var(--bg-primary)]">
                     <WidgetMeta
-                        updatedAt={lastUpdate}
+                        updatedAt={null}
+                        fetchedAt={lastUpdate}
                         isCached={showCached}
                         note={connectionNote}
                         sourceLabel="WebSocket"

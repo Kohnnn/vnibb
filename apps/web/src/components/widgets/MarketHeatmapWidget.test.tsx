@@ -240,10 +240,25 @@ describe('MarketHeatmapWidget', () => {
 
     expect(screen.getByText('Cached')).toBeInTheDocument();
     expect(screen.getByText(/Constituents 2026-09-10 \(stale\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Updated 2026-09-23/)).toBeInTheDocument();
+    expect(screen.getByText(/As of 2026-09-23/)).toBeInTheDocument();
     expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
       __widgetRuntime: expect.objectContaining({
         provenance: expect.objectContaining({ cached: true, stale: true, updatedAt: oldConstituents }),
+      }),
+    }));
+  });
+
+  it('does not substitute snapshot generation or receipt for an unknown price date', () => {
+    mockUseMarketHeatmap.mockReturnValue({
+      ...mockHeatmapData({ updated_at: '2026-10-08T12:00:00Z', price_updated_at: null }),
+      dataUpdatedAt: 1750000000000,
+    });
+    const onDataChange = jest.fn();
+    render(<MarketHeatmapWidget id="market-heatmap" onDataChange={onDataChange} />);
+    expect(screen.getByText('As-of unknown')).toBeInTheDocument();
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      __widgetRuntime: expect.objectContaining({
+        provenance: expect.objectContaining({ fetchedAt: 1750000000000 }),
       }),
     }));
   });
@@ -264,13 +279,22 @@ describe('MarketHeatmapWidget', () => {
   });
 
   it('warns when fallback rows cannot establish full-universe coverage', () => {
-    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({ partial: true, cached: false }));
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({ partial:true, cached:false }));
+    render(<MarketHeatmapWidget id="market-heatmap" />);
+    expect(screen.getByText(/Partial universe/)).toBeInTheDocument();
+  });
+
+  it('reports unavailable coverage instead of a flat zero-stock market', () => {
+    // A provider failure returns count=0/sectors=[] (market.py). Rendering that as a
+    // treemap produced "0 Stocks • 0 Groups" and a fabricated neutral read (issue #107).
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({ count: 0, sectors:[] }));
     const onDataChange = jest.fn();
     render(<MarketHeatmapWidget id="market-heatmap" onDataChange={onDataChange} />);
-    expect(screen.getByText(/Partial universe/)).toBeInTheDocument();
+
+    expect(screen.getByText('Market data unavailable')).toBeInTheDocument();
     expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
       __widgetRuntime: expect.objectContaining({
-        provenance: expect.objectContaining({ stale: true }),
+        layoutHint: expect.objectContaining({ empty:true }),
       }),
     }));
   });

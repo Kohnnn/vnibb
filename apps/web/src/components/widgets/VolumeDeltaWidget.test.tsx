@@ -14,9 +14,14 @@ const VolumeDelta = widgetRegistry.get('volume_delta')!.component;
 const refetch = jest.fn();
 
 function showVolumeDelta(candles: object[], microError: Error | null) {
+  // Canonical fixture: the widget certifies each OHLC row by its own
+  // `price_unit` marker, so the fixture states VND per row plus the matching
+  // response-level status (QA #98).
+  const certifiedCandles = candles.map((row) => ({ price_unit: 'VND', ...row }));
   historicalQuery.mockReturnValue({
-    data: { data: candles }, isLoading: false, isFetching: false,
-    error: null, refetch, dataUpdatedAt: 1750000000000,
+    data: { data: certifiedCandles, meta: { count: certifiedCandles.length, unit_status: 'confirmed_vnd' } },
+    isLoading:false, isFetching:false, error: null,
+    refetch, dataUpdatedAt: 1750000000000,
   } as never);
   microQuery.mockReturnValue({
     data: undefined, isLoading: false, isFetching: false,
@@ -79,7 +84,7 @@ describe('volume_delta saved dashboard widget', () => {
     await waitFor(() => expect(onDataChange).toHaveBeenCalledWith(expect.objectContaining({
       __widgetRuntime: expect.objectContaining({
         layoutHint: expect.objectContaining({ empty: false }),
-        provenance: expect.objectContaining({ localOnly: true, stale: true }),
+        provenance: expect.objectContaining({ localOnly:true, stale:true }),
       }),
     })));
   });

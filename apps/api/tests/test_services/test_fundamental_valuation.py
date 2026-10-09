@@ -15,7 +15,7 @@ import pytest
 from vnibb.services.fundamental_valuation import (
     FundamentalInputs,
     ValuationConfig,
-    _normalize_statement_unit_outliers,
+    _normalize_statement_rows,
     compute_cagr,
     compute_dividend_years,
     compute_fcf_positive,
@@ -60,18 +60,15 @@ def _cash_row(
     }
 
 
-def test_normalize_statement_unit_outliers_repairs_fundamental_raw_rows() -> None:
+def test_statement_values_are_not_rescaled_from_magnitude() -> None:
     rows = [
-        {"yearReport": 2022, "revenue": 10_000_000_000, "net_profit_after_tax": 1_000_000_000},
-        {"yearReport": 2023, "revenue": 11_000_000_000, "net_profit_after_tax": 1_100_000_000},
-        {"yearReport": 2024, "revenue": 12_000_000_000_000, "net_profit_after_tax": 1_200_000_000_000},
+        {"yearReport": 2022, "revenue": 10_000_000_000},
+        {"yearReport": 2023, "revenue": 11_000_000_000},
+        {"yearReport": 2024, "revenue": 12_000_000_000_000},
     ]
-
-    normalized = _normalize_statement_unit_outliers(rows)
-
-    assert normalized[2]["revenue"] == 12_000_000_000
-    assert normalized[2]["net_profit_after_tax"] == 1_200_000_000
-    assert rows[2]["revenue"] == 12_000_000_000_000
+    normalized = _normalize_statement_rows([{"raw": row} for row in rows])
+    assert normalized[2]["revenue"] == rows[2]["revenue"]
+    assert normalized[2]["_valuation_unit_lineage"]["revenue"]["scaleToVnd"] is None
 
 
 # --- DCF ---------------------------------------------------------------------
@@ -369,6 +366,9 @@ def _happy_inputs() -> FundamentalInputs:
         cash_flows=cash,
         company_name="AAA Corp",
         exchange="HOSE",
+        price_unit="VND",
+        shares_unit="shares",
+        statement_unit="VND",
     )
 
 
@@ -461,7 +461,7 @@ class TestToDocument:
         assert doc["symbol"] == "AAA"
         assert doc["snapshotDate"] == "2026-06-10"
         assert doc["source"] == "vnibb-fundamental-engine"
-        assert doc["schemaVersion"] == 1
+        assert doc["schemaVersion"] == 2
         assert doc["observedAt"] is not None
         assert doc["updatedAt"] is not None
         for key in (
@@ -500,6 +500,9 @@ class TestToDocument:
             "baseFcf": pytest.approx(200.0),
             "growthRate": pytest.approx(0.10, rel=1e-6),
             "horizonYears": 10,
+            "unitQuality": "verified",
+            "comparisonUnavailableReason": None,
+            "unitLineage": {"price": {"unit": "VND"}, "shares": {"unit": "shares"}, "statements": {"unit": "VND"}},
         }
         assert doc["valuationMethod"] == "dcf"
 
@@ -510,7 +513,7 @@ class _PriceCorpus:
 
     async def get_raw_dataset_records(self, _symbol, *, dataset, **_kwargs):
         if dataset == "company.info":
-            return [{"raw": {"issue_share": 1_000_000}}]
+            return [{"raw": {"issue_share": 1_000_000, "units": {"issue_share": "shares"}}}]
         return []
 
     async def get_eod_prices(self, _symbol, **_kwargs):
@@ -563,3 +566,105 @@ async def test_valuation_does_not_value_unknown_units_or_index_points(record):
 
     assert inputs.price is None
     assert inputs.market_cap is None
+
+
+@pytest.mark.parametrize("missing", ["price_unit", "shares_unit", "statement_unit"])
+def test_unknown_unit_disables_comparison_with_specific_reason(missing):
+    inputs = _happy_inputs()
+    setattr(inputs, missing, None)
+    snapshot = compute_fundamental_snapshot(inputs)
+    assert snapshot.margin_of_safety is None
+    assert snapshot.valuation_verdict is None
+    assert snapshot.inputs["unit_quality"] == "unknown"
+    assert "unknown" in snapshot.inputs["comparison_unavailable_reason"]
+    if missing != "price_unit":
+        assert snapshot.intrinsic_value is None
+    else:
+        assert snapshot.intrinsic_value is not None
+
+
+@pytest.mark.parametrize("price", [50.0, 59_700_000.0])
+def test_declared_vnd_valuation_is_not_forced_near_price(price):
+    inputs = _happy_inputs()
+    inputs.price = price
+    snapshot = compute_fundamental_snapshot(inputs)
+    # Independent model value: constant 200 VND annual FCF growing from 10%
+    # to 3% over ten years, divided by 100 shares. No price-based rescaling.
+    fcf, present_value = 200.0, 0.0
+    for year in range(1, 11):
+        fcf *= 1 + 0.10 + (0.03 - 0.10) * (year - 1) / 9
+        present_value += fcf / 1.12 ** year
+    expected = (present_value + fcf * 1.03 / 0.09 / 1.12 ** 10) / 100
+    assert snapshot.intrinsic_value == pytest.approx(expected)
+    assert snapshot.price == price
+    assert snapshot.inputs["unit_quality"] == "verified"
+
+
+class _ValuationCorpus(_PriceCorpus):
+    def __init__(self, currency_unit="VND", shares_unit="shares"):
+        super().__init__([{"close": 59_700, "priceUnit": "VND", "time": "2026-06-15"}])
+        self.currency_unit = currency_unit
+        self.shares_unit = shares_unit
+
+    async def get_raw_dataset_records(self, _symbol, *, dataset, **_kwargs):
+        if dataset == "company.info":
+            return [{"raw": {"issued_share": 1_000_000, "industry": "Bank", "units": {"issued_share": self.shares_unit}}}]
+        if dataset == "finance.balance_sheet":
+            return [{"dataset": dataset, "datasetVariant": dataset + ".year", "source": "fixture",
+                     "observedAt": "2026-06-15T00:00:00Z", "raw": {
+                         "yearReport": 2025, "owners_equity": 20_000_000_000,
+                         "total_assets": 30_000_000_000, "currency_unit": self.currency_unit}}]
+        if dataset == "finance.income_statement":
+            return [{"raw": {"yearReport": 2025, "net_profit_after_tax": 2_600_000_000,
+                             "currency_unit": self.currency_unit}}]
+        return []
+
+
+@pytest.mark.asyncio
+async def test_known_price_equity_and_share_units_preserve_rim_value():
+    inputs = await load_fundamental_inputs("VNM", _ValuationCorpus())
+    snapshot = compute_fundamental_snapshot(inputs)
+    # ROE equals the 13% discount rate, hence residual income is zero.
+    assert snapshot.intrinsic_value == pytest.approx(20_000)
+    assert snapshot.price == 59_700
+    assert snapshot.margin_of_safety == -100
+    assert snapshot.inputs["unit_quality"] == "verified"
+    doc = to_document(snapshot, date(2026, 6, 15))
+    assert doc["inputs"]["unitLineage"]["statements"][1]["fields"]["owners_equity"] == {
+        "rawValue": 20_000_000_000, "rawUnit": "VND", "scaleToVnd": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("currency_unit,shares_unit", [(None, "shares"), ("VND", None)])
+async def test_loaded_unknown_units_do_not_publish_intrinsic_or_comparison(currency_unit, shares_unit):
+    inputs = await load_fundamental_inputs("VNM", _ValuationCorpus(currency_unit, shares_unit))
+    snapshot = compute_fundamental_snapshot(inputs)
+    assert snapshot.intrinsic_value is None
+    assert snapshot.margin_of_safety is None
+    assert snapshot.inputs["unit_quality"] == "unknown"
+    assert snapshot.inputs["comparison_unavailable_reason"]
+
+
+@pytest.mark.asyncio
+async def test_statement_conversion_uses_only_declared_currency_scale():
+    corpus = _ValuationCorpus("million VND")
+    records = await corpus.get_raw_dataset_records("VNM", dataset="finance.balance_sheet")
+    records[0]["raw"]["owners_equity"] = 20_000
+    normalized = _normalize_statement_rows(records)
+    assert normalized[0]["owners_equity"] == 20_000_000_000
+    assert records[0]["raw"]["owners_equity"] == 20_000
+
+
+def test_conflicting_same_year_statement_observations_do_not_choose_valuation_truth():
+    records = [
+        {"observedAt": date(2026, 6, 14), "raw": {"yearReport": 2025, "owners_equity": 20_000_000_000, "currency_unit": "VND"}},
+        {"observedAt": date(2026, 6, 15), "raw": {"yearReport": 2025, "owners_equity": 21_000_000_000, "currency_unit": "VND"}},
+    ]
+    inputs = _happy_inputs()
+    inputs.sector = "Bank"
+    inputs.balance_sheets = _normalize_statement_rows(records)
+    snapshot = compute_fundamental_snapshot(inputs)
+    assert snapshot.intrinsic_value is None
+    assert snapshot.margin_of_safety is None
+    assert "no established revision order" in snapshot.inputs["comparison_unavailable_reason"]
+    assert inputs.balance_sheets[0]["_valuation_observations"] == [row["raw"] for row in records]

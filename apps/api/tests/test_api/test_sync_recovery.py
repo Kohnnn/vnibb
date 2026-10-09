@@ -249,11 +249,13 @@ async def test_statement_all_language_fallbacks_only_when_fields_need_supplement
 
         def income_statement(self, period, lang="en"):
             languages.append(lang)
-            return pd.DataFrame([{
+            frame = pd.DataFrame([{
                 "period": "2025", "revenue": 100, "net_income": 10,
                 "selling_general_admin": 2, "depreciation": 1,
                 "research_development": 1, "ebitda": 20,
             }])
+            frame.attrs["value_unit"] = "VND"
+            return frame
 
     monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
     rows = await VnstockFinancialsFetcher.extract_data({
@@ -261,6 +263,67 @@ async def test_statement_all_language_fallbacks_only_when_fields_need_supplement
     })
     assert rows
     assert languages and all(language == "en" for language in languages)
+
+
+@pytest.mark.asyncio
+async def test_statement_dispatches_supported_keywords_to_underlying_provider(monkeypatch):
+    from vnibb.providers.vnstock.financials import VnstockFinancialsFetcher
+    calls = []
+
+    class Provider:
+        def balance_sheet(self, period, display_mode="std"):
+            calls.append(display_mode)
+            frame = pd.DataFrame([{"item_id": "total_assets", "2026-Q2": 55_677_822_007_000}])
+            frame.attrs["value_unit"] = "VND"
+            return frame
+
+    class Adapter:
+        def __init__(self, **kwargs):
+            self._provider = Provider()
+
+        def balance_sheet(self, period):
+            raise AssertionError("Adapter wrapper must not reject underlying provider keywords")
+
+    monkeypatch.setattr(runtime, "get_finance_class", lambda: Adapter)
+    rows = await VnstockFinancialsFetcher.extract_data({
+        "symbol": "VNM", "statement_type": "balance", "period": "quarter", "limit": 4,
+    })
+    assert calls and all(mode == "all" for mode in calls)
+    assert rows[0]["total_assets"] == 55_677_822_007_000
+
+
+@pytest.mark.asyncio
+async def test_statement_respects_wrapped_provider_actual_signature(monkeypatch):
+    from functools import wraps
+
+    from vnibb.providers.vnstock.financials import VnstockFinancialsFetcher
+    calls = []
+
+    def original(self, period, display_mode="std"):
+        calls.append(display_mode)
+        frame = pd.DataFrame([{"item_id": "total_assets", "2026-Q2": 55_677_822_007_000}])
+        frame.attrs["value_unit"] = "VND"
+        return frame
+
+    @wraps(original)
+    def quota_wrapper(self, period, show_log=False):
+        calls.append("quota_wrapper")
+        return original(self, period)
+
+    class Provider:
+        balance_sheet = quota_wrapper
+
+    class Adapter:
+        def __init__(self, **kwargs):
+            self._provider = Provider()
+
+    monkeypatch.setattr(runtime, "get_finance_class", lambda: Adapter)
+    rows = await VnstockFinancialsFetcher.extract_data({
+        "symbol": "VNM", "statement_type": "balance", "period": "quarter", "limit": 4,
+    })
+    assert calls and "quota_wrapper" in calls
+    assert "all" not in calls
+    assert rows[0]["total_assets"] == 55_677_822_007_000
 
 
 @pytest.mark.asyncio

@@ -159,6 +159,19 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
     enabled: Boolean(upperSymbol),
   });
 
+  const quantQuality = quantQuery.data?.meta as { unit_status?: string; unresolved_excluded_dates?: string[]; unresolved_session_count?: number } | undefined;
+  const historyQuality = historyQuery.data?.meta as { unit_status?: string; unresolved_excluded_dates?: string[]; unresolved_session_count?: number } | undefined;
+  const certifiedUnits = [quantQuality, historyQuality].every((quality) =>
+    ['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? ''));
+  const historyUnit = historyQuality?.unit_status === 'confirmed_vnd' ? 'VND' : 'index_points';
+  const certifiedHistory = Boolean(historyQuery.data?.data.length)
+    && historyQuery.data!.data.every((row) => row.price_unit === historyUnit);
+  const derivedWithheld = Boolean(quantQuery.data || historyQuery.data) && (!certifiedUnits || !certifiedHistory
+    || [quantQuality, historyQuality].some((quality) => Boolean(quality?.unresolved_excluded_dates?.length || quality?.unresolved_session_count))
+    || Boolean(quantQuery.data?.error));
+  const unavailableReason = !certifiedUnits || !certifiedHistory
+    ? 'Risk dashboard unavailable: historical price units were not certified.'
+    : 'Risk dashboard unavailable: source quality is unresolved.';
   const priceSeries = ((historyQuery.data?.data || []) as OHLCData[])
     .slice()
     .sort((left, right) => new Date(String(left.time)).getTime() - new Date(String(right.time)).getTime());
@@ -231,12 +244,15 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
 
   const riskScore = riskComputation.score
   const scoreLabel = riskGrade(riskScore);
-  const hasData = Boolean(drawdown || parkinson || sortino || hurst !== null);
+  const hasData = !derivedWithheld && [drawdown?.max_drawdown_from_52w_high_pct, parkinson?.current_parkinson_vol_30d_pct,
+    benchmarkRisk?.current_relative_drawdown_pct, benchmarkRisk?.current_tracking_error_30d_pct,
+    benchmarkRisk?.downside_deviation_30d_pct, sortinoAverage, hurst].every((value) => typeof value === 'number' && Number.isFinite(value));
   const isLoading = (quantQuery.isLoading || historyQuery.isLoading) && !hasData;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading, { timeoutMs: 10_000 });
   const quantWarning = extractQuantWarning(quantQuery.data);
   const adjustmentWarning = historyQuery.data?.meta?.adjustment_warning ?? null;
   const latestDataDate = quantQuery.data?.data?.last_data_date ?? historyQuery.data?.data?.at(-1)?.time ?? null;
+  const fetchedAt = quantQuery.dataUpdatedAt ?? historyQuery.dataUpdatedAt;
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -244,10 +260,11 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
       apiGroup: '/quant',
       endpoint: `/quant/${upperSymbol}?period=${period}&metrics=drawdown_recovery,parkinson_volatility,sortino,benchmark_risk`,
       sourceLabel: 'Risk dashboard',
-      lastDataDate: latestDataDate ?? quantQuery.data?.data?.computed_at ?? historyQuery.dataUpdatedAt,
+      lastDataDate: latestDataDate,
+      fetchedAt,
       adjustmentMode: quantQuery.data?.data?.adjustment_mode,
       derived: true,
-      extra: {
+      extra: hasData ? {
         riskScore,
         riskLabel: scoreLabel.label,
         pricePoints: priceSeries.length,
@@ -255,15 +272,15 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
         adjustmentRequestedCount: historyQuery.data?.meta?.adjustment_requested_count ?? null,
         adjustmentAppliedCount: historyQuery.data?.meta?.adjustment_applied_count ?? null,
         adjustmentWarning,
-      },
+      } : undefined,
     }));
-  }, [adjustmentWarning, hasData, historyQuery.data?.meta?.adjustment_applied_count, historyQuery.data?.meta?.adjustment_coverage_pct, historyQuery.data?.meta?.adjustment_requested_count, historyQuery.dataUpdatedAt, latestDataDate, onDataChange, period, priceSeries.length, quantQuery.data?.data?.adjustment_mode, quantQuery.data?.data?.computed_at, riskScore, scoreLabel.label, upperSymbol]);
+  }, [adjustmentWarning, fetchedAt, hasData, historyQuery.data?.meta?.adjustment_applied_count, historyQuery.data?.meta?.adjustment_coverage_pct, historyQuery.data?.meta?.adjustment_requested_count, latestDataDate, onDataChange, period, priceSeries.length, quantQuery.data?.data?.adjustment_mode, riskScore, scoreLabel.label, upperSymbol]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to inspect risk" icon={<ShieldAlert size={18} />} />;
   }
 
-  const exportRows = [
+  const exportRows = hasData ? [
     {
       symbol: upperSymbol,
       period,
@@ -281,7 +298,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
       cvar_95_1d_pct: benchmarkRisk?.cvar_95_1d_pct ?? null,
       relative_drawdown_pct: benchmarkRisk?.current_relative_drawdown_pct ?? null,
     },
-  ];
+  ] : [];
 
   return (
     <WidgetContainer
@@ -317,7 +334,8 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
             ))}
           </div>
           <WidgetMeta
-            updatedAt={quantQuery.data?.data?.last_data_date ?? quantQuery.data?.data?.computed_at ?? historyQuery.dataUpdatedAt}
+            updatedAt={latestDataDate}
+            fetchedAt={fetchedAt}
             isFetching={(quantQuery.isFetching || historyQuery.isFetching) && hasData}
             note={`${period} composite view · ${(quantQuery.data?.data?.adjustment_mode || 'adjusted')} history vs ${benchmarkRisk?.benchmark || 'VNINDEX'}`}
             align="right"
@@ -340,6 +358,8 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
           <WidgetError error={quantQuery.error as Error} onRetry={() => quantQuery.refetch()} />
         ) : historyQuery.error && !hasData ? (
           <WidgetError error={historyQuery.error as Error} onRetry={() => historyQuery.refetch()} />
+        ) : derivedWithheld ? (
+          <WidgetEmpty message={unavailableReason} icon={<ShieldAlert size={18} />} />
         ) : !hasData ? (
           <WidgetEmpty message="Risk metrics not available yet" icon={<ShieldAlert size={18} />} />
         ) : (

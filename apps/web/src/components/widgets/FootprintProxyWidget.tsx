@@ -34,6 +34,7 @@ export function FootprintProxyWidget({ symbol, onDataChange }: FootprintProxyWid
     enabled: Boolean(upperSymbol),
   });
   const bars = data?.data?.footprint?.bars || [];
+  const lastDataDate = null;
   const footprintBlock = data?.data?.footprint as { source?: string; quality?: string } | undefined;
   // Backend reports availability via `quality` ('available' / 'unavailable' /
   // 'not_requested'). Map both keys so we surface a typed empty state instead
@@ -53,11 +54,12 @@ export function FootprintProxyWidget({ symbol, onDataChange }: FootprintProxyWid
         apiGroup: '/microstructure',
         endpoint: `/microstructure/${upperSymbol}?features=footprint&interval=5m&lookback_days=7`,
         sourceLabel: 'Footprint proxy · trade ticks',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate,
+        fetchedAt: dataUpdatedAt,
         extra: hasData ? { bars: bars.length, quality: footprintStatus } : undefined,
       }),
     );
-  }, [onDataChange, hasData, dataUpdatedAt, upperSymbol, bars.length, footprintStatus]);
+  }, [onDataChange, hasData, lastDataDate, dataUpdatedAt, upperSymbol, bars.length, footprintStatus]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view footprint proxy" icon={<Rows3 size={18} />} />;
@@ -95,7 +97,7 @@ export function FootprintProxyWidget({ symbol, onDataChange }: FootprintProxyWid
           <Rows3 size={12} className="text-cyan-400" />
           <span>Footprint Proxy</span>
         </div>
-        <WidgetMeta updatedAt={dataUpdatedAt} isFetching={isFetching && hasData} note="Mongo match-type proxy" align="right" />
+        <WidgetMeta updatedAt={lastDataDate} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note="Mongo match-type proxy" align="right" />
       </div>
 
       <div className="flex-1 overflow-auto space-y-2 pr-1">

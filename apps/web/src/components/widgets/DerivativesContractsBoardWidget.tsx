@@ -52,9 +52,11 @@ export function DerivativesContractsBoardWidget({
       apiGroup: '/derivatives',
       endpoint: '/api/v1/derivatives/contracts',
       sourceLabel: 'VNIBB derivatives contracts',
+      lastDataDate: null,
+      fetchedAt: contractsQuery.dataUpdatedAt,
       extra: { count: contractsQuery.data?.count ?? contracts.length },
     }))
-  }, [contracts.length, contractsQuery.data?.count, hasData, onDataChange])
+  }, [contracts.length, contractsQuery.data?.count, contractsQuery.dataUpdatedAt, hasData, onDataChange])
 
   return (
     <WidgetContainer
@@ -79,7 +81,8 @@ export function DerivativesContractsBoardWidget({
               />
             </div>
             <WidgetMeta
-              updatedAt={contractsQuery.dataUpdatedAt}
+              updatedAt={null}
+              fetchedAt={contractsQuery.dataUpdatedAt}
               isFetching={contractsQuery.isFetching && hasData}
               note="Contracts board"
               align="right"

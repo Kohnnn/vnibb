@@ -2726,7 +2726,11 @@ class DataPipeline:
         total = 0
 
         normalized_period = "quarter" if period in {"quarter", "Q", "QTR"} else "year"
-        fetch_limit = 8 if normalized_period == "quarter" else 6
+        # Request the provider max (le=40) so the stored fallback keeps the same
+        # depth as the live widget window (QUARTER_PERIOD_LIMIT=40). limit=8 is
+        # enough for freshness (the transform keeps the newest periods) but leaves
+        # the fallback serving a shorter history than the live path.
+        fetch_limit = 40 if normalized_period == "quarter" else 6
 
         def _parse_period_fields(
             raw_period: Any,
@@ -2791,16 +2795,6 @@ class DataPipeline:
                     return parsed
             return None
 
-        def _extract_raw_float(payload: Dict[str, Any], *keys: str) -> Optional[float]:
-            if not payload:
-                return None
-            for key in keys:
-                if key in payload:
-                    parsed = _coerce_float(payload.get(key))
-                    if parsed is not None:
-                        return parsed
-            return None
-
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
             await self._wait_for_rate_limit("financials")
@@ -2834,8 +2828,7 @@ class DataPipeline:
                     continue
 
                 symbol_synced = False
-                income_depreciation_lookup: Dict[Tuple[int, int], float] = {}
-                annual_income_depreciation: Dict[int, float] = {}
+                income_depreciation_lookup: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
                 for statement_type, model, cache_slug in statement_specs:
                     params = FinancialsQueryParams(
                         symbol=symbol,
@@ -2854,372 +2847,179 @@ class DataPipeline:
                     async with async_session_maker() as session:
                         for entry in items:
                             payload = entry.model_dump(mode="json")
-                            if isinstance(entry.raw_data, dict):
-                                raw_payload = dict(entry.raw_data)
-                            else:
-                                raw_payload = dict(payload)
+                            raw_payload = dict(entry.raw_data or {})
+                            canonical = {
+                                key: value for key, value in payload.items() if key != "raw_data"
+                            }
+                            if entry.unavailable_reason or entry.value_unit != "VND":
+                                canonical["unavailable_reason"] = (
+                                    entry.unavailable_reason or "unknown_source_unit"
+                                )
+                                for key, value in canonical.items():
+                                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                                        canonical[key] = None
+
+                            lineage_fields = (
+                                "source", "currency", "value_unit", "unit_metadata",
+                                "aggregation_basis", "source_periods", "unavailable_reason",
+                                "consolidation_basis", "flow_basis",
+                            )
+                            derived: Dict[str, Any] = {}
+                            lineage = {key: canonical.get(key) for key in lineage_fields}
+                            lineage["canonical_data"] = canonical
+                            lineage["derived_data"] = derived
+                            raw_payload["_financial_lineage"] = lineage
 
                             period_value, fiscal_year, fiscal_quarter = _parse_period_fields(
-                                entry.period,
-                                raw_payload,
+                                entry.period, raw_payload
                             )
-
                             common = {
                                 "symbol": symbol,
                                 "period": period_value,
                                 "period_type": normalized_period,
                                 "fiscal_year": fiscal_year,
                                 "fiscal_quarter": fiscal_quarter,
-                                "source": "vnstock",
+                                "source": entry.source or "unknown",
                                 "updated_at": datetime.utcnow(),
                             }
+                            lookup_key = (
+                                fiscal_year, fiscal_quarter or 0,
+                                entry.source, entry.currency, entry.consolidation_basis,
+                                entry.flow_basis, entry.aggregation_basis,
+                                entry.period, tuple(entry.source_periods),
+                            )
 
                             if statement_type == StatementType.INCOME:
-                                operating_expenses = _pick_float(
-                                    _extract_raw_float(
-                                        payload,
-                                        "operating_expenses",
-                                        "operatingExpenses",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "operating_expenses",
-                                        "operatingExpenses",
-                                    ),
-                                )
-                                if operating_expenses is None:
-                                    sga = _coerce_float(entry.selling_general_admin)
-                                    rnd = _coerce_float(entry.research_development)
-                                    if sga is not None or rnd is not None:
-                                        operating_expenses = (sga or 0.0) + (rnd or 0.0)
+                                operating_expenses = _coerce_float(canonical.get("operating_expenses"))
+                                sga = _coerce_float(canonical.get("selling_general_admin"))
+                                rnd = _coerce_float(canonical.get("research_development"))
+                                if operating_expenses is None and sga is not None and rnd is not None:
+                                    operating_expenses = sga + rnd
+                                    derived["operating_expenses"] = {
+                                        "value": operating_expenses,
+                                        "formula": "selling_general_admin + research_development",
+                                        "source_fields": ["selling_general_admin", "research_development"],
+                                    }
 
-                                income_depreciation = _pick_float(
-                                    entry.depreciation,
-                                    _extract_raw_float(
-                                        payload,
-                                        "depreciation",
-                                        "depreciation_and_amortization",
-                                        "depreciation_and_amortisation",
-                                        "khau_hao_tai_san_co_dinh",
-                                        "chi_phi_khau_hao",
-                                        "khau_hao_tscd",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "depreciation",
-                                        "depreciation_and_amortization",
-                                        "depreciation_and_amortisation",
-                                        "khau_hao_tai_san_co_dinh",
-                                        "chi_phi_khau_hao",
-                                        "khau_hao_tscd",
-                                    ),
-                                )
-
-                                lookup_key = (fiscal_year, fiscal_quarter or 0)
+                                income_depreciation = _coerce_float(canonical.get("depreciation"))
                                 if income_depreciation is not None:
-                                    income_depreciation_lookup[lookup_key] = income_depreciation
-                                    annual_income_depreciation[fiscal_year] = income_depreciation
+                                    income_depreciation_lookup[lookup_key] = {
+                                        "value": income_depreciation,
+                                        "period": entry.period,
+                                        "unit_metadata": entry.unit_metadata.get("depreciation", {}),
+                                    }
 
-                                sga_value = _pick_float(
-                                    entry.selling_general_admin,
-                                    _extract_raw_float(
-                                        payload,
-                                        "selling_general_admin",
-                                        "selling_expenses",
-                                        "general_and_administrative_expenses",
-                                        "general_and_admin_expenses",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "selling_general_admin",
-                                        "selling_expenses",
-                                        "general_and_administrative_expenses",
-                                        "general_and_admin_expenses",
-                                    ),
-                                )
-                                research_development_value = _pick_float(
-                                    entry.research_development,
-                                    _extract_raw_float(
-                                        payload,
-                                        "research_development",
-                                        "research_and_development",
-                                        "rd_expense",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "research_development",
-                                        "research_and_development",
-                                        "rd_expense",
-                                    ),
-                                )
-
-                                operating_income_value = _coerce_float(entry.operating_income)
-                                ebitda_value = _coerce_float(entry.ebitda)
-                                if ebitda_value is None:
-                                    if (
-                                        operating_income_value is not None
-                                        and income_depreciation is not None
-                                    ):
-                                        ebitda_value = operating_income_value + abs(
-                                            income_depreciation
-                                        )
-                                        raw_payload["_ebitda_computed_from_operating_income"] = True
-
-                                if sga_value is not None:
-                                    raw_payload["selling_general_admin"] = sga_value
-                                if income_depreciation is not None:
-                                    raw_payload["depreciation"] = income_depreciation
-                                if research_development_value is not None:
-                                    raw_payload["research_development"] = research_development_value
-                                if ebitda_value is not None:
-                                    raw_payload["ebitda"] = ebitda_value
+                                operating_income_value = _coerce_float(canonical.get("operating_income"))
+                                ebitda_value = _coerce_float(canonical.get("ebitda"))
+                                if (
+                                    ebitda_value is None
+                                    and operating_income_value is not None
+                                    and income_depreciation is not None
+                                ):
+                                    ebitda_value = operating_income_value + abs(income_depreciation)
+                                    derived["ebitda"] = {
+                                        "value": ebitda_value,
+                                        "formula": "operating_income + abs(depreciation)",
+                                        "source_fields": ["operating_income", "depreciation"],
+                                    }
 
                                 values = {
                                     **common,
-                                    "revenue": _coerce_float(entry.revenue),
-                                    "cost_of_revenue": _coerce_float(entry.cost_of_revenue),
-                                    "gross_profit": _coerce_float(entry.gross_profit),
+                                    "revenue": _coerce_float(canonical.get("revenue")),
+                                    "cost_of_revenue": _coerce_float(canonical.get("cost_of_revenue")),
+                                    "gross_profit": _coerce_float(canonical.get("gross_profit")),
                                     "operating_expenses": operating_expenses,
                                     "operating_income": operating_income_value,
-                                    "interest_expense": _coerce_float(entry.interest_expense),
-                                    "other_income": _coerce_float(entry.other_income),
+                                    "interest_expense": _coerce_float(canonical.get("interest_expense")),
+                                    "other_income": _coerce_float(canonical.get("other_income")),
                                     "income_before_tax": _pick_float(
-                                        entry.pre_tax_profit,
-                                        entry.profit_before_tax,
-                                        _extract_raw_float(
-                                            payload,
-                                            "pre_tax_profit",
-                                            "profit_before_tax",
-                                            "income_before_tax",
-                                        ),
-                                        _extract_raw_float(
-                                            raw_payload,
-                                            "pre_tax_profit",
-                                            "profit_before_tax",
-                                            "income_before_tax",
-                                        ),
+                                        canonical.get("pre_tax_profit"), canonical.get("profit_before_tax")
                                     ),
-                                    "income_tax": _pick_float(
-                                        entry.tax_expense,
-                                        _extract_raw_float(payload, "tax_expense", "income_tax"),
-                                        _extract_raw_float(
-                                            raw_payload, "tax_expense", "income_tax"
-                                        ),
-                                    ),
-                                    "net_income": _coerce_float(entry.net_income),
+                                    "income_tax": _coerce_float(canonical.get("tax_expense")),
+                                    "net_income": _coerce_float(canonical.get("net_income")),
                                     "ebitda": ebitda_value,
-                                    "eps": _coerce_float(entry.eps),
-                                    "eps_diluted": _coerce_float(entry.eps_diluted),
+                                    "eps": _coerce_float(canonical.get("eps")),
+                                    "eps_diluted": _coerce_float(canonical.get("eps_diluted")),
                                     "raw_data": raw_payload,
                                 }
                             elif statement_type == StatementType.BALANCE:
-                                accounts_payable_value = _pick_float(
-                                    entry.accounts_payable,
-                                    _extract_raw_float(
-                                        payload,
-                                        "accounts_payable",
-                                        "trade_accounts_payable",
-                                        "short_term_trade_accounts_payable",
-                                        "short_term_trade_payable",
-                                        "long_term_trade_payables",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "accounts_payable",
-                                        "trade_accounts_payable",
-                                        "short_term_trade_accounts_payable",
-                                        "short_term_trade_payable",
-                                        "long_term_trade_payables",
-                                    ),
-                                )
-                                goodwill_value = _pick_float(
-                                    entry.goodwill,
-                                    _extract_raw_float(
-                                        payload,
-                                        "goodwill",
-                                        "good_will_bn_vnd",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "goodwill",
-                                        "good_will_bn_vnd",
-                                    ),
-                                )
-                                intangible_assets_value = _pick_float(
-                                    entry.intangible_assets,
-                                    _extract_raw_float(
-                                        payload,
-                                        "intangible_assets",
-                                        "intangible_fixed_assets",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "intangible_assets",
-                                        "intangible_fixed_assets",
-                                    ),
-                                )
-                                if accounts_payable_value is not None:
-                                    raw_payload["accounts_payable"] = accounts_payable_value
-                                if goodwill_value is not None:
-                                    raw_payload["goodwill"] = goodwill_value
-                                if intangible_assets_value is not None:
-                                    raw_payload["intangible_assets"] = intangible_assets_value
-
                                 values = {
                                     **common,
-                                    "total_assets": _coerce_float(entry.total_assets),
-                                    "current_assets": _coerce_float(entry.current_assets),
+                                    "total_assets": _coerce_float(canonical.get("total_assets")),
+                                    "current_assets": _coerce_float(canonical.get("current_assets")),
                                     "cash_and_equivalents": _pick_float(
-                                        entry.cash_and_equivalents,
-                                        entry.cash,
+                                        canonical.get("cash_and_equivalents"), canonical.get("cash")
                                     ),
-                                    "short_term_investments": _pick_float(
-                                        _extract_raw_float(
-                                            payload,
-                                            "short_term_investments",
-                                            "shortTermInvestments",
-                                        ),
-                                        _extract_raw_float(
-                                            raw_payload,
-                                            "short_term_investments",
-                                            "shortTermInvestments",
-                                        ),
-                                    ),
-                                    "accounts_receivable": _coerce_float(entry.accounts_receivable),
-                                    "inventory": _coerce_float(entry.inventory),
-                                    "non_current_assets": _pick_float(
-                                        _extract_raw_float(
-                                            payload,
-                                            "non_current_assets",
-                                            "nonCurrentAssets",
-                                        ),
-                                        _extract_raw_float(
-                                            raw_payload,
-                                            "non_current_assets",
-                                            "nonCurrentAssets",
-                                        ),
-                                    ),
-                                    "fixed_assets": _coerce_float(entry.fixed_assets),
-                                    "total_liabilities": _coerce_float(entry.total_liabilities),
-                                    "current_liabilities": _coerce_float(entry.current_liabilities),
-                                    "accounts_payable": accounts_payable_value,
-                                    "short_term_debt": _coerce_float(entry.short_term_debt),
-                                    "non_current_liabilities": _coerce_float(
-                                        entry.long_term_liabilities
-                                    ),
-                                    "long_term_debt": _coerce_float(entry.long_term_debt),
-                                    "total_equity": _pick_float(entry.total_equity, entry.equity),
-                                    "retained_earnings": _coerce_float(entry.retained_earnings),
-                                    "book_value_per_share": _pick_float(
-                                        _extract_raw_float(
-                                            payload,
-                                            "book_value_per_share",
-                                            "bookValuePerShare",
-                                            "bvps",
-                                        ),
-                                        _extract_raw_float(
-                                            raw_payload,
-                                            "book_value_per_share",
-                                            "bookValuePerShare",
-                                            "bvps",
-                                        ),
-                                    ),
+                                    "short_term_investments": _coerce_float(canonical.get("short_term_investments")),
+                                    "accounts_receivable": _coerce_float(canonical.get("accounts_receivable")),
+                                    "inventory": _coerce_float(canonical.get("inventory")),
+                                    "non_current_assets": _coerce_float(canonical.get("non_current_assets")),
+                                    "fixed_assets": _coerce_float(canonical.get("fixed_assets")),
+                                    "total_liabilities": _coerce_float(canonical.get("total_liabilities")),
+                                    "current_liabilities": _coerce_float(canonical.get("current_liabilities")),
+                                    "accounts_payable": _coerce_float(canonical.get("accounts_payable")),
+                                    "short_term_debt": _coerce_float(canonical.get("short_term_debt")),
+                                    "non_current_liabilities": _coerce_float(canonical.get("long_term_liabilities")),
+                                    "long_term_debt": _coerce_float(canonical.get("long_term_debt")),
+                                    "total_equity": _pick_float(canonical.get("total_equity"), canonical.get("equity")),
+                                    "retained_earnings": _coerce_float(canonical.get("retained_earnings")),
+                                    "book_value_per_share": _coerce_float(canonical.get("book_value_per_share")),
                                     "raw_data": raw_payload,
                                 }
                             else:
-                                net_change = None
+                                depreciation_value = _coerce_float(canonical.get("depreciation"))
                                 if (
-                                    entry.operating_cash_flow is not None
-                                    and entry.investing_cash_flow is not None
-                                    and entry.financing_cash_flow is not None
+                                    depreciation_value is None
+                                    and not canonical.get("unavailable_reason")
+                                    and all(lookup_key[index] is not None for index in (2, 3, 4, 5))
+                                    and lookup_key in income_depreciation_lookup
                                 ):
-                                    net_change = (
-                                        entry.operating_cash_flow
-                                        + entry.investing_cash_flow
-                                        + entry.financing_cash_flow
-                                    )
+                                    supplement = income_depreciation_lookup[lookup_key]
+                                    depreciation_value = supplement["value"]
+                                    derived["depreciation"] = {
+                                        "value": depreciation_value,
+                                        "source_statement": "income",
+                                        "source_fields": ["depreciation"],
+                                        "source_periods": [supplement["period"]],
+                                        "unit_metadata": supplement["unit_metadata"],
+                                    }
 
-                                lookup_key = (fiscal_year, fiscal_quarter or 0)
-                                depreciation_value = _pick_float(
-                                    entry.depreciation,
-                                    _extract_raw_float(
-                                        payload,
-                                        "depreciation",
-                                        "depreciation_and_amortization",
-                                        "depreciation_and_amortisation",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "depreciation",
-                                        "depreciation_and_amortization",
-                                        "depreciation_and_amortisation",
-                                    ),
-                                )
-                                if depreciation_value is None:
-                                    depreciation_value = income_depreciation_lookup.get(lookup_key)
-                                    if depreciation_value is None and fiscal_quarter is not None:
-                                        depreciation_value = annual_income_depreciation.get(
-                                            fiscal_year
-                                        )
-                                    if depreciation_value is not None:
-                                        raw_payload["_depreciation_cross_fill"] = "income_statement"
-
-                                investing_cash_flow_value = _coerce_float(entry.investing_cash_flow)
+                                operating_cash_flow_value = _coerce_float(canonical.get("operating_cash_flow"))
+                                investing_cash_flow_value = _coerce_float(canonical.get("investing_cash_flow"))
+                                financing_cash_flow_value = _coerce_float(canonical.get("financing_cash_flow"))
                                 capital_expenditure_value = _pick_float(
-                                    entry.capital_expenditure,
-                                    entry.capex,
-                                    _extract_raw_float(
-                                        payload,
-                                        "capital_expenditure",
-                                        "capex",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "capital_expenditure",
-                                        "capex",
-                                    ),
+                                    canonical.get("capital_expenditure"), canonical.get("capex")
                                 )
-                                if (
-                                    capital_expenditure_value is None
-                                    and investing_cash_flow_value is not None
-                                ):
-                                    capital_expenditure_value = investing_cash_flow_value
-                                    raw_payload["_capital_expenditure_proxy"] = (
-                                        "investing_cash_flow"
-                                    )
-
-                                free_cash_flow_value = _pick_float(
-                                    entry.free_cash_flow,
-                                    _extract_raw_float(
-                                        payload,
-                                        "free_cash_flow",
-                                        "freecashflow",
-                                        "free_cashflow",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "free_cash_flow",
-                                        "freecashflow",
-                                        "free_cashflow",
-                                    ),
-                                )
-                                operating_cash_flow_value = _coerce_float(entry.operating_cash_flow)
+                                free_cash_flow_value = _coerce_float(canonical.get("free_cash_flow"))
                                 if (
                                     free_cash_flow_value is None
                                     and operating_cash_flow_value is not None
                                     and capital_expenditure_value is not None
+                                    and capital_expenditure_value <= 0
                                 ):
-                                    free_cash_flow_value = (
-                                        operating_cash_flow_value + capital_expenditure_value
-                                    )
-                                    raw_payload["_free_cash_flow_computed"] = True
+                                    free_cash_flow_value = operating_cash_flow_value + capital_expenditure_value
+                                    derived["free_cash_flow"] = {
+                                        "value": free_cash_flow_value,
+                                        "formula": "operating_cash_flow + capital_expenditure",
+                                        "source_fields": ["operating_cash_flow", "capital_expenditure"],
+                                    }
 
-                                if depreciation_value is not None:
-                                    raw_payload["depreciation"] = depreciation_value
-                                if capital_expenditure_value is not None:
-                                    raw_payload["capital_expenditure"] = capital_expenditure_value
-                                if free_cash_flow_value is not None:
-                                    raw_payload["free_cash_flow"] = free_cash_flow_value
+                                net_change = _pick_float(
+                                    canonical.get("net_change_in_cash"), canonical.get("net_cash_flow")
+                                )
+                                if net_change is None and all(value is not None for value in (
+                                    operating_cash_flow_value, investing_cash_flow_value,
+                                    financing_cash_flow_value,
+                                )):
+                                    net_change = (
+                                        operating_cash_flow_value + investing_cash_flow_value
+                                        + financing_cash_flow_value
+                                    )
+                                    derived["net_change_in_cash"] = {
+                                        "value": net_change,
+                                        "formula": "operating_cash_flow + investing_cash_flow + financing_cash_flow",
+                                        "source_fields": ["operating_cash_flow", "investing_cash_flow", "financing_cash_flow"],
+                                    }
 
                                 values = {
                                     **common,
@@ -3227,16 +3027,35 @@ class DataPipeline:
                                     "depreciation": depreciation_value,
                                     "investing_cash_flow": investing_cash_flow_value,
                                     "capital_expenditure": capital_expenditure_value,
-                                    "financing_cash_flow": _coerce_float(entry.financing_cash_flow),
-                                    "dividends_paid": _coerce_float(entry.dividends_paid),
-                                    "debt_repayment": _coerce_float(entry.debt_repayment),
+                                    "financing_cash_flow": financing_cash_flow_value,
+                                    "dividends_paid": _coerce_float(canonical.get("dividends_paid")),
+                                    "debt_repayment": _coerce_float(canonical.get("debt_repayment")),
                                     "free_cash_flow": free_cash_flow_value,
-                                    "net_change_in_cash": _pick_float(
-                                        entry.net_change_in_cash,
-                                        net_change,
-                                    ),
+                                    "net_change_in_cash": net_change,
                                     "raw_data": raw_payload,
                                 }
+
+                            # A provider-rejected metric is unavailable, not absent: deriving
+                            # it from other fields would persist a number the lineage refused.
+                            rejected_fields = {
+                                key
+                                for key, metadata in (canonical.get("unit_metadata") or {}).items()
+                                if isinstance(metadata, dict) and metadata.get("unavailable_reason")
+                            }
+                            for key in rejected_fields:
+                                derived.pop(key, None)
+                                if key in values:
+                                    values[key] = None
+
+                            for key, supplement in derived.items():
+                                canonical[key] = supplement["value"]
+                                canonical["unit_metadata"][key] = {
+                                    **supplement,
+                                    "value_unit": "VND",
+                                    "currency": entry.currency,
+                                    "derived": True,
+                                }
+                            payload = {**canonical, "raw_data": raw_payload}
 
                             stmt = get_upsert_stmt(
                                 model, ["symbol", "period", "period_type"], values

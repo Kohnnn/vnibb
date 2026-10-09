@@ -9,29 +9,52 @@ jest.mock('@/lib/queries', () => ({ useHistoricalPrices: jest.fn() }));
 
 const historicalQuery = jest.mocked(useHistoricalPrices);
 const receivedAt = Date.parse('2026-10-05T10:00:00Z');
+const certified = { count: 40, unit_status: 'confirmed_vnd' } as const satisfies NonNullable<EquityHistoricalResponse['meta']>;
+const unavailableText = /ATR regime unavailable/;
 
-function showATR(meta?: EquityHistoricalResponse['meta'], datesMissing = false, error: Error | null = null) {
-  const candles = Array.from({ length: 40 }, (_, index) => ({
-    symbol: 'FPT',
-    time: datesMissing ? '' : new Date(Date.UTC(2024, 0, index + 1)).toISOString().slice(0, 10),
-    open: 100000, high: 110000, low: 90000, close: 105000, volume: 1000,
-  }));
+type Options = {
+  datesMissing?: boolean;
+  error?: Error | null;
+  count?: number;
+  flat?: boolean;
+  /** Drop per-row price_unit so certified metadata has no row-level proof. */
+  rowsMissingUnitProof?: boolean;
+};
+
+function bars(count: number, options: Options) {
+  return Array.from({ length: count }, (_, index) => {
+    const row = {
+      symbol: 'FPT',
+      time: options.datesMissing ? '' : new Date(Date.UTC(2024, 0, index + 1)).toISOString().slice(0, 10),
+      open: 100000,
+      high: options.flat ? 100000 : 110000,
+      low: options.flat ? 100000 : 90000,
+      close: 100000,
+      volume: 1000,
+      price_unit: 'VND' as const,
+    };
+    return options.rowsMissingUnitProof ? { ...row, price_unit: undefined } : row;
+  });
+}
+
+function showATR(meta: NonNullable<EquityHistoricalResponse['meta']>, options: Options = {}) {
   historicalQuery.mockReturnValue({
-    data: { data: candles, meta }, isLoading: false, isFetching: false,
+    data: { data: bars(options.count ?? 40, options), meta },
+    isLoading:false, isFetching:false,
+    error: options.error ?? null, refetch: jest.fn(), dataUpdatedAt: receivedAt,
+  } as unknown as UseQueryResult<EquityHistoricalResponse, Error>);
+  render(<ATRRegimeWidget symbol="FPT" />);
+}
+
+function showATRFailure(error: Error) {
+  historicalQuery.mockReturnValue({
+    data: undefined, isLoading:false, isFetching:false,
     error, refetch: jest.fn(), dataUpdatedAt: receivedAt,
   } as unknown as UseQueryResult<EquityHistoricalResponse, Error>);
-  const onDataChange = jest.fn();
-  render(<ATRRegimeWidget symbol="FPT" onDataChange={onDataChange} />);
-  return onDataChange;
+  render(<ATRRegimeWidget symbol="FPT" />);
 }
 
-function expectProvenance(onDataChange: jest.Mock, provenance: Record<string, unknown>) {
-  expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
-    __widgetRuntime: expect.objectContaining({ provenance: expect.objectContaining(provenance) }),
-  }));
-}
-
-describe('ATR historical observation metadata', () => {
+describe('ATR regime availability', () => {
   beforeEach(() => {
     jest.spyOn(Date, 'now').mockReturnValue(receivedAt);
   });
@@ -40,37 +63,30 @@ describe('ATR historical observation metadata', () => {
     jest.restoreAllMocks();
   });
 
-  it('marks old observations fetched now stale and prefers backend freshness over receipt time', () => {
-    const observationDate = '2024-02-09';
-    const onDataChange = showATR({ count: 40, freshness_as_of: observationDate, last_data_date: '2026-10-05' });
+  it('marks old observations stale and prefers backend freshness over receipt time', () => {
+    showATR({ ...certified, freshness_as_of: '2024-02-09', last_data_date: '2026-10-05' });
 
-    expectProvenance(onDataChange, { updatedAt: observationDate, stale: true });
-    expect(screen.getByText(`Updated ${formatAbsoluteTimestamp(new Date(observationDate))}`)).toBeInTheDocument();
+    expect(screen.getByText(`As of ${formatAbsoluteTimestamp(new Date('2024-02-09'))}`)).toBeInTheDocument();
     expect(screen.getByText('Stale')).toBeInTheDocument();
-    expect(screen.queryByText(`Updated ${formatAbsoluteTimestamp(new Date(receivedAt))}`)).not.toBeInTheDocument();
+    expect(screen.getByText(`Fetched ${formatAbsoluteTimestamp(new Date(receivedAt))}`)).toBeInTheDocument();
   });
 
   it('uses last_data_date when freshness_as_of is absent', () => {
-    const onDataChange = showATR({ count: 40, last_data_date: '2024-02-08' });
+    showATR({ ...certified, last_data_date: '2024-02-08' });
 
-    expectProvenance(onDataChange, { updatedAt: '2024-02-08', stale: true });
+    expect(screen.getByText(`As of ${formatAbsoluteTimestamp(new Date('2024-02-08'))}`)).toBeInTheDocument();
   });
 
   it('uses the final returned bar when metadata dates are absent or invalid', () => {
-    const onDataChange = showATR({ count: 40, freshness_as_of: 'invalid', last_data_date: null });
+    showATR({ ...certified, freshness_as_of: 'invalid', last_data_date: null });
 
-    expectProvenance(onDataChange, { updatedAt: '2024-02-09', stale: true });
+    expect(screen.getByText(`As of ${formatAbsoluteTimestamp(new Date('2024-02-09'))}`)).toBeInTheDocument();
   });
 
-  it('does not substitute query receipt time when no observation dates exist', () => {
-    const onDataChange = showATR({ count: 40, freshness_as_of: null, last_data_date: null }, true);
+  it('does not present the receipt time as a source observation date', () => {
+    showATR(certified, { datesMissing:true });
 
-    expectProvenance(onDataChange, {
-      updatedAt: undefined,
-      stale: false,
-      warnings: ['Historical observation date unavailable'],
-    });
-    expect(screen.queryByText(/^Updated /)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^As of /)).not.toBeInTheDocument();
     expect(screen.queryByText('Live')).not.toBeInTheDocument();
     expect(screen.getByText(/Historical observation date unavailable/)).toBeInTheDocument();
   });
@@ -78,10 +94,11 @@ describe('ATR historical observation metadata', () => {
   it.each([
     ['mixed', 'Mixed historical price units'],
     ['unconfirmed', 'Historical price units unconfirmed'],
-  ] as const)('carries partial coverage, %s units, and fallback warnings visibly and in provenance', (unitStatus, unitWarning) => {
-    const onDataChange = showATR({
-      count: 40, freshness_as_of: '2026-10-05T09:00:00Z',
-      completeness_status: 'partial', unit_status: unitStatus, fallback_used: true,
+  ] as const)('surfaces partial coverage and %s unit warnings', (unitStatus, unitWarning) => {
+    showATR({
+      ...certified,
+      freshness_as_of: '2026-10-05T09:00:00Z',
+      completeness_status: 'partial', unit_status: unitStatus, fallback_used:true,
       warnings: ['Internal trading-day gap'], adjustment_warning: 'Adjustment coverage incomplete',
     });
     const warnings = [
@@ -89,18 +106,66 @@ describe('ATR historical observation metadata', () => {
       'Historical source fallback used', 'Adjustment coverage incomplete',
     ];
 
-    expectProvenance(onDataChange, { warnings, stale: false, cached: false });
     for (const warning of warnings) expect(screen.getByText(new RegExp(warning))).toBeInTheDocument();
   });
 
   it('keeps refresh-failure fallback distinct from backend source fallback', () => {
-    const onDataChange = showATR({ count: 40, freshness_as_of: '2026-10-05T09:00:00Z' }, false, new Error('Refresh failed'));
+    showATR({ ...certified, freshness_as_of: '2026-10-05T09:00:00Z' }, { error: new Error('Refresh failed') });
 
-    expectProvenance(onDataChange, {
-      updatedAt: '2026-10-05T09:00:00Z', cached: true, stale: true,
-      warnings: ['Latest historical refresh failed; showing previous observations'],
-    });
     expect(screen.getByText('Stale')).toBeInTheDocument();
     expect(screen.getByText(/Latest historical refresh failed/)).toBeInTheDocument();
+  });
+
+  it('withholds regime and sizing when historical price units are not certified', () => {
+    showATR({ ...certified, unit_status: 'mixed' });
+
+    expect(screen.getAllByText(unavailableText).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Sizing Model')).not.toBeInTheDocument();
+    expect(screen.queryByText('ATR %')).not.toBeInTheDocument();
+  });
+
+  it('withholds regime when certified metadata has rows without price-unit proof', () => {
+    showATR(certified, { rowsMissingUnitProof:true });
+
+    expect(screen.getAllByText(unavailableText).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Sizing Model')).not.toBeInTheDocument();
+  });
+
+  it('withholds regime when certified history still has unresolved source quality', () => {
+    showATR({ ...certified, unresolved_excluded_dates: ['2024-01-05'] } as NonNullable<EquityHistoricalResponse['meta']>);
+
+    expect(screen.getAllByText(unavailableText).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Sizing Model')).not.toBeInTheDocument();
+  });
+
+  it('shows the failure and no metrics when history cannot be loaded at all', () => {
+    showATRFailure(new Error('Historical provider unavailable'));
+
+    expect(screen.getByText('Historical provider unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try Again' })).toBeInTheDocument();
+    expect(screen.queryByText('Sizing Model')).not.toBeInTheDocument();
+    expect(screen.queryByText('ATR %')).not.toBeInTheDocument();
+  });
+
+  it('renders regime and position sizing for certified, complete history', () => {
+    showATR(certified);
+
+    expect(screen.getByText('ATR %')).toBeInTheDocument();
+    expect(screen.getByText('Sizing Model')).toBeInTheDocument();
+    expect(screen.getByText('Suggested Shares')).toBeInTheDocument();
+  });
+
+  it('reports a genuine zero ATR instead of missing history', () => {
+    showATR(certified, { flat:true });
+
+    expect(screen.getByText('Sizing Model')).toBeInTheDocument();
+    expect(screen.queryByText('Not enough ATR history')).not.toBeInTheDocument();
+  });
+
+  it('reports missing history instead of a zero ATR', () => {
+    showATR(certified, { count: 5 });
+
+    expect(screen.getByText('Not enough ATR history')).toBeInTheDocument();
+    expect(screen.queryByText('Sizing Model')).not.toBeInTheDocument();
   });
 });

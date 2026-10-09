@@ -95,6 +95,10 @@ class EquityHistoricalData(BaseModel):
     close: float = Field(..., description="Closing price")
     volume: int = Field(..., description="Trading volume")
     price_unit: PriceUnit = Field(default="unknown", description="Canonical price unit, independent of adjustment mode")
+    price_source: Optional[str] = Field(
+        None,
+        description="Per-row source provenance (e.g. vnstock_vnd:KBS, vnstock_history:VCI, vietcap); never inferred from magnitude",
+    )
 
     # Optional extended fields from vnstock
     value: Optional[float] = Field(None, description="Trading value in VND")
@@ -250,6 +254,7 @@ class VnstockEquityHistoricalFetcher(
                         symbol=params.symbol.upper(),
                         time=time_value,
                         price_unit=row["price_unit"],
+                        price_source=row.get("price_source"),
                         open=float(row.get("open") or row.get("price") or 0),
                         high=float(row.get("high") or 0),
                         low=float(row.get("low") or 0),

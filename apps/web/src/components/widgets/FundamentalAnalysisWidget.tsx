@@ -20,6 +20,7 @@ function textValue(value: unknown): string | null {
 }
 
 function numberValue(value: unknown): number | null {
+  if (value == null || value === '' || typeof value === 'boolean') return null;
   const numeric = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
@@ -68,6 +69,9 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
   const payload = getData(data?.data);
   const profile = payload?.profile ?? null;
   const valuation = payload?.valuation ?? null;
+  const valuationVerified = valuation?.inputs?.unitQuality === 'verified';
+  const comparisonUnavailableReason = textValue(valuation?.inputs?.comparisonUnavailableReason)
+    || 'Legacy valuation units are unverified. Price, intrinsic value and margin of safety are unavailable until source units are reconciled.';
   const competitiveAdvantage = payload?.competitive_advantage ?? null;
   const profileDescription = textValue(profile?.description);
   const companyName = textValue(profile?.company_name) || symbol?.toUpperCase();
@@ -77,7 +81,10 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
   const sections = [...(payload?.sections ?? payload?.metrics ?? [])].slice(0, 4);
   const hasData = Boolean(summary || strengths.length || risks.length || sections.length || valuation || competitiveAdvantage);
   const source = textValue(payload?.source) || textValue(valuation?.source) || 'vnstock';
-  const updatedAt = payload?.updated_at || payload?.generated_at || valuation?.as_of || competitiveAdvantage?.as_of || data?.meta?.last_data_date || dataUpdatedAt;
+  // The endpoint serves no source observation date: `as_of` is the valuation engine's
+  // run date and `dataUpdatedAt` is a retrieval receipt, so both belong outside
+  // `lastDataDate`.
+  const updatedAt = null;
   const moatFactors = competitiveAdvantage?.moat_factors ?? {};
   const qualityMetrics = competitiveAdvantage?.quality_metrics ?? {};
 
@@ -88,10 +95,11 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
       endpoint: `/equity/${symbol}/fundamental-analysis`,
       sourceLabel: source,
       lastDataDate: updatedAt,
+      fetchedAt: dataUpdatedAt || null,
       stale: Boolean(error && hasData),
       extra: { sections: sections.length, strengths: strengths.length, risks: risks.length },
     }));
-  }, [error, hasData, onDataChange, risks.length, sections.length, source, strengths.length, symbol, updatedAt]);
+  }, [dataUpdatedAt, error, hasData, onDataChange, risks.length, sections.length, source, strengths.length, symbol, updatedAt]);
 
   if (!symbol) return <WidgetEmpty message="Select a symbol to view fundamental analysis" icon={<FileText size={18} />} />;
   if (isLoading && !hasData) return <WidgetSkeleton lines={6} />;
@@ -100,7 +108,7 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
 
   return (
     <div className="h-full space-y-3 overflow-auto">
-      <WidgetMeta updatedAt={updatedAt} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note="Fundamental analysis" align="right" />
+      <WidgetMeta updatedAt={updatedAt} fetchedAt={dataUpdatedAt || null} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note="Fundamental analysis" align="right" />
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         {valuation && (
@@ -108,15 +116,16 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Valuation</div>
-                <div className="mt-2 text-2xl font-black text-[var(--text-primary)]">{money(valuation.intrinsic_value) ?? 'n/a'}</div>
-                <div className="text-xs text-[var(--text-muted)]">Intrinsic value vs price {money(valuation.price) ?? 'n/a'}</div>
+                <div className="mt-2 text-2xl font-black text-[var(--text-primary)]">{valuationVerified ? money(valuation.intrinsic_value) ?? 'n/a' : 'n/a'}</div>
+                <div className="text-xs text-[var(--text-muted)]">{valuationVerified ? `Intrinsic value vs price ${money(valuation.price) ?? 'n/a'} VND/share` : 'Monetary comparison unavailable'}</div>
               </div>
-              <div className={`rounded-full border px-3 py-1 text-xs font-black uppercase ${verdictTone(valuation.valuation_verdict)}`}>
-                {textValue(valuation.valuation_verdict)?.replace('_', ' ') ?? 'no verdict'}
+              <div className={`rounded-full border px-3 py-1 text-xs font-black uppercase ${verdictTone(valuationVerified ? valuation.valuation_verdict : null)}`}>
+                {valuationVerified ? textValue(valuation.valuation_verdict)?.replace('_', ' ') ?? 'no verdict' : 'unverified units'}
               </div>
             </div>
+            {!valuationVerified && <p role="status" className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">{comparisonUnavailableReason}</p>}
             <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
-              <Metric label="MoS" value={pct(valuation.margin_of_safety)} />
+              <Metric label="MoS" value={valuationVerified ? pct(valuation.margin_of_safety) : null} />
               <Metric label="Method" value={textValue(valuation.valuation_method)?.toUpperCase()} />
               <Metric label="P/E" value={ratio(valuation.pe)} />
               <Metric label="P/B" value={ratio(valuation.pb)} />

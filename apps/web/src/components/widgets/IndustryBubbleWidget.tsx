@@ -125,11 +125,12 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove, onDataChange }: I
         apiGroup: '/market',
         endpoint: `/market/industry-bubble?symbol=${upperSymbol}&x_metric=${xMetric}&y_metric=${yMetric}&size_metric=${sizeMetric}&top_n=${topN}`,
         sourceLabel: 'Industry bubble',
-        lastDataDate: data?.updated_at || dataUpdatedAt,
+        lastDataDate: null,
+        fetchedAt: dataUpdatedAt,
         extra: hasData ? { symbol: upperSymbol, sector: data?.sector, count: points.length } : undefined,
       }),
     );
-  }, [hasData, data?.updated_at, dataUpdatedAt, data?.sector, upperSymbol, xMetric, yMetric, sizeMetric, topN, points.length, onDataChange]);
+  }, [hasData, dataUpdatedAt, data?.sector, upperSymbol, xMetric, yMetric, sizeMetric, topN, points.length, onDataChange]);
 
   return (
     <WidgetContainer
@@ -182,7 +183,8 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove, onDataChange }: I
             </div>
 
             <WidgetMeta
-              updatedAt={data?.updated_at || dataUpdatedAt}
+              updatedAt={null}
+              fetchedAt={dataUpdatedAt}
               isFetching={isFetching && hasData}
               note={`${metricLabel(xMetric)} vs ${metricLabel(yMetric)}`}
               align="right"
@@ -256,9 +258,16 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove, onDataChange }: I
           {isLoading && !hasData ? (
             <WidgetSkeleton variant="chart" />
           ) : error && !hasData ? (
-            <WidgetError error={error as Error} onRetry={() => refetch()} />
+            <WidgetError
+              title="Industry bubble unavailable"
+              error={error as Error}
+              onRetry={() => refetch()}
+            />
           ) : !hasData ? (
-            <WidgetEmpty message={`No industry bubble data available for ${upperSymbol}.`} icon={<CircleDot size={18} />} />
+            <WidgetEmpty
+              message={`No comparable sector peers for ${upperSymbol}. The bubble needs other instruments classified in the same sector; ${data?.sector ? `sector "${data.sector}" returned no usable points.` : 'no sector classification is available for this symbol.'}`}
+              icon={<CircleDot size={18} />}
+            />
           ) : (
             <div className="space-y-3">
               <div className="grid grid-cols-1 gap-2 xl:grid-cols-3">

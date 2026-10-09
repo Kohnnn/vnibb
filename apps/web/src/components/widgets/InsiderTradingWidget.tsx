@@ -21,12 +21,18 @@ interface InsiderTradingWidgetProps {
   onDataChange?: (data: WidgetDataPayload) => void;
 }
 
+// #109: the footer printed "Net: +-" because the sign prefix was decided from
+// `net_value >= 0` while this formatter rendered every falsy value as '-'.
+// Unavailable is now an em dash, zero is a real zero, and negatives keep the
+// sign inside the formatted amount instead of collapsing into "VND-…".
 function formatCurrency(value: number | null | undefined): string {
-  if (!value) return '-';
-  if (value >= 1e9) return `VND${(value / 1e9).toFixed(1)}bn`;
-  if (value >= 1e6) return `VND${(value / 1e6).toFixed(1)}mn`;
-  if (value >= 1e3) return `VND${(value / 1e3).toFixed(1)}k`;
-  return `VND${value}`;
+  if (value == null || !Number.isFinite(value)) return '—';
+  const sign = value < 0 ? '-' : '';
+  const magnitude = Math.abs(value);
+  if (magnitude >= 1e9) return `${sign}VND${(magnitude / 1e9).toFixed(1)}bn`;
+  if (magnitude >= 1e6) return `${sign}VND${(magnitude / 1e6).toFixed(1)}mn`;
+  if (magnitude >= 1e3) return `${sign}VND${(magnitude / 1e3).toFixed(1)}k`;
+  return `${sign}VND${magnitude}`;
 }
 
 function formatDate(dateStr: string): string {
@@ -94,6 +100,13 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
   const isFallback = Boolean(error && hasData);
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
+  // Source observation = latest disclosed transaction date; ignore scheduled future dates.
+  const lastDataDate = deals.reduce<string | null>((latest, deal) => {
+    const observedAt = new Date(deal.announce_date).getTime();
+    if (!Number.isFinite(observedAt) || observedAt > Date.now()) return latest;
+    return latest === null || observedAt > new Date(latest).getTime() ? deal.announce_date : latest;
+  }, null);
+
   useEffect(() => {
     onDataChange?.({
       __widgetRuntime: {
@@ -101,9 +114,13 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
           empty: filteredDeals.length === 0,
           compactHeight: 3,
         },
+        provenance: {
+          updatedAt: lastDataDate,
+          fetchedAt: dealsUpdatedAt,
+        },
       },
     })
-  }, [filteredDeals.length, onDataChange])
+  }, [filteredDeals.length, lastDataDate, dealsUpdatedAt, onDataChange])
 
   return (
     <div className="h-full flex flex-col">
@@ -124,7 +141,8 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
         </div>
         <div className="flex items-center gap-2">
           <WidgetMeta
-            updatedAt={dealsUpdatedAt}
+            updatedAt={lastDataDate}
+            fetchedAt={dealsUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note="90d sentiment"
@@ -235,7 +253,7 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
                   </div>
                   {deal.deal_quantity && (
                     <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">
-                      {deal.deal_quantity.toLocaleString()} shares @ {formatCurrency(deal.deal_price || 0)}
+                      {deal.deal_quantity.toLocaleString()} shares @ {formatCurrency(deal.deal_price)}
                     </div>
                   )}
                 </div>
@@ -260,8 +278,12 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
           </div>
           <div className="flex items-center justify-between mt-1">
             <span className="text-[var(--text-muted)]">Net:</span>
-            <span className={`font-medium ${sentiment.net_value >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {sentiment.net_value >= 0 ? '+' : ''}{formatCurrency(sentiment.net_value)}
+            <span className={`font-medium ${
+              sentiment.net_value == null
+                ? 'text-[var(--text-muted)]'
+                : sentiment.net_value >= 0 ? 'text-green-400' : 'text-red-400'
+            }`}>
+              {sentiment.net_value != null && sentiment.net_value > 0 ? '+' : ''}{formatCurrency(sentiment.net_value)}
             </span>
           </div>
         </div>

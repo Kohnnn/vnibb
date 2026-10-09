@@ -19,7 +19,7 @@ interface TechnicalSnapshotWidgetProps {
 }
 
 function formatSignal(signal?: string) {
-  if (!signal) return 'Neutral';
+  if (!signal) return 'Unavailable';
   return signal.replace('_', ' ').replace(/\n/g, ' ');
 }
 
@@ -41,6 +41,15 @@ export function TechnicalSnapshotWidget({ id, symbol, onRemove, onDataChange }: 
   } = useFullTechnicalAnalysis(symbol, { timeframe: 'D', enabled: Boolean(symbol) });
 
   const hasData = Boolean(data);
+  const quality = data?.data_quality;
+  const certifiedUnits = ['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '');
+  const derivedWithheld = Boolean(data) && (!certifiedUnits
+    || Boolean(quality?.unresolved_session_count || quality?.unresolved_excluded_dates?.length)
+    || ['no_data', 'unavailable', 'error', 'unresolved', 'mixed', 'unconfirmed'].includes(quality?.status ?? '')
+    || data?.signals.overall_signal === 'unavailable');
+  const unavailableReason = !certifiedUnits
+    ? 'Technical snapshot unavailable: historical price units were not certified.'
+    : data?.signals.data_quality?.note ?? 'Technical snapshot unavailable: source quality is unresolved.';
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
   const rsi = data?.oscillators?.rsi?.value;
   const macd = data?.oscillators?.macd?.histogram;
@@ -51,16 +60,17 @@ export function TechnicalSnapshotWidget({ id, symbol, onRemove, onDataChange }: 
   useEffect(() => {
     onDataChange?.(
       buildWidgetRuntime({
-        empty: !hasData,
+        empty: !hasData || derivedWithheld,
         apiGroup: '/technical',
         endpoint: `/analysis/ta/${symbol}/full?timeframe=D`,
         sourceLabel: 'Technical snapshot',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate: data?.data_quality?.latest_date ?? null,
+        fetchedAt: dataUpdatedAt,
         stale: Boolean(error && hasData),
-        extra: data?.signals?.overall_signal ? { overallSignal: data.signals.overall_signal } : undefined,
+        extra: !derivedWithheld && data?.signals?.overall_signal ? { overallSignal: data.signals.overall_signal } : undefined,
       }),
     );
-  }, [onDataChange, hasData, dataUpdatedAt, error, symbol, data?.signals?.overall_signal]);
+  }, [onDataChange, hasData, derivedWithheld, data?.data_quality?.latest_date, dataUpdatedAt, error, symbol, data?.signals?.overall_signal]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view technicals" />;
@@ -79,7 +89,8 @@ export function TechnicalSnapshotWidget({ id, symbol, onRemove, onDataChange }: 
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={data?.data_quality?.latest_date ?? null}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={Boolean(error && hasData)}
             note="Daily timeframe"
@@ -101,6 +112,8 @@ export function TechnicalSnapshotWidget({ id, symbol, onRemove, onDataChange }: 
             <WidgetSkeleton lines={5} />
           ) : error && !hasData ? (
             <WidgetError error={error as Error} onRetry={() => refetch()} />
+          ) : derivedWithheld ? (
+            <WidgetEmpty message={unavailableReason} icon={<Activity size={18} />} />
           ) : !hasData ? (
             <WidgetEmpty message="Technical indicators not available" icon={<Activity size={18} />} />
           ) : (

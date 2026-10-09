@@ -47,7 +47,7 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
   const isLoading = (shareholdersQuery.isLoading || foreignQuery.isLoading || insiderQuery.isLoading) && !hasData
   const isFetching = shareholdersQuery.isFetching || foreignQuery.isFetching || insiderQuery.isFetching
   const error = shareholdersQuery.error || foreignQuery.error || insiderQuery.error
-  const updatedAt = Math.max(shareholdersQuery.dataUpdatedAt, foreignQuery.dataUpdatedAt, insiderQuery.dataUpdatedAt)
+  const fetchedAt = Math.max(shareholdersQuery.dataUpdatedAt, foreignQuery.dataUpdatedAt, insiderQuery.dataUpdatedAt)
   const gradeTone = summary.grade === 'A' ? 'text-emerald-300' : summary.grade === 'B' ? 'text-cyan-300' : summary.grade === 'C' ? 'text-amber-300' : 'text-rose-300'
   const availableSources = [shareholders.length > 0, foreignFlow.length > 0, Boolean(insider)].filter(Boolean).length
   const ownershipHealth: WidgetHealthState | undefined = !hasData && !isLoading && !error
@@ -71,6 +71,10 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
       endpoint: `/api/v1/equity/${upperSymbol}/ownership-summary`,
       sourceLabel: 'Shareholders + foreign flow + insider sentiment',
       derived: true,
+      // Ownership inputs expose no source observation date, so freshness stays
+      // unknown and the query receipts are reported separately.
+      lastDataDate: null,
+      fetchedAt,
       stale: Boolean(error && hasData),
       extra: {
         holderCount: summary.holderCount,
@@ -78,7 +82,7 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
         availableSources,
       },
     }))
-  }, [availableSources, error, hasData, onDataChange, summary.holderCount, summary.score, upperSymbol])
+  }, [availableSources, error, fetchedAt, hasData, onDataChange, summary.holderCount, summary.score, upperSymbol])
 
   const refresh = () => {
     void shareholdersQuery.refetch()
@@ -111,7 +115,7 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
               <div className="text-[11px] text-[var(--text-secondary)]">{summary.stance}</div>
             </div>
           </div>
-          <WidgetMeta updatedAt={updatedAt} isFetching={isFetching && hasData} note={`${summary.holderCount} holders`} health={ownershipHealth} align="right" />
+          <WidgetMeta updatedAt={null} fetchedAt={fetchedAt} isFetching={isFetching && hasData} note={`${summary.holderCount} holders`} health={ownershipHealth} align="right" />
         </div>
 
         {isLoading ? (

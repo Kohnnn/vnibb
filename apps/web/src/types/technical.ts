@@ -1,6 +1,6 @@
 // Technical Analysis types
 
-export type Signal = 'strong_buy' | 'buy' | 'neutral' | 'sell' | 'strong_sell';
+export type Signal = 'strong_buy' | 'buy' | 'neutral' | 'sell' | 'strong_sell' | 'unavailable';
 export type Timeframe = 'D' | 'W' | 'M';
 
 export interface IndicatorDetail {
@@ -18,6 +18,7 @@ export interface SignalSummary {
     total_indicators: number;
     indicators: IndicatorDetail[];
     trend_strength: string;
+    data_quality?: { status?: string; reason?: string; note?: string } | null;
 }
 
 export interface TechnicalIndicators {
@@ -134,6 +135,7 @@ export interface IchimokuSignalSummary {
 export interface IchimokuSeriesResponse {
     symbol: string;
     period: string;
+    price_unit?: 'VND' | 'index_points' | 'unknown';
     data: IchimokuPoint[];
     signal: IchimokuSignalSummary;
 }
@@ -158,6 +160,7 @@ export interface FibonacciPricePoint {
 
 export interface FibonacciRetracementResponse {
     symbol: string;
+    price_unit?: 'VND' | 'index_points' | 'unknown';
     lookback_days: number;
     direction: string;
     swing_high: SwingPoint;
@@ -186,6 +189,9 @@ export interface FullTechnicalAnalysis {
         bars?: number;
         latest_date?: string | null;
         issues?: string[];
+        unit_status?: string;
+        unresolved_session_count?: number;
+        unresolved_excluded_dates?: string[];
     };
     generated_at: string;
 }

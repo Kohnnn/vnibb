@@ -31,6 +31,13 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove, onDataChange }
   const deals = data ?? [];
   const hasData = deals.length > 0;
 
+  // Source observation = latest disclosed transaction date; ignore scheduled future dates.
+  const lastDataDate = deals.reduce<string | null>((latest, deal) => {
+    const observedAt = new Date(deal.announce_date).getTime();
+    if (!Number.isFinite(observedAt) || observedAt > Date.now()) return latest;
+    return latest === null || observedAt > new Date(latest).getTime() ? deal.announce_date : latest;
+  }, null);
+
   const summary = useMemo(() => {
     const buys = deals.filter((deal) => deal.deal_action?.toUpperCase().includes('BUY'));
     const sells = deals.filter((deal) => deal.deal_action?.toUpperCase().includes('SELL'));
@@ -51,13 +58,15 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove, onDataChange }
       apiGroup: '/insider',
       endpoint: `/api/v1/insider/deals/${symbol}`,
       sourceLabel: 'Latest insider filings',
+      lastDataDate,
+      fetchedAt: dataUpdatedAt,
       stale: Boolean(error && hasData),
       extra: {
         dealCount: deals.length,
         netValue: summary.netValue,
       },
     }));
-  }, [deals.length, error, hasData, onDataChange, summary.netValue, symbol]);
+  }, [deals.length, error, hasData, lastDataDate, dataUpdatedAt, onDataChange, summary.netValue, symbol]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view insider activity" />;
@@ -76,7 +85,8 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove, onDataChange }
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
         <div className="px-3 py-2 border-b border-[var(--border-color)]">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={lastDataDate}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={Boolean(error && hasData)}
             note="Latest insider filings"

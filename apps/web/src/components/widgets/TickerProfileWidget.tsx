@@ -108,7 +108,10 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
     const hasData = Boolean(profile);
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
-    const updatedAt = [dataUpdatedAt, dividendsUpdatedAt, insiderUpdatedAt]
+    // Profile, dividend, and insider rows expose no source observation date —
+    // only the query receipts, which say when we retrieved them. Freshness
+    // therefore stays unknown and the receipts move to `fetchedAt`.
+    const fetchedAt = [dataUpdatedAt, dividendsUpdatedAt, insiderUpdatedAt]
         .filter(Boolean)
         .sort((a, b) => Number(b) - Number(a))[0];
     const showDividendsSection = dividendsLoading || Boolean(dividendsError) || dividends.length > 0;
@@ -124,12 +127,12 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
             empty: !hasData,
             apiGroup: '/equity',
             endpoint: `/equity/${symbol}/profile`,
-            sourceLabel: 'vnstock',
-            lastDataDate: dataUpdatedAt,
+            lastDataDate: null,
+            fetchedAt,
             stale: isFallback,
             extra: { sections: showCorporateActions ? 3 : 1 },
         }));
-    }, [dataUpdatedAt, hasData, isFallback, onDataChange, showCorporateActions, symbol]);
+    }, [fetchedAt, hasData, isFallback, onDataChange, showCorporateActions, symbol]);
 
     if (timedOut && isLoading && !hasData) {
         return (
@@ -201,7 +204,8 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
     return (
         <div className="space-y-3">
             <WidgetMeta
-                updatedAt={updatedAt}
+                updatedAt={null}
+                fetchedAt={fetchedAt}
                 isFetching={(isFetching || dividendsFetching || insiderFetching) && hasData}
                 isCached={isFallback}
                 note="Company profile"

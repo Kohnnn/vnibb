@@ -24,7 +24,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
-import { normalizeNewsItemTimestamp } from '@/lib/newsTime';
+import { normalizeNewsItemTimestamp, newsObservationProvenance } from '@/lib/newsTime';
 
 interface NewsArticle {
     id: number | string;
@@ -153,12 +153,19 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
     const newsItems: NewsArticle[] = useMemo(
         () => (data?.articles || []).map((item: NewsArticle) => ({
             ...item,
-            published_date: normalizeNewsItemTimestamp(item as unknown as Record<string, unknown>) || item.published_date || null,
+            published_date: normalizeNewsItemTimestamp(item) || item.published_date || null,
         })),
         [data?.articles]
     );
     const hasData = newsItems.length > 0;
     const isFallback = Boolean(error && hasData);
+    // Source observation only: raw API rows (not the UI-mapped `published_date`,
+    // which may fall back to crawl aliases) so the latest genuine article date is
+    // used and the query receipt never becomes freshness.
+    const observation = useMemo(
+        () => newsObservationProvenance(data?.articles, { receiptAt: dataUpdatedAt }),
+        [data?.articles, dataUpdatedAt],
+    );
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
     useEffect(() => {
@@ -168,12 +175,26 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                 apiGroup: '/news',
                 endpoint: '/news/feed',
                 sourceLabel: symbol ? `${symbol} related feed` : 'Market feed',
-                lastDataDate: dataUpdatedAt,
+                lastDataDate: observation.lastDataDate,
+                fetchedAt: dataUpdatedAt,
+                coverage: observation.coverage,
                 stale: isFallback,
+                cached: isFallback,
+                warnings: observation.warning ? [observation.warning] : undefined,
                 extra: { count: newsItems.length },
             }),
         );
-    }, [onDataChange, hasData, dataUpdatedAt, isFallback, newsItems.length, symbol]);
+    }, [
+        onDataChange,
+        hasData,
+        dataUpdatedAt,
+        isFallback,
+        newsItems.length,
+        symbol,
+        observation.lastDataDate,
+        observation.coverage,
+        observation.warning,
+    ]);
 
     // Filter by search query
     const filteredNews = newsItems.filter(item =>
@@ -266,7 +287,8 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                 )}
                 <div className="px-3 pt-2">
                     <WidgetMeta
-                        updatedAt={dataUpdatedAt}
+                        updatedAt={observation.lastDataDate}
+                        fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
                         note={symbol ? `${symbol} related feed` : 'Market feed'}

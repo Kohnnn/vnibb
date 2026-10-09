@@ -1,5 +1,6 @@
 import html2canvas from 'html2canvas';
 import { logClientError } from '@/lib/clientLogger';
+import { deriveWidgetHealth } from '@/lib/widgetHealth';
 
 /**
  * Source-aware export provenance. Phase 1 (Fincept/Quantcept-inspired) standard:
@@ -17,7 +18,11 @@ export interface ExportProvenance {
   cached?: boolean;
   stale?: boolean;
   warnings?: string[];
+  /** Source observation/as-of only; retrieval belongs in fetchedAt. */
   updatedAt?: number | string | Date | null;
+  fetchedAt?: number | string | Date | null;
+  coverage?: 'complete' | 'partial' | 'unknown';
+  marketClosed?: boolean;
   adjustmentMode?: string;
   localOnly?: boolean;
   capturedAt?: string;
@@ -38,6 +43,7 @@ export function buildExportProvenance(input: ExportProvenance): ExportProvenance
   return {
     ...input,
     updatedAt: normalizeTimestamp(input.updatedAt),
+    fetchedAt: normalizeTimestamp(input.fetchedAt),
     capturedAt: input.capturedAt ?? new Date().toISOString(),
   };
 }
@@ -54,20 +60,15 @@ export function provenanceToMarkdown(provenance?: ExportProvenance): string {
     ['Source', provenance.sourceLabel],
     ['API group', provenance.apiGroup],
     ['Endpoint', provenance.endpoint],
-    ['Data updated', provenance.updatedAt ? normalizeTimestamp(provenance.updatedAt) : null],
+    ['Source as of', normalizeTimestamp(provenance.updatedAt) ?? 'unknown'],
+    ['Fetched at', normalizeTimestamp(provenance.fetchedAt)],
+    ['Coverage', provenance.coverage],
+    ['Delivery', provenance.cached === undefined ? null : provenance.cached ? 'cached snapshot' : 'not marked cached'],
     ['Adjustment mode', provenance.adjustmentMode],
     ['Warnings', provenance.warnings?.join(' · ') || null],
     [
-      'Freshness',
-      provenance.localOnly
-        ? 'local-only'
-        : provenance.stale
-          ? 'stale'
-          : provenance.cached
-            ? 'cached'
-            : provenance.updatedAt
-              ? 'live'
-              : null,
+      'Data status',
+      deriveWidgetHealth(provenance)?.label ?? null,
     ],
     ['Captured at', provenance.capturedAt ?? new Date().toISOString()],
   ];
@@ -126,10 +127,13 @@ export function exportToCSV(data: any, filename: string, provenance?: ExportProv
       ['source', resolved.sourceLabel],
       ['api_group', resolved.apiGroup],
       ['endpoint', resolved.endpoint],
-      ['data_updated', resolved.updatedAt],
+      ['source_as_of', resolved.updatedAt ?? 'unknown'],
+      ['fetched_at', resolved.fetchedAt],
+      ['coverage', resolved.coverage],
+      ['cached', resolved.cached],
       ['adjustment_mode', resolved.adjustmentMode],
       ['warnings', resolved.warnings?.join(' · ') || undefined],
-      ['freshness', resolved.localOnly ? 'local-only' : resolved.stale ? 'stale' : resolved.cached ? 'cached' : resolved.updatedAt ? 'live' : undefined],
+      ['data_status', deriveWidgetHealth(resolved)?.label],
       ['captured_at', resolved.capturedAt],
     ];
     for (const [key, value] of provRows) {

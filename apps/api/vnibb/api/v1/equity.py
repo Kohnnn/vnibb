@@ -88,7 +88,7 @@ from vnibb.services.cache_manager import CacheManager
 from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_pipeline import CACHE_TTL_ORDERBOOK, CACHE_TTL_ORDERBOOK_DAILY
 from vnibb.services.data_quality import is_market_business_day
-from vnibb.services.financial_service import get_financials_with_ttm, normalize_statement_period
+from vnibb.services.financial_service import build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
 
@@ -290,7 +290,7 @@ async def _load_financial_statement_fallback(
     )
     if quarter_filter is not None:
         stmt = stmt.where(model.fiscal_quarter == quarter_filter)
-    stmt = stmt.limit(max(limit, 4) if period_upper == "TTM" else limit)
+    stmt = stmt.limit(max(limit, 8) if period_upper == "TTM" else limit)
 
     result = await db.execute(stmt)
     rows = result.scalars().all()
@@ -375,6 +375,20 @@ async def _load_financial_statement_fallback(
         )
         for row in rows
     ]
+    for index, (row, statement) in enumerate(zip(rows, fallback_rows, strict=True)):
+        raw = getattr(row, "raw_data", None) or {}
+        lineage = raw.get("_financial_lineage") or {}
+        canonical = lineage.get("canonical_data")
+        if isinstance(canonical, dict):
+            restored = FinancialStatementData.model_validate(canonical)
+            restored.period = statement.period
+            restored.raw_data = raw
+            fallback_rows[index] = restored
+            statement = restored
+        else:
+            statement.source = getattr(row, "source", None)
+            statement.unit_metadata = {"basis": {"unavailable_reason": "legacy_unit_basis_unconfirmed"}}
+        statement.updated_at = getattr(row, "updated_at", None)
 
     if period_upper == "TTM":
         return _build_ttm_financial_statement_rows(fallback_rows, statement_type=statement_type)
@@ -423,7 +437,20 @@ async def _load_mongo_financial_statement_rows(
         variant=_financial_dataset_variant(dataset, requested_period),
         limit=max(limit * 4, 80),
     )
-    raw_rows = [row.get("raw") for row in raw_records if isinstance(row.get("raw"), dict)]
+    raw_rows = []
+    for record in raw_records:
+        raw = record.get("raw")
+        if not isinstance(raw, dict):
+            continue
+        lineage = raw.get("_financial_lineage") or {}
+        if isinstance(lineage.get("canonical_data"), dict):
+            prepared = dict(lineage["canonical_data"])
+            prepared["raw_data"] = raw
+        else:
+            prepared = dict(raw)
+            prepared["_source"] = record.get("providerSource") or record.get("source") or "mongo_unconfirmed"
+            prepared["_source_envelope"] = {key: value for key, value in record.items() if key != "raw"}
+        raw_rows.append(prepared)
     if not raw_rows:
         return []
 
@@ -503,68 +530,9 @@ async def _load_mongo_financial_ratio_rows(
 
 
 def _build_ttm_financial_statement_rows(
-    rows: list[FinancialStatementData],
-    *,
-    statement_type: str,
+    rows: list[FinancialStatementData], *, statement_type: str
 ) -> list[FinancialStatementData]:
-    quarter_rows = [
-        row for row in _sort_financial_statement_rows(rows) if "Q" in str(row.period or "").upper()
-    ]
-    if not quarter_rows:
-        return []
-
-    latest = quarter_rows[-1]
-    if statement_type in {"balance", "balance_sheet"}:
-        payload = latest.model_dump(mode="json")
-        payload["period"] = "TTM"
-        return [FinancialStatementData.model_validate(payload)]
-
-    source_rows = quarter_rows[-4:]
-    if len(source_rows) < 4:
-        return []
-
-    def sum_metric(field_name: str) -> float | None:
-        values = []
-        for row in source_rows:
-            value = getattr(row, field_name, None)
-            if isinstance(value, (int, float)):
-                values.append(float(value))
-        return sum(values) if values else None
-
-    payload = latest.model_dump(mode="json")
-    payload["period"] = "TTM"
-
-    for field_name in [
-        "revenue",
-        "cost_of_revenue",
-        "gross_profit",
-        "operating_income",
-        "pre_tax_profit",
-        "profit_before_tax",
-        "tax_expense",
-        "interest_expense",
-        "depreciation",
-        "selling_general_admin",
-        "research_development",
-        "other_income",
-        "net_income",
-        "ebitda",
-        "operating_cash_flow",
-        "investing_cash_flow",
-        "financing_cash_flow",
-        "free_cash_flow",
-        "net_change_in_cash",
-        "net_cash_flow",
-        "capex",
-        "capital_expenditure",
-        "dividends_paid",
-        "stock_repurchased",
-        "debt_repayment",
-    ]:
-        payload[field_name] = sum_metric(field_name)
-
-    payload["raw_data"] = latest.raw_data
-    return [FinancialStatementData.model_validate(payload)]
+    return build_ttm_statement_rows(rows, statement_type)
 
 
 def _financial_dataset_variant(dataset: str, period: str) -> str:
@@ -573,75 +541,23 @@ def _financial_dataset_variant(dataset: str, period: str) -> str:
     return f"{dataset}.{suffix}"
 
 
-def _build_ratio_ttm_rows(rows: List[FinancialRatioData]) -> List[FinancialRatioData]:
-    usable_rows = [row for row in rows if _ratio_has_metric_value(row)]
-    ordered_rows = sorted(usable_rows or rows, key=lambda item: _ratio_period_sort_key(item.period))
-    latest = ordered_rows[-1] if ordered_rows else None
-    if latest is None:
-        return []
+# Rejected provider metrics also invalidate the alias columns that mirror them.
+_FINANCIAL_METRIC_ALIASES = {
+    "total_equity": ("equity",),
+    "cash_and_equivalents": ("cash",),
+    "net_change_in_cash": ("net_cash_flow",),
+    "capex": ("capital_expenditure",),
+}
 
-    payload = latest.model_dump(mode="json")
-    payload["period"] = "TTM"
 
-    # QA-v3 F1: Build a real TTM payload by summing the most recent 4
-    # quarterly rows (and inheriting any field that's already present in
-    # the latest row). Without this, EV/EBITDA TTM and EPS TTM remained
-    # null even when 4 quarterly values were available.
-    quarterly_rows = [
-        row
-        for row in ordered_rows
-        if "Q" in str(row.period or "").upper()
-    ]
-    last4 = quarterly_rows[-4:]
+def _field_metric_rejected(item: FinancialStatementData, field_name: str) -> bool:
+    """True when a provider field was explicitly rejected, so it must stay unavailable.
 
-    def _sum_attr(attr: str) -> float | None:
-        values: list[float] = []
-        for row in last4:
-            val = getattr(row, attr, None)
-            if isinstance(val, (int, float)) and val == val:
-                values.append(float(val))
-        return sum(values) if len(values) == 4 else None
-
-    if len(last4) == 4:
-        for attr in ("eps", "dps"):
-            ttm_value = _sum_attr(attr)
-            if ttm_value is not None:
-                payload[attr] = ttm_value
-
-    # If `ev_ebitda` is null on the latest row but we have an annual
-    # entry with a value, inherit it as a working approximation. This
-    # is an explicit fallback rather than a fabricated computation.
-    if not payload.get("ev_ebitda"):
-        for row in reversed(ordered_rows):
-            value = getattr(row, "ev_ebitda", None)
-            if isinstance(value, (int, float)) and value == value and value > 0:
-                payload["ev_ebitda"] = float(value)
-                break
-
-    # DQ remediation 2026-06-08 (DQ-019): the TTM payload was built from a single
-    # latest quarter row, so point-in-time sections (LIQUIDITY/EFFICIENCY/
-    # PROFITABILITY/LEVERAGE/COVERAGE/OCF/GROWTH) that happened to be null on that
-    # one quarter were dropped entirely, leaving TTM showing only VALUATION+DIVIDEND.
-    # Inherit each missing ratio field from the most recent row that carries a value
-    # (most-recent-available convention) so those sections render. Flow-summed metrics
-    # (eps/dps) handled above keep their TTM sums.
-    _ttm_summed = {"eps", "dps"}
-    candidate_fields = [
-        name
-        for name in latest.model_dump(mode="json").keys()
-        if name not in {"period", "symbol"} and name not in _ttm_summed
-    ]
-    for attr in candidate_fields:
-        current = payload.get(attr)
-        if isinstance(current, (int, float)) and current == current:
-            continue  # already populated on the latest row
-        for row in reversed(ordered_rows):
-            value = getattr(row, attr, None)
-            if isinstance(value, (int, float)) and value == value:
-                payload[attr] = float(value)
-                break
-
-    return [FinancialRatioData.model_validate(payload)]
+    A rejected metric is not a missing value: merging or reconstructing it would
+    present a number the provider lineage refused to certify.
+    """
+    metadata = item.unit_metadata.get(field_name)
+    return isinstance(metadata, dict) and bool(metadata.get("unavailable_reason"))
 
 
 def _financial_statement_identity(item: FinancialStatementData) -> tuple[str, int, int]:
@@ -679,12 +595,31 @@ def _merge_financial_statement_rows(
         if fallback is None:
             merged.append(item)
             continue
+        if item.unavailable_reason or fallback.unavailable_reason:
+            merged.append(item)
+            continue
+        primary_basis = {str(value.get("consolidation_basis")) for value in item.unit_metadata.values()}
+        fallback_basis = {str(value.get("consolidation_basis")) for value in fallback.unit_metadata.values()}
+        if (item.source or fallback.source) and (item.value_unit != "VND" or fallback.value_unit != "VND"):
+            merged.append(item)
+            continue
+        if (item.consolidation_basis, item.flow_basis) != (fallback.consolidation_basis, fallback.flow_basis):
+            merged.append(item)
+            continue
+        if item.value_unit != fallback.value_unit or primary_basis != fallback_basis:
+            merged.append(item)
+            continue
 
         payload = item.model_dump(mode="json")
         fallback_payload = fallback.model_dump(mode="json")
         for field_name in FinancialStatementData.model_fields:
+            if _field_metric_rejected(item, field_name) or _field_metric_rejected(fallback, field_name):
+                continue
             if payload.get(field_name) is None and fallback_payload.get(field_name) is not None:
                 payload[field_name] = fallback_payload[field_name]
+                if field_name in fallback.unit_metadata:
+                    payload["unit_metadata"][field_name] = fallback.unit_metadata[field_name]
+        payload["raw_data"] = {"primary": item.raw_data, "fallback": fallback.raw_data}
         merged.append(FinancialStatementData.model_validate(payload))
 
     for item in fallback_rows:
@@ -695,48 +630,6 @@ def _merge_financial_statement_rows(
     return merged
 
 
-_STATEMENT_SCALE_FIELDS = {
-    "revenue", "gross_profit", "operating_income", "net_income", "ebitda",
-    "cost_of_revenue", "pre_tax_profit", "profit_before_tax", "tax_expense",
-    "interest_expense", "depreciation", "selling_general_admin", "research_development",
-    "other_income", "total_assets", "total_liabilities", "total_equity",
-    "cash_and_equivalents", "equity", "cash", "inventory", "current_assets",
-    "fixed_assets", "current_liabilities", "long_term_liabilities", "retained_earnings",
-    "short_term_debt", "long_term_debt", "accounts_receivable", "accounts_payable",
-    "customer_deposits", "goodwill", "intangible_assets", "operating_cash_flow",
-    "investing_cash_flow", "financing_cash_flow", "free_cash_flow", "net_change_in_cash",
-    "net_cash_flow", "capex", "capital_expenditure", "dividends_paid", "stock_repurchased",
-    "debt_repayment",
-}
-
-
-def _median_abs(values: list[float]) -> float | None:
-    finite = sorted(abs(value) for value in values if math.isfinite(value) and value != 0)
-    if not finite:
-        return None
-    midpoint = len(finite) // 2
-    if len(finite) % 2:
-        return finite[midpoint]
-    return (finite[midpoint - 1] + finite[midpoint]) / 2
-
-
-def _normalize_statement_unit_outliers(rows: list[FinancialStatementData]) -> list[FinancialStatementData]:
-    if len(rows) < 3:
-        return rows
-    for field_name in _STATEMENT_SCALE_FIELDS:
-        values = [float(getattr(row, field_name)) for row in rows if isinstance(getattr(row, field_name, None), (int, float))]
-        baseline = _median_abs(values)
-        if baseline is None or baseline <= 0:
-            continue
-        for row in rows:
-            value = getattr(row, field_name, None)
-            if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-                continue
-            abs_value = abs(float(value))
-            scaled_abs = abs_value / 1000
-            if abs_value > baseline * 100 and baseline / 5 <= scaled_abs <= baseline * 5:
-                setattr(row, field_name, float(value) / 1000)
-    return rows
 
 
 def _normalize_financial_metric_key(raw_key: Any) -> str:
@@ -761,6 +654,13 @@ def _normalize_financial_metric_key(raw_key: Any) -> str:
 
 def _build_financial_metric_lookup(raw_payload: Any) -> dict[str, Any]:
     if not isinstance(raw_payload, dict):
+        return {}
+    lineage = raw_payload.get("_financial_lineage")
+    if isinstance(lineage, dict):
+        if lineage.get("unavailable_reason") or lineage.get("value_unit") != "VND":
+            return {}
+        raw_payload = lineage.get("canonical_data") or {}
+    elif "provider_rows" in raw_payload or "source_reports" in raw_payload or raw_payload.get("unavailable_reason"):
         return {}
 
     lookup: dict[str, Any] = {}
@@ -918,6 +818,8 @@ def _enrich_financial_statement_rows(
     }
 
     for item in rows:
+        if item.unavailable_reason:
+            continue
         raw_data = item.raw_data if isinstance(item.raw_data, dict) else {}
 
         if item.total_equity is None:
@@ -1096,7 +998,17 @@ def _enrich_financial_statement_rows(
         ):
             item.ebitda = item.operating_income + abs(item.depreciation)
 
-    return _sort_financial_statement_rows(_normalize_statement_unit_outliers(rows))
+        # A provider-rejected metric is not a missing value. Filling it from a raw
+        # lookup or an accounting identity would publish a number the lineage refused.
+        for metric, metadata in item.unit_metadata.items():
+            if not (isinstance(metadata, dict) and metadata.get("unavailable_reason")):
+                continue
+            if metric in FinancialStatementData.model_fields:
+                setattr(item, metric, None)
+            for alias in _FINANCIAL_METRIC_ALIASES.get(metric, ()):
+                setattr(item, alias, None)
+
+    return _sort_financial_statement_rows(rows)
 
 
 async def _cross_fill_income_statement_rows(
@@ -1128,8 +1040,15 @@ async def _cross_fill_income_statement_rows(
         cashflow_row = cashflow_by_period.get(str(item.period or "").upper())
         if cashflow_row is None:
             continue
+        if item.unavailable_reason or cashflow_row.unavailable_reason or item.value_unit != "VND" or cashflow_row.value_unit != "VND":
+            continue
+        if item.consolidation_basis is None or (item.source, item.consolidation_basis, item.flow_basis) != (
+            cashflow_row.source, cashflow_row.consolidation_basis, cashflow_row.flow_basis):
+            continue
         if item.depreciation is None:
             item.depreciation = _pick_optional_float(item.depreciation, cashflow_row.depreciation)
+            item.unit_metadata["depreciation"] = cashflow_row.unit_metadata.get("depreciation", {})
+            item.raw_data = {"primary": item.raw_data, "depreciation_source": cashflow_row.raw_data}
         if (
             item.ebitda is None
             and item.operating_income is not None
@@ -1382,6 +1301,7 @@ def _to_historical_data_from_payload(
     return EquityHistoricalData(
         symbol=str(doc.get("symbol") or "").upper(),
         price_unit=doc["price_unit"],
+        price_source=doc.get("price_source"),
         time=time_value,
         open=adjusted_open,
         high=adjusted_high,
@@ -1785,6 +1705,21 @@ def _historical_resolution_meta(
         else "mixed" if len(selected_units) > 1
         else "unconfirmed"
     )
+    # Session price basis is only claimed when the resolution actually applied
+    # an adjustment. No resolved source contract documents that its stored
+    # history is unadjusted (Vietcap's ``raw`` marker denotes VND denomination,
+    # not an unadjusted series), so an unadjusted read is disclosed as
+    # unverified rather than certified as "raw".
+    if not rows or selected_units == {"index_points"}:
+        session_basis = "not_applicable"
+    elif any(row.adjustment_applied for row in rows):
+        session_basis = "adjusted"
+    else:
+        session_basis = "unverified"
+        warnings.append(
+            "session price basis unverified: no resolved source contract "
+            "documents whether the stored history is back-adjusted"
+        )
     return _historical_adjustment_meta(
         rows,
         adjustment_mode,
@@ -1799,6 +1734,7 @@ def _historical_resolution_meta(
         freshness_as_of=freshness,
         completeness_status=completeness_status,
         unit_status=unit_status,
+        session_basis=session_basis,
         warnings=warnings,
     )
 
@@ -2513,8 +2449,10 @@ def _filter_ratio_rows_for_period(
         return [row for row in rows if period_upper in str(row.period or "").upper()]
 
     if period_upper == "TTM":
-        ttm_rows = [row for row in rows if "TTM" in str(row.period or "").upper()]
-        return ttm_rows if ttm_rows else _build_ratio_ttm_rows(rows)
+        # Only rows the source itself reports as TTM. The removed helper summed EPS/DPS
+        # over four quarters and inherited stale values for every other ratio, which
+        # fabricated a period no provider supplied (issues #101/#106).
+        return [row for row in rows if "TTM" in str(row.period or "").upper()]
 
     return rows
 
@@ -4313,18 +4251,10 @@ async def _enrich_missing_ratio_metrics(
             item.provision_coverage = (abs(loan_loss_reserve) / gross_loans) * 100
 
         prev_revenue, prev_net_income, _prev_eps = prev_income_values.get(key, (None, None, None))
-        if (
-            item.revenue_growth is None
-            and revenue not in (None, 0)
-            and prev_revenue not in (None, 0)
-        ):
-            item.revenue_growth = ((revenue - prev_revenue) / prev_revenue) * 100
-        if (
-            item.earnings_growth is None
-            and net_income not in (None, 0)
-            and prev_net_income not in (None, 0)
-        ):
-            item.earnings_growth = ((net_income - prev_net_income) / prev_net_income) * 100
+        if revenue is not None and prev_revenue is not None:
+            item.revenue_growth = _growth_rate(revenue, prev_revenue)
+        if net_income is not None and prev_net_income is not None:
+            item.earnings_growth = _growth_rate(net_income, prev_net_income)
 
         if item.ebitda is None:
             ebitda_value = ebitda_reported
@@ -5222,8 +5152,19 @@ async def get_financials(
             period=period,
             limit=limit,
         )
+        fy_legacy_primary = str(period).upper() in {"FY", "YEAR"} and bool(fallback_data)
+        if fy_legacy_primary:
+            # #104: the legacy annual row is primary and the provider row fills gaps.
+            data = _merge_financial_statement_rows(fallback_data, data)
         if data:
-            data = _merge_financial_statement_rows(data, _merge_financial_statement_rows(mongo_data, fallback_data))
+            # `fallback_data` is already primary for FY, so passing it again as a fill
+            # source would merge the same rows twice; Mongo rows can still add fields.
+            fill_source = (
+                mongo_data
+                if fy_legacy_primary
+                else _merge_financial_statement_rows(mongo_data, fallback_data)
+            )
+            data = _merge_financial_statement_rows(data, fill_source)
             data = _enrich_financial_statement_rows(data)
             if statement_type == StatementType.INCOME.value:
                 data = await _cross_fill_income_statement_rows(
@@ -5488,7 +5429,23 @@ async def get_ttm_snapshot(
 def _growth_rate(current: Optional[float], previous: Optional[float]) -> Optional[float]:
     if current is None or previous in (None, 0):
         return None
-    return ((current - previous) / previous) * 100
+    if not math.isfinite(current) or not math.isfinite(previous):
+        return None
+    return ((current - previous) / abs(previous)) * 100
+
+def _growth_detail(current: Optional[float], previous: Optional[float]) -> dict[str, Any]:
+    value = _growth_rate(current, previous)
+    transition = None
+    if current is not None and previous is not None:
+        if previous < 0 < current:
+            transition = "loss_to_profit"
+        elif current < 0 < previous:
+            transition = "profit_to_loss"
+    return {"value": value, "current": current, "previous": previous,
+            "negative_base": previous is not None and previous < 0, "transition": transition,
+            "unavailable_reason": "missing_base_or_value" if current is None or previous is None else
+                "zero_base" if previous == 0 else "nonfinite_value" if value is None else None}
+
 
 
 @router.get("/{symbol}/growth", response_model=StandardResponse[dict[str, Any]])
@@ -5535,15 +5492,17 @@ async def get_growth_rates(
         "eps_growth": None,
         "ebitda_growth": None,
     }
+    comparisons: dict[str, dict[str, Any]] = {"yoy": {}, "qoq": {}}
+    same_quarter_prev_year = None
 
-    if len(annual_income) >= 2:
+    if len(annual_income) >= 2 and annual_income[0].fiscal_year == annual_income[1].fiscal_year + 1:
         current, previous = annual_income[0], annual_income[1]
         yoy["revenue_growth"] = _growth_rate(current.revenue, previous.revenue)
         yoy["earnings_growth"] = _growth_rate(current.net_income, previous.net_income)
         yoy["eps_growth"] = _growth_rate(current.eps, previous.eps)
         yoy["ebitda_growth"] = _growth_rate(current.ebitda, previous.ebitda)
 
-    if len(annual_balance) >= 2:
+    if len(annual_balance) >= 2 and annual_balance[0].fiscal_year == annual_balance[1].fiscal_year + 1:
         current, previous = annual_balance[0], annual_balance[1]
         yoy["asset_growth"] = _growth_rate(current.total_assets, previous.total_assets)
 
@@ -5573,11 +5532,38 @@ async def get_growth_rates(
             qoq["ebitda_growth"] = _growth_rate(
                 latest_quarter.ebitda, same_quarter_prev_year.ebitda
             )
+    for scope, current, previous in [
+        ("yoy", annual_income[0] if annual_income else None, annual_income[1] if len(annual_income) > 1 else None),
+        ("qoq", latest_quarter, same_quarter_prev_year),
+    ]:
+        for name, field in [("revenue_growth", "revenue"), ("earnings_growth", "net_income"),
+                            ("eps_growth", "eps"), ("ebitda_growth", "ebitda")]:
+            detail = _growth_detail(getattr(current, field, None), getattr(previous, field, None))
+            detail["current_period"] = getattr(current, "period", None)
+            detail["previous_period"] = getattr(previous, "period", None)
+            if current is not None and previous is not None and current.fiscal_year != previous.fiscal_year + 1:
+                detail.update(value=None, unavailable_reason="non_comparable_periods")
+            current_lineage = (getattr(current, "raw_data", None) or {}).get("_financial_lineage") or {}
+            previous_lineage = (getattr(previous, "raw_data", None) or {}).get("_financial_lineage") or {}
+            detail["basis_status"] = "confirmed" if current_lineage and previous_lineage else "legacy_basis_unconfirmed"
+            detail["source"] = getattr(current, "source", None)
+            for basis_name in ("value_unit", "consolidation_basis", "flow_basis"):
+                current_basis, previous_basis = current_lineage.get(basis_name), previous_lineage.get(basis_name)
+                detail[basis_name] = current_basis
+                if current_basis is not None and previous_basis is not None and current_basis != previous_basis:
+                    detail.update(value=None, unavailable_reason="incompatible_reporting_basis", basis_status="incompatible")
+            (yoy if scope == "yoy" else qoq)[name] = detail["value"]
+            comparisons[scope][name] = detail
+
 
     payload = {
         "symbol": symbol_upper,
         "yoy": yoy,
         "qoq": qoq,
+        "growth_convention": "absolute_prior_denominator",
+        "growth_formula": "((current - previous) / abs(previous)) * 100",
+        "quarter_comparison": "same_quarter_previous_year",
+        "comparisons": comparisons,
         "as_of": {
             "annual": annual_income[0].period if annual_income else None,
             "quarter": latest_quarter.period if latest_quarter else None,
@@ -6613,7 +6599,8 @@ async def get_rating(symbol: str):
 
 @router.get("/{symbol}/financial-ratios", response_model=StandardResponse[List[FinancialRatioData]])
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
-@cached(ttl=86400, key_prefix="ratios_v4")
+# Namespace bump: the old namespace still holds fabricated TTM ratio rows (issues #101/#106).
+@cached(ttl=86400, key_prefix="ratios_v5")
 async def get_financial_ratios(
     symbol: str,
     period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
@@ -6633,6 +6620,16 @@ async def get_financial_ratios(
         "symbol": symbol_upper,
         "last_data_date": _serialize_meta_datetime(latest_price_time),
     }
+    if str(period or "").strip().upper() == "TTM":
+        # Ratio TTM is unsupported: no provider supplies it, and the removed helper
+        # fabricated one by summing EPS/DPS and inheriting stale values for the rest.
+        # State the unsupported period explicitly rather than returning that row
+        # (issues #101/#106).
+        return StandardResponse(
+            data=[],
+            meta=MetaData(count=0, **meta_kwargs),
+            error="TTM ratios are not supported: no source supplies a certified four-quarter ratio basis.",
+        )
     db_ratio_rows: List[FinancialRatioData] = []
     mongo_ratio_rows: List[FinancialRatioData] = []
     provider_ratio_rows: List[FinancialRatioData] = []
@@ -6942,10 +6939,16 @@ async def get_income_statement(
             period=period,
             limit=limit,
         )
-        if data:
-            data = _merge_financial_statement_rows(data, fallback_data)
-        else:
+        fy_legacy_primary = str(period).upper() in {"FY", "YEAR"} and bool(fallback_data)
+        if fy_legacy_primary:
+            # #104: the legacy annual row is primary and the provider row fills gaps.
+            data = _merge_financial_statement_rows(fallback_data, data)
+        if not data:
             data = fallback_data
+        elif not fy_legacy_primary:
+            # For FY `fallback_data` is already primary above, so merging it again
+            # would apply the same rows twice.
+            data = _merge_financial_statement_rows(data, fallback_data)
         data = _enrich_financial_statement_rows(data)
         data = await _cross_fill_income_statement_rows(
             db=db,

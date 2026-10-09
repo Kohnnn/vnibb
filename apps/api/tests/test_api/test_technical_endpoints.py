@@ -21,6 +21,7 @@ def _build_price_frame(rows: int = 220) -> pd.DataFrame:
                 "low": close - 1.2,
                 "close": close,
                 "volume": 900_000 + ((index % 13) * 21_000),
+                "price_unit": "VND",
             }
         )
 
@@ -41,6 +42,7 @@ async def test_ichimoku_endpoint_returns_series_payload(client, monkeypatch):
     payload = response.json()
     assert payload["symbol"] == "VCI"
     assert payload["period"] == "1Y"
+    assert payload["price_unit"] == "VND"
     assert len(payload["data"]) >= 200
     assert payload["signal"]["cloud_trend"] in {"bullish", "bearish", "neutral"}
     assert "tenkan_sen" in payload["data"][-1]
@@ -62,7 +64,30 @@ async def test_fibonacci_endpoint_returns_levels_and_nearest_level(client, monke
     assert response.status_code == 200
     payload = response.json()
     assert payload["symbol"] == "FPT"
+    assert payload["price_unit"] == "VND"
     assert payload["direction"] in {"retracement_from_high", "retracement_from_low"}
     assert payload["levels"]["61.8%"] > 0
     assert payload["nearest_level"]["level"] in payload["levels"]
     assert len(payload["price_data"]) >= 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["ichimoku", "fibonacci"])
+@pytest.mark.parametrize("units", [None, ["index_points", "VND"], [None, "VND"]])
+async def test_series_unit_certificate_requires_every_history_row(client, monkeypatch, endpoint, units):
+    frame = _build_price_frame(260)
+    if units is None:
+        frame = frame.drop(columns=["price_unit"])
+    else:
+        frame.loc[0, "price_unit"] = units[0]
+        frame.loc[1, "price_unit"] = units[1]
+
+    class DummyService:
+        async def get_ohlcv_data(self, *_args, **_kwargs):
+            return frame
+
+    monkeypatch.setattr(technical, "get_ta_service", lambda: DummyService())
+    response = await client.get(f"/api/v1/analysis/ta/FPT/{endpoint}")
+
+    assert response.status_code == 200
+    assert response.json()["price_unit"] == "unknown"

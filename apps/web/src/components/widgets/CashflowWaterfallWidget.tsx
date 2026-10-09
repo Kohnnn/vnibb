@@ -11,8 +11,8 @@ import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { useCashFlow } from '@/lib/queries';
-import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
-import { formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
+import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, isCanonicalQuarterPeriod, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { convertFinancialValueForUnit, formatRawValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { buildCashFlowWaterfallModel } from '@/lib/financialVisualizations';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
@@ -34,18 +34,59 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove, onDataChange }
   const apiPeriod = period === 'FY' ? 'year' : period;
   const periodMode: FinancialPeriodMode = period === 'FY' ? 'year' : period === 'TTM' ? 'ttm' : 'quarter';
 
+  // Same canonicalisation as the statement tables: a period the provider repeats
+  // with different values has no authoritative basis, so it is excluded rather
+  // than letting the bridge pick whichever row happened to sort last, and a row
+  // with no fiscal identity cannot become the previous-period comparator
+  // (issue #103).
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useCashFlow(symbol, { period: apiPeriod });
-  const orderedItems = useMemo(
-    () => [...(data?.data || [])].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
+  const { rows: canonicalItems, issues: periodIssues, invalidPeriodCount } = useMemo(
+    () => canonicalPeriodRows(data?.data ||[]),
     [data?.data],
   );
-  const displayItems = useMemo(
+  const orderedItems = useMemo(
+    () => [...canonicalItems].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
+    [canonicalItems],
+  );
+  // The TTM branch returns a single TTM row today (financial_service
+  // .build_ttm_statement_rows), and this filter guarantees TTM mode can never
+  // bridge a quarter row under a TTM header if a payload carries one (issue #101).
+  const periodItems = useMemo(
     () => periodMode === 'quarter'
       ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
-      : orderedItems,
+      : periodMode === 'ttm'
+        ? orderedItems.filter((item) => String(item.period ?? '').toUpperCase().includes('TTM'))
+        : orderedItems,
     [orderedItems, periodMode],
   );
+  // A row the API returned without certification carries every numeric field as
+  // null plus `unavailable_reason`. Such a row cannot form a bridge, so it is held
+  // out of the model and disclosed in the note rather than rendering as an
+  // all-missing bridge; a row that merely has some null fields is untouched
+  // (issue #103).
+  const unavailableNote = useMemo(() => describeUnavailableStatementRows(periodItems), [periodItems]);
+  const displayItems = useMemo(
+    () => periodItems.filter((item) => !isUnavailableStatementRow(item)),
+    [periodItems],
+  );
   const hasData = displayItems.length > 0;
+  const duplicatePeriodNote = useMemo(() => {
+    const notes: string[] = [];
+    const ambiguous = periodIssues.filter((issue) => issue.reason === 'ambiguous-basis');
+    if (ambiguous.length > 0) {
+      notes.push(
+        `Unavailable: ${ambiguous.map((issue) => issue.period).join(', ')} returned conflicting rows with no basis field, so no bridge is shown for ${ambiguous.length === 1 ? 'it' : 'them'}.`,
+      );
+    }
+    if (invalidPeriodCount > 0) {
+      notes.push(`${invalidPeriodCount} provider row${invalidPeriodCount === 1 ? '' : 's'} without a fiscal period excluded.`);
+    }
+    return notes.length > 0 ? notes.join(' ') : null;
+  }, [periodIssues, invalidPeriodCount]);
+  const statementNote = useMemo(
+    () => [duplicatePeriodNote, unavailableNote].filter(Boolean).join(' ') || null,
+    [duplicatePeriodNote, unavailableNote],
+  );
   const latest = displayItems.at(-1);
   const hasReportedBridge = Boolean(
     latest && [
@@ -56,8 +97,20 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove, onDataChange }
     ].every((value) => typeof value === 'number' && Number.isFinite(value)),
   );
 
+  // The waterfall model is built from raw statement rows, so the scale is
+  // resolved from the converted values and each model value is converted exactly
+  // once at format time (issue #100).
   const scale = useMemo(
-    () => resolveUnitScale(displayItems.flatMap((item) => [item.operating_cash_flow, item.investing_cash_flow, item.financing_cash_flow, item.net_change_in_cash, item.free_cash_flow]), unitConfig),
+    () => resolveUnitScale(
+      displayItems.flatMap((item) => [
+        item.operating_cash_flow,
+        item.investing_cash_flow,
+        item.financing_cash_flow,
+        item.net_change_in_cash,
+        item.free_cash_flow,
+      ].map((value) => convertFinancialValueForUnit(value, unitConfig, item.period))),
+      unitConfig,
+    ),
     [displayItems, unitConfig],
   );
   const model = useMemo(
@@ -73,14 +126,15 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove, onDataChange }
         apiGroup: '/equity',
         endpoint: `/equity/${symbol}/cash-flow?period=${apiPeriod}`,
         sourceLabel: 'Cash bridge',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate: null,
+        fetchedAt: dataUpdatedAt,
         stale: Boolean(error && hasData),
         extra: hasData ? { periods: displayItems.length } : undefined,
       }),
     );
   }, [onDataChange, model, error, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
   const latestLabel = model
-    ? formatFinancialPeriodLabel(model.period, { mode: periodMode, index: displayItems.length - 1, total: displayItems.length })
+    ? formatFinancialPeriodLabel(model.period, { mode: periodMode })
     : period === 'FY'
       ? 'Annual'
       : period;
@@ -102,10 +156,11 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove, onDataChange }
       <div className="flex h-full flex-col px-2 py-1.5">
         <div className="border-b border-[var(--border-subtle)] pb-1">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={null}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={Boolean(error && hasData)}
-            note={`${latestLabel} • ${getUnitLegend(scale, unitConfig)}`}
+            note={statementNote ?? `${latestLabel} • ${getUnitLegend(scale, unitConfig)}`}
             sourceLabel="VNIBB cash-flow statements"
             align="right"
           />
@@ -127,14 +182,14 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove, onDataChange }
             <WidgetError error={error as Error} onRetry={() => refetch()} />
           ) : !model ? (
             <WidgetEmpty
-              message={`No cash bridge available for ${symbol}`}
-              detail="A waterfall requires reported operating, investing, financing, and net cash-change fields for one period; missing lines are not inferred."
+              message={unavailableNote ? `Cash bridge unavailable for ${symbol}` : `No cash bridge available for ${symbol}`}
+              detail={unavailableNote ?? 'A waterfall requires reported operating, investing, financing, and net cash-change fields for one period; missing lines are not inferred.'}
               icon={<ChartNoAxesColumnIncreasing size={18} />}
             />
           ) : (
             <CashFlowWaterfallChart
               model={model}
-              formatValue={(value) => formatUnitValuePlain(value, scale, unitConfig)}
+              formatValue={(value) => formatRawValuePlain(value, scale, unitConfig, model.period)}
             />
           )}
         </div>

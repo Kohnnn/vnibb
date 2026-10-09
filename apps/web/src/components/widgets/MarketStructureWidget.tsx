@@ -44,14 +44,23 @@ export function MarketStructureWidget({ symbol, onDataChange }: MarketStructureW
 
   const { data: foreign } = useForeignTrading(upperSymbol, { limit: 60, enabled: Boolean(upperSymbol) })
 
+  const meta = data?.meta
+  // Only per-row `price_unit` markers certify the series; a response-level
+  // `unit_status` cannot certify rows that carry no marker (QA #98).
+  const expectedUnit = meta?.unit_status === 'confirmed_vnd' ? 'VND' : 'index_points'
+  const certifiedUnits = Boolean(data?.data?.length)
+    && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(meta?.unit_status ?? '')
+    && (data?.data ??[]).every((row) => row.price_unit === expectedUnit)
+  const derivedWithheld = Boolean(data) && !certifiedUnits
+
   const bars = useMemo<ProfileBar[]>(() => {
-    return (data?.data || []).map((bar) => ({
+    return (derivedWithheld ?[] : data?.data ||[]).map((bar) => ({
       high: bar.high,
       low: bar.low,
       close: bar.close,
       volume: bar.volume,
     }))
-  }, [data])
+  }, [data, derivedWithheld])
 
   const profile = useMemo(() => (bars.length ? buildVolumeProfile(bars, 24) : null), [bars])
   const lastClose = bars.length ? bars[bars.length - 1].close : null
@@ -80,7 +89,8 @@ export function MarketStructureWidget({ symbol, onDataChange }: MarketStructureW
           apiGroup: '/equity',
           endpoint: `/equity/historical?symbol=${upperSymbol}`,
           adjustmentMode: 'adjusted',
-          updatedAt: data?.meta?.last_data_date ?? (dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined),
+          updatedAt: data?.meta?.last_data_date ?? null,
+          fetchedAt: dataUpdatedAt,
         },
       },
       ...(profile
@@ -103,9 +113,13 @@ export function MarketStructureWidget({ symbol, onDataChange }: MarketStructureW
   if (!hasData) {
     return (
       <WidgetEmpty
-        message={`Not enough history for ${upperSymbol}`}
+        message={derivedWithheld
+          ? 'Market structure unavailable: historical price units were not certified.'
+          : `Not enough history for ${upperSymbol}`}
         icon={<LayoutGrid size={18} />}
-        detail="Market structure needs adjusted EOD bars to build a volume-by-price profile."
+        detail={derivedWithheld
+          ? 'Unmarked sessions are excluded; certified VND rows are required.'
+          : 'Market structure needs adjusted EOD bars to build a volume-by-price profile.'}
       />
     )
   }
@@ -209,7 +223,8 @@ export function MarketStructureWidget({ symbol, onDataChange }: MarketStructureW
       <WidgetMeta
         className="px-1 pt-1"
         isFetching={isFetching}
-        updatedAt={data?.meta?.last_data_date ?? dataUpdatedAt}
+        updatedAt={data?.meta?.last_data_date}
+        fetchedAt={dataUpdatedAt}
         sourceLabel="Adjusted EOD · derived"
         align="right"
       />

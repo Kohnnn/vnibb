@@ -233,8 +233,8 @@ def test_transform_data_maps_bank_customer_deposits_aliases():
         symbol="VCB", statement_type=StatementType.BALANCE, period="year", limit=2
     )
     rows = [
-        {"item_id": "tien_gui_cua_khach_hang", "2024": 1_390_814_015_000_000},
-        {"item_id": "deposits_from_customers", "2025": 1_592_598_206_000_000},
+        {"item_id": "tien_gui_cua_khach_hang", "_value_unit": "VND", "2024": 1_390_814_015_000_000},
+        {"item_id": "deposits_from_customers", "_value_unit": "VND", "2025": 1_592_598_206_000_000},
     ]
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
@@ -262,12 +262,14 @@ def test_transform_data_maps_kbs_short_term_trade_accounts_payable_alias():
             "_source": "KBS",
         },
     ]
+    for row in rows:
+        row["_value_unit"] = "VND"
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
 
     assert len(data) == 1
-    assert data[0].accounts_payable == 3_923_309_000.0
-    assert data[0].intangible_assets == 1_030_797_450.0
+    assert data[0].accounts_payable == 3_923_309.0
+    assert data[0].intangible_assets == 1_030_797.45
 
 
 def test_transform_data_maps_bank_balance_aliases():
@@ -291,6 +293,8 @@ def test_transform_data_maps_bank_balance_aliases():
             "_source": "VCI",
         },
     ]
+    for row in rows:
+        row["_value_unit"] = "VND"
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
 
@@ -300,7 +304,7 @@ def test_transform_data_maps_bank_balance_aliases():
     assert data[0].customer_deposits == 618_911_535_000.0
 
 
-def test_transform_data_maps_kbs_income_aliases_and_scales_monetary_values():
+def test_transform_data_maps_kbs_income_without_rescaling_provider_values():
     params = FinancialsQueryParams(
         symbol="VCI", statement_type=StatementType.INCOME, period="year", limit=2
     )
@@ -319,14 +323,16 @@ def test_transform_data_maps_kbs_income_aliases_and_scales_monetary_values():
         },
         {"item_id": "n_13.1.earning_per_share_vnd", "2024": 1540.0, "_source": "KBS"},
     ]
+    for row in rows:
+        row["_value_unit"] = "VND"
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
 
     assert len(data) == 1
-    assert data[0].revenue == 3_695_525_335_000.0
-    assert data[0].pre_tax_profit == 1_089_337_105_000.0
-    assert data[0].net_income == 910_692_113_000.0
-    assert data[0].selling_general_admin == -129_175_258_000.0
+    assert data[0].revenue == 3_695_525_335.0
+    assert data[0].pre_tax_profit == 1_089_337_105.0
+    assert data[0].net_income == 910_692_113.0
+    assert data[0].selling_general_admin == -129_175_258.0
     assert data[0].eps == 1540.0
 
 
@@ -357,12 +363,177 @@ def test_transform_data_maps_kbs_cashflow_aliases_and_net_change():
         },
         {"item_id": "n_4_principal_repayments", "2024": -7_858_500_000.0, "_source": "KBS"},
     ]
+    for row in rows:
+        row["_value_unit"] = "VND"
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
 
     assert len(data) == 1
-    assert data[0].operating_cash_flow == -4_657_314_437_000.0
-    assert data[0].net_change_in_cash == 2_156_458_770_000.0
-    assert data[0].capex == -57_598_155_000.0
-    assert data[0].dividends_paid == -437_491_942_000.0
-    assert data[0].debt_repayment == -7_858_500_000_000.0
+    assert data[0].operating_cash_flow == -4_657_314_437.0
+    assert data[0].net_change_in_cash == 2_156_458_770.0
+    assert data[0].capex == -57_598_155.0
+    assert data[0].dividends_paid == -437_491_942.0
+    assert data[0].debt_repayment == -7_858_500_000.0
+
+
+def test_kbs_vnm_source_lineage_survives_canonical_round_trip():
+    params = FinancialsQueryParams(symbol="VNM", statement_type=StatementType.BALANCE, period="quarter")
+    rows = [{"item_id": "total_assets", "item_en": "TOTAL ASSETS (Bn. VND)", "2026-Q2": 55_677_822_007_000,
+        "_source": "KBS", "_value_unit": "VND", "_provider_value_multiplier": 1000,
+        "_normalization_contract": "vnstock.kbs._fetch_series_data: ValueN * 1000",
+        "_provider_attrs": {"source_reports": [{"Head": [{"YearPeriod": 2026, "TermCode": "Q2", "United": "HN",
+            "PeriodBegin": "202604", "PeriodEnd": "202606"}], "Unit": [{"UnitedCode": "HN", "UnitedNameEN": "Consolidated"}]}]}}]
+    row = VnstockFinancialsFetcher.transform_data(params, rows)[0]
+    assert row.total_assets == 55_677_822_007_000
+    assert row.unit_metadata["total_assets"]["raw_value"] == 55_677_822_007
+    assert row.unit_metadata["total_assets"]["consolidation_basis"] == "Consolidated"
+    assert row.flow_basis == "single_quarter"
+    assert row.raw_data["provider_rows"][0]["item_en"] == "TOTAL ASSETS (Bn. VND)"
+    repeated = VnstockFinancialsFetcher.transform_data(params, [row.model_dump(mode="json")])[0]
+    assert repeated.total_assets == row.total_assets
+    assert repeated.raw_data == row.raw_data
+
+
+def test_unknown_provider_unit_withholds_values_without_magnitude_repair():
+    params = FinancialsQueryParams(symbol="VNM", statement_type=StatementType.BALANCE, period="quarter")
+    rows = [{"item_id": "total_assets", "2026-Q2": 55_677_822_007_000_000, "_source": "KBS"}]
+    row = VnstockFinancialsFetcher.transform_data(params, rows)[0]
+    assert row.total_assets is None
+    assert row.unavailable_reason == "unknown_source_unit"
+    assert row.raw_data["provider_rows"] == rows
+
+
+def test_explicit_source_unit_scales_only_monetary_field():
+    params = FinancialsQueryParams(symbol="VNM", statement_type=StatementType.INCOME)
+    rows = [{"item_id": "revenue", "unit": "Bn. VND", "2025": 53_312.370717301, "_source": "fixture"}]
+    row = VnstockFinancialsFetcher.transform_data(params, rows)[0]
+    assert row.revenue == 53_312_370_717_301
+    assert row.unit_metadata["revenue"]["normalization_multiplier"] == 1_000_000_000
+
+
+def test_kbs_eps_undoes_only_documented_library_multiplier():
+    params = FinancialsQueryParams(symbol="VNM", statement_type=StatementType.INCOME)
+    rows = [{"item_id": "earning_per_share_vnd", "2025": 1_540_000, "_source": "KBS", "_value_unit": "VND",
+        "_provider_value_multiplier": 1000, "_normalization_contract": "vnstock.kbs._fetch_series_data: ValueN * 1000"}]
+    row = VnstockFinancialsFetcher.transform_data(params, rows)[0]
+    assert row.eps == 1540
+    assert row.unit_metadata["eps"]["value_unit"] == "VND/share"
+    assert row.unit_metadata["eps"]["normalization_multiplier"] == 0.001
+
+
+def test_source_head_cumulative_basis_is_not_treated_as_single_quarter():
+    params = FinancialsQueryParams(symbol="VNM", statement_type=StatementType.CASHFLOW, period="quarter")
+    rows = [{"item_id": "operating_cash_flow", "2026-Q2": 100, "_source": "KBS", "_value_unit": "VND",
+        "_provider_attrs": {"source_reports": [{"Head": [{"YearPeriod": 2026, "TermCode": "Q2", "United": "HN",
+            "PeriodBegin": "202601", "PeriodEnd": "202606"}], "Unit": [{"UnitedCode": "HN", "UnitedNameEN": "Consolidated"}]}]}}]
+    row = VnstockFinancialsFetcher.transform_data(params, rows)[0]
+    assert row.flow_basis == "cumulative_ytd"
+    assert row.consolidation_basis == "Consolidated"
+    assert row.unit_metadata["operating_cash_flow"]["source_head"]["PeriodBegin"] == "202601"
+
+
+def test_kbs_headings_and_cash_component_do_not_conflict_with_aggregates():
+    params = FinancialsQueryParams(symbol="VNM", statement_type=StatementType.BALANCE, period="quarter")
+    rows = [
+        {"item_id": "total_assets", "item": "TÀI SẢN", "2026-Q2": float("nan")},
+        {"item_id": "total_assets", "item": "TỔNG CỘNG TÀI SẢN", "2026-Q2": 55_677_822_007_000},
+        {"item_id": "cash", "item": "1. Tiền", "2026-Q2": 1_427_466_367_000},
+        {"item_id": "cash_and_cash_equivalents", "item": "I. Tiền và các khoản tương đương tiền", "2026-Q2": 5_154_466_367_000},
+    ]
+    for row in rows:
+        row.update(_source="KBS", _value_unit="VND")
+    statement = VnstockFinancialsFetcher.transform_data(params, rows)[0]
+    assert statement.total_assets == 55_677_822_007_000
+    assert statement.cash_and_equivalents == 5_154_466_367_000
+    assert statement.value_unit == "VND"
+    assert statement.unavailable_reason is None
+    assert len(statement.raw_data["provider_rows"]) == 4
+
+
+def test_conflicting_financial_metric_does_not_withhold_unrelated_confirmed_values():
+    params = FinancialsQueryParams(symbol="VNM", statement_type=StatementType.BALANCE, period="quarter")
+    rows = [{"item_id": field, "2026-Q2": value, "_source": "KBS", "_value_unit": "VND"}
+            for field, value in [("total_assets", 55_677_822_007_000), ("total_equity", 10), ("total_equity", 20)]]
+    statement = VnstockFinancialsFetcher.transform_data(params, rows)[0]
+    assert statement.total_assets == 55_677_822_007_000
+    assert statement.total_equity is None
+    assert statement.unit_metadata["total_equity"]["unavailable_reason"] == "conflicting_metric_rows"
+    assert statement.value_unit == "VND"
+
+
+def test_wide_row_alias_requires_unit_evidence_and_converts_once():
+    """A camelCase alias is normalized like a mapped key, never certified blind.
+
+    `totalAssets` is read by the wide-row constructor but was absent from
+    `_metric_mapping`, so its value used to enter the statement with no lineage
+    entry and the row was still certified VND (issue #106).
+    """
+    params = FinancialsQueryParams(
+        symbol="VNM", statement_type=StatementType.BALANCE, period="year"
+    )
+
+    # Sourced but unitless: no unit evidence, so the alias value is withheld.
+    withheld = VnstockFinancialsFetcher.transform_data(
+        params, [{"period": "2025", "totalAssets": 53_312.37, "_source": "KBS"}]
+    )[0]
+    assert withheld.total_assets is None
+    assert withheld.value_unit is None
+    assert withheld.unavailable_reason == "unknown_source_unit"
+    assert withheld.unit_metadata["total_assets"]["unavailable_reason"] == "unknown_source_unit"
+
+    # Explicit unit: the alias value is converted exactly once.
+    scaled = VnstockFinancialsFetcher.transform_data(
+        params,
+        [{"period": "2025", "totalAssets": 53_312.37, "_source": "fixture", "_value_unit": "Bn. VND"}],
+    )[0]
+    assert scaled.total_assets == 53_312_370_000_000
+    assert scaled.value_unit == "VND"
+    assert scaled.unit_metadata["total_assets"]["normalization_multiplier"] == 1_000_000_000
+
+    # No source and no unit: unchanged contract, recorded rather than assumed.
+    unitless = VnstockFinancialsFetcher.transform_data(
+        params, [{"period": "2025", "totalAssets": 53_312.37}]
+    )[0]
+    assert unitless.total_assets == 53_312.37
+    assert unitless.value_unit == "VND"
+    assert unitless.unit_metadata["total_assets"]["source_unit"] == "VND"
+
+
+def test_wide_row_alias_selection_is_independent_of_input_key_order():
+    """The selected alias is the constructor's first argument, not the row's key order.
+
+    `net_income` reads `netIncome` before `postTaxProfit`, so a row that carries both
+    must resolve to `netIncome` whichever way the dict is written (issue #106).
+    """
+    params = FinancialsQueryParams(
+        symbol="VNM", statement_type=StatementType.INCOME, period="year"
+    )
+    base = {"period": "2025", "_source": "fixture", "_value_unit": "VND"}
+
+    forward = VnstockFinancialsFetcher.transform_data(
+        params, [dict(base, netIncome=7.0, postTaxProfit=5.0)]
+    )[0]
+    reversed_keys = VnstockFinancialsFetcher.transform_data(
+        params, [dict(base, postTaxProfit=5.0, netIncome=7.0)]
+    )[0]
+
+    assert forward.net_income == 7.0
+    assert reversed_keys.net_income == 7.0
+    assert forward.unit_metadata["net_income"]["label"] == "netIncome"
+    assert reversed_keys.unit_metadata["net_income"]["label"] == "netIncome"
+
+
+def test_wide_row_alias_does_not_fall_back_past_a_rejected_higher_priority_key():
+    """A unit-rejected first alias withholds the metric instead of using a later alias."""
+    params = FinancialsQueryParams(
+        symbol="VNM", statement_type=StatementType.INCOME, period="year"
+    )
+    row = VnstockFinancialsFetcher.transform_data(
+        params,
+        [{"period": "2025", "netIncome": 7.0, "postTaxProfit": 5.0, "_source": "KBS"}],
+    )[0]
+
+    assert row.net_income is None
+    assert row.value_unit is None
+    assert row.unit_metadata["net_income"]["label"] == "netIncome"
+    assert row.unit_metadata["net_income"]["unavailable_reason"] == "unknown_source_unit"

@@ -198,11 +198,12 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
           sourceLabel: 'Transaction flow',
           apiGroup: '/equity',
           endpoint: `/equity/${upperSymbol}/transaction-flow`,
-          updatedAt: data?.meta?.last_data_date ?? (dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined),
+          updatedAt: latestDataDate,
+          fetchedAt: dataUpdatedAt,
         },
       },
     });
-  }, [hasRenderableFlowData, onDataChange, upperSymbol, data?.meta?.last_data_date, dataUpdatedAt]);
+  }, [hasRenderableFlowData, onDataChange, upperSymbol, latestDataDate, dataUpdatedAt]);
 
   return (
     <WidgetContainer
@@ -263,7 +264,8 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                 ))}
               </div>
               <WidgetMeta
-                updatedAt={data?.meta?.last_data_date ?? dataUpdatedAt}
+                updatedAt={latestDataDate}
+                fetchedAt={dataUpdatedAt}
                 isFetching={isFetching && hasData}
                 health={healthState}
                 note={note}

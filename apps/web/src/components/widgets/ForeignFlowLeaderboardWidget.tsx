@@ -54,7 +54,8 @@ export function ForeignFlowLeaderboardWidget({ id, widgetGroup, onRemove, onData
       apiGroup: '/market',
       endpoint: '/market/foreign-flow-leaderboard',
       sourceLabel: data?.source ?? 'VNIBB stored foreign_trading',
-      lastDataDate: sourceStale ? freshness?.last_data_date ?? data?.trade_date ?? dataUpdatedAt : null,
+      lastDataDate: data?.trade_date ?? freshness?.last_data_date ?? null,
+      fetchedAt: dataUpdatedAt,
       stale: sourceStale || Boolean(error && rows.length),
       exportData: rows,
       extra: { metric, window, tradeDate: data?.trade_date, symbolsCovered: data?.symbols_covered ?? 0, symbolsUnavailable: data?.symbols_unavailable ?? 0, windowCoverage: data?.window_coverage, settlementDates: data?.settlement_dates ?? [], availableFields: data?.available_fields ?? [], freshnessStatus: freshness?.status ?? 'unavailable' },
@@ -65,7 +66,7 @@ export function ForeignFlowLeaderboardWidget({ id, widgetGroup, onRemove, onData
     <WidgetContainer title="Foreign Flow Leaderboard" widgetId={id} onRefresh={() => refetch()} onClose={onRemove} isLoading={isLoading && !rows.length} noPadding exportData={rows} exportFilename={`foreign_flow_${metric}_${window.toLowerCase()}`}>
       <div className="flex h-full flex-col bg-[var(--bg-primary)]">
         <div className="border-b border-[var(--border-subtle)] px-3 py-2">
-          <WidgetMeta updatedAt={data?.trade_date ?? dataUpdatedAt} isFetching={isFetching && Boolean(rows.length)} sourceLabel={data?.source ?? 'VNIBB stored foreign_trading'} note={data?.trade_date ? `Settlement end ${data.trade_date}` : 'Settlement date unavailable'} align="right" />
+          <WidgetMeta updatedAt={data?.trade_date ?? freshness?.last_data_date ?? null} fetchedAt={dataUpdatedAt} isFetching={isFetching && Boolean(rows.length)} sourceLabel={data?.source ?? 'VNIBB stored foreign_trading'} note={data?.trade_date ? `Settlement end ${data.trade_date}` : 'Settlement date unavailable'} align="right" />
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
             <div role="group" aria-label="Foreign-flow metric" className="flex rounded border border-[var(--border-subtle)]">
               {([['net_volume', 'Net volume'], ['net_value', 'Net value']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={metric === value} onClick={() => setMetric(value)} className={`min-h-11 px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${metric === value ? 'bg-blue-500/20 text-blue-200' : 'text-[var(--text-muted)]'}`}>{label}</button>)}

@@ -11,10 +11,11 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
-import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
+import { canonicalPeriodRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { convertFinancialValueForUnit, EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+import { useUnit } from '@/contexts/UnitContext';
 
 interface FinancialRatiosWidgetProps {
     id: string;
@@ -141,7 +142,15 @@ function normalizeRatioPeriod(period: string | null | undefined): string | null 
 }
 
 function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemove, onDataChange }: FinancialRatiosWidgetProps) {
-    const periodSyncGroup = typeof config?.periodSyncGroup === 'string' ? config.periodSyncGroup : undefined;
+    // Default to the shared group the "Financial Period View" banner writes; a
+    // widget-level `periodSyncGroup` overrides it and an explicit `null` opts out
+    // so the period stays widget-local (issue #101).
+    const configuredSyncGroup = config?.periodSyncGroup;
+    const periodSyncGroup = configuredSyncGroup === null
+        ? undefined
+        : typeof configuredSyncGroup === 'string' && configuredSyncGroup.trim()
+            ? configuredSyncGroup
+            : FUNDAMENTAL_PERIOD_SYNC_GROUP;
     const defaultPeriod =
         config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
             ? (config.defaultPeriod as 'Q' | 'TTM')
@@ -165,7 +174,8 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         refetch,
         isFetching,
         dataUpdatedAt,
-    } = useFinancialRatios(symbol, { period: apiPeriod });
+    } = useFinancialRatios(symbol, { period: apiPeriod, enabled: period !== 'TTM' });
+    const { config: unitConfig } = useUnit();
     // Request the same period and limit as the adjacent statement widget: on
     // some provider responses the available fiscal years vary with the limit.
     // This feed supplies headings only; ratio rows supply all metric values.
@@ -175,27 +185,12 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         limit: visiblePeriodLimit,
     });
 
-    const rawRatios = data?.data || [];
-    const ratios = useMemo(() => {
-        const seen = new Set<string>()
-
-        return rawRatios
-            .map((entry) => {
-                const normalizedPeriod = normalizeRatioPeriod(entry?.period)
-                if (!normalizedPeriod) return null
-                return {
-                    ...entry,
-                    period: normalizedPeriod,
-                }
-            })
-            .filter((entry): entry is NonNullable<typeof entry> => {
-                if (!entry) return false
-                if (seen.has(entry.period)) return false
-                seen.add(entry.period)
-                return true
-            })
-            .sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period))
-    }, [rawRatios]);
+    const rawRatios = period === 'TTM' ? [] : data?.data || [];
+    const canonicalRatios = useMemo(() => canonicalPeriodRows(rawRatios), [rawRatios]);
+    const ratios = useMemo(() => canonicalRatios.rows
+        .map((entry) => ({ ...entry, period: normalizeRatioPeriod(entry.period)! }))
+        .sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
+        [canonicalRatios.rows]);
 
     // Columns are exactly the statement panels' window, so the same period selector shows
     // the same headings in every panel — including "2026 YTD", which the ratio feed cannot
@@ -227,7 +222,8 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                 apiGroup: '/equity',
                 endpoint: `/equity/${symbol}/ratios?period=${apiPeriod}`,
                 sourceLabel: 'Financial ratios',
-                lastDataDate: dataUpdatedAt,
+                lastDataDate: null,
+                fetchedAt: dataUpdatedAt,
                 stale: isFallback,
                 extra: hasData ? { periods: ratios.length } : undefined,
             }),
@@ -313,11 +309,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         () =>
             visiblePeriods.map((periodValue, index) => ({
                 key: periodValue ?? `period_${index}`,
-                label: formatFinancialPeriodLabel(periodValue, {
-                    mode: periodMode,
-                    index,
-                    total: visiblePeriods.length,
-                }),
+                label: formatFinancialPeriodLabel(periodValue, { mode: periodMode }),
                 align: 'right' as const,
             })),
         [periodMode, visiblePeriods]
@@ -359,7 +351,9 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                             const entry = ratioLookup.get(periodValue);
                             return [
                                 tableColumns[index]?.key ?? `period_${index}`,
-                                readRatioMetric(entry as Record<string, unknown> | undefined, metricKey),
+                                ['eps', 'bvps', 'dps'].includes(metricKey)
+                                    ? convertFinancialValueForUnit(readRatioMetric(entry as Record<string, unknown> | undefined, metricKey), unitConfig, periodValue)
+                                    : readRatioMetric(entry as Record<string, unknown> | undefined, metricKey),
                             ];
                         })
                     ),
@@ -368,7 +362,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         });
 
         return rows;
-    }, [categoryLabels, categoryMetrics, ratioLookup, tableColumns, visiblePeriods]);
+    }, [categoryLabels, categoryMetrics, ratioLookup, tableColumns, visiblePeriods, unitConfig]);
 
     const dataQualityWarnings = useMemo(() => {
         const warnings: string[] = [];
@@ -418,13 +412,19 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
             <div className="h-full flex flex-col">
                 <div className="px-2 py-1.5 border-b border-[var(--border-subtle)]">
                     <WidgetMeta
-                        updatedAt={dataUpdatedAt}
+                        updatedAt={null}
+                        fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right'}
+                        note={period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · unsupported' : 'Quarterly · newest on right'}
                         align="right"
                     />
                 </div>
+                {(canonicalRatios.issues.length > 0 || canonicalRatios.invalidPeriodCount > 0) && (
+                    <div className="px-3 py-1.5 text-[10px] text-amber-300">
+                        Fiscal period resolution: {canonicalRatios.issues.filter((issue) => issue.reason === 'ambiguous-basis').length} conflicting periods excluded; {canonicalRatios.issues.filter((issue) => issue.reason === 'duplicate-identical').length} identical repeats collapsed; {canonicalRatios.invalidPeriodCount} undated rows excluded.
+                    </div>
+                )}
                 {(() => {
                     // QA-v2 F1: surface a coverage hint when the backend
                     // tells us full ratio coverage starts after the
@@ -446,7 +446,13 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                     );
                 })()}
                 <div className="flex-1 overflow-auto px-2 pt-1 scrollbar-hide">
-                    {timedOut && isLoading && !hasData ? (
+                    {period === 'TTM' ? (
+                        <WidgetEmpty
+                            message="TTM ratios are not supported"
+                            detail="The provider does not supply ratios recomputed from a verified twelve-month window. Latest-period ratios and EPS/DPS sums are not shown as TTM. Select FY or Q."
+                            icon={<BarChart3 size={18} />}
+                        />
+                    ) : timedOut && isLoading && !hasData ? (
                         <WidgetError
                             title="Loading timed out"
                             error={new Error('Request timed out after 15 seconds.')}
@@ -485,10 +491,13 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                                 maxYears={tableColumns.length || 1}
                                 initialScrollPosition="end"
                                 storageKey={`ratios:${id}:${symbol}:${period}`}
-                                footerNote={`Note: Ratio history by ${period}. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
+                                footerNote={`Note: Ratio history by ${period}. EPS/BVPS/DPS are ${unitConfig.display === 'USD' ? 'USD' : 'VND'} per share; dimensionless ratios are not currency-converted. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
                                 valueFormatter={(value, row) => {
                                     if (UNDEFINED_WHEN_ZERO_RATIO_KEYS[row.id] === true && typeof value === 'number' && value === 0) {
                                         return EMPTY_VALUE;
+                                    }
+                                    if (row.id === 'eps' || row.id === 'bvps' || row.id === 'dps') {
+                                        return formatNumber(value as number | null | undefined, { decimals: 2 });
                                     }
                                     const isPercentMetric = percentKeys.has(row.id);
                                     return isPercentMetric

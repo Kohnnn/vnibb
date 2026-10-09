@@ -53,7 +53,7 @@ export function MarketSentimentWidget({ id, onRemove, onDataChange }: MarketSent
   const isLoading = (sentimentQuery.isLoading || trendingQuery.isLoading) && !sentiment;
   const error = sentimentQuery.error || trendingQuery.error;
   const hasData = Boolean(sentiment && sentiment.total_articles > 0);
-  const updatedAt = Math.max(sentimentQuery.dataUpdatedAt, trendingQuery.dataUpdatedAt);
+  const fetchedAt = Math.max(sentimentQuery.dataUpdatedAt, trendingQuery.dataUpdatedAt) || null;
   const refresh = () => {
     void sentimentQuery.refetch();
     void trendingQuery.refetch();
@@ -81,12 +81,13 @@ export function MarketSentimentWidget({ id, onRemove, onDataChange }: MarketSent
         apiGroup: '/news',
         endpoint: '/news/sentiment',
         sourceLabel: 'Market sentiment',
-        lastDataDate: updatedAt,
+        lastDataDate: null,
+        fetchedAt,
         stale: Boolean(error && hasData),
         extra: { articles: sentiment?.total_articles ?? 0, overall: sentiment?.overall },
       }),
     );
-  }, [onDataChange, hasData, updatedAt, error, sentiment?.total_articles, sentiment?.overall]);
+  }, [onDataChange, hasData, fetchedAt, error, sentiment?.total_articles, sentiment?.overall]);
 
   if (isLoading) {
     return <WidgetSkeleton lines={6} />;
@@ -143,7 +144,7 @@ export function MarketSentimentWidget({ id, onRemove, onDataChange }: MarketSent
               <div className={`text-lg font-semibold capitalize ${config.color}`}>{normalizedOverall}</div>
             </div>
           </div>
-          <WidgetMeta updatedAt={updatedAt} isFetching={(sentimentQuery.isFetching || trendingQuery.isFetching) && hasData} note={`${sentiment.total_articles} articles`} align="right" />
+          <WidgetMeta updatedAt={null} fetchedAt={fetchedAt} isFetching={(sentimentQuery.isFetching || trendingQuery.isFetching) && hasData} note={`${sentiment.total_articles} articles`} align="right" />
         </div>
 
         <div className="mb-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">

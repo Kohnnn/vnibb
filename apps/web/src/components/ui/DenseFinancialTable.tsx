@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
 import { Sparkline } from '@/components/ui/Sparkline'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
-import { calculatePercentChange, EMPTY_VALUE } from '@/lib/units'
+import { EMPTY_VALUE, describePercentChange, percentChangeDetail } from '@/lib/units'
 import { cn } from '@/lib/utils'
 
 export interface DenseTableColumn {
@@ -465,12 +465,19 @@ export function DenseFinancialTable({
                         ? asNumber(row.values[comparisonColumnKey])
                         : null
 
-                    const growthPct = showGrowth
-                      ? calculatePercentChange(currentNumber, previousNumber, {
+                    // Absolute prior-period denominator: the project convention, and the
+                    // one the API's growth payload uses, so the same fiscal period cannot
+                    // read +100.7% here and -100.7% in the Growth Bridge (issue #104). A
+                    // negative prior value is classified rather than lumped into a single
+                    // "turnaround" label: a loss that narrowed is not a loss that flipped
+                    // to profit.
+                    const growthDetail = showGrowth && !row.isGroup
+                      ? percentChangeDetail(currentNumber, previousNumber, {
                           minimumBase: 0.001,
                           clamp: 'yoy_change',
                         })
                       : null
+                    const growthPct = growthDetail?.change ?? null
 
                     return (
                       <td
@@ -491,17 +498,21 @@ export function DenseFinancialTable({
                       >
                         <div className="flex min-h-[28px] flex-col items-end justify-center gap-0.5">
                           <span className="block leading-4">{displayValue}</span>
-                        {growthPct !== null ? (
+                        {growthPct !== null && growthDetail ? (
                           <span
                             className={cn(
                               'inline-flex rounded px-1 py-0.5 text-[9px] font-semibold leading-none',
-                              growthPct === 0
+                              growthDetail.hasNegativeBase
+                                ? 'bg-amber-500/15 text-amber-400'
+                                : growthPct === 0
                                 ? 'bg-slate-500/15 text-slate-300'
                                 : growthPct >= 0
                                 ? 'bg-emerald-500/15 text-emerald-500'
                                 : 'bg-rose-500/15 text-rose-500'
                             )}
+                            title={describePercentChange(growthDetail)}
                           >
+                            {growthDetail.label ? `${growthDetail.label} ` : ''}
                             {growthPct >= 0 ? '+' : ''}
                             {growthPct.toFixed(1)}%
                           </span>

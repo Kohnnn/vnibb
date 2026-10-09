@@ -27,6 +27,7 @@ import type {
 import { createWorkspaceBackup, importWorkspaceBackup, type WorkspaceBackup } from '@/lib/workspaceBackup';
 import type { ResearchImportPlan } from '@/lib/researchBundle';
 import { MAX_NOTEBOOK_ITEMS, RESEARCH_NOTEBOOK_EVENT, RESEARCH_NOTEBOOK_KEY, readNotebookItems } from '@/lib/researchNotebook';
+import type { DashboardContextValue } from './types';
 
 // Re-export everything from submodules for backward compatibility
 export * from './types';
@@ -37,19 +38,9 @@ export * from './actions';
 export * from './reducer';
 export * from './hooks';
 
-// ============================================================================
-// Storage Keys (local to this file for now - will be moved to constants)
-// ============================================================================
-
-const STORAGE_KEY = 'vnibb_dashboards';
-const FOLDERS_KEY = 'vnibb_folders';
-const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
-const CURRENT_STORAGE_VERSION = 'v74';
-const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 25;
-const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';
-const DASHBOARD_STORAGE_COMMIT_KEY = 'vnibb-dashboard-storage-commit';
-const DASHBOARD_RECOVERY_BACKUP_KEY = 'vnibb_dashboards_recovery_backup_v1';
+// Storage keys live in ./constants only. A second local copy of
+// CURRENT_MIGRATION_VERSION (25) drifted from constants (26) and made the
+// version stamp never converge, so migration 26 re-ran on every load (#110).
 
 interface StoredDashboardViewState {
     activeDashboardId: string | null;
@@ -215,6 +206,15 @@ import {
     SYSTEM_DASHBOARD_IDS,
     GLOBAL_SYSTEM_TEMPLATE_IDS,
     INITIAL_FOLDER_NAME,
+    STORAGE_KEY,
+    FOLDERS_KEY,
+    STORAGE_VERSION_KEY,
+    CURRENT_STORAGE_VERSION,
+    MIGRATION_VERSION_KEY,
+    CURRENT_MIGRATION_VERSION,
+    LAST_VIEW_STATE_KEY,
+    DASHBOARD_STORAGE_COMMIT_KEY,
+    DASHBOARD_RECOVERY_BACKUP_KEY,
 } from './constants';
 
 // Migration functions come from ./migrations (moved from DashboardContext.tsx)
@@ -240,10 +240,14 @@ export {
     createGlobalMarketsDashboard,
 } from './systemDashboards';
 
-import { createGlobalMarketsDashboard } from './systemDashboards';
-
-// Import migration functions locally for use in this file
 import {
+    createGlobalMarketsDashboard,
+    createQuantSystemDashboard,
+    createTechnicalSystemDashboard,
+} from './systemDashboards';
+
+import {
+    migrateEmptySystemDashboardTabs,
     migrateEmptyTabs,
     migrateLegacyWidgetTypes,
     migrateLegacyWidgetLayoutBounds,
@@ -336,34 +340,16 @@ function createSystemDashboards(): Dashboard[] {
             updatedAt: now,
         },
         {
-            id: TECHNICAL_DASHBOARD_ID,
-            name: 'Technical',
-            description: 'Technical analysis and charting workspace',
+            ...createTechnicalSystemDashboard(),
             folderId: INITIAL_FOLDER_ID,
             order: 1,
-            isDefault: true,
-            isEditable: true,
-            adminUnlocked: false,
-            showGroupLabels: false,
-            tabs: [],
             syncGroups: [...defaultSyncGroups],
-            createdAt: now,
-            updatedAt: now,
         },
         {
-            id: QUANT_DASHBOARD_ID,
-            name: 'Quant',
-            description: 'Quantitative analysis and backtesting workspace',
+            ...createQuantSystemDashboard(),
             folderId: INITIAL_FOLDER_ID,
             order: 2,
-            isDefault: true,
-            isEditable: true,
-            adminUnlocked: false,
-            showGroupLabels: false,
-            tabs: [],
             syncGroups: [...defaultSyncGroups],
-            createdAt: now,
-            updatedAt: now,
         },
         { ...createGlobalMarketsDashboard(), folderId: INITIAL_FOLDER_ID, order: 3 },
     ];
@@ -473,6 +459,7 @@ function readDashboardStorageSnapshot(): { dashboards: Dashboard[]; folders: Das
         if (version < 24) normalizedDashboards = migrateLegacyGlobalMarketsDashboard(normalizedDashboards);
         if (version < 25) normalizedDashboards = migrateDefaultInvestorHome(normalizedDashboards);
         if (version < 26) normalizedDashboards = migrateLegacyWidgetTypes(normalizedDashboards);
+        if (version < 27) normalizedDashboards = migrateEmptySystemDashboardTabs(normalizedDashboards);
 
         const normalizedFolders = folders.some((folder) => folder.id === INITIAL_FOLDER_ID)
             ? folders as unknown as DashboardFolder[]
@@ -501,65 +488,6 @@ function readDashboardStorageSnapshot(): { dashboards: Dashboard[]; folders: Das
 // ============================================================================
 // Context
 // ============================================================================
-
-interface DashboardContextValue {
-    state: DashboardState;
-    localStateReady: boolean;
-    // Dashboard actions
-    setActiveDashboard: (id: string) => void;
-    createDashboard: (data: DashboardCreate) => Dashboard;
-    exportWorkspace: (groups?: Dashboard['widgetGroups'], linkedGlobalMarketsSymbol?: string) => WorkspaceBackup;
-    restoreWorkspace: (backup: WorkspaceBackup) => void;
-    importResearchBundle: (plan: ResearchImportPlan) => void;
-    updateDashboard: (id: string, updates: Partial<Dashboard>) => void;
-    updateDashboardRuntime: (id: string, updates: Partial<Dashboard>) => void;
-    deleteDashboard: (id: string) => void;
-    // Folder actions
-    createFolder: (name: string) => DashboardFolder;
-    updateFolder: (id: string, updates: Partial<DashboardFolder>) => void;
-    deleteFolder: (id: string) => void;
-    toggleFolder: (id: string) => void;
-    // Tab actions
-    setActiveTab: (id: string) => void;
-    createTab: (dashboardId: string, name: string) => DashboardTab;
-    updateTab: (dashboardId: string, tabId: string, updates: Partial<DashboardTab>) => void;
-    deleteTab: (dashboardId: string, tabId: string) => void;
-    reorderTabs: (dashboardId: string, tabs: DashboardTab[]) => void;
-    restoreLastClosedTab: () => string | null;
-    recentlyClosedTabs: ReadonlyArray<{
-        dashboardId: string;
-        tab: DashboardTab;
-        closedAt: number;
-    }>;
-    applyTemplate: (dashboardId: string, tabId: string, templateName: string) => void;
-    // Widget actions
-    addWidget: (dashboardId: string, tabId: string, widget: WidgetCreate) => WidgetInstance;
-    updateWidget: (dashboardId: string, tabId: string, widgetId: string, updates: Partial<WidgetInstance>) => void;
-    updateWidgetRuntime: (dashboardId: string, tabId: string, widgetId: string, updates: Partial<WidgetInstance>) => void;
-    deleteWidget: (dashboardId: string, tabId: string, widgetId: string) => void;
-    cloneWidget: (dashboardId: string, tabId: string, widgetId: string) => WidgetInstance | null;
-    updateTabLayout: (dashboardId: string, tabId: string, widgets: WidgetInstance[]) => void;
-    resetTabLayout: (dashboardId: string, tabId: string) => void;
-    // Sync group actions
-    updateSyncGroupSymbol: (dashboardId: string, groupId: number, symbol: string) => void;
-    createSyncGroup: (dashboardId: string, symbol: string) => WidgetSyncGroup;
-    setDashboardAdminUnlocked: (dashboardId: string, unlocked: boolean) => void;
-    // Move & Reorder actions
-    moveDashboard: (dashboardId: string, targetFolderId: string | undefined) => void;
-    reorderDashboards: (dashboardIds: string[], folderId: string | undefined) => void;
-    // Computed values
-    activeDashboard: Dashboard | null;
-    activeTab: DashboardTab | null;
-    migrationNotice: DashboardMigrationNotice | null;
-    dismissMigrationNotice: () => void;
-    backendSync: {
-        enabled: boolean;
-        status: 'idle' | 'syncing' | 'synced' | 'local' | 'error';
-        loadPaused: boolean;
-    };
-    availableTemplates: string[];
-}
-
 const DashboardContext = createContext<DashboardContextValue | null>(null);
 
 // ============================================================================
@@ -575,6 +503,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const [localStateReady, setLocalStateReady] = useState(false);
     const [migrationNotice, setMigrationNotice] = useState<DashboardMigrationNotice | null>(null);
     const [backendSyncStatus, setBackendSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'local' | 'error'>('idle');
+    const [userNavigationSeq, setUserNavigationSeq] = useState(0);
     const [recentlyClosed, setRecentlyClosed] = useState<
         Array<{ dashboardId: string; tab: DashboardTab; closedAt: number }>
     >([]);
@@ -780,6 +709,12 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 (d) => {
                     if (migrationVersion < 26) {
                         d = migrateLegacyWidgetTypes(d);
+                    }
+                    return { dashboards: d };
+                },
+                (d) => {
+                    if (migrationVersion < 27) {
+                        d = migrateEmptySystemDashboardTabs(d);
                     }
                     return { dashboards: d };
                 },
@@ -1010,14 +945,30 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             ...current.dashboards.filter((dashboard) => !cloudIds.has(dashboard.id) && !/^\d+$/.test(dashboard.id)),
             ...loadedDashboards,
         ];
-        const selectedDashboard = dashboards.find((dashboard) => dashboard.id === current.activeDashboardId)
-            ?? loadedDashboards[0] ?? dashboards[0];
-        const activeTabId = selectedDashboard?.tabs.some((tab) => tab.id === current.activeTabId)
-            ? current.activeTabId : selectedDashboard?.tabs[0]?.id ?? null;
+        // #102: the snapshot resolves minutes after mount and must not pull the
+        // user back to `loadedDashboards[0]` just because their current
+        // workspace is not part of it — bundled system workspaces and local
+        // imports are legitimately absent from the cloud response.
+        //
+        // It must still follow a *cloud* dashboard that was deleted: a numeric
+        // (cloud) id missing from the response has no surviving local copy, so
+        // the user cannot stay on it.
+        const currentId = current.activeDashboardId;
+        const stillPresent = dashboards.some((dashboard) => dashboard.id === currentId);
+        const droppedCloudId = currentId !== null && /^\d+$/.test(currentId) && !stillPresent;
+        const selectedDashboard = stillPresent
+            ? dashboards.find((dashboard) => dashboard.id === currentId) ?? null
+            : (droppedCloudId || currentId === null ? (loadedDashboards[0] ?? dashboards[0] ?? null) : null);
+        const activeDashboardId = selectedDashboard?.id ?? current.activeDashboardId;
+        const activeTabId = selectedDashboard
+            ? (selectedDashboard.tabs.some((tab) => tab.id === current.activeTabId)
+                ? current.activeTabId
+                : selectedDashboard.tabs[0]?.id ?? null)
+            : current.activeTabId;
         dispatch({ type: 'LOAD_STATE', payload: {
             ...current,
             dashboards,
-            activeDashboardId: selectedDashboard?.id ?? null,
+            activeDashboardId,
             activeTabId,
         } });
     }, backendSyncReady);
@@ -1028,10 +979,22 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const availableTemplates = Object.keys(TAB_WIDGET_TEMPLATES);
 
     // Action creators
-    const setActiveDashboard = useCallback((id: string) => {
-        dispatch({ type: 'SET_ACTIVE_DASHBOARD', payload: { dashboardId: id } });
+    const setActiveDashboard = useCallback((id: string, options?: { programmatic?: boolean }) => {
+        // A restore may precede the state-ref sync. Omit an unresolved tab so
+        // the reducer selects from current tabs; genuinely empty workspaces stay empty.
+        const target = stateRef.current.dashboards.find((dashboard) => dashboard.id === id) ?? null;
+        const restoredTabId = getRestoredActiveTabId(target, readStoredDashboardViewState());
+        dispatch({
+            type: 'SET_ACTIVE_DASHBOARD',
+            payload: { dashboardId: id, ...(restoredTabId ? { tabId: restoredTabId } : {}) },
+        });
+        // Only a genuine user selection bumps the navigation sequence; the
+        // URL-sync hook applying a deep link must not count as user navigation.
+        if (!options?.programmatic) {
+            setUserNavigationSeq((seq) => seq + 1);
+        }
         captureAnalyticsEvent(ANALYTICS_EVENTS.dashboardSwitched, { dashboardId: id });
-    }, []);
+    }, [getRestoredActiveTabId]);
 
     const createDashboard = useCallback((data: DashboardCreate): Dashboard => {
         const now = new Date().toISOString();
@@ -1096,8 +1059,11 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         dispatch({ type: 'TOGGLE_FOLDER', payload: { folderId: id } });
     }, []);
 
-    const setActiveTab = useCallback((id: string) => {
+    const setActiveTab = useCallback((id: string, options?: { programmatic?: boolean }) => {
         dispatch({ type: 'SET_ACTIVE_TAB', payload: { tabId: id } });
+        if (!options?.programmatic) {
+            setUserNavigationSeq((seq) => seq + 1);
+        }
     }, []);
 
     const createTab = useCallback((dashboardId: string, name: string): DashboardTab => {
@@ -1308,6 +1274,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const contextValue: DashboardContextValue = {
         state,
         localStateReady,
+        userNavigationSeq,
         exportWorkspace,
         restoreWorkspace,
         importResearchBundle,

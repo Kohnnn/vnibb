@@ -2,7 +2,7 @@ import logging
 import math
 import asyncio
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 
 from vnibb.core.config import settings
 from vnibb.providers.vnstock.financials import (
@@ -127,9 +127,12 @@ def _merge_statement_row_pair(
 ) -> FinancialStatementData:
     payload = primary.model_dump(mode="json")
     secondary_payload = secondary.model_dump(mode="json")
-    for field_name in FinancialStatementData.model_fields:
-        if payload.get(field_name) is None and secondary_payload.get(field_name) is not None:
-            payload[field_name] = secondary_payload[field_name]
+    if any(payload.get(name) != secondary_payload.get(name)
+           for name in FinancialStatementData.model_fields if name not in {"updated_at", "raw_data"}):
+        payload.update({name: None for name in FinancialStatementData.model_fields
+                        if isinstance(payload.get(name), (int, float))})
+        payload["unavailable_reason"] = "conflicting_duplicate_period"
+        payload["raw_data"] = {"conflicting_rows": [primary.raw_data, secondary.raw_data]}
     return FinancialStatementData.model_validate(payload)
 
 
@@ -185,11 +188,29 @@ def _build_ytd_snapshot(
         return number
 
     latest = quarters[0]
+    if latest.unavailable_reason or latest.value_unit != "VND":
+        return None
+    if statement_type == "balance":
+        return latest.model_copy(update={"period": f"{year} (YTD)", "aggregation_basis": "latest_quarter_snapshot",
+                                        "source_periods": [latest.period]})
+    if latest.flow_basis == "cumulative_ytd":
+        return latest.model_copy(update={"period": f"{year} (YTD)", "aggregation_basis": "reported_cumulative_ytd",
+                                        "source_periods": [latest.period]})
+    expected_quarters = list(range(_extract_period_quarter(latest.period) or 0, 0, -1))
+    if [_extract_period_quarter(row.period) for row in quarters] != expected_quarters:
+        return None
+    if any(row.flow_basis != "single_quarter" or row.value_unit != "VND" or row.unavailable_reason
+           or row.consolidation_basis != latest.consolidation_basis for row in quarters):
+        return None
     ytd_data = FinancialStatementData(
         symbol=symbol.upper(),
         period=f"{year} (YTD)",
         statement_type=statement_type,
-        updated_at=latest.updated_at or datetime.utcnow(),
+        updated_at=latest.updated_at or datetime.now(UTC),
+        source=latest.source, currency=latest.currency, value_unit=latest.value_unit,
+        consolidation_basis=latest.consolidation_basis, flow_basis="cumulative_ytd",
+        aggregation_basis="year_to_date_flow_sum", source_periods=[row.period for row in quarters],
+        raw_data={"source_rows": [row.model_dump(mode="json") for row in quarters]},
     )
 
     if statement_type == "income":
@@ -379,12 +400,88 @@ async def get_financials_with_ttm(
     return data
 
 
+def build_ttm_statement_rows(
+    rows: list[FinancialStatementData], statement_type: str
+) -> list[FinancialStatementData]:
+    quarters = _normalize_statement_rows(rows, period_type="quarter")
+    quarters = [row for row in quarters if _extract_period_quarter(row.period) is not None]
+    if not quarters:
+        return []
+    latest = quarters[0]
+    def unavailable(reason: str) -> list[FinancialStatementData]:
+        return [FinancialStatementData(symbol=latest.symbol, period="TTM", statement_type=statement_type,
+            unavailable_reason=reason, source_periods=[row.period for row in quarters],
+            raw_data={"source_rows": [row.model_dump(mode="json") for row in quarters]})]
+    if latest.unavailable_reason:
+        return unavailable(latest.unavailable_reason)
+    if latest.value_unit != "VND":
+        return unavailable("unknown_source_unit")
+    if statement_type in {"balance", "balance_sheet"}:
+        return [latest.model_copy(update={"period": "TTM", "aggregation_basis": "latest_quarter_snapshot",
+                                          "source_periods": [latest.period]})]
+    metrics = ("revenue", "cost_of_revenue", "gross_profit", "operating_income", "net_income", "ebitda",
+               "pre_tax_profit", "tax_expense", "interest_expense", "depreciation", "selling_general_admin",
+               "research_development", "other_income") if statement_type == "income" else (
+               "operating_cash_flow", "investing_cash_flow", "financing_cash_flow", "free_cash_flow",
+               "net_change_in_cash", "capex", "dividends_paid", "stock_repurchased", "debt_repayment", "depreciation")
+    period_lookup = {row.period: row for row in quarters}
+    flows = []
+    for row in quarters[:4]:
+        if row.flow_basis == "single_quarter":
+            flows.append(row)
+            continue
+        if row.flow_basis != "cumulative_ytd":
+            return unavailable("unknown_quarterly_flow_basis")
+        quarter = _extract_period_quarter(row.period)
+        if quarter == 1:
+            flows.append(row.model_copy(update={"flow_basis": "single_quarter"}))
+            continue
+        prior = period_lookup.get(f"Q{quarter - 1}-{_extract_period_year(row.period)}")
+        if prior is None or prior.flow_basis != "cumulative_ytd":
+            return unavailable("missing_prior_cumulative_quarter")
+        if (row.value_unit, row.consolidation_basis, row.source) != (prior.value_unit, prior.consolidation_basis, prior.source):
+            return unavailable("incompatible_quarterly_basis")
+        delta = row.model_copy(deep=True, update={"flow_basis": "single_quarter"})
+        for metric in metrics:
+            value, previous = getattr(row, metric), getattr(prior, metric)
+            setattr(delta, metric, value - previous if value is not None and previous is not None else None)
+        delta.raw_data = {"transformation": "cumulative_ytd_difference", "current": row.model_dump(mode="json"),
+                          "previous": prior.model_dump(mode="json")}
+        flows.append(delta)
+    source_rows = flows
+    ordinal = [(_extract_period_year(row.period) or 0) * 4 + (_extract_period_quarter(row.period) or 0)
+               for row in source_rows]
+    if len(source_rows) != 4 or ordinal != list(range(ordinal[0], ordinal[0] - 4, -1)):
+        return unavailable("missing_consecutive_quarters")
+    if any(row.unavailable_reason for row in source_rows):
+        return unavailable("unavailable_quarter_value")
+    bases = {(row.source, row.value_unit, row.consolidation_basis, row.flow_basis) for row in source_rows}
+    if len(bases) != 1 or any(row.consolidation_basis is None for row in source_rows):
+        return unavailable("incompatible_or_unknown_quarterly_basis")
+    result = FinancialStatementData(symbol=latest.symbol, period="TTM", statement_type=statement_type,
+        updated_at=latest.updated_at, source=latest.source, currency=latest.currency, value_unit=latest.value_unit,
+        consolidation_basis=latest.consolidation_basis, flow_basis="trailing_twelve_months",
+        aggregation_basis="four_quarter_flow_sum", source_periods=[row.period for row in source_rows],
+        raw_data={"source_rows": [row.model_dump(mode="json") for row in source_rows]})
+    for metric in metrics:
+        values = [getattr(row, metric) for row in source_rows]
+        if all(value is not None and math.isfinite(value) for value in values):
+            setattr(result, metric, sum(values))
+        result.unit_metadata[metric] = {"aggregation_basis": result.aggregation_basis,
+            "source_periods": result.source_periods, "components": [row.unit_metadata.get(metric) for row in source_rows],
+            "unavailable_reason": "missing_quarter_value" if getattr(result, metric) is None else None}
+    result.profit_before_tax = result.pre_tax_profit
+    result.net_cash_flow = result.net_change_in_cash
+    result.capital_expenditure = result.capex
+    result.unit_metadata["eps"] = {"unavailable_reason": "ttm_eps_requires_weighted_share_basis"}
+    return [result]
+
 async def calculate_ttm(symbol: str, statement_type: str) -> list[FinancialStatementData]:
     """
-    Calculate Trailing Twelve Months (TTM) by summing last 4 quarters.
+    Build a latest balance snapshot or four consecutive quarterly flows.
     """
     params = FinancialsQueryParams(
-        symbol=symbol, statement_type=StatementType(statement_type), period="quarter", limit=4
+        symbol=symbol, statement_type=StatementType(statement_type), period="quarter", limit=8
     )
 
     try:
@@ -401,83 +498,7 @@ async def calculate_ttm(symbol: str, statement_type: str) -> list[FinancialState
             statement_type,
             exc,
         )
-        return []
+        return [FinancialStatementData(symbol=symbol.upper(), period="TTM", statement_type=statement_type,
+            unavailable_reason=f"financial_source_fetch_failed: {exc}")]
 
-    quarters = _normalize_statement_rows(quarters, period_type="quarter")
-
-    if len(quarters) < 4:
-        logger.warning(f"Not enough quarterly data for TTM calculation for {symbol}")
-        return quarters  # Return whatever we have or empty
-
-    def _sanitize_optional(value: float | None) -> float | None:
-        if value is None:
-            return None
-        try:
-            number = float(value)
-        except (TypeError, ValueError):
-            return None
-        if math.isnan(number) or math.isinf(number):
-            return None
-        return number
-
-    # Combine last 4 quarters
-    ttm_data = FinancialStatementData(
-        symbol=symbol.upper(),
-        period="TTM",
-        statement_type=statement_type,
-        updated_at=quarters[0].updated_at,
-    )
-
-    # Flow metrics belong to one statement type only. A zero is a real result only
-    # when every contributing quarter reports a value (including a real zero).
-    if statement_type == "income":
-        metrics = (
-            "revenue", "cost_of_revenue", "gross_profit", "operating_income",
-            "net_income", "ebitda", "pre_tax_profit", "tax_expense",
-            "interest_expense", "depreciation",
-        )
-    elif statement_type == "cashflow":
-        metrics = (
-            "operating_cash_flow", "investing_cash_flow", "financing_cash_flow",
-            "free_cash_flow", "net_change_in_cash", "capex", "dividends_paid",
-            "stock_repurchased", "debt_repayment",
-        )
-    else:
-        metrics = ()
-
-    for metric in metrics:
-        total = 0.0
-        for quarter in quarters:
-            value = _sanitize_optional(getattr(quarter, metric))
-            if value is None:
-                break
-            total += value
-        else:
-            setattr(ttm_data, metric, total)
-
-    if statement_type == "income":
-        ttm_data.profit_before_tax = ttm_data.pre_tax_profit
-    elif statement_type == "cashflow":
-        ttm_data.net_cash_flow = ttm_data.net_change_in_cash
-        ttm_data.capital_expenditure = ttm_data.capex
-    elif statement_type == "balance":
-        # Balance sheets are point-in-time snapshots, not summed flows.
-        most_recent = quarters[0]
-        ttm_data.total_assets = _sanitize_optional(most_recent.total_assets)
-        ttm_data.total_liabilities = _sanitize_optional(most_recent.total_liabilities)
-        ttm_data.total_equity = _sanitize_optional(most_recent.total_equity)
-        ttm_data.cash_and_equivalents = _sanitize_optional(most_recent.cash_and_equivalents)
-        ttm_data.current_assets = _sanitize_optional(most_recent.current_assets)
-        ttm_data.fixed_assets = _sanitize_optional(most_recent.fixed_assets)
-        ttm_data.current_liabilities = _sanitize_optional(most_recent.current_liabilities)
-        ttm_data.long_term_liabilities = _sanitize_optional(most_recent.long_term_liabilities)
-        ttm_data.retained_earnings = _sanitize_optional(most_recent.retained_earnings)
-        ttm_data.short_term_debt = _sanitize_optional(most_recent.short_term_debt)
-        ttm_data.long_term_debt = _sanitize_optional(most_recent.long_term_debt)
-        ttm_data.accounts_receivable = _sanitize_optional(most_recent.accounts_receivable)
-        ttm_data.accounts_payable = _sanitize_optional(most_recent.accounts_payable)
-        ttm_data.customer_deposits = _sanitize_optional(most_recent.customer_deposits)
-        ttm_data.goodwill = _sanitize_optional(most_recent.goodwill)
-        ttm_data.intangible_assets = _sanitize_optional(most_recent.intangible_assets)
-
-    return [ttm_data]
+    return build_ttm_statement_rows(quarters, statement_type)

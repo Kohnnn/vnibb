@@ -201,6 +201,7 @@ class QuantBacktestResponseData(BaseModel):
     equity_curve_summary: Dict[str, Any]
     trades: List[Dict[str, Any]]
     warnings: List[str] = []
+    basis: Dict[str, Any] = {}
 
 
 class QuantSweepResponseData(BaseModel):
@@ -213,6 +214,7 @@ class QuantSweepResponseData(BaseModel):
     best: Dict[str, Any] | None = None
     cells: List[Dict[str, Any]]
     warnings: List[str] = []
+    basis: Dict[str, Any] = {}
 
 
 def _safe_float(value: Any, decimals: int = 4) -> float | None:
@@ -461,6 +463,84 @@ def _merge_historical_rows(*collections: list[EquityHistoricalData]) -> list[Equ
     return [by_time[key] for key in sorted(by_time)]
 
 
+def _build_price_frame_diagnostics(
+    *,
+    rows: list[EquityHistoricalData],
+    excluded_dates: set[date],
+    unresolved_dates: set[date],
+    start_date: date,
+    end_date: date,
+) -> dict[str, Any]:
+    """Source-contract diagnostics for a loaded price frame.
+
+    Records which sessions carried unconfirmed or incompatible price units and
+    how many sessions survived, so consumers can disclose *why* analytics are
+    unavailable instead of emitting neutral zeros or directional labels.
+    """
+    resolved_units = {getattr(row, "price_unit", "unknown") for row in rows}
+    if len(resolved_units) > 1:
+        unit_status = "mixed"
+    elif resolved_units == {"index_points"}:
+        unit_status = "index_points"
+    elif resolved_units == {"VND"}:
+        unit_status = "confirmed_vnd"
+    else:
+        unit_status = "unconfirmed"
+    excluded = sorted(day.isoformat() for day in excluded_dates)
+    unresolved = sorted(day.isoformat() for day in unresolved_dates)
+    return {
+        "requested_start_date": start_date.isoformat(),
+        "requested_end_date": end_date.isoformat(),
+        "observed_session_count": len(rows),
+        "excluded_session_count": len(excluded),
+        "excluded_price_unit_dates": excluded,
+        "unresolved_session_count": len(unresolved),
+        "unresolved_excluded_dates": unresolved,
+        "unit_status": unit_status,
+    }
+
+
+def _summarize_dates(dates: list[str], limit: int = 6) -> str:
+    listed = ", ".join(dates[:limit])
+    return f"{listed}, …" if len(dates) > limit else listed
+
+
+def _build_price_unit_warning(diagnostics: dict[str, Any] | None) -> str | None:
+    if not diagnostics:
+        return None
+    unresolved = list(diagnostics.get("unresolved_excluded_dates") or [])
+    if not unresolved:
+        return None
+    excluded_count = diagnostics.get("excluded_session_count", len(unresolved))
+    return (
+        f"Unavailable: {len(unresolved)} session(s) with unconfirmed or incompatible price units "
+        f"could not be resolved ({_summarize_dates(unresolved)}); "
+        f"{excluded_count} excluded session(s), "
+        f"{diagnostics.get('observed_session_count', 0)} compatible session(s) retained over "
+        f"{diagnostics.get('requested_start_date')}..{diagnostics.get('requested_end_date')}; "
+        "derived analytics withheld."
+    )
+
+
+def _price_diagnostics_meta(frame: pd.DataFrame | None) -> dict[str, Any]:
+    """Meta fields exposing why a price frame failed to resolve.
+
+    Consumers attach these to insufficient-data responses so an unresolved
+    session is disclosed as such instead of appearing as an ordinary gap.
+    """
+    attrs = getattr(frame, "attrs", None)
+    diagnostics = attrs.get("price_diagnostics") if isinstance(attrs, dict) else None
+    if not diagnostics:
+        return {}
+    return {
+        "unit_status": diagnostics.get("unit_status"),
+        "observed_session_count": diagnostics.get("observed_session_count"),
+        "excluded_session_count": diagnostics.get("excluded_session_count"),
+        "excluded_price_unit_dates": diagnostics.get("excluded_price_unit_dates"),
+        "unresolved_excluded_dates": diagnostics.get("unresolved_excluded_dates"),
+    }
+
+
 def _historical_rows_to_frame(rows: list[EquityHistoricalData]) -> pd.DataFrame:
     rows = [
         row for row in rows
@@ -539,6 +619,7 @@ async def _merge_latest_quote_into_frame(
     if getattr(quote_timestamp, "tzinfo", None) is not None:
         quote_timestamp = quote_timestamp.tz_localize(None)
 
+    diagnostics = frame.attrs.get("price_diagnostics")
     merged = frame.copy().sort_values("time").reset_index(drop=True)
     last_row = merged.iloc[-1]
     quote_date = quote_timestamp.normalize()
@@ -568,9 +649,13 @@ async def _merge_latest_quote_into_frame(
 
     if quote_date == last_date:
         merged.loc[merged.index[-1], list(latest_row.keys())] = list(latest_row.values())
+        if diagnostics is not None:
+            merged.attrs["price_diagnostics"] = diagnostics
         return merged, "Merged latest quote into current session calculations."
 
     merged = pd.concat([merged, pd.DataFrame([latest_row])], ignore_index=True)
+    if diagnostics is not None:
+        merged.attrs["price_diagnostics"] = diagnostics
     return merged, "Appended latest quote snapshot to quant calculations."
 
 
@@ -601,6 +686,7 @@ async def _load_quant_frame_with_warning(
             source=source,
         )
     return frame, _merge_warnings(
+        _build_price_unit_warning(frame.attrs.get("price_diagnostics")),
         _build_period_warning(frame, start_date, period),
         _build_staleness_warning(frame, end_date),
         latest_quote_warning,
@@ -1297,6 +1383,7 @@ async def _get_quant_metric_alias_response(
                 symbol=symbol_upper,
                 data_points=observed_points,
                 last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+                **_price_diagnostics_meta(frame),
             ),
             error=(
                 f"Insufficient Data: Expected at least {min_points_required} sessions, "
@@ -1331,6 +1418,7 @@ async def _get_quant_metric_alias_response(
                 symbol=symbol_upper,
                 data_points=observed_points,
                 last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+                **_price_diagnostics_meta(frame),
             ),
             error=str(exc),
         )
@@ -1353,6 +1441,7 @@ async def _get_quant_metric_alias_response(
             symbol=symbol_upper,
             data_points=observed_points,
             last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            **_price_diagnostics_meta(frame),
         ),
     )
 
@@ -1655,13 +1744,28 @@ async def _load_price_frame(
             symbol,
             ", ".join(day.isoformat() for day in sorted(unresolved_dates)),
         )
-        return _historical_rows_to_frame([])
+        frame = _historical_rows_to_frame([])
+        frame.attrs["price_diagnostics"] = _build_price_frame_diagnostics(
+            rows=rows,
+            excluded_dates=excluded_dates,
+            unresolved_dates=unresolved_dates,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        return frame
 
-    if not rows:
-        return _historical_rows_to_frame(rows)
+    if rows:
+        rows = _apply_corporate_action_adjustments(rows, corporate_actions, normalized_mode)
 
-    rows = _apply_corporate_action_adjustments(rows, corporate_actions, normalized_mode)
-    return _historical_rows_to_frame(rows)
+    frame = _historical_rows_to_frame(rows)
+    frame.attrs["price_diagnostics"] = _build_price_frame_diagnostics(
+        rows=rows,
+        excluded_dates=excluded_dates,
+        unresolved_dates=set(),
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return frame
 
 
 def _compute_volume_delta(frame: pd.DataFrame) -> Dict[str, Any]:
@@ -2810,7 +2914,7 @@ async def get_gamma_exposure_proxy(
                 "bands": [],
                 "data_quality_note": warning,
             },
-            meta=MetaData(count=0),
+            meta=MetaData(count=0, symbol=symbol_upper, **_price_diagnostics_meta(frame)),
             error="Insufficient historical data for gamma proxy.",
         )
 
@@ -2857,7 +2961,10 @@ async def get_gamma_exposure_proxy(
     }
     if warning:
         payload["data_quality_note"] = f"{payload['data_quality_note']} {warning}".strip()
-    return StandardResponse(data=payload, meta=MetaData(count=len(band_rows)))
+    return StandardResponse(
+        data=payload,
+        meta=MetaData(count=len(band_rows), symbol=symbol_upper, **_price_diagnostics_meta(frame)),
+    )
 
 
 @router.get("/{symbol}/momentum", response_model=StandardResponse[Dict[str, Any]])
@@ -2934,8 +3041,9 @@ async def get_momentum_profile(
                 "last_data_date": last_data_timestamp,
                 "returns_pct": {},
                 "peer_distribution": [],
+                "data_quality_note": warning,
             },
-            meta=MetaData(count=0),
+            meta=MetaData(count=0, symbol=symbol_upper, **_price_diagnostics_meta(frame)),
             error="Insufficient historical data for momentum profile.",
         )
 
@@ -3041,7 +3149,10 @@ async def get_momentum_profile(
     }
     if warning:
         payload["data_quality_note"] = warning
-    return StandardResponse(data=payload, meta=MetaData(count=len(peer_distribution)))
+    return StandardResponse(
+        data=payload,
+        meta=MetaData(count=len(peer_distribution), **_price_diagnostics_meta(frame)),
+    )
 
 
 @router.get("/{symbol}/earnings-quality", response_model=StandardResponse[Dict[str, Any]])
@@ -3386,7 +3497,14 @@ async def get_smart_money_flow(
         "synthetic_block_bias": spike_bias,
         "block_trades": merged_events,
     }
-    return StandardResponse(data=payload, meta=MetaData(count=len(merged_events)))
+    return StandardResponse(
+        data=payload,
+        meta=MetaData(
+            count=len(merged_events),
+            symbol=symbol_upper,
+            **_price_diagnostics_meta(price_frame),
+        ),
+    )
 
 
 @router.get("/{symbol}/relative-rotation", response_model=StandardResponse[Dict[str, Any]])
@@ -3923,6 +4041,23 @@ async def run_quant_backtest(
         equity_curve_summary=equity_curve_summary,
         trades=trades,
         warnings=warnings,
+        # Issue #106: a backtest and a sweep cell are comparable only when every
+        # parameter, date, fee and Sharpe convention matches, so the basis states
+        # all of them instead of leaving equivalence to assumption.
+        basis={
+            "include_latest_quote": False,
+            "period": period_upper,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "adjustment_mode": adjustment_mode,
+            "source": request.source,
+            "initial_capital": request.initial_capital,
+            "fee_bps": request.fee_bps,
+            "execution": "next_session_open",
+            "fast_window": request.strategy.fast_window,
+            "slow_window": request.strategy.slow_window,
+            "sharpe_convention": "mean(daily_returns)/std(daily_returns,ddof=1)*sqrt(252), risk_free=0",
+        },
     )
     return StandardResponse(
         data=payload,
@@ -3931,6 +4066,7 @@ async def run_quant_backtest(
             symbol=symbol_upper,
             data_points=equity_curve_summary["data_points"],
             last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            **_price_diagnostics_meta(frame),
         ),
     )
 
@@ -3974,6 +4110,7 @@ async def run_quant_sweep(
         source=request.source,
         period=period_upper,
         adjustment_mode=adjustment_mode,
+        include_latest_quote=False,
     )
     last_data_timestamp = _resolve_frame_last_timestamp(frame)
 
@@ -4021,6 +4158,24 @@ async def run_quant_sweep(
         best=best,
         cells=cells,
         warnings=unique_warnings,
+        basis={
+            "include_latest_quote": False,
+            "period": period_upper,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "adjustment_mode": adjustment_mode,
+            "source": request.source,
+            "objective": request.objective,
+            "fast_windows": fast_windows,
+            "slow_windows": slow_windows,
+            # Same settled-session rule as the backtest endpoint: no merged quote,
+            # same fee/capital/execution/Sharpe convention, so a cell is directly
+            # comparable to a backtest run at the same parameters (issue #106).
+            "initial_capital": request.initial_capital,
+            "fee_bps": request.fee_bps,
+            "execution": "next_session_open",
+            "sharpe_convention": "mean(daily_returns)/std(daily_returns,ddof=1)*sqrt(252), risk_free=0",
+        },
     )
     return StandardResponse(
         data=payload,
@@ -4029,6 +4184,7 @@ async def run_quant_sweep(
             symbol=symbol_upper,
             data_points=len(frame.index),
             last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            **_price_diagnostics_meta(frame),
         ),
     )
 
@@ -4107,6 +4263,7 @@ async def get_quant_metrics(
                 symbol=symbol_upper,
                 data_points=observed_points,
                 last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+                **_price_diagnostics_meta(frame),
             ),
             error=(
                 f"Insufficient Data: Expected at least {min_points_required} sessions, "
@@ -4157,6 +4314,7 @@ async def get_quant_metrics(
             symbol=symbol_upper,
             data_points=observed_points,
             last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            **_price_diagnostics_meta(frame),
         ),
     )
 
@@ -4241,5 +4399,6 @@ async def get_seasonality_matrix(
             symbol=symbol_upper,
             data_points=len(payload.rows),
             last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            **(_price_diagnostics_meta(frame) if granularity_value != "hourly" else {}),
         ),
     )

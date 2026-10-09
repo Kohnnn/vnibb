@@ -55,7 +55,9 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
       apiGroup: '/quant',
       endpoint: `/quant/${upperSymbol}/earnings-quality`,
       sourceLabel: 'vnstock',
-      lastDataDate: payload?.computed_at ?? dataUpdatedAt,
+      // `computed_at` is the scorecard's computation time, not a source observation.
+      lastDataDate: null,
+      fetchedAt: payload?.computed_at || dataUpdatedAt || null,
       derived: true,
       stale: Boolean(error && hasData),
       extra: { grade: payload?.grade || 'N/A' },
@@ -74,7 +76,8 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
           <span>Earnings Quality</span>
         </div>
         <WidgetMeta
-          updatedAt={dataUpdatedAt}
+          updatedAt={null}
+          fetchedAt={payload?.computed_at || dataUpdatedAt || null}
           isFetching={isFetching && hasData}
           note="Quarterly quality factors"
           align="right"

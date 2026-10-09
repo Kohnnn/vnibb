@@ -52,10 +52,13 @@ export function OwnershipChangesWidget({ id, symbol, onRemove, onDataChange }: O
       apiGroup: '/equity',
       endpoint: `/api/v1/equity/${symbol}/shareholders`,
       sourceLabel: 'Latest ownership snapshot',
+      // Holder rows expose no source observation date, so freshness stays
+      // unknown and the query receipt is reported separately.
+      lastDataDate: null,
+      fetchedAt: dataUpdatedAt,
       stale: Boolean(error && hasData),
-      extra: { holderCount: holders.length },
     }));
-  }, [error, hasData, holders.length, onDataChange, symbol]);
+  }, [dataUpdatedAt, error, hasData, holders.length, onDataChange, symbol]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view ownership" />;
@@ -74,7 +77,8 @@ export function OwnershipChangesWidget({ id, symbol, onRemove, onDataChange }: O
       <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
         <div className="px-3 py-2 border-b border-[var(--border-color)]/70">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={null}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={Boolean(error && hasData)}
             note="Latest ownership snapshot"

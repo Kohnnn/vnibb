@@ -76,11 +76,20 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
   })
 
   const hasData = Boolean(data)
+  const quality = data?.data_quality
+  const certifiedUnits = ['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+  const derivedWithheld = Boolean(data) && (!certifiedUnits
+    || Boolean(quality?.unresolved_session_count || quality?.unresolved_excluded_dates?.length)
+    || ['no_data', 'unavailable', 'error', 'unresolved', 'mixed', 'unconfirmed'].includes(quality?.status ?? '')
+    || data?.signals.overall_signal === 'unavailable')
+  const unavailableReason = !certifiedUnits
+    ? 'Signal summary unavailable: historical price units were not certified.'
+    : data?.signals.data_quality?.note ?? 'Signal summary unavailable: source quality is unresolved.'
   const isFallback = Boolean(error && hasData)
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   const derived = useMemo(() => {
-    if (!data) return null
+    if (!data || derivedWithheld) return null
     const total = Math.max(data.signals.total_indicators || 0, 1)
     const strongest = Math.max(data.signals.buy_count, data.signals.sell_count, data.signals.neutral_count)
     const consensus = Math.round((strongest / total) * 100)
@@ -108,22 +117,23 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
       resistanceDistancePct,
       balance,
     }
-  }, [data])
+  }, [data, derivedWithheld])
 
   useEffect(() => {
     onDataChange?.(
       buildWidgetRuntime({
-        empty: !hasData,
+        empty: !hasData || derivedWithheld,
         apiGroup: '/technical',
         endpoint: `/analysis/ta/${upperSymbol}/full?timeframe=${timeframe}`,
         sourceLabel: 'Signal summary (derived)',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate: data?.data_quality?.latest_date ?? null,
+        fetchedAt: dataUpdatedAt,
         stale: isFallback,
         derived: true,
-        extra: data?.signals?.overall_signal ? { overallSignal: data.signals.overall_signal, consensus: derived?.consensus } : undefined,
+        extra: !derivedWithheld && data?.signals?.overall_signal ? { overallSignal: data.signals.overall_signal, consensus: derived?.consensus } : undefined,
       }),
     )
-  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, timeframe, data?.signals?.overall_signal, derived?.consensus])
+  }, [onDataChange, hasData, derivedWithheld, isFallback, data?.data_quality?.latest_date, dataUpdatedAt, upperSymbol, timeframe, data?.signals?.overall_signal, derived?.consensus])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view trade signals" icon={<ShieldAlert size={18} />} />
@@ -154,7 +164,8 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
             ))}
           </div>
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={data?.data_quality?.latest_date ?? null}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note={TIMEFRAME_OPTIONS.find((item) => item.value === timeframe)?.label}
@@ -176,8 +187,12 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
         <WidgetSkeleton lines={8} />
       ) : error && !hasData ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
-      ) : !data || !derived ? (
-        <WidgetEmpty message="No signal summary available." icon={<ShieldAlert size={18} />} size="compact" />
+      ) : !data || !derived || derivedWithheld ? (
+        <WidgetEmpty
+          message={data ? unavailableReason : 'Signal summary unavailable: inputs not source-backed.'}
+          icon={<ShieldAlert size={18} />}
+          size="compact"
+        />
       ) : (
         <>
           <div className="grid grid-cols-[auto_1fr] gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">

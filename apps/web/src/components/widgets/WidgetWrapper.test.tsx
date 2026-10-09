@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { WidgetWrapper } from './WidgetWrapper';
 import { NotesWidget } from './NotesWidget';
 import { DEFAULT_GROUPS } from '@/types/widget';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 let mockTickerOverride: string | null = null;
 let mockWidgetConfig: Record<string, unknown> = {};
 let mockWidgetType = 'screener';
@@ -344,4 +345,26 @@ test('the widget menu opens scoped requirements and limitations and closes again
 
   await user.click(within(panel).getByRole('button', { name: 'Close widget requirements' }));
   expect(screen.queryByRole('region', { name: 'Widget requirements and limitations' })).not.toBeInTheDocument();
+});
+
+test('wrapper badges use source age while preserving retrieval and cache lineage', async () => {
+  const now = jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-08T03:00:00Z').getTime());
+  const payload = buildWidgetRuntime({
+    empty: false, apiGroup: '/news', endpoint: '/news/market', sourceLabel: 'Stored published articles',
+    lastDataDate: '2026-09-21T15:00:00Z', fetchedAt: '2026-10-08T03:00:00Z', cached: true,
+  });
+  try {
+    const user = userEvent.setup();
+    render(<WidgetWrapper id="screener" title="News" widgetType="screener" dashboardId="dashboard" tabId="tab" data={payload}>
+      <output />
+    </WidgetWrapper>);
+
+    expect(screen.queryByRole('button', { name: 'Data status: Live' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Data status: Stale' }));
+    expect(screen.getByText('Source as of')).toBeInTheDocument();
+    expect(screen.getByText('Fetched at')).toBeInTheDocument();
+    expect(screen.getByText('Cached snapshot')).toBeInTheDocument();
+  } finally {
+    now.mockRestore();
+  }
 });

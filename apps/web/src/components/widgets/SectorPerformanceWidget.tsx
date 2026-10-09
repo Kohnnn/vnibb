@@ -10,6 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetGroupId } from '@/types/widget';
+import { toNumber } from './utils';
 
 interface SectorPerformanceWidgetProps {
     isEditing?: boolean;
@@ -18,7 +19,11 @@ interface SectorPerformanceWidgetProps {
     onDataChange?: (data: WidgetDataPayload) => void;
 }
 
-function getHeatmapColor(changePct: number): string {
+// A sector with no usable change rows is not a flat 0% sector: it gets the
+// neutral slate tile and a "—" label instead of a fabricated "+0.00%" read
+// (issue #107). A genuine 0 still paints the neutral band.
+function getHeatmapColor(changePct: number | null): string {
+    if (changePct === null) return 'bg-slate-600/40';
     if (changePct >= 2) return 'bg-green-600';
     if (changePct >= 1) return 'bg-green-500/70';
     if (changePct >= 0.5) return 'bg-green-400/50';
@@ -39,7 +44,7 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
     const isFallback = Boolean(error && hasData);
 
     const sortedSectors = useMemo(() => {
-        return [...sectors].sort((a, b) => Math.abs((b.changePct ?? 0) - (a.changePct ?? 0)));
+        return [...sectors].sort((a, b) => Math.abs(toNumber(b.changePct) ?? 0) - Math.abs(toNumber(a.changePct) ?? 0));
     }, [sectors]);
 
     useEffect(() => {
@@ -49,7 +54,8 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                 apiGroup: '/market',
                 endpoint: '/market/sector-performance',
                 sourceLabel: 'Sector snapshot',
-                lastDataDate: dataUpdatedAt,
+                lastDataDate: null,
+                fetchedAt: dataUpdatedAt,
                 stale: isFallback,
                 extra: hasData ? { sectorCount: sectors.length } : undefined,
             }),
@@ -84,7 +90,8 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
         >
             <div className="h-full flex flex-col p-2">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     note="Sector snapshot"
@@ -102,7 +109,7 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                     ) : view === 'grid' ? (
                         <div className="grid grid-cols-2 gap-1.5">
                             {sortedSectors.map((sector) => {
-                                const change = sector.changePct ?? 0;
+                                const change = toNumber(sector.changePct);
                                 const name = sector.sectorName || sector.sectorNameEn || sector.sectorId;
                                 return (
                                     <div
@@ -112,8 +119,8 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                                         <div className="break-words whitespace-normal text-[10px] font-bold uppercase text-[var(--text-secondary)]">
                                             {name}
                                         </div>
-                                        <div className={`text-base font-black ${change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                            {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+                                        <div className={`text-base font-black ${change === null ? 'text-[var(--text-muted)]' : change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            {change === null ? '—' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`}
                                         </div>
                                         <div className="text-[9px] text-[var(--text-muted)]">{sector.totalStocks} stocks</div>
                                     </div>
@@ -123,8 +130,8 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                     ) : (
                         <div className="space-y-0.5">
                             {sortedSectors.map((sector) => {
-                                const change = sector.changePct ?? 0;
-                                const isUp = change >= 0;
+                                const change = toNumber(sector.changePct);
+                                const isUp = (change ?? 0) >= 0;
                                 const name = sector.sectorName || sector.sectorNameEn || sector.sectorId;
                                 const topGainer = sector.topGainer?.symbol;
                                 const topLoser = sector.topLoser?.symbol;
@@ -135,7 +142,7 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                                         className="flex items-center justify-between py-2 px-3 hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
                                     >
                                         <div className="flex items-center gap-3">
-                                            <div className={`w-2 h-2 rounded-full ${isUp ? 'bg-green-400' : 'bg-red-400'}`} />
+                                            <div className={`w-2 h-2 rounded-full ${change === null ? 'bg-slate-500' : isUp ? 'bg-green-400' : 'bg-red-400'}`} />
                                             <div>
                                                 <div className="text-sm font-medium text-[var(--text-primary)]">{name}</div>
                                                 <div className="text-[10px] text-[var(--text-muted)] flex items-center gap-2">
@@ -158,8 +165,8 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                                                 </div>
                                             </div>
                                         </div>
-                                        <span className={`text-sm font-bold font-mono ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                                            {isUp ? '+' : ''}{change.toFixed(2)}%
+                                        <span className={`text-sm font-bold font-mono ${change === null ? 'text-[var(--text-muted)]' : isUp ? 'text-green-400' : 'text-red-400'}`}>
+                                            {change === null ? '—' : `${isUp ? '+' : ''}${change.toFixed(2)}%`}
                                         </span>
                                     </div>
                                 );

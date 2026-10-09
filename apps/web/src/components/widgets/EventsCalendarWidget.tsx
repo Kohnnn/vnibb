@@ -90,6 +90,8 @@ export function EventsCalendarWidget({ symbol, onDataChange }: EventsCalendarWid
     const hasData = events.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+    // Event dates are action schedules, not source observations, so
+    // freshness stays unknown and the query receipt goes to fetchedAt.
 
     useEffect(() => {
         onDataChange?.(
@@ -98,7 +100,8 @@ export function EventsCalendarWidget({ symbol, onDataChange }: EventsCalendarWid
                 apiGroup: '/equity',
                 endpoint: `/equity/${symbol}/events`,
                 sourceLabel: 'Company events',
-                lastDataDate: dataUpdatedAt,
+                lastDataDate: null,
+                fetchedAt: dataUpdatedAt,
                 stale: isFallback,
                 extra: { count: events.length },
             }),
@@ -130,7 +133,8 @@ export function EventsCalendarWidget({ symbol, onDataChange }: EventsCalendarWid
 
             <div className="pb-2 border-b border-[var(--border-subtle)]">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     note="Company events"

@@ -198,9 +198,13 @@ registerWidget(
   'core_data',
   ['intraday', 'trades', 'order', 'flow']
 );
+// The "Financial Ratios" tile resolves to the ratio widget, not the unified
+// statements workspace. The unified widget owns its own period state and ignores
+// `config`, so binding this type to it left the tile stuck on FY while the
+// "Financial Period View" banner claimed it had synced (issue #101).
 registerWidget(
   'financial_ratios',
-  () => import('./FinancialsWidget'),
+  () => import('./FinancialRatiosWidget'),
   'analysis',
   ['financial', 'ratios']
 );
