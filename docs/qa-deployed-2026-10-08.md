@@ -67,7 +67,6 @@ A real browser MSR Quant replay visibly withheld momentum score/returns, signal,
 The separate five-scenario production replay completed in 90.78 seconds: MSR Quant and Technical consumers rendered unavailable states with no sampled legacy extreme-return/BUY/Strong Downtrend tokens; each checked consumer was matched to responses from its own navigation window. Invalid-tab navigation resolved to the real Quant tab and rewrote the URL; warm reload ended with ten unavailable widgets and zero loading. VNM shared TTM selected the period and disclosed unsupported TTM ratios. The old API also supplied populated statement values, including assets `55,677,822.01B VND`; these old-backend quantities are not financially validated and must not be treated as acceptance of the new normalization/lineage contract. Console errors were zero in the five scenarios; all 59 failed requests were navigation aborts.
 
 
-
 ## Historical QA record — superseded by the follow-up above
 
 This report separates **deployed before evidence**, **uncommitted local repairs**, deterministic fixtures and isolated-provider observations. Local passes do not prove a production release or market-data truth. Issues [#98](https://github.com/Kohnnn/vnibb/issues/98) and [#100–#110](https://github.com/Kohnnn/vnibb/issues/111) were read and remain **OPEN**; no acceptance or historical issue was closed.
