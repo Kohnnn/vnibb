@@ -32,7 +32,7 @@ Executed verification: TypeScript and production build passed; ESLint had zero e
 
 - [x] Preserve explicit unavailable TTM reasons for empty source results and ordinary calculation failures; the before/after service smoke failed/passed and all 29 financial-service tests passed. Cancellation propagation and null metrics remain intact.
 - [x] Preserve HTTPS certificate verification in the existing Oracle runtime/smoke scripts; public baseline smoke passed and an invalid trust bundle was rejected.
-- [x] Run the uninterrupted release gate on frozen source: all nine steps passed, 157 suites/1,044 frontend tests and 1,610 backend tests with four skips. Review the scoped changes since `a7a301a` before commit.
-- [ ] Commit only release-owned changes; publish and merge through the existing CI-controlled release workflow.
-- [ ] Capture the current API image and Vercel rollback target, publish a revision-pinned image and deploy API/MCP/scheduler plus the canonical `vnibb-web` project.
-- [ ] Verify live revision identity, health, price guards, financial unavailable states, navigation and warm reload; retain provider/data limits separately.
+- [x] Run the uninterrupted release gate on frozen source and resolve review findings. Final PR and main CI passed all four jobs, 157 suites/1,044 frontend tests and 1,621 backend tests with four skips; the TTM fallback regression and React type-peer boundary are repaired.
+- [x] Commit only release-owned changes; publish and merge through the existing CI-controlled release workflow. PR #112 merged as `0e5dfdd87a75bf755794727efd2470e52f24b0d2`.
+- [ ] Complete backend rollout after renewed Tailscale SSH approval. Frontend rollback target is retained; canonical `vnibb-web` now serves READY `dpl_CVbWJxYdHQQV7soRVhUgGM7MkMdb` at merged revision `0e5dfdd`. ARM64 publication run `37940732576` passed with digest `sha256:b1ec3141fce79a7077ba6e13c2099cd0eaf2d45f06f52f4e08b80866eaebd68e`; API/MCP/scheduler remain on `2c576542` until approved replacement.
+- [ ] Complete new-backend live acceptance after rollout. Frontend health returned HTTP 200, navigation passed 40/40, and warm reload left zero loading widgets. MSR price guards visibly withheld uncertified analytics; old-backend financial/provider limits remain separate from frontend success.
