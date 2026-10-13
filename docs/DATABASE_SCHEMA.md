@@ -1048,17 +1048,23 @@ Multi-dataset raw record store for fundamentals and company data.
 **Indexes:** `(dataset, symbol, recordKey)` unique
 
 ### `market_financial_metric_map`
-Code->label dictionary for decoding `raw` financial fields.
+Original symbol-specific financial descriptors; one bounded snapshot per `(symbol, comTypeCode, section, source)`. A symbol write cannot append to another symbol's document.
 
 | Attribute | Type | Description |
 |---|---|---|
+| `symbol` | string | Exact uppercase issuer symbol |
 | `comTypeCode` | string | Company type (e.g. `IN`, `CT`, bank/securities/insurance) |
 | `section` | string | `INCOME_STATEMENT`, `BALANCE_SHEET`, `CASH_FLOW`, `NOTE` |
 | `source` | string | `vietcap` |
-| `labels` | object | `{ field: {field, name, level, parent, titleEn, titleVi, ...} }` |
-| `fieldCount` | int | Number of mapped fields |
+| `descriptors` | array | Original section list, preserving hierarchy, null/repeated fields and unknown properties |
+| `descriptorEvidence` | object | Exact `symbol`, `comTypeCode`, `section`, `source`, metrics `endpoint`, receipt `receivedAt`, optional original `sourceResponse` |
+| `receivedAt`, `updatedAt`, `createdAt` | datetime | Retained receipt/storage lineage, not fiscal publication dates |
+| `schemaVersion` | int | `3` for served per-symbol descriptor documents |
+| `migrationSource` | object | Migrated records only: original collection, string document ID and exact symbol evidence path; aggregate legacy timestamps remain separate provenance |
 
-**Indexes:** `(comTypeCode, section, source)` unique
+**Index:** `uq_metric_map_symbol_type_section_source`, unique `(symbol, comTypeCode, section, source)`, partial filter `symbol: {$type: "string"}`. The old type-wide unique index must be retired by the controlled migration, not silently ignored during index initialization.
+
+Readers select exact `source="vietcap"`, `symbol`, `schemaVersion=3`. Old type-wide `labels`/`symbolDescriptors` documents remain untouched historical raw data and are not served. Migration copies only exact retained symbol entries or inline symbol-scoped `descriptorEvidence`; it never joins generic type descriptors, invents receipt dates or overwrites existing symbol keys. See `apps/api/scripts/vietcap/README.md` for the paused-writer, backed-up cutover.
 
 ### `market_company_profiles`
 Company master + analyst coverage (Vietcap `details` + `search-bar`).

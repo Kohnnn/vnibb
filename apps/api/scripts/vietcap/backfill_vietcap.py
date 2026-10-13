@@ -9,7 +9,7 @@ Targets (database: vnibb-market):
   market_prices_derivatives      EOD OHLCV for futures/derivatives (separate)
   market_prices_bond             EOD OHLCV for bonds/debentures (separate)
   market_vnstock_premium_records financial statements / ratios / shareholders (source="vietcap")
-  market_financial_metric_map    original descriptor lists per symbol/section (existing type key)
+  market_financial_metric_map    bounded descriptor document per symbol/type/section/source
   market_company_profiles        company master + sector + analyst (details + search-bar)
   market_index_constituents      index membership from getByGroup
 
@@ -236,7 +236,7 @@ def _main(runner: Any) -> int:
     load_env_file(API_ROOT / ".env")
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", nargs="?", choices=("inventory", "backfill", "resume"), default="backfill")
+    parser.add_argument("command", nargs="?", choices=("inventory", "backfill", "resume", "migrate-metric-maps"), default="backfill")
     parser.add_argument("--symbols", default="STOCK", help="Confirmed Trading symbols, instrument type, or ALL; default entire STOCK universe")
     parser.add_argument(
         "--datasets",
@@ -244,7 +244,7 @@ def _main(runner: Any) -> int:
         help="Comma list of: ohlc,financials,ratios,company,shareholders,listing,indices,icb or 'all'",
     )
     parser.add_argument("--count-back", type=int, default=10000)
-    parser.add_argument("--apply", action="store_true", help="Opt in to provider calls and MongoDB/PostgreSQL writes.")
+    parser.add_argument("--apply", action="store_true", help="Opt in to writes (migration is provider-free; backfill/resume acquire providers).")
     parser.add_argument("--ensure-indexes", action="store_true")
     parser.add_argument("--max-pairs", type=int, default=50, help="Maximum symbol/dataset attempts; never truncates universe")
     parser.add_argument("--budget-seconds", type=float, default=300)
@@ -253,6 +253,16 @@ def _main(runner: Any) -> int:
     parser.add_argument("--checkpoint-file", type=Path, default=Path(os.getenv("VNIBB_BACKFILL_CHECKPOINT", "/var/lib/vnibb/vietcap_backfill.json")))
     parser.add_argument("--universe-file", type=Path, help="Explicit cached Trading getAll envelope; source/freshness are printed")
     args = parser.parse_args()
+
+    if args.command == "migrate-metric-maps":
+        mongo_url = os.getenv("MONGODB_URL")
+        if not mongo_url:
+            raise SystemExit("MONGODB_URL is required for metric-map inventory/migration")
+        from pymongo import MongoClient
+        with MongoClient(mongo_url, serverSelectionTimeoutMS=10000) as mongo:
+            report = w.migrate_metric_maps(mongo[os.getenv("MONGODB_DATABASE", "vnibb-market")], apply=args.apply)
+        print(json.dumps({"mode": "apply" if args.apply else "read_only", **report}, default=str))
+        return 0
 
     allowed = {"ohlc", "financials", "ratios", "company", "shareholders", "listing", "indices", "icb"}
     selected = {d.strip().lower() for d in args.datasets.split(",") if d.strip()}
@@ -556,7 +566,7 @@ def _ensure_indexes(db: Any) -> None:
     _safe("market_vnstock_premium_records", [("dataset", 1), ("symbol", 1), ("recordKey", 1)], unique=True)
     _safe("market_company_profiles", [("symbol", 1), ("source", 1)], unique=True)
     _safe("market_index_constituents", [("group", 1), ("source", 1)], unique=True)
-    _safe("market_financial_metric_map", [("comTypeCode", 1), ("section", 1), ("source", 1)], unique=True)
+    w.ensure_metric_map_indexes(db)
     _safe("market_icb_sectors", [("icbCode", 1), ("source", 1)], unique=True)
 
 

@@ -4,17 +4,17 @@ Bounded public Vietcap IQ/trading ingestion into MongoDB `vnibb-market`. Vietcap
 
 ## Quick start
 
-Run from `vnibb/apps/api`; dry-run fetches data but writes nothing:
+Run from `vnibb/apps/api`; default inventory is provider-free and writes nothing:
 
 ```bash
-python scripts/vietcap/backfill_vietcap.py --symbols VCB,BVH,FPT --limit 3 \
-  --datasets financials,company,listing
+python scripts/vietcap/backfill_vietcap.py inventory --symbols VCB,BVH,FPT \
+  --datasets financials,company,listing --universe-file /path/to/trading-universe.json
 ```
 
 Apply the same bounded slice (requires `MONGODB_URL`):
 
 ```bash
-python scripts/vietcap/backfill_vietcap.py --symbols VCB,BVH,FPT --limit 3 \
+python scripts/vietcap/backfill_vietcap.py backfill --symbols VCB,BVH,FPT --max-pairs 9 \
   --datasets financials,company,listing --apply
 ```
 
@@ -26,20 +26,20 @@ Rerunning the same slice upserts the existing natural keys. Apply also awaits de
 |---|---|
 | `--symbols` | `ALL`, an instrument type, or comma-separated symbols |
 | `--datasets` | `ohlc,financials,ratios,company,shareholders,listing,indices,icb` or `all`; unknown names are rejected |
-| `--limit` | Maximum selected symbols; zero means no cap |
+| `--max-pairs` | Positive symbol/dataset attempt bound; never truncates the selected universe |
 | `--count-back` | Positive OHLC history bound; default 10000 |
-| `--apply` | Enable upserts; default is dry-run |
-| `--ensure-indexes` | Create supporting indexes during apply; existing data is retained |
-| `--skip-fresh-through` | Skip OHLC already reaching the specified YYYY-MM-DD; other datasets still run |
+| `--apply` | Enable provider acquisition and upserts for backfill/resume; migration writes are provider-free |
+| `--ensure-indexes` | Create supporting indexes during apply; metric-map index failures are fatal, requiring controlled cutover |
+| `--checkpoint-file` | Durable receipts; resume skips only exact succeeded pairs |
 
-`financials` includes all three statement sections plus raw ratios. `listing` (singular) joins selected trading instrument metadata with IQ search metadata under `reference.listings`. Dry-run reports supported structured fields and unavailable groups without requiring SQL admission. Apply preserves raw rows and returns status 1 when a requested structured group has no supported fields; reachable groups still persist. Any caught error or unavailable requested raw data also returns status 1. Invalid flags/datasets return status 2. All apply persistence shares one event loop; the database engine is disposed before that loop closes.
+`financials` includes all three statement sections plus raw ratios. `listing` (singular) joins selected trading instrument metadata with IQ search metadata under `reference.listings`. Without `--apply`, backfill/resume report retained receipts without provider calls or SQL admission. Apply preserves raw rows and returns status 1 when a requested structured group has no supported fields; reachable groups still persist. Any caught error or unavailable requested raw data also returns status 1. Invalid flags/datasets return status 2. All apply persistence shares one event loop; the database engine is disposed before that loop closes.
 
 ## Financial contract
 
 - Runtime implementations live in `vnibb/services/vietcap_client.py` and `vnibb/services/vietcap_ingestion.py`; recurring ingestion and this CLI reuse them.
 - Annual/quarter variants are `{dataset}.year` and `{dataset}.quarter`. Existing financial `recordKey` and dataset/symbol/key upsert filters remain unchanged.
 - Company classification comes from the actual symbol's IQ `comTypeCode`, never its trading instrument type. Missing classification stays unknown.
-- Descriptors are fetched once per symbol and retained as original section lists, including hierarchy, repeated fields, nulls and unknown properties. The existing metric-map natural key is retained with lossless `symbolDescriptors` evidence per symbol.
+- Descriptors are fetched once per symbol and retained as original section lists, including hierarchy, repeated fields, nulls and unknown properties. `market_financial_metric_map` uses `(symbol, comTypeCode, section, source)`, top-level `descriptors` and exact `descriptorEvidence`, `schemaVersion=3`. Every section, including `NOTE`, stays symbol-scoped. No growing `symbolDescriptors` write remains; legacy documents are retained unserved.
 - `observedAt` and `receivedAt` are receipt timestamps, not fabricated fiscal publication dates. `rawFiscalBasis` retains supplied fiscal/basis fields; parsed `publicDate` is preserved as `sourceDate`.
 - Statement and ratio values stay raw. Units are unknown unless actual payload/descriptor evidence establishes them. No magnitude-based scaling or guessed metric mapping is allowed.
 - Structured fields require the symbol/section descriptor evidence consumed by `vietcap_financials`; unsupported units, labels or ambiguous fields remain unavailable.
@@ -50,6 +50,31 @@ Rerunning the same slice upserts the existing natural keys. Apply also awaits de
 - Listing upserts run before dependent stock prices. An applied stock OHLC slice also fetches and persists its bounded IQ/trading listing prerequisite when `listing` is not explicitly selected, so a first-run database can admit those prices.
 
 An applied stock OHLC slice reports its admission outcome under `price_admission`: `source_rows`, `admitted_rows`, `rejected_rows`, `rejected_reasons` (for example `invalid_ohlc_bounds`, `missing_negative_or_nonfinite_ohlcv`, `noninteger_volume`, `invalid_date`), `persisted_rows` and the actual admitted/persisted first/last bounds, plus a `classification`. A mixed window is `partial_source_invalid` and the pair is still receipted `failed` behind a strict guard that requires the full returned window to reach SQL (`Returned OHLC window incomplete: <rejected> source rows unadmitted; <persisted>/<returned> SQL rows persisted`); a rejected SQL conflict instead classifies `sql_source_conflict` with `conflicting_keys` and also returns nonzero. A real new-process apply observed this end to end: AAA returned 4,049 source rows, persisted 4,048, and rejected exactly one `invalid_ohlc_bounds` row as `partial_source_invalid`. Rejections are source-invalid rows, not writer loss: every raw Mongo row is retained unrepaired, `history_complete` stays `null`, and re-running `resume` under the same contract retries the pair rather than silently certifying a short window.
+
+## Controlled metric-map cutover
+
+This is an additive storage migration, not a provider acquisition or financial-unit repair. Run the following only after the integration owner's source freeze and targeted checks, using the actual deployment interpreter/environment:
+
+1. Pause owned recurring/backfill financial writers and request-time IQ acquisition (the daily scheduler and HTTP empty/unusable-financial path both reuse `sync_symbol_financials`). Record process identity and checkpoint; do not terminate unrelated processes. Back up Mongo data, PostgreSQL and receipts; record checksums and the actual `market_financial_metric_map.list_indexes()` specifications/cardinality before writes.
+2. Inspect candidates without provider calls or writes:
+
+   ```bash
+   python scripts/vietcap/backfill_vietcap.py migrate-metric-maps
+   ```
+
+3. Apply while writers remain paused:
+
+   ```bash
+   python scripts/vietcap/backfill_vietcap.py migrate-metric-maps --apply
+   ```
+
+   The helper first creates `uq_metric_map_symbol_type_section_source`, unique `(symbol, comTypeCode, section, source)`, partial filter `symbol: {$type: "string"}`. It then drops only indexes whose actual reported keys equal the obsolete `(comTypeCode, section, source)` and whose `unique` flag is true. Index errors propagate; there is no mock/silent success. No documents are deleted. Originals without outer `symbol` remain unserved historical raw.
+
+   Copies come only from exact `symbolDescriptors.<symbol>` entries with matching stored symbol/endpoint/receipt, or raw envelopes with fully matching symbol/type/section/source `descriptorEvidence`. Original descriptor lists, receipt dates and response metadata remain; `migrationSource` records the retained collection/document ID/path and legacy aggregate timestamps separately. Missing per-symbol created/update dates stay absent; aggregate dates are never assigned as symbol facts. Shared generic `labels`, unknown receipts and contradictory evidence are rejected, never guessed. `$setOnInsert` preserves existing bounded keys; reruns are additive/idempotent. `eligible`, `inserted`, `existing`, `rejected` and `dropped_indexes` are disclosed.
+
+   `migrationSource.documentId` is stored as the original ID's string representation for the public JSON contract. Rerunning this same command inventories (`normalizable_ids`) and, with `--apply`, canonicalizes (`normalized_ids`) only BSON ObjectId values at `migrationSource.documentId` on existing v3 documents. The update matches the original document ID and provenance value and changes only that field; legacy raw documents, descriptors, evidence and dates stay untouched.
+4. Conditional actual-Mongo smoke (requires configured real Mongo; never claim a stub proves it): compare retained legacy document IDs/counts/BSON sizes with the backup; verify the partial unique index and absence of the obsolete unique key; compare migrated descriptors/evidence/receipt dates against originals. For two real acquired symbols sharing company type/section, read each through `MongoMarketDataService.get_reference_records`; each result must have its own outer symbol and exact `descriptorEvidence`, with no aggregate descriptor map. Refresh one symbol only, confirm the other document and legacy originals remain byte-equivalent. Use `$bsonSize` over `schemaVersion=3` documents and record maximum size, distinct symbol count and per-section counts; historical near-16MiB raw documents are not served and must not be miscounted as failures.
+5. Resume the bounded native financial acquisition against the existing checkpoint and exact affected symbol list; use `financials` for combined statement/ratio acquisition, not an independent ratio provider pass. A financial receipt may remain failed for structured admission while raw acquisition succeeds; retain partial committed counts and report those outcomes separately. Do not reset unrelated succeeded receipts. Index/schema repair does not weaken unit, fiscal, source-conflict or descriptor guards.
 
 ## Archived maintenance
 

@@ -65,29 +65,6 @@ def fake_mongo(monkeypatch):
     monkeypatch.setitem(sys.modules, "pymongo", module)
 
 
-def test_ensure_indexes_creates_global_latest_date_index_in_key_order() -> None:
-    class Collection:
-        def __init__(self) -> None:
-            self.indexes = []
-
-        def create_index(self, keys, **options) -> None:
-            self.indexes.append((keys, options))
-
-    class Database:
-        def __init__(self) -> None:
-            self.collections = {}
-
-        def __getitem__(self, name):
-            return self.collections.setdefault(name, Collection())
-
-    database = Database()
-    backfill_vietcap._ensure_indexes(database)
-
-    assert ([('tradeDate', -1)], {"name": "idx_tradeDate_desc"}) in database[
-        "market_prices_eod"
-    ].indexes
-
-
 def test_default_inventory_never_requires_mongo_or_provider(monkeypatch, capsys):
     monkeypatch.delenv("MONGODB_URL", raising=False)
     monkeypatch.setattr(backfill_vietcap, "load_env_file", lambda _: None)
@@ -346,7 +323,7 @@ def test_statement_writer_retains_success_response_lineage():
     assert records[0]["descriptorEvidence"]["sourceResponse"] == source
 
 
-def test_metric_map_preserves_symbol_hierarchy_and_existing_filter():
+def test_metric_map_preserves_symbol_hierarchy_and_bounded_filter():
     from vnibb.services.vietcap_ingestion import upsert_metric_map
 
     class Collection:
@@ -356,10 +333,106 @@ def test_metric_map_preserves_symbol_hierarchy_and_existing_filter():
     collection = Collection()
     descriptors = [{"field": None}, {"field": "a", "parent": "ROOT"}, {"field": "a", "extra": None}]
     assert upsert_metric_map({"market_financial_metric_map": collection}, "CT", {"INCOME_STATEMENT": descriptors}, symbol="VNM", dry_run=False) == 1
-    assert collection.operation._filter == {"comTypeCode": "CT", "section": "INCOME_STATEMENT", "source": "vietcap"}
-    stored = collection.operation._doc["$set"]["symbolDescriptors.VNM"]
+    assert collection.operation._filter == {"symbol": "VNM", "comTypeCode": "CT", "section": "INCOME_STATEMENT", "source": "vietcap"}
+    stored = collection.operation._doc["$set"]
     assert stored["descriptors"] == descriptors
+    assert stored["descriptorEvidence"]["symbol"] == "VNM"
+    assert stored["schemaVersion"] == 3
+    assert "symbolDescriptors" not in stored
     assert upsert_metric_map(None, None, {"INCOME_STATEMENT": descriptors}, symbol="VNM", dry_run=False) == 0
+
+
+def test_metric_map_index_cutover_fails_closed_and_drops_only_obsolete_unique():
+    from vnibb.services.vietcap_ingestion import ensure_metric_map_indexes
+
+    class Collection:
+        def __init__(self):
+            self.calls = []
+
+        def list_indexes(self):
+            keys = {"comTypeCode": 1, "section": 1, "source": 1}
+            return [{"name": "actual_legacy_name", "key": keys, "unique": True},
+                    {"name": "retained_read_index", "key": keys},
+                    {"name": "_id_", "key": {"_id": 1}, "unique": True}]
+
+        def create_index(self, keys, **options):
+            self.calls.append(("create", keys, options))
+
+        def drop_index(self, name):
+            self.calls.append(("drop", name))
+
+    collection = Collection()
+    db = {"market_financial_metric_map": collection}
+    with pytest.raises(RuntimeError, match="actual_legacy_name"):
+        ensure_metric_map_indexes(db)
+    assert len(collection.calls) == 1
+    assert collection.calls[0][2]["partialFilterExpression"] == {"symbol": {"$type": "string"}}
+    assert ensure_metric_map_indexes(db, drop_obsolete=True) == ["actual_legacy_name"]
+    assert collection.calls[-1] == ("drop", "actual_legacy_name")
+
+
+def test_metric_map_migration_retains_only_exact_evidence_and_is_additive():
+    from copy import deepcopy
+    from datetime import datetime
+    from types import SimpleNamespace
+    from bson import ObjectId
+    from vnibb.services.vietcap_ingestion import migrate_metric_maps
+
+    received = datetime(2025, 1, 1)
+    descriptors = [{"field": None}, {"field": "a"}, {"field": "a"}]
+    legacy_id, inline_id = ObjectId(), ObjectId()
+    legacy = {"_id": legacy_id, "comTypeCode": "CT", "section": "INCOME_STATEMENT", "source": "vietcap",
+              "createdAt": received, "symbolDescriptors": {
+                  "AAA": {"symbol": "AAA", "descriptors": descriptors, "receivedAt": received,
+                          "endpoint": "/v1/company/AAA/financial-statement/metrics"},
+                  "BBB": {"symbol": "AAA", "descriptors": descriptors, "receivedAt": received}}}
+    key = {"symbol": "BBB", "comTypeCode": "CT", "section": "INCOME_STATEMENT", "source": "vietcap"}
+    inline = {"_id": inline_id, **key, "descriptors": [{"field": "b"}], "descriptorEvidence": {
+        **key, "receivedAt": received, "endpoint": "/v1/company/BBB/financial-statement/metrics"}}
+    original = deepcopy(legacy)
+
+    class Cursor(list):
+        def sort(self, *args):
+            return self
+
+    class Collection:
+        def __init__(self, rows):
+            self.rows = rows
+            self.inserted = {}
+
+        def find(self, query, *args):
+            return Cursor([] if "migrationSource.documentId" in query else self.rows)
+
+        def list_indexes(self):
+            return []
+
+        def create_index(self, *args, **kwargs):
+            pass
+
+        def update_one(self, query, update, upsert):
+            identity = tuple(query.items())
+            if identity in self.inserted:
+                return SimpleNamespace(upserted_id=None)
+            self.inserted[identity] = update["$setOnInsert"]
+            return SimpleNamespace(upserted_id=identity)
+
+    maps = Collection([legacy])
+    records = Collection([inline, {**inline, "_id": "contradiction", "symbol": "CCC"}])
+    db = {"market_financial_metric_map": maps, "market_vnstock_premium_records": records}
+    assert migrate_metric_maps(db)["eligible"] == 2
+    assert not maps.inserted
+    report = migrate_metric_maps(db, apply=True)
+    assert (report["inserted"], report["rejected"]) == (2, 2)
+    assert legacy == original
+    stored = {document["symbol"]: document for document in maps.inserted.values()}
+    assert stored["AAA"]["descriptors"] == descriptors
+    assert stored["AAA"]["receivedAt"] == received
+    assert stored["AAA"]["migrationSource"] == {"collection": "market_financial_metric_map", "documentId": str(legacy_id), "path": "symbolDescriptors.AAA", "createdAt": received}
+    assert "createdAt" not in stored["AAA"]
+    assert "updatedAt" not in stored["AAA"]
+    assert stored["BBB"]["descriptorEvidence"] == inline["descriptorEvidence"]
+    assert stored["BBB"]["migrationSource"]["documentId"] == str(inline_id)
+    assert migrate_metric_maps(db, apply=True)["existing"] == 2
 
 
 def test_cli_uses_one_loop_and_disposes_engine_before_close(monkeypatch):

@@ -423,11 +423,9 @@ class MongoMarketDataService:
         bounded_limit = max(1, min(limit, 100))
 
         def _read() -> list[dict[str, Any]]:
-            query = {"source": "vietcap"}
+            query = {"source": "vietcap", "symbol": symbol_upper}
             if store == "market_financial_metric_map":
-                query[f"symbolDescriptors.{symbol_upper}"] = {"$exists": True}
-            else:
-                query["symbol"] = symbol_upper
+                query["schemaVersion"] = 3
             cursor = self._get_collection(store).find(query, {"_id": 0}).sort(
                 [("updatedAt", -1), ("comTypeCode", 1), ("section", 1)]
             ).limit(bounded_limit)

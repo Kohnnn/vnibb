@@ -211,7 +211,7 @@ def contract(dataset):
                 "source_anchor": "vnibb/services/data_pipeline.py; vnibb/services/sync_all_data.py"}
     if dataset in {"market_company_profiles", "market_financial_metric_map", "market_index_constituents", "market_icb_sectors", "reference.listings", "company.shareholder_structure"}:
         return {"refresh_owner": "scripts/vietcap/backfill_vietcap.py (operator-run); recurring SQL writers do not imply Mongo refresh",
-                "supported_scope": "IQ selected symbols; index group/ICB/descriptor-type scopes are not equity symbol scopes",
+                "supported_scope": "IQ selected symbols (including exact symbol/type/section descriptors); index group/ICB scopes are not equity symbol scopes",
                 "history_bound": "retained profile/reference snapshot, not historical replay",
                 "source_anchor": "vnibb/services/vietcap_ingestion.py; scripts/vietcap/backfill_vietcap.py"}
     return {"refresh_owner": "manual_or_unknown; no recurring coverage claim",
@@ -380,7 +380,7 @@ def mongo_inventory(url, database, universe):
         premium = "market_vnstock_premium_records"
         retained = set(db[premium].distinct("dataset")) if premium in names else set()
         datasets = {name for name in retained if isinstance(name, str) and re.fullmatch(r"[a-z_]+(?:\.[a-z_]+)+", name)} | required
-        specs = [(name, name, {}, "symbol", bound) for name, bound in physical.items()]
+        specs = [(name, name, {"source": "vietcap", "schemaVersion": 3, "symbol": {"$type": "string"}} if name == "market_financial_metric_map" else {}, "symbol", bound) for name, bound in physical.items()]
         for dataset in sorted(datasets):
             # Catalog scopes, not outer equity symbols, define market identity.
             market_scoped = catalog.get(dataset) == "market" or dataset.startswith(("macro.", "market.", "analytics.valuation."))
@@ -394,7 +394,7 @@ def mongo_inventory(url, database, universe):
                 continue
             rows = mongo_summary(db[collection], query, key, bound)
             expected = {symbol for symbol, (kind, _) in universe.items() if kind in price_types[dataset]} if dataset in price_types else None
-            if dataset.startswith("finance.") or dataset in {"market_company_profiles", "reference.listings", "company.shareholder_structure"}:
+            if dataset.startswith("finance.") or dataset in {"market_company_profiles", "market_financial_metric_map", "reference.listings", "company.shareholder_structure"}:
                 expected = {symbol for symbol, (kind, _) in universe.items() if kind == "STOCK"}
             if dataset in {"analytics.valuation.pe", "analytics.valuation.pb"}:
                 expected = {"VNINDEX"}
@@ -408,11 +408,8 @@ def mongo_inventory(url, database, universe):
                 current = {symbol for symbol in expected if universe[symbol][1] != "DELISTED"}
                 entry["currently_listed_coverage"] = coverage(current, [row["_id"] for row in rows])
             if collection == "market_financial_metric_map":
-                descriptor_symbols = set()
-                for document in db[collection].find({}, {"symbolDescriptors": 1, "_id": 0}):
-                    if isinstance(document.get("symbolDescriptors"), dict):
-                        descriptor_symbols.update(document["symbolDescriptors"])
-                entry["descriptor_symbol_coverage"] = coverage({symbol for symbol, (kind, _) in universe.items() if kind == "STOCK"}, descriptor_symbols)
+                entry["descriptor_symbol_coverage"] = coverage(expected, [row["_id"] for row in rows])
+                entry["historical_raw_documents"] = db[collection].count_documents({"symbol": {"$exists": False}})
             if collection == premium:
                 entry["scope_counts"] = safe_scopes(db[collection].aggregate([
                     {"$match": query}, {"$group": {"_id": {"type": "$scopeType", "key": "$scopeKey"}, "rows": {"$sum": 1}}},

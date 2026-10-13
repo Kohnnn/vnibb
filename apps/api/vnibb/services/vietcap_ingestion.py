@@ -122,33 +122,133 @@ def _period_label(year: Any, length_report: Any) -> tuple[str, str, int | None, 
 # ---------------------------------------------------------------------------
 
 def upsert_metric_map(
-    db: Any, com_type: str | None, metric_map: dict[str, Any], *, symbol: str, dry_run: bool
+    db: Any, com_type: str | None, metric_map: dict[str, Any], *, symbol: str, dry_run: bool,
+    descriptor_response: dict[str, Any] | None = None,
 ) -> int:
     """Keep the original symbol-specific hierarchy, including null/repeated fields."""
     from pymongo import UpdateOne
     if com_type is None:
         return 0
 
-    received_at = _now()
+    received_at = (descriptor_response or {}).get("receivedAt") or _now()
+    symbol_upper = str(symbol).strip().upper()
+    if not symbol_upper:
+        raise ValueError("A stock symbol is required")
     ops = []
     for section, fields in metric_map.items():
+        key = {"symbol": symbol_upper, "comTypeCode": com_type, "section": section, "source": "vietcap"}
         doc = {
-            "comTypeCode": com_type, "section": section,
-            "source": "vietcap", "providerSource": "vietcap",
-            f"symbolDescriptors.{symbol.upper()}": {
-                "symbol": symbol.upper(), "descriptors": fields, "receivedAt": received_at,
-                "endpoint": f"/v1/company/{symbol.upper()}/financial-statement/metrics",
+            **key, "providerSource": "vietcap", "descriptors": fields,
+            "descriptorEvidence": {
+                **key, "receivedAt": received_at,
+                "endpoint": f"/v1/company/{symbol_upper}/financial-statement/metrics",
+                "sourceResponse": descriptor_response,
             },
-            "receivedAt": received_at, "updatedAt": received_at, "schemaVersion": 2,
+            "receivedAt": received_at, "updatedAt": received_at, "schemaVersion": 3,
         }
         if not dry_run:
             ops.append(UpdateOne(
-                {"comTypeCode": com_type, "section": section, "source": "vietcap"},
-                {"$set": doc, "$setOnInsert": {"createdAt": received_at}}, upsert=True,
+                key, {"$set": doc, "$setOnInsert": {"createdAt": received_at}}, upsert=True,
             ))
     if ops:
         db["market_financial_metric_map"].bulk_write(ops, ordered=False)
     return len(metric_map)
+
+
+def ensure_metric_map_indexes(db: Any, *, drop_obsolete: bool = False) -> list[str]:
+    """Protect symbol keys before explicitly retiring the type-wide unique index."""
+    collection = db["market_financial_metric_map"]
+    legacy_keys = [("comTypeCode", 1), ("section", 1), ("source", 1)]
+    obsolete = [index["name"] for index in collection.list_indexes()
+                if list(index["key"].items()) == legacy_keys and index.get("unique")]
+    collection.create_index(
+        [("symbol", 1), *legacy_keys], name="uq_metric_map_symbol_type_section_source",
+        unique=True, partialFilterExpression={"symbol": {"$type": "string"}},
+    )
+    if obsolete and not drop_obsolete:
+        raise RuntimeError(f"Metric-map cutover required; back up and pause writers, then run backfill_vietcap.py migrate-metric-maps --apply; obsolete indexes: {obsolete}")
+    for name in obsolete:
+        collection.drop_index(name)
+    return obsolete
+
+
+def migrate_metric_maps(db: Any, *, apply: bool = False) -> dict[str, Any]:
+    """Copy only exact retained symbol evidence; never overwrite or delete raw records."""
+    collection = db["market_financial_metric_map"]
+    seen: set[tuple[str, str, str, str]] = set()
+    report: dict[str, Any] = {"eligible": 0, "inserted": 0, "existing": 0, "rejected": 0,
+                              "normalizable_ids": 0, "normalized_ids": 0, "dropped_indexes": []}
+    if apply:
+        report["dropped_indexes"] = ensure_metric_map_indexes(db, drop_obsolete=True)
+    for document in collection.find(
+        {"schemaVersion": 3, "migrationSource.documentId": {"$type": "objectId"}},
+        {"migrationSource.documentId": 1},
+    ):
+        identifier = document["migrationSource"]["documentId"]
+        report["normalizable_ids"] += 1
+        if apply:
+            result = collection.update_one(
+                {"_id": document["_id"], "schemaVersion": 3, "migrationSource.documentId": identifier},
+                {"$set": {"migrationSource.documentId": str(identifier)}},
+            )
+            report["normalized_ids"] += result.modified_count
+
+    def retain(key: dict[str, Any], descriptors: Any, evidence: Any, origin: dict[str, Any], timestamps: dict[str, Any]) -> None:
+        symbol = key.get("symbol")
+        if (not isinstance(symbol, str) or not symbol or symbol != symbol.strip().upper()
+                or not isinstance(key.get("comTypeCode"), str) or not key["comTypeCode"]
+                or not isinstance(key.get("section"), str) or not key["section"] or key.get("source") != "vietcap"
+                or not isinstance(descriptors, list) or not isinstance(evidence, dict)
+                or any(evidence.get(field) != value for field, value in key.items())
+                or not evidence.get("receivedAt")
+                or evidence.get("endpoint") != f"/v1/company/{symbol}/financial-statement/metrics"):
+            report["rejected"] += 1
+            return
+        identity = tuple(key[field] for field in ("symbol", "comTypeCode", "section", "source"))
+        if identity in seen:
+            return
+        seen.add(identity)
+        report["eligible"] += 1
+        if not apply:
+            return
+        document = {
+            **key, "providerSource": "vietcap", "descriptors": descriptors,
+            "descriptorEvidence": evidence, "receivedAt": evidence["receivedAt"],
+            **timestamps,
+            "schemaVersion": 3, "migrationSource": origin,
+        }
+        result = collection.update_one(key, {"$setOnInsert": document}, upsert=True)
+        report["inserted" if result.upserted_id is not None else "existing"] += 1
+
+    for legacy in collection.find({"symbol": {"$exists": False}, "source": "vietcap"}):
+        entries = legacy.get("symbolDescriptors")
+        if not isinstance(entries, dict):
+            report["rejected"] += 1
+            continue
+        for symbol, entry in entries.items():
+            if not isinstance(entry, dict) or entry.get("symbol") != symbol:
+                report["rejected"] += 1
+                continue
+            key = {"symbol": symbol, "comTypeCode": legacy.get("comTypeCode"),
+                   "section": legacy.get("section"), "source": legacy.get("source")}
+            evidence = {**key, **{field: entry[field] for field in (*key, "receivedAt", "endpoint", "sourceResponse") if field in entry}}
+            retain(key, entry.get("descriptors"), evidence,
+                   {"collection": "market_financial_metric_map", "documentId": str(legacy["_id"]),
+                    "path": f"symbolDescriptors.{symbol}",
+                    **{field: legacy[field] for field in ("createdAt", "updatedAt") if field in legacy}},
+                   {field: entry[field] for field in ("createdAt", "updatedAt") if field in entry})
+
+    projection = {"symbol": 1, "comTypeCode": 1, "section": 1, "source": 1,
+                  "descriptors": 1, "descriptorEvidence": 1, "createdAt": 1, "updatedAt": 1}
+    for record in db["market_vnstock_premium_records"].find(
+        {"source": "vietcap", "descriptorEvidence": {"$exists": True}}, projection,
+    ).sort("receivedAt", -1):
+        key = {field: record.get(field) for field in ("symbol", "comTypeCode", "section", "source")}
+        retain(key, record.get("descriptors"), record.get("descriptorEvidence"),
+               {"collection": "market_vnstock_premium_records", "documentId": str(record["_id"]),
+                "path": "descriptorEvidence"},
+               {field: record[field] for field in ("createdAt", "updatedAt") if field in record})
+    return report
 
 
 def _financial_provenance(raw: dict[str, Any], received_at: datetime) -> dict[str, Any]:
@@ -344,7 +444,7 @@ def sync_symbol_financials(db: Any, client: Any, symbol: str, *, com_type: str |
     descriptor_response = response_metadata.get(f"{IQ_BASE}/v1/company/{symbol.upper()}/financial-statement/metrics")
     if not metric_map:
         raise ValueError(f"Financial descriptors unavailable for {symbol}")
-    upsert_metric_map(db, com_type, metric_map, symbol=symbol, dry_run=dry_run)
+    upsert_metric_map(db, com_type, metric_map, symbol=symbol, dry_run=dry_run, descriptor_response=descriptor_response)
     records: list[dict[str, Any]] = []
     sections = {"INCOME_STATEMENT": "finance.income_statement", "BALANCE_SHEET": "finance.balance_sheet", "CASH_FLOW": "finance.cash_flow"}
     errors: dict[str, str] = {}

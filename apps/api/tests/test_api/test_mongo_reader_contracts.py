@@ -263,14 +263,119 @@ async def test_market_reader_public_tool_ignores_outer_symbol(monkeypatch, datas
 @pytest.mark.asyncio
 @pytest.mark.parametrize("store", ["market_company_profiles", "market_financial_metric_map"])
 async def test_reference_envelope_public_tool(monkeypatch, store):
-    envelope = {"source": "vietcap", "symbol": "VNM", "schemaVersion": 2, "createdAt": datetime(2025, 1, 1), "symbolDescriptors": {"VNM": {"descriptors": [{"field": None}, {"field": "a"}, {"field": "a"}]}}}
+    envelope = {"source": "vietcap", "symbol": "VNM", "schemaVersion": 3, "createdAt": datetime(2025, 1, 1), "descriptors": [{"field": None}, {"field": "a"}, {"field": "a"}], "descriptorEvidence": {"symbol": "VNM"}}
     collection = Collection([envelope])
     server = enable_public_reader(monkeypatch, collection)
     response = await server.get_reference_dataset("VNM", store)
     assert set(response["items"][0]) == set(envelope)
-    assert response["items"][0]["symbolDescriptors"]["VNM"]["descriptors"] == envelope["symbolDescriptors"]["VNM"]["descriptors"]
+    assert response["items"][0]["descriptors"] == envelope["descriptors"]
     if store == "market_financial_metric_map":
-        assert collection.query == {"source": "vietcap", "symbolDescriptors.VNM": {"$exists": True}}
+        assert collection.query == {"source": "vietcap", "symbol": "VNM", "schemaVersion": 3}
+
+
+@pytest.mark.asyncio
+async def test_metric_map_same_type_section_stays_independent_through_public_consumer(monkeypatch):
+    from copy import deepcopy
+    from vnibb.services.vietcap_ingestion import upsert_metric_map
+
+    class WritableCollection(Collection):
+        def bulk_write(self, operations, ordered):
+            for operation in operations:
+                match = next((row for row in self.rows if all(row.get(key) == value for key, value in operation._filter.items())), None)
+                if match is None:
+                    match = deepcopy(operation._doc.get("$setOnInsert", {}))
+                    self.rows.append(match)
+                match.update(deepcopy(operation._doc["$set"]))
+
+    legacy = {"source": "vietcap", "comTypeCode": "CT", "section": "INCOME_STATEMENT",
+              "schemaVersion": 2, "symbolDescriptors": {"AAA": {"descriptors": [{"field": "historical"}]}}}
+    original = deepcopy(legacy)
+    collection = WritableCollection([legacy])
+    db = {"market_financial_metric_map": collection}
+    descriptors = {"AAA": [{"field": None}, {"field": "a"}, {"field": "a"}], "BBB": [{"field": "b"}]}
+    for symbol, fields in descriptors.items():
+        upsert_metric_map(db, "CT", {"INCOME_STATEMENT": fields}, symbol=symbol, dry_run=False)
+    aaa = deepcopy(collection.rows[1])
+    upsert_metric_map(db, "CT", {"INCOME_STATEMENT": [{"field": "b2"}]}, symbol="BBB", dry_run=False)
+    assert len(collection.rows) == 3
+    assert collection.rows[0] == original
+    assert collection.rows[1] == aaa
+    server = enable_public_reader(monkeypatch, collection)
+    for symbol, fields in (("AAA", descriptors["AAA"]), ("BBB", [{"field": "b2"}])):
+        response = await server.get_reference_dataset(symbol, "market_financial_metric_map")
+        assert len(response["items"]) == 1
+        item = response["items"][0]
+        assert item["descriptors"] == fields
+        assert item["descriptorEvidence"]["symbol"] == symbol
+        assert item["descriptorEvidence"]["endpoint"] == f"/v1/company/{symbol}/financial-statement/metrics"
+        assert "symbolDescriptors" not in item
+
+
+@pytest.mark.asyncio
+async def test_migrated_objectid_lineage_reaches_public_reference_json(monkeypatch):
+    import json
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from bson import ObjectId
+    from vnibb.services.vietcap_ingestion import migrate_metric_maps
+
+    original_id = ObjectId()
+    received = datetime(2025, 1, 1)
+    key = {"symbol": "VNM", "comTypeCode": "CT", "section": "INCOME_STATEMENT", "source": "vietcap"}
+    evidence = {**key, "receivedAt": received, "endpoint": "/v1/company/VNM/financial-statement/metrics"}
+    descriptors = [{"field": None}, {"field": "a"}, {"field": "a"}]
+    legacy = {"_id": original_id, "comTypeCode": "CT", "section": "INCOME_STATEMENT", "source": "vietcap",
+              "symbolDescriptors": {"VNM": {"symbol": "VNM", "descriptors": descriptors,
+                  "receivedAt": received, "endpoint": evidence["endpoint"]}}}
+
+    class RetainedCollection(Collection):
+        def find(self, query, projection=None):
+            if "migrationSource.documentId" in query:
+                return Cursor([row for row in self.rows if row.get("schemaVersion") == 3
+                               and isinstance(row.get("migrationSource", {}).get("documentId"), ObjectId)])
+            if isinstance(query.get("symbol"), dict):
+                return Cursor([row for row in self.rows if "symbol" not in row])
+            return super().find(query, projection or {})
+
+        def list_indexes(self):
+            return []
+
+        def create_index(self, *args, **kwargs):
+            pass
+
+        def update_one(self, query, update, upsert=False):
+            if "$set" in update:
+                row = next(row for row in self.rows if row["_id"] == query["_id"])
+                assert row["migrationSource"]["documentId"] == query["migrationSource.documentId"]
+                row["migrationSource"]["documentId"] = update["$set"]["migrationSource.documentId"]
+                return SimpleNamespace(modified_count=1)
+            match = next((row for row in self.rows if all(row.get(field) == value for field, value in query.items())), None)
+            if match is not None:
+                return SimpleNamespace(upserted_id=None)
+            row = {"_id": ObjectId(), **deepcopy(update["$setOnInsert"])}
+            self.rows.append(row)
+            return SimpleNamespace(upserted_id=row["_id"])
+
+    maps = RetainedCollection([legacy])
+    db = {"market_financial_metric_map": maps, "market_vnstock_premium_records": RetainedCollection([])}
+    assert migrate_metric_maps(db, apply=True)["inserted"] == 1
+    server = enable_public_reader(monkeypatch, maps)
+    response = await server.get_reference_dataset("VNM", "market_financial_metric_map")
+    assert json.loads(json.dumps(response))["items"][0]["migrationSource"]["documentId"] == str(original_id)
+    assert response["items"][0]["descriptors"] == descriptors
+    assert response["items"][0]["descriptorEvidence"]["symbol"] == "VNM"
+
+    # Repair already migrated ObjectId provenance without touching any other data.
+    maps.rows[1]["migrationSource"]["documentId"] = original_id
+    before = deepcopy(maps.rows)
+    assert migrate_metric_maps(db)["normalizable_ids"] == 1
+    assert maps.rows == before
+    report = migrate_metric_maps(db, apply=True)
+    assert report["normalized_ids"] == 1
+    before[1]["migrationSource"]["documentId"] = str(original_id)
+    assert maps.rows == before
+    response = await server.get_reference_dataset("VNM", "market_financial_metric_map")
+    assert json.loads(json.dumps(response))["items"][0]["migrationSource"]["documentId"] == str(original_id)
 
 
 @pytest.mark.asyncio
