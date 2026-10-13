@@ -240,8 +240,8 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
           <WidgetEmpty
             message={
               filter === 'all'
-                ? 'No insider disclosures in this window'
-                : `No ${filter === 'buy' ? 'buy' : 'sell'} disclosures in this window`
+                ? 'No insider disclosures returned'
+                : `No ${filter === 'buy' ? 'buy' : 'sell'} disclosures in the returned filings`
             }
             detail={
               filter === 'all'
