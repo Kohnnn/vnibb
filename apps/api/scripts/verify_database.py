@@ -210,7 +210,9 @@ def contract(dataset):
                 "history_bound": "retained daily aggregates, not issuer history",
                 "source_anchor": "vnibb/services/data_pipeline.py; vnibb/services/sync_all_data.py"}
     if dataset in {"market_company_profiles", "market_financial_metric_map", "market_index_constituents", "market_icb_sectors", "reference.listings", "company.shareholder_structure"}:
-        return {"refresh_owner": "scripts/vietcap/backfill_vietcap.py (operator-run); recurring SQL writers do not imply Mongo refresh",
+        recurring = dataset in {"market_company_profiles", "company.shareholder_structure"}
+        return {"refresh_owner": ("FullMarketSync.run_maintenance_cycle iq_reference_maintenance (vnibb/services/sync_all_data.py) plus operator-run scripts/vietcap/backfill_vietcap.py"
+                                 if recurring else "scripts/vietcap/backfill_vietcap.py (operator-run); recurring SQL writers do not imply Mongo refresh"),
                 "supported_scope": "IQ selected symbols (including exact symbol/type/section descriptors); index group/ICB scopes are not equity symbol scopes",
                 "history_bound": "retained profile/reference snapshot, not historical replay",
                 "source_anchor": "vnibb/services/vietcap_ingestion.py; scripts/vietcap/backfill_vietcap.py"}
@@ -367,6 +369,7 @@ def mongo_inventory(url, database, universe):
     physical = {**dict.fromkeys(price_types, "tradeDate"), "market_company_profiles": "updatedAt",
                 "market_financial_metric_map": "receivedAt", "market_index_constituents": "syncedAt",
                 "market_icb_sectors": "updatedAt", "market_intraday_trades": "tradeTime"}
+    identity_key = {"market_index_constituents": "group", "market_icb_sectors": "icbCode"}
     catalog = premium_catalog()
     required = {"reference.listings", "company.shareholder_structure", *catalog,
                 "quote.intraday", *FINANCIAL_DATASETS.values()}
@@ -380,7 +383,7 @@ def mongo_inventory(url, database, universe):
         premium = "market_vnstock_premium_records"
         retained = set(db[premium].distinct("dataset")) if premium in names else set()
         datasets = {name for name in retained if isinstance(name, str) and re.fullmatch(r"[a-z_]+(?:\.[a-z_]+)+", name)} | required
-        specs = [(name, name, {"source": "vietcap", "schemaVersion": 3, "symbol": {"$type": "string"}} if name == "market_financial_metric_map" else {}, "symbol", bound) for name, bound in physical.items()]
+        specs = [(name, name, {"source": "vietcap", "schemaVersion": 3, "symbol": {"$type": "string"}} if name == "market_financial_metric_map" else {}, identity_key.get(name, "symbol"), bound) for name, bound in physical.items()]
         for dataset in sorted(datasets):
             # Catalog scopes, not outer equity symbols, define market identity.
             market_scoped = catalog.get(dataset) == "market" or dataset.startswith(("macro.", "market.", "analytics.valuation."))
