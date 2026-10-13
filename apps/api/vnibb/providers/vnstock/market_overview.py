@@ -240,7 +240,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
 
             return indices
         except asyncio.TimeoutError:
-            raise ProviderTimeoutError(provider="vnstock", timeout=30)
+            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=30)
         except Exception as e:
             logger.error(f"vnstock market overview fetch error: {e}")
             raise ProviderError(message=str(e), provider="vnstock", details={})

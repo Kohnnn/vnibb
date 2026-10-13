@@ -305,10 +305,7 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
             except Exception:
                 return []
         except asyncio.TimeoutError:
-            raise ProviderTimeoutError(
-                provider="vnstock",
-                timeout=settings.vnstock_timeout,
-            )
+            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
 
     @staticmethod
     def transform_data(

@@ -246,11 +246,13 @@ class FullMarketSync:
                         raise RuntimeError("acquisition unavailable or incomplete")
                     receipt.update(last_succeeded_at=datetime.utcnow().isoformat(), outcome="empty" if not count else "succeeded", rows=int(count))
                     receipt.pop("error", None)
+                    receipt.pop("errors", None)
                     state["acquired_symbols"].append(symbol)
                     state["failed_symbols"] = [item for item in state["failed_symbols"] if item != symbol]
                     acquired += 1
                 except Exception as exc:
-                    receipt.update(outcome="deferred" if deadline.expired() else "failed", error=f"{type(exc).__name__}: {exc}")
+                    provider_errors = [item["error"] for item in progress.get("errors", []) if isinstance(item, dict) and item.get("error")]
+                    receipt.update(outcome="deferred" if deadline.expired() else "failed", error="; ".join(provider_errors) or f"{type(exc).__name__}: {exc}")
                     if not deadline.expired():
                         failures += 1
                         if symbol not in state["failed_symbols"]:
@@ -260,7 +262,7 @@ class FullMarketSync:
                         history = metadata.setdefault("acquisition_error_history", [])
                         if failure not in history:
                             metadata["acquisition_error_history"] = (history + [failure])[-100:]
-                for key in ("acquisition_outcomes", "financial_acquisition", "stage_stats", "acquisition"):
+                for key in ("acquisition_outcomes", "financial_acquisition", "stage_stats", "acquisition", "errors"):
                     if progress.get(key) is not None:
                         receipt[key] = jsonable_encoder(progress[key])
                 state["pending_count"] = len(symbols) - len(state["acquired_symbols"])

@@ -292,7 +292,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
         try:
             return await run_financial_provider(_fetch_sync, settings.vnstock_timeout)
         except TimeoutError as exc:
-            raise ProviderTimeoutError(provider="vnstock", timeout=settings.vnstock_timeout) from exc
+            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout) from exc
 
     @staticmethod
     def transform_data(

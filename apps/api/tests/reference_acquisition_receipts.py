@@ -75,6 +75,15 @@ def pipeline(monkeypatch):
     return instance
 
 
+def stub_reference_fetch(monkeypatch, dataset, fetcher, **kwargs):
+    path = f"vnibb.providers.vnstock.{dataset}.{fetcher}"
+    if dataset == "insider_deals":
+        monkeypatch.setattr(f"{path}.fetch", AsyncMock(**kwargs))
+    else:
+        monkeypatch.setattr(f"{path}.extract_data", AsyncMock(**kwargs))
+        monkeypatch.setattr(f"{path}.transform_data", lambda params, rows: rows)
+
+
 # ---------------------------------------------------------------------------
 # Receipt honesty (all five reference writers)
 # ---------------------------------------------------------------------------
@@ -82,7 +91,7 @@ def pipeline(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("dataset,fetcher", WRITERS)
 async def test_empty_reference_receipt_preserves_records(monkeypatch, dataset, fetcher):
-    monkeypatch.setattr(f"vnibb.providers.vnstock.{dataset}.{fetcher}.fetch", AsyncMock(return_value=[]))
+    stub_reference_fetch(monkeypatch, dataset, fetcher, return_value=[])
     session_factory = AsyncMock(side_effect=AssertionError("empty fetch must not open a write session"))
     monkeypatch.setattr(pipeline_module, "async_session_maker", session_factory)
     progress = {}
@@ -99,7 +108,7 @@ async def test_empty_reference_receipt_preserves_records(monkeypatch, dataset, f
 @pytest.mark.asyncio
 @pytest.mark.parametrize("dataset,fetcher", WRITERS)
 async def test_provider_failure_is_not_an_empty_receipt(monkeypatch, dataset, fetcher):
-    monkeypatch.setattr(f"vnibb.providers.vnstock.{dataset}.{fetcher}.fetch", AsyncMock(side_effect=RuntimeError("upstream unavailable")))
+    stub_reference_fetch(monkeypatch, dataset, fetcher, side_effect=RuntimeError("upstream unavailable"))
     progress = {}
 
     count = await getattr(pipeline(monkeypatch), f"sync_{dataset}")(symbols=["VNM"], progress=progress)
@@ -115,7 +124,7 @@ async def test_provider_failure_is_not_an_empty_receipt(monkeypatch, dataset, fe
 @pytest.mark.parametrize("dataset,fetcher", WRITERS)
 async def test_failed_commit_does_not_count_rows_as_persisted(monkeypatch, dataset, fetcher):
     payload = {"title": "Results", "published_at": "2026-10-12", "transaction_date": "2026-10-12", "insider_name": "Director", "transaction_type": "Purchase"}
-    monkeypatch.setattr(f"vnibb.providers.vnstock.{dataset}.{fetcher}.fetch", AsyncMock(return_value=[SimpleNamespace(model_dump=lambda: payload)]))
+    stub_reference_fetch(monkeypatch, dataset, fetcher, return_value=[SimpleNamespace(model_dump=lambda: payload)])
     monkeypatch.setattr(pipeline_module, "async_session_maker", lambda: Session(fail_commit=True))
     progress = {}
 
@@ -130,7 +139,7 @@ async def test_failed_commit_does_not_count_rows_as_persisted(monkeypatch, datas
 @pytest.mark.parametrize("dataset,fetcher", WRITERS)
 async def test_committed_reference_receipt_counts_success(monkeypatch, dataset, fetcher):
     payload = {"title": "Results", "published_at": "2026-10-12", "transaction_date": "2026-10-12", "insider_name": "Director", "transaction_type": "Purchase"}
-    monkeypatch.setattr(f"vnibb.providers.vnstock.{dataset}.{fetcher}.fetch", AsyncMock(return_value=[SimpleNamespace(model_dump=lambda: payload)]))
+    stub_reference_fetch(monkeypatch, dataset, fetcher, return_value=[SimpleNamespace(model_dump=lambda: payload)])
     monkeypatch.setattr(pipeline_module, "async_session_maker", lambda: Session())
     progress = {}
 
@@ -142,7 +151,7 @@ async def test_committed_reference_receipt_counts_success(monkeypatch, dataset, 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("dataset,fetcher", WRITERS)
 async def test_empty_reference_receipt_still_checkpoints(monkeypatch, dataset, fetcher):
-    monkeypatch.setattr(f"vnibb.providers.vnstock.{dataset}.{fetcher}.fetch", AsyncMock(return_value=[]))
+    stub_reference_fetch(monkeypatch, dataset, fetcher, return_value=[])
     instance = pipeline(monkeypatch)
     monkeypatch.setattr(instance, "_should_checkpoint", lambda *args: True)
     checkpoint = AsyncMock()
@@ -157,7 +166,7 @@ async def test_empty_reference_receipt_still_checkpoints(monkeypatch, dataset, f
 
 @pytest.mark.asyncio
 async def test_missing_company_identity_is_failed_not_empty(monkeypatch):
-    monkeypatch.setattr("vnibb.providers.vnstock.shareholders.VnstockShareholdersFetcher.fetch", AsyncMock(return_value=[SimpleNamespace(model_dump=lambda: {})]))
+    stub_reference_fetch(monkeypatch, "shareholders", "VnstockShareholdersFetcher", return_value=[SimpleNamespace(model_dump=lambda: {})])
     monkeypatch.setattr(pipeline_module, "async_session_maker", lambda: Session())
     instance = pipeline(monkeypatch)
     monkeypatch.setattr(instance, "_get_or_create_company_id", AsyncMock(return_value=None))

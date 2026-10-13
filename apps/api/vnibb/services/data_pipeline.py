@@ -2803,12 +2803,14 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["profiles"]["errors"] += 1
+                    progress.setdefault("errors", []).append({"symbol": symbol, "dataset": "profiles", "error": self._describe_provider_exception(exc)})
                 continue
             except Exception as e:
                 logger.debug(f"Failed to sync profile for {symbol}: {e}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["profiles"]["errors"] += 1
+                    progress.setdefault("errors", []).append({"symbol": symbol, "dataset": "profiles", "error": self._describe_provider_exception(e)})
                 continue
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = symbol
@@ -4293,7 +4295,10 @@ class DataPipeline:
             try:
                 await self._wait_for_rate_limit("profiles")
                 params = CompanyNewsQueryParams(symbol=symbol, limit=limit)
-                items = await VnstockCompanyNewsFetcher.fetch(params)
+                raw_items = await VnstockCompanyNewsFetcher.extract_data(
+                    VnstockCompanyNewsFetcher.transform_query(params)
+                )
+                items = VnstockCompanyNewsFetcher.transform_data(params, raw_items)
                 if not items:
                     if progress is not None:
                         progress["empty_count"] += 1
@@ -4335,7 +4340,7 @@ class DataPipeline:
                     progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["company_news"]["success"] += 1
-            except Exception as exc:
+            except (Exception, SystemExit) as exc:
                 logger.debug(f"Company news sync failed for {symbol}: {exc}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
@@ -4478,6 +4483,7 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["company_events"]["errors"] += 1
+                    progress.setdefault("errors", []).append({"symbol": symbol, "dataset": "company_events", "error": self._describe_provider_exception(exc)})
 
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = symbol
@@ -4565,6 +4571,7 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["dividends"]["errors"] += 1
+                    progress.setdefault("errors", []).append({"symbol": symbol, "dataset": "dividends", "error": self._describe_provider_exception(exc)})
 
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = symbol
@@ -4775,7 +4782,10 @@ class DataPipeline:
             try:
                 await self._wait_for_rate_limit("profiles")
                 params = ShareholdersQueryParams(symbol=symbol)
-                items = await VnstockShareholdersFetcher.fetch(params)
+                raw_items = await VnstockShareholdersFetcher.extract_data(
+                    VnstockShareholdersFetcher.transform_query(params)
+                )
+                items = VnstockShareholdersFetcher.transform_data(params, raw_items)
                 if not items:
                     if progress is not None:
                         progress["empty_count"] += 1
@@ -4807,7 +4817,7 @@ class DataPipeline:
                     progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["shareholders"]["success"] += 1
-            except Exception as exc:
+            except (Exception, SystemExit) as exc:
                 logger.debug(f"Shareholder sync failed for {symbol}: {exc}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
@@ -4862,7 +4872,10 @@ class DataPipeline:
             try:
                 await self._wait_for_rate_limit("profiles")
                 params = OfficersQueryParams(symbol=symbol)
-                items = await VnstockOfficersFetcher.fetch(params)
+                raw_items = await VnstockOfficersFetcher.extract_data(
+                    VnstockOfficersFetcher.transform_query(params)
+                )
+                items = VnstockOfficersFetcher.transform_data(params, raw_items)
                 if not items:
                     if progress is not None:
                         progress["empty_count"] += 1
@@ -4894,7 +4907,7 @@ class DataPipeline:
                     progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["officers"]["success"] += 1
-            except Exception as exc:
+            except (Exception, SystemExit) as exc:
                 logger.debug(f"Officer sync failed for {symbol}: {exc}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
@@ -4949,7 +4962,10 @@ class DataPipeline:
             try:
                 await self._wait_for_rate_limit("profiles")
                 params = SubsidiariesQueryParams(symbol=symbol)
-                items = await VnstockSubsidiariesFetcher.fetch(params)
+                raw_items = await VnstockSubsidiariesFetcher.extract_data(
+                    VnstockSubsidiariesFetcher.transform_query(params)
+                )
+                items = VnstockSubsidiariesFetcher.transform_data(params, raw_items)
                 if not items:
                     if progress is not None:
                         progress["empty_count"] += 1
@@ -4978,7 +4994,7 @@ class DataPipeline:
                     progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["subsidiaries"]["success"] += 1
-            except Exception as exc:
+            except (Exception, SystemExit) as exc:
                 logger.debug(f"Subsidiaries sync failed for {symbol}: {exc}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1

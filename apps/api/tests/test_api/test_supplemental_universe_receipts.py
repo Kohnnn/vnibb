@@ -1,4 +1,10 @@
 from datetime import date
+from threading import Event
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pandas as pd
+from requests.exceptions import ReadTimeout
 
 import pytest
 from sqlalchemy import select
@@ -7,6 +13,95 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from vnibb.models.sync_status import SyncStatus
 from vnibb.services import sync_all_data
 from vnibb.services.sync_all_data import FullMarketSync
+from vnibb.core.config import settings
+from vnibb.providers.vnstock import runtime
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dataset,method", [("shareholders", "shareholders"), ("officers", "officers"), ("subsidiaries", "subsidiaries"), ("company_news", "news")])
+@pytest.mark.parametrize("source_outcome", ["timeout", "http_error", "empty", "quota_exhausted"])
+async def test_provider_failure_and_successful_empty_reach_persisted_reference_receipts(
+    test_engine, monkeypatch, dataset, method, source_outcome,
+):
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(sync_all_data, "async_session_maker", sessions)
+    monkeypatch.setattr("vnibb.services.data_pipeline.async_session_maker", sessions)
+    monkeypatch.setattr(sync_all_data.data_pipeline, "_wait_for_rate_limit", AsyncMock())
+    requests = []
+    timeout_seconds = settings.vnstock_timeout
+    released = Event() if source_outcome == "timeout" else None
+    started = Event() if source_outcome == "timeout" else None
+    if released is not None:
+        timeout_seconds = 0.25
+        monkeypatch.setattr(settings, "vnstock_timeout", timeout_seconds)
+
+    def request():
+        requests.append(method)
+        if started is not None:
+            started.set()
+        if source_outcome == "http_error":
+            raise ReadTimeout("HTTPSConnectionPool(host='iq.vietcap.com.vn'): Read timed out. (read timeout=30)")
+        if source_outcome == "quota_exhausted":
+            # vnai CleanErrorContext converts SDK RateLimitExceeded into sys.exit(SystemExit).
+            class RateLimitExceeded(Exception):
+                pass
+
+            try:
+                raise RateLimitExceeded("API quota exhausted")
+            except RateLimitExceeded:
+                raise SystemExit("Rate limit exceeded. API quota exhausted. Process terminated.")
+        if released is not None:
+            # Real provider work outlives the configured deadline; the executor thread exits after assertion.
+            released.wait(30)
+        return pd.DataFrame()
+
+    class Vnstock:
+        def stock(self, *, symbol, source):
+            assert symbol == "ACC" and source == "VCI"
+            return SimpleNamespace(company=SimpleNamespace(**{method: request}))
+
+    monkeypatch.setattr(runtime, "get_vnstock_class", lambda: Vnstock)
+
+    async def acquire(symbol, progress):
+        return await getattr(sync_all_data.data_pipeline, f"sync_{dataset}")(symbols=[symbol], progress=progress)
+
+    try:
+        result = await FullMarketSync().run_maintenance_cycle(
+            "provider_receipt_fixture", ["ACC"], [(dataset, acquire)], 30, 1, allow_empty=True,
+        )
+    finally:
+        if released is not None:
+            released.set()
+            started.wait(5)
+
+
+    async with sessions() as session:
+        row = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "provider_receipt_fixture"))).one()
+        stage = row.additional_data["stages"][dataset]
+        receipt = stage["receipts"]["ACC"]
+
+    assert requests == [method]
+    if source_outcome == "empty":
+        assert result.success and result.complete
+        assert stage["acquired_symbols"] == ["ACC"] and stage["failed_symbols"] == []
+        assert receipt["outcome"] == "empty" and receipt["rows"] == 0
+        assert receipt["stage_stats"][dataset]["empty"] == 1
+        assert "error" not in receipt
+    else:
+        assert not result.success and not result.complete and result.error_count == 1
+        assert stage["acquired_symbols"] == [] and stage["failed_symbols"] == ["ACC"]
+        assert receipt["outcome"] == "failed" and "last_succeeded_at" not in receipt
+        assert receipt["stage_stats"][dataset]["errors"] == 1
+        assert not receipt["stage_stats"][dataset].get("empty")
+        assert "TypeError" not in receipt["error"]
+        assert receipt["errors"][0]["error"] == receipt["error"]
+        if source_outcome == "timeout":
+            assert f"ProviderTimeoutError: Provider vnstock request timed out after {timeout_seconds}s" in receipt["error"]
+        elif source_outcome == "quota_exhausted":
+            assert receipt["error"].startswith("SystemExit: Rate limit exceeded. API quota exhausted. Process terminated.")
+            assert "RateLimitExceeded: API quota exhausted" in receipt["error"]
+        else:
+            assert "ProviderError" in receipt["error"] and "ReadTimeout" in receipt["error"]
 
 
 @pytest.mark.asyncio
