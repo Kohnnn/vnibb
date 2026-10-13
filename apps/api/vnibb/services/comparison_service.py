@@ -20,6 +20,7 @@ from sqlalchemy import desc, select
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.core.price_units import persisted_price_record, screener_price_record
+from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS, admitted_ratio_value
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
@@ -83,14 +84,9 @@ PERCENT_METRIC_LIMITS = {
 def _normalize_comparison_metric(metric_key: str, value: Any) -> Optional[float]:
     """Coerce a stored comparison value without inferring a magnitude.
 
-    Storage contract (issue #106): every percent metric in
-    `vnibb.models.comparison.COMPARISON_METRICS` is declared `format="percent"`
-    and is produced already scaled to percent — `_build_comparison_backfill`
-    multiplies ratios by 100, and `PERCENT_METRIC_LIMITS` bounds the stored
-    magnitude. Nothing proves a stored fraction means "multiply by 100", and
-    some provider enrichment paths emit a fraction for the same metric key, so
-    the value is passed through as stored; one outside the plausible percent
-    bound is unknown rather than rescaled by an inferred factor.
+    Stored percent values are canonical; provider transforms normalize only
+    explicitly declared units before persistence. Unknown provider units are
+    withheld by the row reader. Legacy values are never rescaled by magnitude.
     """
     numeric = _coerce_number(value)
     if numeric is None:
@@ -162,14 +158,13 @@ def _metric_from_ratio_row(row: Any, metric_key: str) -> Optional[float]:
         "debt_assets": "debt_to_assets",
     }
     attribute = attribute_map.get(metric_key, metric_key)
-    column_value = getattr(row, attribute, None)
-    if column_value is not None:
-        return _first_metric_value(metric_key, column_value)
-    # No column: `ocf_sales`/`fcf_yield` exist only in `raw_data`, where the
-    # local writer stores a fraction (see `_ratio_json_metric`).
-    return _first_metric_value(
-        metric_key, _ratio_json_metric(metric_key, getattr(row, "raw_data", None), attribute)
-    )
+    raw_data = getattr(row, "raw_data", None) or {}
+    value = getattr(row, attribute, None)
+    if value is None:
+        value = _ratio_json_metric(metric_key, raw_data, attribute)
+    return _first_metric_value(metric_key, admitted_ratio_value(
+        value, metric_key, ratio_units=raw_data.get("ratio_units"), source=getattr(row, "source", None),
+    ))
 
 
 def _build_statement_snapshot(
@@ -583,12 +578,17 @@ class ComparisonService:
                             "current_ratio": ratios_dict.get("current_ratio"),
                             "debt_to_equity": ratios_dict.get("debt_equity"),
                         }
+                        for key in PERCENT_RATIO_FIELDS.intersection(metrics_dict):
+                            metrics_dict[key] = admitted_ratio_value(metrics_dict[key], key, ratio_units=ratios_dict.get("ratio_units"))
                         return StockMetrics(symbol=symbol, metrics=metrics_dict)
                 except Exception as ratio_err:
                     logger.warning(f"Ratio fallback failed for {symbol}: {ratio_err}")
 
                 return StockMetrics(symbol=symbol)
 
+            debt_assets = _record_value(data, "debt_assets", "debtToAssets", "debt_to_asset")
+            if debt_assets is None:
+                debt_assets = (_record_value(data, "extended_metrics") or {}).get("debt_to_asset")
             metrics_dict = {
                 "price": _record_value(data, "price"),
                 "volume": _record_value(data, "volume"),
@@ -606,7 +606,7 @@ class ComparisonService:
                 "revenue_growth": _record_value(data, "revenue_growth", "revenueGrowth"),
                 "earnings_growth": _record_value(data, "earnings_growth", "earningsGrowth"),
                 "debt_to_equity": _record_value(data, "debt_to_equity", "debtToEquity"),
-                "debt_assets": _record_value(data, "debt_assets", "debtToAssets", "debt_to_asset"),
+                "debt_assets": debt_assets,
                 "current_ratio": _record_value(data, "current_ratio", "currentRatio"),
                 "quick_ratio": _record_value(data, "quick_ratio", "quickRatio"),
                 "asset_turnover": _record_value(data, "asset_turnover", "assetTurnover"),
@@ -618,6 +618,9 @@ class ComparisonService:
                 "dividend_yield": _record_value(data, "dividend_yield", "dividendYield"),
                 "foreign_ownership": _record_value(data, "foreign_ownership", "foreignOwnership"),
             }
+            ratio_units = _record_value(data, "ratio_units") or (_record_value(data, "extended_metrics") or {}).get("ratio_units", {})
+            for key in PERCENT_RATIO_FIELDS:
+                metrics_dict[key] = admitted_ratio_value(metrics_dict[key], key, ratio_units=ratio_units)
 
             async with async_session_maker() as session:
                 stock_row = (
@@ -658,16 +661,16 @@ class ComparisonService:
                     "pb": ratio_row.pb_ratio,
                     "ps": ratio_row.ps_ratio,
                     "ev_ebitda": ratio_row.ev_ebitda,
-                    "roe": ratio_row.roe,
-                    "roa": ratio_row.roa,
-                    "roic": ratio_row.roic,
-                    "gross_margin": ratio_row.gross_margin,
-                    "net_margin": ratio_row.net_margin,
-                    "operating_margin": ratio_row.operating_margin,
-                    "revenue_growth": ratio_row.revenue_growth,
-                    "earnings_growth": ratio_row.earnings_growth,
+                    "roe": _metric_from_ratio_row(ratio_row, "roe"),
+                    "roa": _metric_from_ratio_row(ratio_row, "roa"),
+                    "roic": _metric_from_ratio_row(ratio_row, "roic"),
+                    "gross_margin": _metric_from_ratio_row(ratio_row, "gross_margin"),
+                    "net_margin": _metric_from_ratio_row(ratio_row, "net_margin"),
+                    "operating_margin": _metric_from_ratio_row(ratio_row, "operating_margin"),
+                    "revenue_growth": _metric_from_ratio_row(ratio_row, "revenue_growth"),
+                    "earnings_growth": _metric_from_ratio_row(ratio_row, "earnings_growth"),
                     "debt_to_equity": ratio_row.debt_to_equity,
-                    "debt_assets": ratio_row.debt_to_assets,
+                    "debt_assets": _metric_from_ratio_row(ratio_row, "debt_assets"),
                     "current_ratio": ratio_row.current_ratio,
                     "quick_ratio": ratio_row.quick_ratio,
                     "asset_turnover": getattr(ratio_row, "asset_turnover", None),
@@ -875,6 +878,7 @@ class ComparisonService:
                     "pe",
                     "pe_ratio",
                     "roe",
+                    "ratio_units",
                     "price",
                     "close",
                     "price_unit",
@@ -972,7 +976,10 @@ class ComparisonService:
                     name=_text(stock, "company_name", "organ_name", "organName"),
                     market_cap=_market_cap(stock),
                     pe_ratio=_positive_float(_value(stock, "pe", "pe_ratio")),
-                    roe=_to_float(_value(stock, "roe")),
+                    roe=_to_float(admitted_ratio_value(
+                        _value(stock, "roe"), "roe",
+                        ratio_units=_value(stock, "ratio_units") or (_value(stock, "extended_metrics") or {}).get("ratio_units"),
+                    )),
                     price=_price(stock),
                     change_pct=_change_pct(stock),
                     industry=_industry(stock),
@@ -1052,8 +1059,10 @@ class ComparisonService:
                             payload["market_cap"] = market_cap
                         if _positive_float(payload.get("pe")) is None and _positive_float(pe) is not None:
                             payload["pe"] = pe
-                        if payload.get("roe") in (None, "") and roe is not None:
-                            payload["roe"] = roe
+                        snapshot_units = (extended_metrics or {}).get("ratio_units", {})
+                        if admitted_ratio_value(payload.get("roe"), "roe", ratio_units=payload.get("ratio_units") or (payload.get("extended_metrics") or {}).get("ratio_units")) is None:
+                            payload["roe"] = admitted_ratio_value(roe, "roe", ratio_units=snapshot_units)
+                            payload["ratio_units"] = {**(payload.get("ratio_units") or {}), "roe": snapshot_units.get("roe", "unknown")}
                         if _price(payload) is None and price is not None:
                             snapshot_price = screener_price_record({"symbol": symbol_key, "price": price, "extended_metrics": extended_metrics})
                             payload["price"] = snapshot_price.get("price")
@@ -1252,6 +1261,8 @@ class ComparisonService:
                                 FinancialRatio.pe_ratio,
                                 FinancialRatio.roe,
                                 FinancialRatio.fiscal_year,
+                                FinancialRatio.raw_data,
+                                FinancialRatio.source,
                             )
                             .where(FinancialRatio.symbol.in_(fallback_targets))
                             .where(FinancialRatio.period_type == "year")
@@ -1264,7 +1275,7 @@ class ComparisonService:
 
                 pe_by_symbol: dict[str, float] = {}
                 roe_by_symbol: dict[str, float] = {}
-                for sym, pe_val, roe_val, _year in fallback_rows:
+                for sym, pe_val, roe_val, _year, raw_data, source in fallback_rows:
                     if not sym:
                         continue
                     key = str(sym).upper()
@@ -1273,13 +1284,9 @@ class ComparisonService:
                         if pe_float is not None:
                             pe_by_symbol[key] = pe_float
                     if key not in roe_by_symbol:
-                        roe_float = (
-                            float(roe_val)
-                            if roe_val is not None
-                            and isinstance(roe_val, (int, float))
-                            and roe_val == roe_val
-                            else None
-                        )
+                        roe_float = _to_float(admitted_ratio_value(
+                            roe_val, "roe", ratio_units=(raw_data or {}).get("ratio_units"), source=source,
+                        ))
                         if roe_float is not None:
                             roe_by_symbol[key] = roe_float
 

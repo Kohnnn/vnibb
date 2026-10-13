@@ -410,6 +410,8 @@ class MongoMarketDataService:
         dataset: str,
         variant: str | None = None,
         limit: int = 100,
+        source: str | None = None,
+        raise_errors: bool = False,
     ) -> list[dict[str, Any]]:
         """Return raw shared vnstock records for a symbol/dataset pair, symbol-exact.
 
@@ -432,6 +434,8 @@ class MongoMarketDataService:
             query: dict[str, Any] = {"dataset": dataset, "symbol": symbol_upper}
             if variant is not None:
                 query["datasetVariant"] = variant
+            if source is not None:
+                query["source"] = source
             cursor = (
                 coll.find(
                     query,
@@ -447,9 +451,31 @@ class MongoMarketDataService:
                         "observedAt": 1,
                         "updatedAt": 1,
                         "raw": 1,
+                        "comTypeCode": 1,
+                        "section": 1,
+                        "period": 1,
+                        "periodType": 1,
+                        "fiscalYear": 1,
+                        "fiscalQuarter": 1,
+                        "fiscalBasis": 1,
+                        "rawFiscalBasis": 1,
+                        "unit": 1,
+                        "units": 1,
+                        "unitEvidence": 1,
+                        "sourceDate": 1,
+                        "sourceResponse": 1,
+                        "receivedAt": 1,
+                        "descriptors": 1,
+                        "descriptorEvidence": 1,
+                        "structured": 1,
+                        "schemaVersion": 1,
                     },
                 )
-                .sort([("observedAt", -1), ("updatedAt", -1)])
+                .sort(
+                    [("fiscalYear", -1), ("fiscalQuarter", -1), ("updatedAt", -1)]
+                    if source == "vietcap" and dataset.startswith("finance.")
+                    else [("observedAt", -1), ("updatedAt", -1)]
+                )
                 .limit(limit)
             )
             return list(cursor)
@@ -463,6 +489,8 @@ class MongoMarketDataService:
                 dataset,
                 exc,
             )
+            if raise_errors:
+                raise
             return []
 
     async def get_price_depth_precise(
@@ -1018,14 +1046,15 @@ class MongoMarketDataService:
         self,
         symbol: str,
         rows: list[dict[str, Any]],
+        *,
+        source: str = "vnstock-data",
     ) -> int:
         """Upsert normalized EOD OHLCV rows into ``market_prices_eod``.
 
-        The scheduled vnstock path is a fallback behind the Vietcap-primary
-        corpus. Runtime reads filter only on ``symbol``/``tradeDate`` and ignore
-        ``source``, so this writer must never create a vnstock row for a day that
-        already has a Vietcap bar. Price units are normalized from explicit markers
-        or the retained vnstock history source contract, never numeric magnitude.
+        Vietcap is primary; free vnstock VCI fills uncovered days only. The
+        existing natural key remains (symbol, tradeDate, source). Price units
+        are normalized from explicit markers or retained source contracts,
+        never numeric magnitude. No existing source records are deleted.
         Rows carry ``tradeDate`` (a naive ``datetime``) plus OHLCV
         fields. Returns the number of upsert operations accepted by MongoDB. A bulk
         write exception propagates because unordered writes may partially persist.
@@ -1033,6 +1062,8 @@ class MongoMarketDataService:
 
         if not self.enabled:
             return 0
+        if source not in {"vietcap", "vnstock-data"}:
+            raise ValueError(f"Unsupported EOD source: {source}")
         symbol_upper = symbol.upper()
         if not rows:
             return 0
@@ -1045,11 +1076,15 @@ class MongoMarketDataService:
             synced_at = datetime.now(UTC).replace(tzinfo=None)
             normalized_rows: list[dict[str, Any]] = []
             for raw in rows:
+                if source == "vnstock-data" and str(raw.get("price_source") or "").upper() not in {
+                    "VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI",
+                }:
+                    raise ValueError(f"Free VCI provenance required for EOD fallback: {symbol_upper}")
                 trade_date = raw.get("tradeDate")
                 if not isinstance(trade_date, datetime):
                     continue
-                # The existing corpus stores tradeDate at 07:00:00 (ICT close,
-                # naive). Normalize to that exact instant so the
+                # Preserve the existing naive 07:00:00 trade-day key convention;
+                # this is storage identity, not a source close/publication time.
                 # (symbol, tradeDate, source) upsert key matches the existing
                 # document and overwrites it in place. A date-only (00:00:00)
                 # key would miss the existing bar and insert a duplicate for the
@@ -1087,29 +1122,31 @@ class MongoMarketDataService:
             ops: list[Any] = []
             for raw in normalized_rows:
                 trade_date = raw["tradeDate"]
-                if trade_date in vietcap_dates:
-                    # Vietcap is primary. Do not create a duplicate vnstock-data
-                    # bar for a date already covered by Vietcap.
+                if source != "vietcap" and trade_date in vietcap_dates:
                     continue
 
                 doc = {
                     "symbol": symbol_upper,
                     "tradeDate": trade_date,
                     "interval": "1D",
-                    "source": "vnstock-data",
-                    "sourceKey": (
-                        f"vnstock-data:{symbol_upper}:eod:"
-                        f"{trade_date.date().isoformat()}"
-                    ),
+                    "source": source,
+                    "providerSource": "vietcap" if source == "vietcap" else "VCI",
+                    "sourceKey": f"{source}:{symbol_upper}:eod:{trade_date.date().isoformat()}",
                     "open": raw.get("open"),
                     "high": raw.get("high"),
                     "low": raw.get("low"),
                     "close": raw.get("close"),
                     "volume": raw.get("volume"),
+                    "accumulatedVolume": raw.get("accumulatedVolume"),
+                    "accumulatedValue": raw.get("accumulatedValue"),
                     "value": raw.get("value"),
                     "adj_close": next((raw.get(field) for field in ("adj_close", "adjusted_close", "adjClose") if raw.get(field) is not None), None),
                     "priceUnit": raw["price_unit"],
                     "price_source": raw.get("price_source"),
+                    "raw": raw.get("raw", raw),
+                    "sourceUnit": raw.get("sourceUnit", raw.get("price_unit")),
+                    "sourceUnitEvidence": raw.get("sourceUnitEvidence"),
+                    "receivedAt": synced_at,
                     "updatedAt": synced_at,
                     "syncedAt": synced_at,
                     "schemaVersion": 1,
@@ -1119,7 +1156,7 @@ class MongoMarketDataService:
                         {
                             "symbol": symbol_upper,
                             "tradeDate": trade_date,
-                            "source": "vnstock-data",
+                            "source": source,
                         },
                         {"$set": doc, "$setOnInsert": {"createdAt": synced_at}},
                         upsert=True,

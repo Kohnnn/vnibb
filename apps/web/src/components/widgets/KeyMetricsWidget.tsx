@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useScreenerData, useMetricsHistory, useFinancialRatios, useProfile, useStockQuote, useQuantMetrics } from '@/lib/queries';
-import { formatDividendYield, formatRatio, formatPercent, normalizeDividendYield } from '@/lib/formatters';
-import { formatUnitValue } from '@/lib/units';
+import { formatDividendYield, formatRatio, normalizeDividendYield } from '@/lib/formatters';
+import { formatUnitValue, formatPercent } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { TableSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -77,6 +77,11 @@ function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
 }
 
 import { toNumber, resolveMetric } from './utils';
+
+function formatRatioPercent(value: number | null | undefined): string {
+    if (value === null || value === undefined || !Number.isFinite(value)) return '-';
+    return `${value >= 0 ? '+' : ''}${formatPercent(value, { input: 'percent' })}`;
+}
 
 export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChange }: KeyMetricsWidgetProps) {
     const [activeCategory, setActiveCategory] = useState<MetricsCategory>('valuation');
@@ -190,7 +195,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
             { value: derivedMarketCap, source: 'Profile+Quote', positiveOnly: true },
         ]),
         dividendYield: resolveMetric([
-            { value: normalizeDividendYield((ttmRatio as any)?.dividend_yield), source: 'Ratios TTM' },
+            { value: normalizeDividendYield(ttmRatio?.dividend_yield), source: 'Ratios TTM' },
             { value: normalizeDividendYield(latestRatio?.dividend_yield), source: 'Ratios' },
             { value: normalizeDividendYield(stock?.dividend_yield), source: 'Screener' },
         ]),
@@ -271,15 +276,15 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
         ]
         : activeCategory === 'profitability'
             ? [
-                { label: 'ROE', value: formatPercent(mergedStock?.roe) },
-                { label: 'ROA', value: formatPercent(mergedStock?.roa) },
-                { label: 'Net Margin', value: formatPercent(mergedStock?.net_margin) },
+                { label: 'ROE', value: formatRatioPercent(mergedStock?.roe) },
+                { label: 'ROA', value: formatRatioPercent(mergedStock?.roa) },
+                { label: 'Net Margin', value: formatRatioPercent(mergedStock?.net_margin) },
             ]
             : activeCategory === 'health'
                 ? [
                     { label: 'Debt/Equity', value: formatRatio(mergedStock?.debt_to_equity) },
                     { label: 'Current Ratio', value: formatRatio(mergedStock?.current_ratio) },
-                    { label: 'Gross Margin', value: formatPercent(mergedStock?.gross_margin) },
+                    { label: 'Gross Margin', value: formatRatioPercent(mergedStock?.gross_margin) },
                 ]
                 : [
                     { label: 'Market Cap', value: formatUnitValue(mergedStock?.market_cap, unitConfig) },
@@ -395,11 +400,11 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
 
                             {activeCategory === 'profitability' && (
                                 <div className="space-y-2">
-                                    <MetricRow label="ROE" value={formatPercent(mergedStock?.roe)} sparklineData={history?.roe} source={metricMap.roe.source} />
-                                    <MetricRow label="ROA" value={formatPercent(mergedStock?.roa)} sparklineData={history?.roa} source={metricMap.roa.source} />
-                                    <MetricRow label="ROIC" value={formatPercent(mergedStock?.roic)} source={metricMap.roic.source} />
-                                    <MetricRow label="Net Margin" value={formatPercent(mergedStock?.net_margin)} source={metricMap.netMargin.source} />
-                                    <MetricRow label="Gross Margin" value={formatPercent(mergedStock?.gross_margin)} source={metricMap.grossMargin.source} />
+                                    <MetricRow label="ROE" value={formatRatioPercent(mergedStock?.roe)} sparklineData={history?.roe} source={metricMap.roe.source} />
+                                    <MetricRow label="ROA" value={formatRatioPercent(mergedStock?.roa)} sparklineData={history?.roa} source={metricMap.roa.source} />
+                                    <MetricRow label="ROIC" value={formatRatioPercent(mergedStock?.roic)} source={metricMap.roic.source} />
+                                    <MetricRow label="Net Margin" value={formatRatioPercent(mergedStock?.net_margin)} source={metricMap.netMargin.source} />
+                                    <MetricRow label="Gross Margin" value={formatRatioPercent(mergedStock?.gross_margin)} source={metricMap.grossMargin.source} />
                                 </div>
                             )}
 

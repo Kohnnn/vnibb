@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hmac
 import json
 import logging
@@ -12,6 +13,7 @@ from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, PlainTextResponse
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
@@ -23,6 +25,7 @@ from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, check_database_connection
 from vnibb.core.logging_config import setup_logging
 from vnibb.core.price_units import normalize_price_record, persisted_price_record
+from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS, admitted_ratio_value
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.market import MarketSector, SectorPerformance
 from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
@@ -50,6 +53,8 @@ Guardrails:
 - User-owned tables are excluded from generic queries. Matrix selections require the owner's
   verified Supabase JWT on each HTTP request and explicit source export rights.
 - Include freshness and source notes when summarizing data for downstream agents.
+- Provider execution is forbidden. Missing data stays unavailable; never fetch premium or
+  banned provider data. Canonical financial evidence uses IQ primary/free VCI only.
 """.strip()
 
 ROADMAP_WARNING = """
@@ -269,7 +274,7 @@ MARKET_INDEX_CODES = ("VNINDEX", "VN30", "HNX", "UPCOM")
 
 @dataclass(frozen=True)
 class PremiumDatasetSpec:
-    """Allowlist entry for a MongoDB-backed vnstock premium dataset.
+    """Allowlist entry for a persisted analytical dataset; no provider execution.
 
     These datasets live in the shared `market_vnstock_premium_records` collection
     on the private (Tailscale) MongoDB host. Each is identified by its `dataset`
@@ -433,18 +438,20 @@ def _normalize_filter_value(key: str, value: str) -> str:
             raise ValueError("A valid stock symbol is required")
         return normalized
 
+    if key == "period_type":
+        return text.lower()
+
     if key in {
         "exchange",
         "industry",
         "sector",
         "interval",
-        "period_type",
         "source",
         "event_type",
         "index_code",
     }:
         return (
-            text.upper() if key in {"exchange", "interval", "period_type", "index_code"} else text
+            text.upper() if key in {"exchange", "interval", "index_code"} else text
         )
 
     return text
@@ -551,9 +558,9 @@ AGENT_CONNECTION_GUIDE = """
 VNIBB Read-Only MCP — connection guide for downstream agents.
 
 This server exposes curated Vietnam equity market data from the VNIBB Postgres
-database and the MongoDB vnstock analytical corpus. It is intentionally
-read-only: no tool mutates user state, triggers jobs, or opens administrative
-surfaces.
+database and the MongoDB analytical corpus. Vietcap IQ is primary; free vnstock
+VCI is the only admitted secondary ingestion source. It is intentionally read-only:
+no tool invokes providers, mutates state, triggers jobs, or installs premium modules.
 
 Transport:
 - stdio: run `vnibb-mcp --transport stdio` (IDE-local, no HTTP auth).
@@ -563,7 +570,7 @@ Transport:
 Authentication:
 - streamable-http deployments require `Authorization: Bearer <token>` where
   `<token>` is the shared `VNIBB_MCP_SHARED_BEARER_TOKEN`.
-- Unauthenticated `/health` returns the runtime revision and database summary.
+- Unauthenticated `/health` reports process/configuration only, not DB connectivity.
 - User JWTs are accepted but scoped to the Matrix selection tool only.
 
 Discovery:
@@ -571,7 +578,7 @@ Discovery:
 - `vnibb://database/collections` — allowlisted Postgres tables, filters, sort
   fields, limits, and dates.
 - `vnibb://database/schema/{collection}` — one table's MCP-facing metadata.
-- `vnibb://mongo/datasets` — allowlisted MongoDB vnstock premium datasets.
+- `vnibb://mongo/datasets` — allowlisted persisted datasets (legacy storage names).
 - `vnibb://mcp/skills` — retrieval workflows for common agent tasks.
 
 Recommended call order:
@@ -588,6 +595,10 @@ Read-only contract:
 - Treat every row as evidence with its own source, scope, and date; never
   present unavailable or stale data as current.
 - User-owned tables and Matrix selections require an explicit user JWT.
+- Financial tools prefer IQ and explicitly identified VCI PostgreSQL rows; Mongo
+  finance datasets require IQ envelopes. Empty is not permission for a fallback fetch.
+- Historical non-financial rows remain readable with actual source/date evidence;
+  freshness is not inferred from ingestion time. `premium` in names is storage legacy.
 
 Connect, discover via resources, and read with `get_symbol_snapshot` /
 `get_market_snapshot` before low-level collection queries.
@@ -696,6 +707,23 @@ def _serialize_row(row: Any, *, model: Any = None) -> dict[str, Any]:
     payload = dict(row)
     if model is StockPrice:
         payload = persisted_price_record(payload)
+    elif model is FinancialRatio:
+        raw_data = payload.get("raw_data")
+        ratio_units = raw_data.get("ratio_units") if isinstance(raw_data, dict) else None
+        if not isinstance(ratio_units, dict) or not ratio_units:
+            ratio_units = dict.fromkeys(PERCENT_RATIO_FIELDS, "unknown")
+        unavailable_metrics = {}
+        for metric in PERCENT_RATIO_FIELDS:
+            column = "debt_to_assets" if metric == "debt_assets" else metric
+            value = payload.get(column)
+            payload[column] = admitted_ratio_value(
+                value, metric, ratio_units=ratio_units, source=payload.get("source")
+            )
+            if value is not None and payload[column] is None:
+                unavailable_metrics[column] = "Percentage unit evidence is missing or unsupported"
+        if unavailable_metrics:
+            payload["unavailable_metrics"] = unavailable_metrics
+            payload["data_status"] = "partial_unavailable"
     return {key: _normalize_row_value(value) for key, value in payload.items()}
 
 
@@ -780,7 +808,9 @@ def _apply_sql_queries(statement: Any, model: Any, queries: list[dict[str, Any]]
 
         if method == "equal":
             if values:
-                statement = statement.where(column == _coerce_compared_value(column, values[0]))
+                statement = statement.where(
+                    column.in_([_coerce_compared_value(column, value) for value in values])
+                )
         elif method == "greaterThanEqual":
             if values:
                 statement = statement.where(column >= _coerce_compared_value(column, values[0]))
@@ -956,6 +986,10 @@ async def query_database_collection_data(
         sort_by=sort_by,
         descending=descending,
     )
+    financial_collection = spec.collection in {*STATEMENT_COLLECTIONS.values(), "financial_ratios"}
+    if financial_collection:
+        queries.insert(0, _query_equal("source", ["vietcap", "VCI"]))
+        applied_filters["admitted_sources"] = ["vietcap", "VCI"]
 
     rows = await list_collection_documents_paginated(
         spec.collection,
@@ -969,7 +1003,7 @@ async def query_database_collection_data(
         "description": spec.description,
         "filters_applied": applied_filters,
         "row_count": len(rows),
-        "items": sanitize_context_value(rows),
+        "items": jsonable_encoder(rows) if financial_collection else sanitize_context_value(rows),
         **(_price_series_metadata(rows) if spec.collection == "stock_prices" else {}),
     }
 
@@ -992,8 +1026,12 @@ async def _get_latest_symbol_document(
             _query_limit(1),
         ]
     )
-    rows = await list_collection_documents(collection_id, queries=queries)
-    return rows[0] if rows else None
+    for source_values in (["vietcap"], ["VCI"]):
+        source_queries = [_query_equal("source", source_values), *queries]
+        rows = await list_collection_documents(collection_id, queries=source_queries)
+        if rows:
+            return rows[0]
+    return None
 
 
 async def _get_symbol_rows(
@@ -1308,7 +1346,7 @@ async def get_symbol_snapshot(symbol: str) -> dict[str, Any]:
         raise ValueError("A stock symbol is required")
 
     service = AIContextService()
-    snapshot = await service._build_symbol_snapshot(normalized, prefer_database_data=True)
+    snapshot = await service._build_postgres_snapshot(normalized)
     if snapshot is None:
         return {
             "symbol": normalized,
@@ -1317,11 +1355,19 @@ async def get_symbol_snapshot(symbol: str) -> dict[str, Any]:
             "message": "No VNIBB database snapshot was found for this symbol.",
         }
 
+    financial_collections = {"ratios": "financial_ratios", **STATEMENT_COLLECTIONS}
+    for key, collection in financial_collections.items():
+        if key in snapshot:
+            snapshot[key] = await _get_latest_symbol_document(collection, normalized)
+    if snapshot.get("ratios"):
+        for short_name, column in (("pe", "pe_ratio"), ("pb", "pb_ratio"), ("ps", "ps_ratio")):
+            snapshot["ratios"][short_name] = snapshot["ratios"].get(column)
+
     return {
         "symbol": normalized,
         "source": "postgres",
         "found": True,
-        "snapshot": sanitize_context_value(snapshot),
+        "snapshot": jsonable_encoder(snapshot),
     }
 
 
@@ -1330,7 +1376,7 @@ async def get_market_snapshot() -> dict[str, Any]:
     """Get the current database-backed market snapshot for key VN indices and sectors."""
     await _ensure_database_available()
     service = AIContextService()
-    snapshot = await service._build_market_snapshot(prefer_database_data=True)
+    snapshot = await service._build_postgres_market_snapshot()
     return {
         "source": "postgres",
         "indices_expected": list(MARKET_INDEX_CODES),
@@ -1400,8 +1446,12 @@ async def get_latest_financial_statement(
         "statement": statement_key,
         "collection": collection_id,
         "period_type": _normalize_filter_value("period_type", period_type) if period_type else None,
-        "item": sanitize_context_value(row or {}),
+        "item": jsonable_encoder(row or {}),
         "found": row is not None,
+        "source": f"postgres:{collection_id}",
+        "provider_source": row.get("source") if row else None,
+        "data_status": "available" if row else "empty_no_admitted_source",
+        "freshness": "not_assessed; inspect source dates and fiscal period",
     }
 
 
@@ -1422,8 +1472,12 @@ async def get_latest_financial_ratios(
         "symbol": normalized_symbol,
         "collection": "financial_ratios",
         "period_type": _normalize_filter_value("period_type", period_type) if period_type else None,
-        "item": sanitize_context_value(row or {}),
+        "item": jsonable_encoder(row or {}),
         "found": row is not None,
+        "source": "postgres:financial_ratios",
+        "provider_source": row.get("source") if row else None,
+        "data_status": row.get("data_status", "available") if row else "empty_no_admitted_source",
+        "freshness": "not_assessed; inspect source dates and fiscal period",
     }
 
 
@@ -1559,22 +1613,29 @@ async def query_database_collection(
 
 @mcp.tool()
 async def get_mongo_status() -> dict[str, Any]:
-    """Check the read-only MongoDB analytical source and summarize available collections.
-
-    The MongoDB source holds the full vnstock premium corpus (EOD prices and the
-    shared `market_vnstock_premium_records` datasets) on a private Tailscale host.
-    """
+    """Check MongoDB connectivity independently of corpus contents; never execute providers."""
     service = get_mongo_market_data_service()
     if not service.enabled:
         return {
             "enabled": False,
             "read_only": True,
+            "connectivity": {"status": "not_configured"},
             "message": "MongoDB analytical source is not configured (MONGODB_ENABLED / MONGODB_URL).",
+        }
+    try:
+        await asyncio.to_thread(lambda: service._get_database().command("ping"))
+    except Exception:
+        logger.exception("MCP MongoDB connectivity check failed")
+        return {
+            "enabled": True,
+            "read_only": True,
+            "connectivity": {"status": "error", "message": "MongoDB is not reachable"},
         }
     collections = await service.inspect_collections(sample_limit=1)
     return {
         "enabled": True,
         "read_only": True,
+        "connectivity": {"status": "connected"},
         "database": settings.mongodb_database,
         "collections": sanitize_context_value(collections),
     }
@@ -1648,11 +1709,12 @@ async def get_premium_dataset(
     symbol: str,
     dataset: str,
     limit: int = 100,
+    period_type: str | None = None,
 ) -> dict[str, Any]:
-    """Read a guarded MongoDB vnstock premium dataset for one symbol.
+    """Read one allowlisted persisted dataset, never execute a provider.
 
-    `dataset` must be one of the allowlisted names from `list_premium_datasets`.
-    Unknown or disabled datasets are rejected. Limits are capped per dataset.
+    Financial datasets require Vietcap IQ source envelopes. `period_type` selects
+    the exact year/quarter variant. Legacy non-financial data retains its provenance.
     """
     _ensure_mongo_available()
     normalized_symbol = normalize_symbol_input(symbol)
@@ -1669,18 +1731,31 @@ async def get_premium_dataset(
 
     bounded_limit = _coerce_limit(limit, spec.max_limit)
     service = get_mongo_market_data_service()
-    records = await service.get_raw_dataset_records_precise(
-        normalized_symbol,
-        dataset=spec.dataset,
-        limit=bounded_limit,
-    )
+    normalized_period = _normalize_filter_value("period_type", period_type) if period_type else None
+    if normalized_period not in (None, "year", "quarter"):
+        raise ValueError("period_type must be year or quarter")
+    read_options: dict[str, Any] = {"dataset": spec.dataset, "limit": bounded_limit, "raise_errors": True}
+    if spec.dataset.startswith("finance."):
+        read_options["source"] = "vietcap"
+    if normalized_period:
+        read_options["variant"] = f"{spec.dataset}.{normalized_period}"
+    try:
+        records = await service.get_raw_dataset_records_precise(normalized_symbol, **read_options)
+    except Exception as exc:
+        logger.exception("MCP MongoDB dataset read failed")
+        raise ToolError("MongoDB dataset read failed; this is not an empty result") from exc
     return {
         "symbol": normalized_symbol,
         "dataset": spec.dataset,
         "scope_type": spec.scope_type,
         "source": "mongodb:market_vnstock_premium_records",
+        "provider_source": "vietcap" if spec.dataset.startswith("finance.") else None,
+        "period_type": normalized_period,
+        "data_status": "available" if records else "empty",
+        "freshness": "not_assessed; inspect observedAt/sourceDate and fiscal period",
+        "provider_execution": False,
         "row_count": len(records),
-        "items": sanitize_context_value(records),
+        "items": jsonable_encoder(records),
     }
 
 

@@ -333,7 +333,9 @@ def _warmup_vnstock_sync():
         get_vnstock()
 
         # Pre-import key modules to avoid _ModuleLock deadlocks in threads
-        from vnstock_data import Company, Finance, Listing
+        vnstock_module = sys.modules["vnstock"]
+        for class_name in ("Company", "Finance", "Listing"):
+            getattr(vnstock_module, class_name)
 
         logger.info("vnstock modules pre-loaded successfully.")
     except Exception as e:
@@ -354,6 +356,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Pre-initialize vnstock in main thread to prevent deadlocks
     # Non-blocking with timeout for robustness
     if settings.environment != "test":
+        from vnibb.providers.vnstock.runtime import validate_free_runtime
+
+        validate_free_runtime()
         import os
         import threading
 

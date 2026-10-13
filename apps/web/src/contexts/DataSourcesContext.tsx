@@ -16,23 +16,8 @@ import { createDataSource } from '@/types/dataSource';
 const STORAGE_KEY = 'vnibb_data_sources';
 const VNSTOCK_SOURCE_KEY = 'vnibb_vnstock_source';
 
-export type VnstockSource = 'KBS' | 'VCI' | 'MSN' | 'FMP';
+export type VnstockSource = 'VCI';
 
-const VNSTOCK_SOURCES: readonly VnstockSource[] = ['KBS', 'VCI', 'MSN', 'FMP'];
-
-function normalizeVnstockSource(value: string | null): VnstockSource | null {
-    if (!value) {
-        return null;
-    }
-
-    const upperValue = value.toUpperCase();
-    // vnstock 4.x dropped TCBS and DNSE; migrate legacy stored values to KBS so
-    // the UI never offers a source the backend now rejects with 422.
-    const migratedValue = upperValue === 'TCBS' || upperValue === 'DNSE' ? 'KBS' : upperValue;
-    return VNSTOCK_SOURCES.includes(migratedValue as VnstockSource)
-        ? (migratedValue as VnstockSource)
-        : null;
-}
 
 // ============================================================================
 // Actions
@@ -126,7 +111,7 @@ interface DataSourcesProviderProps {
 
 const initialState: DataSourceState = {
     dataSources: [],
-    vnstockSource: 'KBS',
+    vnstockSource: 'VCI',
 };
 
 export function DataSourcesProvider({ children }: DataSourcesProviderProps) {
@@ -138,11 +123,7 @@ export function DataSourcesProvider({ children }: DataSourcesProviderProps) {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
                 const parsed = JSON.parse(saved) as Partial<DataSourceState>;
-                dispatch({ type: 'SET_STATE', payload: { ...initialState, ...parsed, vnstockSource: state.vnstockSource } });
-            }
-            const savedVnstockSource = normalizeVnstockSource(localStorage.getItem(VNSTOCK_SOURCE_KEY));
-            if (savedVnstockSource) {
-                dispatch({ type: 'SET_VNSTOCK_SOURCE', payload: savedVnstockSource });
+                dispatch({ type: 'SET_STATE', payload: { ...initialState, ...parsed, vnstockSource: 'VCI' } });
             }
         } catch (error) {
             console.error('Failed to load data sources from localStorage:', error);

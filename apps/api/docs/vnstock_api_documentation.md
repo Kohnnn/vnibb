@@ -4,7 +4,7 @@
 > **Official version history**: [vnstocks.com/docs/tai-lieu/lich-su-phien-ban](https://vnstocks.com/docs/tai-lieu/lich-su-phien-ban)
 > **Upstream repo**: [github.com/thinh-vu/vnstock](https://github.com/thinh-vu/vnstock)
 > **MCP/CLI companion**: [github.com/mrgoonie/vnstock-agent](https://github.com/mrgoonie/vnstock-agent)
-> **VNIBB runtime target**: `vnstock>=3.5.0,<3.6` in `apps/api/pyproject.toml`
+> **VNIBB runtime target**: `vnstock>=4.0.4,<4.1` in `apps/api/pyproject.toml`; community VCI only
 
 This document is a VNIBB-facing reference, not the canonical upstream manual. It is audited against the public docs site, the official version history, the upstream GitHub README/CHANGELOG, and the `vnstock-agent` README.
 
@@ -14,6 +14,16 @@ When those sources disagree, use this order of precedence:
 - VNIBB config and `pyproject.toml` for local integration assumptions
 
 Context7 is still useful for deeper API lookup, but it should be treated as a supporting source rather than the primary source of truth.
+
+VNIBB uses Vietcap IQ as its primary Vietnamese ingestion source. Only free
+`vnstock` with `source="VCI"` may fill supported gaps. Sponsor packages are never
+imported by provider routing, even when installed. Other source examples below
+describe upstream interfaces, not enabled VNIBB runtime alternatives. Unsupported
+VCI datasets remain unavailable; existing historical source lineage stays readable.
+The image and API startup reject discoverable sponsor modules, including `vnii`,
+before VNStock import because VNAI can otherwise authenticate an installed `vnii`
+package during tier discovery. Use a clean community environment; old stored
+lineage is readable and is not subject to package-availability checks.
 
 ---
 
@@ -416,12 +426,13 @@ df = fund.details.nav_report('SSISCA')
 | Guest | ~20 requests/minute, no registration |
 | Community | ~60 requests/minute, free registration |
 | Sponsor | 3-5x the free tier according to the upstream README |
-| VNIBB backend | Local env defaults reserve `500/min` main budget plus `50/min` reinforcement budget for premium/server-side workloads |
+| VNIBB backend | Guest allowance: `18/min` main plus `2/min` reinforcement; `20/min` per-operation ceiling |
 
 Notes:
-- The `500/min` and `50/min` figures come from VNIBB's own env defaults, not from the public upstream docs.
-- If you run ad-hoc scripts or use `vnstock-agent` locally, assume the lower public-tier limits unless you have sponsor access and a configured `VNSTOCK_API_KEY`.
+- The 20/min default follows the pinned runtime's VNAI `Authenticator.TIER_LIMITS`: guest `20/min`, `1200/hour`, `5000/day`; registered free `60/min`, `3600/hour`, `10000/day`. Registration is not assumed. These are upstream tier limits, not a guarantee of source availability.
+- Free community registration is not assumed. Installed sponsor packages or an API key never enable a paid VNIBB runtime.
 - Batch endpoints such as `Trading.price_board()` and cached backend screener snapshots are preferred over many per-symbol calls.
+- Local main/reinforcement pacing is not a cross-worker or cross-process quota ledger; pipeline stages can contain multiple upstream operations. Provider throttling and unavailable/error results remain authoritative.
 
 ### Rate Limiting Implementation
 
@@ -601,3 +612,12 @@ except Exception as e:
 ---
 
 *Audited on 2026-04-02 against `vnstocks.com/docs`, the official version-history page, `thinh-vu/vnstock` README/CHANGELOG, and `mrgoonie/vnstock-agent` README.*
+
+## IQ structured persistence contracts (2026-10-13)
+
+- IQ is primary; only free community VCI may supplement it. Fiscal identity must reconcile every supplied year, quarter, and period before a SQL natural key is assigned.
+- Canonical quarter monetary flows require explicit `single_quarter` reporting evidence. Missing/conflicting basis and cumulative YTD values remain disclosed in raw envelopes but are not relabeled as quarter flows. Consolidation remains unknown unless the response explicitly identifies it; descriptor section/company type does not establish scope. Explicit EPS `VND/share` can remain available independently of unknown scope. Amount scales cannot manufacture per-share units.
+- IQ SQL statements retain full acquired envelopes plus the existing `_financial_lineage.canonical_data` shape, including explicit unit/flow/scope evidence. Secondary ratio refreshes cannot overwrite or enrich IQ-owned rows; the shared source guard reports conflicting natural keys and retains already persisted counts. Fresh certified IQ stock prices may upgrade generic IQ-owned price rows, never another source's rows.
+- `sync_symbol_financials` continues independent datasets after an acquisition failure. `FinancialAcquisitionPartial` exposes acquired `records`, dataset `errors`, and completed `mongo_rows`; CLI and recurring consumers persist reachable structured groups and report incomplete acquisition rather than raw-only success. Structured persistence errors retain their own affected-row counts.
+- The recurring EOD SQL bridge accepts only confirmed `STOCK` listings. Valid index-point bars remain Mongo observations and do not enter the stock/VND bridge.
+

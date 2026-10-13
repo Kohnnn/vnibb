@@ -26,6 +26,7 @@ from vnibb.core.config import settings
 from vnibb.core.database import get_db
 from vnibb.core.exceptions import ProviderTimeoutError
 from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
+from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.company import Company, Shareholder
 
@@ -91,6 +92,9 @@ from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.financial_service import build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
+from vnibb.services.vietcap_client import VietcapClient
+from vnibb.services.vietcap_financials import persist_vietcap_financials
+from vnibb.services.vietcap_ingestion import FinancialAcquisitionPartial, sync_symbol_financials
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -401,8 +405,9 @@ async def _load_mongo_financial_statement_rows(
     statement_type: str,
     period: str,
     limit: int,
+    records: list[dict[str, Any]] | None = None,
 ) -> list[FinancialStatementData]:
-    """Read raw vnstock financial statement records from Mongo when configured."""
+    """Read descriptor-backed IQ statements before verified free-VCI records."""
 
     dataset_map = {
         "income": "finance.income_statement",
@@ -428,43 +433,68 @@ async def _load_mongo_financial_statement_rows(
     requested_period = str(period or "year").strip().upper()
     normalized_period = "quarter" if requested_period in {"QUARTER", "Q", "Q1", "Q2", "Q3", "Q4", "TTM"} else "year"
     service = get_mongo_market_data_service()
-    if not service.enabled:
+    if not service.enabled and records is None:
         return []
 
-    raw_records = await service.get_raw_dataset_records(
-        symbol,
-        dataset=dataset,
-        variant=_financial_dataset_variant(dataset, requested_period),
-        limit=max(limit * 4, 80),
+    from vnibb.services.vietcap_financials import load_vietcap_financial_rows
+
+    read_limit = min(max(limit * 4, 80), 5000)
+    iq_rows = await load_vietcap_financial_rows(
+        symbol, dataset, normalized_period, limit=read_limit, records=records,
     )
-    raw_rows = []
-    for record in raw_records:
-        raw = record.get("raw")
-        if not isinstance(raw, dict):
-            continue
-        lineage = raw.get("_financial_lineage") or {}
-        if isinstance(lineage.get("canonical_data"), dict):
-            prepared = dict(lineage["canonical_data"])
-            prepared["raw_data"] = raw
-        else:
-            prepared = dict(raw)
-            prepared["_source"] = record.get("providerSource") or record.get("source") or "mongo_unconfirmed"
+    rows: list[FinancialStatementData] = []
+    for iq_row in iq_rows:
+        payload = iq_row.model_dump()
+        payload["statement_type"] = provider_statement_type.value
+        for source_field, target_field in {
+            "profit_before_tax": "pre_tax_profit", "equity": "total_equity",
+            "cash": "cash_and_equivalents", "receivables": "accounts_receivable",
+            "net_cash_flow": "net_change_in_cash", "capital_expenditure": "capex",
+        }.items():
+            if source_field in payload:
+                payload[target_field] = payload[source_field]
+                if source_field in payload.get("unit_metadata", {}):
+                    payload["unit_metadata"][target_field] = payload["unit_metadata"][source_field]
+        rows.append(FinancialStatementData.model_validate(payload))
+    if not rows:
+        if records is not None:
+            return []
+        raw_records = await service.get_raw_dataset_records_precise(
+            symbol, dataset=dataset, variant=_financial_dataset_variant(dataset, requested_period),
+            limit=read_limit,
+        )
+        raw_rows = []
+        for record in raw_records:
+            raw = record.get("raw")
+            if not isinstance(raw, dict):
+                continue
+            source = str(record.get("providerSource") or record.get("source") or "").upper()
+            if source != "VCI":
+                continue
+            lineage = raw.get("_financial_lineage") or {}
+            if isinstance(lineage.get("canonical_data"), dict):
+                prepared = dict(lineage["canonical_data"])
+                prepared["raw_data"] = raw
+            else:
+                prepared = dict(raw)
+            prepared["_source"] = "VCI"
             prepared["_source_envelope"] = {key: value for key, value in record.items() if key != "raw"}
-        raw_rows.append(prepared)
-    if not raw_rows:
-        return []
-
-    rows = VnstockFinancialsFetcher.transform_data(
-        FinancialsQueryParams(
-            symbol=symbol,
-            statement_type=provider_statement_type,
-            period=normalized_period,  # type: ignore[arg-type]
-            limit=min(max(limit, 1), 40),
-        ),
-        raw_rows,
-    )
+            raw_rows.append(prepared)
+        if not raw_rows:
+            return []
+        rows = VnstockFinancialsFetcher.transform_data(
+            FinancialsQueryParams(
+                symbol=symbol, statement_type=provider_statement_type,
+                period=normalized_period,  # type: ignore[arg-type]
+                limit=min(max(limit, 1), 40),
+            ),
+            raw_rows,
+        )
     if requested_period == "TTM":
-        return _build_ttm_financial_statement_rows(rows, statement_type=statement_type)
+        ttm_rows = _build_ttm_financial_statement_rows(rows, statement_type=provider_statement_type.value)
+        if iq_rows:
+            ttm_rows = [row.model_copy(update={"source": "vietcap"}) for row in ttm_rows]
+        return ttm_rows
     if requested_period in {"Q1", "Q2", "Q3", "Q4"}:
         rows = [row for row in rows if str(row.period or "").upper().startswith(f"{requested_period}-")]
     rows = _sort_financial_statement_rows(rows)
@@ -477,7 +507,7 @@ async def _load_mongo_financial_ratio_rows(
     *,
     limit: int = 80,
 ) -> list[FinancialRatioData]:
-    """Read raw vnstock financial ratio records from Mongo when configured."""
+    """Read descriptor-backed IQ ratios before verified free-VCI records."""
 
     requested_period = str(period or "year").strip().upper()
     normalized_period = "year" if requested_period in {"YEAR", "FY"} else "quarter"
@@ -485,13 +515,25 @@ async def _load_mongo_financial_ratio_rows(
     if not service.enabled:
         return []
 
-    raw_records = await service.get_raw_dataset_records(
-        symbol,
-        dataset="finance.ratio",
-        variant=_financial_dataset_variant("finance.ratio", requested_period),
-        limit=max(limit * 4, 120),
+    from vnibb.services.vietcap_financials import load_vietcap_financial_rows
+
+    read_limit = min(max(limit * 4, 120), 5000)
+    rows = await load_vietcap_financial_rows(symbol, "finance.ratio", normalized_period, limit=read_limit)
+    if rows:
+        rows = [row.model_copy(update={"period": _normalize_ratio_period(row.period) or row.period}) for row in rows]
+        return _filter_ratio_rows_for_period(_dedupe_ratio_rows(rows), period)[-limit:]
+
+    raw_records = await service.get_raw_dataset_records_precise(
+        symbol, dataset="finance.ratio",
+        variant=_financial_dataset_variant("finance.ratio", requested_period), limit=read_limit,
     )
-    raw_rows = [row.get("raw") for row in raw_records if isinstance(row.get("raw"), dict)]
+    raw_rows = [
+        {**record["raw"], "_source": "VCI",
+         "_source_envelope": {key: value for key, value in record.items() if key != "raw"}}
+        for record in raw_records
+        if isinstance(record.get("raw"), dict)
+        and str(record.get("providerSource") or record.get("source") or "").upper() == "VCI"
+    ]
     if not raw_rows:
         return []
 
@@ -1219,7 +1261,8 @@ def _to_historical_data_from_mongo(
     row: dict[str, Any], *, adjustment_mode: str = "raw"
 ) -> Optional[EquityHistoricalData]:
     return _to_historical_data_from_payload(
-        {**row, "time": row.get("tradeDate") or row.get("time") or row.get("date")},
+        {**row, "time": row.get("tradeDate") or row.get("time") or row.get("date"),
+         "price_source": row.get("price_source") or row.get("providerSource") or row.get("source")},
         adjustment_mode=adjustment_mode,
     )
 
@@ -2488,10 +2531,21 @@ def _merge_ratio_rows(
     preferred: FinancialRatioData,
     fallback: FinancialRatioData,
 ) -> FinancialRatioData:
+    from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
+
     payload = fallback.model_dump(mode="json")
-    for key, value in preferred.model_dump(mode="json").items():
-        if value is not None:
+    preferred_payload = preferred.model_dump(mode="json")
+    for key, value in preferred_payload.items():
+        if key not in {"ratio_units", "provider_evidence"} and value is not None:
             payload[key] = value
+    units = {**fallback.ratio_units, **preferred.ratio_units}
+    for metric in PERCENT_RATIO_FIELDS:
+        if metric in preferred.ratio_units:
+            payload[metric] = preferred_payload[metric]
+        elif preferred_payload[metric] is not None:
+            units[metric] = "unknown"
+    payload["ratio_units"] = units
+    payload["provider_evidence"] = fallback.provider_evidence + preferred.provider_evidence
     return FinancialRatioData.model_validate(payload)
 
 
@@ -2884,6 +2938,8 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
 
     raw_payload = getattr(row, "raw_data", None)
     raw_data = raw_payload if isinstance(raw_payload, dict) else {}
+    from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
+    ratio_units = dict(raw_data.get("ratio_units") or {})
 
     ev_sales = _coerce_optional_float(getattr(row, "ev_sales", None))
     if ev_sales is None:
@@ -2901,7 +2957,7 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
     # can derive gross_margin = gross_profit / revenue * 100 ourselves so the
     # FE doesn't have to render the "Data quality notes" banner for those
     # periods. Mirrors the logic already used in `comparison_service`.
-    gross_margin_value = _pick_optional_float(row.gross_margin, raw_data.get("gross_margin"))
+    gross_margin_value = _pick_optional_float(row.gross_margin, raw_data.get("gross_margin")) if ratio_units.get("gross_margin") == "percent" or (not ratio_units and getattr(row, "source", None) != "vnstock") else None
     if gross_margin_value is None:
         revenue_value = _coerce_optional_float(
             raw_data.get("revenue")
@@ -2922,8 +2978,9 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
             # Guard against absurd values from corrupt raw payloads.
             if -500.0 <= derived <= 500.0:
                 gross_margin_value = derived
+                ratio_units["gross_margin"] = "percent"
 
-    return FinancialRatioData(
+    result = FinancialRatioData(
         symbol=row.symbol,
         period=period_value,
         pe=_pick_optional_float(row.pe_ratio, raw_data.get("pe"), raw_data.get("priceToEarning")),
@@ -3011,6 +3068,13 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
         ),
         peg_ratio=getattr(row, "peg_ratio", _coerce_optional_float(raw_data.get("peg_ratio"))),
     )
+    result.ratio_units = ratio_units
+    result.provider_evidence = raw_data.get("provider_evidence") or []
+    for metric in PERCENT_RATIO_FIELDS:
+        if (ratio_units and ratio_units.get(metric) != "percent") or (not ratio_units and getattr(row, "source", None) == "vnstock"):
+            setattr(result, metric, None)
+            result.ratio_units[metric] = "unknown"
+    return result
 
 
 def _ratio_has_metric_value(item: FinancialRatioData) -> bool:
@@ -4046,8 +4110,10 @@ async def _enrich_missing_ratio_metrics(
 
         if item.roe is None and net_income is not None and total_equity not in (None, 0):
             item.roe = (net_income / total_equity) * 100
+            item.ratio_units["roe"] = "percent"
         if item.roa is None and net_income is not None and total_assets not in (None, 0):
             item.roa = (net_income / total_assets) * 100
+            item.ratio_units["roa"] = "percent"
         if (
             not is_bank_like
             and item.roic is None
@@ -4057,6 +4123,7 @@ async def _enrich_missing_ratio_metrics(
             invested_capital = total_equity + (long_term_debt or 0.0)
             if invested_capital not in (None, 0):
                 item.roic = (net_income / invested_capital) * 100
+                item.ratio_units["roic"] = "percent"
         if (
             item.current_ratio is None
             and current_assets not in (None, 0)
@@ -4123,6 +4190,7 @@ async def _enrich_missing_ratio_metrics(
             and operating_income is not None
         ):
             item.operating_margin = (operating_income / revenue) * 100
+            item.ratio_units["operating_margin"] = "percent"
         if (
             item.gross_margin is None
             and revenue not in (None, 0)
@@ -4141,12 +4209,14 @@ async def _enrich_missing_ratio_metrics(
                 derived_gross_margin = (gross_profit_value / revenue) * 100
                 if -500.0 <= derived_gross_margin <= 500.0:
                     item.gross_margin = derived_gross_margin
+                    item.ratio_units["gross_margin"] = "percent"
         if (
             item.net_margin is None
             and revenue not in (None, 0)
             and net_income is not None
         ):
             item.net_margin = (net_income / revenue) * 100
+            item.ratio_units["net_margin"] = "percent"
         if (
             item.asset_turnover is None
             and revenue not in (None, 0)
@@ -4174,7 +4244,8 @@ async def _enrich_missing_ratio_metrics(
             and total_liabilities not in (None, 0)
             and total_assets not in (None, 0)
         ):
-            item.debt_assets = total_liabilities / total_assets
+            item.debt_assets = (total_liabilities / total_assets) * 100
+            item.ratio_units["debt_assets"] = "percent"
         if (
             item.debt_equity is None
             and total_equity not in (None, 0)
@@ -4272,8 +4343,10 @@ async def _enrich_missing_ratio_metrics(
         prev_revenue, prev_net_income, _prev_eps = prev_income_values.get(key, (None, None, None))
         if revenue is not None and prev_revenue is not None:
             item.revenue_growth = _growth_rate(revenue, prev_revenue)
+            item.ratio_units["revenue_growth"] = "percent"
         if net_income is not None and prev_net_income is not None:
             item.earnings_growth = _growth_rate(net_income, prev_net_income)
+            item.ratio_units["earnings_growth"] = "percent"
 
         if item.ebitda is None:
             ebitda_value = ebitda_reported
@@ -4374,13 +4447,13 @@ async def _enrich_missing_ratio_metrics(
 
 
 @router.get("/historical", response_model=StandardResponse[list[EquityHistoricalData]])
-@cached(key_prefix="historical_v4_vnd")
+@cached(key_prefix="historical_v5_source_lineage")
 async def get_historical_prices(
     symbol: str = Query(..., min_length=1, max_length=10),
     start_date: date = Query(default_factory=lambda: date.today() - timedelta(days=365)),
     end_date: date = Query(default_factory=date.today),
     interval: str = Query(default="1D", pattern=r"^(1m|5m|15m|30m|1H|1D|1W|1M)$"),
-    source: str = Query(default="VCI", pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -4526,7 +4599,7 @@ async def get_historical_prices(
 @cached(ttl=30, key_prefix="quote_v2_vnd")
 async def get_quote(
     symbol: str,
-    source: str = Query(default="VCI"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     refresh: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ):
@@ -5134,6 +5207,7 @@ async def get_fundamental_analysis(
 
 
 @router.get("/{symbol}/financials", response_model=StandardResponse[List[FinancialStatementData]])
+@cached(ttl=86400, key_prefix="financials_v2_iq_acquired", exclude_args=[4])
 async def get_financials(
     symbol: str,
     statement_type: Literal["income", "balance", "cashflow"] = Query("income"),
@@ -5141,6 +5215,7 @@ async def get_financials(
     limit: int = Query(20, ge=1, le=80),
     db: AsyncSession = Depends(get_db),
 ):
+    symbol = symbol.upper().strip()
     statement_model = {
         "income": IncomeStatement,
         "balance": BalanceSheet,
@@ -5151,6 +5226,55 @@ async def get_financials(
         if statement_model is not None
         else None
     )
+    primary_error: Exception | None = None
+    mongo_data: list[FinancialStatementData] = []
+    try:
+        mongo_data = await _load_mongo_financial_statement_rows(
+            symbol=symbol, statement_type=statement_type, period=period, limit=limit,
+        )
+    except Exception as exc:
+        primary_error = exc
+        logger.warning("IQ statement read failed for %s: %s", symbol, exc)
+    try:
+        if not mongo_data or not all(row.source == "vietcap" for row in mongo_data):
+            service = get_mongo_market_data_service()
+            client = VietcapClient()
+            records: list[dict[str, Any]] = []
+            try:
+                company = await asyncio.to_thread(client.get_company_details, symbol)
+                if not (company or {}).get("comTypeCode"):
+                    raise ValueError(f"IQ company type unavailable for {symbol}")
+                records = await asyncio.to_thread(
+                    sync_symbol_financials,
+                    service._get_database() if service.enabled else None,
+                    client, symbol, com_type=(company or {}).get("comTypeCode"),
+                    dry_run=not service.enabled,
+                )
+                if not records:
+                    raise ValueError(f"IQ financial records unavailable for {symbol}")
+            except FinancialAcquisitionPartial as exc:
+                records = exc.records
+                primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+            except Exception as exc:
+                primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+            if records:
+                try:
+                    await persist_vietcap_financials(records, cache_manager=CacheManager(db))
+                except Exception as exc:
+                    primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+                acquired = await _load_mongo_financial_statement_rows(
+                    symbol=symbol, statement_type=statement_type, period=period, limit=limit,
+                    records=records,
+                )
+                mongo_data = _merge_financial_statement_rows(acquired, mongo_data)
+        if mongo_data and all(row.source == "vietcap" for row in mongo_data):
+            return StandardResponse(
+                data=mongo_data, meta=MetaData(count=len(mongo_data), last_data_date=last_data_date),
+                error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
+            )
+    except Exception as exc:
+        primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+        logger.warning("IQ statement acquisition failed for %s: %s", symbol, exc)
     try:
         data = await get_financials_with_ttm(
             symbol=symbol,
@@ -5165,24 +5289,12 @@ async def get_financials(
             period=period,
             limit=limit,
         )
-        mongo_data = await _load_mongo_financial_statement_rows(
-            symbol=symbol,
-            statement_type=statement_type,
-            period=period,
-            limit=limit,
-        )
         fy_legacy_primary = str(period).upper() in {"FY", "YEAR"} and bool(fallback_data)
         if fy_legacy_primary:
             # #104: the legacy annual row is primary and the provider row fills gaps.
             data = _merge_financial_statement_rows(fallback_data, data)
         if data:
-            # `fallback_data` is already primary for FY, so passing it again as a fill
-            # source would merge the same rows twice; Mongo rows can still add fields.
-            fill_source = (
-                mongo_data
-                if fy_legacy_primary
-                else _merge_financial_statement_rows(mongo_data, fallback_data)
-            )
+            fill_source = mongo_data if fy_legacy_primary else _merge_financial_statement_rows(mongo_data, fallback_data)
             data = _merge_financial_statement_rows(data, fill_source)
             data = _enrich_financial_statement_rows(data)
             if statement_type == StatementType.INCOME.value:
@@ -5196,6 +5308,7 @@ async def get_financials(
             return StandardResponse(
                 data=data,
                 meta=MetaData(count=len(data), last_data_date=last_data_date),
+                error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
             )
 
         fallback_data = _merge_financial_statement_rows(mongo_data, fallback_data)
@@ -5212,9 +5325,13 @@ async def get_financials(
             return StandardResponse(
                 data=fallback_data,
                 meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
+                error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
             )
 
-        return StandardResponse(data=[], meta=MetaData(count=0, last_data_date=last_data_date))
+        return StandardResponse(
+            data=[], meta=MetaData(count=0, last_data_date=last_data_date),
+            error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
+        )
     except BaseException as e:
         if _is_control_flow_exception(e):
             raise
@@ -5227,6 +5344,7 @@ async def get_financials(
                 period=period,
                 limit=limit,
             )
+            fallback_data = _merge_financial_statement_rows(mongo_data, fallback_data)
             if fallback_data:
                 fallback_data = _enrich_financial_statement_rows(fallback_data)
                 if statement_type == StatementType.INCOME.value:
@@ -5240,15 +5358,19 @@ async def get_financials(
                 return StandardResponse(
                     data=fallback_data,
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
+                    error=f"IQ financial source unavailable: {primary_error}; VCI supplement unavailable: {e}" if primary_error else f"VCI supplement unavailable: {e}",
                 )
         except Exception as fallback_error:
             logger.warning(f"DB fallback failed for financials {symbol}: {fallback_error}")
 
-        return StandardResponse(data=[], error=f"Data unavailable: {str(e)}")
+        return StandardResponse(
+            data=mongo_data, meta=MetaData(count=len(mongo_data), last_data_date=last_data_date),
+            error=f"Data unavailable: {primary_error}; VCI supplement unavailable: {e}" if primary_error else f"Data unavailable: {e}",
+        )
 
 
 @router.get("/{symbol}/peers")
-@cached(ttl=900, key_prefix="equity_peers")
+@cached(ttl=900, key_prefix="equity_peers_v2_certified")
 async def get_equity_peers(
     symbol: str,
     limit: int = Query(default=10, ge=1, le=20),
@@ -6618,8 +6740,8 @@ async def get_rating(symbol: str):
 
 @router.get("/{symbol}/financial-ratios", response_model=StandardResponse[List[FinancialRatioData]])
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
-# Namespace bump: the old namespace still holds fabricated TTM ratio rows (issues #101/#106).
-@cached(ttl=86400, key_prefix="ratios_v5")
+# Namespace bump: prefer certified IQ data over cached legacy provider precedence.
+@cached(ttl=86400, key_prefix="ratios_v7_iq_primary")
 async def get_financial_ratios(
     symbol: str,
     period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
@@ -6649,8 +6771,22 @@ async def get_financial_ratios(
             meta=MetaData(count=0, **meta_kwargs),
             error="TTM ratios are not supported: no source supplies a certified four-quarter ratio basis.",
         )
-    db_ratio_rows: List[FinancialRatioData] = []
+    primary_error: Exception | None = None
     mongo_ratio_rows: List[FinancialRatioData] = []
+    try:
+        mongo_ratio_rows = await _load_mongo_financial_ratio_rows(symbol_upper, period, limit=80)
+        if mongo_ratio_rows and all(
+            any(evidence.get("source") == "vietcap" for evidence in row.provider_evidence)
+            and _ratio_has_metric_value(row) for row in mongo_ratio_rows
+        ):
+            return StandardResponse(
+                data=mongo_ratio_rows,
+                meta=MetaData(count=len(mongo_ratio_rows), data_points=len(mongo_ratio_rows), **meta_kwargs),
+            )
+    except Exception as exc:
+        primary_error = exc
+        logger.warning("IQ ratio read failed for %s: %s", symbol_upper, exc)
+    db_ratio_rows: List[FinancialRatioData] = []
     provider_ratio_rows: List[FinancialRatioData] = []
     provider_error: Exception | None = None
     support_rows = {
@@ -6683,11 +6819,6 @@ async def get_financial_ratios(
     except Exception as db_error:
         logger.warning(f"Ratio DB lookup failed for {symbol_upper}: {db_error}")
 
-    mongo_ratio_rows = await _load_mongo_financial_ratio_rows(
-        symbol_upper,
-        period,
-        limit=80,
-    )
 
     latest_statement_period_key = await _get_latest_statement_period_key(
         db,
@@ -6753,6 +6884,12 @@ async def get_financial_ratios(
         data = [item for item in data if VALID_RATIO_PERIOD_RE.match(str(item.period or ""))]
         data = _dedupe_ratio_rows(data)
         data = _filter_ratio_rows_for_period(data, period)
+        from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
+
+        for item in data:
+            for metric in PERCENT_RATIO_FIELDS:
+                if item.ratio_units and item.ratio_units.get(metric) != "percent":
+                    setattr(item, metric, None)
         usable_data = [item for item in data if _ratio_has_metric_value(item)]
         payload = usable_data if usable_data else data
         if payload:
@@ -6785,6 +6922,7 @@ async def get_financial_ratios(
                     full_ratio_coverage_starts=coverage_starts,
                     **meta_kwargs,
                 ),
+                error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
             )
 
     await _schedule_critical_reinforcement(
@@ -6792,11 +6930,11 @@ async def get_financial_ratios(
         endpoint="equity.ratios",
         domains=["ratios"],
     )
-    return StandardResponse(data=[], error=str(provider_error) if provider_error else None)
+    return StandardResponse(data=[], error=str(provider_error or primary_error) if provider_error or primary_error else None)
 
 
 @router.get("/{symbol}/ratios/history", response_model=StandardResponse[List[dict[str, Any]]])
-@cached(ttl=86400, key_prefix="ratios_history_v2")
+@cached(ttl=86400, key_prefix="ratios_history_v3_certified")
 async def get_ratio_history(
     symbol: str,
     ratios: str = Query("pe,pb,ps", description="Comma-separated ratio keys"),
@@ -6825,7 +6963,7 @@ async def get_ratio_history(
         for item in data:
             row: dict[str, Any] = {"period": item.period or ""}
             for key in ratio_list:
-                row[key] = getattr(item, key, None)
+                row[key] = admitted_ratio_value(getattr(item, key, None), key, ratio_units=getattr(item, "ratio_units", None))
             rows.append(row)
 
         rows = sorted(rows, key=lambda r: period_sort_key(str(r.get("period", ""))))
@@ -6835,7 +6973,7 @@ async def get_ratio_history(
 
 
 @router.get("/{symbol}/metrics/history", response_model=MetricsHistoryResponse)
-@cached(ttl=3600, key_prefix="metrics_history")
+@cached(ttl=3600, key_prefix="metrics_history_v2_certified")
 async def get_metrics_history(
     symbol: str,
     days: int = Query(30, ge=1, le=3650),
@@ -6851,10 +6989,13 @@ async def get_metrics_history(
     def build_series_from_rows(rows: List[Any], metric_key: str, attr: str) -> List[Optional[float]]:
         if not (include_all or metric_key in metrics_list):
             return []
-        # DQ remediation 2026-06-08: preserve nulls instead of coercing missing
-        # values to 0.0. A 0 P/E or 0% ROE is a real, misleading value; pre-coverage
-        # years (e.g. 2012-2019 with valuation-only KBS rows) must render as gaps, not 0.
-        return [_coerce_optional_float(getattr(r, attr, None)) for r in rows]
+        return [
+            _coerce_optional_float(admitted_ratio_value(
+                getattr(row, attr, None), metric_key,
+                ratio_units=(row.extended_metrics or {}).get("ratio_units"),
+            ))
+            for row in rows
+        ]
 
     try:
         from vnibb.models.screener import ScreenerSnapshot
@@ -6917,8 +7058,12 @@ async def get_metrics_history(
     def build_series(metric_key: str, attr: str) -> List[Optional[float]]:
         if not (include_all or metric_key in metrics_list):
             return []
-        # DQ remediation 2026-06-08: preserve nulls (see build_series_from_rows).
-        return [_coerce_optional_float(getattr(r, attr, None)) for r in ordered]
+        return [
+            _coerce_optional_float(admitted_ratio_value(
+                getattr(row, attr, None), metric_key, ratio_units=getattr(row, "ratio_units", None),
+            ))
+            for row in ordered
+        ]
 
     return MetricsHistoryResponse(
         symbol=symbol_upper,
@@ -7144,7 +7289,13 @@ async def get_dividends(
 ):
     try:
         symbol_upper = symbol.upper()
-        raw_items = await VnstockDividendsFetcher.fetch(symbol=symbol_upper)
+        provider_error: str | None = None
+        try:
+            raw_items = await VnstockDividendsFetcher.fetch(symbol=symbol_upper)
+        except Exception as exc:
+            provider_error = f"VCI dividends unavailable: {exc}"
+            logger.warning("Dividends provider failed for %s: %s", symbol_upper, exc)
+            raw_items = []
         latest_price = await _get_latest_price(db, symbol_upper)
 
         rows: list[dict[str, Any]] = []
@@ -7265,6 +7416,7 @@ async def get_dividends(
                     "payment_date",
                 ),
             ),
+            error=provider_error,
         )
     except Exception as e:
         return StandardResponse(data=[], error=str(e))

@@ -303,6 +303,7 @@ export interface FinancialRatiosResponse {
   symbol: string;
   count: number;
   data: FinancialRatioData[];
+  error?: string | null;
   meta?: {
     count?: number;
     data_points?: number;

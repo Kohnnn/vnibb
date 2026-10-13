@@ -26,7 +26,7 @@ class StreamingStatus(BaseModel):
 
 class StreamingRequest(BaseModel):
     """Request to start streaming."""
-    data_types: list[str] = ["stockps", "index", "board"]
+    data_types: list[str] = ["stockps"]
     symbols: list[str] | None = None
 
 
@@ -34,13 +34,13 @@ class StreamingRequest(BaseModel):
     "/realtime/start",
     response_model=StreamingStatus,
     summary="Start Real-time Streaming",
-    description="Start WebSocket streaming for market data. Uses vnstock_pipeline if available.",
+    description="Poll stock prices during active market sessions using free vnstock.",
     dependencies=[Depends(require_admin_automation_access)],
 )
 async def start_streaming(
     request: StreamingRequest = None,
 ) -> StreamingStatus:
-    """Start WebSocket streaming for market data."""
+    """Start market-session stock price polling."""
     if request is None:
         request = StreamingRequest()
 
@@ -49,15 +49,23 @@ async def start_streaming(
         return StreamingStatus(
             is_running=pipeline.is_running,
             pipeline_available=pipeline._pipeline_available,
-            data_types=[] if not pipeline.is_running else request.data_types,
+            data_types=["stockps"] if pipeline.is_running else [],
             message="Streaming is unavailable outside active market sessions",
         )
     if pipeline.is_running:
         return StreamingStatus(
             is_running=True,
             pipeline_available=pipeline._pipeline_available,
-            data_types=request.data_types,
+            data_types=["stockps"],
             message="Streaming already running",
+        )
+
+    if "stockps" not in request.data_types:
+        return StreamingStatus(
+            is_running=False,
+            pipeline_available=False,
+            data_types=[],
+            message="Only stock price polling is available; index and order book streaming are unavailable",
         )
 
     started = await pipeline.start_streaming(
@@ -75,10 +83,8 @@ async def start_streaming(
     return StreamingStatus(
         is_running=True,
         pipeline_available=pipeline._pipeline_available,
-        data_types=request.data_types,
-        message="Streaming started" + (
-            " (WebSocket)" if pipeline._pipeline_available else " (Polling fallback)"
-        ),
+        data_types=["stockps"],
+        message="Stock price polling started",
     )
 
 
@@ -86,18 +92,18 @@ async def start_streaming(
     "/realtime/stop",
     response_model=StreamingStatus,
     summary="Stop Real-time Streaming",
-    description="Stop WebSocket streaming.",
+    description="Stop stock price polling.",
     dependencies=[Depends(require_admin_automation_access)],
 )
 async def stop_streaming() -> StreamingStatus:
-    """Stop WebSocket streaming."""
+    """Stop stock price polling."""
     pipeline = get_realtime_pipeline()
     stopped = await pipeline.stop_streaming()
 
     return StreamingStatus(
         is_running=not stopped,
         pipeline_available=pipeline._pipeline_available,
-        data_types=[] if stopped else ["stockps", "index", "board"],
+        data_types=[] if stopped else ["stockps"],
         message="Streaming stopped" if stopped else "Streaming stop timed out",
     )
 
@@ -116,7 +122,7 @@ async def get_status() -> StreamingStatus:
     return StreamingStatus(
         is_running=status["is_running"],
         pipeline_available=status["pipeline_available"],
-        data_types=["stockps", "index", "board"] if status["is_running"] else [],
+        data_types=["stockps"] if status["is_running"] else [],
         message="Running" if status["is_running"] else "Stopped",
     )
 

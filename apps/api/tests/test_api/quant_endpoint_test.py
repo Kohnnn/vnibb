@@ -516,7 +516,7 @@ async def test_benchmark_risk_alias_metric_name_resolves_without_name_error(test
         symbol="VNM",
         metric_name="benchmark-risk",
         period="1Y",
-        source="KBS",
+        source="VCI",
         adjustment_mode="raw",
         db=test_db,
     )
@@ -526,7 +526,7 @@ async def test_benchmark_risk_alias_metric_name_resolves_without_name_error(test
     assert response.data["metric"] == "benchmark_risk"
     # Dates must be resolved before benchmark frame loading.
     assert captured["start_date"] < captured["end_date"]
-    assert captured["source"] == "KBS"
+    assert captured["source"] == "VCI"
 
 
 def test_compute_benchmark_risk_returns_relative_and_tail_metrics():
@@ -730,7 +730,7 @@ async def test_load_price_frame_rolls_back_and_falls_back_to_provider_on_aborted
         symbol="VNM",
         start_date=date(2026, 3, 1),
         end_date=date(2026, 3, 12),
-        source="KBS",
+        source="VCI",
     )
 
     assert rollback_calls == 1
@@ -823,7 +823,7 @@ async def test_load_price_frame_refreshes_stale_db_rows_with_provider_data(
         symbol="VNM",
         start_date=date(2026, 1, 1),
         end_date=date(2026, 3, 15),
-        source="KBS",
+        source="VCI",
     )
 
     observed_dates = set(frame["time"].dt.date.tolist())
@@ -889,7 +889,7 @@ async def test_load_price_frame_refills_excluded_middle_with_current_trusted_tai
 
     frame = await quant._load_price_frame(
         db=test_db, symbol="VNM", start_date=original["time"].min().date(),
-        end_date=original["time"].max().date(), source="KBS",
+        end_date=original["time"].max().date(), source="VCI",
     )
 
     assert len(cache_calls) == 1
@@ -911,7 +911,7 @@ async def test_load_price_frame_refills_excluded_middle_with_current_trusted_tai
         assert quant._compute_garch_volatility(frame)["omega"] is None
         for endpoint in (quant.get_sortino_monthly_metric, quant.get_garch_volatility_metric):
             response = await endpoint(
-                symbol="VNM", period="5Y", source="KBS", adjustment_mode="raw", db=test_db,
+                symbol="VNM", period="5Y", source="VCI", adjustment_mode="raw", db=test_db,
             )
             assert response.meta.count == 0
             assert response.error == "Insufficient Data: Expected at least 30 sessions, got 0."
@@ -937,7 +937,7 @@ async def test_load_price_frame_does_not_refill_unobserved_calendar_gaps(test_db
 
     frame = await quant._load_price_frame(
         db=test_db, symbol="FPT", start_date=date(2025, 1, 3),
-        end_date=date(2025, 1, 6), source="KBS",
+        end_date=date(2025, 1, 6), source="VCI",
     )
 
     assert frame["time"].dt.date.tolist() == [date(2025, 1, 3), date(2025, 1, 6)]
@@ -995,7 +995,7 @@ async def test_load_price_frame_applies_adjustments_for_quant_history(test_db, m
         symbol="VNM",
         start_date=date(2026, 1, 1),
         end_date=date(2026, 1, 10),
-        source="KBS",
+        source="VCI",
         adjustment_mode="adjusted",
     )
 
@@ -1076,7 +1076,7 @@ async def test_peer_analytics_omit_unresolved_price_sessions(monkeypatch, endpoi
             prices,
         ]
         response = await quant.get_momentum_profile(
-            "FPT", period="3Y", source="KBS", adjustment_mode="raw",
+            "FPT", period="3Y", source="VCI", adjustment_mode="raw",
             db=SimpleNamespace(execute=AsyncMock(side_effect=results)),
         )
         symbols = [item["symbol"] for item in response.data["peer_distribution"]]
@@ -1132,7 +1132,7 @@ async def test_load_quant_frame_with_warning_merges_latest_quote_snapshot(test_d
         symbol="VCI",
         start_date=date(2026, 3, 1),
         end_date=date(2026, 3, 21),
-        source="KBS",
+        source="VCI",
         period="1Y",
         adjustment_mode="raw",
     )
@@ -1245,7 +1245,7 @@ async def test_quant_skips_unknown_quote_instead_of_splicing_units(monkeypatch):
         return SimpleNamespace(price=73, price_unit="unknown", updated_at=pd.Timestamp.now()), False
 
     monkeypatch.setattr(quant.VnstockStockQuoteFetcher, "fetch", fetch_quote)
-    result, warning = await quant._merge_latest_quote_into_frame(frame, symbol="FPT", source="KBS")
+    result, warning = await quant._merge_latest_quote_into_frame(frame, symbol="FPT", source="VCI")
 
     pd.testing.assert_frame_equal(result, frame)
     assert "unknown or incompatible price units" in warning
@@ -1316,7 +1316,7 @@ async def test_garch_volatility_alias_canonicalizes_and_returns_payload(test_db,
         symbol="VNM",
         metric_name="garch-volatility",
         period="3Y",
-        source="KBS",
+        source="VCI",
         adjustment_mode="raw",
         db=test_db,
     )

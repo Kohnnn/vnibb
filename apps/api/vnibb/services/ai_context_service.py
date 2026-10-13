@@ -9,6 +9,7 @@ from sqlalchemy import desc, select
 
 from vnibb.core.database import async_session_maker
 from vnibb.core.price_units import persisted_price_record
+from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.market import MarketSector, SectorPerformance
 from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
@@ -1005,6 +1006,8 @@ class AIContextService:
             return None
 
         price_context = _build_price_context(price_rows)
+        ratio_units = (getattr(ratio_row, "raw_data", None) or {}).get("ratio_units")
+        ratio_source = getattr(ratio_row, "source", None)
 
         return {
             "symbol": symbol,
@@ -1035,15 +1038,15 @@ class AIContextService:
                 "pb_ratio": getattr(ratio_row, "pb_ratio", None),
                 "ps": getattr(ratio_row, "ps_ratio", None),
                 "ps_ratio": getattr(ratio_row, "ps_ratio", None),
-                "roe": getattr(ratio_row, "roe", None),
-                "roa": getattr(ratio_row, "roa", None),
-                "gross_margin": getattr(ratio_row, "gross_margin", None),
-                "operating_margin": getattr(ratio_row, "operating_margin", None),
-                "net_margin": getattr(ratio_row, "net_margin", None),
+                **{
+                    metric: admitted_ratio_value(
+                        getattr(ratio_row, metric, None), metric,
+                        ratio_units=ratio_units, source=ratio_source,
+                    )
+                    for metric in ("roe", "roa", "gross_margin", "operating_margin", "net_margin", "revenue_growth", "earnings_growth")
+                },
                 "current_ratio": getattr(ratio_row, "current_ratio", None),
                 "debt_to_equity": getattr(ratio_row, "debt_to_equity", None),
-                "revenue_growth": getattr(ratio_row, "revenue_growth", None),
-                "earnings_growth": getattr(ratio_row, "earnings_growth", None),
                 "eps": getattr(ratio_row, "eps", None),
                 "bvps": getattr(ratio_row, "bvps", None),
             }

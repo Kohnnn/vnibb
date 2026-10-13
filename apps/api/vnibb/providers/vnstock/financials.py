@@ -208,6 +208,8 @@ class FinancialStatementData(BaseModel):
     symbol: str = Field(..., description="Stock ticker symbol")
     period: str = Field(..., description="Reporting period (e.g., 2024, Q1-2024)")
     statement_type: str = Field(..., description="Statement type")
+    fiscal_year: int | None = None
+    fiscal_quarter: int | None = None
 
     # Common metrics (populated based on statement type)
     revenue: float | None = Field(None, description="Total Revenue")
@@ -312,21 +314,12 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 from vnibb.providers.vnstock.runtime import (
                     create_finance,
                     finance_method_kwargs,
-                    get_finance_class,
+                    validate_source,
                 )
-
-                Finance = get_finance_class()
 
                 statement_type = query["statement_type"]
                 period = query["period"]
-                candidate_sources: list[str] = []
-                # KBS is the default runtime source on vnstock 3.5.x, but VCI still
-                # exposes richer financial statement labels/values for many symbols.
-                for source in ["VCI", settings.vnstock_source, "KBS"]:
-                    if source and source not in candidate_sources:
-                        candidate_sources.append(source)
-                if getattr(Finance, "supports_source", True) is False:
-                    candidate_sources = ["default"]
+                candidate_sources = [validate_source(settings.vnstock_source)]
 
                 def _get_statement_method(finance: Any):
                     if statement_type == "income":
@@ -671,15 +664,6 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                             reverse=True,
                         )
 
-                    if best_source and best_source != settings.vnstock_source:
-                        logger.info(
-                            "Using richer fallback vnstock source for %s %s: %s (lang=%s score=%s)",
-                            query["symbol"],
-                            statement_type,
-                            best_source,
-                            best_lang,
-                            best_score,
-                        )
                     return [item.model_dump(mode="json") for item in merged_rows]
 
                 if last_error is not None and not candidate_payloads:

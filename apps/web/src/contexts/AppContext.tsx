@@ -18,7 +18,7 @@ import React, {
 export type Theme = 'dark' | 'light';
 export type Density = 'compact' | 'comfortable' | 'spacious';
 export type ChartStyleDefault = 'candle' | 'bar' | 'line' | 'area';
-export type DataSource = 'KBS' | 'VCI' | 'MSN' | 'FMP';
+export type DataSource = 'VCI';
 export type UnitSystem = 'metric' | 'imperial';
 
 // ============================================================================
@@ -85,7 +85,7 @@ export function AppProvider({ children }: AppProviderProps) {
   const [colorblindMode, setColorblindModeState] = useState(false);
   
   // Data Sources state
-  const [preferredVnstockSource, setPreferredVnstockSourceState] = useState<DataSource>('KBS');
+  const [preferredVnstockSource, setPreferredVnstockSourceState] = useState<DataSource>('VCI');
   
   // Units state
   const [unitSystem, setUnitSystemState] = useState<UnitSystem>('metric');
@@ -120,11 +120,7 @@ export function AppProvider({ children }: AppProviderProps) {
       if (storedColorblindMode === 'true') setColorblindModeState(true);
       
       // Data Sources
-      const storedVnstockSource = localStorage.getItem(VNSTOCK_SOURCE_KEY);
-      if (storedVnstockSource === 'KBS' || storedVnstockSource === 'VCI' || 
-          storedVnstockSource === 'MSN' || storedVnstockSource === 'FMP') {
-        setPreferredVnstockSourceState(storedVnstockSource);
-      }
+      localStorage.setItem(VNSTOCK_SOURCE_KEY, 'VCI');
       
       // Units
       const storedUnitSystem = localStorage.getItem(UNIT_SYSTEM_KEY);

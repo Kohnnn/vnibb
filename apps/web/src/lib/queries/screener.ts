@@ -14,7 +14,7 @@ function useVnstockSource(): VnstockSource {
         const { preferredVnstockSource } = useDataSources();
         return preferredVnstockSource;
     } catch {
-        return 'KBS';
+        return 'VCI';
     }
 }
 
@@ -35,7 +35,7 @@ export function useScreenerData(options?: {
     target_upside_min?: number;
     industry?: string;
     limit?: number;
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+    source?: 'VCI';
     // Dynamic filters (new)
     filters?: string;
     sort?: string;
@@ -57,7 +57,7 @@ export function useScreenerData(options?: {
     sort_order?: 'asc' | 'desc';
     enabled?: boolean;
 }) {
-    let preferredSource: VnstockSource = 'KBS';
+    let preferredSource: VnstockSource = 'VCI';
 
     try {
         const { preferredVnstockSource } = useDataSources();

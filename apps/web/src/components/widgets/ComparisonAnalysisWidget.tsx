@@ -96,7 +96,7 @@ type PerformancePeriod = (typeof PERFORMANCE_PERIODS)[number]
 interface RatioColumn {
   key: keyof FinancialRatioData
   label: string
-  format: 'ratio' | 'percent-auto' | 'percent'
+  format: 'ratio' | 'percent'
 }
 
 const VALUATION_RATIO_COLUMNS: RatioColumn[] = [
@@ -109,12 +109,12 @@ const VALUATION_RATIO_COLUMNS: RatioColumn[] = [
 ]
 
 const FINANCIAL_RATIO_COLUMNS: RatioColumn[] = [
-  { key: 'roe', label: 'ROE', format: 'percent-auto' },
-  { key: 'roa', label: 'ROA', format: 'percent-auto' },
-  { key: 'roic', label: 'ROIC', format: 'percent-auto' },
-  { key: 'gross_margin', label: 'Gross Margin', format: 'percent-auto' },
-  { key: 'operating_margin', label: 'Operating Margin', format: 'percent-auto' },
-  { key: 'net_margin', label: 'Net Margin', format: 'percent-auto' },
+  { key: 'roe', label: 'ROE', format: 'percent' },
+  { key: 'roa', label: 'ROA', format: 'percent' },
+  { key: 'roic', label: 'ROIC', format: 'percent' },
+  { key: 'gross_margin', label: 'Gross Margin', format: 'percent' },
+  { key: 'operating_margin', label: 'Operating Margin', format: 'percent' },
+  { key: 'net_margin', label: 'Net Margin', format: 'percent' },
   { key: 'current_ratio', label: 'Current Ratio', format: 'ratio' },
   { key: 'debt_equity', label: 'D/E', format: 'ratio' },
 ]
@@ -127,7 +127,7 @@ const LIQUIDITY_RATIO_COLUMNS: RatioColumn[] = [
 
 const LEVERAGE_RATIO_COLUMNS: RatioColumn[] = [
   { key: 'debt_equity', label: 'D/E', format: 'ratio' },
-  { key: 'debt_assets', label: 'D/A', format: 'percent-auto' },
+  { key: 'debt_assets', label: 'D/A', format: 'percent' },
   { key: 'interest_coverage', label: 'Interest Coverage', format: 'ratio' },
   { key: 'equity_multiplier', label: 'Equity Multiplier', format: 'ratio' },
 ]
@@ -139,8 +139,8 @@ const EFFICIENCY_RATIO_COLUMNS: RatioColumn[] = [
 ]
 
 const GROWTH_RATIO_COLUMNS: RatioColumn[] = [
-  { key: 'revenue_growth', label: 'Revenue Growth', format: 'percent-auto' },
-  { key: 'earnings_growth', label: 'Earnings Growth', format: 'percent-auto' },
+  { key: 'revenue_growth', label: 'Revenue Growth', format: 'percent' },
+  { key: 'earnings_growth', label: 'Earnings Growth', format: 'percent' },
 ]
 
 const CATEGORY_RATIO_COLUMNS: Record<string, RatioColumn[]> = {
@@ -856,12 +856,8 @@ function formatRatioGridValue(
       ? 'yoy_change'
       : 'margin'
 
-  if (format === 'percent-auto') {
-    return formatPercent(value, { decimals: 2, input: 'auto', clamp })
-  }
-
   if (format === 'percent') {
-    return formatPercent(value, { decimals: 2, input: 'auto', clamp })
+    return formatPercent(value, { decimals: 2, input: 'percent', clamp })
   }
 
   return formatNumber(value, { decimals: 2 })
@@ -879,7 +875,7 @@ function formatMetric(value: number | null | undefined, format: string, metricKe
       : 'margin'
 
   if (format === 'percent') {
-    return formatPercent(value, { decimals: 2, input: 'auto', clamp })
+    return formatPercent(value, { decimals: 2, input: 'percent', clamp })
   }
 
   if (format === 'currency' || format === 'large_number') {

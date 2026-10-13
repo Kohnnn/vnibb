@@ -33,9 +33,9 @@ At a high level, production looks like:
 3. the backend exposes HTTP and WebSocket surfaces
 4. the `vnibb-mcp` sidecar exposes the read-only MCP HTTP surface for VniAgent and remote clients
 5. the self-hosted database stack backs persistence, runtime state, auth, and cache
-6. Vietcap is the primary EOD corpus; free VNStock/KBS provides runtime fallback and gap fill
-7. `VNSTOCK_RUNTIME_TIER=free` is the production default; premium modules are optional accelerators and never a startup dependency in free mode
-8. the API image is built once, published, and deployed by immutable digest; premium builds use BuildKit secrets only
+6. Vietcap IQ/Trading is the primary Vietnamese ingestion source for structured financials and market data; free VNStock VCI is supplementary where supported
+7. `VNSTOCK_RUNTIME_TIER=free` and `VNSTOCK_SOURCE=VCI` are the only supported execution policy; the shared provider importer rejects installed or already-loaded Sponsor packages before any VNStock import can authenticate, including direct OHLCV backfill calls outside startup
+8. the free-compatible API image is built once, published and deployed by immutable digest; do not mount or bootstrap premium packages for this deployment
 9. migrations run through the one-shot `migrate` service before API/MCP replacement; the API process does not migrate at startup
 10. API scheduling remains disabled and the profiled `scheduler` worker is the only scheduler runtime
 
@@ -49,10 +49,10 @@ VniAgent server context path
   -> apps/api
   -> VNIBB_MCP_URL
   -> vnibb-mcp
-  -> n6v self-hosted stack over Tailscale (<n6v-tailscale-ip>, private):
-     - MongoDB vnibb-market :27017  (market corpus)
-     - self-hosted Supabase Postgres :15433/:16543 (app/runtime state, auth)
-     - Redis :6379 (cache/locks)
+  -> verified deployment connection targets:
+     - MongoDB vnibb-market (raw/analytical corpus)
+     - PostgreSQL (app state and admitted structured observations)
+     - Redis (production scheduler locks/cache)
 ```
 
 ## Backend Tech Stack
@@ -77,16 +77,15 @@ VniAgent server context path
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| **Primary EOD** | Vietcap public market-data API | Canonical raw-VND OHLCV corpus and freshness basis |
-| **Runtime fallback** | VNStock 4.0 free tier (KBS baseline) | Screener, quotes, financials, and provider gap fill |
-| **AI Assist** | VNAI 2.6.2 publisher wheel | Installed with the constrained free-tier image; historical 2.4.x hook compatibility is unverified, so premium-only paths require separate runtime proof |
-| **Premium accelerators** | vnstock_data, vnstock_ta, vnstock_news, vnstock_pipeline | Optional; enabled only with `VNSTOCK_RUNTIME_TIER=premium` and a premium-built image |
+| **Primary Vietnamese source** | Vietcap IQ/Trading public API | Lossless provider records, descriptor-backed financial fields and source-certified market data |
+| **Supplementary parser/transport** | Free VNStock 4.0.x, VCI only | Supported free calls to the same Vietcap upstream; not independent outage protection |
+| **AI Assist dependency** | VNAI 2.6.2 publisher wheel | Constrained free-tier dependency; installation does not authorize sponsor modules or AI spend |
 
 ### Database & Persistence
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| **Persistence** | Self-hosted on n6v (MongoDB + Supabase Postgres + Redis, Tailscale-private) | System of record: market corpus, app/runtime state, auth, and cache |
+| **Persistence** | Self-hosted PostgreSQL + MongoDB + Redis | Oracle Compose defines local stores; inspect runtime URLs/mounts before recovery. Historical n6v topology is not current routing proof. |
 | **Async DB** | SQLAlchemy 2.0+ / asyncpg | Async ORM with connection pooling |
 | **Migrations** | Alembic 1.13+ | Schema migrations |
 
@@ -157,7 +156,7 @@ Local workspace browsing and interactive administration have separate access rul
 
 ## Data Flow: Raw Data to Widgets
 
-The complete data pipeline from raw provider data to widget display:
+The large diagram below is a historical pipeline reference. Current Vietnamese ingestion starts with Vietcap IQ/Trading, stores lossless Mongo envelopes and admitted PostgreSQL fields, and uses only free VCI for supported supplementary requests. Current runtime commands and safe local/production recovery are in `oracle_runbook.md`; do not follow the diagram's obsolete KBS/DNSE/scraper or premium fallback paths.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐

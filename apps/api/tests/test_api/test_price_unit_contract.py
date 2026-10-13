@@ -1,5 +1,6 @@
 from datetime import date
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from vnibb.api.v1 import equity
@@ -16,11 +17,10 @@ def bar(**extra):
             "low": 0.3, "close": 0.5, "volume": 123, "value": 5000,
             "adj_close": 0.45, **extra}
 
-@pytest.mark.parametrize("source", ["KBS", "VCI"])
-def test_history_source_contract_scales_even_sub_thousand_vnd(source):
+def test_history_source_contract_scales_even_sub_thousand_vnd():
     rows = VnstockEquityHistoricalFetcher.transform_data(
         EquityHistoricalQueryParams(symbol="XYZ", start_date=date(2026, 6, 8),
-                                    end_date=date(2026, 6, 8), source=source), [bar()],
+                                    end_date=date(2026, 6, 8), source="VCI"), [bar()],
     )
     assert rows[0].price_unit == "VND"
     assert (rows[0].open, rows[0].high, rows[0].low, rows[0].close) == (400, 600, 300, 500)
@@ -52,6 +52,28 @@ def test_known_legacy_source_and_new_source_markers_are_distinct():
     assert row["price_unit"] == "VND"
 
 
+@pytest.mark.parametrize("as_mapping", [True, False])
+def test_persisted_iq_price_preserves_raw_unit_contract(as_mapping):
+    stored = bar(source="vietcap", raw_data={"priceUnit": "VND", "price_source": "vietcap"})
+    row = persisted_price_record(stored if as_mapping else SimpleNamespace(**stored))
+    assert row["price_unit"] == "VND"
+    assert row["price_source"] == "vietcap"
+    assert row["close"] == 0.5
+
+
+def test_persisted_iq_price_without_unit_evidence_stays_unknown():
+    row = persisted_price_record(bar(source="vietcap", raw_data={"source": "vietcap"}))
+    assert row["price_unit"] == "unknown"
+    assert row["close"] == 0.5
+
+
+def test_certified_iq_vnd_marker_is_unscaled_but_legacy_iq_remains_unknown():
+    certified = persisted_price_record(bar(source="vietcap_vnd"))
+    assert certified["price_unit"] == "VND"
+    assert certified["close"] == 0.5
+    assert persisted_price_record(bar(source="vietcap"))["price_unit"] == "unknown"
+
+
 def test_index_history_stays_points():
     row = normalize_price_record(bar(symbol="VNINDEX", close=1200), source="vnstock_history:KBS")
     assert row["price_unit"] == "index_points"
@@ -78,6 +100,43 @@ def test_mongo_vnd_price_remains_canonical():
     row = equity._to_historical_data_from_mongo(bar(priceUnit="VND", tradeDate="2026-06-08"))
     assert row.price_unit == "VND"
     assert row.close == 0.5
+
+
+@pytest.mark.parametrize("lineage,expected", [
+    ({"source": "vietcap", "providerSource": "vietcap"}, "vietcap"),
+    ({"source": "vnstock-data", "providerSource": "VCI"}, "VCI"),
+    ({"source": "vietcap", "providerSource": "vietcap", "price_source": "certified-origin"}, "certified-origin"),
+    ({}, None),
+])
+def test_mongo_historical_mapping_preserves_record_source(lineage, expected):
+    row = equity._to_historical_data_from_mongo(bar(priceUnit="VND", tradeDate="2026-06-08", **lineage))
+    assert row.price_source == expected
+    assert row.close == 0.5
+
+
+@pytest.mark.asyncio
+async def test_historical_consumer_keeps_iq_lineage_without_certifying_session(client, monkeypatch):
+    docs = [bar(priceUnit="VND", tradeDate="2026-06-08", source="vietcap", providerSource="vietcap")]
+    async def mongo_prices(*args, **kwargs):
+        return docs
+    async def no_cache(*args, **kwargs):
+        return SimpleNamespace(hit=False, data=None)
+    async def no_rows(*args, **kwargs):
+        return []
+    provider = AsyncMock(side_effect=AssertionError("Complete Mongo row must not trigger VCI"))
+    monkeypatch.setattr(equity, "get_mongo_market_data_service", lambda: SimpleNamespace(enabled=True, get_eod_prices_between=mongo_prices))
+    monkeypatch.setattr(equity.CacheManager, "get_historical_prices", no_cache)
+    monkeypatch.setattr(equity, "_load_historical_from_recent_cache", no_rows)
+    monkeypatch.setattr(equity, "_load_historical_from_db", no_rows)
+    monkeypatch.setattr(equity.VnstockEquityHistoricalFetcher, "fetch", provider)
+    response = await client.get("/api/v1/equity/historical?symbol=XYZ&start_date=2026-06-08&end_date=2026-06-08")
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["data"][0]["price_source"] == "vietcap"
+    assert payload["data"][0]["close"] == 0.5
+    assert payload["meta"]["source_counts"] == {"mongo": 1}
+    assert payload["meta"]["session_basis"] == "unverified"
+    provider.assert_not_awaited()
 
 
 def test_merge_excludes_unknown_and_metadata_uses_selected_rows(monkeypatch):
@@ -130,7 +189,7 @@ async def test_quote_provider_scales_all_price_fields_but_not_volume(monkeypatch
         def stock(self, **kwargs):
             return SimpleNamespace(quote=SimpleNamespace(history=lambda **kwargs: History()))
     monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_vnstock_class", lambda: Provider)
-    quote, cached = await VnstockStockQuoteFetcher.fetch("XYZ", source="KBS", use_cache=False)
+    quote, cached = await VnstockStockQuoteFetcher.fetch("XYZ", source="VCI", use_cache=False)
     assert not cached
     assert quote.price_unit == "VND"
     assert (quote.price, quote.prev_close, quote.open, quote.high, quote.low) == (500, 400, 400, 600, 300)
@@ -196,6 +255,22 @@ async def test_quote_memory_cache_is_scoped_by_provider_source(monkeypatch):
     assert not cached
     assert quote.price == 600
     assert calls == ["VCI"]
+
+
+@pytest.mark.asyncio
+async def test_quote_rejects_unsupported_source_before_cache(monkeypatch):
+    from vnibb.providers.vnstock.stock_quote import QuoteCache, StockQuoteData
+
+    monkeypatch.setattr(QuoteCache, "_cache", {})
+    QuoteCache.set("KBS:XYZ", StockQuoteData(symbol="XYZ", price=500, price_unit="VND"))
+    with pytest.raises(ValueError, match="only free VCI"):
+        await VnstockStockQuoteFetcher.fetch("XYZ", source="KBS")
+
+
+@pytest.mark.parametrize("source", ["KBS", "TCBS", "MSN", "FMP", "DNSE"])
+def test_historical_params_reject_unsupported_source(source):
+    with pytest.raises(ValueError):
+        EquityHistoricalQueryParams(symbol="XYZ", source=source)
 
 
 @pytest.mark.asyncio
@@ -298,7 +373,7 @@ async def test_historical_api_discloses_unknown_omission_and_selected_units(clie
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("date_layout", ["index", "named_index", "date_column"])
-async def test_premium_backfill_preserves_provider_trading_dates(monkeypatch, date_layout):
+async def test_vci_backfill_preserves_provider_trading_dates(monkeypatch, date_layout):
     import sys
     from contextlib import asynccontextmanager
     from unittest.mock import AsyncMock
@@ -314,16 +389,16 @@ async def test_premium_backfill_preserves_provider_trading_dates(monkeypatch, da
     else:
         frame.index = dates.rename("date" if date_layout == "named_index" else None)
     frame.attrs["price_unit"] = "THOUSAND_VND"
-    provider = SimpleNamespace(source="KBS", __module__="vnstock_data.explorer.kbs.quote",
+    provider = SimpleNamespace(source="VCI", __module__="vnstock.explorer.vci.quote",
                                history=lambda **kwargs: frame)
-    monkeypatch.setitem(sys.modules, "vnstock_data", SimpleNamespace(Quote=lambda **kwargs: provider))
+    monkeypatch.setitem(sys.modules, "vnstock", SimpleNamespace(Quote=lambda **kwargs: provider))
     session = SimpleNamespace(execute=AsyncMock(), commit=AsyncMock())
     @asynccontextmanager
     async def session_maker():
         yield session
     monkeypatch.setattr(backfill, "async_session_maker", session_maker)
 
-    records = backfill._fetch_premium("XYZ", date(2026, 6, 8), date(2026, 6, 9))
+    records = backfill._fetch_vci("XYZ", date(2026, 6, 8), date(2026, 6, 9))
     assert records is not None
     assert [row["time"] for row in records] == ["2026-06-08", "2026-06-09"]
     assert [(row["price_unit"], row["close"], row["adj_close"], row["volume"], row["value"]) for row in records] == [
@@ -332,8 +407,8 @@ async def test_premium_backfill_preserves_provider_trading_dates(monkeypatch, da
     assert await backfill._persist_postgres(1, "XYZ", records) == 2
     persisted = [call.args[0].compile().params for call in session.execute.await_args_list]
     assert [(row["time"], row["close"], row["adj_close"], row["source"]) for row in persisted] == [
-        (date(2026, 6, 8), 500, 450, "vnstock_vnd:KBS"),
-        (date(2026, 6, 9), 600, 550, "vnstock_vnd:KBS"),
+        (date(2026, 6, 8), 500, 450, "vnstock_vnd:VCI"),
+        (date(2026, 6, 9), 600, 550, "vnstock_vnd:VCI"),
     ]
     session.commit.assert_awaited_once()
 

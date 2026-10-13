@@ -120,16 +120,17 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                 return True
 
             try:
-                from vnibb.providers.vnstock.runtime import get_listing_class, get_vnstock_class
+                from vnibb.providers.vnstock.runtime import (
+                    get_listing_class,
+                    get_vnstock_class,
+                    validate_source,
+                )
 
                 Listing = get_listing_class()
                 Vnstock = get_vnstock_class()
 
                 record: dict[str, Any] = {}
-                candidate_sources: list[str] = []
-                for source in [settings.vnstock_source, "VCI", "KBS"]:
-                    if source and source not in candidate_sources:
-                        candidate_sources.append(source)
+                candidate_sources = [validate_source(settings.vnstock_source)]
 
                 for source in candidate_sources:
                     try:
@@ -158,7 +159,7 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
 
                 # Get company name from Listing (overview doesn't include it)
                 try:
-                    listing = Listing()
+                    listing = Listing(source=validate_source(settings.vnstock_source))
                     symbols_df = listing.all_symbols()
                     if symbols_df is not None and not symbols_df.empty:
                         match = symbols_df[symbols_df["symbol"] == query["symbol"]]

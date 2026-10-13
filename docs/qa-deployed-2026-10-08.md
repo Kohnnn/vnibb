@@ -361,3 +361,26 @@ Appended after the frozen-source rebuild (PID356044). These are **new** observat
 - Replace all in-flight entries with final exercised results; retain explicit fail/blocked/not-tested limits.
 - Review unknown VCI/legacy financial lineage, peer/Sharpe investigations and actual current deployment identities.
 - Obtain publication/deployment/production-write approvals separately; preserve rollback and original records. Repeat deployed P0/financial/navigation acceptance after the authorized cutover; owner removes/narrows the temporary access exception.
+
+## 9. IQ-primary local database and MCP acceptance — 13 October 2026
+
+This section records the later user-authorized IQ-primary/free-VCI cutover separately from the historical deployed QA above. No production corpus repair, security-policy bypass or complete financial correctness claim follows from local acceptance.
+
+| Surface | Observed result | Limit |
+|---|---|---|
+| Local databases | Authenticated PostgreSQL/MongoDB healthy on loopback `55432`/`57017`; PostgreSQL migration head `e5f1a7c9d2b4` | Private credentials remain outside Git; not production health |
+| Real IQ ingestion | VNM and FPT each persisted one listing and ten SQL EOD bars; VNM retained 167 raw financial periods and 42 SQL EPS observations | Unknown monetary/percentage/reporting-basis fields remain withheld |
+| Repeat apply | VNM retained ten SQL price rows and 42 EPS observations | Bounded same-symbol idempotence, not whole-market reconciliation |
+| Historical HTTP | Restarted FPT endpoint returned HTTP 200 with ten VND bars and `price_source=vietcap` on every row | Session basis remains unverified |
+| Authenticated MCP protocol | Initialized 18 tools; VNM returned three certified SQL prices, an IQ SQL income observation and three raw IQ ratio rows | Raw ratio availability is not canonical percentage admission |
+| Strict full-financial MCP smoke | Exit 1: statement source units unknown; SQL balance-sheet/cash-flow rows absent | Explicit source-contract blocker; no fabricated bindings or provider substitution |
+| Production rollout | Blocked: Tailscale `NeedsLogin`, no tailnet IP/peers, unresolved MagicDNS | SSH authorization does not establish reachability; no host-key/TLS/access-policy bypass |
+| Frontend provider settings | Only VCI rendered; saved KBS migrated to VCI on reload | Real local webpack browser, not production deployment |
+| Degraded ratio UI | Alert plus P/E `18.40`, P/B `2.10`, Cached/Stale rendered | Synthetic response in actual `financial_ratios` widget; no provider-value claim |
+| Focused frontend checks | Six suites / 76 tests and TypeScript passed | Operational source migration and ratio disclosure consumers |
+| MCP and dividend boundaries | MCP suite 70 passed; real SQL source-list/ratio admission plus dividend fallback/cancellation selection 17 passed | Deterministic database/HTTP fixtures, not complete live financial acceptance |
+| Financial HTTP | Live VNM FY income returned IQ EPS `4022`/`4028` and null revenue | Known EPS does not certify unknown monetary totals |
+| Recurring IQ writer | Actual `DataPipeline.sync_daily_prices` FPT Sep30–Oct13 wrote ten rows, retained ten SQL rows, all `vietcap_vnd`; first close `63000` | Bounded real scheduled acquisition; no whole-market claim |
+| Decoder/acquisition checks | 156 passed; importer/recurring/source/cache checks 164 passed | Deterministic regression seams |
+
+Integrated Standards and Spec reviews identified eight and seven contract gaps respectively. Repairs are complete; Spec re-review found no actionable unresolved findings. The remaining Standards statement-source guard was repaired and exercised with real SQL across income/balance/cash-flow. Frontend lint/typecheck/changelog/build and 159 suites / 1,078 tests passed. Backend full run: 1,904 passed, four skipped, seven retired-provider expectation failures, two warnings; retired expectations were migrated (20 focused checks passed). Final ownership/decoder/acquisition/analytics selection passed 174 tests and changed-line Ruff passed. No full-backend rerun or all-green full-suite claim. Monetary-unit/reporting-basis evidence and production reachability remain separate acceptance blockers.

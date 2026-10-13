@@ -12,7 +12,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { canonicalPeriodRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
-import { convertFinancialValueForUnit, EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
+import { clampPercentage, convertFinancialValueForUnit, EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useUnit } from '@/contexts/UnitContext';
@@ -30,6 +30,11 @@ function formatRatio(value: number | null | undefined, decimals = 2): string {
     return formatNumber(value, { decimals });
 }
 
+const CANONICAL_PERCENT_KEYS: Record<string, true> = {
+    roe: true, roa: true, roic: true, gross_margin: true, net_margin: true,
+    operating_margin: true, revenue_growth: true, earnings_growth: true, debt_assets: true,
+};
+
 function formatPct(metricKey: string, value: number | null | undefined): string {
     const clamp = metricKey === 'dividend_yield' || metricKey === 'fcf_yield'
         ? 'yield'
@@ -37,7 +42,9 @@ function formatPct(metricKey: string, value: number | null | undefined): string 
             ? 'yoy_change'
             : 'margin';
 
-    return formatPercent(value, { decimals: 2, input: 'auto', clamp });
+    return CANONICAL_PERCENT_KEYS[metricKey]
+        ? formatPercent(clampPercentage(value, clamp), { decimals: 2, input: 'percent' })
+        : formatPercent(value, { decimals: 2, input: 'auto', clamp });
 }
 
 const ratioLabels: Record<string, string> = {
@@ -212,7 +219,8 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
     }, [period, ratios, statementReferenceQuery.data?.data, visiblePeriodLimit]);
 
     const hasData = ratios.length > 0;
-    const isFallback = Boolean(error && hasData);
+    const responseWarning = period === 'TTM' ? null : data?.error || null;
+    const isFallback = Boolean((error || responseWarning) && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
     useEffect(() => {
@@ -420,6 +428,11 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                         align="right"
                     />
                 </div>
+                {responseWarning && hasData && (
+                    <div role="alert" className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+                        {responseWarning}
+                    </div>
+                )}
                 {(canonicalRatios.issues.length > 0 || canonicalRatios.invalidPeriodCount > 0) && (
                     <div className="px-3 py-1.5 text-[10px] text-amber-300">
                         Fiscal period resolution: {canonicalRatios.issues.filter((issue) => issue.reason === 'ambiguous-basis').length} conflicting periods excluded; {canonicalRatios.issues.filter((issue) => issue.reason === 'duplicate-identical').length} identical repeats collapsed; {canonicalRatios.invalidPeriodCount} undated rows excluded.
@@ -463,8 +476,8 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                         />
                     ) : isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={6} />
-                    ) : error && !hasData ? (
-                        <WidgetError error={error as Error} onRetry={() => refetch()} />
+                    ) : (error || responseWarning) && !hasData ? (
+                        <WidgetError error={(error as Error) || new Error(responseWarning!)} onRetry={() => refetch()} />
                     ) : !hasData ? (
                         <WidgetEmpty message={`No ratio data for ${symbol}`} icon={<BarChart3 size={18} />} />
                     ) : tableRows.length === 0 ? (

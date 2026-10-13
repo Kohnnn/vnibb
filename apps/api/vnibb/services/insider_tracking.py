@@ -85,12 +85,10 @@ class InsiderTrackingService:
         does not exist in vnstock>=3.5 (the method is on `stock.company`,
         not `stock.finance`). Result was that the writer raised on every
         symbol and the InsiderDeal table stayed empty since v1. Now
-        delegates to VnstockInsiderDealsFetcher which already knows the
-        correct vnstock_data + vnstock entrypoints with proper field-alias
-        normalization across KBS / VCI sources.
+        delegates to the free VCI company provider with existing field-alias
+        normalization. Unsupported datasets are recorded as provider errors.
         """
         from vnibb.providers.vnstock.insider_deals import (
-            InsiderDealsQueryParams,
             VnstockInsiderDealsFetcher,
         )
 
@@ -99,7 +97,7 @@ class InsiderTrackingService:
         for symbol in symbols:
             try:
                 deal_records = await VnstockInsiderDealsFetcher.fetch(
-                    InsiderDealsQueryParams(symbol=symbol, limit=50)
+                    symbol=symbol, limit=50
                 )
 
                 if not deal_records:

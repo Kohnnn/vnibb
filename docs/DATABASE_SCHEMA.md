@@ -1,18 +1,11 @@
 # Database Schema
 
-**Persistence:** fully self-hosted on n6v (Tailscale `<n6v-tailscale-ip>`, private network only — no cloud database)
-**Physical stores:** PostgreSQL app model (28 tables, via self-hosted Supabase) + MongoDB `vnibb-market` corpus + Redis cache
-**Total Collections:** 29 (PostgreSQL/app model) + Mongo `vnibb-market` market corpus
-**Active Alembic revision:** `b6c7d8e9f012` (2026-07-05 — adds `prediction_market_intraday_snapshots` for Phase 8 alerts/history endpoints)
+**Persistence:** self-hosted PostgreSQL app/structured financial model, MongoDB `vnibb-market` analytical corpus, and optional Redis cache. Oracle Compose defines these stores on the application host; confirm deployed connection targets and mounts rather than assuming the historical n6v topology.
+**Migration head:** `e5f1a7c9d2b4` restores the financial-ratio natural key. Local startup applied the full chain on 13 October 2026; production revision requires an authenticated runtime check.
 
-> Two physical stores are described here:
-> 1. The **PostgreSQL app model (n6v)** — the 27 collections below that power the
->    application (dashboards, screener, app-facing financials, prediction markets, etc.).
-> 2. The **MongoDB `vnibb-market` market corpus** on n6v — the canonical
->    analytical/market datastore that runtime market reads (`/equity/historical`,
->    quant, MCP) prefer. See the dedicated section
->    "MongoDB Market Corpus (n6v)" near the end of this document and
->    `VIETCAP_DATA_SOURCE.md` for the Vietcap-sourced collections.
+> PostgreSQL owns app state and admitted structured observations. MongoDB retains provider envelopes, descriptor evidence and analytical records. Vietcap IQ/Trading is the primary Vietnamese ingestion source; free `vnstock` VCI is supplementary and shares the same upstream. Never infer financial units, fiscal basis or publication dates from value magnitude or receipt time. Unknown fields remain unavailable rather than being certified by storage.
+>
+> The provider contract is documented at [`../../docs/VIETCAP_DATA_SOURCE.md`](../../docs/VIETCAP_DATA_SOURCE.md). The legacy collection names and n6v sections below describe compatibility/history, not proof of current provider execution or host placement. Local startup and safe production recovery are in [`oracle_runbook.md`](oracle_runbook.md#database-recovery-and-local-startup).
 
 ---
 

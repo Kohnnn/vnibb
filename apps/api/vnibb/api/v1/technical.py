@@ -2,7 +2,7 @@
 Technical Analysis API Endpoints
 
 Provides technical indicators for stocks.
-Uses vnstock_ta premium package with pandas fallback.
+Uses free market history with local pandas calculations.
 """
 
 import logging
@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 import pandas as pd
 
 from vnibb.core.price_units import PriceUnit
+from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
 from vnibb.services.technical_analysis import get_ta_service, normalize_history_frame
 
 
@@ -729,7 +730,7 @@ async def get_technical_indicators_direct(
     symbol: str,
     indicators: str = Query("rsi,sma,ema", description="Comma-separated: rsi,macd,sma,ema,bb"),
     period: int = Query(14, ge=5, le=50),
-    source: str = Query("KBS", description="Data source"),
+    source: str = Query("VCI", pattern=r"^VCI$", description="Data source: VCI"),
 ):
     """
     Calculate technical indicators for a symbol using vnstock.
@@ -740,11 +741,10 @@ async def get_technical_indicators_direct(
     from vnibb.core.config import settings
     from datetime import datetime, timedelta
 
+    source = validate_source(source)
+
     def _calculate():
-        try:
-            from vnstock_data import Quote
-        except Exception:
-            from vnstock import Quote
+        Quote = get_quote_class()
         import pandas as pd
 
         q = Quote(symbol=symbol.upper(), source=source)

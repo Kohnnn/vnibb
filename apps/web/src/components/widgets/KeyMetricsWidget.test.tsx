@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import type { MetricsHistoryResponse, QuantResponse } from '@/lib/api';
 import {
@@ -172,6 +172,30 @@ describe('KeyMetricsWidget', () => {
     mockUseProfile.mockReturnValue(makeQueryResult(emptyProfileData));
     mockUseStockQuote.mockReturnValue(makeQueryResult(emptyQuoteData));
     mockUseQuantMetrics.mockReturnValue(makeQueryResult(emptyQuantData));
+  });
+
+  it('renders canonical low ratio percentages in cards and metric rows', () => {
+    mockUseFinancialRatios.mockImplementation((_symbol, options) => makeQueryResult<FinancialRatiosResponse>({
+      symbol: 'VCB', count: 1,
+      data: [{ symbol: 'VCB', period: options?.period === 'TTM' ? 'TTM' : '2025', roe: 0.25, roa: -0.25, dividend_yield: 0.25 }],
+    }));
+
+    render(<KeyMetricsWidget id="metrics" symbol="VCB" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Profitability' }));
+    expect(screen.getAllByText('+0.25%')).toHaveLength(2);
+    expect(screen.getAllByText('-0.25%')).toHaveLength(2);
+    expect(screen.queryByText('+25.00%')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Market' }));
+    expect(screen.getAllByText('25.00%')).toHaveLength(2);
+  });
+
+  it('renders canonical low screener percentages when ratios are unavailable', () => {
+    render(<KeyMetricsWidget id="metrics" symbol="VCB" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Profitability' }));
+    expect(screen.getAllByText('+0.18%')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Market' }));
+    expect(screen.getAllByText('3.00%')).toHaveLength(2);
   });
 
   it('does not emit repeated runtime payloads when parent rerenders with unchanged metric values', async () => {

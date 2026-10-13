@@ -24,7 +24,6 @@ def _mock_history(monkeypatch, frame, asset_type=None):
     monkeypatch.setattr(runtime, "get_vnstock_class", lambda: lambda: SimpleNamespace(
         stock=lambda **kwargs: SimpleNamespace(quote=quote)
     ))
-    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
 
 
 @pytest.mark.asyncio
@@ -34,7 +33,7 @@ def _mock_history(monkeypatch, frame, asset_type=None):
 async def test_technical_history_quote_merge_requires_same_known_unit(monkeypatch, unit, price, expected):
     frame = _frame(periods=2)
     _mock_history(monkeypatch, frame)
-    monkeypatch.setattr(settings, "vnstock_source", "KBS")
+    monkeypatch.setattr(settings, "vnstock_source", "VCI")
 
     async def fetch_quote(**kwargs):
         return SimpleNamespace(price=price, price_unit=unit, updated_at=datetime(2026, 1, 2, 15)), False
@@ -50,7 +49,7 @@ async def test_technical_history_quote_merge_requires_same_known_unit(monkeypatc
 @pytest.mark.asyncio
 async def test_technical_derivative_history_retains_points_before_quote_merge(monkeypatch):
     _mock_history(monkeypatch, _frame(close=1200, periods=2), asset_type="derivative")
-    monkeypatch.setattr(settings, "vnstock_source", "KBS")
+    monkeypatch.setattr(settings, "vnstock_source", "VCI")
 
     async def fetch_quote(**kwargs):
         return SimpleNamespace(price=1201, price_unit="index_points", updated_at=datetime(2026, 1, 2, 15)), False
@@ -64,8 +63,10 @@ async def test_technical_derivative_history_retains_points_before_quote_merge(mo
 
 @pytest.mark.asyncio
 async def test_technical_unknown_history_is_not_used_for_calculations(monkeypatch):
-    _mock_history(monkeypatch, _frame())
-    monkeypatch.setattr(settings, "vnstock_source", "MSN")
+    frame = _frame()
+    frame.attrs["source"] = "MSN"
+    _mock_history(monkeypatch, frame)
+    monkeypatch.setattr(settings, "vnstock_source", "VCI")
 
     async def unexpected_quote(**kwargs):
         pytest.fail("Unknown history must not be merged with a quote")
@@ -74,62 +75,38 @@ async def test_technical_unknown_history_is_not_used_for_calculations(monkeypatc
     service = TechnicalAnalysisService()
 
     assert await service.get_ohlcv_data("FPT", date(2026, 1, 1), date(2026, 2, 1)) is None
-    assert await service._calculate_fallback("FPT", date(2026, 1, 1), date(2026, 2, 1)) == {}
+    assert await service.calculate_indicators("FPT", date(2026, 1, 1), date(2026, 2, 1)) == {}
 
 
 @pytest.mark.asyncio
-async def test_fallback_indicators_use_vnd_without_scaling_volume(monkeypatch):
+async def test_pandas_indicators_use_vnd_without_scaling_volume(monkeypatch):
     _mock_history(monkeypatch, _frame())
-    monkeypatch.setattr(settings, "vnstock_source", "KBS")
+    monkeypatch.setattr(settings, "vnstock_source", "VCI")
 
-    result = await TechnicalAnalysisService()._calculate_fallback("FPT", date(2026, 1, 1), date(2026, 2, 1))
+    result = await TechnicalAnalysisService().calculate_indicators("FPT", date(2026, 1, 1), date(2026, 2, 1))
 
     assert result["sma_20"] == 500
     assert result["atr_14"] == pytest.approx(200)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("marked", [True, False])
-async def test_premium_indicators_require_explicit_history_units(monkeypatch, marked):
-    frame = _frame()
-    if marked:
-        frame.attrs["price_unit"] = "THOUSAND_VND"
-    seen = []
+async def test_installed_paid_ta_is_never_selected(monkeypatch):
     module = ModuleType("vnstock_ta")
 
-    class DataSource:
-        __module__ = "vnstock_ta.datasource"
+    def paid_access(name):
+        pytest.fail(f"Paid technical package accessed: {name}")
 
-        def __init__(self, **kwargs):
-            pass
-
-        def get_data(self):
-            return frame
-
-    class Indicator:
-        def __init__(self, data):
-            if not marked:
-                pytest.fail("Unmarked premium history must not reach indicator calculations")
-            seen.append(data)
-
-        def sma(self, **kwargs):
-            return pd.Series([500])
-
-    module.DataSource = DataSource
-    module.Indicator = Indicator
+    module.__getattr__ = paid_access
     monkeypatch.setitem(sys.modules, "vnstock_ta", module)
-    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
-    monkeypatch.setattr(settings, "vnstock_source", "KBS")
+    _mock_history(monkeypatch, _frame())
+    monkeypatch.setattr(settings, "vnstock_source", "VCI")
+    service = TechnicalAnalysisService()
 
-    result = await TechnicalAnalysisService()._calculate_with_vnstock_ta("FPT", date(2026, 1, 1), date(2026, 2, 1))
-    if not marked:
-        assert result == {}
-        assert seen == []
-        return
+    result = await service.calculate_indicators("FPT", date(2026, 1, 1), date(2026, 2, 1))
 
+    assert service._ta_available is False
     assert result["sma_20"] == 500
-    assert seen[0]["close"].tolist() == [500] * 30
-    assert seen[0]["volume"].tolist() == [100] * 30
+    assert result["atr_14"] == pytest.approx(200)
 
 
 def test_history_normalization_preserves_real_split_in_canonical_prices():
@@ -153,59 +130,42 @@ def test_frame_category_keeps_unrecognized_index_in_points():
     assert set(result["price_unit"]) == {"index_points"}
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("unit,expected", [(None, None), ("VND", 0.5)])
-async def test_sponsor_technical_history_needs_explicit_equity_unit(monkeypatch, unit, expected):
+def test_stored_sponsor_technical_history_needs_explicit_equity_unit(unit, expected):
     frame = _frame(periods=2)
     if unit:
         frame.attrs["price_unit"] = unit
 
-    class Quote:
-        __module__ = "vnstock_data.explorer.kbs.quote"
-
-        def history(self, **kwargs):
-            return frame
-
-    monkeypatch.setattr(runtime, "get_vnstock_class", lambda: lambda: SimpleNamespace(
-        stock=lambda **kwargs: SimpleNamespace(quote=Quote())
-    ))
-    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
-    monkeypatch.setattr(settings, "vnstock_source", "KBS")
-
-    async def no_quote(**kwargs):
-        return SimpleNamespace(price=None, updated_at=None), False
-
-    monkeypatch.setattr(technical_analysis.VnstockStockQuoteFetcher, "fetch", no_quote)
-
-    result = await TechnicalAnalysisService().get_ohlcv_data("FPT", date(2026, 1, 1), date(2026, 1, 2))
+    quote = SimpleNamespace()
+    quote.__module__ = "vnstock_data.explorer.kbs.quote"
+    result = normalize_history_frame(frame, symbol="FPT", source="KBS", provider=quote)
 
     if expected is None:
-        assert result is None
+        assert result.empty
     else:
         assert result["close"].tolist() == [expected, expected]
         assert set(result["price_unit"]) == {"VND"}
 
 
 @pytest.mark.asyncio
-async def test_direct_sponsor_indicator_endpoint_discloses_unknown_without_computing(monkeypatch):
+async def test_direct_indicator_endpoint_discloses_unknown_without_computing(monkeypatch):
     from vnibb.api.v1 import technical
 
-    module = ModuleType("vnstock_data")
-
     class Quote:
-        __module__ = "vnstock_data.explorer.kbs.quote"
+        __module__ = "vnstock.explorer.vci.quote"
 
         def __init__(self, **kwargs):
             pass
 
         def history(self, **kwargs):
-            return _frame()
+            frame = _frame()
+            frame.attrs["price_unit"] = "unknown"
+            return frame
 
-    module.Quote = Quote
-    monkeypatch.setitem(sys.modules, "vnstock_data", module)
+    monkeypatch.setattr(technical, "get_quote_class", lambda: Quote)
     monkeypatch.setattr(settings, "vnstock_timeout", 5)
 
-    result = await technical.get_technical_indicators_direct("FPT", indicators="sma", period=14, source="KBS")
+    result = await technical.get_technical_indicators_direct("FPT", indicators="sma", period=14, source="VCI")
 
     assert result == {"error": "Price units unavailable", "price_unit": "unknown"}
 
@@ -221,7 +181,6 @@ def test_technical_frame_actual_source_overrides_requested_source():
 async def test_signal_summary_unavailable_reason_insufficient_when_no_exclusion(monkeypatch):
     """Zero indicators without an observed unit exclusion must NOT claim unresolved units."""
     service = TechnicalAnalysisService()
-    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
 
     async def no_frame(*args, **kwargs):
         return None
@@ -240,7 +199,6 @@ async def test_signal_summary_unavailable_reason_insufficient_when_no_exclusion(
 async def test_signal_summary_unavailable_reason_unresolved_when_exclusion_observed(monkeypatch):
     """Only an observed unit exclusion yields the unresolved_price_units reason."""
     service = TechnicalAnalysisService()
-    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
 
     async def excluded_frame(*args, **kwargs):
         frame = pd.DataFrame()
@@ -269,7 +227,6 @@ async def test_signal_summary_unavailable_reason_unresolved_when_exclusion_obser
 async def test_macd_fade_threshold_preserves_semantics_by_price_unit(
     monkeypatch, unit, scale, signal, direction, magnitude, expected,
 ):
-    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
     service = TechnicalAnalysisService()
 
     async def moving_averages(*args, **kwargs):
@@ -301,7 +258,6 @@ async def test_macd_fade_threshold_preserves_semantics_by_price_unit(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("unit,expected", [("VND", "confirmed_vnd"), ("index_points", "index_points"), (None, "unconfirmed")])
 async def test_full_technical_quality_certifies_actual_frame_units(monkeypatch, unit, expected):
-    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
     service = TechnicalAnalysisService()
     frame = _frame(close=100000, periods=240)
     frame.loc[1, "close"] = 50000

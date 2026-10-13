@@ -99,12 +99,12 @@ export function isCanonicalQuarterPeriod(period: string | null | undefined): boo
  *
  * The provider can return the same fiscal period more than once (a revision, or a
  * consolidated/separate pair). There is no field in the payload that proves which
- * of two different rows is authoritative, so this never picks one: rows that are
- * byte-identical after period normalization collapse to one (a harmless repeat),
- * while rows that disagree are treated as an ambiguous period and excluded
- * entirely. Excluding is deliberate - silently choosing either would replace a
- * real balance with a different basis. Both cases are reported so the caller can
- * disclose them instead of hiding the collision (issue #103).
+ * of two different rows is authoritative, so this never picks one: rows that agree
+ * on every observed value collapse to one (a harmless repeat), while rows that
+ * disagree are treated as an ambiguous period and excluded entirely. Excluding is
+ * deliberate - silently choosing either would replace a real balance with a
+ * different basis. Both cases are reported so the caller can disclose them instead
+ * of hiding the collision (issue #103).
  *
  * Rows whose period cannot be normalized have no fiscal identity at all; they are
  * counted (not dropped silently) and excluded so they never fabricate a year.
@@ -121,10 +121,18 @@ export interface CanonicalPeriodRows<T extends { period?: string | null }> {
   invalidPeriodCount: number
 }
 
+// ponytail: basis must be top-level; promote new raw-only lineage before comparing it.
+const NON_OBSERVATION_FIELDS: readonly string[] = ['updated_at', 'raw_data']
+
 function rowsAreIdentical<T extends { period?: string | null }>(left: T, right: T): boolean {
   const serialize = (value: T): string | null => {
     try {
-      return JSON.stringify(value)
+      return JSON.stringify(
+        Object.entries(value)
+          // Undefined fields are omitted from JSON responses.
+          .filter(([key, entry]) => entry !== undefined && !NON_OBSERVATION_FIELDS.includes(key))
+          .sort(([leftKey], [rightKey]) => (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0))
+      )
     } catch {
       return null
     }

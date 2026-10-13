@@ -96,10 +96,10 @@ class VnstockCompanyNewsFetcher(BaseFetcher[CompanyNewsQueryParams, CompanyNewsD
 
         def _fetch_sync() -> List[dict]:
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
 
                 Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
+                stock = Vnstock().stock(symbol=query["symbol"], source=validate_source(settings.vnstock_source))
 
                 # Get company news
                 news_df = stock.company.news()
@@ -142,12 +142,7 @@ class VnstockCompanyNewsFetcher(BaseFetcher[CompanyNewsQueryParams, CompanyNewsD
 
         for row in data:
             try:
-                # Handle various column name variations from vnstock. Different
-                # KBS / VCI / DNSE news endpoints emit different keys; we try
-                # the full known set so the downstream `published_date` write
-                # is rarely null. Without this, every KBS row landed with a
-                # null timestamp because only `publishDate/date/time` were
-                # checked. (B1 from the QA evaluation report.)
+                # Preserve timestamp aliases from retained provider payloads.
                 published = (
                     row.get("publishDate")
                     or row.get("publish_date")
@@ -171,7 +166,7 @@ class VnstockCompanyNewsFetcher(BaseFetcher[CompanyNewsQueryParams, CompanyNewsD
                 news_item = CompanyNewsData(
                     symbol=params.symbol.upper(),
                     title=row.get("title") or row.get("Title") or "Untitled",
-                    source=row.get("source") or row.get("Source") or "KBS",
+                    source=row.get("source") or row.get("Source") or "VCI",
                     published_at=published,
                     url=row.get("url") or row.get("link") or row.get("URL"),
                     summary=row.get("summary") or row.get("content") or row.get("description"),

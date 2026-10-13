@@ -15,7 +15,7 @@ export function useVnstockSource(): VnstockSource {
         const { preferredVnstockSource } = useDataSources();
         return preferredVnstockSource;
     } catch {
-        return 'KBS';
+        return 'VCI';
     }
 }
 
@@ -470,7 +470,7 @@ export const historicalQueryKey = (
         startDate?: string;
         endDate?: string;
         interval?: string;
-        source?: string;
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
     }
 ) => ['historical', symbol, params] as const;
@@ -481,12 +481,12 @@ export function useHistoricalPrices(
         startDate?: string;
         endDate?: string;
         interval?: string;
-        source?: string;
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
 ) {
-    let preferredSource: VnstockSource = 'KBS';
+    let preferredSource: VnstockSource = 'VCI';
 
     try {
         const { preferredVnstockSource } = useDataSources();

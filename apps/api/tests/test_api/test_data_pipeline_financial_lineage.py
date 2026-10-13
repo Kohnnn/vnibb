@@ -15,6 +15,17 @@ def financial_sync(monkeypatch):
     cached = []
     pipeline = DataPipeline()
 
+    class Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [1]
+
+    class Statement:
+        def returning(self, *columns):
+            return self
+
     class RecordingSession:
         async def __aenter__(self):
             return self
@@ -23,7 +34,7 @@ def financial_sync(monkeypatch):
             return False
 
         async def execute(self, values):
-            persisted.append(values)
+            return Result()
 
         async def commit(self):
             pass
@@ -40,7 +51,12 @@ def financial_sync(monkeypatch):
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", wait_for_rate_limit)
     monkeypatch.setattr(pipeline, "_cache_set_json", cache_set_json)
     monkeypatch.setattr(pipeline_module, "async_session_maker", RecordingSession)
-    monkeypatch.setattr(pipeline_module, "get_upsert_stmt", lambda model, keys, values: values)
+    def upsert(model, index_elements, values, **kwargs):
+        persisted.append(values)
+        return Statement()
+
+    monkeypatch.setattr(pipeline_module, "get_upsert_stmt", upsert)
+
     monkeypatch.setattr(VnstockFinancialsFetcher, "extract_data", extract_data)
 
     async def sync(entries, period="quarter"):

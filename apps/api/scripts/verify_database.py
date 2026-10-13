@@ -59,7 +59,7 @@ def check_vnstock():
     print("\n🔄 Testing VNStock connection...")
     try:
         from vnstock import Listing
-        listing = Listing(source="KBS")
+        listing = Listing(source="VCI")
         df = listing.all_symbols()
         print(f"✅ VNStock connected: {len(df):,} symbols available")
         return True

@@ -1,5 +1,6 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from vnibb.mcp import server
 
 
@@ -103,8 +104,8 @@ class _FakeMongoService:
         }
         return [{"symbol": symbol, "close": 2.0}]
 
-    async def get_raw_dataset_records_precise(self, symbol, *, dataset, limit):
-        self.calls["precise_raw"] = {"symbol": symbol, "dataset": dataset, "limit": limit}
+    async def get_raw_dataset_records_precise(self, symbol, *, dataset, limit, source=None, variant=None, raise_errors=False):
+        self.calls["precise_raw"] = {"symbol": symbol, "dataset": dataset, "limit": limit, "source": source, "variant": variant, "raise_errors": raise_errors}
         return [{"symbol": symbol, "dataset": dataset, "recordKey": f"k:{symbol}:{dataset}"}]
 
     async def get_price_depth_precise(self, symbol, *, limit, include_provenance):
@@ -437,6 +438,8 @@ async def test_eod_history_retains_unknown_rows_without_claiming_comparable_seri
     [
         ({"symbol": "VNINDEX", "close": 1300.0, "source": "VCI"}, 1300.0, "index_points"),
         ({"symbol": "VNM", "close": 65.0, "price_unit": "unknown", "source": "VCI"}, 65.0, "unknown"),
+        ({"symbol": "VNM", "close": 65.0, "source": "vietcap_vnd"}, 65.0, "VND"),
+        ({"symbol": "VNM", "close": 65.0, "source": "vietcap"}, 65.0, "unknown"),
     ],
 )
 def test_stock_price_serialization_respects_index_and_explicit_unknown_units(
@@ -453,3 +456,207 @@ def test_non_price_collection_serialization_does_not_add_price_units():
     row = {"symbol": "VNM", "source": "vnstock", "revenue": 1000.0}
 
     assert server._serialize_row(row, model=server.IncomeStatement) == row
+
+
+@pytest.mark.asyncio
+async def test_financial_corpus_filters_iq_source_and_fiscal_variant(monkeypatch):
+    fake = _FakeMongoService()
+    monkeypatch.setattr(server, "get_mongo_market_data_service", lambda: fake)
+    result = await server.get_premium_dataset("FPT", "finance.income_statement", period_type="quarter")
+    assert fake.calls["precise_raw"]["source"] == "vietcap"
+    assert fake.calls["precise_raw"]["variant"] == "finance.income_statement.quarter"
+    assert fake.calls["precise_raw"]["raise_errors"] is True
+    assert result["provider_source"] == "vietcap"
+
+
+@pytest.mark.asyncio
+async def test_mongo_read_failure_is_not_an_empty_dataset(monkeypatch):
+    class FailedMongo(_FakeMongoService):
+        async def get_raw_dataset_records_precise(self, *args, **kwargs):
+            raise ConnectionError("unavailable")
+
+    monkeypatch.setattr(server, "get_mongo_market_data_service", FailedMongo)
+    with pytest.raises(server.ToolError, match="not an empty result"):
+        await server.get_premium_dataset("FPT", "finance.ratio")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reachable", [True, False])
+async def test_mongo_status_distinguishes_empty_database_from_unreachable(monkeypatch, reachable):
+    class EmptyMongo(_FakeMongoService):
+        def _get_database(self):
+            return self
+
+        def command(self, name):
+            assert name == "ping"
+            if not reachable:
+                raise ConnectionError("unavailable")
+            return {"ok": 1}
+
+        async def inspect_collections(self, **kwargs):
+            return []
+
+    monkeypatch.setattr(server, "get_mongo_market_data_service", EmptyMongo)
+    result = await server.get_mongo_status()
+    assert result["connectivity"]["status"] == ("connected" if reachable else "error")
+
+
+@pytest.mark.asyncio
+async def test_mcp_snapshots_use_only_postgres_context(monkeypatch):
+    async def available():
+        pass
+
+    class DatabaseContext:
+        async def _build_postgres_snapshot(self, symbol):
+            return {"symbol": symbol}
+
+        async def _build_postgres_market_snapshot(self):
+            return {"indices": []}
+
+    monkeypatch.setattr(server, "_ensure_database_available", available)
+    monkeypatch.setattr(server, "AIContextService", DatabaseContext)
+    assert (await server.get_symbol_snapshot("FPT"))["snapshot"] == {"symbol": "FPT"}
+    assert (await server.get_market_snapshot())["snapshot"] == {"indices": []}
+
+
+@pytest.mark.asyncio
+async def test_latest_financial_prefers_iq_before_newer_vci(monkeypatch):
+    calls = []
+
+    async def read(collection, queries):
+        source = queries[0]["values"]
+        calls.append(source)
+        return [{"symbol": "FPT", "source": source[0], "fiscal_year": 2025}]
+
+    monkeypatch.setattr(server, "list_collection_documents", read)
+    row = await server._get_latest_symbol_document("income_statements", "FPT")
+    assert row["source"] == "vietcap"
+    assert calls == [["vietcap"]]
+
+
+@pytest.mark.asyncio
+async def test_financial_envelope_does_not_truncate_source_evidence(monkeypatch):
+    evidence = {f"metric_{i}": i for i in range(30)}
+
+    class EvidenceMongo(_FakeMongoService):
+        async def get_raw_dataset_records_precise(self, *args, **kwargs):
+            return [{"raw": evidence, "descriptors": evidence, "structured": evidence}]
+
+    monkeypatch.setattr(server, "get_mongo_market_data_service", EvidenceMongo)
+    result = await server.get_premium_dataset("FPT", "finance.ratio")
+    assert result["items"][0]["raw"] == evidence
+    assert result["items"][0]["descriptors"] == evidence
+
+
+@pytest.mark.asyncio
+async def test_latest_financial_uses_only_explicit_vci_secondary(monkeypatch):
+    calls = []
+
+    async def read(collection, queries):
+        sources = queries[0]["values"]
+        calls.append(sources)
+        return [] if sources == ["vietcap"] else [{"source": "VCI"}]
+
+    monkeypatch.setattr(server, "list_collection_documents", read)
+    row = await server._get_latest_symbol_document("financial_ratios", "FPT")
+    assert row["source"] == "VCI"
+    assert calls == [["vietcap"], ["VCI"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "collection", ["income_statements", "balance_sheets", "cash_flows", "financial_ratios"]
+)
+async def test_generic_financial_query_admits_iq_and_vci_only(
+    monkeypatch, test_engine, test_db, collection
+):
+    model = server.COLLECTION_MODELS[collection]
+    sources = ["vietcap", "VCI", "vnstock", "KBS", "DNSE", "VND"]
+    test_db.add_all(
+        model(
+            id=index,
+            symbol="FPT",
+            period=str(2026 - index),
+            period_type="year",
+            fiscal_year=2026 - index,
+            source=source,
+        )
+        for index, source in enumerate(sources, start=1)
+    )
+    test_db.add(
+        model(id=7, symbol="VNM", period="2025", period_type="year", fiscal_year=2025, source="VCI")
+    )
+    await test_db.commit()
+    monkeypatch.setattr(
+        server, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False)
+    )
+
+    result = await server.query_database_collection_data(
+        collection=collection, symbol="FPT", period_type="year"
+    )
+
+    assert result["row_count"] == 2
+    assert {row["id"] for row in result["items"]} == {1, 2}
+    assert {row["source"] for row in result["items"]} == {"vietcap", "VCI"}
+    assert result["filters_applied"]["admitted_sources"] == ["vietcap", "VCI"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["vietcap", "VCI"])
+@pytest.mark.parametrize("unit", [None, "unknown", "fraction", "percent"])
+async def test_sql_ratio_consumers_withhold_unadmitted_percentages(
+    monkeypatch, test_engine, test_db, source, unit
+):
+    from vnibb.models.trading import FinancialRatio
+    from vnibb.services import ai_context_service
+
+    percent_columns = {
+        "roe", "roa", "roic", "gross_margin", "operating_margin", "net_margin",
+        "revenue_growth", "earnings_growth", "debt_to_assets",
+    }
+    raw_data = {"provider_evidence": [{"roe": 0.2, "unit": unit}]}
+    if unit is not None:
+        raw_data["ratio_units"] = dict.fromkeys(server.PERCENT_RATIO_FIELDS, unit)
+    stored_row = FinancialRatio(
+        id=1, symbol="FPT", period="2025", period_type="year", fiscal_year=2025,
+        source=source, pe_ratio=12.5, eps=4200.0, raw_data=raw_data,
+        **dict.fromkeys(percent_columns, 0.2),
+    )
+    test_db.add(stored_row)
+    await test_db.commit()
+    session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(server, "async_session_maker", session_maker)
+    monkeypatch.setattr(ai_context_service, "async_session_maker", session_maker)
+
+    async def database_available():
+        return True
+
+    monkeypatch.setattr(server, "check_database_connection", database_available)
+    generic = await server.query_database_collection_data(
+        collection="financial_ratios", symbol="FPT", period_type="year"
+    )
+    latest = await server.get_latest_financial_ratios("FPT", period_type="year")
+    snapshot = await server.get_symbol_snapshot("FPT")
+
+    for payload in (generic["items"][0], latest["item"], snapshot["snapshot"]["ratios"]):
+        assert payload["pe_ratio"] == 12.5
+        assert payload["eps"] == 4200.0
+        assert payload["raw_data"] == raw_data
+        for column in percent_columns:
+            assert payload[column] == (0.2 if unit == "percent" else None)
+        if unit != "percent":
+            assert set(payload["unavailable_metrics"]) == percent_columns
+            assert payload["data_status"] == "partial_unavailable"
+        else:
+            assert "unavailable_metrics" not in payload
+    assert snapshot["snapshot"]["ratios"]["pe"] == 12.5
+    assert latest["data_status"] == ("available" if unit == "percent" else "partial_unavailable")
+    await test_db.refresh(stored_row)
+    assert stored_row.raw_data == raw_data
+    assert all(getattr(stored_row, column) == 0.2 for column in percent_columns)
+
+
+@pytest.mark.parametrize("value,expected", [("quarter", "quarter"), (" YEAR ", "year")])
+def test_fiscal_period_filters_match_persisted_lowercase_values(value, expected):
+    _, queries, _, _ = server.build_collection_queries(collection="income_statements", period_type=value)
+    assert server._query_equal("period_type", [expected]) in queries

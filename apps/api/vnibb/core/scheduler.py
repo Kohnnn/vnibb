@@ -490,19 +490,22 @@ def configure_scheduler():
     logger.info("Scheduled: nightly_price_backfill at 10:00 UTC (5:00 PM VNT)")
 
     # =========================================================================
-    # Mongo EOD Daily Sync - 5:15 PM VNT (10:15 AM UTC)
-    # Advances the canonical Mongo `market_prices_eod` corpus, which otherwise
-    # only ever moved via operator-run backfill scripts. Runs after the Postgres
-    # daily sync + nightly backfill so upstream is warm. Bounded rolling window
-    # keeps it cheap; idempotent upserts keyed on (symbol, tradeDate, source).
+    # Vietcap IQ Daily Sync - 5:15 PM VNT (10:15 AM UTC)
+    # Refreshes listings, bounded recent EOD, and the oldest 50 stock financial
+    # symbols. Writes source envelopes plus admitted PostgreSQL observations.
+    # Free VCI EOD is supplementary; primary failures remain failed outcomes.
+    # Existing natural keys and archived source records remain intact.
     # =========================================================================
     async def guarded_mongo_eod_sync():
         from vnibb.services.mongo_eod_sync import run_mongo_eod_sync
 
         async def sync_and_check_outcome():
             summary = await run_mongo_eod_sync()
-            if summary["failures"]:
-                raise RuntimeError(f"Mongo EOD sync completed with {summary['failures']} failed symbols")
+            if summary["failures"] or summary.get("primary_failures", 0):
+                raise RuntimeError(
+                    f"Mongo IQ sync completed with {summary['failures']} failures and "
+                    f"{summary.get('primary_failures', 0)} unavailable primary EOD requests"
+                )
 
         await _run_guarded_job(
             "mongo_eod_sync",
@@ -514,7 +517,7 @@ def configure_scheduler():
         guarded_mongo_eod_sync,
         trigger=CronTrigger(hour=10, minute=15, timezone="UTC"),
         id="mongo_eod_sync",
-        name="Mongo EOD Daily Sync",
+        name="Mongo Vietcap IQ Daily Sync",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

@@ -27,6 +27,7 @@ from sqlalchemy import select, func, text
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, get_db
 from vnibb.core.price_units import persisted_price_record, screener_price_record
+from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
@@ -49,7 +50,7 @@ from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.sector_service import SectorService
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
-from vnibb.providers.vnstock import get_vnstock
+from vnibb.providers.vnstock import get_stock
 from vnibb.api.v1.market_heatmap import (
     HeatmapGroupBuilder,
     HeatmapGroupConfig,
@@ -400,7 +401,6 @@ RSS_FEED_URLS: dict[str, list[str]] = {
     "vnexpress": ["https://vnexpress.net/rss/kinh-doanh/chung-khoan.rss"],
 }
 
-WORLD_INDEX_POINT_TIMEOUT_SECONDS = 5
 WORLD_INDEX_FALLBACK_TIMEOUT_SECONDS = 5
 HEATMAP_FETCH_TIMEOUT_SECONDS = 20
 TOP_MOVER_TYPES = {"gainer", "loser", "volume", "value"}
@@ -609,8 +609,7 @@ def _compute_money_flow_metrics(
 
 async def _fetch_benchmark_history_from_provider(start_date: date, end_date: date) -> pd.DataFrame:
     def _load_history() -> pd.DataFrame:
-        stock_manager = get_vnstock()
-        stock = stock_manager.stock(symbol="VNINDEX", source=settings.vnstock_source)
+        stock = get_stock("VNINDEX")
         history = stock.quote.history(
             start=start_date.strftime("%Y-%m-%d"),
             end=end_date.strftime("%Y-%m-%d"),
@@ -991,14 +990,6 @@ def _to_float(value: Any) -> Optional[float]:
         return parsed if np.isfinite(parsed) else None
     except ValueError:
         return None
-
-
-def _extract_close_from_row(row: dict[str, Any]) -> Optional[float]:
-    for key in ("close", "Close", "value", "price", "last"):
-        parsed = _to_float(row.get(key))
-        if parsed is not None:
-            return parsed
-    return None
 
 
 def _first_non_none(*values: Any) -> Any:
@@ -1568,6 +1559,8 @@ async def _load_latest_ratio_metrics(symbols: List[str]) -> Dict[str, dict[str, 
                 FinancialRatio.debt_to_equity.label("debt_to_equity"),
                 FinancialRatio.revenue_growth.label("revenue_growth"),
                 FinancialRatio.earnings_growth.label("earnings_growth"),
+                FinancialRatio.raw_data.label("raw_data"),
+                FinancialRatio.source.label("source"),
                 func.row_number()
                 .over(
                     partition_by=FinancialRatio.symbol,
@@ -1594,12 +1587,12 @@ async def _load_latest_ratio_metrics(symbols: List[str]) -> Dict[str, dict[str, 
             "pe_ratio": _to_float(row.get("pe_ratio")),
             "pb_ratio": _to_float(row.get("pb_ratio")),
             "ps_ratio": _to_float(row.get("ps_ratio")),
-            "roe": _to_float(row.get("roe")),
-            "roa": _to_float(row.get("roa")),
-            "roic": _to_float(row.get("roic")),
+            "roe": _to_float(admitted_ratio_value(row.get("roe"), "roe", ratio_units=(row.get("raw_data") or {}).get("ratio_units"), source=row.get("source"))),
+            "roa": _to_float(admitted_ratio_value(row.get("roa"), "roa", ratio_units=(row.get("raw_data") or {}).get("ratio_units"), source=row.get("source"))),
+            "roic": _to_float(admitted_ratio_value(row.get("roic"), "roic", ratio_units=(row.get("raw_data") or {}).get("ratio_units"), source=row.get("source"))),
             "debt_to_equity": _to_float(row.get("debt_to_equity")),
-            "revenue_growth": _to_float(row.get("revenue_growth")),
-            "earnings_growth": _to_float(row.get("earnings_growth")),
+            "revenue_growth": _to_float(admitted_ratio_value(row.get("revenue_growth"), "revenue_growth", ratio_units=(row.get("raw_data") or {}).get("ratio_units"), source=row.get("source"))),
+            "earnings_growth": _to_float(admitted_ratio_value(row.get("earnings_growth"), "earnings_growth", ratio_units=(row.get("raw_data") or {}).get("ratio_units"), source=row.get("source"))),
         }
         for row in rows
     }
@@ -2286,52 +2279,6 @@ def _clean_rss_description(raw_description: Optional[str]) -> Optional[str]:
         return None
 
     return plain_text[:280]
-
-
-async def _fetch_world_index_point(symbol: str, name: str) -> Optional[dict[str, Any]]:
-    def _sync_fetch() -> Optional[dict[str, Any]]:
-        vn = get_vnstock()
-        idx = vn.world_index(symbol=symbol, source="MSN")
-        end_date = date.today()
-        start_date = end_date - timedelta(days=14)
-        frame = idx.quote.history(
-            start=start_date.isoformat(), end=end_date.isoformat(), interval="1D"
-        )
-        if frame is None or len(frame.index) == 0:
-            return None
-
-        rows = frame.to_dict(orient="records")
-        if not rows:
-            return None
-
-        latest = rows[-1]
-        latest_value = _extract_close_from_row(latest)
-        if latest_value is None:
-            return None
-
-        previous_value: Optional[float] = None
-        if len(rows) > 1:
-            previous_value = _extract_close_from_row(rows[-2])
-
-        change = latest_value - previous_value if previous_value is not None else 0.0
-        change_pct = (change / previous_value * 100.0) if previous_value not in (None, 0) else 0.0
-
-        return {
-            "symbol": symbol,
-            "name": name,
-            "value": latest_value,
-            "change": change,
-            "change_pct": change_pct,
-            "updated_at": latest.get("time") or latest.get("date"),
-        }
-
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_sync_fetch), timeout=WORLD_INDEX_POINT_TIMEOUT_SECONDS
-        )
-    except Exception as e:
-        logger.debug(f"World index fetch failed for {symbol}: {e}")
-        return None
 
 
 @router.get(
@@ -3055,7 +3002,7 @@ async def get_earnings_season(
 
 
 @router.get("/industry-bubble", response_model=IndustryBubbleResponse)
-@cached(ttl=300, key_prefix="industry_bubble")
+@cached(ttl=300, key_prefix="industry_bubble_v2_certified")
 async def get_industry_bubble(
     symbol: str = Query(..., description="Reference symbol used to determine sector"),
     x_metric: str = Query(
@@ -3888,30 +3835,12 @@ async def get_market_sector_performance(
 @router.get("/world-indices", response_model=WorldIndicesResponse)
 @cached(ttl=300, key_prefix="world_indices")
 async def get_world_indices(limit: int = Query(default=8, ge=1, le=16)) -> WorldIndicesResponse:
-    symbols: list[tuple[str, str]] = [
-        ("DJI", "Dow Jones"),
-        ("SPX", "S&P 500"),
-        ("IXIC", "NASDAQ"),
-        ("N225", "Nikkei 225"),
-        ("HSI", "Hang Seng"),
-        ("FTSE", "FTSE 100"),
-        ("GDAXI", "DAX"),
-        ("STOXX50E", "Euro Stoxx 50"),
-    ]
-
     try:
         yahoo_rows = await _fetch_yahoo_world_indices(limit)
         if yahoo_rows:
             return WorldIndicesResponse(
                 count=len(yahoo_rows), data=yahoo_rows, source="yahoo_finance:world_indices"
             )
-
-        tasks = [_fetch_world_index_point(symbol, name) for symbol, name in symbols[:limit]]
-        fetched = await asyncio.gather(*tasks)
-        rows = [item for item in fetched if item is not None]
-
-        if rows:
-            return WorldIndicesResponse(count=len(rows), data=rows, source="vnstock:world_index")
 
         vn_indices = await asyncio.wait_for(
             VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from vnibb.core.exceptions import ProviderError
 from vnibb.core.price_units import PriceUnit, history_price_records
+from vnibb.providers.vnstock.runtime import validate_source
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class VnstockStockQuoteFetcher:
     @staticmethod
     async def fetch(
         symbol: str,
-        source: str = "KBS",
+        source: str = "VCI",
         use_cache: bool = True,
     ) -> tuple[StockQuoteData, bool]:
         """
@@ -127,13 +128,14 @@ class VnstockStockQuoteFetcher:
         
         Args:
             symbol: Stock ticker symbol (e.g., 'VNM', 'FPT')
-            source: Data source (KBS default)
+            source: Free VCI data source
             use_cache: Whether to use 30-second cache
         
         Returns:
             Tuple of (StockQuoteData, is_cached: bool)
         """
 
+        source = validate_source(source)
         symbol = symbol.upper().strip()
         cache_key = f"{source.upper()}:{symbol}"
         

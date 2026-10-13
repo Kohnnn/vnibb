@@ -1,33 +1,38 @@
-"""Runtime helpers for preferring VNStock sponsor packages."""
+"""Runtime helpers for the free VNStock VCI provider."""
 
 from __future__ import annotations
 
 import asyncio
-import logging
+import os
+import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from importlib.util import find_spec
 from threading import Lock
 from typing import Any
 
-logger = logging.getLogger(__name__)
+
+def validate_free_runtime() -> None:
+    """Fail before VNAI can authenticate a discovered paid runtime package."""
+    paid_modules = ("vnstock_data", "vnstock_ta", "vnstock_pipeline", "vnstock_news", "vnii")
+    present = [name for name in paid_modules if name in sys.modules or find_spec(name) is not None]
+    if present:
+        raise RuntimeError(
+            f"Free runtime contains forbidden paid modules: {','.join(present)}. "
+            "Use a clean community environment or rebuild the credential-free image "
+            "without historical premium runtime mounts."
+        )
 
 
 def import_vnstock_symbol(name: str) -> tuple[Any, str]:
-    """Return a vnstock symbol, preferring sponsor `vnstock_data`."""
-    try:
-        module = __import__("vnstock_data", fromlist=[name])
-        symbol = getattr(module, name)
-        logger.debug("Using vnstock_data.%s", name)
-        return symbol, "vnstock_data"
-    except Exception as sponsor_error:
-        module = __import__("vnstock", fromlist=[name])
-        symbol = getattr(module, name)
-        logger.warning(
-            "Falling back to free vnstock.%s because vnstock_data import failed: %s",
-            name,
-            sponsor_error,
-        )
-        return symbol, "vnstock"
+    """Validate the free VCI policy before community import can authenticate VNAI."""
+    tier = os.getenv("VNSTOCK_RUNTIME_TIER", "free").strip().lower()
+    if tier != "free":
+        raise ValueError("VNSTOCK_RUNTIME_TIER must be 'free'; paid runtimes are disabled")
+    validate_source(os.getenv("VNSTOCK_SOURCE", "VCI"))
+    validate_free_runtime()
+    module = __import__("vnstock", fromlist=[name])
+    return getattr(module, name), "vnstock"
 
 
 def get_vnstock_class():
@@ -47,34 +52,25 @@ def get_quote_class():
 
 
 def get_finance_class():
-    try:
-        module = __import__("vnstock_data", fromlist=["Finance", "Fundamental"])
-    except ImportError:
-        return import_vnstock_symbol("Finance")[0]
-    finance = getattr(module, "Finance", None)
-    if finance is not None:
-        return finance
-    fundamental = module.Fundamental
-    import inspect
-    supports_constructor_source = "source" in inspect.signature(fundamental).parameters
-    supports_equity_source = "source" in inspect.signature(fundamental.equity).parameters
-
-    def create_finance(symbol: str, source: str, period: str = "year"):
-        layer = fundamental(**({"source": source} if supports_constructor_source else {}))
-        return layer.equity(symbol, **({"source": source} if supports_equity_source else {}))
-
-    create_finance.supports_source = supports_constructor_source or supports_equity_source
-    return create_finance
+    return import_vnstock_symbol("Finance")[0]
 
 
 def get_company_class():
     return import_vnstock_symbol("Company")[0]
 
 
+def validate_source(source: str | None = None) -> str:
+    """Reject alternate providers before constructing a vnstock client."""
+    normalized = (source or "VCI").strip().upper()
+    if normalized != "VCI":
+        raise ValueError(f"Unsupported vnstock source '{source}'; only free VCI is enabled")
+    return normalized
+
+
 def create_finance(symbol: str, source: str, period: str):
     import inspect
     factory = get_finance_class()
-    kwargs = {"symbol": symbol, "source": source}
+    kwargs = {"symbol": symbol, "source": validate_source(source)}
     parameters = inspect.signature(factory).parameters
     if "period" in parameters or any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
         kwargs["period"] = period

@@ -40,7 +40,7 @@ async def compare_stocks(
         pattern=r"^(1M|3M|6M|1Y|YTD|ALL)$",
         description="Time period for price performance normalization",
     ),
-    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|MSN|FMP)$", description="Data source"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
 ) -> ComparisonResponse:
     """
     Compare multiple stocks side by side.

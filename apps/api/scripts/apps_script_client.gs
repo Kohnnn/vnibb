@@ -26,7 +26,7 @@
  *        -> [ {flat statement row per period}, ... ]   (PRIMARY)
  *   GET /ratios/{symbol}?period=year|quarter
  *        -> [ {one flat row of ~84 metrics} ]
- *   GET /screener?exchange=HOSE|HNX|UPCOM|ALL&industry=&limit=1..2000&source=KBS
+ *   GET /screener?exchange=HOSE|HNX|UPCOM|ALL&industry=&limit=1..2000&source=VCI
  *        -> [ {flat row of 84 metrics per ticker}, ... ]
  *   GET /historical/{symbol}?start_date=YYYY-MM-DD (REQUIRED)
  *                           &end_date=YYYY-MM-DD&interval=1D|1W|1M
@@ -467,6 +467,14 @@ function assertConfig_() {
   }
 }
 
+function validateSource_(source) {
+  var normalized = String(source || 'VCI').trim().toUpperCase();
+  if (normalized !== 'VCI') {
+    throw new Error('Unsupported vnstock source "' + source + '"; only free VCI is enabled.');
+  }
+  return normalized;
+}
+
 /**
  * Perform a GET against the VNIBB Apps Script API with retry + backoff.
  *
@@ -485,7 +493,10 @@ function fetchVnibb(endpoint, params) {
 
   var queryString = Object.keys(params || {})
     .filter(function (k) { return params[k] !== null && params[k] !== undefined && params[k] !== ''; })
-    .map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); })
+    .map(function (k) {
+      var value = k === 'source' ? validateSource_(params[k]) : params[k];
+      return encodeURIComponent(k) + '=' + encodeURIComponent(value);
+    })
     .join('&');
 
   var url = CONFIG.baseUrl + endpoint + (queryString ? '?' + queryString : '');
@@ -692,7 +703,7 @@ function pullRatios(symbol, period) {
  * @param {string=} exchange 'HOSE' | 'HNX' | 'UPCOM' | 'ALL' (default 'HOSE').
  * @param {number=} limit    Max rows, 1-2000 (default 200).
  * @param {string=} industry Optional industry filter.
- * @param {string=} source   Data source (default 'KBS').
+ * @param {string=} source   Data source ('VCI' only; default 'VCI').
  */
 function pullScreener(exchange, limit, industry, source) {
   exchange = exchange || 'HOSE';
@@ -702,7 +713,7 @@ function pullScreener(exchange, limit, industry, source) {
     exchange: exchange,
     limit: limit,
     industry: industry || null,
-    source: source || 'KBS',
+    source: source || 'VCI',
   });
 
   if (!Array.isArray(data) || data.length === 0) {
@@ -762,7 +773,7 @@ function pullHistorical(symbol, startDate, endDate, interval) {
  * Fetch a live quote for one ticker. Logs it; returns the quote object.
  *
  * @param {string} symbol   Ticker, e.g. 'VNM'.
- * @param {string=} source  Quote source (default 'VCI').
+ * @param {string=} source  Quote source ('VCI' only; default 'VCI').
  * @returns {Object}        The quote object (result.data).
  */
 function pullQuote(symbol, source) {
@@ -1113,7 +1124,7 @@ function pullBoundedFinancials(symbol, statementType, period, limit) {
  * @param {string=} exchange
  * @param {number=} limit
  * @param {string=} industry
- * @param {string=} source
+ * @param {string=} source Data source ('VCI' only; default 'VCI').
  * @returns {Array<Object>}
  */
 function pullBoundedScreener(exchange, limit, industry, source) {
@@ -1123,7 +1134,7 @@ function pullBoundedScreener(exchange, limit, industry, source) {
     exchange: exchange,
     limit: limit,
     industry: industry || null,
-    source: source || 'KBS',
+    source: source || 'VCI',
   });
   var result = readBoundedEnvelope_(envelope);
   logBoundedResult_('Screener ' + exchange, result);

@@ -18,20 +18,6 @@ from vnibb.core.exceptions import ProviderError
 logger = logging.getLogger(__name__)
 
 
-def _patch_kbs_company_client() -> Optional[type]:
-    try:
-        from vnstock_data.core.utils.client import ProxyConfig as DataProxyConfig
-        from vnstock_data.core.utils.client import send_request as data_send_request
-        import vnstock_data.explorer.kbs.company as kbs_company
-
-        if kbs_company.send_request is not data_send_request:
-            kbs_company.send_request = data_send_request
-        return DataProxyConfig
-    except Exception as exc:
-        logger.debug(f"KBS company client patch failed: {exc}")
-        return None
-
-
 def _truncate(value: object, limit: int) -> Optional[str]:
     if value is None:
         return None
@@ -111,51 +97,14 @@ class VnstockInsiderDealsFetcher:
         """
         try:
             def _fetch():
-                try:
-                    from vnstock_data.api.company import Company
+                from vnibb.providers.vnstock.runtime import get_company_class, validate_source
 
-                    try:
-                        company = Company(source="VCI", symbol=symbol.upper())
-                        df = company.insider_trading(page=1, page_size=limit)
-                        if df is not None and len(df) > 0:
-                            return df.to_dict(orient="records")
-                    except Exception as e:
-                        logger.debug(f"VCI insider trading failed for {symbol}: {e}")
-
-                    try:
-                        company = Company(source="KBS", symbol=symbol.upper())
-                        proxy_config_cls = _patch_kbs_company_client()
-                        if proxy_config_cls is not None:
-                            company._provider.proxy_config = proxy_config_cls()
-                        df = company.insider_trading(page=1, page_size=limit)
-                        if df is not None and len(df) > 0:
-                            return df.to_dict(orient="records")
-                    except Exception as e:
-                        logger.debug(f"KBS insider trading failed for {symbol}: {e}")
-                except Exception as e:
-                    logger.debug(f"vnstock_data insider trading failed for {symbol}: {e}")
-
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
-
-                Vnstock = get_vnstock_class()
-
-                def _fetch_source(source: str):
-                    stock = Vnstock().stock(symbol=symbol.upper(), source=source)
-                    if not hasattr(stock.company, "insider_deals"):
-                        raise AttributeError("insider_deals not supported")
-                    df = stock.company.insider_deals()
-                    if df is not None and len(df) > 0:
-                        return df.head(limit).to_dict(orient="records")
-                    return []
-
-                source = settings.vnstock_source
-                try:
-                    records = _fetch_source(source)
-                    if records:
-                        return records
-                except Exception as e:
-                    logger.debug(f"{source} insider_deals failed for {symbol}: {e}")
-
+                company = get_company_class()(symbol=symbol.upper(), source=validate_source(settings.vnstock_source))
+                if not hasattr(company, "insider_deals"):
+                    raise AttributeError("Insider deals are unavailable in free VCI")
+                df = company.insider_deals()
+                if df is not None and len(df) > 0:
+                    return df.head(limit).to_dict(orient="records")
                 return []
             
             loop = asyncio.get_event_loop()

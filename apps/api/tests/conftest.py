@@ -36,10 +36,6 @@ def postgres_contract_database_url(environ: dict[str, str] | None = None) -> str
 
 mock_vnstock = MagicMock()
 sys.modules["vnstock"] = mock_vnstock
-sys.modules["vnstock_pipeline"] = MagicMock()
-sys.modules["vnstock_data"] = MagicMock()
-sys.modules["vnstock_ta"] = MagicMock()
-sys.modules["vnstock_news"] = MagicMock()
 
 os.environ["ENVIRONMENT"] = "test"
 if POSTGRES_CONTRACT:
@@ -51,6 +47,8 @@ os.environ["REDIS_HOST"] = ""
 os.environ["REDIS_PORT"] = "0"
 os.environ["SENTRY_DSN"] = ""
 os.environ["VNSTOCK_API_KEY"] = "mock_key"
+os.environ["VNSTOCK_SOURCE"] = "VCI"
+os.environ["VNSTOCK_RUNTIME_TIER"] = "free"
 os.environ["OPENROUTER_API_KEY"] = "mock_openrouter_key"
 os.environ["GEMINI_API_KEY"] = "mock_key"
 os.environ["OPENAI_API_KEY"] = "mock_key"

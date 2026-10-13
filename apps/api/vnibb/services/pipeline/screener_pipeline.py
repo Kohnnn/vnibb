@@ -88,10 +88,10 @@ class ScreenerPipeline(BasePipeline):
         sync_id: Optional[int] = None,
     ) -> int:
         """Sync comprehensive metrics for stocks using vnstock finance.ratio."""
-        from vnibb.providers.vnstock.runtime import get_listing_class, get_vnstock_class
+        from vnibb.providers.vnstock.runtime import create_finance, finance_method_kwargs, validate_source
+        from vnibb.core.ratio_units import ratio_method_kwargs
 
-        Listing = get_listing_class()
-        Vnstock = get_vnstock_class()
+        source = validate_source(settings.vnstock_source)
 
         logger.info("Syncing screener data...")
         loop = asyncio.get_running_loop()
@@ -159,9 +159,10 @@ class ScreenerPipeline(BasePipeline):
                 await self._wait_for_rate_limit("screener")
 
                 def _fetch_sync():
-                    vnstock = Vnstock()
+                    finance = create_finance(symbol, source, "year")
                     try:
-                        df = vnstock.finance.ratios(symbol=symbol)
+                        method = finance.ratio
+                        df = method(**ratio_method_kwargs(method, finance_method_kwargs(method, "year")))
                         return df
                     except Exception as e:
                         logger.debug(f"Ratio fetch failed for {symbol}: {e}")
@@ -226,7 +227,7 @@ class ScreenerPipeline(BasePipeline):
                             "eps": self._parse_float(row.get("eps")),
                             "bvps": self._parse_float(row.get("bvps")),
                             "extended_metrics": extended_metrics,
-                            "source": settings.vnstock_source or "KBS",
+                            "source": settings.vnstock_source or "VCI",
                             "created_at": date.today(),
                         }
                         values = normalize_screener_record({

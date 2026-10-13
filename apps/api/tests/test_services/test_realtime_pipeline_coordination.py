@@ -1,5 +1,7 @@
 import asyncio
+import sys
 from datetime import datetime
+from types import ModuleType
 from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
 
@@ -51,8 +53,6 @@ async def test_realtime_lease_prevents_contention_and_releases_only_after_stop(m
     monkeypatch.setattr(realtime_pipeline, "is_vietnam_market_open", lambda: True)
     first = realtime_pipeline.RealtimePipeline()
     second = realtime_pipeline.RealtimePipeline()
-    first._pipeline_available = False
-    second._pipeline_available = False
 
     async def hold(_symbols):
         while first.is_running:
@@ -77,7 +77,6 @@ async def test_failed_stream_start_releases_its_lease(monkeypatch):
     monkeypatch.setattr(realtime_pipeline, "DistributedJobLock", FakeLease)
     monkeypatch.setattr(realtime_pipeline, "is_vietnam_market_open", lambda: True)
     pipeline = realtime_pipeline.RealtimePipeline()
-    pipeline._pipeline_available = False
 
     async def fail(_symbols):
         raise RuntimeError("stream unavailable")
@@ -95,7 +94,6 @@ async def test_failed_stream_start_releases_its_lease(monkeypatch):
 async def test_automatic_session_end_stops_stream_and_releases_lease(monkeypatch):
     original_sleep = asyncio.sleep
     market_open = True
-    client = Mock()
 
     async def sleep(seconds):
         nonlocal market_open
@@ -111,8 +109,6 @@ async def test_automatic_session_end_stops_stream_and_releases_lease(monkeypatch
     monkeypatch.setattr(realtime_pipeline, "is_vietnam_market_open", lambda: market_open)
     monkeypatch.setattr(realtime_pipeline.asyncio, "sleep", sleep)
     pipeline = realtime_pipeline.RealtimePipeline()
-    pipeline._pipeline_available = False
-    pipeline._stream_client = client
     monkeypatch.setattr(pipeline, "_polling_fallback", hold)
 
     assert await pipeline.start_streaming()
@@ -124,8 +120,6 @@ async def test_automatic_session_end_stops_stream_and_releases_lease(monkeypatch
 
     assert not pipeline.is_running
     assert pipeline._task.done()
-    client.stop.assert_called_once()
-    assert pipeline._stream_client is None
     assert pipeline._lease is None
     assert pipeline._lease_renewal_task is None
     assert renewal_task.done()
@@ -242,7 +236,7 @@ async def test_manual_start_is_noop_outside_active_session(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fallback_waits_without_polling_outside_active_session(monkeypatch):
+async def test_polling_waits_without_provider_calls_outside_active_session(monkeypatch):
     from vnibb.providers.vnstock import runtime
 
     pipeline = realtime_pipeline.RealtimePipeline()
@@ -292,3 +286,79 @@ async def test_scheduler_shutdown_does_not_wait_after_realtime_cleanup_failure(m
     assert not await scheduler.shutdown_scheduler()
     pipeline.stop_streaming.assert_awaited_once()
     scheduler_instance.shutdown.assert_called_once_with(wait=False)
+
+
+@pytest.mark.asyncio
+async def test_installed_paid_pipeline_is_never_selected(monkeypatch):
+    module = ModuleType("vnstock_pipeline")
+    websocket = ModuleType("vnstock_pipeline.wss")
+    websocket.MarketStreamClient = Mock(side_effect=AssertionError("Paid WebSocket executed"))
+    monkeypatch.setitem(sys.modules, "vnstock_pipeline", module)
+    monkeypatch.setitem(sys.modules, "vnstock_pipeline.wss", websocket)
+    pipeline = realtime_pipeline.RealtimePipeline()
+    poll = AsyncMock()
+    monkeypatch.setattr(pipeline, "_polling_fallback", poll)
+
+    await pipeline._run_stream(["FPT"])
+
+    assert pipeline.get_status()["pipeline_available"] is False
+    poll.assert_awaited_once_with(["FPT"])
+    websocket.MarketStreamClient.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_realtime_api_reports_only_stock_price_polling(monkeypatch):
+    pipeline = realtime_pipeline.RealtimePipeline()
+    start = AsyncMock(return_value=True)
+    monkeypatch.setattr(pipeline, "start_streaming", start)
+    monkeypatch.setattr(realtime_api, "get_realtime_pipeline", lambda: pipeline)
+    monkeypatch.setattr(realtime_api, "is_vietnam_market_open", lambda: True)
+
+    response = await realtime_api.start_streaming(
+        realtime_api.StreamingRequest(data_types=["stockps", "index", "board"])
+    )
+
+    assert response.is_running
+    assert response.pipeline_available is False
+    assert response.data_types == ["stockps"]
+    assert response.message == "Stock price polling started"
+
+
+@pytest.mark.asyncio
+async def test_realtime_api_declares_premium_only_data_types_unavailable(monkeypatch):
+    pipeline = realtime_pipeline.RealtimePipeline()
+    start = AsyncMock()
+    monkeypatch.setattr(pipeline, "start_streaming", start)
+    monkeypatch.setattr(realtime_api, "get_realtime_pipeline", lambda: pipeline)
+    monkeypatch.setattr(realtime_api, "is_vietnam_market_open", lambda: True)
+
+    response = await realtime_api.start_streaming(
+        realtime_api.StreamingRequest(data_types=["index", "board"])
+    )
+
+    assert not response.is_running
+    assert response.data_types == []
+    assert "unavailable" in response.message
+    start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stock_price_polling_uses_free_vci_source(monkeypatch):
+    from vnibb.providers.vnstock import runtime
+
+    pipeline = realtime_pipeline.RealtimePipeline()
+    pipeline.is_running = True
+    trading = Mock()
+    trading.price_board.return_value = None
+    factory = Mock(return_value=trading)
+    sleep = AsyncMock(side_effect=lambda _: setattr(pipeline, "is_running", False))
+    monkeypatch.setattr(settings, "vnstock_source", "VCI")
+    monkeypatch.setattr(runtime, "get_trading_class", lambda: factory)
+    monkeypatch.setattr(realtime_pipeline, "is_vietnam_market_open", lambda: True)
+    monkeypatch.setattr(realtime_pipeline.asyncio, "sleep", sleep)
+
+    await pipeline._polling_fallback(["FPT"])
+
+    factory.assert_called_once_with(source="VCI")
+    trading.price_board.assert_called_once_with(symbols_list=["FPT"])
+    sleep.assert_awaited_once_with(5)

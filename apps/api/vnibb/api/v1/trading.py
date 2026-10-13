@@ -73,9 +73,9 @@ async def get_price_board(
         examples=["VNM,FPT,VIC"],
     ),
     source: str = Query(
-        default="KBS",
-        pattern=r"^(KBS|VCI|MSN|FMP)$",
-        description="Data source: KBS (default), VCI, or DNSE",
+        default="VCI",
+        pattern=r"^VCI$",
+        description="Data source: VCI",
     ),
 ) -> PriceBoardResponse:
     """Fetch real-time price board for multiple symbols. Cached for 1 minute."""
@@ -203,9 +203,9 @@ async def get_sector_top_movers(
         description="Max stocks per sector",
     ),
     source: str = Query(
-        default="KBS",
-        pattern=r"^(KBS|VCI|MSN|FMP)$",
-        description="Data source: KBS (default), VCI, or DNSE",
+        default="VCI",
+        pattern=r"^VCI$",
+        description="Data source: VCI",
     ),
 ) -> SectorTopMoversResponse:
     """Fetch top movers grouped by sector. Cached for 1 minute."""
@@ -322,9 +322,9 @@ class SectorPerformanceResponse(BaseModel):
 )
 async def get_all_sector_performance(
     source: str = Query(
-        default="KBS",
-        pattern=r"^(KBS|VCI|MSN|FMP)$",
-        description="Data source: KBS (default), VCI, or DNSE",
+        default="VCI",
+        pattern=r"^VCI$",
+        description="Data source: VCI",
     ),
     include_empty: bool = Query(
         default=False,

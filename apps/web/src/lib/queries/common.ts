@@ -14,7 +14,7 @@ export function useVnstockSource(): VnstockSource {
         const { preferredVnstockSource } = useDataSources();
         return preferredVnstockSource;
     } catch {
-        return 'KBS';
+        return 'VCI';
     }
 }
 

@@ -1,5 +1,41 @@
 # Oracle Runbook
 
+## Database recovery and local startup
+
+Inspect the existing production host before changing anything: `hostname`, `df -h`, `docker ps -a` and the mounts on `vnibb-db`, `vnibb-mongo`, `vnibb-redis`. If these are the verified serving containers and are stopped, `docker start vnibb-db vnibb-mongo vnibb-redis` preserves their volumes. Do not create replacement stores, run `down -v`, overwrite credentials, or enable the scheduler before provider routing and database health are verified. SSH approval does not connect an unauthenticated workstation: `tailscale status` must show a running tailnet connection before MagicDNS/SSH can work.
+
+For a separate local development database, create a private environment file outside the repository (mode `0600`) with unique `LOCAL_POSTGRES_PASSWORD` and `LOCAL_MONGO_PASSWORD`. Configure the backend with:
+
+```dotenv
+ENVIRONMENT=development
+DEBUG=true
+DATABASE_URL=postgresql+asyncpg://vnibb:<local-password>@127.0.0.1:55432/vnibb
+DATABASE_URL_SYNC=postgresql+psycopg2://vnibb:<local-password>@127.0.0.1:55432/vnibb
+MONGODB_URL=mongodb://vnibb:<local-password>@127.0.0.1:57017/?authSource=admin
+MONGODB_DATABASE=vnibb-market
+MONGODB_ENABLED=true
+VNSTOCK_RUNTIME_TIER=free
+VNSTOCK_SOURCE=VCI
+CACHE_BACKEND=memory
+REDIS_URL=
+SKIP_SCHEDULER_STARTUP=true
+```
+
+```bash
+docker compose --project-name vnibb-local-data --env-file /private/data.local.env \
+  -f docker-compose.data.local.yml up -d --wait
+# Export backend variables from the private file without printing credentials.
+set -a
+. /private/data.local.env
+set +a
+(cd apps/api && .venv/bin/python -m alembic upgrade head)
+```
+
+Ports bind only to loopback; named volumes survive restarts. This stack is not the production corpus. Local startup on 13 October 2026 passed both container health checks and the complete migration chain to `e5f1a7c9d2b4`; production SSH remained unreachable while the workstation reported `NeedsLogin`.
+
+New Vietnamese ingestion uses Vietcap IQ/Trading as primary and free vnstock VCI as the only fallback. Do not enable historical premium mounts, KBS or TCBS routing. Preserve historical release evidence below; its old premium runtime instructions are not the new provider policy.
+
+
 ## 1. Provision Oracle VM
 
 ### Recommended shape
@@ -78,7 +114,7 @@ Edit `deployment/env.oracle` and set:
 - `VNIBB_MCP_SHARED_BEARER_TOKEN`
 - `MCP_PUBLIC_BIND=127.0.0.1`
 - `MCP_PUBLIC_PORT=8001`
-- `VNSTOCK_RUNTIME_TIER=free` for the default Vietcap-primary/free-VNStock runtime; use `premium` only with a premium-built image and verified license
+- `VNSTOCK_RUNTIME_TIER=free` and `VNSTOCK_SOURCE=VCI`; paid tiers and alternate source routing are rejected
 - `REDIS_URL` if the cache tier remains enabled
 - `MEMORY_CACHE_MAX_ENTRY_BYTES=1048576` or larger if the cache tier is disabled and microstructure payloads must fit memory fallback
 - `SENTRY_DSN`
@@ -143,12 +179,10 @@ the timeout to the constraint was observed.
 
 ### Build and publish the release image
 
-Build outside OCI. The release image is free-compatible when no premium secret is supplied. For a premium image, use BuildKit's secret mount and provide the installer SHA-256 out of band; never pass the API key with `--build-arg`.
+Build the credential-free image outside OCI. The Docker build rejects discoverable sponsor packages, including `vnii`; never reuse historical premium runtime mounts or supply sponsor installer credentials. Existing dated rollout evidence above is historical, not the current build policy.
 
 ```bash
 export IMAGE_RELEASE_REVISION="$(git rev-parse --verify HEAD)"
-export VNSTOCK_API_KEY_FILE=/secure/path/vnstock-api-key
-export VNSTOCK_INSTALLER_SHA256=<verified-installer-sha256>
 bash scripts/oracle/build_release_image.sh registry.example.com/vnibb/api:<release-tag>
 ```
 

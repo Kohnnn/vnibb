@@ -57,7 +57,7 @@ class PriceDepthQueryParams(BaseModel):
     """Query parameters for price depth."""
 
     symbol: str
-    source: str = "KBS"
+    source: str = Field(default="VCI", pattern=r"^VCI$")
 
 
 # =============================================================================
@@ -76,34 +76,28 @@ class VnstockPriceDepthFetcher:
     @staticmethod
     async def fetch(
         symbol: str,
-        source: str = "KBS",
+        source: str = "VCI",
     ) -> PriceDepthData:
         """
         Fetch price depth (order book) for a symbol.
 
         Args:
             symbol: Stock symbol
-            source: Data source (KBS default on vnstock >= 3.5.0)
+            source: Free VCI only
 
         Returns:
             PriceDepthData with bid/ask levels
         """
+        from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
+
+        source = validate_source(source)
         try:
-
             def _fetch():
-                try:
-                    from vnstock_data.api.quote import Quote
-
-                    quote = Quote(source=source.upper(), symbol=symbol.upper())
-                    df = quote.price_depth()
-                    return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
-                except Exception:
-                    from vnibb.providers.vnstock.runtime import get_vnstock_class
-
-                    Vnstock = get_vnstock_class()
-                    stock = Vnstock().stock(symbol=symbol.upper(), source=source.upper())
-                    df = stock.quote.price_depth()
-                    return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
+                quote = get_quote_class()(symbol=symbol.upper(), source=source)
+                if not hasattr(quote, "price_depth"):
+                    raise AttributeError("Price depth is unavailable in free VCI")
+                df = quote.price_depth()
+                return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
 
             loop = asyncio.get_event_loop()
             records = await loop.run_in_executor(None, _fetch)

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.providers.base import BaseFetcher
+from vnibb.core.ratio_units import normalize_ratio_payload, ratio_method_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +174,8 @@ class FinancialRatioData(BaseModel):
     dividend_yield: Optional[float] = None
     payout_ratio: Optional[float] = None
     peg_ratio: Optional[float] = None
+    ratio_units: dict[str, str] = Field(default_factory=dict)
+    provider_evidence: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {
         "json_schema_extra": {
@@ -209,22 +212,15 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 from vnibb.providers.vnstock.runtime import (
                     create_finance,
                     finance_method_kwargs,
-                    get_finance_class,
+                    validate_source,
                 )
 
-                Finance = get_finance_class()
-
-                candidate_sources: list[str] = []
-                for source in ["VCI", settings.vnstock_source, "KBS"]:
-                    if source and source not in candidate_sources:
-                        candidate_sources.append(source)
-                if getattr(Finance, "supports_source", True) is False:
-                    candidate_sources = ["default"]
+                candidate_sources = [validate_source(settings.vnstock_source)]
 
                 def _fetch_rows_for_source(source: str) -> List[dict[str, Any]]:
                     finance = create_finance(query["symbol"], source, query.get("period", "year"))
                     method = finance.ratio
-                    kwargs = finance_method_kwargs(method, query.get("period", "year"))
+                    kwargs = ratio_method_kwargs(method, finance_method_kwargs(method, query.get("period", "year")))
                     df = method(**kwargs)
 
                     if df is None or df.empty:
@@ -261,7 +257,6 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
 
                 best_rows: List[dict[str, Any]] = []
                 best_score = -1
-                best_source: str | None = None
                 last_error: Exception | None = None
 
                 for source in candidate_sources:
@@ -281,15 +276,8 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                     if score > best_score:
                         best_score = score
                         best_rows = rows
-                        best_source = source
 
                 if best_rows:
-                    if best_source and best_source != settings.vnstock_source:
-                        logger.info(
-                            "Using alternate vnstock ratio source for %s: %s",
-                            query["symbol"],
-                            best_source,
-                        )
                     return best_rows
 
                 if last_error is not None:
@@ -313,6 +301,9 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
     ) -> List[FinancialRatioData]:
         if not data:
             return []
+
+        def _canonical_ratio(evidence: list[dict], period_keys: list[Any] | None = None, **payload: Any) -> FinancialRatioData:
+            return FinancialRatioData(**normalize_ratio_payload(payload, evidence, payload.get("period"), period_keys))
 
         def _to_float(value: Any) -> Optional[float]:
             if value is None:
@@ -419,7 +410,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                         receivables_turnover = 365.0 / dso
 
                     results.append(
-                        FinancialRatioData(
+                        _canonical_ratio([row],
                             symbol=params.symbol.upper(),
                             period=period_text,
                             pe=_pick_float(_lookup(lookup, "p_e"), _lookup(lookup, "pe")),
@@ -636,7 +627,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
             results = []
             for period in periods:
                 try:
-                    results.append(FinancialRatioData(**by_period[period]))
+                    results.append(_canonical_ratio(data, [key for key, normalized in period_columns if normalized == period], **by_period[period]))
                 except Exception as e:
                     logger.warning(f"Skipping invalid ratio row: {e}")
             return results
@@ -673,7 +664,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                     continue
 
                 results.append(
-                    FinancialRatioData(
+                    _canonical_ratio([row],
                         symbol=params.symbol.upper(),
                         period=period_value,
                         pe=row.get("priceToEarning") or row.get("pe"),

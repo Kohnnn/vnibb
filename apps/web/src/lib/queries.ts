@@ -28,13 +28,13 @@ export function useHistoricalPrices(
         startDate?: string;
         endDate?: string;
         interval?: string;
-        source?: string;
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
 ) {
     // Get the preferred source from context, but allow override via options
-    let preferredSource: VnstockSource = 'KBS';
+    let preferredSource: VnstockSource = 'VCI';
 
     try {
         const { preferredVnstockSource } = useDataSources();
@@ -433,7 +433,7 @@ export function useScreenerData(options?: {
     target_upside_min?: number;
     industry?: string;
     limit?: number;
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+    source?: 'VCI';
     // Dynamic filters (new)
     filters?: string; // JSON encoded FilterGroup
     sort?: string;    // Multi-sort string: "field:order,field2:order2"
@@ -456,7 +456,7 @@ export function useScreenerData(options?: {
     enabled?: boolean;
 }) {
     // Get the preferred source from context, but allow override via options
-    let preferredSource: VnstockSource = 'KBS';
+    let preferredSource: VnstockSource = 'VCI';
 
     try {
         const { preferredVnstockSource } = useDataSources();
@@ -1235,7 +1235,7 @@ export function useQuantMetrics(
     options?: {
         period?: api.QuantPeriod;
         metrics?: api.QuantMetric[];
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1281,7 +1281,7 @@ export function useGarchVolatility(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1328,7 +1328,7 @@ export function useQuantBacktest(
         slowWindow?: number;
         initialCapital?: number;
         feeBps?: number;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1371,7 +1371,7 @@ export function useQuantSweep(
         objective?: api.QuantSweepRequest['objective'];
         initialCapital?: number;
         feeBps?: number;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1408,7 +1408,7 @@ export function useSeasonalityMatrix(
     options?: {
         granularity?: api.SeasonalityGranularity;
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1432,7 +1432,7 @@ export function useGammaExposure(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1455,7 +1455,7 @@ export function useMomentumProfile(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1493,7 +1493,7 @@ export function usePairDiagnostics(
     other: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1526,7 +1526,7 @@ export function useMarketStructureTests(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }

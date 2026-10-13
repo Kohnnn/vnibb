@@ -44,6 +44,14 @@ class BalanceSheetData(BaseModel):
     cash: Optional[float] = None
     inventory: Optional[float] = None
     receivables: Optional[float] = None
+    source: str | None = None
+    raw_data: dict[str, Any] | None = None
+    fiscal_year: int | None = None
+    fiscal_quarter: int | None = None
+    unit_metadata: dict[str, Any] = Field(default_factory=dict)
+    value_unit: str | None = None
+    flow_basis: str | None = None
+    consolidation_basis: str | None = None
     
     model_config = {
         "json_schema_extra": {
@@ -76,10 +84,10 @@ class VnstockBalanceSheetFetcher(BaseFetcher[BalanceSheetQueryParams, BalanceShe
         
         def _fetch_sync() -> List[dict]:
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
 
                 Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
+                stock = Vnstock().stock(symbol=query["symbol"], source=validate_source(settings.vnstock_source))
                 df = stock.finance.balance_sheet(period=query.get("period", "year"), lang="en")
                 
                 if df is None or df.empty:

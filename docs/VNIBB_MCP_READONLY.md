@@ -19,7 +19,7 @@ This branch intentionally ships a safer first step:
 VNIBB already has two useful but different MCP-adjacent data surfaces:
 
 - the VNIBB API/backend, which normalizes and serves the Postgres app model
-- the private MongoDB analytical corpus, which holds the vnstock premium records
+- the private MongoDB analytical corpus, which holds Vietcap IQ structured/raw evidence and historical records
 
 This server sits between those two ideas.
 
@@ -68,7 +68,7 @@ Postgres-table-backed (curated VNIBB app tables):
 - `get_corporate_timeline`
 - `query_database_collection`
 
-Analytical-corpus-backed (vnstock premium analytical corpus):
+Analytical-corpus-backed (database reads only, never provider execution):
 
 - `get_mongo_status`
 - `list_premium_datasets`
@@ -94,13 +94,20 @@ Design notes:
 
 ## Analytical data source
 
-The database-stack tools expose the full vnstock premium corpus stored in the
-privately hosted database stack (`vnibb-market`):
+The analytical tools read the privately hosted database stack (`vnibb-market`):
 
-- `market_prices_eod` - end-of-day OHLCV history (~1.3M rows)
-- `market_vnstock_premium_records` - shared collection holding ~80 datasets,
-  each identified by a `dataset` field (e.g. `finance.ratio`, `company.info`,
-  `equity.foreign_flow`, `macro.gdp`)
+- `market_prices_eod` — persisted end-of-day OHLCV history
+- `market_vnstock_premium_records` — historical collection name, also used for free Vietcap IQ records keyed by `dataset`, `datasetVariant`, and symbol
+
+New ingestion/execution is Vietcap IQ primary plus free `vnstock` VCI only. MCP does not import or execute provider fetchers, install sponsor packages, backfill, or use banned provider fallbacks. Historical non-financial records may remain readable with their actual source and dates; the word `premium` in the legacy tool/collection name is not a runtime subscription requirement. Never describe these records as current without checking source observation dates.
+
+Canonical PostgreSQL financial tools prefer persisted `vietcap` rows, then explicitly identified free VCI rows; ambiguous `vnstock` rows are not source proof. Mongo `finance.*` reads use `source=vietcap`, optional `period_type=year|quarter` maps to the exact dataset variant, and return the lossless source envelope (raw payload, descriptor evidence, company type, source units, fiscal basis, and dates). No IQ rows means empty, not a substitution from old paid data. Database read failures are tool errors, not empty results. `freshness` is deliberately `not_assessed`; `updatedAt` is ingestion time, not proof of current financial data.
+
+Generic PostgreSQL financial queries apply the full admitted-source list (`vietcap`, `VCI`) as SQL `IN`, so both sources remain readable and unsupported sources stay excluded. Generic ratio queries, latest-ratio reads and symbol snapshots require canonical `percent` evidence for percentage metrics, including ROIC and debt/assets. Missing, unknown or fractional unit evidence withholds canonical percentages and returns `unavailable_metrics` reasons with `data_status=partial_unavailable`; other metrics and `raw_data` remain available without modifying stored observations.
+
+The HTTP dividend endpoint retains its PostgreSQL dividend/event fallbacks after a live free VCI provider exception and returns the provider failure in `error` alongside any usable rows. Cancellation propagates rather than being converted into fallback data.
+
+PostgreSQL `StockPrice` has no raw/unit columns. Its stock-only IQ bridge persists `source=vietcap_vnd` only after validating explicit VND source evidence, following the existing `vnstock_vnd` marker convention. MCP returns `price_unit=VND` without rescaling for that exact certified marker. Historical generic `vietcap` rows remain unknown-unit; no numeric-magnitude inference or blanket source admission occurs. Full raw price/unit evidence remains in MongoDB rather than PostgreSQL. Reapply IQ ingestion to upgrade only owned IQ rows; unrelated source rows are not overwritten.
 
 Access is gated by the same settings the backend uses:
 
@@ -110,6 +117,16 @@ MONGODB_DATABASE=vnibb-market
 MONGODB_URL=mongodb://<user>:<pass>@<tailscale-ip>:27017/vnibb-market?authSource=vnibb-market
 MONGODB_TIMEOUT_MS=10000
 ```
+
+Use the same free-only runtime intent for the API, scheduler, and sidecar:
+
+```env
+VNSTOCK_SOURCE=VCI
+VNSTOCK_RUNTIME_TIER=free
+VNSTOCK_RUNTIME_INSTALL=0
+```
+
+The sidecar reads PostgreSQL via `DATABASE_URL` and MongoDB via the settings above. Populate them through the existing IQ ingestion path, not MCP. `/health` reports process/configuration only; `get_database_status` and `get_mongo_status` exercise database connectivity separately from whether a symbol has data.
 
 When the database stack is not configured, the database-stack tools return a clear "not configured"
 status (for `get_mongo_status`) or raise a descriptive error (for data tools)
@@ -381,17 +398,21 @@ If these are ever added later, put them behind a separate admin MCP surface with
 
 ## OCI smoke checks
 
-Use the dedicated smoke script after deploy:
+Run from `vnibb/` against an already running sidecar; this command does not start production:
 
 ```bash
-bash scripts/oracle/mcp_smoke_test.sh
-BASE_URL=https://api.example.com bash scripts/oracle/mcp_smoke_test.sh
+VNIBB_MCP_SHARED_BEARER_TOKEN=... SYMBOL=FPT PERIOD_TYPE=year PYTHON_MODE=host:python3 BASE_URL=http://127.0.0.1:8001 bash scripts/oracle/mcp_smoke_test.sh
+VNIBB_MCP_SHARED_BEARER_TOKEN=... SYMBOL=FPT PERIOD_TYPE=quarter PYTHON_MODE=host:python3 BASE_URL=https://api.example.com bash scripts/oracle/mcp_smoke_test.sh
+# Uses the running container's bearer env when not explicitly supplied:
+ENV_FILE=deployment/env.oracle COMPOSE_FILE=docker-compose.oracle.yml PYTHON_MODE=container SYMBOL=FPT bash scripts/oracle/mcp_smoke_test.sh
 ```
 
-The script verifies:
+The protocol smoke initializes MCP, lists required tools, checks both database statuses, and reads symbol-scoped PostgreSQL prices plus all three structured statements and matching Mongo IQ envelopes. It validates source, explicit units, fiscal scope, numeric financial values, raw payload, descriptors, and company type. Disconnected/unconfigured databases and connected-but-empty IQ data fail with different messages. Health alone is never connectivity proof.
 
-- `/mcp-health` returns `200`
-- `/mcp` is reachable
-- MCP initialization succeeds
-- the server can list tools
-- `get_database_status` executes successfully
+TLS verification is always enabled. For a private CA, set `SSL_CERT_FILE` to the trusted CA bundle (the path must exist in the selected container when using container mode). No TLS bypass is provided. Auto mode chooses a host Python with `mcp`/`httpx`, otherwise a running compose MCP container; compose interpolation always uses `--env-file "$ENV_FILE"`. `MCP_URL`/`HEALTH_URL` override routing; container loopback points to that container, not the caller's host.
+
+Limitations: this is persisted-data acceptance for one symbol and one fiscal basis, not live provider reachability, all-symbol coverage, freshness, ratio completeness, or unit equivalence across datasets. The ratio dataset is probed and reports availability, but completeness is not asserted. IQ may legitimately omit units or a decoded fiscal basis: the writer preserves `unknown` and raw evidence, and smoke fails acceptance for that dataset rather than fabricating scale or labeling cumulative values quarterly. Source-date absence also fails; receipt time cannot substitute. Run both fiscal periods and each target symbol as needed. Focused regressions (not run during edits):
+
+```bash
+python -m pytest apps/api/tests/test_api/test_mcp_server.py apps/api/tests/test_api/test_matrix_mcp.py -q
+```

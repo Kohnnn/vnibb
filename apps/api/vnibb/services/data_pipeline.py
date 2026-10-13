@@ -1,13 +1,14 @@
 """
-Data Pipeline Service - Comprehensive VNStock Integration
+Data Pipeline Service - IQ-first scheduled stock acquisition
 
-Batch data synchronization from ALL vnstock Golden Sponsor APIs.
+Vietcap Trading/IQ supplies stock listings and prices; community VCI supplements outages.
 Uses APScheduler for scheduled jobs.
 Supports both PostgreSQL and SQLite dialects.
 """
 
 import asyncio
 import logging
+import math
 import os
 import re
 from contextvars import ContextVar
@@ -44,7 +45,11 @@ from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, engine
 from vnibb.core.retry import with_retry
 from vnibb.core.price_units import history_price_records, normalize_price_record, persisted_price_record, persisted_price_source, screener_price_record
+from vnibb.core.ratio_units import admitted_ratio_value, normalize_ratio_payload, ratio_method_kwargs
 from vnibb.core.vn_sectors import resolve_sector_name
+from vnibb.providers.vnstock.runtime import validate_source
+from vnibb.services.screener_metadata import screener_metadata_updates
+from vnibb.services.cache_manager import StructuredPersistenceConflict, source_update_condition
 from vnibb.models.alerts import BlockTrade
 from vnibb.models.company import Company, Officer, Shareholder
 from vnibb.models.derivatives import DerivativePrice
@@ -132,6 +137,8 @@ def get_upsert_stmt(
     values,
     preserve_existing_on_null=(),
     preserve_columns_without=(),
+    update_overrides=None,
+    update_condition=None,
 ):
     """Generate a dialect-specific upsert statement."""
     if engine.dialect.name == "postgresql":
@@ -155,7 +162,9 @@ def get_upsert_stmt(
                 else_=incoming,
             )
         update_values[column.name] = incoming
-    return stmt.on_conflict_do_update(index_elements=index_elements, set_=update_values)
+    if update_overrides is not None:
+        update_values.update(update_overrides(stmt))
+    return stmt.on_conflict_do_update(index_elements=index_elements, set_=update_values, where=update_condition)
 
 
 class RateLimiter:
@@ -185,10 +194,10 @@ class DataPipeline:
         )
         self.global_vnstock_limiter = RateLimiter(calls_per_minute=rps_budget * 60)
         self.reinforcement_vnstock_limiter = RateLimiter(calls_per_minute=reinforcement_rps * 60)
-        self._normal_budget_per_minute = 500
+        self._normal_budget_per_minute = int(rps_budget * 60)
         reinforcement_budget = int(reinforcement_rps * 60)
         self._reinforcement_budget_per_minute = (
-            min(50, reinforcement_budget) if reinforcement_budget > 0 else 0
+            reinforcement_budget if reinforcement_budget > 0 else 0
         )
         self._rate_log_window_start = 0.0
         self._rate_log_normal_calls = 0
@@ -210,9 +219,6 @@ class DataPipeline:
         self.rate_limiters = {
             key: RateLimiter(calls_per_minute=value) for key, value in base_limits.items()
         }
-        if settings.vnstock_api_key:
-            os.environ["VNSTOCK_API_KEY"] = settings.vnstock_api_key
-            logger.info("VNStock API key configured (registration handled at startup)")
 
     async def _record_rate_usage(self, mode: str) -> None:
         now = asyncio.get_event_loop().time()
@@ -296,76 +302,110 @@ class DataPipeline:
         interval: str = "1D",
         bypass_internal_retry: bool = False,
     ) -> pd.DataFrame:
+        from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
+
+        source = validate_source(settings.vnstock_source)
         timeout_seconds = max(float(getattr(settings, "vnstock_timeout", 0) or 0), 1.0)
-        # Source fallback chain: try the configured primary first, then walk
-        # through alternates so a single-source provider regression no longer
-        # blocks the whole sync. Some symbols (eg. delisted, warrants) only
-        # ship via specific sources, and KBS / VCI rotate which one is up.
-        configured = (settings.vnstock_source or "KBS").upper()
-        fallback_sources = [configured]
-        for alt in ("KBS", "VCI"):
-            if alt not in fallback_sources:
-                fallback_sources.append(alt)
 
-        last_error: Optional[Exception] = None
-        for source in fallback_sources:
-            def _fetch_sync(_source: str = source) -> pd.DataFrame:
-                from vnibb.providers.vnstock.runtime import get_quote_class
+        def _fetch_sync() -> pd.DataFrame:
+            quote = get_quote_class()(symbol=symbol, source=source)
+            history_callable = quote.history
+            unwrapped_history = getattr(history_callable, "__wrapped__", None)
+            if bypass_internal_retry and callable(unwrapped_history):
+                frame = unwrapped_history(quote, start=start, end=end, interval=interval)
+            else:
+                frame = history_callable(start=start, end=end, interval=interval)
+            if isinstance(frame, pd.DataFrame):
+                frame = pd.DataFrame(history_price_records(frame, symbol=symbol, source=source, provider=quote, asset_type=getattr(quote, "asset_type", None)))
+            return frame
 
-                Quote = get_quote_class()
-                quote = Quote(symbol=symbol, source=_source)
-                history_callable = quote.history
-                unwrapped_history = getattr(history_callable, "__wrapped__", None)
-                if bypass_internal_retry and callable(unwrapped_history):
-                    frame = unwrapped_history(quote, start=start, end=end, interval=interval)
-                else:
-                    frame = history_callable(start=start, end=end, interval=interval)
-                if isinstance(frame, pd.DataFrame):
-                    frame = pd.DataFrame(history_price_records(frame, symbol=symbol, source=_source, provider=quote, asset_type=getattr(quote, "asset_type", None)))
-                return frame
+        frame = await asyncio.wait_for(asyncio.to_thread(_fetch_sync), timeout=timeout_seconds)
+        if frame is None or (bool(frame.empty) if hasattr(frame, "empty") else not bool(frame)):
+            raise ValueError("empty data (VCI)")
+        return frame
 
+    async def _fetch_trading_listing_rows(self, client) -> List[Dict[str, Any]]:
+        from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+
+        try:
+            rows = await asyncio.to_thread(client.get_all_symbols)
+            if rows:
+                return rows
+            raise ValueError("Empty Vietcap Trading listing")
+        except Exception as exc:
+            logger.warning("Vietcap Trading listing unavailable: %s", exc)
+        service = get_mongo_market_data_service()
+        if service.enabled:
+            def read_cached():
+                rows = list(service._get_collection("market_symbols").find({"source": "vietcap"}, {"_id": 0}))
+                records = service._get_collection("market_vnstock_premium_records").find(
+                    {"dataset": "reference.listings", "source": "vietcap"}, {"_id": 0, "raw": 1},
+                )
+                rows.extend(record.get("raw", {}).get("trading") or record.get("raw", {}) for record in records)
+                return rows
             try:
-                df = await asyncio.wait_for(
-                    asyncio.to_thread(_fetch_sync),
-                    timeout=timeout_seconds,
-                )
-                # Defensive empty check: tests / mocks may return non-DataFrame
-                # values; treat anything without rows as success only when it's
-                # a real DataFrame with at least one row, OR a non-None
-                # truthy value (so test mocks that return a sentinel still pass
-                # through unchanged).
-                df_is_empty: bool
-                if df is None:
-                    df_is_empty = True
-                elif hasattr(df, "empty"):
-                    df_is_empty = bool(df.empty)
-                else:
-                    df_is_empty = not bool(df)
+                rows = await asyncio.to_thread(read_cached)
+                if rows:
+                    return rows
+            except Exception as exc:
+                logger.warning("Cached IQ listing unavailable: %s", exc)
+        from vnibb.providers.vnstock.runtime import get_listing_class
 
-                if not df_is_empty:
-                    if source != configured:
-                        logger.info(
-                            "Recovered %s prices from fallback source %s",
-                            symbol,
-                            source,
-                        )
-                    return df
-                # Empty df → try next source rather than treating as error.
-                last_error = ValueError(f"empty data ({source})")
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-                logger.debug(
-                    "Quote history fetch failed for %s via %s: %s",
-                    symbol,
-                    source,
-                    exc,
-                )
-                continue
+        try:
+            listing = get_listing_class()(source=validate_source(settings.vnstock_source))
+            frame = await asyncio.to_thread(listing.symbols_by_exchange)
+            return [{**row, "_listing_source": "VCI"} for row in frame.to_dict(orient="records")] if frame is not None else []
+        except Exception as exc:
+            logger.warning("Free VCI instrument metadata unavailable: %s", exc)
+            return []
 
-        if last_error is not None:
-            raise last_error
-        # Should not reach: every iteration sets last_error or returns df.
-        return pd.DataFrame()
+    async def _fetch_stock_history_frame(self, client, symbol, start, end, *, instrument_type):
+        from vnibb.services.vietcap_ingestion import ohlc_rows_from_gap_chart
+        from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+
+        if str(instrument_type or "").upper() != "STOCK":
+            raise ValueError(f"Price acquisition requires a confirmed stock listing: {symbol}")
+        start_day, end_day = date.fromisoformat(start), date.fromisoformat(end)
+        try:
+            raw = await asyncio.to_thread(
+                client.get_ohlc, symbol, count_back=(end_day - start_day).days + 1,
+                to_epoch=int(datetime.combine(end_day + timedelta(days=1), time.min, ZoneInfo("Asia/Ho_Chi_Minh")).timestamp()),
+            )
+            rows = ohlc_rows_from_gap_chart(symbol, raw, instrument_type="STOCK") if raw else []
+            rows = [row for row in rows if start_day <= row["tradeDate"].date() <= end_day]
+            if not rows:
+                raise ValueError("Vietcap returned no EOD bars in the requested window")
+        except Exception as exc:
+            logger.warning("Vietcap EOD unavailable for %s: %s", symbol, exc)
+            service = get_mongo_market_data_service()
+            rows = []
+            if service.enabled:
+                def read_cached():
+                    return list(service._get_collection("market_prices_eod").find({
+                        "symbol": symbol, "source": "vietcap",
+                        "tradeDate": {"$gte": datetime.combine(start_day, time.min), "$lt": datetime.combine(end_day + timedelta(days=1), time.min)},
+                    }, {"_id": 0}).sort("tradeDate", 1))
+                rows = await asyncio.to_thread(read_cached)
+            if not rows:
+                frame = await self._fetch_quote_history_frame(
+                    symbol=symbol, start=start, end=end, interval="1D", bypass_internal_retry=True,
+                )
+                if any(str(row.get("price_source") or "").upper() not in {"VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI"} for row in frame.to_dict(orient="records")):
+                    raise ValueError(f"Free VCI provenance required for {symbol}") from exc
+                return frame
+        prepared = []
+        for row in rows:
+            values = {field: float(row[field]) for field in ("open", "high", "low", "close", "volume")}
+            if row.get("symbol", symbol) != symbol or not isinstance(row.get("tradeDate"), datetime):
+                raise ValueError(f"Invalid IQ EOD identity for {symbol}")
+            if any(not math.isfinite(value) or value < 0 for value in values.values()) or not values["volume"].is_integer():
+                raise ValueError(f"Invalid IQ OHLCV for {symbol}")
+            if not 0 < values["low"] <= min(values["open"], values["close"]) <= max(values["open"], values["close"]) <= values["high"]:
+                raise ValueError(f"Invalid IQ price range for {symbol}")
+            if row.get("priceUnit", row.get("price_unit")) != "VND":
+                raise ValueError(f"IQ EOD price unit unavailable for {symbol}")
+            prepared.append({**row, "time": row["tradeDate"], "price_unit": "VND", "price_source": "vietcap", "source": "vietcap_vnd"})
+        return pd.DataFrame(prepared).sort_values("time")
 
     async def _ensure_redis(self) -> bool:
         if not settings.redis_url:
@@ -871,26 +911,68 @@ class DataPipeline:
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
     ) -> int:
-        """Sync all stock symbols."""
+        """Refresh source-backed IQ stock listings; free VCI supplements outages."""
         from vnibb.providers.vnstock.runtime import get_listing_class
+        from vnibb.services.vietcap_client import VietcapClient
+        from vnibb.services.vietcap_financials import persist_vietcap_listings
 
-        Listing = get_listing_class()
+        client = VietcapClient()
+        trading_rows = await self._fetch_trading_listing_rows(client)
+        stock_rows = [row for row in trading_rows if str(row.get("type") or "").upper() == "STOCK"]
+        if stock_rows and any(row.get("_listing_source") != "VCI" for row in stock_rows):
+            try:
+                search_rows = await asyncio.to_thread(client.get_company_search_bar)
+                if not search_rows:
+                    raise ValueError("Empty IQ company descriptions")
+            except Exception as exc:
+                logger.warning("IQ listing descriptions unavailable: %s", exc)
+                search_rows = []
+                if progress is not None:
+                    progress["error_count"] = progress.get("error_count", 0) + 1
+            count = await persist_vietcap_listings(stock_rows, search_rows)
+            rejected = len(stock_rows) - count
+            if rejected:
+                logger.warning("IQ listing persistence rejected %d of %d stock rows", rejected, len(stock_rows))
+                if progress is not None:
+                    progress["error_count"] = progress.get("error_count", 0) + rejected
+            async with async_session_maker() as session:
+                stocks = (await session.execute(select(Stock).where(Stock.symbol.in_([row["symbol"] for row in stock_rows])))).scalars().all()
+                listing_cache = [{"symbol": stock.symbol, "organ_name": stock.company_name, "exchange": stock.exchange, "sector": stock.sector} for stock in stocks]
+            await self._cache_set_json(build_cache_key("vnibb", "listing", "symbols", "VCI"), listing_cache, CACHE_TTL_LISTING)
+            for item in listing_cache:
+                await self._cache_set_json(build_cache_key("vnibb", "listing", "symbol", item["symbol"]), item, CACHE_TTL_LISTING)
+            if progress is not None:
+                progress.setdefault("stage_stats", {})
+                progress["stage_stats"]["stock_list"] = {"success": count, "errors": rejected + (0 if search_rows else 1), "total": len(stock_rows)}
+                progress["success_count"] = progress.get("success_count", 0) + count
+                progress["last_symbol"] = None
+                progress["last_index"] = None
+                if sync_id is not None:
+                    await self._checkpoint(progress, sync_id)
+            return count
 
-        logger.info("Syncing stock list...")
-        listing_source = settings.vnstock_source or "KBS"
-        try:
-            listing = Listing(source=listing_source)
-            df = listing.all_symbols()
-            exchange_df = listing.symbols_by_exchange()
-            industry_df = listing.symbols_by_industries()
-        except SystemExit as exc:
-            logger.warning(f"Listing source {listing_source} aborted: {exc}")
-            return 0
-        except Exception as e:
-            logger.warning(f"Listing source {listing_source} failed: {e}.")
-            return 0
+        listing_source = "VCI"
+        listing = get_listing_class()(source=validate_source(settings.vnstock_source))
+        df = await asyncio.to_thread(listing.all_symbols)
         if df is None or df.empty:
-            return 0
+            raise ValueError("IQ and free VCI listings unavailable")
+        confirmed_symbols = {str(row.get("symbol") or "").upper() for row in stock_rows}
+        df = df[df["symbol"].astype(str).str.upper().isin(confirmed_symbols)]
+        if df.empty:
+            raise ValueError("Free VCI listing has no confirmed stock instruments")
+        exchange_df = pd.DataFrame()
+        industry_df = pd.DataFrame()
+        for method_name in ("symbols_by_exchange", "symbols_by_industries"):
+            try:
+                frame = await asyncio.to_thread(getattr(listing, method_name))
+                if method_name == "symbols_by_exchange":
+                    exchange_df = frame
+                else:
+                    industry_df = frame
+            except Exception as exc:
+                logger.warning("Free VCI listing metadata %s unavailable: %s", method_name, exc)
+                if progress is not None:
+                    progress["error_count"] = progress.get("error_count", 0) + 1
 
         def normalize_text(value: Any) -> Optional[str]:
             if value is None:
@@ -971,7 +1053,7 @@ class DataPipeline:
                     "updated_at": datetime.utcnow(),
                 }
                 try:
-                    stmt = get_upsert_stmt(Stock, ["symbol"], values)
+                    stmt = get_upsert_stmt(Stock, ["symbol"], values, preserve_existing_on_null={"company_name", "industry", "sector", "short_name"})
                     await session.execute(stmt)
                     count += 1
                     cache_batch.append(
@@ -1113,7 +1195,7 @@ class DataPipeline:
         def _extract_listing_metadata(src: str) -> Dict[str, Dict[str, Any]]:
             metadata: Dict[str, Dict[str, Any]] = {}
             try:
-                listing = Listing(source=src)
+                listing = Listing(source=validate_source(src))
                 df = listing.all_symbols()
                 exchange_df = listing.symbols_by_exchange()
                 industry_df = listing.symbols_by_industries()
@@ -1272,7 +1354,7 @@ class DataPipeline:
                     "listed_shares": _parse_float(listed_shares),
                 }
 
-        primary_source = (settings.vnstock_source or "KBS").upper()
+        primary_source = (settings.vnstock_source or "VCI").upper()
         listing_metadata = await loop.run_in_executor(
             None, _extract_listing_metadata, primary_source
         )
@@ -1375,7 +1457,7 @@ class DataPipeline:
 
                             def _fetch_ratio_snapshot(sym: str, src: str):
                                 finance = create_finance(sym, src, "year")
-                                kwargs = finance_method_kwargs(finance.ratio, "year")
+                                kwargs = ratio_method_kwargs(finance.ratio, finance_method_kwargs(finance.ratio, "year"))
                                 df = finance.ratio(**kwargs)
                                 if df is None or df.empty:
                                     return None
@@ -1448,15 +1530,17 @@ class DataPipeline:
                                             owners_equity = value
                                     if liabilities is not None and owners_equity not in (None, 0):
                                         ratio_row["de"] = liabilities / owners_equity
+                                    ratio_row = normalize_ratio_payload(ratio_row, records, latest_year)
                                 else:
                                     # Legacy format
                                     ratio_row = df.iloc[0].to_dict()
+                                    ratio_row = normalize_ratio_payload(ratio_row, [ratio_row])
 
                                 try:
                                     end_date = datetime.now()
                                     start_date = end_date - timedelta(days=10)
                                     from vnibb.providers.vnstock.runtime import get_quote_class
-                                    quote = get_quote_class()(symbol=sym, source=src)
+                                    quote = get_quote_class()(symbol=sym, source=validate_source(src))
                                     history = quote.history(
                                         start=start_date.strftime("%Y-%m-%d"),
                                         end=end_date.strftime("%Y-%m-%d"),
@@ -1586,9 +1670,9 @@ class DataPipeline:
 
                     extended_metrics = {
                         "debt_to_asset": _parse_float(
-                            row.get("debt_to_asset")
-                            or row.get("debtOnAsset")
-                            or row.get("debt_on_asset")
+                            row.get("debt_assets", row.get("debt_to_asset"))
+                            if "debt_assets" in row.get("ratio_units", {})
+                            else row.get("debt_to_asset") or row.get("debtOnAsset") or row.get("debt_on_asset")
                         ),
                         "days_receivable": _parse_float(
                             row.get("days_receivable")
@@ -1615,6 +1699,11 @@ class DataPipeline:
                         price_unit=price_provenance.get("price_unit", "unknown"),
                         price_source=price_provenance.get("price_source"),
                     )
+                    for key in ("ratio_units", "provider_evidence"):
+                        if row.get(key) is not None:
+                            extended_metrics[key] = row[key]
+                    if "debt_assets" in row.get("ratio_units", {}):
+                        extended_metrics["debt_to_asset"] = row.get("debt_assets")
 
                     values = {
                         "symbol": symbol,
@@ -1704,12 +1793,18 @@ class DataPipeline:
                         "source": "vnstock_ratio",
                         "created_at": datetime.utcnow(),
                     }
+                    for metric in row.get("ratio_units", {}):
+                        if metric in ScreenerSnapshot.__table__.c:
+                            values[metric] = row.get(metric)
                     stmt = get_upsert_stmt(
                         ScreenerSnapshot,
                         ["symbol", "snapshot_date"],
                         values,
                         preserve_existing_on_null={"trade_date"},
-                        preserve_columns_without=("trade_date", {"price", "volume", "extended_metrics"}),
+                        preserve_columns_without=("trade_date", {"price", "volume"}),
+                        update_overrides=lambda stmt: screener_metadata_updates(
+                            stmt, engine.dialect.name, stmt.excluded.trade_date.is_(None)
+                        ),
                     )
                     await session.execute(stmt)
                     count += 1
@@ -1819,35 +1914,40 @@ class DataPipeline:
                 ratio_payload = ratio.raw_data if isinstance(ratio.raw_data, dict) else {}
                 changed = False
 
-                if screener_row.revenue_growth is None:
-                    revenue_growth_value = _pick_float(
-                        ratio.revenue_growth,
-                        ratio_payload.get("revenue_growth"),
-                        ratio_payload.get("revenueGrowth"),
+                extended_metrics = dict(screener_row.extended_metrics or {})
+                ratio_units = dict(extended_metrics.get("ratio_units") or {})
+                copied_percentage = False
+                for metric, attribute, aliases in (
+                    ("revenue_growth", "revenue_growth", ("revenue_growth", "revenueGrowth")),
+                    ("earnings_growth", "earnings_growth", ("earnings_growth", "earningsGrowth")),
+                    ("operating_margin", "operating_margin", ("operating_margin", "operatingMargin")),
+                    ("debt_assets", "debt_to_assets", ("debt_assets", "debt_to_assets", "debt_to_asset")),
+                ):
+                    existing_value = (
+                        extended_metrics.get("debt_to_asset") if metric == "debt_assets"
+                        else getattr(screener_row, attribute)
                     )
-                    if revenue_growth_value is not None:
-                        screener_row.revenue_growth = revenue_growth_value
-                        changed = True
-
-                if screener_row.earnings_growth is None:
-                    earnings_growth_value = _pick_float(
-                        ratio.earnings_growth,
-                        ratio_payload.get("earnings_growth"),
-                        ratio_payload.get("earningsGrowth"),
+                    if existing_value is not None:
+                        continue
+                    value = admitted_ratio_value(
+                        _pick_float(getattr(ratio, attribute), *(ratio_payload.get(key) for key in aliases)),
+                        metric, ratio_units=ratio_payload.get("ratio_units"), source=ratio.source,
                     )
-                    if earnings_growth_value is not None:
-                        screener_row.earnings_growth = earnings_growth_value
-                        changed = True
-
-                if screener_row.operating_margin is None:
-                    operating_margin_value = _pick_float(
-                        ratio.operating_margin,
-                        ratio_payload.get("operating_margin"),
-                        ratio_payload.get("operatingMargin"),
-                    )
-                    if operating_margin_value is not None:
-                        screener_row.operating_margin = operating_margin_value
-                        changed = True
+                    if value is None:
+                        continue
+                    if metric == "debt_assets":
+                        extended_metrics["debt_to_asset"] = value
+                    else:
+                        setattr(screener_row, attribute, value)
+                    ratio_units[metric] = "percent"
+                    copied_percentage = changed = True
+                if copied_percentage:
+                    extended_metrics["ratio_units"] = ratio_units
+                    evidence = ratio_payload.get("provider_evidence")
+                    if isinstance(evidence, list):
+                        extended_metrics["provider_evidence"] = [
+                            *(extended_metrics.get("provider_evidence") or []), *evidence,
+                        ]
 
                 if screener_row.dividend_yield is None:
                     dividend_yield_value = _normalize_dividend_yield(
@@ -1897,13 +1997,6 @@ class DataPipeline:
                         screener_row.debt_to_equity = debt_to_equity_value
                         changed = True
 
-                debt_to_asset_value = _pick_float(
-                    ratio.debt_to_assets,
-                    ratio_payload.get("debt_assets"),
-                    ratio_payload.get("debt_to_assets"),
-                    ratio_payload.get("debt_to_asset"),
-                )
-                extended_metrics = dict(screener_row.extended_metrics or {})
 
                 def _set_extended_metric(key: str, value: Optional[float]) -> None:
                     nonlocal changed
@@ -1914,7 +2007,6 @@ class DataPipeline:
                     extended_metrics[key] = value
                     changed = True
 
-                _set_extended_metric("debt_to_asset", debt_to_asset_value)
                 _set_extended_metric(
                     "days_receivable",
                     _pick_float(
@@ -2009,6 +2101,13 @@ class DataPipeline:
                 result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1))
                 symbols = [r[0] for r in result.fetchall()]
 
+        from vnibb.core.price_units import is_index_symbol
+        from vnibb.services.vietcap_client import VietcapClient
+
+        client = VietcapClient()
+        trading_rows = await self._fetch_trading_listing_rows(client)
+        metadata = {str(row.get("symbol") or "").upper(): row for row in trading_rows}
+
         resolved_end = end_date or date.today()
         resolved_start = start_date or (resolved_end - timedelta(days=days))
         if resolved_start > resolved_end:
@@ -2092,16 +2191,21 @@ class DataPipeline:
                         range_start_str = range_start.strftime("%Y-%m-%d")
                         range_end_str = range_end.strftime("%Y-%m-%d")
                         active_range = (range_start_str, range_end_str)
-                        range_df = await self._fetch_quote_history_frame(
-                            symbol=symbol,
-                            start=range_start_str,
-                            end=range_end_str,
-                            interval="1D",
-                            bypass_internal_retry=True,
-                        )
+                        if is_index_symbol(symbol):
+                            range_df = await self._fetch_quote_history_frame(
+                                symbol=symbol, start=range_start_str, end=range_end_str,
+                                interval="1D", bypass_internal_retry=True,
+                            )
+                        else:
+                            range_df = await self._fetch_stock_history_frame(
+                                client, symbol, range_start_str, range_end_str,
+                                instrument_type=metadata.get(symbol.upper(), {}).get("type"),
+                            )
                         if range_df is None or range_df.empty:
                             raise RuntimeError(f"Empty price acquisition for {symbol} ({range_start_str} -> {range_end_str})")
 
+                        conflicts = []
+                        range_synced = 0
                         for _, row in range_df.iterrows():
                             if row.get("price_unit") not in {"VND", "index_points"}:
                                 raise ValueError(f"Unknown price unit for {symbol}")
@@ -2120,18 +2224,35 @@ class DataPipeline:
                                 "value": row.get("value"),
                                 "adj_close": next((row.get(field) for field in ("adj_close", "adjusted_close", "adjClose") if row.get(field) is not None), None),
                                 "interval": "1D",
-                                "source": persisted_price_source(row),
+                                "source": "vietcap_vnd" if row.get("source") == "vietcap_vnd" else persisted_price_source(row),
                             }
-                            stmt = get_upsert_stmt(StockPrice, ["symbol", "time", "interval"], val, preserve_existing_on_null={"value"})
-                            await session.execute(stmt)
-
-                        symbol_synced += len(range_df)
-                        latest_candidate = range_df.iloc[-1].to_dict()
-                        latest_row = latest_candidate
+                            stmt = get_upsert_stmt(
+                                StockPrice, ["symbol", "time", "interval"], val,
+                                preserve_existing_on_null={"value"},
+                                update_condition=source_update_condition(StockPrice, val["source"]),
+                            )
+                            result = await session.execute(stmt.returning(StockPrice.id))
+                            affected = len(result.scalars().all())
+                            range_synced += affected
+                            if not affected:
+                                conflicts.append({"symbol": symbol, "time": str(row_time), "interval": "1D"})
+                        await session.commit()
+                        symbol_synced += range_synced
+                        total_synced += range_synced
+                        if conflicts:
+                            logger.warning("Price acquisition retained IQ-owned rows for %s: %s", symbol, conflicts)
+                            if progress is not None:
+                                progress["error_count"] = progress.get("error_count", 0) + 1
+                                progress["stage_stats"]["prices"]["errors"] += 1
+                                progress.setdefault("source_conflicts", []).append({"symbol": symbol, "reason": "source_ownership_conflict", "keys": conflicts, "persisted_rows": range_synced})
+                        latest_result = await session.execute(
+                            select(StockPrice).where(StockPrice.symbol == symbol, StockPrice.interval == "1D").order_by(StockPrice.time.desc()).limit(1)
+                        )
+                        latest_stored = latest_result.scalar_one_or_none()
+                        latest_row = persisted_price_record(latest_stored) if latest_stored else None
 
                     await session.commit()
 
-                total_synced += symbol_synced
                 if latest_row:
                     latest_payload = {
                         "symbol": symbol,
@@ -2498,7 +2619,7 @@ class DataPipeline:
                 )
 
                 def acquire_profile(symbol=symbol) -> Dict[str, Any]:
-                    company = get_company_class()(symbol=symbol, source=settings.vnstock_source)
+                    company = get_company_class()(symbol=symbol, source=validate_source(settings.vnstock_source))
                     overview_row: Dict[str, Any] = {}
                     profile_row: Dict[str, Any] = {}
                     errors: list[Exception] = []
@@ -2844,6 +2965,7 @@ class DataPipeline:
                         raise RuntimeError(f"Empty {statement_type.value} acquisition for {symbol}")
 
                     latest_cache_payload: List[Dict[str, Any]] = []
+                    rejected_updates: List[str] = []
                     async with async_session_maker() as session:
                         for entry in items:
                             payload = entry.model_dump(mode="json")
@@ -3058,13 +3180,22 @@ class DataPipeline:
                             payload = {**canonical, "raw_data": raw_payload}
 
                             stmt = get_upsert_stmt(
-                                model, ["symbol", "period", "period_type"], values
+                                model, ["symbol", "period", "period_type"], values,
+                                update_condition=source_update_condition(model, values["source"]),
                             )
-                            await session.execute(stmt)
+                            result = await session.execute(stmt.returning(model.id))
+                            if not result.scalars().all():
+                                rejected_updates.append(values["period"])
 
                             latest_cache_payload.append(payload)
 
                         await session.commit()
+
+                    if rejected_updates:
+                        raise StructuredPersistenceConflict(
+                            len(items) - len(rejected_updates),
+                            [{"table": model.__tablename__, "symbol": symbol, "period": entry_period} for entry_period in rejected_updates],
+                        )
 
                     cache_key = build_cache_key(
                         "vnibb", "financials", cache_slug, symbol, normalized_period
@@ -3199,7 +3330,7 @@ class DataPipeline:
             if year is None:
                 return None
             if normalized_period == "quarter":
-                return f"{year}-Q{quarter}" if quarter else None
+                return f"Q{quarter}-{year}" if quarter else None
             return str(year)
 
         async def _seed_ratio_period_rows(session: AsyncSession, symbol_value: str) -> int:
@@ -3266,11 +3397,11 @@ class DataPipeline:
                 }
                 stmt = get_upsert_stmt(
                     FinancialRatio,
-                    ["symbol", "period", "period_type"],
                     values,
+                    update_condition=source_update_condition(FinancialRatio, "derived"),
                 )
-                await session.execute(stmt)
-                created_count += 1
+                result = await session.execute(stmt.returning(FinancialRatio.id))
+                created_count += len(result.scalars().all())
                 existing_periods.add(period_text.upper())
 
             return created_count
@@ -3283,6 +3414,7 @@ class DataPipeline:
                         .where(
                             FinancialRatio.symbol == symbol_value,
                             FinancialRatio.period_type == normalized_period,
+                            source_update_condition(FinancialRatio, None),
                         )
                         .order_by(
                             FinancialRatio.fiscal_year.desc(), FinancialRatio.fiscal_quarter.desc()
@@ -3494,6 +3626,8 @@ class DataPipeline:
 
             changed_count = 0
             for ratio_row in ratio_rows:
+                if ratio_row.source in {"vietcap", "vietcap_vnd"}:
+                    continue
                 year = int(ratio_row.fiscal_year)
                 quarter = (
                     int(ratio_row.fiscal_quarter or 0) if normalized_period == "quarter" else 0
@@ -3692,6 +3826,7 @@ class DataPipeline:
                     if invested_capital not in (None, 0):
                         ratio_row.roic = round((net_income / invested_capital) * 100, 4)
                         raw_payload["roic"] = ratio_row.roic
+                        raw_payload.setdefault("ratio_units", {})["roic"] = "percent"
                         changed = True
 
                 if (
@@ -3766,10 +3901,8 @@ class DataPipeline:
                         raw_payload.get("earningsGrowth"),
                     )
                     if pe_value is not None and earnings_growth not in (None, 0):
-                        growth_base = (
-                            earnings_growth if abs(earnings_growth) > 1 else earnings_growth * 100
-                        )
-                        if growth_base > 0:
+                        growth_base = earnings_growth if raw_payload.get("ratio_units", {}).get("earnings_growth") == "percent" else None
+                        if growth_base is not None and growth_base > 0:
                             ratio_row.peg_ratio = round(pe_value / growth_base, 4)
                             raw_payload["peg_ratio"] = ratio_row.peg_ratio
                             changed = True
@@ -3798,6 +3931,8 @@ class DataPipeline:
                             progress["stage_stats"]["financial_ratios"]["errors"] += 1
                         continue
 
+                    persisted_rows = 0
+                    conflicts = []
                     for ratio in ratio_items:
                         period_str = str(ratio.period or "").strip()
                         period_upper = period_str.upper()
@@ -3819,12 +3954,9 @@ class DataPipeline:
                                 fiscal_quarter = int(alt_quarter_match.group(1))
                                 fiscal_year = int(alt_quarter_match.group(2))
 
-                        if not period_str:
-                            period_str = (
-                                f"Q{fiscal_quarter}-{fiscal_year}"
-                                if fiscal_quarter
-                                else str(fiscal_year)
-                            )
+                        period_str = _format_ratio_period(period_str, fiscal_year, fiscal_quarter)
+                        if period_str is None:
+                            raise ValueError("Financial ratio fiscal identity unavailable")
 
                         ratio_payload = ratio.model_dump(mode="json")
 
@@ -3912,13 +4044,20 @@ class DataPipeline:
                             "updated_at": datetime.utcnow(),
                         }
                         stmt = get_upsert_stmt(
-                            FinancialRatio, ["symbol", "period", "period_type"], values
+                            FinancialRatio, ["symbol", "period", "period_type"], values,
+                            update_condition=source_update_condition(FinancialRatio, values["source"]),
                         )
-                        await session.execute(stmt)
+                        result = await session.execute(stmt.returning(FinancialRatio.id))
+                        affected = len(result.scalars().all())
+                        persisted_rows += affected
+                        if affected == 0:
+                            conflicts.append({"table": FinancialRatio.__tablename__, "symbol": symbol, "period": period_str, "period_type": normalized_period})
 
                     await session.flush()
                     enriched_rows = await _enrich_ratio_rows(session, symbol)
                     await session.commit()
+                    if conflicts:
+                        raise StructuredPersistenceConflict(persisted_rows, conflicts)
                     if enriched_rows or seeded_rows:
                         logger.info(
                             "Enriched %d computed ratio rows for %s (%d synthetic periods)",
@@ -4774,7 +4913,7 @@ class DataPipeline:
 
         batch_size = 50
         total = 0
-        source = settings.vnstock_source or "KBS"
+        source = settings.vnstock_source or "VCI"
         for idx in range(start_index, len(symbols), batch_size):
             batch = symbols[idx : idx + batch_size]
             await self._wait_for_rate_limit("price_board")
@@ -5016,14 +5155,14 @@ class DataPipeline:
             symbol = symbols[idx]
             await self._wait_for_rate_limit("intraday")
             try:
-                source = settings.vnstock_source or "KBS"
+                source = settings.vnstock_source or "VCI"
 
                 async def _fetch_intraday() -> List[Dict[str, Any]]:
                     def _sync_fetch() -> List[Dict[str, Any]]:
                         from vnibb.providers.vnstock.runtime import get_vnstock_class
 
                         Vnstock = get_vnstock_class()
-                        stock = Vnstock().stock(symbol=symbol, source=source)
+                        stock = Vnstock().stock(symbol=symbol, source=validate_source(source))
                         df = stock.quote.intraday()
                         if df is None or df.empty:
                             return []
@@ -5341,7 +5480,7 @@ class DataPipeline:
         total = 0
         snapshot_time = datetime.utcnow()
         trade_date = snapshot_time.date()
-        source = settings.vnstock_source or "KBS"
+        source = settings.vnstock_source or "VCI"
 
         async with async_session_maker() as session:
             existing = await session.execute(

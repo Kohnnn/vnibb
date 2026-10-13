@@ -38,6 +38,7 @@ async def test_get_stock_metrics_backfills_bvps_and_roic_from_financial_ratios(
             fiscal_quarter=None,
             bvps=25_000.0,
             roic=18.5,
+            raw_data={"ratio_units": {"roic": "percent"}},
             pb_ratio=1.28,
             updated_at=datetime.utcnow(),
         )
@@ -177,7 +178,7 @@ async def test_get_peers_treats_zero_pe_as_missing_and_backfills_snapshot(
             pe=12.3,
             roe=14.0,
             price=28.0,
-            extended_metrics={"price_unit": "THOUSAND_VND"},
+            extended_metrics={"price_unit": "THOUSAND_VND", "ratio_units": {"roe": "percent"}},
             source="KBS",
             created_at=datetime.utcnow(),
         )

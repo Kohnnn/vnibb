@@ -5,14 +5,15 @@ WORKDIR /app
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG IMAGE_RELEASE_REVISION=unknown
-ARG VNSTOCK_INSTALLER_SHA256
-ARG VNSTOCK_PREMIUM_REQUIRED_MODULES=vnstock_data,vnstock_ta,vnstock_pipeline,vnstock_news,vnii
 
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONPATH=/opt/venv/lib/python3.12/site-packages \
     TZ=Asia/Ho_Chi_Minh \
     VNSTOCK_INTERACTIVE=0 \
     VNSTOCK_LANGUAGE=2 \
+    VNSTOCK_RUNTIME_TIER=free \
+    VNSTOCK_SOURCE=VCI \
+    VNSTOCK_RUNTIME_INSTALL=0 \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -33,20 +34,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && pip install --isolated --no-cache-dir --index-url https://pypi.org/simple -c constraints-vnstock.txt . \
     && python -c "from importlib.metadata import version; print(f'vnstock {version(\"vnstock\")} | vnai {version(\"vnai\")}')"
 
-RUN --mount=type=secret,id=vnstock_api_key,required=false \
-    set -eu; \
-    if [ -s /run/secrets/vnstock_api_key ]; then \
-        test -n "$VNSTOCK_INSTALLER_SHA256"; \
-        curl --fail --silent --show-error --location https://vnstocks.com/files/vnstock-cli-installer.run --output /tmp/vnstock-cli-installer.run; \
-        printf '%s  %s\n' "$VNSTOCK_INSTALLER_SHA256" /tmp/vnstock-cli-installer.run | sha256sum --check --status -; \
-        chmod +x /tmp/vnstock-cli-installer.run; \
-        installer_status=0; \
-        /tmp/vnstock-cli-installer.run -- --non-interactive --venv-path /opt/venv --api-key "$(cat /run/secrets/vnstock_api_key)" || installer_status=$?; \
-        pip install --no-cache-dir html2text pta_reload tqdm; \
-        VNSTOCK_MODULES="vnstock,$VNSTOCK_PREMIUM_REQUIRED_MODULES" python -c "import importlib, os; [importlib.import_module(module.strip()) for module in os.environ['VNSTOCK_MODULES'].split(',') if module.strip()]"; \
-        printf 'VNStock installer status: %s; independent import verification passed\n' "$installer_status"; \
-        rm -rf /tmp/vnstock-cli-installer.run /root/.vnstock /root/vnstock_installer_debug.log; \
-    fi
+RUN python -c "from importlib.util import find_spec; modules = ('vnstock_data', 'vnstock_ta', 'vnstock_pipeline', 'vnstock_news', 'vnii'); present = [name for name in modules if find_spec(name) is not None]; assert not present, f'Paid modules are forbidden in the free image: {present}'"
 
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh \

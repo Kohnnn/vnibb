@@ -76,7 +76,7 @@ async def test_price_board_normalizes_foreign_value_aliases(monkeypatch):
 
     class FakeTrading:
         def __init__(self, source):
-            assert source == "KBS"
+            assert source == "VCI"
 
         def price_board(self, **kwargs):
             assert kwargs["symbols_list"] == ["VNM", "FPT"]
@@ -91,3 +91,10 @@ async def test_price_board_normalizes_foreign_value_aliases(monkeypatch):
 
     assert [row.foreign_buy_value for row in rows] == [1_500.0, 900.0]
     assert [row.foreign_sell_value for row in rows] == [600.0, 400.0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["KBS", "TCBS", "MSN", "FMP", "DNSE"])
+async def test_price_board_rejects_unsupported_sources_before_empty_symbols(source):
+    with pytest.raises(ValueError, match="only free VCI"):
+        await VnstockPriceBoardFetcher.fetch([], source=source)

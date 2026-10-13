@@ -188,10 +188,9 @@ class RSRatingService:
             if returns is not None:
                 return returns
 
-            candidate_sources: list[str] = []
-            for source in [settings.vnstock_source, "VCI", "KBS"]:
-                if source and source not in candidate_sources:
-                    candidate_sources.append(source)
+            from vnibb.providers.vnstock.runtime import validate_source
+
+            candidate_sources = [validate_source(settings.vnstock_source)]
 
             for source in candidate_sources:
                 try:

@@ -13,6 +13,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from vnibb.core.exceptions import ProviderError
+from vnibb.providers.vnstock.runtime import validate_source
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 class StockQuoteQueryParams(BaseModel):
     """Query parameters for stock quote."""
     symbol: str
-    source: str = "KBS"
+    source: str = Field(default="VCI", pattern=r"^VCI$")
 
 
 
@@ -84,7 +85,7 @@ class VnstockStockPriceFetcher:
     @staticmethod
     async def fetch(
         symbol: str,
-        source: str = "KBS",
+        source: str = "VCI",
     ) -> StockQuoteData:
 
         """
@@ -97,6 +98,7 @@ class VnstockStockPriceFetcher:
         Returns:
             StockQuoteData with current price and market data
         """
+        source = validate_source(source)
         symbol = symbol.upper().strip()
         
         try:

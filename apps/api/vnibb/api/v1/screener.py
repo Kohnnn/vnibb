@@ -7,38 +7,39 @@ Provides endpoints for:
 - Database caching with TTL
 """
 
-import logging
 import asyncio
+import logging
 import math
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
 from typing import Any, List, Literal, Optional
 
-from fastapi import APIRouter, Query, Request, Depends
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
 import pandas as pd
+from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from vnibb.core.config import settings
-from vnibb.core.database import get_db
-from vnibb.core.price_units import persisted_price_record, screener_price_record
-from vnibb.models.stock import Stock, StockPrice
-from vnibb.models.company import Company
-from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
-from vnibb.models.trading import FinancialRatio
-from vnibb.providers.vnstock.equity_screener import (
-    VnstockScreenerFetcher,
-    StockScreenerParams,
-    ScreenerData,
-)
-from vnibb.core.exceptions import ProviderError, ProviderTimeoutError, ProviderRateLimitError
-from vnibb.services.cache_manager import CacheManager
+from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.core.cache import redis_client
 from vnibb.core.cache_constants import REDIS_TTL_INDEX_CONSTITUENTS
+from vnibb.core.config import settings
+from vnibb.core.database import get_db
+from vnibb.core.exceptions import ProviderError, ProviderRateLimitError, ProviderTimeoutError
+from vnibb.core.price_units import persisted_price_record, screener_price_record
+from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
+from vnibb.core.retry import vnstock_cb
+from vnibb.models.company import Company
+from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+from vnibb.models.stock import Stock, StockPrice
+from vnibb.models.trading import FinancialRatio
+from vnibb.providers.vnstock.equity_screener import (
+    ScreenerData,
+    StockScreenerParams,
+    VnstockScreenerFetcher,
+)
+from vnibb.services.cache_manager import CacheManager
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.screener_filter_service import ScreenerFilterService
-from vnibb.api.v1.schemas import StandardResponse, MetaData
-from vnibb.core.retry import vnstock_cb
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -177,6 +178,23 @@ def _to_screener_data_row(row: object) -> ScreenerData:
     extended_metrics = getattr(row, "extended_metrics", None)
     if not isinstance(extended_metrics, dict):
         extended_metrics = {}
+    ratio_units = extended_metrics.get("ratio_units", getattr(row, "ratio_units", {}))
+    if not isinstance(ratio_units, dict):
+        ratio_units = {}
+    provider_evidence = extended_metrics.get(
+        "provider_evidence", getattr(row, "provider_evidence", [])
+    )
+
+    def _ratio_percent(metric: str) -> Any:
+        if ratio_units.get(metric) != "percent":
+            return None
+        field = "debt_to_asset" if metric == "debt_assets" else metric
+        value = getattr(row, field, None)
+        if value is None:
+            value = extended_metrics.get(field)
+            if metric == "debt_assets" and field not in extended_metrics:
+                value = extended_metrics.get("debt_to_assets", extended_metrics.get(metric))
+        return value
     price_record = screener_price_record(row)
 
     def _pick(*values: Any) -> Any:
@@ -224,21 +242,15 @@ def _to_screener_data_row(row: object) -> ScreenerData:
         pb=getattr(row, "pb", None),
         ps=getattr(row, "ps", None),
         ev_ebitda=getattr(row, "ev_ebitda", None),
-        roe=getattr(row, "roe", None),
-        roa=getattr(row, "roa", None),
-        roic=getattr(row, "roic", None),
-        gross_margin=getattr(row, "gross_margin", None),
-        net_margin=getattr(row, "net_margin", None),
-        operating_margin=getattr(row, "operating_margin", None),
-        revenue_growth=getattr(row, "revenue_growth", None),
-        earnings_growth=getattr(row, "earnings_growth", None),
+        **{
+            metric: _ratio_percent(metric)
+            for metric in PERCENT_RATIO_FIELDS if metric != "debt_assets"
+        },
+        ratio_units=ratio_units,
+        provider_evidence=provider_evidence if isinstance(provider_evidence, list) else [],
         dividend_yield=getattr(row, "dividend_yield", None),
         debt_to_equity=getattr(row, "debt_to_equity", None),
-        debt_to_asset=_pick(
-            getattr(row, "debt_to_asset", None),
-            extended_metrics.get("debt_to_asset"),
-            extended_metrics.get("debt_to_assets"),
-        ),
+        debt_to_asset=_ratio_percent("debt_assets"),
         current_ratio=getattr(row, "current_ratio", None),
         quick_ratio=getattr(row, "quick_ratio", None),
         days_receivable=_pick(
@@ -935,6 +947,18 @@ async def _enrich_screener_metrics(
         symbol = row.symbol
         ratio_row = ratio_by_symbol.get(symbol)
         ratio_raw = ratio_row.raw_data if ratio_row and isinstance(ratio_row.raw_data, dict) else {}
+
+        def _certified_ratio(
+            metric: str,
+            field: Optional[str] = None,
+            *,
+            ratio_raw: dict[str, Any] = ratio_raw,
+            ratio_row: Any = ratio_row,
+        ) -> Optional[float]:
+            units = ratio_raw.get("ratio_units", {})
+            if not isinstance(units, dict) or units.get(metric) != "percent":
+                return None
+            return _pick_float(getattr(ratio_row, field or metric, None), ratio_raw.get(metric))
         income = income_by_symbol.get(symbol, [])
         latest_income = income[0] if income else {}
         prev_income = income[1] if len(income) > 1 else {}
@@ -949,11 +973,7 @@ async def _enrich_screener_metrics(
             updates["dividend_yield"] = normalized_existing_dividend
 
         if row.roic is None:
-            roic = _pick_float(
-                ratio_row.roic if ratio_row else None,
-                ratio_raw.get("roic"),
-                ratio_raw.get("roic_percent"),
-            )
+            roic = _certified_ratio("roic")
             if roic is not None:
                 updates["roic"] = roic
 
@@ -999,11 +1019,7 @@ async def _enrich_screener_metrics(
                 updates["ev_ebitda"] = ev_ebitda
 
         if row.operating_margin is None:
-            operating_margin = _pick_float(
-                ratio_row.operating_margin if ratio_row else None,
-                ratio_raw.get("operating_margin"),
-                ratio_raw.get("operatingMargin"),
-            )
+            operating_margin = _certified_ratio("operating_margin")
             if operating_margin is None:
                 revenue = _coerce_float(latest_income.get("revenue"))
                 operating_income = _coerce_float(latest_income.get("operating_income"))
@@ -1013,11 +1029,7 @@ async def _enrich_screener_metrics(
                 updates["operating_margin"] = operating_margin
 
         if row.revenue_growth is None:
-            revenue_growth = _pick_float(
-                ratio_row.revenue_growth if ratio_row else None,
-                ratio_raw.get("revenue_growth"),
-                ratio_raw.get("revenueGrowth"),
-            )
+            revenue_growth = _certified_ratio("revenue_growth")
             if revenue_growth is None:
                 revenue_growth = _compute_growth(
                     _coerce_float(latest_income.get("revenue")),
@@ -1027,12 +1039,7 @@ async def _enrich_screener_metrics(
                 updates["revenue_growth"] = revenue_growth
 
         if row.earnings_growth is None:
-            earnings_growth = _pick_float(
-                ratio_row.earnings_growth if ratio_row else None,
-                ratio_raw.get("earnings_growth"),
-                ratio_raw.get("earningsGrowth"),
-                ratio_raw.get("net_profit_growth"),
-            )
+            earnings_growth = _certified_ratio("earnings_growth")
             if earnings_growth is None:
                 earnings_growth = _compute_growth(
                     _coerce_float(latest_income.get("net_income")),
@@ -1042,17 +1049,12 @@ async def _enrich_screener_metrics(
                 updates["earnings_growth"] = earnings_growth
 
         if row.debt_to_asset is None:
-            debt_to_asset = _pick_float(
-                ratio_row.debt_to_assets if ratio_row else None,
-                ratio_raw.get("debt_to_assets"),
-                ratio_raw.get("debt_to_asset"),
-                ratio_raw.get("debtOnAsset"),
-            )
+            debt_to_asset = _certified_ratio("debt_assets", "debt_to_assets")
             if debt_to_asset is None:
                 liabilities = _coerce_float(balance.get("total_liabilities"))
                 assets = _coerce_float(balance.get("total_assets"))
                 if liabilities is not None and assets not in (None, 0):
-                    debt_to_asset = liabilities / assets
+                    debt_to_asset = (liabilities / assets) * 100
             if debt_to_asset is not None:
                 updates["debt_to_asset"] = debt_to_asset
 
@@ -1158,6 +1160,16 @@ async def _enrich_screener_metrics(
                 updates["market_cap"] = price * shares * _shares_multiplier(shares)
 
         if updates:
+            percent_updates = {
+                ("debt_assets" if metric == "debt_to_asset" else metric): "percent"
+                for metric in updates
+                if metric in PERCENT_RATIO_FIELDS or metric == "debt_to_asset"
+            }
+            if percent_updates:
+                updates["ratio_units"] = {**row.ratio_units, **percent_updates}
+                evidence = ratio_raw.get("provider_evidence", [])
+                if isinstance(evidence, list):
+                    updates["provider_evidence"] = row.provider_evidence + evidence
             row = row.model_copy(update=updates)
 
         enriched_rows.append(row)
@@ -1641,7 +1653,7 @@ async def get_screener(
     min_listing_age_days: Optional[int] = Query(None, ge=0),
     target_upside_min: Optional[float] = Query(None, allow_inf_nan=False),
     limit: int = Query(default=100, ge=1, le=2000),
-    source: str = Query(default="KBS"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     use_cache: bool = Query(default=True),
     refresh: bool = Query(default=False),
     filters: Optional[str] = Query(None),

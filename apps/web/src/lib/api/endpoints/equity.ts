@@ -60,7 +60,7 @@ export async function getHistoricalPrices(
         startDate?: string;
         endDate?: string;
         interval?: string;
-        source?: string;
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         signal?: AbortSignal;
     }

@@ -9,7 +9,7 @@ Targets (database: vnibb-market):
   market_prices_derivatives      EOD OHLCV for futures/derivatives (separate)
   market_prices_bond             EOD OHLCV for bonds/debentures (separate)
   market_vnstock_premium_records financial statements / ratios / shareholders (source="vietcap")
-  market_financial_metric_map    code->label maps per (comTypeCode, section)
+  market_financial_metric_map    original descriptor lists per symbol/section (existing type key)
   market_company_profiles        company master + sector + analyst (details + search-bar)
   market_index_constituents      index membership from getByGroup
 
@@ -23,7 +23,6 @@ vnstock path multiplies by 1000 when it later needs parity. We do NOT rescale he
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -39,11 +38,10 @@ REPO_ROOT = _SELF.parents[4] if len(_SELF.parents) > 4 else _SELF.parent
 API_ROOT = REPO_ROOT / "apps" / "api"
 WORKSPACE_ROOT = REPO_ROOT.parent  # .../VNIBB (holds the canonical .env)
 
-try:
-    from .vietcap_client import VietcapClient
-except ImportError:
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from vietcap_client import VietcapClient  # noqa: E402
+sys.path.insert(0, str(_SELF.parents[2]))
+from vnibb.services import vietcap_ingestion as w  # noqa: E402
+from vnibb.services.vietcap_client import VietcapClient  # noqa: E402
+from vnibb.services.vietcap_ingestion import ohlc_rows_from_gap_chart  # noqa: E402
 
 # Instrument type -> EOD collection. STOCK and indices share the canonical corpus.
 PRICE_COLLECTION_BY_TYPE: dict[str, str] = {
@@ -57,12 +55,6 @@ PRICE_COLLECTION_BY_TYPE: dict[str, str] = {
     "DEBENTURE": "market_prices_bond",
 }
 
-FINANCIAL_SECTIONS = ("INCOME_STATEMENT", "BALANCE_SHEET", "CASH_FLOW")
-SECTION_DATASET = {
-    "INCOME_STATEMENT": "finance.income_statement",
-    "BALANCE_SHEET": "finance.balance_sheet",
-    "CASH_FLOW": "finance.cash_flow",
-}
 
 
 def load_env_file(path: Path) -> None:
@@ -83,76 +75,16 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _float(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
-def _int(value: Any) -> int | None:
-    f = _float(value)
-    return int(f) if f is not None else None
 
 
-def _hash(text: str) -> str:
-    return hashlib.sha1(text.encode("utf-8")).hexdigest()
-
-
-def _epoch_to_dt(epoch: Any) -> datetime | None:
-    try:
-        seconds = int(float(epoch))
-    except (TypeError, ValueError):
-        return None
-    # Canonical trade-day key at 07:00:00 (UTC) to match MongoMarketDataService.
-    dt = datetime.fromtimestamp(seconds, UTC)
-    return datetime(dt.year, dt.month, dt.day, 7, 0, 0)
 
 
 # ---------------------------------------------------------------------------
 # OHLC / price history
 # ---------------------------------------------------------------------------
 
-def ohlc_rows_from_gap_chart(symbol: str, raw: dict[str, Any]) -> list[dict[str, Any]]:
-    """Expand parallel arrays (o/h/l/c/v/t) into per-day documents."""
-    if not raw:
-        return []
-    opens = raw.get("o") or []
-    highs = raw.get("h") or []
-    lows = raw.get("l") or []
-    closes = raw.get("c") or []
-    volumes = raw.get("v") or []
-    times = raw.get("t") or []
-    acc_vol = raw.get("accumulatedVolume") or []
-    acc_val = raw.get("accumulatedValue") or []
-    n = min(len(opens), len(highs), len(lows), len(closes), len(volumes), len(times))
-    symbol_upper = symbol.upper()
-    rows: list[dict[str, Any]] = []
-    for i in range(n):
-        trade_date = _epoch_to_dt(times[i])
-        if trade_date is None:
-            continue
-        close_val = _float(closes[i])
-        # Vietcap gap-chart returns close=0 for some early-listing days (no real
-        # match). Such rows are unusable for charts/quant, so skip them.
-        if close_val is None or close_val <= 0:
-            continue
-        rows.append(
-            {
-                "symbol": symbol_upper,
-                "tradeDate": trade_date,
-                "open": _float(opens[i]),
-                "high": _float(highs[i]),
-                "low": _float(lows[i]),
-                "close": close_val,
-                "volume": _int(volumes[i]),
-                "accumulatedVolume": _float(acc_vol[i]) if i < len(acc_vol) else None,
-                "accumulatedValue": _float(acc_val[i]) if i < len(acc_val) else None,
-            }
-        )
-    return rows
 
 
 def upsert_eod_rows(db: Any, collection: str, symbol: str, rows: list[dict[str, Any]], *, dry_run: bool) -> int:
@@ -164,6 +96,8 @@ def upsert_eod_rows(db: Any, collection: str, symbol: str, rows: list[dict[str, 
     count = 0
     for row in rows:
         trade_date = row["tradeDate"]
+        if row.get("priceUnit") not in {"VND", "index_points"}:
+            raise ValueError(f"Source price unit unavailable for {symbol}")
         doc = {
             "symbol": symbol_upper,
             "tradeDate": trade_date,
@@ -177,7 +111,11 @@ def upsert_eod_rows(db: Any, collection: str, symbol: str, rows: list[dict[str, 
             "volume": row.get("volume"),
             "accumulatedVolume": row.get("accumulatedVolume"),
             "accumulatedValue": row.get("accumulatedValue"),
-            "priceUnit": "VND",
+            "priceUnit": row["priceUnit"],
+            "raw": row.get("raw"),
+            "sourceUnitEvidence": row.get("sourceUnitEvidence"),
+            "providerSource": "vietcap",
+            "receivedAt": synced_at,
             "updatedAt": synced_at,
             "syncedAt": synced_at,
             "schemaVersion": 1,
@@ -223,7 +161,7 @@ def resolve_universe(client: VietcapClient, raw_symbols: str) -> dict[str, dict[
     requested = [s.strip().upper() for s in raw_symbols.split(",") if s.strip()]
     result: dict[str, dict[str, Any]] = {}
     for sym in requested:
-        result[sym] = by_symbol.get(sym, {"symbol": sym, "type": "STOCK"})
+        result[sym] = by_symbol.get(sym, {"symbol": sym})
     return result
 
 
@@ -251,11 +189,19 @@ INDEX_GROUPS = [
 
 
 def main() -> int:
-    try:
-        from . import vietcap_writers as w
-    except ImportError:
-        import vietcap_writers as w
+    import asyncio
 
+    with asyncio.Runner() as runner:
+        try:
+            return _main(runner)
+        finally:
+            database = sys.modules.get("vnibb.core.database")
+            engine = getattr(database, "engine", None)
+            if engine is not None:
+                runner.run(engine.dispose())
+
+
+def _main(runner: Any) -> int:
     load_env_file(WORKSPACE_ROOT / ".env")
     load_env_file(REPO_ROOT / ".env")
     load_env_file(API_ROOT / ".env")
@@ -265,10 +211,9 @@ def main() -> int:
     parser.add_argument(
         "--datasets",
         default="ohlc,financials,ratios,company,shareholders",
-        help="Comma list of: ohlc,financials,ratios,company,shareholders,indices,icb or 'all'",
+        help="Comma list of: ohlc,financials,ratios,company,shareholders,listing,indices,icb or 'all'",
     )
     parser.add_argument("--count-back", type=int, default=10000)
-    parser.add_argument("--reconcile", action="store_true", help="After OHLC apply, drop overlapping vnstock-data bars (Vietcap wins)")
     parser.add_argument("--apply", action="store_true", help="Write to MongoDB. Default is dry-run.")
     parser.add_argument("--ensure-indexes", action="store_true")
     parser.add_argument("--limit", type=int, default=0, help="Cap symbol count (0 = no cap)")
@@ -279,11 +224,28 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    allowed = {"ohlc", "financials", "ratios", "company", "shareholders", "listing", "indices", "icb"}
     selected = {d.strip().lower() for d in args.datasets.split(",") if d.strip()}
+    if not selected or selected - allowed - {"all"}:
+        parser.error("--datasets must contain supported dataset names")
     if "all" in selected:
-        selected = {"ohlc", "financials", "ratios", "company", "shareholders", "indices", "icb"}
-
+        selected = allowed
+    if args.limit < 0 or args.count_back <= 0:
+        parser.error("--limit must be nonnegative and --count-back positive")
     client = VietcapClient()
+    failures = 0
+    unavailable = 0
+    totals: dict[str, int] = {}
+
+    def require_data(value: Any, label: str) -> Any:
+        if not value:
+            raise ValueError(f"Requested data unavailable: {label}")
+        return value
+
+    def record_error(exc: Exception) -> None:
+        nonlocal failures, unavailable
+        failures += 1
+        unavailable += int(isinstance(exc, ValueError))
 
     db = None
     if args.apply or args.skip_fresh_through:
@@ -300,33 +262,44 @@ def main() -> int:
 
     # Indices + ICB are universe-level, run once.
     search_index: dict[str, dict[str, Any]] = {}
-    if "company" in selected:
+    if selected & {"company", "financials", "ratios", "listing"} or (args.apply and "ohlc" in selected):
         try:
-            for row in client.get_company_search_bar():
+            for row in require_data(client.get_company_search_bar(), "search-bar"):
                 code = str(row.get("code") or "").upper()
                 if code:
                     search_index[code] = row
         except Exception as exc:  # noqa: BLE001
+            record_error(exc)
             print(json.dumps({"step": "search-bar", "error": str(exc)}))
 
     if "indices" in selected:
         for group in INDEX_GROUPS:
             try:
                 members = [str(r.get("symbol") or "") for r in client.get_symbols_by_group(group)]
+                require_data(members, f"index {group}")
                 n = w.upsert_index_constituents(db, group, members, dry_run=not args.apply) if (db is not None or not args.apply) else 0
+                totals["index_members"] = totals.get("index_members", 0) + n
                 print(json.dumps({"step": "indices", "group": group, "members": n}))
             except Exception as exc:  # noqa: BLE001
+                record_error(exc)
                 print(json.dumps({"step": "indices", "group": group, "error": str(exc)}))
 
     if "icb" in selected:
         try:
-            rows = client.get_icb_codes()
+            rows = require_data(client.get_icb_codes(), "icb")
             n = w.upsert_icb_sectors(db, rows, dry_run=not args.apply)
+            totals["icb_sectors"] = n
             print(json.dumps({"step": "icb", "sectors": n}))
         except Exception as exc:  # noqa: BLE001
+            record_error(exc)
             print(json.dumps({"step": "icb", "error": str(exc)}))
 
-    universe = resolve_universe(client, args.symbols)
+    try:
+        universe = require_data(resolve_universe(client, args.symbols), "symbol universe")
+    except Exception as exc:
+        record_error(exc)
+        print(json.dumps({"totals": totals, "errors": failures, "unavailable": unavailable, "error": str(exc)}))
+        return 1
     symbols = sorted(universe)
 
     fresh_symbols: set[str] = set()
@@ -355,18 +328,58 @@ def main() -> int:
         "datasets": sorted(selected),
         "symbol_count": len(symbols),
         "skipped_fresh": skipped_fresh,
-        "reconcile": args.reconcile,
     }, indent=2))
 
-    metric_map_done: set[str] = set()
-    totals: dict[str, int] = {}
 
     def _add(key: str, value: int) -> None:
         totals[key] = totals.get(key, 0) + int(value or 0)
 
+    def report_structured(records: list[dict[str, Any]], summary: dict[str, Any]) -> None:
+        summary["structured_fields"] = sum(len(row.get("structured", {}).get("values", {})) for row in records)
+        summary["unavailable_fields"] = sum(len(row.get("structured", {}).get("unavailable", {})) for row in records)
+        datasets = {row["dataset"] for row in records}
+        admitted = {row["dataset"] for row in records if row.get("structured", {}).get("values")}
+        summary["unavailable_structured_datasets"] = sorted(datasets - admitted)
+
+    def report_persistence_error(exc: Exception, summary: dict[str, Any], count_key: str = "structured_rows") -> None:
+        from vnibb.services.cache_manager import StructuredPersistenceConflict
+        from vnibb.services.vietcap_financials import StructuredFinancialUnavailable
+
+        if isinstance(exc, (StructuredFinancialUnavailable, StructuredPersistenceConflict)):
+            summary[count_key] = exc.persisted_rows
+            _add(count_key, exc.persisted_rows)
+            if isinstance(exc, StructuredFinancialUnavailable):
+                summary["unavailable_structured_groups"] = exc.unavailable_groups
+            else:
+                summary["structured_conflicting_keys"] = exc.conflicting_keys
+        record_error(exc)
+
+
+    listing_symbols = symbols if "listing" in selected else [
+        symbol for symbol in symbols
+        if args.apply and "ohlc" in selected and universe[symbol].get("type") == "STOCK"
+    ]
+    if listing_symbols:
+        try:
+            trading = [universe[symbol] for symbol in listing_symbols]
+            search = [search_index[symbol] for symbol in listing_symbols if symbol in search_index]
+            missing = [symbol for symbol in listing_symbols if symbol not in search_index or not universe[symbol].get("type")]
+            if missing:
+                record_error(ValueError(f"Listing metadata unavailable for {','.join(missing)}"))
+                print(json.dumps({"step": "listing", "unavailable_symbols": missing}))
+            require_data(search, "IQ listing search metadata")
+            totals["listing_rows"] = w.upsert_listing_rows(db, trading, search, dry_run=not args.apply)
+            if args.apply:
+                from vnibb.services.vietcap_financials import persist_vietcap_listings
+                totals["structured_listing_rows"] = runner.run(persist_vietcap_listings(trading, search))
+        except Exception as exc:
+            listing_summary = {"step": "listing", "error": str(exc)}
+            report_persistence_error(exc, listing_summary, "structured_listing_rows")
+            print(json.dumps(listing_summary, default=str))
+
     for idx, symbol in enumerate(symbols, 1):
         meta = universe.get(symbol, {})
-        com_type = str(meta.get("comTypeCode") or meta.get("type") or "STOCK").upper()
+        com_type = search_index.get(symbol, {}).get("comTypeCode")
         row_summary: dict[str, Any] = {"symbol": symbol, "i": idx, "type": meta.get("type")}
 
         if "ohlc" in selected:
@@ -375,69 +388,91 @@ def main() -> int:
             else:
                 try:
                     raw = client.get_ohlc(symbol, count_back=args.count_back)
-                    rows = ohlc_rows_from_gap_chart(symbol, raw) if raw else []
+                    rows = ohlc_rows_from_gap_chart(symbol, raw, instrument_type=meta.get("type")) if raw else []
+                    require_data(rows, f"OHLC {symbol}")
                     coll_name = price_collection_for(meta.get("type"))
                     n = upsert_eod_rows(db, coll_name, symbol, rows, dry_run=not args.apply)
                     row_summary["ohlc"] = {"collection": coll_name, "rows": n,
                                            "first": rows[0]["tradeDate"].date().isoformat() if rows else None,
                                            "last": rows[-1]["tradeDate"].date().isoformat() if rows else None}
                     _add("ohlc_rows", n)
-                    if args.reconcile and args.apply and coll_name == "market_prices_eod":
-                        vdates, removed = w.reconcile_eod_source(db, symbol, dry_run=False)
-                        row_summary["reconcile"] = {"vietcapDates": vdates, "removedVnstock": removed}
-                        _add("reconciled_removed", removed)
+                    if args.apply and meta.get("type") == "STOCK":
+                        from vnibb.services.vietcap_financials import persist_vietcap_prices
+                        row_summary["structured_price_rows"] = runner.run(persist_vietcap_prices(symbol, rows))
+                        _add("structured_price_rows", row_summary["structured_price_rows"])
+                        require_data(row_summary["structured_price_rows"], f"structured prices {symbol}")
                 except Exception as exc:  # noqa: BLE001
+                    report_persistence_error(exc, row_summary, "structured_price_rows")
                     row_summary["ohlc_error"] = str(exc)
 
         if "financials" in selected:
             try:
-                if com_type not in metric_map_done:
-                    mm = client.get_financial_metrics_map(symbol)
-                    if mm:
-                        w.upsert_metric_map(db, com_type, mm, dry_run=not args.apply)
-                        metric_map_done.add(com_type)
-                fin_total = 0
-                for section in FINANCIAL_SECTIONS:
-                    stmt = client.get_financial_statement(symbol, section)
-                    fin_total += w.upsert_statement_periods(
-                        db, symbol, SECTION_DATASET[section], section, stmt, dry_run=not args.apply
-                    )
-                row_summary["financials"] = fin_total
-                _add("financial_periods", fin_total)
-            except Exception as exc:  # noqa: BLE001
-                row_summary["financials_error"] = str(exc)
+                try:
+                    records = w.sync_symbol_financials(db, client, symbol, com_type=com_type, dry_run=not args.apply)
+                    financial_count = len(records)
+                except w.FinancialAcquisitionPartial as exc:
+                    records = exc.records
+                    financial_count = exc.mongo_rows
+                    record_error(exc)
+                    row_summary["financials_error"] = str(exc)
+                    row_summary["financial_acquisition_errors"] = exc.errors
+                report_structured(records, row_summary)
+                row_summary["financials"] = financial_count
+                row_summary["financial_envelopes"] = len(records)
+                _add("financial_periods", financial_count)
+                if args.apply and records:
+                    from vnibb.services.vietcap_financials import persist_vietcap_financials
+                    row_summary["structured_rows"] = runner.run(persist_vietcap_financials(records))
+                    _add("structured_rows", row_summary["structured_rows"])
+            except Exception as exc:
+                report_persistence_error(exc, row_summary)
+                row_summary["structured_financials_error"] = str(exc)
 
-        if "ratios" in selected:
+        if "ratios" in selected and "financials" not in selected:
             try:
-                ratios = client.get_statistics_financial(symbol)
-                n = w.upsert_ratio_rows(db, symbol, ratios, dry_run=not args.apply)
+                ratios = require_data(client.get_statistics_financial(symbol), f"ratios {symbol}")
+                records = []
+                from vnibb.services.vietcap_client import IQ_BASE
+                response_metadata = getattr(client, "response_metadata", {})
+                n = w.upsert_ratio_rows(db, symbol, ratios, com_type=com_type, records=records, dry_run=not args.apply,
+                    source_response=response_metadata.get(f"{IQ_BASE}/v1/company/{symbol.upper()}/statistics-financial"))
+                report_structured(records, row_summary)
                 row_summary["ratios"] = n
                 _add("ratio_rows", n)
-            except Exception as exc:  # noqa: BLE001
+                if args.apply:
+                    from vnibb.services.vietcap_financials import persist_vietcap_financials
+                    row_summary["structured_rows"] = runner.run(persist_vietcap_financials(records))
+                    _add("structured_rows", row_summary["structured_rows"])
+            except Exception as exc:
+                report_persistence_error(exc, row_summary)
                 row_summary["ratios_error"] = str(exc)
 
         if "company" in selected:
             try:
                 details = client.get_company_details(symbol)
                 n = w.upsert_company_profile(db, symbol, details, search_index.get(symbol), dry_run=not args.apply)
+                require_data(n, f"company {symbol}")
                 row_summary["company"] = n
                 _add("company_profiles", n)
             except Exception as exc:  # noqa: BLE001
+                record_error(exc)
                 row_summary["company_error"] = str(exc)
 
         if "shareholders" in selected:
             try:
                 data = client.get_shareholder_structure(symbol)
                 n = w.upsert_shareholder_structure(db, symbol, data, dry_run=not args.apply)
+                require_data(n, f"shareholders {symbol}")
                 row_summary["shareholders"] = n
                 _add("shareholder_rows", n)
             except Exception as exc:  # noqa: BLE001
+                record_error(exc)
                 row_summary["shareholders_error"] = str(exc)
 
         print(json.dumps(row_summary, default=str))
 
-    print(json.dumps({"totals": totals}, indent=2))
-    return 0
+    print(json.dumps({"totals": totals, "errors": failures, "unavailable": unavailable}, indent=2))
+    return int(failures > 0)
 
 
 def _ensure_indexes(db: Any) -> None:

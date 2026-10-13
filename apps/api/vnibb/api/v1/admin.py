@@ -80,7 +80,7 @@ def _vnstock_runtime_status() -> Dict[str, Any]:
         "api_key_configured": bool(settings.vnstock_api_key),
         "source": settings.vnstock_source,
         "timeout_seconds": settings.vnstock_timeout,
-        "preferred_runtime": "vnstock_data" if packages["vnstock_data"]["installed"] else "vnstock",
+        "preferred_runtime": "vnstock",
         "sponsor_packages_installed": all(packages[name]["installed"] for name in sponsor_names),
         "packages": packages,
     }

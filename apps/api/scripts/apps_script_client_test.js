@@ -227,6 +227,24 @@ let unknownDataset = false;
 try { ctx.fetchBounded_("nonsense", {}); } catch (e) { unknownDataset = true; }
 check(unknownDataset, "fetchBounded_ rejects unknown dataset");
 
+console.log("— free VCI source routing —");
+check(ctx.validateSource_() === "VCI", "omitted source defaults to VCI");
+check(ctx.validateSource_(" vci ") === "VCI", "VCI source is normalized");
+for (const unsupported of ["KBS", "TCBS", "DNSE", "MSN", "FMP", "INVALID"]) {
+  const requestCount = requests.length;
+  let rejected = false;
+  try { ctx.fetchVnibb("/screener", { source: unsupported }); } catch (error) {
+    rejected = error.message.includes("only free VCI");
+  }
+  check(rejected && requests.length === requestCount, "rejects " + unsupported + " before network access");
+}
+responses.push(() => []);
+ctx.pullScreener("HOSE", 100);
+check(requests[requests.length - 1].url.includes("source=VCI"), "legacy screener defaults to VCI");
+responses.push(() => ({ data: { symbol: "VNM" } }));
+ctx.pullQuote("VNM", " vci ");
+check(requests[requests.length - 1].url.includes("source=VCI"), "quote forwards normalized VCI");
+
 console.log("— provenance block —");
 
 let prov = ctx.provenanceRows_(okMeta());
@@ -276,8 +294,9 @@ check(!!sheetsByName["VNM income (year)"], "financial data tab written");
 check(!!sheetsByName["VNM income (year) provenance"], "financial provenance tab written");
 
 responses.push(() => boundedResponse(okMeta({ dataset: "screener", source: "fallback_cache", source_date: "2025-07-15", count: 1 }), [SCREENER_ROW]));
-let screener = ctx.pullBoundedScreener("HOSE", 100, null, "KBS");
+let screener = ctx.pullBoundedScreener("HOSE", 100, null);
 check(screener.length === 1, "pullBoundedScreener returns rows");
+check(requests[requests.length - 1].url.includes("source=VCI"), "bounded screener defaults to VCI");
 check(!!sheetsByName["Screener (HOSE) provenance"], "screener provenance tab written");
 
 responses.push(() => boundedResponse(okMeta({ dataset: "historical", source: "merged", source_date: "2025-01-09", count: 1 }), [HISTORY_ROW]));

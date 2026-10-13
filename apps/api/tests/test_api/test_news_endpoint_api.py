@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
+
+from fastapi import BackgroundTasks
 
 import pytest
 
@@ -368,16 +371,14 @@ async def test_world_news_map_endpoint_returns_source_geography(client, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_trending_endpoint_resolves_under_news_prefix(client, monkeypatch):
-    async def fake_analyze_trending():
-        return {"topics": [], "period_hours": 24, "total_articles": 0}
-
-    monkeypatch.setattr(news.news_crawler, "analyze_trending", fake_analyze_trending)
+async def test_trending_endpoint_reports_unavailable_under_news_prefix(client):
 
     response = await client.get("/api/v1/news/trending")
 
     assert response.status_code == 200
     assert response.json()["topics"] == []
+    assert response.json()["available"] is False
+    assert response.json()["reason"] == "trending_analysis_unavailable"
 
 
 @pytest.mark.asyncio
@@ -414,3 +415,30 @@ async def test_world_news_sources_endpoint_returns_registry(client, monkeypatch)
     payload = response.json()
     assert payload["sources"][0]["id"] == "cafef_markets"
     assert payload["sources"][0]["feed_urls"] == ["https://cafef.vn/thi-truong-chung-khoan.rss"]
+
+
+@pytest.mark.asyncio
+async def test_empty_feed_schedules_rss_without_paid_news_availability(monkeypatch):
+    feed = news.NewsFeed(articles=[], total=0)
+    monkeypatch.setattr(news, "get_news_feed", AsyncMock(return_value=feed))
+    monkeypatch.setattr(news.news_crawler, "_news_available", False)
+    tasks = BackgroundTasks()
+
+    result = await news.get_news_feed_api(
+        tasks, source=None, sentiment=None, symbol=None, mode="all", limit=20, offset=0,
+    )
+
+    assert result is feed
+    assert len(tasks.tasks) == 1
+    assert tasks.tasks[0].func == news.news_crawler.crawl_market_news
+    assert tasks.tasks[0].kwargs == {
+        "sources": None, "limit": 20, "analyze_sentiment": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_news_sources_reports_free_rss_available():
+    payload = await news.get_sources()
+
+    assert payload["available"] is True
+    assert payload["sources"] == news.news_crawler.SOURCES

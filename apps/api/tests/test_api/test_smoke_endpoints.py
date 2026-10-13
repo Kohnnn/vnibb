@@ -9,7 +9,7 @@ from vnibb.models.company import Company, Shareholder
 from vnibb.models.comparison import StockComparison
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.market_news import MarketNews
-from vnibb.models.news import Dividend
+from vnibb.models.news import CompanyEvent, Dividend
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
@@ -22,6 +22,7 @@ from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.providers.vnstock.foreign_trading import ForeignTradingData
 from vnibb.providers.vnstock.intraday import IntradayTradeData
 from vnibb.providers.vnstock.price_depth import OrderLevel, PriceDepthData
+from vnibb.providers.vnstock.market_overview import MarketIndexData
 from vnibb.providers.vnstock.stock_quote import StockQuoteData
 from vnibb.providers.vnstock.trading_stats import TradingStatsData
 from vnibb.services.sector_service import SectorPerformance, StockBrief
@@ -484,7 +485,11 @@ async def test_profile_cache_backfills_sector_and_scales_market_cap(client, test
 
 
 @pytest.mark.asyncio
-async def test_dividends_endpoint_falls_back_to_cached_dividend_rows(client, test_db, monkeypatch):
+@pytest.mark.parametrize("provider_fails", [False, True])
+@pytest.mark.parametrize("fallback_model", [Dividend, CompanyEvent])
+async def test_dividends_endpoint_falls_back_to_cached_rows(
+    client, test_db, monkeypatch, provider_fails, fallback_model
+):
     test_db.add(
         Stock(
             id=1,
@@ -499,17 +504,17 @@ async def test_dividends_endpoint_falls_back_to_cached_dividend_rows(client, tes
             stock_id=1,
             symbol="VNM",
             time=date(2026, 3, 14),
-            open=62.9,
-            high=63.4,
-            low=62.3,
-            close=63.1,
+            open=62900,
+            high=63400,
+            low=62300,
+            close=63100,
             volume=2_050_000,
             interval="1D",
-            source="KBS",
+            source="vnstock_vnd:VCI",
         )
     )
-    test_db.add(
-        Dividend(
+    if fallback_model is Dividend:
+        fallback_row = Dividend(
             id=1,
             symbol="VNM",
             exercise_date=date(2025, 9, 15),
@@ -520,14 +525,31 @@ async def test_dividends_endpoint_falls_back_to_cached_dividend_rows(client, tes
             record_date=date(2025, 9, 16),
             payment_date=date(2025, 10, 5),
         )
-    )
+    else:
+        fallback_row = CompanyEvent(
+            id=1,
+            symbol="VNM",
+            event_type="dividend",
+            ex_date=date(2025, 9, 15),
+            record_date=date(2025, 9, 16),
+            payment_date=date(2025, 10, 5),
+            value=4300.0,
+            raw_data={"dividend_ratio": 43.0, "fiscal_year": 2025},
+        )
+    test_db.add(fallback_row)
     await test_db.commit()
 
-    async def fake_dividend_fetch(symbol):
-        assert symbol == "VNM"
-        return []
+    class Company:
+        def __init__(self, *, symbol, source):
+            assert symbol == "VNM"
+            assert source == "VCI"
 
-    monkeypatch.setattr("vnibb.api.v1.equity.VnstockDividendsFetcher.fetch", fake_dividend_fetch)
+        def events(self):
+            if provider_fails:
+                raise RuntimeError("VCI events unavailable")
+            return None
+
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_company_class", lambda: Company)
 
     response = await client.get("/api/v1/equity/VNM/dividends?limit=5")
 
@@ -540,6 +562,26 @@ async def test_dividends_endpoint_falls_back_to_cached_dividend_rows(client, tes
     assert payload["data"][0]["type"] == "cash"
     assert payload["data"][0]["annual_dps"] == 4300.0
     assert payload["data"][0]["dividend_yield"] == pytest.approx(6.8146, rel=1e-4)
+    if provider_fails:
+        assert "VCI dividends unavailable" in payload["error"]
+        assert "VCI events unavailable" in payload["error"]
+    else:
+        assert payload["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_dividends_endpoint_propagates_provider_cancellation(monkeypatch):
+    from vnibb.api.v1 import equity
+
+    fetch = AsyncMock(side_effect=asyncio.CancelledError())
+    db = AsyncMock()
+    monkeypatch.setattr(equity.VnstockDividendsFetcher, "fetch", fetch)
+
+    with pytest.raises(asyncio.CancelledError):
+        await equity.get_dividends(symbol="VNM", limit=5, db=db)
+
+    fetch.assert_awaited_once_with(symbol="VNM")
+    db.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3481,20 +3523,16 @@ async def test_market_world_indices_smoke_returns_data(client, monkeypatch):
     async def fake_yahoo_world_indices(limit: int):
         return []
 
-    async def fake_world_index_point(symbol: str, name: str):
-        return {
-            "symbol": symbol,
-            "name": name,
-            "value": 1234.5,
-            "change": 10.0,
-            "change_pct": 0.8,
-            "updated_at": "2026-02-15",
-        }
+    async def fake_market_overview(_params):
+        return [
+            MarketIndexData(index_name=name, current_value=1234.5, change=10.0, change_pct=0.8)
+            for name in ("VN-INDEX", "HNX-INDEX")
+        ]
 
     monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_world_indices", fake_yahoo_world_indices)
     monkeypatch.setattr(
-        "vnibb.api.v1.market._fetch_world_index_point",
-        fake_world_index_point,
+        "vnibb.api.v1.market.VnstockMarketOverviewFetcher.fetch",
+        fake_market_overview,
     )
 
     response = await client.get("/api/v1/market/world-indices?limit=2")
@@ -3502,6 +3540,8 @@ async def test_market_world_indices_smoke_returns_data(client, monkeypatch):
     payload = response.json()
     assert payload["count"] == 2
     assert payload["data"][0]["value"] == 1234.5
+    assert payload["source"] == "vnstock:market_overview_fallback"
+    assert payload["error"] == "Global index feed unavailable, using VN market index fallback"
 
 
 @pytest.mark.asyncio
@@ -3653,25 +3693,13 @@ async def test_health_detailed_returns_200(client):
 
 @pytest.mark.asyncio
 async def test_request_timeout_middleware_returns_504(client, monkeypatch):
-    monkeypatch.setattr("vnibb.api.v1.market.WORLD_INDEX_POINT_TIMEOUT_SECONDS", 2)
     monkeypatch.setattr("vnibb.core.config.settings.api_request_timeout_seconds", 0.01)
 
     async def fake_yahoo_world_indices(limit: int):
+        await asyncio.sleep(0.05)
         return []
 
-    async def fake_world_index_point(symbol: str, name: str):
-        await asyncio.sleep(0.05)
-        return {
-            "symbol": symbol,
-            "name": name,
-            "value": 1234.5,
-            "change": 10.0,
-            "change_pct": 0.8,
-            "updated_at": "2026-02-15",
-        }
-
     monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_world_indices", fake_yahoo_world_indices)
-    monkeypatch.setattr("vnibb.api.v1.market._fetch_world_index_point", fake_world_index_point)
 
     response = await client.get("/api/v1/market/world-indices?limit=1")
     assert response.status_code == 504

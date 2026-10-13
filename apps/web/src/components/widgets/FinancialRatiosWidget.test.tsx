@@ -13,7 +13,7 @@ jest.mock('@/components/ui/WidgetContainer', () => ({
 }));
 
 jest.mock('@/components/ui/WidgetMeta', () => ({
-  WidgetMeta: () => null,
+  WidgetMeta: ({ isCached }: { isCached?: boolean }) => isCached ? <span>Cached snapshot</span> : null,
 }));
 
 jest.mock('@/components/ui/widget-skeleton', () => ({
@@ -72,10 +72,10 @@ const statementResponse = {
   ],
 };
 
-function renderWidget() {
+function renderWidget(onDataChange?: (data: WidgetDataPayload) => void) {
   return render(
     <UnitProvider>
-      <FinancialRatiosWidget id="ratios-1" symbol="FPT" />
+      <FinancialRatiosWidget id="ratios-1" symbol="FPT" onDataChange={onDataChange} />
     </UnitProvider>,
   );
 }
@@ -100,6 +100,44 @@ describe('FinancialRatiosWidget period columns', () => {
     jest.clearAllMocks();
     mockUseFinancialRatios.mockReturnValue(queryResult(ratiosResponse));
     mockUseIncomeStatement.mockReturnValue(queryResult(statementResponse));
+  });
+
+  test('discloses the primary failure while retaining fallback ratios and stale metadata', async () => {
+    const warning = 'Vietcap IQ unavailable; showing stored VCI ratios.';
+    const onDataChange = jest.fn();
+    mockUseFinancialRatios.mockReturnValue(queryResult({ ...ratiosResponse, error: warning }));
+
+    renderWidget(onDataChange);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(warning);
+    expect(screen.getByText('Cached snapshot')).toBeInTheDocument();
+    await waitFor(() => expect(rowValues(screen.getByText(/^P\/E$/i))).toContain('18.40'));
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      __widgetRuntime: expect.objectContaining({ provenance: expect.objectContaining({ stale: true }) }),
+    }));
+  });
+
+  test('shows the response failure instead of an ordinary empty state when no ratios are usable', () => {
+    const warning = 'Vietcap IQ ratios unavailable and no stored ratios exist.';
+    mockUseFinancialRatios.mockReturnValue(queryResult({ data: [], error: warning }));
+
+    renderWidget();
+
+    expect(screen.getByText(warning)).toBeInTheDocument();
+    expect(screen.queryByText('No ratio data for FPT')).not.toBeInTheDocument();
+  });
+
+  test('renders canonical low percentage points without magnitude conversion', async () => {
+    mockUseFinancialRatios.mockReturnValue(queryResult({
+      symbol: 'FPT', count: 1, data: [{ period: '2025', roe: 0.25, dividend_yield: 0.03 }],
+    }));
+    mockUseIncomeStatement.mockReturnValue(queryResult(undefined));
+
+    renderWidget();
+
+    await waitFor(() => expect(rowValues(screen.getByText('ROE'))).toContain('0.25%'));
+    expect(rowValues(screen.getByText('Dividend Yield'))).toContain('3.00%');
+    expect(screen.queryByText('25.00%')).not.toBeInTheDocument();
   });
 
   // The columns are the statement panels' window verbatim — same headings, same newest-only

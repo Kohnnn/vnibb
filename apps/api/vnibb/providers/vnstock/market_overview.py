@@ -16,6 +16,7 @@ from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 
 from vnibb.providers.vnstock import get_vnstock
+from vnibb.providers.vnstock.runtime import validate_source
 
 logger = logging.getLogger(__name__)
 
@@ -101,13 +102,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
             "UPCOM": ["UPCOM", "UPCOMINDEX", "UPCOM-INDEX"],
         }
 
-        # Market indices still come back in compact KBS units on vnstock 3.4.x,
-        # so prefer VCI for full-point index history even when the app default is KBS.
-        source_candidates: list[str] = []
-        for candidate in ("VCI", settings.vnstock_source, "KBS"):
-            normalized = (candidate or "").strip().upper()
-            if normalized and normalized not in source_candidates:
-                source_candidates.append(normalized)
+        source_candidates = [validate_source(settings.vnstock_source)]
 
         def _fetch_single_index(index_name: str, symbols: list[str]) -> Optional[dict[str, Any]]:
             """Fetch a single market index with timeout handling."""
@@ -258,10 +253,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
         results = []
         for row in data:
             try:
-                # Handle different column names from active sources (KBS, VCI, DNSE)
-                # VCI: close, change, pctChange
-                # KBS: close, change, pct_change
-                # DNSE: close, change, change_ratio
+                # Preserve column aliases from retained provider payloads.
                 current_value = _first_non_none(
                     row.get("current_value"),
                     row.get("close"),
