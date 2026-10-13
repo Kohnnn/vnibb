@@ -12,6 +12,7 @@ import { Building2, Globe, Users, Calendar, MapPin, AlertTriangle } from 'lucide
 import { formatTimestamp } from '@/lib/format';
 import { formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
 import { formatLargeNumber } from '@/lib/units';
+import { normalizeInsiderAction } from '@/lib/insiderActions';
 import type { DividendRecord } from '@/lib/api';
 
 interface TickerProfileWidgetProps {
@@ -333,8 +334,11 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                                 ) : (
                                     <div className="space-y-2">
                                         {insiderDeals.slice(0, 2).map((deal) => {
-                                            const action = deal.deal_action?.toUpperCase() || 'DEAL';
-                                            const isBuy = action.includes('BUY');
+                                            const actionToken = normalizeInsiderAction(deal.deal_action);
+                                            const actionLabel = actionToken ?? 'UNKNOWN';
+                                            const actionClass = actionToken === 'BUY' ? 'text-green-400'
+                                                : actionToken === 'SELL' ? 'text-red-400' : 'text-[var(--text-muted)]';
+                                            const priceText = deal.price_unit === 'VND' ? formatVND(deal.deal_price) : '—';
                                             return (
                                                 <div
                                                     key={deal.id}
@@ -347,11 +351,11 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                                                         <div className="text-[10px] text-[var(--text-muted)]">{deal.insider_position || '—'}</div>
                                                     </div>
                                                     <div className="text-right">
-                                                        <div className={`text-[10px] font-bold ${isBuy ? 'text-green-400' : 'text-red-400'}`}>
-                                                            {action}
+                                                        <div className={`text-[10px] font-bold ${actionClass}`}>
+                                                            {actionLabel}
                                                         </div>
                                                         <div className="text-[10px] text-[var(--text-muted)]">
-                                                            {formatNumber(deal.deal_quantity)} @ {formatVND(deal.deal_price)}
+                                                            {formatNumber(deal.deal_quantity)} @ {priceText}
                                                         </div>
                                                         <div className="text-[10px] text-[var(--text-muted)]">{formatDateOnly(deal.announce_date)}</div>
                                                     </div>

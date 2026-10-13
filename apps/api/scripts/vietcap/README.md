@@ -49,9 +49,26 @@ Rerunning the same slice upserts the existing natural keys. Apply also awaits de
 - Apply bridges confirmed stock OHLC to the existing PostgreSQL price store and reports `structured_price_rows`. Financial/source conflicts retain raw Mongo records, report partial committed counts and conflicting natural keys, and return nonzero rather than overwrite non-IQ SQL data.
 - Listing upserts run before dependent stock prices. An applied stock OHLC slice also fetches and persists its bounded IQ/trading listing prerequisite when `listing` is not explicitly selected, so a first-run database can admit those prices.
 
+An applied stock OHLC slice reports its admission outcome under `price_admission`: `source_rows`, `admitted_rows`, `rejected_rows`, `rejected_reasons` (for example `invalid_ohlc_bounds`, `missing_negative_or_nonfinite_ohlcv`, `noninteger_volume`, `invalid_date`), `persisted_rows` and the actual admitted/persisted first/last bounds, plus a `classification`. A mixed window is `partial_source_invalid` and the pair is still receipted `failed` behind a strict guard that requires the full returned window to reach SQL (`Returned OHLC window incomplete: <rejected> source rows unadmitted; <persisted>/<returned> SQL rows persisted`); a rejected SQL conflict instead classifies `sql_source_conflict` with `conflicting_keys` and also returns nonzero. A real new-process apply observed this end to end: AAA returned 4,049 source rows, persisted 4,048, and rejected exactly one `invalid_ohlc_bounds` row as `partial_source_invalid`. Rejections are source-invalid rows, not writer loss: every raw Mongo row is retained unrepaired, `history_complete` stays `null`, and re-running `resume` under the same contract retries the pair rather than silently certifying a short window.
+
 ## Archived maintenance
 
 `maintain_vietcap_corpus.py` and maintenance functions remain archived for separate controlled operations. The backfill CLI has no destructive reconciliation option or maintenance call path. Do not run maintenance as part of ingestion.
+
+## Read-only coverage inventory
+
+Run from `apps/api`, supplying an already captured Trading `getAll` response (JSON list or an object with `instruments`/`data`). No universe/provider request is repeated:
+
+```bash
+python scripts/verify_database.py --inventory --universe-json /path/to/universe.json \
+  --env-file /home/compute_01/.config/vnibb/data.local.env
+python scripts/verify_database_selfcheck.py
+```
+
+The opt-in JSON report separates physical SQL and Mongo datasets, stock-type/currently-listed/active-SQL universes, expected/present/missing symbols, retained time/fiscal-period bounds, SQL null/nonnull/descriptor-unit-admitted fields, and raw Mongo admission-unavailable reasons. It discovers the current premium allowlist without importing MCP or invoking providers. SQL statements run in a rolled-back read-only transaction; Mongo uses only read queries. Missing collections/tables are `unavailable`, not failed reads or proof of full-session replay. Query failures return a sanitized exception type and exit 1; valid empty/unavailable inventories return 0. No payloads, credentials or database URLs are printed.
+
+Refresh/history declarations cite existing ingestion owners; unknown scopes remain explicit rather than inventing a symbol denominator. SQL flows, SQL ticks, Mongo raw ticks, typed ticks and depth are separate inventories. Bounds and ingestion times are not exchange-session completeness or source freshness. IQ field admission uses retained scoped descriptors/unit evidence; free VCI and legacy fields remain counted but unverified by this inventory. QA contract IDs refer to the authoritative #111 extension index; inventory does not certify ticket outcomes or authenticated Matrix acceptance. The legacy no-argument invocation remains unchanged, including its VCI connectivity call; use `--inventory` for provider-free operation. Neither command above was executed during this change.
+
 
 ## Regression check
 

@@ -6,6 +6,7 @@ All writers target MongoDB ``vnibb-market`` and tag rows with source="vietcap".
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from datetime import UTC, datetime
@@ -259,7 +260,7 @@ def upsert_ratio_rows(
             "source": "vietcap",
             "providerSource": "vietcap",
             "recordKey": record_key,
-            "period": period,
+            "period": str(year) if annual else period,
             **_financial_provenance(raw, synced_at),
             "raw": raw,
             "sourceResponse": source_response,
@@ -380,6 +381,7 @@ def upsert_company_profile(
     search_row: dict[str, Any] | None,
     *,
     dry_run: bool,
+    source_response: dict[str, Any] | None = None,
 ) -> int:
 
     if not details and not search_row:
@@ -389,12 +391,16 @@ def upsert_company_profile(
     doc = {
         "symbol": symbol_upper,
         "source": "vietcap",
+        "providerSource": "vietcap",
         "details": details or {},
-        "searchBar": search_row or {},
         "updatedAt": synced_at,
         "syncedAt": synced_at,
         "schemaVersion": 1,
     }
+    if search_row is not None:
+        doc["searchBar"] = search_row
+    if source_response is not None:
+        doc["sourceResponse"] = source_response
     if dry_run:
         return 1
     db["market_company_profiles"].update_one(
@@ -405,7 +411,7 @@ def upsert_company_profile(
     return 1
 
 
-def upsert_shareholder_structure(db: Any, symbol: str, data: dict[str, Any] | None, *, dry_run: bool) -> int:
+def upsert_shareholder_structure(db: Any, symbol: str, data: dict[str, Any] | None, *, dry_run: bool, source_response: dict[str, Any] | None = None) -> int:
 
     if not data:
         return 0
@@ -427,6 +433,8 @@ def upsert_shareholder_structure(db: Any, symbol: str, data: dict[str, Any] | No
         "syncedAt": synced_at,
         "schemaVersion": 1,
     }
+    if source_response is not None:
+        doc["sourceResponse"] = source_response
     if dry_run:
         return 1
     db["market_vnstock_premium_records"].update_one(
@@ -435,6 +443,48 @@ def upsert_shareholder_structure(db: Any, symbol: str, data: dict[str, Any] | No
         upsert=True,
     )
     return 1
+
+
+async def sync_vietcap_reference(symbol: str, dataset: str, progress: dict[str, Any]) -> int:
+    from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+    from vnibb.services.vietcap_client import IQ_BASE, VietcapClient
+
+    if dataset not in {"iq_company_profile", "iq_shareholder_structure"}:
+        raise ValueError(f"Unsupported IQ reference dataset: {dataset}")
+    symbol = symbol.strip().upper()
+    if not symbol or not symbol.isascii() or not symbol.isalnum():
+        raise ValueError("Invalid IQ reference symbol")
+    client = VietcapClient()
+    profile = dataset == "iq_company_profile"
+    endpoint = f"{IQ_BASE}/v1/company/details?ticker={symbol}" if profile else f"{IQ_BASE}/v1/company/{symbol}/shareholder-structure"
+    acquisition = {"source": "vietcap", "symbol": symbol, "dataset": dataset, "endpoint": endpoint, "outcome": "attempted"}
+    progress["acquisition"] = acquisition
+    try:
+        fetch = client.get_company_details if profile else client.get_shareholder_structure
+        data = await asyncio.to_thread(fetch, symbol)
+        metadata = client.response_metadata.get(endpoint, {})
+        acquisition["source_response"] = metadata
+        if not data:
+            confirmed = metadata.get("successful") is True or metadata.get("success") is True or str(metadata.get("status")) in {"0", "200"} or str(metadata.get("code")) in {"0", "200"}
+            if not confirmed:
+                raise RuntimeError(f"Unconfirmed empty IQ reference response for {symbol}/{dataset}")
+            progress["empty_count"] = progress.get("empty_count", 0) + 1
+            acquisition.update(outcome="confirmed_empty", rows=0)
+            return 0
+
+        def persist() -> int:
+            database = get_mongo_market_data_service()._get_database()
+            if profile:
+                return upsert_company_profile(database, symbol, data, None, dry_run=False, source_response=metadata)
+            return upsert_shareholder_structure(database, symbol, data, dry_run=False, source_response=metadata)
+        count = await asyncio.to_thread(persist)
+        progress["success_count"] = progress.get("success_count", 0) + count
+        acquisition.update(outcome="succeeded", rows=count)
+        return count
+    except Exception as exc:
+        acquisition.update(outcome="failed", error=f"{type(exc).__name__}: {exc}", source_response=client.response_metadata.get(endpoint, {}))
+        progress["error_count"] = progress.get("error_count", 0) + 1
+        raise
 
 
 # ---------------------------------------------------------------------------

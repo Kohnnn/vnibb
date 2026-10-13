@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from vnibb.services.vietcap_financials import (
     decode_vietcap_financial_record,
+    financial_fiscal_basis,
     load_vietcap_financial_rows,
     persist_vietcap_financials,
     persist_vietcap_listings,
@@ -96,9 +97,38 @@ def test_scope_fiscal_and_unit_conflicts_stay_unavailable(envelope, change):
 def test_actual_annual_ratio_quarter_five_requires_ratio_year(envelope):
     envelope.update(dataset="finance.ratio", datasetVariant="finance.ratio.year", descriptors=None)
     envelope["raw"].update(quarter=5, ratioType="RATIO_YEAR", ratioYearId=123)
+    envelope["period"] = "2025-Q5"
+    assert financial_fiscal_basis(envelope)["period"] is None
+    envelope["period"] = "2025"
     assert decode_vietcap_financial_record(envelope)["fiscalBasis"]["period"] == "2025"
     envelope["raw"]["ratioType"] = "RATIO_TTM"
     assert decode_vietcap_financial_record(envelope)["fiscalBasis"]["period"] is None
+
+
+@pytest.mark.parametrize("location", ["envelope", "raw"])
+@pytest.mark.parametrize("period_type,expected", [("year", "2025"), (" YEAR ", "2025"), ("quarter", None), ("ttm", None)])
+def test_explicit_period_type_agrees_with_dataset_variant(envelope, location, period_type, expected):
+    target = envelope if location == "envelope" else envelope["raw"]
+    target["periodType"] = period_type
+    assert financial_fiscal_basis(envelope)["period"] == expected
+    assert decode_vietcap_financial_record(envelope)["fiscalBasis"]["period"] == expected
+
+
+def test_fiscal_identity_requires_exact_dataset_variant_and_explicit_year(envelope):
+    envelope["datasetVariant"] = "finance.balance_sheet.year"
+    assert financial_fiscal_basis(envelope)["period"] is None
+    envelope["datasetVariant"] = "finance.income_statement.year"
+    envelope["raw"].pop("yearReport")
+    assert financial_fiscal_basis(envelope)["period"] is None
+
+
+@pytest.mark.parametrize("quarter", [None, 0, 2, 5])
+@pytest.mark.parametrize("ttm_evidence", [{"ratioType": "RATIO_TTM"}, {"ratioTTMId": 123}])
+def test_explicit_ttm_ratio_never_becomes_annual_or_quarterly(envelope, quarter, ttm_evidence):
+    variant = "quarter" if quarter == 2 else "year"
+    envelope.update(dataset="finance.ratio", datasetVariant=f"finance.ratio.{variant}")
+    envelope["raw"] = {"year": 2025, "quarter": quarter, **ttm_evidence}
+    assert financial_fiscal_basis(envelope)["period"] is None
 
 
 @pytest.mark.parametrize("basis,reason", [(None, "quarter_basis_unverified"), ("cumulative_ytd", "incompatible_quarter_basis"), ("single_quarter", None)])
@@ -232,7 +262,7 @@ async def test_bounded_reader_retains_model_evidence(envelope, monkeypatch):
     service.get_raw_dataset_records_precise = reader
     monkeypatch.setattr(mongo_module, "get_mongo_market_data_service", lambda: service)
     rows = await load_vietcap_financial_rows("VNM", "finance.income_statement", limit=3)
-    reader.assert_awaited_once_with("VNM", dataset="finance.income_statement", variant="finance.income_statement.year", source="vietcap", raise_errors=True, limit=3)
+    reader.assert_awaited_once_with("VNM", dataset="finance.income_statement", variant="finance.income_statement.year", source="vietcap", limit=3)
     assert rows[0].revenue == 12
     assert rows[0].raw_data["descriptors"] == envelope["descriptors"]
     assert rows[0].source == "vietcap"
@@ -256,12 +286,22 @@ async def test_price_bridge_requires_explicit_vnd_and_valid_date():
 async def test_listing_bridge_joins_actual_search_fields_without_fake_shares():
     cache = AsyncMock()
     cache.store_listing_data.return_value = 1
-    trading = [{"symbol": "VNM", "board": "HSX", "organName": "Trading Name", "organShortName": "VINAMILK"}]
+    trading = [{"symbol": "VNM", "type": "STOCK", "board": "HSX", "organName": "Trading Name", "organShortName": "VINAMILK"}]
     search = [{"code": "VNM", "name": "Search Name", "icbLv4": {"code": "FOOD", "name": "Food"}, "icbLv1": {"name": "Consumer"}}]
     assert await persist_vietcap_listings(trading, search, cache_manager=cache) == 1
     row = cache.store_listing_data.call_args.args[0][0]
-    assert row == {"symbol": "VNM", "company_name": "Search Name", "short_name": "VINAMILK", "exchange": "HOSE", "industry": "Food", "sector": "Consumer"}
+    assert row == {"symbol": "VNM", "company_name": "Search Name", "short_name": "VINAMILK", "exchange": "HOSE", "is_active": 1, "industry": "Food", "sector": "Consumer"}
     assert cache.store_listing_data.call_args.kwargs == {"source": "vietcap"}
+
+
+@pytest.mark.asyncio
+async def test_listing_bridge_keeps_delisted_stock_without_search_and_rejects_nonstock():
+    cache = AsyncMock()
+    cache.store_listing_data.return_value = 1
+    trading = [{"symbol": "OLD", "type": "STOCK", "board": "DELISTED", "organName": "Old"}, {"symbol": "CW1", "type": "CW", "board": "HSX"}]
+    assert await persist_vietcap_listings(trading, [], cache_manager=cache) == 1
+    rows = cache.store_listing_data.call_args.args[0]
+    assert len(rows) == 1 and rows[0]["symbol"] == "OLD" and rows[0]["is_active"] == 0
 
 
 @pytest.mark.asyncio

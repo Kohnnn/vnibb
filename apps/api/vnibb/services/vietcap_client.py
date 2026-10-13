@@ -173,13 +173,21 @@ class VietcapClient:
 
     def get_company_details(self, symbol: str) -> dict[str, Any] | None:
         url = f"{IQ_BASE}/v1/company/details?ticker={symbol.upper()}"
-        data = self._unwrap(self._request("GET", url, IQ_BASE))
-        return data if isinstance(data, dict) else None
+        payload = self._request("GET", url, IQ_BASE)
+        data = self._unwrap(payload)
+        envelope = isinstance(payload, dict) and any(key in payload for key in ("data", "successful", "success", "status", "code"))
+        if (envelope and ("data" not in payload or data is payload)) or (data is not None and not isinstance(data, dict)):
+            raise ValueError(f"Invalid company details response for {symbol}")
+        return data
 
     def get_shareholder_structure(self, symbol: str) -> dict[str, Any] | None:
         url = f"{IQ_BASE}/v1/company/{symbol.upper()}/shareholder-structure"
-        data = self._unwrap(self._request("GET", url, IQ_BASE))
-        return data if isinstance(data, dict) else None
+        payload = self._request("GET", url, IQ_BASE)
+        data = self._unwrap(payload)
+        envelope = isinstance(payload, dict) and any(key in payload for key in ("data", "successful", "success", "status", "code"))
+        if (envelope and ("data" not in payload or data is payload)) or (data is not None and not isinstance(data, dict)):
+            raise ValueError(f"Invalid shareholder structure response for {symbol}")
+        return data
 
     def get_financial_metrics_map(self, symbol: str) -> dict[str, list[dict[str, Any]]]:
         """Return code->label maps keyed by section (INCOME_STATEMENT/BALANCE_SHEET/CASH_FLOW/NOTE)."""

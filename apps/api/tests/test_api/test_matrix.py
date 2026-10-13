@@ -1,6 +1,9 @@
 import copy
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
+from types import SimpleNamespace
+
+import httpx
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -15,7 +18,7 @@ from vnibb.models.app_kv import AppKeyValue
 from vnibb.services import matrix_service as service
 from vnibb.services.matrix_playbooks import PLAYBOOKS
 
-OWNER = "matrix-owner"
+OWNER = "00000000-0000-4000-8000-000000000010"
 SECRET = "matrix-contract-test-only-secret"
 
 
@@ -232,7 +235,19 @@ async def test_http_auth_bounds_and_untrusted_overrides(test_db, stored, monkeyp
 
     app.dependency_overrides[get_db] = database
     monkeypatch.setattr(settings, "supabase_jwt_secret", SECRET)
-    token = jwt.encode({"sub": OWNER, "exp": datetime.now(UTC) + timedelta(minutes=5)}, SECRET, algorithm="HS256")
+    from vnibb.core import auth
+    monkeypatch.setattr(settings, "supabase_url", "https://matrix-auth.invalid")
+    monkeypatch.setattr(settings, "supabase_anon_key", "disposable-fixture-key")
+    state = {"status": 200}
+    def respond(request):
+        return httpx.Response(state["status"], json={"id": OWNER})
+    monkeypatch.setattr(auth, "httpx", SimpleNamespace(
+        AsyncClient=lambda **kwargs: AsyncClient(transport=httpx.MockTransport(respond), **kwargs),
+        RequestError=httpx.RequestError,
+    ))
+    now = int(datetime.now(UTC).timestamp())
+    token = jwt.encode({"sub": OWNER, "exp": now + 300, "iat": now, "aud": "authenticated",
+                        "iss": "https://matrix-auth.invalid/auth/v1", "session_id": str(uuid4())}, SECRET, algorithm="HS256")
     sid = stored["snapshot"]["snapshot_id"]
     rid = stored["snapshot"]["cells"][0]["result_id"]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://matrix.test") as client:
@@ -248,6 +263,10 @@ async def test_http_auth_bounds_and_untrusted_overrides(test_db, stored, monkeyp
         assert response.status_code == 422
         assert (await client.get("/matrix/snapshots?limit=51")).status_code == 422
         assert (await client.get(f"/matrix/snapshots/{sid}/evidence", params={"result_id": str(uuid4())})).status_code == 404
+        state["status"] = 401
+        assert (await client.get(f"/matrix/snapshots/{sid}")).status_code == 401
+        state["status"] = 503
+        assert (await client.get(f"/matrix/snapshots/{sid}")).status_code == 503
 
 
 @pytest.mark.asyncio

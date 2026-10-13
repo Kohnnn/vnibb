@@ -50,11 +50,14 @@ async def test_active_recipient_cannot_read_after_issuer_revokes_session(authori
 @pytest.mark.asyncio
 @pytest.mark.parametrize("claim,value", [("iss", "https://other.test/auth/v1"),
                                          ("aud", "service_role"), ("session_id", None),
+                                         ("session_id", "00000000-0000-0000-0000-000000000000"),
                                          ("sub", "anon:browser"), ("exp", 1)])
 async def test_active_identity_rejects_wrong_claims(authority, claim, value):
     from vnibb.core.auth import AuthError, require_active_user
     with pytest.raises(AuthError):
         await require_active_user(f"Bearer {token(**{claim: value})}")
+    if value == "00000000-0000-0000-0000-000000000000":
+        assert len(authority) == 1
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,7 @@ import { useInsiderDeals } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatTimestamp } from '@/lib/format';
 import { formatNumber, formatVND } from '@/lib/formatters';
+import { normalizeInsiderAction } from '@/lib/insiderActions';
 
 interface InsiderDealTimelineWidgetProps {
   id: string;
@@ -39,10 +40,10 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove, onDataChange }
   }, null);
 
   const summary = useMemo(() => {
-    const buys = deals.filter((deal) => deal.deal_action?.toUpperCase().includes('BUY'));
-    const sells = deals.filter((deal) => deal.deal_action?.toUpperCase().includes('SELL'));
-    const buyValue = buys.reduce((sum, deal) => sum + (deal.deal_value ?? 0), 0);
-    const sellValue = sells.reduce((sum, deal) => sum + (deal.deal_value ?? 0), 0);
+    const buys = deals.filter((deal) => normalizeInsiderAction(deal.deal_action) === 'BUY');
+    const sells = deals.filter((deal) => normalizeInsiderAction(deal.deal_action) === 'SELL');
+    const buyValue = buys.reduce((sum, deal) => sum + (deal.value_unit === 'VND' ? deal.deal_value ?? 0 : 0), 0);
+    const sellValue = sells.reduce((sum, deal) => sum + (deal.value_unit === 'VND' ? deal.deal_value ?? 0 : 0), 0);
     return {
       buyCount: buys.length,
       sellCount: sells.length,
@@ -124,9 +125,12 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove, onDataChange }
 
               <div className="space-y-2">
                 {deals.slice(0, 8).map((deal) => {
-                  const action = deal.deal_action?.toUpperCase() || 'DEAL';
-                  const isBuy = action.includes('BUY');
-                  const value = deal.deal_value ?? (deal.deal_price ?? 0) * (deal.deal_quantity ?? 0);
+                  const actionToken = normalizeInsiderAction(deal.deal_action);
+                  const actionLabel = actionToken ?? 'UNKNOWN';
+                  const actionClass = actionToken === 'BUY' ? 'text-emerald-400'
+                    : actionToken === 'SELL' ? 'text-red-400' : 'text-[var(--text-muted)]';
+                  const priceText = deal.price_unit === 'VND' ? formatVND(deal.deal_price) : '—';
+                  const valueText = deal.value_unit === 'VND' ? formatVND(deal.deal_value) : '—';
                   return (
                     <div
                       key={deal.id}
@@ -142,13 +146,13 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove, onDataChange }
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className={`text-[10px] font-bold ${isBuy ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {action}
+                        <div className={`text-[10px] font-bold ${actionClass}`}>
+                          {actionLabel}
                         </div>
                         <div className="text-[10px] text-[var(--text-muted)]">
-                          {formatNumber(deal.deal_quantity)} @ {formatVND(deal.deal_price)}
+                          {formatNumber(deal.deal_quantity)} @ {priceText}
                         </div>
-                        <div className="text-[10px] text-[var(--text-muted)]">{formatVND(value)}</div>
+                        <div className="text-[10px] text-[var(--text-muted)]">{valueText}</div>
                       </div>
                     </div>
                   );

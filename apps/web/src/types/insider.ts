@@ -12,6 +12,8 @@ export interface InsiderTrade {
     deal_price: number | null;
     deal_value: number | null;
     announce_date: string;
+    price_unit: string | null;
+    value_unit: string | null;
 }
 
 export interface BlockTrade {

@@ -12,6 +12,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { formatShortDate } from '@/lib/format';
+import { normalizeInsiderAction } from '@/lib/insiderActions';
 
 interface InsiderTradingWidgetProps {
   id?: string;
@@ -33,6 +34,13 @@ function formatCurrency(value: number | null | undefined): string {
   if (magnitude >= 1e6) return `${sign}VND${(magnitude / 1e6).toFixed(1)}mn`;
   if (magnitude >= 1e3) return `${sign}VND${(magnitude / 1e3).toFixed(1)}k`;
   return `${sign}VND${magnitude}`;
+}
+
+// Admitted money is canonical VND only when the provider supplied unit
+// evidence; anything else renders unavailable instead of assuming VND.
+function formatAdmittedMoney(value: number | null | undefined, unit: string | null | undefined): string {
+  if (unit !== 'VND') return '—';
+  return formatCurrency(value);
 }
 
 function formatDate(dateStr: string): string {
@@ -88,8 +96,9 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
 
   const filteredDeals = deals.filter((deal) => {
     if (filter === 'all') return true;
-    if (filter === 'buy') return deal.deal_action?.toLowerCase().includes('mua') || deal.deal_action?.toLowerCase().includes('buy');
-    if (filter === 'sell') return deal.deal_action?.toLowerCase().includes('bán') || deal.deal_action?.toLowerCase().includes('sell');
+    const action = normalizeInsiderAction(deal.deal_action);
+    if (filter === 'buy') return action === 'BUY';
+    if (filter === 'sell') return action === 'SELL';
     return true;
   });
 
@@ -225,9 +234,12 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
         ) : (
           <div className="space-y-1.5">
             {filteredDeals.map((deal) => {
-              const isBuy = deal.deal_action?.toLowerCase().includes('mua') || deal.deal_action?.toLowerCase().includes('buy');
-              const ActionIcon = isBuy ? TrendingUp : TrendingDown;
-              const actionColor = isBuy ? 'text-green-400' : 'text-red-400';
+              const action = normalizeInsiderAction(deal.deal_action);
+              const isBuy = action === 'BUY';
+              const isSell = action === 'SELL';
+              const ActionIcon = isBuy ? TrendingUp : isSell ? TrendingDown : AlertCircle;
+              const actionColor = isBuy ? 'text-green-400' : isSell ? 'text-red-400' : 'text-[var(--text-muted)]';
+              const actionLabel = isBuy ? 'BUY' : isSell ? 'SELL' : 'UNKNOWN';
 
               return (
                 <div
@@ -240,9 +252,10 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
                       <span className="break-words whitespace-normal text-xs text-[var(--text-primary)]" title={deal.insider_name || 'Unknown'}>
                         {deal.insider_name || 'Unknown'}
                       </span>
+                      <span className={`text-[10px] font-semibold uppercase ${actionColor}`}>{actionLabel}</span>
                     </div>
                     <span className={`text-xs font-medium ${actionColor}`}>
-                      {formatCurrency(deal.deal_value)}
+                      {formatAdmittedMoney(deal.deal_value, deal.value_unit)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)]">
@@ -251,11 +264,11 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
                     </span>
                     <span>{formatDate(deal.announce_date)}</span>
                   </div>
-                  {deal.deal_quantity && (
+                  {deal.deal_quantity ? (
                     <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">
-                      {deal.deal_quantity.toLocaleString()} shares @ {formatCurrency(deal.deal_price)}
+                      {deal.deal_quantity.toLocaleString()} shares @ {formatAdmittedMoney(deal.deal_price, deal.price_unit)}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               );
             })}

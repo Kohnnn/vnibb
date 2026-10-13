@@ -131,7 +131,7 @@ async def test_eod_reads_limit_logical_days_after_source_deduplication(
 
     assert [row["tradeDate"].date() for row in rows] == [date(2026, 6, 10), date(2026, 6, 11)]
     assert [row["close"] for row in rows] == [25500.0, 26000.0]
-    assert all("source" not in row for row in rows)
+    assert all(row["source"] == "vietcap" for row in rows)
     assert collection.query["symbol"] == "VNM"
     assert collection.cursor.sort_args == ("tradeDate", 1)
     assert collection.cursor.limit_value is None
@@ -139,9 +139,12 @@ async def test_eod_reads_limit_logical_days_after_source_deduplication(
 
 
 @pytest.mark.asyncio
-async def test_get_source_latest_trade_date_returns_none_when_disabled():
+async def test_get_source_latest_trade_date_discloses_disabled(monkeypatch):
+    from vnibb.services.mongo_market_data_service import settings
+    monkeypatch.setattr(settings, "mongodb_enabled", False)
     service = MongoMarketDataService()
-    assert await service.get_source_latest_trade_date("vietcap") is None
+    with pytest.raises(RuntimeError, match="not_configured"):
+        await service.get_source_latest_trade_date("vietcap")
 
 
 @pytest.mark.asyncio
@@ -158,7 +161,7 @@ async def test_get_source_latest_trade_date_uses_source_descending_query(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_get_source_latest_trade_date_returns_none_on_read_error(monkeypatch):
+async def test_get_source_latest_trade_date_discloses_read_error(monkeypatch):
     service = MongoMarketDataService()
     monkeypatch.setattr(
         MongoMarketDataService,
@@ -166,7 +169,8 @@ async def test_get_source_latest_trade_date_returns_none_on_read_error(monkeypat
         lambda *_: (_ for _ in ()).throw(RuntimeError("unavailable")),
     )
 
-    assert await service.get_source_latest_trade_date("vietcap") is None
+    with pytest.raises(RuntimeError, match="query_failed"):
+        await service.get_source_latest_trade_date("vietcap")
 
 
 @pytest.mark.asyncio
@@ -383,16 +387,13 @@ async def test_precise_iq_reader_filters_source_and_keeps_descriptor_evidence(mo
     monkeypatch.setattr(MongoMarketDataService, "_get_collection", lambda *_: collection)
     await service.get_raw_dataset_records_precise(
         "vnm", dataset="finance.income_statement", variant="finance.income_statement.year",
-        source="vietcap", raise_errors=True,
+        source="vietcap",
     )
     assert collection.query["source"] == "vietcap"
     assert collection.query["datasetVariant"] == "finance.income_statement.year"
-    assert all(collection.projection[field] == 1 for field in (
-        "raw", "descriptors", "descriptorEvidence", "comTypeCode", "rawFiscalBasis",
-        "receivedAt", "sourceDate", "units", "structured",
-    ))
+    assert collection.projection == {"_id": 0}
     assert collection.cursor.sort_args == (
-        [("fiscalYear", -1), ("fiscalQuarter", -1), ("updatedAt", -1)],
+        [("fiscalYear", -1), ("fiscalQuarter", -1), ("updatedAt", -1), ("recordKey", 1)],
     )
 
 
@@ -401,11 +402,12 @@ async def test_precise_iq_reader_does_not_hide_database_failure(monkeypatch):
     service = MongoMarketDataService()
     collection = Collection(error=RuntimeError("Mongo unavailable"))
     monkeypatch.setattr(MongoMarketDataService, "_get_collection", lambda *_: collection)
-    with pytest.raises(RuntimeError, match="Mongo unavailable"):
+    with pytest.raises(RuntimeError, match="query_failed"):
         await service.get_raw_dataset_records_precise(
-            "vnm", dataset="finance.ratio", source="vietcap", raise_errors=True,
+            "vnm", dataset="finance.ratio", source="vietcap",
         )
-    assert await service.get_raw_dataset_records_precise("vnm", dataset="finance.ratio") == []
+    with pytest.raises(RuntimeError, match="query_failed"):
+        await service.get_raw_dataset_records_precise("vnm", dataset="finance.ratio")
 
 
 
@@ -512,6 +514,7 @@ async def test_price_depth_precise_limit_caps_rows_within_newest_batch(monkeypat
 @pytest.mark.parametrize("writer", ["statement", "ratio"])
 def test_vietcap_raw_upserts_preserve_periods_and_refresh_without_duplicates(writer):
     from vnibb.services.vietcap_ingestion import upsert_ratio_rows, upsert_statement_periods
+    from vnibb.services.vietcap_financials import financial_fiscal_basis
 
     class UpsertCollection(Collection):
         def bulk_write(self, operations, *, ordered):
@@ -549,17 +552,24 @@ def test_vietcap_raw_upserts_preserve_periods_and_refresh_without_duplicates(wri
     assert write(rows, first_batch) == 2
     assert len(collection.rows) == 2
     assert len({row["recordKey"] for row in collection.rows}) == 2
+    original_keys = {row["raw"]["yearReport"]: row["recordKey"] for row in collection.rows}
     assert all(row["symbol"] == "VNM" and row["source"] == "vietcap" for row in collection.rows)
 
     refreshed = [{**rows[0], "value": 120}]
     assert write(refreshed, second_batch) == 1
     assert write(refreshed, second_batch) == 1
     assert len(collection.rows) == 2
-    latest = next(row for row in collection.rows if row["period"] == "FY2025")
+    latest = next(row for row in collection.rows if row["raw"]["yearReport"] == 2025)
+    assert latest["raw"]["lengthReport"] == 5
+    assert financial_fiscal_basis(latest)["periodType"] == "year"
+    assert financial_fiscal_basis(latest)["year"] == 2025
+    assert latest["recordKey"] == original_keys[2025]
     assert latest["raw"]["value"] == 120
     assert latest["updatedAt"] == second_batch
     assert all(row["createdAt"] == first_batch for row in collection.rows)
-    previous = next(row for row in collection.rows if row["period"] == "FY2024")
+    previous = next(row for row in collection.rows if row["raw"]["yearReport"] == 2024)
+    assert financial_fiscal_basis(previous)["periodType"] == "year"
+    assert financial_fiscal_basis(previous)["year"] == 2024
     assert previous["updatedAt"] == first_batch
 
 

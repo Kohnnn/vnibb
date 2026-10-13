@@ -334,9 +334,9 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
     ],
   },
   transaction_flow: {
-    purpose: 'Breaks each session into domestic, foreign, and proprietary participation so you can see who drove the tape.',
-    calculation: 'Uses transaction-flow decomposition and overlays price to compare net participation against the session close.',
-    interpretation: 'Rising price with supportive flow suggests healthier sponsorship. Divergence between price and flow often matters more than a single large print.',
+    purpose: 'Shows measured transaction samples separately from certified full-session domestic, foreign, and proprietary flow.',
+    calculation: 'Uses observed buy/sell and net metrics for sampled or unknown coverage. Session totals and domestic residual require full-session certification; foreign and proprietary daily feeds are not sample-matched.',
+    interpretation: 'Check the source receipt, observed trade count, window, and completeness before interpreting flow. An observed sample is not a session denominator or proof of session-wide sponsorship.',
   },
   money_flow_trend: {
     purpose: 'Maps sector peers into strength and trend quadrants to show where leadership is rotating.',

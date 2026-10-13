@@ -772,7 +772,7 @@ class CacheManager:
                 symbol = record.get("symbol") or record.get("ticker")
                 if not symbol:
                     continue
-                if source == "vietcap" and record.get("exchange") not in {"HOSE", "HNX", "UPCOM"}:
+                if source == "vietcap" and record.get("exchange") not in {"HOSE", "HNX", "UPCOM", "DELISTED"}:
                     continue
 
                 symbol = symbol.upper()
@@ -783,7 +783,7 @@ class CacheManager:
                     "exchange": record.get("exchange") or "HOSE",
                     "industry": record.get("industry") or record.get("industry_name") or None,
                     "sector": record.get("sector") or None,
-                    "is_active": 1,
+                    "is_active": int(record.get("is_active", 1)) if source == "vietcap" else 1,
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -792,7 +792,7 @@ class CacheManager:
                     key: func.coalesce(stmt.excluded[key], getattr(Stock, key))
                     for key in ("company_name", "short_name", "industry", "sector")
                 }
-                updates.update(is_active=1, updated_at=now)
+                updates.update(is_active=values["is_active"], updated_at=now)
                 if record.get("exchange"):
                     updates["exchange"] = stmt.excluded.exchange
                 result = await session.execute(

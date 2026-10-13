@@ -1450,6 +1450,7 @@ async def test_transaction_flow_endpoint_returns_derived_domestic_flow(client, t
             id=900,
             symbol="VCI",
             trade_date=date(2026, 3, 20),
+            coverage={"scope": "full_session", "completed_session": True},
             buy_volume=1_200_000,
             sell_volume=900_000,
             buy_value=42_840_000.0,
@@ -1541,6 +1542,7 @@ async def test_transaction_flow_derives_missing_net_fields_from_buy_sell(client,
             id=901,
             symbol="FPT",
             trade_date=date(2026, 3, 21),
+            coverage={"scope": "full_session", "completed_session": True},
             buy_volume=1_500_000,
             sell_volume=1_200_000,
             buy_value=180_750_000.0,
@@ -1597,6 +1599,7 @@ async def test_transaction_flow_preserves_zero_bucket_inputs_for_domestic_deriva
                 id=902,
                 symbol="ZERO",
                 trade_date=trade_date,
+                coverage={"scope": "full_session", "completed_session": True},
                 net_volume=100,
                 net_value=1_000.0,
                 foreign_net_volume=0,
@@ -1756,6 +1759,144 @@ async def test_orderbook_endpoint_uses_latest_close_when_no_priced_snapshot(clie
     assert payload["data"]["entries"][0]["price"] == 25.0
     assert payload["data"]["entries"][0]["price_status"] == "reference"
     assert payload["data"]["last_price"] == 25.0
+
+
+@pytest.mark.asyncio
+async def test_orderbook_endpoint_exposes_current_depth_receipt_from_cache(client, monkeypatch):
+    receipt = {
+        "scope": "current_batch",
+        "status": "current_batch",
+        "rows": 5,
+        "observed_at": "2026-10-13T02:30:00",
+        "timestamp_meaning": "observed",
+        "price_unit": "VND",
+        "volume_unit": "shares",
+    }
+
+    async def fake_get_json(key):
+        if key.endswith(":orderbook:latest:VNM"):
+            return {
+                "symbol": "VNM",
+                "snapshot_time": "2026-10-13T02:31:00",
+                "entries": [{"level": 1, "price": 75000, "bid_vol": 12000, "ask_vol": 9000}],
+                "last_price": 75050,
+                "current_depth": receipt,
+                "latest_session_status": "current_batch",
+                "observed_at": "2026-10-13T02:30:00",
+                "timestamp_meaning": "observed",
+                "price_unit": "VND",
+                "volume_unit": "shares",
+            }
+        return None
+
+    async def fail_price_depth_fetch(*args, **kwargs):
+        raise AssertionError("provider fetch should not run for a warm orderbook cache")
+
+    monkeypatch.setattr("vnibb.api.v1.equity.redis_client.get_json", fake_get_json)
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockPriceDepthFetcher.fetch",
+        fail_price_depth_fetch,
+    )
+
+    response = await client.get("/api/v1/equity/VNM/orderbook")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["current_depth"] == receipt
+    assert data["latest_session_status"] == "current_batch"
+    assert data["observed_at"] == "2026-10-13T02:30:00"
+    assert data["timestamp_meaning"] == "observed"
+    assert data["price_unit"] == "VND"
+    assert data["volume_unit"] == "shares"
+    assert "sql_depth" not in data
+    assert "mongo_depth" not in data
+
+
+@pytest.mark.asyncio
+async def test_orderbook_endpoint_explicit_empty_cache_batch_is_authoritative(client, monkeypatch):
+    receipt = {"scope": "current_batch", "status": "empty", "rows": 0, "observed_at": None}
+
+    async def fake_get_json(key):
+        if key.endswith(":orderbook:latest:VNM"):
+            return {
+                "symbol": "VNM",
+                "snapshot_time": "2026-10-13T02:31:00",
+                "entries": [],
+                "raw_levels": [],
+                "current_depth": receipt,
+                "latest_session_status": "empty",
+            }
+        return None
+
+    async def fail_price_depth_fetch(*args, **kwargs):
+        raise AssertionError("explicit empty batch must not be re-fetched")
+
+    monkeypatch.setattr("vnibb.api.v1.equity.redis_client.get_json", fake_get_json)
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockPriceDepthFetcher.fetch",
+        fail_price_depth_fetch,
+    )
+
+    response = await client.get("/api/v1/equity/VNM/orderbook")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["entries"] == []
+    assert data["current_depth"] == receipt
+    assert data["latest_session_status"] == "empty"
+
+
+@pytest.mark.asyncio
+async def test_orderbook_endpoint_empty_latest_batch_beats_older_priced_snapshot(
+    client, test_db, monkeypatch
+):
+    empty_receipt = {"scope": "current_batch", "status": "empty", "rows": 0}
+    test_db.add_all(
+        [
+            OrderbookSnapshot(
+                id=910,
+                symbol="VCI",
+                snapshot_time=datetime(2026, 5, 28, 14, 45, 0),
+                price_depth={
+                    "symbol": "VCI",
+                    "entries": [{"level": 1, "price": 25.0, "bid_vol": 12000, "ask_vol": 9000}],
+                    "last_price": 25.0,
+                },
+                bid1_price=25.0,
+                bid1_volume=12000,
+            ),
+            OrderbookSnapshot(
+                id=911,
+                symbol="VCI",
+                snapshot_time=datetime(2026, 5, 29, 9, 15, 0),
+                price_depth={
+                    "symbol": "VCI",
+                    "raw_levels": [],
+                    "current_depth": empty_receipt,
+                    "latest_session_status": "empty",
+                },
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    async def failing_price_depth_fetch(*args, **kwargs):
+        raise RuntimeError("depth provider unavailable")
+
+    monkeypatch.setattr("vnibb.api.v1.equity.redis_client.get_json", lambda _key: None)
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockPriceDepthFetcher.fetch",
+        failing_price_depth_fetch,
+    )
+
+    response = await client.get("/api/v1/equity/VCI/orderbook")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["entries"] == []
+    assert data["current_depth"] == empty_receipt
+    assert data["latest_session_status"] == "empty"
+    assert data["is_stale"] is True
 
 
 @pytest.mark.asyncio
@@ -4166,6 +4307,7 @@ async def test_flow_coverage_excludes_buy_volume_only_rows(client, test_db):
                 id=807,
                 symbol="PROVEN",
                 trade_date=trade_date,
+                coverage={"scope": "full_session", "completed_session": True},
                 buy_volume=100,
                 sell_volume=80,
                 proprietary_net_volume=5,
@@ -4196,6 +4338,7 @@ async def test_flow_coverage_accepts_order_flow_foreign_net_volume_without_forei
             id=808,
             symbol="DIRECT",
             trade_date=trade_date,
+            coverage={"scope": "full_session", "completed_session": True},
             buy_volume=100,
             sell_volume=80,
             foreign_net_volume=15,
@@ -4221,6 +4364,7 @@ async def test_flow_coverage_accepts_foreign_trading_when_order_flow_has_no_fore
                 id=809,
                 symbol="FOREIGN",
                 trade_date=trade_date,
+                coverage={"scope": "full_session", "completed_session": True},
                 buy_volume=100,
                 sell_volume=80,
                 proprietary_net_volume=5,
@@ -4245,6 +4389,7 @@ async def test_flow_coverage_counts_duplicate_foreign_sources_once(client, test_
                 id=810,
                 symbol="DUPLICATE",
                 trade_date=trade_date,
+                coverage={"scope": "full_session", "completed_session": True},
                 buy_volume=100,
                 sell_volume=80,
                 foreign_net_volume=15,

@@ -177,8 +177,7 @@ class FinancialsQueryParams(BaseModel):
     limit: int = Field(
         default=5,
         ge=1,
-        le=40,
-        description="Number of periods to return",
+        description="Number of available source periods to request (source may return fewer)",
     )
 
     @field_validator("symbol")
@@ -340,6 +339,9 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         parameters = inspect.signature(provider_method).parameters
                     kwargs = finance_method_kwargs(provider_method, period)
                     kwargs = {key: value for key, value in kwargs.items() if key in parameters or accepts_kwargs}
+                    for count_key in ("count", "limit"):
+                        if count_key in parameters:
+                            kwargs[count_key] = query["limit"]
                     if lang is None:
                         kwargs.pop("lang", None)
                     elif "lang" in kwargs:

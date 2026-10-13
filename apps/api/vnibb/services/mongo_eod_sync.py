@@ -1,18 +1,22 @@
-"""Bounded recurring Vietcap-primary Mongo and PostgreSQL ingestion.
+"""Vietcap-primary EOD ingestion with separate bounded refresh and catchup.
 
-Listings refresh once per run; recent EOD refreshes the tracked stock universe.
-The oldest 50 IQ financial symbols refresh per run so a daily job cannot trigger
-an unbounded full-history financial sweep. Free vnstock VCI fills EOD only when
-the public Vietcap chart is unavailable. All writes preserve source natural keys.
+Incremental refresh discovers the active SQL Universe, including new symbols.
+Historical acquisition advances oldest unacquired calendar windows using durable
+receipts; receipts do not certify exchange-session completeness. Both writers
+reuse source natural-key upserts and never delete other providers' records.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import select
+
+from vnibb.core.database import async_session_factory
+from vnibb.models.stock import Stock
 from vnibb.services.data_pipeline import data_pipeline
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.vietcap_client import VietcapClient
@@ -37,6 +41,9 @@ DEFAULT_WINDOW_DAYS = 7
 # refetch of the entire universe inside the scheduler.
 MAX_WINDOW_DAYS = 30
 MAX_FINANCIAL_SYMBOLS = 50
+MAX_CATCHUP_SYMBOLS = 50
+DEFAULT_HISTORY_START = date(2000, 1, 1)
+CATCHUP_RECEIPTS = "market_eod_catchup_receipts"
 
 
 def _to_naive_datetime(value: Any) -> datetime | None:
@@ -106,36 +113,100 @@ def _frame_to_rows(frame: Any) -> list[dict[str, Any]]:
 
 
 async def _resolve_universe(service: Any) -> list[str]:
-    """Read the tracked universe; database failure must not become an empty run."""
+    """Discover confirmed active SQL stocks, never infer from retained bars."""
+    async with async_session_factory() as session:
+        result = await session.execute(select(Stock.symbol).where(
+            Stock.is_active == 1,
+            Stock.exchange.in_(("HOSE", "HNX", "UPCOM")),
+        ))
+        return sorted({str(symbol).strip().upper() for symbol in result.scalars().all() if symbol})
 
-    def _read() -> list[str]:
-        coll = service._get_collection("market_prices_eod")  # noqa: SLF001 - same module family
-        return [str(sym).upper() for sym in coll.distinct("symbol") if sym]
 
-    symbols = await asyncio.to_thread(_read)
-    return sorted(dict.fromkeys(symbols))
+def _summary() -> dict[str, Any]:
+    return {"symbols": 0, "rows": 0, "failures": 0, "listings": 0,
+            "financials": 0, "fallbacks": 0, "primary_failures": 0,
+            "structured_rows": 0, "expected": 0, "attempted": 0,
+            "succeeded": 0, "empty": 0, "failed": 0,
+            "outcome": "no_work", "complete": False, "errors": []}
+
+
+def _error(summary: dict[str, Any], stage: str, exc: Exception, symbol: str | None = None) -> None:
+    summary["errors"].append({"stage": stage, "symbol": symbol,
+                              "type": type(exc).__name__, "message": str(exc)})
+
+
+def _finish(summary: dict[str, Any]) -> dict[str, Any]:
+    if "pending" in summary:
+        summary["complete"] = summary["pending"] == 0 and summary["failures"] == 0
+    if summary["failures"] or summary["primary_failures"]:
+        summary["outcome"] = "partial" if summary["succeeded"] else (
+            "empty" if summary["empty"] and not summary["failed"] else "failed")
+    elif summary["succeeded"]:
+        summary["outcome"] = "ok"
+    logger.info("Mongo IQ sync outcome: %s", summary)
+    return summary
+
+
+class EmptyEodAcquisition(RuntimeError):
+    """Both providers returned no usable bars, rather than a transport error."""
+
+
+async def _acquire_eod(client: Any, symbol: str, start: date, end: date,
+                       instrument_type: str | None, summary: dict[str, Any],
+                       *, historical: bool = False) -> tuple[list[dict[str, Any]], str]:
+    try:
+        kwargs = {"count_back": (end - start).days + (2 if historical else 1)}
+        if historical:
+            kwargs["to_epoch"] = int(datetime.combine(end + timedelta(days=1),
+                                                       datetime.min.time(), tzinfo=UTC).timestamp()) - 1
+        raw = await asyncio.to_thread(client.get_ohlc, symbol, **kwargs)
+        rows = ohlc_rows_from_gap_chart(symbol, raw, instrument_type=instrument_type) if raw else []
+        rows = [row for row in rows if start <= row["tradeDate"].date() <= end]
+        if not rows:
+            raise EmptyEodAcquisition("Vietcap returned no EOD bars in the requested window")
+        return rows, "vietcap"
+    except Exception as exc:
+        summary["primary_failures"] += 1
+        _error(summary, "eod_primary", exc, symbol)
+        logger.warning("Vietcap EOD unavailable for %s: %s", symbol, exc)
+        if str(instrument_type or "").upper() != "STOCK":
+            raise RuntimeError("Free VCI fallback requires a confirmed stock listing") from exc
+        await data_pipeline._wait_for_rate_limit("prices")
+        frame = await data_pipeline._fetch_quote_history_frame(
+            symbol=symbol, start=start.isoformat(), end=end.isoformat(),
+            interval="1D", bypass_internal_retry=True,
+        )
+        rows = [row for row in _frame_to_rows(frame) if start <= row["tradeDate"].date() <= end]
+        if not rows:
+            error_type = EmptyEodAcquisition if isinstance(exc, EmptyEodAcquisition) else RuntimeError
+            raise error_type("Free VCI returned no EOD bars in the requested window") from exc
+        if any(str(row.get("price_source") or "").upper() not in
+               {"VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI"} for row in rows):
+            raise RuntimeError("Free VCI returned no source-backed EOD bars") from exc
+        summary["fallbacks"] += 1
+        return rows, "vnstock-data"
 
 
 async def run_mongo_eod_sync(
     *,
     symbols: list[str] | None = None,
     window_days: int = DEFAULT_WINDOW_DAYS,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Refresh IQ listings, bounded financials, and a rolling EOD window."""
     service = get_mongo_market_data_service()
-    summary = {"symbols": 0, "rows": 0, "failures": 0,
-               "listings": 0, "financials": 0, "fallbacks": 0,
-               "primary_failures": 0, "structured_rows": 0}
+    summary = _summary()
     if not service.enabled:
         summary["failures"] = 1
+        summary["failed"] += 1
+        _error(summary, "configuration", RuntimeError("MongoDB is not configured"))
         logger.error("Mongo IQ sync unavailable: MongoDB is not configured")
-        return summary
+        return _finish(summary)
 
     client = VietcapClient()
     window_days = max(1, min(int(window_days), MAX_WINDOW_DAYS))
     end = date.today()
     start = end - timedelta(days=window_days)
-    explicit = sorted({str(s).upper() for s in symbols or [] if s})
+    explicit = sorted({str(s).strip().upper() for s in symbols or [] if s})
     trading_rows: list[dict[str, Any]] = []
     search_rows: list[dict[str, Any]] = []
     try:
@@ -151,60 +222,43 @@ async def run_mongo_eod_sync(
     except Exception as exc:
         summary["structured_rows"] += getattr(exc, "persisted_rows", 0)
         summary["failures"] += 1
+        summary["failed"] += 1
+        _error(summary, "listings", exc)
         logger.error("Mongo IQ listing sync failed: %s", exc)
 
     metadata = {str(row.get("symbol") or "").upper(): row for row in trading_rows}
     search = {str(row.get("code") or "").upper(): row for row in search_rows}
     try:
-        universe = explicit or await _resolve_universe(service)
+        universe = explicit if symbols is not None else await _resolve_universe(service)
     except Exception as exc:
         summary["failures"] += 1
+        summary["failed"] += 1
+        _error(summary, "universe", exc)
         logger.error("Mongo IQ universe read failed: %s", exc)
-        return summary
+        return _finish(summary)
+    summary["expected"] = len(universe)
     if not universe:
-        universe = sorted(symbol for symbol, row in metadata.items()
-                          if symbol and str(row.get("type") or "").upper() == "STOCK")
-    if not universe:
-        summary["failures"] += 1
-        logger.error("Mongo IQ sync unavailable: empty universe")
-        return summary
+        return _finish(summary)
+    if symbols is None:
+        for symbol in universe:
+            metadata.setdefault(symbol, {"symbol": symbol, "type": "STOCK"})
 
     for symbol in universe:
+        summary["attempted"] += 1
         try:
-            source = "vietcap"
-            try:
-                raw = await asyncio.to_thread(client.get_ohlc, symbol,
-                                               count_back=window_days + 1)
-                rows = ohlc_rows_from_gap_chart(
-                    symbol, raw, instrument_type=metadata.get(symbol, {}).get("type"),
-                ) if raw else []
-                rows = [row for row in rows if start <= row["tradeDate"].date() <= end]
-                if not rows:
-                    raise RuntimeError("Vietcap returned no EOD bars in the requested window")
-            except Exception as exc:
-                summary["primary_failures"] += 1
-                logger.warning("Vietcap EOD unavailable for %s: %s", symbol, exc)
-                if str(metadata.get(symbol, {}).get("type") or "").upper() != "STOCK":
-                    raise RuntimeError("Free VCI fallback requires a confirmed stock listing") from exc
-                await data_pipeline._wait_for_rate_limit("prices")
-                frame = await data_pipeline._fetch_quote_history_frame(
-                    symbol=symbol, start=start.isoformat(), end=end.isoformat(),
-                    interval="1D", bypass_internal_retry=True,
-                )
-                rows = _frame_to_rows(frame)
-                if not rows or any(str(row.get("price_source") or "").upper() not in
-                                   {"VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI"}
-                                   for row in rows):
-                    raise RuntimeError("Free VCI returned no source-backed EOD bars") from exc
-                source = "vnstock-data"
-                summary["fallbacks"] += 1
+            rows, source = await _acquire_eod(
+                client, symbol, start, end, metadata.get(symbol, {}).get("type"), summary,
+            )
             summary["rows"] += await service.bulk_upsert_eod_prices(symbol, rows, source=source)
             if source == "vietcap" and str(metadata.get(symbol, {}).get("type") or "").upper() == "STOCK":
                 summary["structured_rows"] += await persist_vietcap_prices(symbol, rows)
             summary["symbols"] += 1
+            summary["succeeded"] += 1
         except Exception as exc:
             summary["structured_rows"] += getattr(exc, "persisted_rows", 0)
             summary["failures"] += 1
+            summary["empty" if isinstance(exc, EmptyEodAcquisition) else "failed"] += 1
+            _error(summary, "eod", exc, symbol)
             logger.error("Mongo IQ EOD sync failed for %s: %s", symbol, exc)
 
     def _financial_slice() -> list[str]:
@@ -225,8 +279,10 @@ async def run_mongo_eod_sync(
         financial_symbols = await asyncio.to_thread(_financial_slice)
     except Exception as exc:
         summary["failures"] += 1
+        summary["failed"] += 1
+        _error(summary, "financial_schedule", exc)
         logger.error("Mongo IQ financial scheduling read failed: %s", exc)
-        return summary
+        return _finish(summary)
     for symbol in financial_symbols:
         if str(metadata.get(symbol, {}).get("type") or "").upper() != "STOCK":
             continue
@@ -241,6 +297,8 @@ async def run_mongo_eod_sync(
                 records = exc.records
                 summary["financials"] += exc.mongo_rows
                 summary["failures"] += 1
+                summary["failed"] += 1
+                _error(summary, "financial_acquisition", exc, symbol)
                 logger.error("Mongo IQ financial acquisition incomplete for %s: %s", symbol, exc)
                 if not records:
                     continue
@@ -250,6 +308,167 @@ async def run_mongo_eod_sync(
         except Exception as exc:
             summary["structured_rows"] += getattr(exc, "persisted_rows", 0)
             summary["failures"] += 1
+            summary["failed"] += 1
+            _error(summary, "financial", exc, symbol)
             logger.error("Mongo IQ financial sync failed for %s: %s", symbol, exc)
-    logger.info("Mongo IQ sync outcome: %s", summary)
-    return summary
+    return _finish(summary)
+
+
+async def get_mongo_eod_catchup_inventory(
+    *, symbols: list[str] | None = None, start: date = DEFAULT_HISTORY_START,
+    end: date | None = None, window_days: int = MAX_WINDOW_DAYS,
+) -> dict[str, Any]:
+    """Provider-free inventory of unacquired windows, not missing sessions.
+
+    Successful receipts cover only the requested acquisition windows. Existing
+    bars alone cannot certify a window: it may contain internal historical gaps.
+    A confirmed listing date excludes pre-listing windows; unknown dates do not.
+    Only windows older than the incremental refresh window are acquired, so a
+    newly discovered symbol's recent sessions stay with the incremental job.
+    """
+    end = end or date.today() - timedelta(days=DEFAULT_WINDOW_DAYS)
+    if start > end:
+        raise ValueError("Catchup start must not be after end")
+    window_days = max(1, min(int(window_days), MAX_WINDOW_DAYS))
+    service = get_mongo_market_data_service()
+    if not service.enabled:
+        raise RuntimeError("MongoDB is not configured")
+    universe = (sorted({str(symbol).strip().upper() for symbol in symbols if symbol})
+                if symbols is not None else await _resolve_universe(service))
+    async with async_session_factory() as session:
+        result = await session.execute(select(Stock.symbol, Stock.listing_date).where(
+            Stock.symbol.in_(universe), Stock.is_active == 1,
+            Stock.exchange.in_(("HOSE", "HNX", "UPCOM")),
+        ))
+        listing_dates = {str(symbol).upper(): listed for symbol, listed in result.all()}
+
+    def read_inventory() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        receipts = service._get_collection(CATCHUP_RECEIPTS)
+        acquired: dict[str, list[tuple[date, date]]] = {}
+        last_attempted: dict[str, str] = {}
+        retained = list(receipts.find({"symbol": {"$in": universe}}, {"_id": 0}))
+        relevant = [receipt for receipt in retained
+                    if date.fromisoformat(receipt["end"]) >= start
+                    and date.fromisoformat(receipt["start"]) <= end]
+        for receipt in relevant:
+            attempted_at = _to_naive_datetime(receipt.get("updatedAt")) or datetime.min
+            last_attempted[receipt["symbol"]] = max(
+                last_attempted.get(receipt["symbol"], ""), attempted_at.isoformat(),
+            )
+            if receipt.get("status") == "succeeded":
+                acquired.setdefault(receipt["symbol"], []).append((
+                    date.fromisoformat(receipt["start"]), date.fromisoformat(receipt["end"]),
+                ))
+        inventory = []
+        for symbol in universe:
+            next_start = max(start, listing_dates.get(symbol) or start)
+            for covered_start, covered_end in sorted(acquired.get(symbol, [])):
+                if covered_start <= next_start <= covered_end:
+                    next_start = covered_end + timedelta(days=1)
+            inventory.append({"symbol": symbol,
+                              "confirmed_stock": symbol in listing_dates,
+                              "last_attempted_at": last_attempted.get(symbol),
+                              "next_start": next_start.isoformat() if next_start <= end else None,
+                              "next_end": min(next_start + timedelta(days=window_days - 1), end).isoformat()
+                                          if next_start <= end else None})
+        return inventory, relevant
+
+    inventory, receipts = await asyncio.to_thread(read_inventory)
+    pending = sum(row["next_start"] is not None for row in inventory)
+    return {"expected": len(universe), "completed": len(universe) - pending,
+            "pending": pending, "start": start.isoformat(), "end": end.isoformat(),
+            "window_days": window_days, "symbols": inventory, "receipts": receipts,
+            "receipt_counts": {status: sum(receipt.get("status") == status for receipt in receipts)
+                               for status in ("succeeded", "empty", "failed")}}
+
+
+async def run_mongo_eod_catchup(
+    *, symbols: list[str] | None = None, start: date = DEFAULT_HISTORY_START,
+    end: date | None = None, window_days: int = MAX_WINDOW_DAYS,
+    max_symbols: int = MAX_CATCHUP_SYMBOLS,
+) -> dict[str, Any]:
+    """Acquire one oldest pending window per bounded symbol slice.
+
+    Register separately from incremental refresh. Empty/failed windows retain
+    their cursor and error receipt; a later run retries without skipping gaps.
+    A successful receipt follows Mongo and SQL writes, including no-change
+    natural-key upserts. No exchange-session completeness is inferred.
+    """
+    summary = _summary()
+    try:
+        inventory = await get_mongo_eod_catchup_inventory(
+            symbols=symbols, start=start, end=end, window_days=window_days,
+        )
+    except Exception as exc:
+        summary["failures"] += 1
+        summary["failed"] += 1
+        _error(summary, "catchup_inventory", exc)
+        return _finish(summary)
+    summary["expected"] = inventory["expected"]
+    summary["completed"] = inventory["completed"]
+    summary["pending"] = inventory["pending"]
+    limit = max(1, min(int(max_symbols), MAX_CATCHUP_SYMBOLS))
+    pending = sorted((row for row in inventory["symbols"] if row["next_start"]),
+                     key=lambda row: (row["last_attempted_at"] is not None,
+                                      row["last_attempted_at"] or "",
+                                      row["next_start"], row["symbol"]))[:limit]
+    if not pending:
+        return _finish(summary)
+    service = get_mongo_market_data_service()
+    client = VietcapClient()
+    try:
+        await asyncio.to_thread(
+            service._get_collection(CATCHUP_RECEIPTS).create_index,
+            [("symbol", 1), ("start", 1), ("end", 1)], unique=True,
+            name="uniq_symbol_acquisition_window",
+        )
+    except Exception as exc:
+        summary["failures"] += 1
+        summary["failed"] += 1
+        _error(summary, "catchup_receipt_index", exc)
+        return _finish(summary)
+    for row in pending:
+        symbol = row["symbol"]
+        summary["attempted"] += 1
+        receipt = {"symbol": symbol, "start": row["next_start"], "end": row["next_end"]}
+        try:
+            rows, source = await _acquire_eod(
+                client, symbol, date.fromisoformat(row["next_start"]),
+                date.fromisoformat(row["next_end"]),
+                "STOCK" if row["confirmed_stock"] else None, summary, historical=True,
+            )
+            writes = await service.bulk_upsert_eod_prices(symbol, rows, source=source)
+            summary["rows"] += writes
+            if source == "vietcap" and row["confirmed_stock"]:
+                summary["structured_rows"] += await persist_vietcap_prices(symbol, rows)
+            await asyncio.to_thread(
+                service._get_collection(CATCHUP_RECEIPTS).update_one, receipt,
+                {"$set": {"status": "succeeded", "source": source,
+                          "acquired_rows": len(rows), "written_rows": writes,
+                          "updatedAt": datetime.now(UTC).replace(tzinfo=None),
+                          "errors": [error for error in summary["errors"] if error["symbol"] == symbol]}},
+                upsert=True,
+            )
+            summary["succeeded"] += 1
+            summary["symbols"] += 1
+            if row["next_end"] == inventory["end"]:
+                summary["completed"] += 1
+                summary["pending"] -= 1
+        except Exception as exc:
+            summary["structured_rows"] += getattr(exc, "persisted_rows", 0)
+            summary["failures"] += 1
+            status = "empty" if isinstance(exc, EmptyEodAcquisition) else "failed"
+            summary[status] += 1
+            _error(summary, "catchup_eod", exc, symbol)
+            try:
+                await asyncio.to_thread(
+                    service._get_collection(CATCHUP_RECEIPTS).update_one, receipt,
+                    {"$set": {"status": status,
+                              "updatedAt": datetime.now(UTC).replace(tzinfo=None),
+                              "errors": [error for error in summary["errors"] if error["symbol"] == symbol]}},
+                    upsert=True,
+                )
+            except Exception as receipt_exc:
+                _error(summary, "catchup_receipt", receipt_exc, symbol)
+            logger.error("Mongo EOD catchup failed for %s: %s", symbol, exc)
+    return _finish(summary)

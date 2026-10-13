@@ -4066,7 +4066,7 @@ async def get_research_rss_feed(
 # hard-codes a small list of broker tickers (SSI/VND/HCM/VCI/MBS/SHS/BSI),
 # which is contradictory because VCI is in that list but its own buckets are
 # sparse. This endpoint returns the actual list of tickers that have
-# non-empty domestic / foreign / proprietary buckets in the last N days, so
+# verified full-session domestic / foreign / proprietary buckets in the last N days, so
 # the widget can render dynamic copy.
 #
 # Cached server-side for 1h to keep the query cheap; the underlying data
@@ -4086,7 +4086,7 @@ class FlowCoverageResponse(BaseModel):
 
 
 @router.get("/flow-coverage", response_model=FlowCoverageResponse)
-@cached(ttl=3600, key_prefix="flow_coverage")
+@cached(ttl=3600, key_prefix="flow_coverage_v2")
 async def get_flow_coverage(
     days: int = Query(30, ge=7, le=120),
     db: AsyncSession = Depends(get_db),
@@ -4106,6 +4106,8 @@ async def get_flow_coverage(
         foreign_net_volume.is_not(None)
         & OrderFlowDaily.proprietary_net_volume.is_not(None)
         & total_net_volume
+        & (OrderFlowDaily.coverage["scope"].as_string() == "full_session")
+        & OrderFlowDaily.coverage["completed_session"].as_boolean().is_(True)
     )
     foreign_join = (
         (ForeignTrading.symbol == OrderFlowDaily.symbol)

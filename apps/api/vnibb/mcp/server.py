@@ -5,11 +5,13 @@ import asyncio
 import hmac
 import json
 import logging
+import math
 import re
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
-from typing import Any
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from typing import Annotated, Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -18,23 +20,26 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
+from pydantic import Field
 from sqlalchemy import select
 
-from vnibb.core.auth import User, get_current_user
+from vnibb.core.auth import User, require_active_user
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, check_database_connection
 from vnibb.core.logging_config import setup_logging
 from vnibb.core.price_units import normalize_price_record, persisted_price_record
 from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS, admitted_ratio_value
+from vnibb.models.company import Company, Officer, Shareholder
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
-from vnibb.models.market import MarketSector, SectorPerformance
+from vnibb.models.market import MarketSector, SectorPerformance, Subsidiary
 from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
+from vnibb.models.sync_status import SyncStatus
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
-from vnibb.services.ai_context_service import AIContextService, sanitize_context_value
+from vnibb.services.ai_context_service import AIContextService
 from vnibb.services.matrix_service import require_matrix_export_rights, resolve_matrix_selection
-from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+from vnibb.services.mongo_market_data_service import MongoReadError, get_mongo_market_data_service
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +251,7 @@ COLLECTION_SPECS: dict[str, CollectionSpec] = {
         max_limit=50,
         date_field="trade_date",
         allowed_filters=(),
-        allowed_sort_fields=("trade_date", "change_pct", "volume", "value"),
+        allowed_sort_fields=("trade_date", "change_pct", "total_volume", "total_value"),
     ),
     "screener_snapshots": CollectionSpec(
         collection="screener_snapshots",
@@ -255,9 +260,13 @@ COLLECTION_SPECS: dict[str, CollectionSpec] = {
         default_desc=True,
         max_limit=100,
         date_field="snapshot_date",
-        allowed_filters=("symbol", "exchange", "industry", "sector"),
-        allowed_sort_fields=("snapshot_date", "market_cap", "rs_rating", "volume", "value"),
+        allowed_filters=("symbol", "exchange", "industry"),
+        allowed_sort_fields=("snapshot_date", "market_cap", "rs_rating", "volume"),
     ),
+    "companies": CollectionSpec("companies", "Persisted SQL profiles; not Mongo company.info.", "symbol", False, 100, "listing_date", ("symbol", "exchange", "industry", "sector"), ("symbol", "company_name", "listing_date")),
+    "shareholders": CollectionSpec("shareholders", "Persisted SQL shareholders; not premium reference.shareholders.", "as_of_date", True, 200, "as_of_date", ("symbol",), ("as_of_date", "ownership_pct", "name")),
+    "officers": CollectionSpec("officers", "Persisted SQL officers; not premium company.officers.", "name", False, 200, "appointment_date", ("symbol",), ("name", "appointment_date")),
+    "subsidiaries": CollectionSpec("subsidiaries", "Persisted SQL subsidiaries; not premium company.subsidiaries.", "id", False, 200, None, ("symbol",), ("id", "subsidiary_name", "ownership_pct")),
 }
 
 STATEMENT_COLLECTIONS = {
@@ -306,6 +315,7 @@ PREMIUM_DATASET_SPECS: dict[str, PremiumDatasetSpec] = {
         PremiumDatasetSpec("company.subsidiaries", "Company subsidiaries.", 200),
         PremiumDatasetSpec("company.affiliate", "Company affiliates.", 200),
         PremiumDatasetSpec("company.news", "Company news records.", 200),
+        PremiumDatasetSpec("company.shareholder_structure", "Vietcap IQ shareholder structure; distinct from SQL shareholders.", 200),
         PremiumDatasetSpec("reference.shareholders", "Major shareholders.", 200),
         # Equity market datasets
         PremiumDatasetSpec("equity.summary", "Equity summary snapshot.", 20),
@@ -322,11 +332,11 @@ PREMIUM_DATASET_SPECS: dict[str, PremiumDatasetSpec] = {
         PremiumDatasetSpec("equity.odd_lot", "Odd-lot session data.", 200),
         PremiumDatasetSpec("equity.volume_profile", "Volume profile by price.", 500),
         # Valuation
-        PremiumDatasetSpec("market.pe", "Market P/E series.", 200),
-        PremiumDatasetSpec("market.pb", "Market P/B series.", 200),
-        PremiumDatasetSpec("market.evaluation", "Market valuation evaluation.", 200),
-        PremiumDatasetSpec("analytics.valuation.pe", "Analytics valuation P/E.", 200),
-        PremiumDatasetSpec("analytics.valuation.pb", "Analytics valuation P/B.", 200),
+        PremiumDatasetSpec("market.pe", "Market P/E series (5Y retained window).", 200, scope_type="market"),
+        PremiumDatasetSpec("market.pb", "Market P/B series (5Y retained window).", 200, scope_type="market"),
+        PremiumDatasetSpec("market.evaluation", "Market valuation evaluation (5Y retained window).", 200, scope_type="market"),
+        PremiumDatasetSpec("analytics.valuation.pe", "Analytics valuation P/E (VNINDEX only).", 200, scope_type="market"),
+        PremiumDatasetSpec("analytics.valuation.pb", "Analytics valuation P/B (VNINDEX only).", 200, scope_type="market"),
         # Macro series (market-scope)
         PremiumDatasetSpec("macro.gdp", "Macro GDP series.", 500, scope_type="market"),
         PremiumDatasetSpec("macro.cpi", "Macro CPI series.", 500, scope_type="market"),
@@ -361,6 +371,8 @@ def _serialize_premium_dataset_specs() -> list[dict[str, Any]]:
             "description": spec.description,
             "max_limit": spec.max_limit,
             "scope_type": spec.scope_type,
+            "scope_key": "market" if spec.scope_type == "market" else "<symbol>",
+            "supported_indices": ["VNINDEX"] if spec.dataset.startswith("analytics.valuation.") else [],
             "read_only": True,
         }
         for spec in sorted(PREMIUM_DATASET_SPECS.values(), key=lambda item: item.dataset)
@@ -389,18 +401,12 @@ def parse_iso_date(value: str | None) -> date | None:
         return None
     text = str(value).strip()
     if not text:
-        return None
+        raise ValueError("Dates must use YYYY-MM-DD format")
     if not DATE_RE.fullmatch(text):
         raise ValueError("Dates must use YYYY-MM-DD format")
     return datetime.strptime(text, "%Y-%m-%d").date()
 
 
-def _date_start_iso(value: date) -> str:
-    return datetime.combine(value, datetime.min.time()).isoformat(timespec="milliseconds") + "Z"
-
-
-def _date_end_iso(value: date) -> str:
-    return datetime.combine(value, datetime.max.time()).isoformat(timespec="milliseconds") + "Z"
 
 
 def _query_equal(attribute: str, values: list[Any]) -> dict[str, Any]:
@@ -415,16 +421,19 @@ def _query_order(attribute: str, descending: bool = False) -> dict[str, Any]:
     return {"method": "orderDesc" if descending else "orderAsc", "attribute": attribute}
 
 
-def _query_gte(attribute: str, value: str) -> dict[str, Any]:
+def _query_gte(attribute: str, value: Any) -> dict[str, Any]:
     return {"method": "greaterThanEqual", "attribute": attribute, "values": [value]}
 
 
-def _query_lte(attribute: str, value: str) -> dict[str, Any]:
+def _query_lte(attribute: str, value: Any) -> dict[str, Any]:
     return {"method": "lessThanEqual", "attribute": attribute, "values": [value]}
 
 
 def _coerce_limit(requested_limit: int, max_limit: int) -> int:
-    return max(1, min(int(requested_limit), int(max_limit)))
+    value = int(requested_limit)
+    if value < 0:
+        raise ValueError("limit must be nonnegative; zero returns no rows")
+    return min(value, int(max_limit))
 
 
 def _normalize_filter_value(key: str, value: str) -> str:
@@ -439,7 +448,12 @@ def _normalize_filter_value(key: str, value: str) -> str:
         return normalized
 
     if key == "period_type":
-        return text.lower()
+        aliases = {"year": "year", "annual": "year", "yearly": "year", "fy": "year",
+                   "quarter": "quarter", "quarterly": "quarter", "q": "quarter"}
+        normalized = aliases.get(text.lower())
+        if normalized is None:
+            raise ValueError("Unsupported period_type; use year or quarter. TTM aggregation is not supported")
+        return normalized
 
     if key in {
         "exchange",
@@ -496,7 +510,7 @@ def build_collection_queries(
     applied_filters: dict[str, Any] = {}
 
     for key, value in raw_filters.items():
-        if value is None or str(value).strip() == "":
+        if value is None:
             continue
         if key not in spec.allowed_filters:
             raise ValueError(
@@ -512,11 +526,13 @@ def build_collection_queries(
         raise ValueError("start_date cannot be later than end_date")
     if (start or end) and not spec.date_field:
         raise ValueError(f"Collection '{spec.collection}' does not support date range filters")
+    date_column = getattr(COLLECTION_MODELS[spec.collection], spec.date_field) if spec.date_field else None
+    datetime_bounds = date_column is not None and date_column.type.python_type is datetime
     if start and spec.date_field:
-        queries.append(_query_gte(spec.date_field, _date_start_iso(start)))
+        queries.append(_query_gte(spec.date_field, datetime.combine(start, datetime.min.time()) if datetime_bounds else start))
         applied_filters["start_date"] = start.isoformat()
     if end and spec.date_field:
-        queries.append(_query_lte(spec.date_field, _date_end_iso(end)))
+        queries.append(_query_lte(spec.date_field, datetime.combine(end, datetime.max.time()) if datetime_bounds else end))
         applied_filters["end_date"] = end.isoformat()
 
     requested_sort = str(sort_by or spec.default_order).strip()
@@ -527,6 +543,10 @@ def build_collection_queries(
 
     effective_desc = spec.default_desc if descending is None else bool(descending)
     queries.append(_query_order(requested_sort, descending=effective_desc))
+    model = COLLECTION_MODELS[spec.collection]
+    for key in (*spec.allowed_filters, *spec.allowed_sort_fields):
+        if key not in model.__table__.columns:
+            raise ValueError(f"Collection '{spec.collection}' has unmapped constraint '{key}'")
 
     bounded_limit = _coerce_limit(limit, spec.max_limit)
     queries.append(_query_limit(bounded_limit))
@@ -540,6 +560,7 @@ def _serialize_collection_specs() -> dict[str, Any]:
     return {
         name: {
             **asdict(spec),
+            "fields": list(COLLECTION_MODELS[name].__table__.columns.keys()),
             "guardrails": {
                 "read_only": True,
                 "max_limit": spec.max_limit,
@@ -599,6 +620,16 @@ Read-only contract:
   finance datasets require IQ envelopes. Empty is not permission for a fallback fetch.
 - Historical non-financial rows remain readable with actual source/date evidence;
   freshness is not inferred from ingestion time. `premium` in names is storage legacy.
+- Full-data tools preserve every fetched row/field/evidence string; Decimal and
+  unsafe JavaScript integers are exact decimal strings. Nonfinite values error.
+- SQL dates are inclusive; either EOD bound selects an open-sided range. Limits
+  support zero, reject negatives and cap at collection/dataset maxima.
+- Market datasets use market scope with no equity symbol; analytics valuations
+  support VNINDEX only. TTM is unsupported; year/quarter aliases are normalized.
+- Snapshots explicitly use compact AI summaries; full records use dedicated or
+  generic reads. Local snapshot builders never call outbound MCP.
+- `get_reference_dataset` selects IQ profile/metric-map physical stores;
+  `get_ingestion_receipts` reads bounded acquisition evidence, never runs jobs.
 
 Connect, discover via resources, and read with `get_symbol_snapshot` /
 `get_market_snapshot` before low-level collection queries.
@@ -693,7 +724,32 @@ COLLECTION_MODELS: dict[str, Any] = {
     "market_sectors": MarketSector,
     "sector_performance": SectorPerformance,
     "screener_snapshots": ScreenerSnapshot,
+    "companies": Company,
+    "shareholders": Shareholder,
+    "officers": Officer,
+    "subsidiaries": Subsidiary,
 }
+
+
+def serialize_data_value(value: Any) -> Any:
+    """Lossless full-data JSON; Decimal is a string, integers retain precision."""
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("Nonfinite numeric data cannot be represented in strict JSON")
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("Nonfinite Decimal data cannot be represented in strict JSON")
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, int) and not isinstance(value, bool) and abs(value) > 2**53 - 1:
+        return str(value)
+    if isinstance(value, dict):
+        return {key: serialize_data_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [serialize_data_value(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return serialize_data_value(jsonable_encoder(value))
 
 
 def _normalize_row_value(value: Any) -> Any:
@@ -753,10 +809,24 @@ def _price_series_metadata(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _selected_store_metadata(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    metadata = serialize_data_value(getattr(rows, "metadata", {}))
+    stores = {str(row["sourceCollection"]) for row in rows if row.get("sourceCollection")}
+    if metadata.get("source_collection"):
+        stores.add(str(metadata["source_collection"]))
+    ordered = sorted(stores)
+    return {**metadata, "source": f"mongodb:{ordered[0]}" if len(ordered) == 1 else None,
+            "source_collections": ordered,
+            "freshness": "not_assessed; inspect observation timestamps, not write/retrieval time"}
+
+
 def _coerce_compared_value(column: Any, value: Any) -> Any:
     """Adapt a filter value to the SQLAlchemy column type before comparison."""
-    if isinstance(value, (date, datetime)):
-        return value
+    python_type = getattr(column.type, "python_type", None)
+    if isinstance(value, datetime):
+        return value.date() if python_type is date else value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time()) if python_type is datetime else value
 
     text = str(value).strip()
     python_type = getattr(column.type, "python_type", None)
@@ -795,7 +865,7 @@ def _apply_sql_queries(statement: Any, model: Any, queries: list[dict[str, Any]]
 
         if method == "limit":
             if values:
-                statement = statement.limit(max(1, int(values[0])))
+                statement = statement.limit(max(0, int(values[0])))
             continue
         if method == "offset":
             if values:
@@ -804,7 +874,7 @@ def _apply_sql_queries(statement: Any, model: Any, queries: list[dict[str, Any]]
 
         column = getattr(model, str(query.get("attribute") or ""), None)
         if column is None:
-            continue
+            raise ValueError(f"Unmapped SQL constraint '{query.get('attribute')}'")
 
         if method == "equal":
             if values:
@@ -822,6 +892,11 @@ def _apply_sql_queries(statement: Any, model: Any, queries: list[dict[str, Any]]
                 column.desc() if method == "orderDesc" else column.asc()
             )
 
+        else:
+            raise ValueError(f"Unsupported SQL constraint method '{method}'")
+
+    for column in model.__table__.primary_key.columns:
+        statement = statement.order_by(column.asc())
     return statement
 
 
@@ -1002,8 +1077,12 @@ async def query_database_collection_data(
         "collection": spec.collection,
         "description": spec.description,
         "filters_applied": applied_filters,
+        "limit": bounded_limit,
+        "max_limit": spec.max_limit,
+        "source": f"postgres:{spec.collection}",
+        "retrieved_at": datetime.now(UTC).isoformat(),
         "row_count": len(rows),
-        "items": jsonable_encoder(rows) if financial_collection else sanitize_context_value(rows),
+        "items": serialize_data_value(rows),
         **(_price_series_metadata(rows) if spec.collection == "stock_prices" else {}),
     }
 
@@ -1015,7 +1094,7 @@ async def _get_latest_symbol_document(
     period_type: str | None = None,
 ) -> dict[str, Any] | None:
     queries = [_query_equal("symbol", [normalize_symbol_input(symbol)])]
-    if period_type:
+    if period_type is not None:
         queries.append(
             _query_equal("period_type", [_normalize_filter_value("period_type", period_type)])
         )
@@ -1179,7 +1258,7 @@ def resource_collection_schema(collection: str) -> str:
     spec = COLLECTION_SPECS.get(normalized)
     if spec is None:
         raise ValueError(f"Collection '{collection}' is not enabled for VNIBB MCP")
-    return json.dumps({normalized: {**asdict(spec), "read_only": True}}, indent=2, sort_keys=True)
+    return json.dumps({normalized: {**_serialize_collection_specs()[normalized], "read_only": True}}, indent=2, sort_keys=True)
 
 
 @mcp.prompt()
@@ -1281,7 +1360,7 @@ def _matrix_request_user(ctx: Context) -> User:
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
 async def get_matrix_selection(
-    snapshot_id: str, result_ids: list[str], ctx: Context
+    snapshot_id: str, result_ids: Annotated[list[str], Field(min_length=1, max_length=120)], ctx: Context
 ) -> dict[str, Any]:
     """Read the caller's frozen Matrix selection and evidence, subject to source export rights."""
     user = _matrix_request_user(ctx)
@@ -1346,7 +1425,7 @@ async def get_symbol_snapshot(symbol: str) -> dict[str, Any]:
         raise ValueError("A stock symbol is required")
 
     service = AIContextService()
-    snapshot = await service._build_postgres_snapshot(normalized)
+    snapshot = await service._build_database_snapshot_direct(normalized)
     if snapshot is None:
         return {
             "symbol": normalized,
@@ -1366,8 +1445,10 @@ async def get_symbol_snapshot(symbol: str) -> dict[str, Any]:
     return {
         "symbol": normalized,
         "source": "postgres",
+        "retrieved_at": datetime.now(UTC).isoformat(),
         "found": True,
-        "snapshot": jsonable_encoder(snapshot),
+        "snapshot": serialize_data_value(snapshot),
+        "serialization_policy": "compact_ai_snapshot; bounded summaries, full financial evidence; use dedicated/generic tools for full rows",
     }
 
 
@@ -1376,11 +1457,13 @@ async def get_market_snapshot() -> dict[str, Any]:
     """Get the current database-backed market snapshot for key VN indices and sectors."""
     await _ensure_database_available()
     service = AIContextService()
-    snapshot = await service._build_postgres_market_snapshot()
+    snapshot = await service._build_database_market_snapshot_direct()
     return {
         "source": "postgres",
+        "retrieved_at": datetime.now(UTC).isoformat(),
         "indices_expected": list(MARKET_INDEX_CODES),
-        "snapshot": sanitize_context_value(snapshot or {}),
+        "snapshot": serialize_data_value(snapshot or {}),
+        "serialization_policy": "compact_ai_snapshot; bounded summaries; use dedicated/generic tools for full rows",
     }
 
 
@@ -1390,7 +1473,7 @@ async def get_symbol_prices(
     interval: str = "1D",
     start_date: str | None = None,
     end_date: str | None = None,
-    limit: int = 60,
+    limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 250}, description="Zero returns no rows; requests above 250 are capped")] = 60,
     descending: bool = False,
 ) -> dict[str, Any]:
     """Get VNIBB database OHLCV rows for one symbol and interval."""
@@ -1400,11 +1483,14 @@ async def get_symbol_prices(
         raise ValueError("A stock symbol is required")
 
     bounded_limit = _coerce_limit(limit, COLLECTION_SPECS["stock_prices"].max_limit)
+    parsed_start, parsed_end = parse_iso_date(start_date), parse_iso_date(end_date)
+    if parsed_start and parsed_end and parsed_start > parsed_end:
+        raise ValueError("start_date cannot be later than end_date")
     rows = await get_stock_price_rows(
         normalized,
         interval=_normalize_filter_value("interval", interval),
-        start_date=parse_iso_date(start_date),
-        end_date=parse_iso_date(end_date),
+        start_date=parsed_start,
+        end_date=parsed_end,
         limit=bounded_limit,
         descending=descending,
     )
@@ -1413,11 +1499,14 @@ async def get_symbol_prices(
         "symbol": normalized,
         "interval": _normalize_filter_value("interval", interval),
         "source": "postgres:stock_prices",
+        "retrieved_at": datetime.now(UTC).isoformat(),
         **_price_series_metadata(rows),
         "row_count": len(rows),
+        "limit": bounded_limit,
+        "max_limit": 250,
         "start_date": start_date,
         "end_date": end_date,
-        "items": sanitize_context_value(rows),
+        "items": serialize_data_value(rows),
     }
 
 
@@ -1445,10 +1534,11 @@ async def get_latest_financial_statement(
         "symbol": normalized_symbol,
         "statement": statement_key,
         "collection": collection_id,
-        "period_type": _normalize_filter_value("period_type", period_type) if period_type else None,
-        "item": jsonable_encoder(row or {}),
+        "period_type": _normalize_filter_value("period_type", period_type) if period_type is not None else None,
+        "item": serialize_data_value(row or {}),
         "found": row is not None,
         "source": f"postgres:{collection_id}",
+        "retrieved_at": datetime.now(UTC).isoformat(),
         "provider_source": row.get("source") if row else None,
         "data_status": "available" if row else "empty_no_admitted_source",
         "freshness": "not_assessed; inspect source dates and fiscal period",
@@ -1471,10 +1561,11 @@ async def get_latest_financial_ratios(
     return {
         "symbol": normalized_symbol,
         "collection": "financial_ratios",
-        "period_type": _normalize_filter_value("period_type", period_type) if period_type else None,
-        "item": jsonable_encoder(row or {}),
+        "period_type": _normalize_filter_value("period_type", period_type) if period_type is not None else None,
+        "item": serialize_data_value(row or {}),
         "found": row is not None,
         "source": "postgres:financial_ratios",
+        "retrieved_at": datetime.now(UTC).isoformat(),
         "provider_source": row.get("source") if row else None,
         "data_status": row.get("data_status", "available") if row else "empty_no_admitted_source",
         "freshness": "not_assessed; inspect source dates and fiscal period",
@@ -1482,7 +1573,7 @@ async def get_latest_financial_ratios(
 
 
 @mcp.tool()
-async def get_company_news(symbol: str, limit: int = 10) -> dict[str, Any]:
+async def get_company_news(symbol: str, limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 25})] = 10) -> dict[str, Any]:
     """Get recent VNIBB database company news rows for one symbol."""
     await _ensure_database_available()
     normalized_symbol = normalize_symbol_input(symbol)
@@ -1498,13 +1589,17 @@ async def get_company_news(symbol: str, limit: int = 10) -> dict[str, Any]:
     )
     return {
         "symbol": normalized_symbol,
+        "source": "postgres:company_news",
+        "retrieved_at": datetime.now(UTC).isoformat(),
         "row_count": len(rows),
-        "items": sanitize_context_value(rows),
+        "limit": bounded_limit,
+        "max_limit": COLLECTION_SPECS["company_news"].max_limit,
+        "items": serialize_data_value(rows),
     }
 
 
 @mcp.tool()
-async def get_corporate_timeline(symbol: str, limit: int = 15) -> dict[str, Any]:
+async def get_corporate_timeline(symbol: str, limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 30})] = 15) -> dict[str, Any]:
     """Get a merged VNIBB database timeline across company events, dividends, and insider deals."""
     await _ensure_database_available()
     normalized_symbol = normalize_symbol_input(symbol)
@@ -1551,8 +1646,12 @@ async def get_corporate_timeline(symbol: str, limit: int = 15) -> dict[str, Any]
 
     return {
         "symbol": normalized_symbol,
+        "source": "postgres:company_events,dividends,insider_deals",
+        "retrieved_at": datetime.now(UTC).isoformat(),
         "row_count": len(timeline),
-        "items": sanitize_context_value(timeline),
+        "limit": bounded_limit,
+        "max_limit": 30,
+        "items": serialize_data_value(timeline),
     }
 
 
@@ -1586,7 +1685,7 @@ async def query_database_collection(
     index_code: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
-    limit: int = 20,
+    limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 250}, description="Per-collection cap applies; zero returns no rows")] = 20,
     sort_by: str | None = None,
     descending: bool | None = None,
 ) -> dict[str, Any]:
@@ -1625,7 +1724,7 @@ async def get_mongo_status() -> dict[str, Any]:
     try:
         await asyncio.to_thread(lambda: service._get_database().command("ping"))
     except Exception:
-        logger.exception("MCP MongoDB connectivity check failed")
+        logger.warning("MCP MongoDB connectivity check failed")
         return {
             "enabled": True,
             "read_only": True,
@@ -1637,7 +1736,7 @@ async def get_mongo_status() -> dict[str, Any]:
         "read_only": True,
         "connectivity": {"status": "connected"},
         "database": settings.mongodb_database,
-        "collections": sanitize_context_value(collections),
+        "collections": serialize_data_value(collections),
     }
 
 
@@ -1655,10 +1754,10 @@ def list_premium_datasets() -> dict[str, Any]:
 @mcp.tool()
 async def get_eod_price_history(
     symbol: str,
-    lookback_days: int = 365,
+    lookback_days: Annotated[int, Field(ge=1)] = 365,
     start_date: str | None = None,
     end_date: str | None = None,
-    limit: int = 1000,
+    limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 5000})] = 1000,
 ) -> dict[str, Any]:
     """Get read-only end-of-day OHLCV history for one symbol from MongoDB.
 
@@ -1675,41 +1774,58 @@ async def get_eod_price_history(
     parsed_start = parse_iso_date(start_date)
     parsed_end = parse_iso_date(end_date)
 
-    if parsed_start and parsed_end:
-        if parsed_start > parsed_end:
+    if int(lookback_days) < 1:
+        raise ValueError("lookback_days must be positive")
+    if parsed_start or parsed_end:
+        if parsed_start and parsed_end and parsed_start > parsed_end:
             raise ValueError("start_date must be on or before end_date")
         rows = await service.get_eod_prices_between(
             normalized,
             start_date=parsed_start,
             end_date=parsed_end,
             limit=bounded_limit,
+            include_provenance=True,
         )
     else:
         rows = await service.get_eod_prices(
             normalized,
             lookback_days=max(1, int(lookback_days)),
             limit=bounded_limit,
+            include_provenance=True,
         )
+
+    for row in rows:
+        # `tradeDate` is the retained provider field; `time` is the canonical session
+        # identity that every other price envelope exposes (dates are session-scoped).
+        trade_date = row.get("tradeDate")
+        if trade_date is not None and not any(row.get(key) for key in ("time", "date", "timestamp")):
+            day = trade_date.date() if isinstance(trade_date, datetime) else str(trade_date)[:10]
+            row["time"] = day.isoformat() if isinstance(day, date) else str(day)
 
     rows = [normalize_price_record(row, symbol=normalized) for row in rows]
 
     return {
         "symbol": normalized,
         "source": "mongodb:market_prices_eod",
+        "retrieved_at": datetime.now(UTC).isoformat(),
         "row_count": len(rows),
+        "limit": bounded_limit,
+        "max_limit": 5000,
+        "lookback_days": int(lookback_days) if not (parsed_start or parsed_end) else None,
         **_price_series_metadata(rows),
         "start_date": start_date,
         "end_date": end_date,
-        "items": sanitize_context_value(rows),
+        "items": serialize_data_value(rows),
     }
 
 
 @mcp.tool()
 async def get_premium_dataset(
-    symbol: str,
-    dataset: str,
-    limit: int = 100,
+    symbol: str | None = None,
+    dataset: str = "",
+    limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 1000}, description="Dataset-specific cap applies; zero returns no rows")] = 100,
     period_type: str | None = None,
+    index_code: str | None = None,
 ) -> dict[str, Any]:
     """Read one allowlisted persisted dataset, never execute a provider.
 
@@ -1717,10 +1833,7 @@ async def get_premium_dataset(
     the exact year/quarter variant. Legacy non-financial data retains its provenance.
     """
     _ensure_mongo_available()
-    normalized_symbol = normalize_symbol_input(symbol)
-    if not normalized_symbol:
-        raise ValueError("A stock symbol is required")
-
+    normalized_symbol = normalize_symbol_input(symbol or "")
     normalized_dataset = _normalize_dataset_name(dataset)
     spec = PREMIUM_DATASET_SPECS.get(normalized_dataset)
     if spec is None:
@@ -1729,41 +1842,54 @@ async def get_premium_dataset(
             "Call `list_premium_datasets` for the allowed names."
         )
 
+    if spec.scope_type == "symbol" and not normalized_symbol:
+        raise ValueError("A stock symbol is required for symbol-scoped datasets")
+    if index_code is not None and (not spec.dataset.startswith("analytics.valuation.") or index_code.strip().upper() != "VNINDEX"):
+        raise ValueError("Index selection is supported only for analytics.valuation datasets and VNINDEX")
+    if period_type is not None and not spec.dataset.startswith("finance."):
+        raise ValueError("period_type is supported only for financial datasets")
     bounded_limit = _coerce_limit(limit, spec.max_limit)
     service = get_mongo_market_data_service()
-    normalized_period = _normalize_filter_value("period_type", period_type) if period_type else None
-    if normalized_period not in (None, "year", "quarter"):
-        raise ValueError("period_type must be year or quarter")
-    read_options: dict[str, Any] = {"dataset": spec.dataset, "limit": bounded_limit, "raise_errors": True}
-    if spec.dataset.startswith("finance."):
+    normalized_period = _normalize_filter_value("period_type", period_type) if period_type is not None else None
+    read_options: dict[str, Any] = {"dataset": spec.dataset, "limit": bounded_limit,
+                                  "scope_type": spec.scope_type,
+                                  "scope_key": "market" if spec.scope_type == "market" else normalized_symbol}
+    if spec.dataset.startswith("finance.") or spec.dataset == "company.shareholder_structure":
         read_options["source"] = "vietcap"
     if normalized_period:
         read_options["variant"] = f"{spec.dataset}.{normalized_period}"
     try:
         records = await service.get_raw_dataset_records_precise(normalized_symbol, **read_options)
-    except Exception as exc:
-        logger.exception("MCP MongoDB dataset read failed")
-        raise ToolError("MongoDB dataset read failed; this is not an empty result") from exc
+    except MongoReadError as exc:
+        raise ToolError(f"{exc}; this is not an empty result") from None
+    except Exception:
+        logger.warning("MCP MongoDB dataset read query_failed")
+        raise ToolError("MongoDB analytical read query_failed; this is not an empty result") from None
     return {
         "symbol": normalized_symbol,
         "dataset": spec.dataset,
         "scope_type": spec.scope_type,
+        "scope_key": "market" if spec.scope_type == "market" else normalized_symbol,
+        "index_code": "VNINDEX" if spec.dataset.startswith("analytics.valuation.") else None,
+        "limit": bounded_limit,
+        "max_limit": spec.max_limit,
         "source": "mongodb:market_vnstock_premium_records",
-        "provider_source": "vietcap" if spec.dataset.startswith("finance.") else None,
+        "retrieved_at": datetime.now(UTC).isoformat(),
+        "provider_source": "vietcap" if spec.dataset.startswith("finance.") or spec.dataset == "company.shareholder_structure" else None,
         "period_type": normalized_period,
         "data_status": "available" if records else "empty",
         "freshness": "not_assessed; inspect observedAt/sourceDate and fiscal period",
         "provider_execution": False,
         "row_count": len(records),
-        "items": jsonable_encoder(records),
+        "items": serialize_data_value(records),
     }
 
 
 @mcp.tool()
 async def get_intraday_trades(
     symbol: str,
-    lookback_days: int = 7,
-    limit: int = 1000,
+    lookback_days: Annotated[int, Field(ge=1)] = 7,
+    limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 20000})] = 1000,
 ) -> dict[str, Any]:
     """Get read-only intraday tick trades for one symbol from MongoDB (bounded symbols)."""
     _ensure_mongo_available()
@@ -1772,6 +1898,8 @@ async def get_intraday_trades(
         raise ValueError("A stock symbol is required")
 
     service = get_mongo_market_data_service()
+    if int(lookback_days) < 1:
+        raise ValueError("lookback_days must be positive")
     rows = await service.get_intraday_trades(
         normalized,
         lookback_days=max(1, int(lookback_days)),
@@ -1779,14 +1907,18 @@ async def get_intraday_trades(
     )
     return {
         "symbol": normalized,
-        "source": "mongodb:market_vnstock_premium_records",
+        **_selected_store_metadata(rows),
+        "retrieved_at": datetime.now(UTC).isoformat(),
         "row_count": len(rows),
-        "items": sanitize_context_value(rows),
+        "limit": _coerce_limit(limit, 20000),
+        "max_limit": 20000,
+        "lookback_days": int(lookback_days),
+        "items": serialize_data_value(rows),
     }
 
 
 @mcp.tool()
-async def get_price_depth(symbol: str, limit: int = 500) -> dict[str, Any]:
+async def get_price_depth(symbol: str, limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 5000})] = 500) -> dict[str, Any]:
     """Get read-only volume-at-price depth rows for one symbol from MongoDB.
 
     Rows are flat price levels from the newest ``updatedAt`` write batch.
@@ -1806,10 +1938,93 @@ async def get_price_depth(symbol: str, limit: int = 500) -> dict[str, Any]:
     )
     return {
         "symbol": normalized,
-        "source": "mongodb:market_vnstock_premium_records",
+        **_selected_store_metadata(rows),
+        "coverage": "current_write_batch; not historical session replay",
         "row_count": len(rows),
-        "items": sanitize_context_value(rows),
+        "retrieved_at": datetime.now(UTC).isoformat(),
+        "limit": _coerce_limit(limit, 5000),
+        "max_limit": 5000,
+        "items": serialize_data_value(rows),
     }
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+async def get_reference_dataset(
+    symbol: str, store: str,
+    limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 100})] = 100,
+) -> dict[str, Any]:
+    """Read IQ profiles or metric descriptors from their explicit physical Mongo store."""
+    _ensure_mongo_available()
+    normalized = normalize_symbol_input(symbol)
+    if not normalized:
+        raise ValueError("A stock symbol is required")
+    if store not in {"market_company_profiles", "market_financial_metric_map"}:
+        raise ValueError("store must be market_company_profiles or market_financial_metric_map")
+    bounded_limit = _coerce_limit(limit, 100)
+    rows = await get_mongo_market_data_service().get_reference_records(normalized, store=store, limit=bounded_limit)
+    return {"symbol": normalized, "source": f"mongodb:{store}", "provider_source": "vietcap",
+            "retrieved_at": datetime.now(UTC).isoformat(),
+            "row_count": len(rows), "items": serialize_data_value(rows), "limit": bounded_limit,
+            "data_status": "available" if rows else "empty", "provider_execution": False,
+            "freshness": "not_assessed; inspect source dates separately from ingestion"}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+async def get_ingestion_receipts(
+    symbol: str, dataset: str,
+    limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 20})] = 5,
+) -> dict[str, Any]:
+    """Read bounded acquisition receipts from the selected store; never run ingestion."""
+    normalized = normalize_symbol_input(symbol)
+    if not normalized:
+        raise ValueError("A stock symbol is required")
+    # Each dataset is persisted by its actual scheduler cycle owner; the legacy
+    # supplemental cycle is still accepted so older receipts stay readable.
+    supplemental = ("supplemental_company_maintenance",)
+    dataset_owners: dict[str, tuple[str, ...]] = {
+        "shareholders": supplemental, "officers": supplemental, "subsidiaries": supplemental,
+        "company_news": supplemental, "insider_deals": supplemental,
+        "profiles": ("daily_profile_maintenance",) + supplemental,
+        "financials_year": ("daily_financial_maintenance",) + supplemental,
+        "financials_quarter": ("daily_financial_maintenance",) + supplemental,
+        "ratios_year": ("daily_financial_maintenance",) + supplemental,
+        "ratios_quarter": ("financial_ratios_maintenance",) + supplemental,
+        "iq_company_profile": ("iq_reference_maintenance",),
+        "iq_shareholder_structure": ("iq_reference_maintenance",),
+        "foreign_trading": ("foreign_trading_universe",),
+        "intraday_trades": ("intraday_trades_universe",),
+    }
+    if dataset not in dataset_owners and dataset != "eod_catchup":
+        raise ValueError("Unsupported receipt dataset; use a supplemental/trading/financial/IQ maintenance dataset or eod_catchup")
+    bounded_limit = _coerce_limit(limit, 20)
+    if dataset == "eod_catchup":
+        _ensure_mongo_available()
+        rows = await get_mongo_market_data_service().get_eod_catchup_receipts(normalized, limit=bounded_limit)
+        store = "mongodb:market_eod_catchup_receipts"
+    else:
+        await _ensure_database_available()
+        receipt_path = SyncStatus.additional_data["stages"][dataset]["receipts"][normalized]
+        statement = select(SyncStatus).where(
+            SyncStatus.sync_type.in_(dataset_owners[dataset]),
+            receipt_path.as_string().is_not(None),
+        ).order_by(SyncStatus.id.desc()).limit(bounded_limit)
+        async with async_session_maker() as session:
+            records = (await session.execute(statement)).scalars().all()
+        rows = []
+        for record in records:
+            stage = record.additional_data["stages"][dataset]
+            rows.append({"record_id": record.id, "sync_type": record.sync_type,
+                         "status": record.status, "started_at": record.started_at,
+                         "completed_at": record.completed_at,
+                         "expected_count": stage.get("expected_count"),
+                         "pending_count": stage.get("pending_count"), "complete": stage.get("complete"),
+                         "receipt": stage["receipts"][normalized]})
+        store = "postgres:sync_status"
+    return {"symbol": normalized, "dataset": dataset, "source": store,
+            "retrieved_at": datetime.now(UTC).isoformat(),
+            "items": serialize_data_value(rows), "row_count": len(rows), "limit": bounded_limit,
+            "data_status": "available" if rows else "empty", "provider_execution": False,
+            "coverage": "Acquisition receipts do not certify historical/session completeness"}
 
 
 def create_http_app() -> FastAPI:
@@ -1841,10 +2056,10 @@ def create_http_app() -> FastAPI:
 
         if received:
             try:
-                request.state.matrix_user = await get_current_user(received)
-            except HTTPException:
+                request.state.matrix_user = await require_active_user(received)
+            except HTTPException as exc:
                 return JSONResponse(
-                    status_code=401,
+                    status_code=503 if exc.status_code == 503 else 401,
                     content={"error": True, "message": "Missing or invalid VNIBB MCP bearer token"},
                     headers={"WWW-Authenticate": "Bearer"},
                 )

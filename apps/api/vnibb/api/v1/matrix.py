@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from vnibb.api.deps import DatabaseDep
-from vnibb.core.auth import User, get_current_user
+from vnibb.core.auth import User, require_active_user
 from vnibb.schemas.matrix import (
     MatrixCreate,
     MatrixEvidence,
@@ -20,7 +20,7 @@ from vnibb.services.matrix_observations import prepare_matrix, selected_matrix_p
 from vnibb.services.matrix_playbooks import PLAYBOOKS
 
 router = APIRouter()
-CurrentUser = Annotated[User, Depends(get_current_user)]
+CurrentUser = Annotated[User, Depends(require_active_user)]
 
 
 async def no_store(response: Response):

@@ -195,20 +195,24 @@ async def test_intraday_scheduler_wrapper_only_calls_provider_during_active_sess
     monkeypatch, hour, minute, active
 ):
     check_time = datetime(2026, 7, 13, hour, minute, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+    from vnibb.services.sync_all_data import FullMarketSync
+
     provider = AsyncMock(return_value=["FPT"])
-    sync = AsyncMock(return_value=1)
-    monkeypatch.setattr(data_pipeline, "is_vietnam_market_open", lambda: realtime_pipeline.is_vietnam_market_open(check_time))
-    monkeypatch.setattr(data_pipeline, "_get_scheduler_priority_symbols", provider)
-    monkeypatch.setattr(data_pipeline.data_pipeline, "sync_intraday_trades", sync)
-    monkeypatch.setattr(data_pipeline.data_pipeline, "sync_orderbook_snapshots", sync)
-    monkeypatch.setattr(data_pipeline.data_pipeline, "sync_derivatives_prices", sync)
-    await data_pipeline.run_intraday_sync()
+    cycle = AsyncMock(return_value=Mock(complete=True, pending_count=0))
+    market_open = realtime_pipeline.is_vietnam_market_open
+    monkeypatch.setattr(realtime_pipeline, "is_vietnam_market_open", lambda: market_open(check_time))
+    monkeypatch.setattr(realtime_pipeline, "DistributedJobLock", FakeLease)
+    monkeypatch.setattr(FullMarketSync, "_get_seeded_symbols", provider)
+    monkeypatch.setattr(FullMarketSync, "run_maintenance_cycle", cycle)
+    monkeypatch.setattr(data_pipeline.data_pipeline, "sync_derivatives_prices", AsyncMock(return_value=1))
+    monkeypatch.setattr(data_pipeline.data_pipeline, "_create_sync_record", AsyncMock(return_value=1))
+    monkeypatch.setattr(data_pipeline.data_pipeline, "_update_sync_record", AsyncMock())
+    await realtime_pipeline.run_intraday_sync()
 
     assert provider.await_count == int(active)
-    assert sync.await_count == 3 * int(active)
+    assert cycle.await_count == int(active)
 
 
-@pytest.mark.asyncio
 def test_scheduler_realtime_jobs_follow_active_sessions(monkeypatch):
     scheduler._scheduler = None
     monkeypatch.setattr(scheduler, "DistributedJobLock", FakeLease)
@@ -220,6 +224,7 @@ def test_scheduler_realtime_jobs_follow_active_sessions(monkeypatch):
     assert "hour='4', minute='30'" in str(jobs["realtime_lunch_stop"].trigger)
     assert "hour='6', minute='0'" in str(jobs["realtime_afternoon_start"].trigger)
     assert "hour='7', minute='45'" in str(jobs["realtime_stop"].trigger)
+    assert {"mongo_eod_sync", "mongo_eod_catchup"} <= jobs.keys()
 
 
 @pytest.mark.asyncio
@@ -236,19 +241,67 @@ async def test_manual_start_is_noop_outside_active_session(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_polling_waits_without_provider_calls_outside_active_session(monkeypatch):
-    from vnibb.providers.vnstock import runtime
-
+async def test_polling_waits_without_acquisition_calls_outside_active_session(monkeypatch):
+    rotation = AsyncMock()
     pipeline = realtime_pipeline.RealtimePipeline()
     pipeline.is_running = True
     sleep = AsyncMock(side_effect=lambda _: setattr(pipeline, "is_running", False))
     monkeypatch.setattr(realtime_pipeline, "is_vietnam_market_open", lambda: False)
     monkeypatch.setattr(realtime_pipeline.asyncio, "sleep", sleep)
-    monkeypatch.setattr(runtime, "get_trading_class", Mock())
+    monkeypatch.setattr(realtime_pipeline, "run_intraday_sync", rotation)
 
     await pipeline._polling_fallback(["FPT"])
 
+    rotation.assert_not_awaited()
     sleep.assert_awaited_once_with(60)
+
+
+@pytest.mark.asyncio
+async def test_active_session_acquires_ticks_and_current_depth(monkeypatch):
+    from vnibb.services import sync_all_data
+    from vnibb.providers.vnstock import runtime
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def scalars(self, _):
+            return Mock(first=Mock(return_value=None))
+
+
+    calls = []
+
+    async def ticks(*, symbols, progress, live_session, retain_ticks):
+        calls.append((symbols[0], live_session, retain_ticks))
+        progress["acquisition_outcomes"] = {"sql": "persisted"}
+        return 4
+
+    async def depth(*, symbols, progress, live_session):
+        calls.append((symbols[0], live_session))
+        progress["acquisition_outcomes"] = {"sql": "persisted", "mongo": "persisted"}
+        return 1
+
+    monkeypatch.setattr(realtime_pipeline, "is_vietnam_market_open", lambda: True)
+    monkeypatch.setattr(sync_all_data, "async_session_maker", Session)
+    monkeypatch.setattr(runtime, "financial_provider_busy", lambda: False)
+    lease = Mock()
+    lease.acquire = AsyncMock(return_value="acquired")
+    lease.release = AsyncMock(return_value=True)
+    monkeypatch.setattr(realtime_pipeline, "DistributedJobLock", lambda *_: lease)
+    monkeypatch.setattr(sync_all_data.FullMarketSync, "_get_seeded_symbols", AsyncMock(return_value=["FPT"]))
+    monkeypatch.setattr(sync_all_data.data_pipeline, "sync_intraday_trades", ticks)
+    monkeypatch.setattr(sync_all_data.data_pipeline, "sync_orderbook_snapshots", depth)
+    monkeypatch.setattr(sync_all_data.data_pipeline, "sync_derivatives_prices", AsyncMock(return_value=0))
+    monkeypatch.setattr(sync_all_data.data_pipeline, "_create_sync_record", AsyncMock(return_value=1))
+    monkeypatch.setattr(sync_all_data.data_pipeline, "_update_sync_record", AsyncMock())
+
+    result = await realtime_pipeline.run_intraday_sync()
+
+    assert calls == [("FPT", True, True), ("FPT", True)]
+    assert result.complete is True
 
 
 @pytest.mark.asyncio
@@ -321,7 +374,6 @@ async def test_realtime_api_reports_only_stock_price_polling(monkeypatch):
     assert response.is_running
     assert response.pipeline_available is False
     assert response.data_types == ["stockps"]
-    assert response.message == "Stock price polling started"
 
 
 @pytest.mark.asyncio
@@ -342,23 +394,3 @@ async def test_realtime_api_declares_premium_only_data_types_unavailable(monkeyp
     start.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_stock_price_polling_uses_free_vci_source(monkeypatch):
-    from vnibb.providers.vnstock import runtime
-
-    pipeline = realtime_pipeline.RealtimePipeline()
-    pipeline.is_running = True
-    trading = Mock()
-    trading.price_board.return_value = None
-    factory = Mock(return_value=trading)
-    sleep = AsyncMock(side_effect=lambda _: setattr(pipeline, "is_running", False))
-    monkeypatch.setattr(settings, "vnstock_source", "VCI")
-    monkeypatch.setattr(runtime, "get_trading_class", lambda: factory)
-    monkeypatch.setattr(realtime_pipeline, "is_vietnam_market_open", lambda: True)
-    monkeypatch.setattr(realtime_pipeline.asyncio, "sleep", sleep)
-
-    await pipeline._polling_fallback(["FPT"])
-
-    factory.assert_called_once_with(source="VCI")
-    trading.price_board.assert_called_once_with(symbols_list=["FPT"])
-    sleep.assert_awaited_once_with(5)

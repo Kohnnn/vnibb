@@ -287,7 +287,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'transaction_flow',
         name: 'Transaction Flow',
-        description: 'Daily domestic, foreign, and proprietary flow with price overlay',
+        description: 'Observed transaction samples and certified session flow with price overlay',
         category: 'analysis',
         defaultConfig: {},
         defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
@@ -1586,7 +1586,7 @@ const MAPPED_WIDGET_CAPABILITIES: Partial<Record<WidgetType, MappedWidgetCapabil
     cash_flow: { scope: 'symbol', evidenceKind: 'cash_flow', limitation: 'Only available cash-flow periods are evidence; earnings alone do not establish cash conversion.' },
     news_feed: { scope: 'symbol', evidenceKind: 'company_news', limitation: 'Recent-news summaries are not exhaustive coverage or independently verified corporate disclosures.' },
     foreign_trading: { scope: 'symbol', evidenceKind: 'foreign_trading', limitation: 'Foreign-trading summaries describe observed flows, not investor intent or future returns.' },
-    transaction_flow: { scope: 'symbol', evidenceKind: 'order_flow', limitation: 'Order-flow summaries are not a full order book or a trade-execution guarantee.' },
+    transaction_flow: { scope: 'symbol', evidenceKind: 'order_flow', limitation: 'Observed samples are not daily totals or a full order book. Session totals and domestic residual require explicit complete-session source coverage.' },
     insider_trading: { scope: 'symbol', evidenceKind: 'insider_deals', limitation: 'Reported insider transactions may be delayed; absence of records does not establish absence of activity.' },
     events_calendar: { scope: 'symbol', evidenceKind: 'company_events', limitation: 'Available company events are not a complete or guaranteed future calendar.' },
     dividend_payment: { scope: 'symbol', evidenceKind: 'dividends', limitation: 'Dividend records do not guarantee future distributions or establish total return.' },

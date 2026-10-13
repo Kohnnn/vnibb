@@ -64,7 +64,7 @@ it does not proxy through the FastAPI app.
 
 Important notes:
 
-- `VNIBB_MCP_URL` is used by the backend so VniAgent can call the MCP sidecar server-side
+- `VNIBB_MCP_URL` is an API/VniAgent client setting. MCP snapshot handlers always use explicit local read-only builders, even when the sidecar inherits this URL from the shared environment; they never delegate to their own snapshot tools. A separately managed MCP process may leave the client URL unset. URL/hostname comparison is not a security or recursion boundary.
 - `VNIBB_MCP_SHARED_BEARER_TOKEN` protects remote MCP HTTP access when requests arrive through Caddy or the tailnet-bound port
 - the API, scheduler, and MCP share free-only runtime intent: Vietcap IQ primary and free vnstock VCI; the MCP reads persisted data only, never invokes providers or installs sponsor modules
 - `MCP_PUBLIC_BIND=127.0.0.1` makes the raw MCP HTTP port reachable on the OCI host outside Docker without exposing it publicly on the internet
@@ -160,7 +160,13 @@ Current MCP-backed VniAgent reads:
 - `get_market_snapshot`
 - `get_symbol_snapshot`
 
-If the MCP sidecar is unavailable, backend logs should show a warning and VniAgent should fall back to direct database-stack context assembly instead of fully failing.
+If the MCP sidecar is unavailable or times out, backend logs show a warning and VniAgent falls back to direct database context assembly. A failed database read remains an error, not an empty successful snapshot. Disabled clients use the same local path; a distinct configured remote endpoint is still a legitimate API client target.
+
+Snapshots are bounded AI summaries, not complete historical exports: daily price input is capped at 21 observations with 20 recent rows; news/events and sector leaders/laggards are capped at four; news text is capped at 500 characters. Use dedicated price/collection tools for full requested data. Price summaries retain dated missing/NaN/Infinity observations as unavailable rather than promoting older dates or compressing horizons. Five/twenty-session returns and twenty-observation ranges require finite positive closes, coherent certified units/basis and every expected exchange session. Window endpoints, status and unavailable reasons are returned. Weekends and configured `MARKET_HOLIDAY_DATES` are excluded; unconfigured exchange closures are not certified. No magnitude-based price correction or percent clamp is applied.
+
+Matrix API owner reads, VniAgent Matrix selections and MCP user identity use the existing active-session policy: HS256 signature, configured issuer, `authenticated` audience, required `sub`/`iat`/`exp`/UUID `session_id`, bounded lifetime and online issuing Auth lookup on every request with subject matching. Configure `SUPABASE_JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `ACTIVE_SESSION_MAX_TTL_SECONDS`; ordinary owners do not require an admin allowlist. Auth denial fails closed (401); unavailable authority/configuration returns 503. Shared deployment bearer tokens never confer Matrix ownership. Snapshot revocation, owner checks, result subsets and source-export permission remain separate gates. Ordinary non-Matrix VniAgent chat does not gain a new auth requirement.
+
+Before claiming deployed acceptance, record actual API/MCP revisions and process-specific client/auth configuration, then use an authorized disposable user session to prove owner/other-owner behavior and online denial after sign-out. A public health response or unauthenticated 401 is insufficient. Do not stress-test recursion in production or expose secrets in retained evidence.
 
 ## Operational warning
 

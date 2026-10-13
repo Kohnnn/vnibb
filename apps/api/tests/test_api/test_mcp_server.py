@@ -91,11 +91,11 @@ class _FakeMongoService:
         self.enabled = enabled
         self.calls: dict[str, object] = {}
 
-    async def get_eod_prices(self, symbol, *, lookback_days, limit):
+    async def get_eod_prices(self, symbol, *, lookback_days, limit, include_provenance=True):
         self.calls["eod"] = {"symbol": symbol, "lookback_days": lookback_days, "limit": limit}
         return [{"symbol": symbol, "close": 1.0}]
 
-    async def get_eod_prices_between(self, symbol, *, start_date, end_date, limit):
+    async def get_eod_prices_between(self, symbol, *, start_date, end_date, limit, include_provenance=True):
         self.calls["eod_between"] = {
             "symbol": symbol,
             "start_date": start_date,
@@ -104,8 +104,8 @@ class _FakeMongoService:
         }
         return [{"symbol": symbol, "close": 2.0}]
 
-    async def get_raw_dataset_records_precise(self, symbol, *, dataset, limit, source=None, variant=None, raise_errors=False):
-        self.calls["precise_raw"] = {"symbol": symbol, "dataset": dataset, "limit": limit, "source": source, "variant": variant, "raise_errors": raise_errors}
+    async def get_raw_dataset_records_precise(self, symbol, *, dataset, limit, source=None, variant=None, scope_type="symbol", scope_key=None):
+        self.calls["precise_raw"] = {"symbol": symbol, "dataset": dataset, "limit": limit, "source": source, "variant": variant, "scope_type": scope_type, "scope_key": scope_key}
         return [{"symbol": symbol, "dataset": dataset, "recordKey": f"k:{symbol}:{dataset}"}]
 
     async def get_price_depth_precise(self, symbol, *, limit, include_provenance):
@@ -465,7 +465,7 @@ async def test_financial_corpus_filters_iq_source_and_fiscal_variant(monkeypatch
     result = await server.get_premium_dataset("FPT", "finance.income_statement", period_type="quarter")
     assert fake.calls["precise_raw"]["source"] == "vietcap"
     assert fake.calls["precise_raw"]["variant"] == "finance.income_statement.quarter"
-    assert fake.calls["precise_raw"]["raise_errors"] is True
+    assert fake.calls["precise_raw"]["scope_type"] == "symbol"
     assert result["provider_source"] == "vietcap"
 
 
@@ -507,10 +507,10 @@ async def test_mcp_snapshots_use_only_postgres_context(monkeypatch):
         pass
 
     class DatabaseContext:
-        async def _build_postgres_snapshot(self, symbol):
+        async def _build_database_snapshot_direct(self, symbol):
             return {"symbol": symbol}
 
-        async def _build_postgres_market_snapshot(self):
+        async def _build_database_market_snapshot_direct(self):
             return {"indices": []}
 
     monkeypatch.setattr(server, "_ensure_database_available", available)
@@ -660,3 +660,256 @@ async def test_sql_ratio_consumers_withhold_unadmitted_percentages(
 def test_fiscal_period_filters_match_persisted_lowercase_values(value, expected):
     _, queries, _, _ = server.build_collection_queries(collection="income_statements", period_type=value)
     assert server._query_equal("period_type", [expected]) in queries
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, 1, 19, 20, 21, 60, 250, 999])
+async def test_public_sql_tool_preserves_fetched_rows_and_deep_evidence(
+    monkeypatch, test_engine, test_db, limit
+):
+    from datetime import date, timedelta
+
+    evidence = "  audit\n" + "evidence " * 100 + "https://example.test/report?unit=VND&basis=consolidated"
+    test_db.add(server.Stock(id=1, symbol="VNM", exchange="HOSE"))
+    await test_db.flush()
+    test_db.add_all(server.StockPrice(
+        id=index + 1, stock_id=1, symbol="VNM", time=date(2026, 1, 1) + timedelta(days=index),
+        interval="1D", open=1, high=1, low=1, close=1, volume=1, source="vietcap_vnd",
+    ) for index in range(260))
+    test_db.add(server.BalanceSheet(
+        id=1, symbol="VNM", period="2025", period_type="year", fiscal_year=2025,
+        source="vietcap", total_equity=0,
+        raw_data={"_financial_lineage": {"unit_metadata": {"revenue": {
+            "provider_value": 0, "source_unit": "VND", "raw_value": None,
+            "raw_unit": "VND", "normalization_multiplier": 1, "validated": True,
+        }}, "canonical_data": {"zero": 0, "missing": None, "flag": False},
+        "source_report": {"evidence": evidence}}},
+    ))
+    await test_db.commit()
+    monkeypatch.setattr(server, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
+    async def available():
+        return True
+    monkeypatch.setattr(server, "check_database_connection", available)
+
+    result = await server.query_database_collection("stock_prices", symbol="VNM", limit=limit)
+    assert len(result["items"]) == result["row_count"] == min(max(limit, 0), 250)
+    latest = await server.get_latest_financial_statement("VNM", "balance_sheet", "YEAR")
+    assert latest["item"]["total_equity"] == 0
+    assert latest["item"]["raw_data"]["_financial_lineage"]["source_report"]["evidence"] == evidence
+    assert latest["item"]["raw_data"]["_financial_lineage"]["canonical_data"] == {"zero": 0, "missing": None, "flag": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, 1, 19, 20, 21, 60, 5000])
+async def test_eod_tool_preserves_deep_evidence_and_all_rows(monkeypatch, limit):
+    from decimal import Decimal
+    import json
+
+    evidence = "  raw\n" + "evidence " * 100 + "qualified unit=VND"
+    class MongoService(_FakeMongoService):
+        async def get_eod_prices(self, symbol, *, limit, **kwargs):
+            return [{"symbol": symbol, "close": 1, "priceUnit": "VND", "audit": {
+                "deep": {"units": {"revenue": {"multiplier": Decimal("1.00000000000000000001"),
+                "large_integer": 2**63, "null": None, "valid": False, "evidence": evidence}}}}}
+                for _ in range(min(limit, 60))]
+    monkeypatch.setattr(server, "get_mongo_market_data_service", MongoService)
+    result = await server.get_eod_price_history("VNM", limit=limit)
+    assert result["row_count"] == len(result["items"]) == min(limit, 60)
+    json.dumps(result, allow_nan=False)
+    if result["items"]:
+        audit = result["items"][0]["audit"]["deep"]["units"]["revenue"]
+        assert audit == {"multiplier": "1.00000000000000000001", "large_integer": str(2**63),
+                         "null": None, "valid": False, "evidence": evidence}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+async def test_mcp_tool_rejects_nonfinite_data_before_json(monkeypatch, value):
+    class InvalidMongo(_FakeMongoService):
+        async def get_raw_dataset_records_precise(self, *args, **kwargs):
+            return [{"raw": {"nested": {"value": value}}}]
+    monkeypatch.setattr(server, "get_mongo_market_data_service", InvalidMongo)
+    with pytest.raises(ValueError, match="Nonfinite"):
+        await server.get_premium_dataset("VNM", "company.info")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("start,end", [("2020-01-01", None), (None, "2020-01-01")])
+async def test_eod_one_sided_bounds_are_executed(monkeypatch, start, end):
+    from datetime import date
+    class BoundMongo(_FakeMongoService):
+        async def get_eod_prices_between(self, symbol, *, start_date, end_date, limit, include_provenance):
+            assert include_provenance is True
+            self.calls["bounds"] = (start_date, end_date)
+            return []
+    fake = BoundMongo()
+    monkeypatch.setattr(server, "get_mongo_market_data_service", lambda: fake)
+    result = await server.get_eod_price_history("VNM", start_date=start, end_date=end)
+    assert fake.calls["bounds"] == (date.fromisoformat(start) if start else None, date.fromisoformat(end) if end else None)
+    assert "eod" not in fake.calls
+    assert result["start_date"] == start and result["end_date"] == end
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dataset", [name for name, spec in server.PREMIUM_DATASET_SPECS.items() if spec.scope_type == "market"])
+async def test_market_dataset_uses_scope_without_equity_symbol(monkeypatch, dataset):
+    fake = _FakeMongoService()
+    monkeypatch.setattr(server, "get_mongo_market_data_service", lambda: fake)
+    result = await server.get_premium_dataset(dataset=dataset)
+    assert fake.calls["precise_raw"]["scope_type"] == "market"
+    assert fake.calls["precise_raw"]["scope_key"] == "market"
+    assert result["scope_key"] == "market"
+    assert result["row_count"] == len(result["items"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dataset", ["company.info", "macro.gdp", "market.pe", "analytics.valuation.pe"])
+async def test_premium_tool_rejects_unapplied_period_and_index_constraints(monkeypatch, dataset):
+    monkeypatch.setattr(server, "get_mongo_market_data_service", _FakeMongoService)
+    with pytest.raises(ValueError, match="period_type is supported only"):
+        await server.get_premium_dataset("VNM", dataset, period_type="year")
+    with pytest.raises(ValueError, match="Index selection"):
+        await server.get_premium_dataset("VNM", dataset, index_code="VN30")
+
+
+@pytest.mark.asyncio
+async def test_ingestion_receipt_tool_projects_selected_pair_from_real_sql(monkeypatch, test_engine, test_db):
+    from datetime import datetime
+    from vnibb.models.sync_status import SyncStatus
+
+    receipt = {"last_attempted_at": "2026-10-01T12:00:00", "last_succeeded_at": None,
+               "outcome": "failed", "rows": 0, "error": "ProviderUnavailable", "stage_stats": {"zero": 0}}
+    test_db.add_all([
+        SyncStatus(id=1, sync_type="supplemental_company_maintenance", status="partial",
+            started_at=datetime(2026, 10, 1), additional_data={"stages": {"profiles": {
+                "expected_count": 2, "pending_count": 1, "complete": False,
+                "receipts": {"VNM": receipt, "VCB": {"private_other_symbol": True}}}}, "unrelated": "not exposed"}),
+        SyncStatus(id=2, sync_type="supplemental_company_maintenance", status="completed",
+            started_at=datetime(2026, 10, 2), additional_data={"stages": {"profiles": {
+                "receipts": {"VCB": {"outcome": "success"}}}}}),
+        SyncStatus(id=3, sync_type="daily_profile_maintenance", status="completed",
+            started_at=datetime(2026, 10, 3), additional_data={"stages": {"profiles": {
+                "expected_count": 1, "pending_count": 0, "complete": True,
+                "receipts": {"VNM": {"outcome": "succeeded", "owner": "daily_profile"}}}}}),
+        SyncStatus(id=4, sync_type="daily_financial_maintenance", status="completed",
+            started_at=datetime(2026, 10, 4), additional_data={"stages": {"ratios_year": {
+                "receipts": {"VNM": {"outcome": "succeeded", "owner": "daily_financial"}}}}}),
+        SyncStatus(id=5, sync_type="financial_ratios_maintenance", status="completed",
+            started_at=datetime(2026, 10, 5), additional_data={"stages": {"ratios_quarter": {
+                "receipts": {"VNM": {"outcome": "succeeded", "owner": "ratios_quarter"}}}}}),
+    ])
+    await test_db.commit()
+    monkeypatch.setattr(server, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
+    async def available():
+        return True
+    monkeypatch.setattr(server, "check_database_connection", available)
+
+    result = await server.get_ingestion_receipts("VNM", "profiles", limit=1)
+    assert result["source"] == "postgres:sync_status"
+    assert result["row_count"] == len(result["items"]) == 1
+    # Newest matching cycle wins: the daily profile owner, not the older legacy row.
+    assert result["items"][0]["record_id"] == 3
+    assert result["items"][0]["receipt"] == {"outcome": "succeeded", "owner": "daily_profile"}
+    history = await server.get_ingestion_receipts("VNM", "profiles", limit=3)
+    assert [item["record_id"] for item in history["items"]] == [3, 1]
+    assert history["items"][1]["record_id"] == 1 and history["items"][1]["receipt"] == receipt
+    assert "unrelated" not in history["items"][1]
+    assert "private_other_symbol" not in str(history)
+    empty = await server.get_ingestion_receipts("VNM", "profiles", limit=0)
+    assert empty["row_count"] == 0 and empty["items"] == []
+    profiles = await server.get_ingestion_receipts("VNM", "profiles", limit=2)
+    assert [item["record_id"] for item in profiles["items"]] == [3, 1]
+    assert profiles["items"][0]["receipt"]["owner"] == "daily_profile"
+    ratios_year = await server.get_ingestion_receipts("VNM", "ratios_year", limit=2)
+    assert [item["record_id"] for item in ratios_year["items"]] == [4]
+    ratios_quarter = await server.get_ingestion_receipts("VNM", "ratios_quarter", limit=2)
+    assert [item["record_id"] for item in ratios_quarter["items"]] == [5]
+    legacy_only = await server.get_ingestion_receipts("VNM", "officers", limit=2)
+    assert legacy_only["row_count"] == 0 and legacy_only["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_selected_store_empty_batch_metadata_survives_public_tool(monkeypatch):
+    class EmptyRows(list):
+        metadata = {"source_collection": "market_intraday_trades", "source_date": "2020-01-01",
+                    "latest_session_status": "empty", "batch_updated_at": "2026-10-01"}
+    class MongoService(_FakeMongoService):
+        async def get_intraday_trades(self, *args, **kwargs):
+            return EmptyRows()
+    monkeypatch.setattr(server, "get_mongo_market_data_service", MongoService)
+    result = await server.get_intraday_trades("VNM")
+    assert result["source"] == "mongodb:market_intraday_trades"
+    assert result["row_count"] == 0 and result["items"] == []
+    assert result["source_date"] == "2020-01-01"
+    assert result["batch_updated_at"] == "2026-10-01"
+    assert result["latest_session_status"] == "empty"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bound", ["", " ", "2026-02-30", "2026-10-01T00:00:00Z"])
+async def test_public_price_tools_reject_invalid_explicit_dates(monkeypatch, bound):
+    async def available():
+        return True
+    monkeypatch.setattr(server, "check_database_connection", available)
+    monkeypatch.setattr(server, "get_mongo_market_data_service", _FakeMongoService)
+    with pytest.raises(ValueError):
+        await server.get_symbol_prices("VNM", start_date=bound)
+    with pytest.raises(ValueError):
+        await server.get_eod_price_history("VNM", end_date=bound)
+
+
+@pytest.mark.asyncio
+async def test_public_tool_rejects_nonfinite_decimal_and_keeps_safe_scalar_types(monkeypatch):
+    from decimal import Decimal
+    class NumericMongo(_FakeMongoService):
+        value = Decimal("NaN")
+        async def get_raw_dataset_records_precise(self, *args, **kwargs):
+            return [{"raw": {"value": self.value, "integer": 2**53 - 1, "boolean": True,
+                             "float": 1.25, "missing": None}}]
+    fake = NumericMongo()
+    monkeypatch.setattr(server, "get_mongo_market_data_service", lambda: fake)
+    for value in [Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")]:
+        fake.value = value
+        with pytest.raises(ValueError, match="Nonfinite"):
+            await server.get_premium_dataset("VNM", "company.info")
+    fake.value = Decimal("0.100000000000000000000000000001")
+    result = await server.get_premium_dataset("VNM", "company.info")
+    assert result["items"][0]["raw"] == {"value": "0.100000000000000000000000000001",
+        "integer": 2**53 - 1, "boolean": True, "float": 1.25, "missing": None}
+
+
+@pytest.mark.asyncio
+async def test_retrieval_time_does_not_replace_stored_observation_time(monkeypatch):
+    source_row = {"sourceCollection": "market_intraday_trades", "source": "vnstock", "providerSource": "VCI",
+                  "sourceDate": "2020-01-01", "observedAt": "2020-01-01T09:00:00", "updatedAt": "2026-10-01T12:00:00",
+                  "priceUnit": "VND", "recordKey": "VNM:old-trade", "volume": 0}
+    class MongoService(_FakeMongoService):
+        async def get_intraday_trades(self, *args, **kwargs):
+            return [source_row]
+    monkeypatch.setattr(server, "get_mongo_market_data_service", MongoService)
+    first = await server.get_intraday_trades("VNM")
+    second = await server.get_intraday_trades("VNM")
+    assert first["items"] == second["items"] == [source_row]
+    assert first["retrieved_at"] <= second["retrieved_at"]
+    assert second["source"] == "mongodb:market_intraday_trades"
+    assert second["freshness"].startswith("not_assessed")
+
+
+@pytest.mark.asyncio
+async def test_eod_rows_expose_canonical_session_time(monkeypatch):
+    from datetime import datetime
+
+    class MongoService(_FakeMongoService):
+        async def get_eod_prices_between(self, symbol, *, start_date, end_date, limit, include_provenance):
+            assert include_provenance is True
+            return [{"symbol": symbol, "tradeDate": datetime(2026, 9, 30, 7, 0), "priceUnit": "VND",
+                     "close": 59400.0, "source": "vietcap"}]
+
+    monkeypatch.setattr(server, "get_mongo_market_data_service", MongoService)
+    result = await server.get_eod_price_history("VNM", start_date="2026-09-01", end_date="2026-10-01")
+
+    item = result["items"][0]
+    assert item["time"] == "2026-09-30"
+    assert item["tradeDate"] == "2026-09-30T07:00:00"
+    assert item["price_unit"] == "VND"
+    assert result["price_unit"] == "VND"

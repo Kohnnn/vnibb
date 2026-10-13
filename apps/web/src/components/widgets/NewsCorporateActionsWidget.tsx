@@ -10,6 +10,7 @@ import { useCompanyNews, useDividends, useInsiderDeals } from '@/lib/queries';
 import { formatTimestamp } from '@/lib/format';
 import { formatNumber, formatPercent, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
+import { normalizeInsiderAction } from '@/lib/insiderActions';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { addNotebookItem } from '@/lib/researchNotebook';
 import { newsItemObservation, newsObservationProvenance } from '@/lib/newsTime';
@@ -351,8 +352,11 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                     ) : (
                       <div className="space-y-2">
                         {insiderDeals.slice(0, 4).map((deal) => {
-                          const action = deal.deal_action?.toUpperCase() || 'DEAL';
-                          const isBuy = action.includes('BUY');
+                          const actionToken = normalizeInsiderAction(deal.deal_action);
+                          const actionLabel = actionToken ?? 'UNKNOWN';
+                          const actionClass = actionToken === 'BUY' ? 'text-green-400'
+                            : actionToken === 'SELL' ? 'text-red-400' : 'text-[var(--text-muted)]';
+                          const priceText = deal.price_unit === 'VND' ? formatVND(deal.deal_price) : '—';
                           return (
                             <div
                               key={deal.id}
@@ -367,11 +371,11 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                                 </div>
                               </div>
                               <div className="text-right">
-                                <div className={`text-[10px] font-bold ${isBuy ? 'text-green-400' : 'text-red-400'}`}>
-                                  {action}
+                                <div className={`text-[10px] font-bold ${actionClass}`}>
+                                  {actionLabel}
                                 </div>
                                 <div className="text-[10px] text-[var(--text-muted)]">
-                                  {formatNumber(deal.deal_quantity)} @ {formatVND(deal.deal_price)}
+                                  {formatNumber(deal.deal_quantity)} @ {priceText}
                                 </div>
                                 <div className="text-[10px] text-[var(--text-muted)]">{formatTimestamp(deal.announce_date)}</div>
                               </div>

@@ -17,6 +17,44 @@ from vnibb.core.price_units import normalize_price_record
 logger = logging.getLogger(__name__)
 
 
+class MongoReadRows(list[dict[str, Any]]):
+    """Rows plus retained batch evidence, including explicit empty source receipts."""
+
+    def __init__(self, rows: Iterable[dict[str, Any]], metadata: dict[str, Any]) -> None:
+        super().__init__(rows)
+        self.metadata = metadata
+
+
+class MongoReadError(RuntimeError):
+    """Safe store-access failure, never a successful empty read."""
+
+    def __init__(self, state: str) -> None:
+        self.state = state
+        super().__init__(f"MongoDB analytical read {state}; retry or check store configuration/connectivity")
+
+
+def _mongo_read_error(exc: Exception) -> MongoReadError:
+    if isinstance(exc, MongoReadError):
+        return exc
+    from pymongo.errors import ConnectionFailure, ExecutionTimeout, NetworkTimeout
+
+    if isinstance(exc, (TimeoutError, ExecutionTimeout, NetworkTimeout)) or getattr(exc, "timeout", False):
+        return MongoReadError("timeout")
+    if isinstance(exc, (ConnectionError, ConnectionFailure)):
+        return MongoReadError("unavailable")
+    return MongoReadError("query_failed")
+
+
+async def _read_mongo(reader: Any, *, empty_page: bool = False) -> Any:
+    try:
+        result = await asyncio.to_thread(reader)
+        if empty_page:
+            return MongoReadRows([], result.metadata) if isinstance(result, MongoReadRows) else []
+        return result
+    except Exception as exc:
+        raise _mongo_read_error(exc) from None
+
+
 _EOD_SOURCE_RANK = {"vietcap": 0, "vnstock-data": 1}
 _EOD_LINEAGE_FIELDS = ("updatedAt", "observedAt", "ingestedAt", "sourceUpdatedAt")
 
@@ -102,7 +140,7 @@ def _dedup_eod_rows(
     rows: Iterable[dict[str, Any]],
     *,
     limit: int | None = None,
-    preserve_provenance: bool = False,
+    preserve_provenance: bool = True,
 ) -> list[dict[str, Any]]:
     """Collapse to one deterministically ranked bar per logical trade date."""
 
@@ -145,7 +183,7 @@ class MongoMarketDataService:
 
     def _get_collection(self, name: str) -> Any:
         if not self.enabled:
-            raise RuntimeError("MongoDB analytical source is not configured")
+            raise MongoReadError("not_configured")
 
         if self._client is None:
             try:
@@ -238,7 +276,7 @@ class MongoMarketDataService:
 
     def _get_database(self) -> Any:
         if not self.enabled:
-            raise RuntimeError("MongoDB analytical source is not configured")
+            raise MongoReadError("not_configured")
 
         if self._client is None:
             self._get_collection("__connectivity_probe__")
@@ -281,11 +319,7 @@ class MongoMarketDataService:
                 )
             return results
 
-        try:
-            return await asyncio.to_thread(_read)
-        except Exception as exc:
-            logger.warning("Mongo collection inspection failed: %s", exc)
-            return []
+        return await _read_mongo(_read)
 
     async def get_intraday_trades(
         self,
@@ -294,114 +328,111 @@ class MongoMarketDataService:
         lookback_days: int = 7,
         limit: int = 5000,
     ) -> list[dict[str, Any]]:
-        """Return tick-like trade rows, preferring the typed derived read model."""
-
+        """Read current raw batch, legacy only when absent, then retained derived ticks."""
         symbol_upper = symbol.upper()
-        lookback_start = datetime.now(UTC) - timedelta(days=max(1, lookback_days))
-        limit = max(1, min(limit, 20000))
-
-        def _read_derived() -> list[dict[str, Any]]:
-            coll = self._get_collection("market_intraday_trades")
-            cursor = (
-                coll.find(
-                    {
-                        "symbol": symbol_upper,
-                        "tradeTime": {"$gte": lookback_start.replace(tzinfo=None)},
-                    },
-                    {
-                        "_id": 0,
-                        "tradeTime": 1,
-                        "price": 1,
-                        "volume": 1,
-                        "matchType": 1,
-                        "tradeId": 1,
-                        "symbol": 1,
-                    },
-                )
-                .sort("tradeTime", 1)
-                .limit(limit)
-            )
-            return [
-                {
-                    "observedAt": row.get("tradeTime"),
-                    "raw": {
-                        "time": row.get("tradeTime"),
-                        "price": row.get("price"),
-                        "volume": row.get("volume"),
-                        "match_type": row.get("matchType"),
-                        "id": row.get("tradeId"),
-                        "symbol": row.get("symbol"),
-                    },
-                    "sourceCollection": "market_intraday_trades",
-                }
-                for row in cursor
-            ]
-
-        def _read_raw() -> list[dict[str, Any]]:
-            coll = self._get_collection("market_vnstock_premium_records")
-            cursor = (
-                coll.find(
-                    {
-                        "dataset": "equity.intraday",
-                        "symbol": symbol_upper,
-                        "observedAt": {"$gte": lookback_start.replace(tzinfo=None)},
-                    },
-                    {
-                        "_id": 0,
-                        "observedAt": 1,
-                        "raw.time": 1,
-                        "raw.price": 1,
-                        "raw.volume": 1,
-                        "raw.match_type": 1,
-                        "raw.id": 1,
-                        "raw.symbol": 1,
-                    },
-                )
-                .sort("observedAt", 1)
-                .limit(limit)
-            )
-            return list(cursor)
-
-        try:
-            rows = await asyncio.to_thread(_read_derived)
-            if rows:
-                return rows
-            return await asyncio.to_thread(_read_raw)
-        except Exception as exc:
-            logger.warning("Mongo derived intraday read failed for %s: %s", symbol_upper, exc)
-            try:
-                return await asyncio.to_thread(_read_raw)
-            except Exception as raw_exc:
-                logger.warning("Mongo raw intraday read failed for %s: %s", symbol_upper, raw_exc)
-                return []
-
-    async def get_price_depth(self, symbol: str, *, limit: int = 500) -> list[dict[str, Any]]:
-        """Return normalized volume-at-price rows from raw price-depth records."""
-
-        symbol_upper = symbol.upper()
-        limit = max(1, min(limit, 5000))
+        lookback_start = (datetime.now(UTC) - timedelta(days=max(1, lookback_days))).replace(tzinfo=None)
+        empty_page = limit == 0
+        bounded_limit = max(1, min(limit, 20000))
 
         def _read() -> list[dict[str, Any]]:
             coll = self._get_collection("market_vnstock_premium_records")
-            cursor = coll.find(
-                {"dataset": "equity.price_depth", "symbol": symbol_upper},
-                {
-                    "_id": 0,
-                    "raw.price": 1,
-                    "raw.volume": 1,
-                    "raw.buy_volume": 1,
-                    "raw.sell_volume": 1,
-                    "raw.undefined_volume": 1,
-                    "raw.symbol": 1,
-                },
-            ).limit(limit)
+            for dataset in ("equity.intraday", "quote.intraday"):
+                cursor = coll.find({"dataset": dataset, "symbol": symbol_upper}, {"_id": 0}).sort(
+                    [("updatedAt", -1), ("batchReceipt", -1), ("observedAt", -1), ("recordKey", 1)]
+                ).limit(20001)
+                rows: list[dict[str, Any]] = []
+                selected = False
+                batch: Any = None
+                metadata: dict[str, Any] = {}
+                for record in cursor:
+                    if not selected:
+                        selected = True
+                        batch = record.get("updatedAt")
+                        metadata = {
+                            "source_collection": "market_vnstock_premium_records", "dataset": dataset,
+                            "batch_updated_at": batch, "latest_session_status": "unknown",
+                            "coverage": "current_retained_batch", "source_date": record.get("sourceDate"),
+                            "requested_session_date": record.get("requestedSessionDate"),
+                        }
+                    elif record.get("updatedAt") != batch:
+                        break
+                    if record.get("batchReceipt") is True:
+                        metadata.update({"latest_session_status": record.get("latestSessionStatus", "unknown"),
+                                         "coverage": record.get("coverage", "unknown"),
+                                         "requested_session_date": record.get("requestedSessionDate"),
+                                         "source_date": record.get("sourceDate")})
+                        metadata["batch_receipt"] = record
+                        if record.get("rowCount") == 0:
+                            return MongoReadRows([], metadata)
+                        continue
+                    observed = record.get("observedAt")
+                    if isinstance(observed, datetime) and observed.replace(tzinfo=None) < lookback_start:
+                        continue
+                    if len(rows) < bounded_limit:
+                        rows.append({**record, "sourceCollection": "market_vnstock_premium_records"})
+                if selected:
+                    return MongoReadRows(rows, metadata)
+
+            cursor = self._get_collection("market_intraday_trades").find(
+                {"symbol": symbol_upper, "tradeTime": {"$gte": lookback_start}}, {"_id": 0}
+            ).sort([("tradeTime", 1), ("tradeId", 1)]).limit(bounded_limit)
+            rows = [{**row, "observedAt": row.get("observedAt", row.get("tradeTime")),
+                     "raw": row.get("raw") or {"time": row.get("tradeTime"), "price": row.get("price"),
+                                                "volume": row.get("volume"), "match_type": row.get("matchType"),
+                                                "id": row.get("tradeId"), "symbol": row.get("symbol")},
+                     "sourceCollection": "market_intraday_trades"} for row in cursor]
+            metadata = {"source_collection": "market_intraday_trades", "coverage": "historical_retained_window",
+                        "latest_session_status": "unknown"}
+            if rows:
+                metadata["latest_session_status"] = rows[0].get("latestSessionStatus", "unknown")
+                metadata["latest_batch_status"] = rows[0].get("latestBatchStatus", "unknown")
+            return MongoReadRows(rows, metadata)
+
+        return await _read_mongo(_read, empty_page=empty_page)
+
+    async def get_price_depth(self, symbol: str, *, limit: int = 500) -> list[dict[str, Any]]:
+        """Return current retained depth batch, never arbitrary historical levels."""
+        return await self.get_price_depth_precise(symbol, limit=limit)
+
+    async def get_eod_catchup_receipts(self, symbol: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        """Return bounded successful/partial/failed catch-up receipts, without mutation."""
+        symbol_upper = str(symbol).strip().upper()
+        if not symbol_upper:
+            raise ValueError("A stock symbol is required")
+        empty_page = limit == 0
+        bounded_limit = max(1, min(limit, 100))
+
+        def _read() -> list[dict[str, Any]]:
+            return list(self._get_collection("market_eod_catchup_receipts").find(
+                {"symbol": symbol_upper}, {"_id": 0}
+            ).sort([("updatedAt", -1), ("windowEnd", -1), ("recordKey", 1)]).limit(bounded_limit))
+
+        return await _read_mongo(_read, empty_page=empty_page)
+
+    async def get_reference_records(
+        self, symbol: str, *, store: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Return complete retained IQ profile/descriptor envelopes, without a provider call."""
+        if store not in {"market_company_profiles", "market_financial_metric_map"}:
+            raise ValueError("Unsupported reference store")
+        symbol_upper = str(symbol).strip().upper()
+        if not symbol_upper:
+            raise ValueError("A stock symbol is required")
+        empty_page = limit == 0
+        bounded_limit = max(1, min(limit, 100))
+
+        def _read() -> list[dict[str, Any]]:
+            query = {"source": "vietcap"}
+            if store == "market_financial_metric_map":
+                query[f"symbolDescriptors.{symbol_upper}"] = {"$exists": True}
+            else:
+                query["symbol"] = symbol_upper
+            cursor = self._get_collection(store).find(query, {"_id": 0}).sort(
+                [("updatedAt", -1), ("comTypeCode", 1), ("section", 1)]
+            ).limit(bounded_limit)
             return list(cursor)
 
-        try:
-            return await asyncio.to_thread(_read)
-        except Exception as exc:
-            logger.warning("Mongo price-depth read failed for %s: %s", symbol_upper, exc)
-            return []
+        return await _read_mongo(_read, empty_page=empty_page)
 
     async def get_raw_dataset_records_precise(
         self,
@@ -411,27 +442,33 @@ class MongoMarketDataService:
         variant: str | None = None,
         limit: int = 100,
         source: str | None = None,
-        raise_errors: bool = False,
+        scope_type: str = "symbol",
+        scope_key: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return raw shared vnstock records for a symbol/dataset pair, symbol-exact.
 
         Unlike :meth:`get_raw_dataset_records`, this reader matches the outer
-        ``symbol`` field only. The premium envelope writes that field from the
-        requested scope symbol, while ``raw.symbol`` can reflect the provider's
-        own ticker spelling (and is not even present in the Vietcap path), so
-        ``$or`` matching on ``raw.symbol`` can surface foreign tickers or drop
-        rows that carry no raw symbol. The result also carries the full storage
-        envelope (``recordKey``, ``scopeKey``, ``source``, ``providerSource``,
-        ``schemaVersion``) so callers can reconstruct provenance instead of a
-        raw-only projection.
+        ``symbol`` field only. Provider ``raw.symbol`` can differ from the
+        retained scope spelling or be absent; it is not an alternate identity.
+        Explicit market/index reads use the stored scopeType/scopeKey pair.
+        The result carries every storage envelope field except Mongo's ``_id``.
         """
 
         symbol_upper = symbol.upper()
+        empty_page = limit == 0
         limit = max(1, min(limit, 5000))
+        if scope_type not in {"symbol", "market", "index"}:
+            raise ValueError("scope_type must be symbol, market or index")
+        if scope_type != "symbol" and not scope_key:
+            raise ValueError("scope_key is required for market/index records")
+        if variant is not None and variant not in {f"{dataset}.year", f"{dataset}.quarter"}:
+            raise ValueError("Unsupported dataset variant; only exact year/quarter variants are supported")
 
         def _read() -> list[dict[str, Any]]:
             coll = self._get_collection("market_vnstock_premium_records")
             query: dict[str, Any] = {"dataset": dataset, "symbol": symbol_upper}
+            if scope_type != "symbol":
+                query = {"dataset": dataset, "scopeType": scope_type, "scopeKey": scope_key}
             if variant is not None:
                 query["datasetVariant"] = variant
             if source is not None:
@@ -439,62 +476,38 @@ class MongoMarketDataService:
             cursor = (
                 coll.find(
                     query,
-                    {
-                        "_id": 0,
-                        "dataset": 1,
-                        "datasetVariant": 1,
-                        "symbol": 1,
-                        "scopeKey": 1,
-                        "source": 1,
-                        "providerSource": 1,
-                        "recordKey": 1,
-                        "observedAt": 1,
-                        "updatedAt": 1,
-                        "raw": 1,
-                        "comTypeCode": 1,
-                        "section": 1,
-                        "period": 1,
-                        "periodType": 1,
-                        "fiscalYear": 1,
-                        "fiscalQuarter": 1,
-                        "fiscalBasis": 1,
-                        "rawFiscalBasis": 1,
-                        "unit": 1,
-                        "units": 1,
-                        "unitEvidence": 1,
-                        "sourceDate": 1,
-                        "sourceResponse": 1,
-                        "receivedAt": 1,
-                        "descriptors": 1,
-                        "descriptorEvidence": 1,
-                        "structured": 1,
-                        "schemaVersion": 1,
-                    },
+                    {"_id": 0},
                 )
                 .sort(
-                    [("fiscalYear", -1), ("fiscalQuarter", -1), ("updatedAt", -1)]
+                    [("fiscalYear", -1), ("fiscalQuarter", -1), ("updatedAt", -1), ("recordKey", 1)]
                     if source == "vietcap" and dataset.startswith("finance.")
-                    else [("observedAt", -1), ("updatedAt", -1)]
+                    else [("observedAt", -1), ("updatedAt", -1), ("recordKey", 1)]
                 )
                 .limit(limit)
             )
-            return list(cursor)
+            rows = list(cursor)
+            if dataset.startswith("finance."):
+                from vnibb.services.vietcap_financials import financial_fiscal_basis
 
-        try:
-            return await asyncio.to_thread(_read)
-        except Exception as exc:
-            logger.warning(
-                "Mongo precise raw dataset read failed for %s %s: %s",
-                symbol_upper,
-                dataset,
-                exc,
-            )
-            if raise_errors:
-                raise
-            return []
+                for row in rows:
+                    if row.get("source") != "vietcap":
+                        continue
+                    raw = row.get("raw") or {}
+                    supplied_variant = row.get("datasetVariant")
+                    supplied_type = row.get("periodType", raw.get("periodType"))
+                    if supplied_type is not None and str(supplied_type).strip().lower() not in {"year", "quarter"}:
+                        raise MongoReadError("unsupported_financial_period")
+                    if supplied_variant is not None and supplied_variant not in {f"{dataset}.year", f"{dataset}.quarter"}:
+                        raise MongoReadError("unsupported_financial_period")
+                    if supplied_variant and any(raw.get(key) is not None for key in ("yearReport", "year", "fiscalYear")):
+                        if financial_fiscal_basis(row)["period"] is None:
+                            raise MongoReadError("invalid_financial_identity")
+            return rows
+
+        return await _read_mongo(_read, empty_page=empty_page)
 
     async def get_price_depth_precise(
-        self, symbol: str, *, limit: int = 500, include_provenance: bool = False
+        self, symbol: str, *, limit: int = 500, include_provenance: bool = True
     ) -> list[dict[str, Any]]:
         """Return normalized volume-at-price rows from the newest depth write batch.
 
@@ -502,11 +515,12 @@ class MongoMarketDataService:
         carries ``price``/``volume`` directly, not a nested ``items`` list) and
         stamps every row of one fetch with the same wall-clock ``updatedAt``
         batch time. This reader groups the freshest batch (the newest
-        ``updatedAt``) and returns its rows, so repeated calls agree on the
-        same session's profile instead of sampling across arbitrary batches.
+        ``updatedAt``) and returns its rows. This is the current retained write
+        batch, not historical-session replay; write time does not prove freshness.
         """
 
         symbol_upper = symbol.upper()
+        empty_page = limit == 0
         limit = max(1, min(limit, 5000))
 
         def _read() -> list[dict[str, Any]]:
@@ -514,51 +528,61 @@ class MongoMarketDataService:
             rows: list[dict[str, Any]] = []
             batch_selected = False
             batch_update: Any = None
+            metadata: dict[str, Any] = {"source_collection": "market_vnstock_premium_records", "coverage": "current_write_batch", "latest_session_status": "unknown"}
             for record in coll.find(
                 {"dataset": "equity.price_depth", "symbol": symbol_upper},
-                {
-                    "_id": 0,
-                    "raw.price": 1,
-                    "raw.volume": 1,
-                    "raw.buy_volume": 1,
-                    "raw.sell_volume": 1,
-                    "raw.undefined_volume": 1,
-                    "observedAt": 1,
-                    "updatedAt": 1,
-                    "recordKey": 1,
-                },
-            ).sort([("updatedAt", -1), ("observedAt", -1), ("recordKey", 1)]):
+                {"_id": 0},
+            ).sort([("updatedAt", -1), ("batchReceipt", -1), ("observedAt", -1), ("recordKey", 1)]).limit(5001):
                 if not batch_selected:
                     batch_update = record.get("updatedAt")
                     batch_selected = True
+                    metadata["batch_updated_at"] = batch_update
                 elif batch_update != record.get("updatedAt"):
                     break
+                if record.get("batchReceipt") is True:
+                    metadata.update({"latest_session_status": record.get("latestSessionStatus", "unknown"),
+                                     "coverage": record.get("coverage", "unknown"), "batch_receipt": record})
+                    if record.get("rowCount") == 0:
+                        return MongoReadRows([], metadata)
+                    continue
                 raw = record.get("raw") or {}
-                row_price = _to_float(raw.get("price"))
-                row_volume = _to_float(raw.get("volume"))
-                if row_price <= 0 or row_volume <= 0:
-                    continue
-                if len(rows) >= limit:
-                    continue
-                row: dict[str, Any] = {
-                    "price": row_price,
-                    "volume": row_volume,
-                    "buy_volume": _to_float(raw.get("buy_volume")),
-                    "sell_volume": _to_float(raw.get("sell_volume")),
-                    "undefined_volume": _to_float(raw.get("undefined_volume")),
-                }
-                if include_provenance:
-                    row["observedAt"] = record.get("observedAt")
-                    row["updatedAt"] = batch_update
-                    row["recordKey"] = record.get("recordKey")
-                rows.append(row)
-            return rows
+                levels = [raw] if "price" in raw else []
+                if not levels:
+                    for index in range(1, 4):
+                        for side, price_keys, volume_keys in (
+                            ("buy", (f"bidPrice{index}", f"bid{index}"), (f"bidVol{index}", f"bidVolume{index}")),
+                            ("sell", (f"offerPrice{index}", f"askPrice{index}", f"ask{index}"), (f"offerVol{index}", f"askVolume{index}", f"askVol{index}")),
+                        ):
+                            price = next((raw[key] for key in price_keys if raw.get(key) is not None), None)
+                            volume = next((raw[key] for key in volume_keys if raw.get(key) is not None), None)
+                            if price is not None:
+                                levels.append({"price": price, "volume": volume, "side": side, "level": index})
+                if not levels and raw and len(rows) < limit:
+                    rows.append({**record, "sourceCollection": "market_vnstock_premium_records", "normalizationStatus": "unsupported_depth_shape"})
+                for level in levels:
+                    row_price = _to_float(level.get("price"))
+                    buy_volume = _to_float(level.get("buy_volume", level.get("buyVol")))
+                    sell_volume = _to_float(level.get("sell_volume", level.get("sellVol")))
+                    row_volume = _to_float(level.get("volume", buy_volume + sell_volume))
+                    side = str(level.get("side", level.get("type", ""))).lower()
+                    if side in {"bid", "buy", "b"}:
+                        buy_volume = row_volume
+                    elif side in {"ask", "sell", "s", "offer"}:
+                        sell_volume = row_volume
+                    if row_price <= 0 or row_volume <= 0 or len(rows) >= limit:
+                        continue
+                    row: dict[str, Any] = dict(record) if include_provenance else {}
+                    row.update({"price": row_price, "volume": row_volume, "buy_volume": buy_volume,
+                                "sell_volume": sell_volume, "undefined_volume": _to_float(level.get("undefined_volume"))})
+                    if "level" in level:
+                        row["level"] = level["level"]
+                    if include_provenance:
+                        row["sourceCollection"] = "market_vnstock_premium_records"
+                        row["coverage"] = "current_write_batch"
+                    rows.append(row)
+            return MongoReadRows(rows, metadata)
 
-        try:
-            return await asyncio.to_thread(_read)
-        except Exception as exc:
-            logger.warning("Mongo price-depth precise read failed for %s: %s", symbol_upper, exc)
-            return []
+        return await _read_mongo(_read, empty_page=empty_page)
 
     async def get_raw_dataset_records(
         self,
@@ -576,6 +600,7 @@ class MongoMarketDataService:
         """
 
         symbol_upper = symbol.upper()
+        empty_page = limit == 0
         limit = max(1, min(limit, 5000))
 
         def _read() -> list[dict[str, Any]]:
@@ -593,18 +618,14 @@ class MongoMarketDataService:
             cursor = (
                 coll.find(
                     query,
-                    {"_id": 0, "raw": 1, "observedAt": 1, "updatedAt": 1, "dataset": 1},
+                    {"_id": 0},
                 )
                 .sort([("observedAt", -1), ("updatedAt", -1)])
                 .limit(limit)
             )
             return list(cursor)
 
-        try:
-            return await asyncio.to_thread(_read)
-        except Exception as exc:
-            logger.warning("Mongo raw dataset read failed for %s %s: %s", symbol_upper, dataset, exc)
-            return []
+        return await _read_mongo(_read, empty_page=empty_page)
 
     async def get_eod_prices(
         self,
@@ -612,11 +633,12 @@ class MongoMarketDataService:
         *,
         lookback_days: int = 365,
         limit: int = 1000,
-        include_provenance: bool = False,
+        include_provenance: bool = True,
     ) -> list[dict[str, Any]]:
         """Return normalized EOD OHLCV rows."""
 
         symbol_upper = symbol.upper()
+        empty_page = limit == 0
         lookback_start = datetime.now(UTC) - timedelta(days=max(1, lookback_days))
         limit = max(1, min(limit, 5000))
 
@@ -627,146 +649,75 @@ class MongoMarketDataService:
                     "symbol": symbol_upper,
                     "tradeDate": {"$gte": lookback_start.replace(tzinfo=None)},
                 },
-                {
-                    "_id": 0,
-                    "symbol": 1,
-                    "tradeDate": 1,
-                    "open": 1,
-                    "high": 1,
-                    "low": 1,
-                    "close": 1,
-                    "volume": 1,
-                    "value": 1,
-                    "adjClose": 1,
-                    "adj_close": 1,
-                    "adjusted_close": 1,
-                    "source": 1,
-                    "sourceKey": 1,
-                    "priceUnit": 1,
-                    "price_source": 1,
-                    "updatedAt": 1,
-                    "observedAt": 1,
-                    "ingestedAt": 1,
-                    "sourceUpdatedAt": 1,
-                },
+                {"_id": 0},
             ).sort("tradeDate", 1)
             return _dedup_eod_rows(
                 _stream_eod_days(cursor, limit),
                 preserve_provenance=include_provenance,
             )
 
-        try:
-            return await asyncio.to_thread(_read)
-        except Exception as exc:
-            logger.warning("Mongo EOD read failed for %s: %s", symbol_upper, exc)
-            return []
+        return await _read_mongo(_read, empty_page=empty_page)
 
     async def get_latest_eod_prices(
         self,
         symbol: str,
         *,
         limit: int = 2,
-        include_provenance: bool = False,
+        include_provenance: bool = True,
     ) -> list[dict[str, Any]]:
         """Return the newest N logical EOD days, with Vietcap/VND precedence."""
 
         symbol_upper = symbol.upper()
+        empty_page = limit == 0
         limit = max(1, min(limit, 5000))
 
         def _read() -> list[dict[str, Any]]:
             coll = self._get_collection("market_prices_eod")
             cursor = coll.find(
                 {"symbol": symbol_upper},
-                {
-                    "_id": 0,
-                    "symbol": 1,
-                    "tradeDate": 1,
-                    "open": 1,
-                    "high": 1,
-                    "low": 1,
-                    "close": 1,
-                    "volume": 1,
-                    "value": 1,
-                    "adjClose": 1,
-                    "adj_close": 1,
-                    "adjusted_close": 1,
-                    "source": 1,
-                    "sourceKey": 1,
-                    "priceUnit": 1,
-                    "price_source": 1,
-                    "updatedAt": 1,
-                    "observedAt": 1,
-                    "ingestedAt": 1,
-                    "sourceUpdatedAt": 1,
-                },
+                {"_id": 0},
             ).sort("tradeDate", -1)
             return _dedup_eod_rows(
                 _stream_eod_days(cursor, limit),
                 preserve_provenance=include_provenance,
             )
 
-        try:
-            return await asyncio.to_thread(_read)
-        except Exception as exc:
-            logger.warning("Mongo latest EOD read failed for %s: %s", symbol_upper, exc)
-            return []
+        return await _read_mongo(_read, empty_page=empty_page)
 
     async def get_eod_prices_between(
         self,
         symbol: str,
         *,
-        start_date: date,
-        end_date: date,
+        start_date: date | None = None,
+        end_date: date | None = None,
         limit: int = 20000,
-        include_provenance: bool = False,
+        include_provenance: bool = True,
     ) -> list[dict[str, Any]]:
         """Return normalized EOD OHLCV rows for an explicit date range."""
 
         symbol_upper = symbol.upper()
+        empty_page = limit == 0
         limit = max(1, min(limit, 50000))
-        start_dt = datetime.combine(start_date, time.min)
-        end_dt = datetime.combine(end_date, time.max)
+        if start_date and end_date and start_date > end_date:
+            raise ValueError("start_date must be on or before end_date")
+        bounds: dict[str, Any] = {}
+        if start_date:
+            bounds["$gte"] = datetime.combine(start_date, time.min)
+        if end_date:
+            bounds["$lte"] = datetime.combine(end_date, time.max)
 
         def _read() -> list[dict[str, Any]]:
             coll = self._get_collection("market_prices_eod")
             cursor = coll.find(
-                {
-                    "symbol": symbol_upper,
-                    "tradeDate": {"$gte": start_dt, "$lte": end_dt},
-                },
-                {
-                    "_id": 0,
-                    "symbol": 1,
-                    "tradeDate": 1,
-                    "open": 1,
-                    "high": 1,
-                    "low": 1,
-                    "close": 1,
-                    "volume": 1,
-                    "value": 1,
-                    "adjClose": 1,
-                    "adj_close": 1,
-                    "adjusted_close": 1,
-                    "source": 1,
-                    "sourceKey": 1,
-                    "priceUnit": 1,
-                    "price_source": 1,
-                    "updatedAt": 1,
-                    "observedAt": 1,
-                    "ingestedAt": 1,
-                    "sourceUpdatedAt": 1,
-                },
+                {"symbol": symbol_upper, **({"tradeDate": bounds} if bounds else {})},
+                {"_id": 0},
             ).sort("tradeDate", 1)
             return _dedup_eod_rows(
                 _stream_eod_days(cursor, limit),
                 preserve_provenance=include_provenance,
             )
 
-        try:
-            return await asyncio.to_thread(_read)
-        except Exception as exc:
-            logger.warning("Mongo EOD range read failed for %s: %s", symbol_upper, exc)
-            return []
+        return await _read_mongo(_read, empty_page=empty_page)
 
     async def get_universe_latest_eod(
         self,
@@ -857,11 +808,7 @@ class MongoMarketDataService:
             )
             return results[:limit]
 
-        try:
-            return await asyncio.to_thread(_read)
-        except Exception as exc:
-            logger.warning("Mongo universe latest-EOD read failed: %s", exc)
-            return []
+        return await _read_mongo(_read)
 
     async def get_universe_latest_trade_date(self) -> date | None:
         """Return the most recent ``tradeDate`` present in ``market_prices_eod``.
@@ -885,11 +832,7 @@ class MongoMarketDataService:
                 return value
             return None
 
-        try:
-            return await asyncio.to_thread(_read)
-        except Exception as exc:
-            logger.warning("Mongo latest trade-date read failed: %s", exc)
-            return None
+        return await _read_mongo(_read)
 
     async def get_source_latest_trade_date(self, source: str) -> date | None:
         """Return the most recent ``tradeDate`` for one ``source`` in the corpus.
@@ -918,11 +861,7 @@ class MongoMarketDataService:
                 return value
             return None
 
-        try:
-            return await asyncio.to_thread(_read)
-        except Exception as exc:
-            logger.warning("Mongo source latest trade-date read failed (%s): %s", source_value, exc)
-            return None
+        return await _read_mongo(_read)
 
     async def get_current_index_constituents(
         self,
@@ -1146,11 +1085,14 @@ class MongoMarketDataService:
                     "raw": raw.get("raw", raw),
                     "sourceUnit": raw.get("sourceUnit", raw.get("price_unit")),
                     "sourceUnitEvidence": raw.get("sourceUnitEvidence"),
-                    "receivedAt": synced_at,
+                    "receivedAt": raw.get("receivedAt", synced_at),
                     "updatedAt": synced_at,
                     "syncedAt": synced_at,
                     "schemaVersion": 1,
                 }
+                for field in ("observedAt", "sourceDate", "sourceUpdatedAt", "publishedAt", "ingestedAt", "sourceResponse"):
+                    if field in raw:
+                        doc[field] = raw[field]
                 ops.append(
                     UpdateOne(
                         {

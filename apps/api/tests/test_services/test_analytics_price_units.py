@@ -264,3 +264,33 @@ async def test_chart_requires_provider_declared_equity_unit(monkeypatch, marker,
     assert [bar["close"] for bar in result] == expected
     if result:
         assert result[0]["price_unit"] == unit
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("price_unit,expected_price", [("unknown", None), ("VND", 12.5), ("thousand_vnd", 12500)])
+async def test_microstructure_admits_depth_prices_only_with_envelope_units(price_unit, expected_price):
+    from vnibb.services.microstructure_analysis import MicrostructureAnalysisService
+
+    depth = {"symbol": "FPT", "source": "vnstock", "providerSource": "VCI", "priceUnit": price_unit,
+             "raw": {"price": 12.5, "volume": 100, "buy_volume": 60, "sell_volume": 40, "price_unit": "VND"}}
+    class Store:
+        async def get_intraday_trades(self, *args, **kwargs):
+            return [{"symbol": "FPT", "priceUnit": "unknown", "observedAt": "2026-10-13T09:00:00",
+                     "raw": {"time": "2026-10-13T09:00:00", "price": 12500, "volume": 100, "price_unit": "VND"}}]
+
+        async def get_price_depth(self, *args, **kwargs):
+            return [depth]
+
+    service = MicrostructureAnalysisService()
+    service.mongo = Store()
+    result = await service.analyze("FPT", features={"volume_profile"})
+    profile = result["volume_profile"]
+    if expected_price is None:
+        assert result["data_quality"]["volume_profile"] == "unavailable"
+        assert profile["bins"] == []
+        assert profile["poc_price"] is None
+    else:
+        assert result["data_quality"]["volume_profile"] == "volume_at_price"
+        assert profile["bins"] == [{"price": expected_price, "volume": 100, "buy_volume": 60, "sell_volume": 40}]
+        assert profile["poc_price"] == expected_price
+    assert depth["raw"]["price"] == 12.5

@@ -49,6 +49,13 @@ class PriceDepthData(BaseModel):
     last_price: Optional[float] = Field(None, alias="lastPrice")
     last_volume: Optional[int] = Field(None, alias="lastVolume")
     raw_levels: Optional[list[dict]] = None
+    provider_source: str = "VCI"
+    observed_at: Optional[str] = None
+    timestamp_meaning: str = "unknown"
+    price_unit: str = "unknown"
+    volume_unit: str = "unknown"
+    coverage_scope: str = "current_batch"
+    historical_replay_supported: bool = False
 
     model_config = {"populate_by_name": True}
 
@@ -103,7 +110,7 @@ class VnstockPriceDepthFetcher:
             records = await loop.run_in_executor(None, _fetch)
 
             if not records:
-                return PriceDepthData(symbol=symbol.upper())
+                return PriceDepthData(symbol=symbol.upper(), raw_levels=[])
 
             # Parse bid/ask levels from records
             bids = []
@@ -138,8 +145,8 @@ class VnstockPriceDepthFetcher:
                     total_ask_volume = sum((row.get("sellVol") or 0) for row in records)
                     return PriceDepthData(
                         symbol=symbol.upper(),
-                        total_bid_volume=total_bid_volume or None,
-                        total_ask_volume=total_ask_volume or None,
+                        total_bid_volume=total_bid_volume,
+                        total_ask_volume=total_ask_volume,
                         raw_levels=records,
                     )
                 for i in range(1, 4):

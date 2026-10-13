@@ -137,6 +137,14 @@ async def get_job_status(session) -> dict:
                          if row["last_outcome"] in {"failed", "timeout"}},
     }
 
+class HistoricalCatchupIncomplete(RuntimeError):
+    """Only bounded acquisition counters may enter the public scheduler receipt."""
+
+    def __init__(self, summary):
+        counters = ("failed", "empty", "primary_failures", "fallbacks", "succeeded", "pending")
+        super().__init__("Mongo historical catch-up " + " ".join(f"{key}={int(summary.get(key, 0))}" for key in counters))
+
+
 DAILY_SYNC_TIMEOUT_SECONDS = 2 * 60 * 60
 DAILY_TRADING_TIMEOUT_SECONDS = 2 * 60 * 60
 SUPPLEMENTAL_SYNC_TIMEOUT_SECONDS = 90 * 60
@@ -303,7 +311,8 @@ async def _run_guarded_job(
             raise
         except Exception as exc:
             elapsed = (datetime.utcnow() - started_at).total_seconds()
-            await _record_job_outcome(job_name, "failed", type(exc).__name__)
+            detail = str(exc) if isinstance(exc, HistoricalCatchupIncomplete) else type(exc).__name__
+            await _record_job_outcome(job_name, "failed", detail)
             logger.error(
                 "%s failed after %.1fs: %s",
                 job_name,
@@ -342,10 +351,9 @@ def configure_scheduler():
     from vnibb.services.data_pipeline import (
         run_daily_trading_sync,
         run_hourly_news_sync,
-        run_intraday_sync,
     )
     from vnibb.services.data_quality import run_scheduled_data_quality_check
-    from vnibb.services.realtime_pipeline import get_realtime_pipeline
+    from vnibb.services.realtime_pipeline import get_realtime_pipeline, run_intraday_sync
     from vnibb.services.sync_all_data import run_daily_market_sync, run_supplemental_company_sync
 
     scheduler = get_scheduler()
@@ -524,6 +532,55 @@ def configure_scheduler():
         misfire_grace_time=300,
     )
     logger.info("Scheduled: mongo_eod_sync at 10:15 UTC (5:15 PM VNT)")
+
+    async def guarded_mongo_eod_catchup():
+        from vnibb.services.mongo_eod_sync import run_mongo_eod_catchup
+        from vnibb.services.sync_all_data import SyncResult
+
+        async def catchup_and_check_outcome():
+            summary = await run_mongo_eod_catchup(max_symbols=50, window_days=30)
+            failed = int(summary.get("failed", 0))
+            empty = int(summary.get("empty", 0))
+            primary_failures = int(summary.get("primary_failures", 0))
+            pending = int(summary.get("pending", 0))
+            if failed or empty or primary_failures:
+                raise HistoricalCatchupIncomplete(summary)
+            return SyncResult(
+                failed == 0 and empty == 0, int(summary.get("succeeded", 0)), failed + empty,
+                0, [], bool(summary.get("complete", False)), pending,
+            )
+
+        await _run_guarded_job("mongo_eod_catchup", catchup_and_check_outcome, MONGO_EOD_SYNC_TIMEOUT_SECONDS)
+
+    # Separate historical owner: at most 50 symbols × one 30-day window daily.
+    scheduler.add_job(
+        guarded_mongo_eod_catchup,
+        trigger=CronTrigger(hour=12, minute=15, timezone="UTC"),
+        id="mongo_eod_catchup",
+        name="Mongo Vietcap IQ Historical Catch-up",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    logger.info("Scheduled: mongo_eod_catchup at 12:15 UTC (7:15 PM VNT)")
+
+    async def guarded_iq_reference_sync():
+        from vnibb.services.sync_all_data import run_iq_reference_sync
+
+        await _run_guarded_job("iq_reference_sync", run_iq_reference_sync, 11 * 60)
+
+    scheduler.add_job(
+        guarded_iq_reference_sync,
+        trigger=CronTrigger(hour=14, minute=15, timezone="UTC"),
+        id="iq_reference_sync",
+        name="Vietcap IQ Reference Continuation",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    logger.info("Scheduled: iq_reference_sync at 14:15 UTC (9:15 PM VNT)")
 
     # =========================================================================
     # Prediction Market Ingestion - Every 5 minutes during market hours
@@ -783,8 +840,8 @@ def configure_scheduler():
 
     # =========================================================================
     # Supplemental Company Sync - After close / off hours
-    # Rotates shareholders, officers, subsidiaries, and broad company news.
-    # Weekend runs process a broader universe.
+    # Full active-universe reference/news/insider continuation with durable receipts.
+    # Weekend capacity increases without resetting progression.
     # =========================================================================
     scheduler.add_job(
         guarded_supplemental_company_sync,

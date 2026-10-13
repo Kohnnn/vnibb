@@ -7,7 +7,7 @@ Provides access to live market data and controls for streaming.
 import logging
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from vnibb.api.v1.admin import require_admin_automation_access
 from vnibb.services.realtime_pipeline import get_realtime_pipeline, is_vietnam_market_open
@@ -22,6 +22,7 @@ class StreamingStatus(BaseModel):
     pipeline_available: bool
     data_types: list[str]
     message: str
+    coverage: dict = Field(default_factory=dict)
 
 
 class StreamingRequest(BaseModel):
@@ -34,13 +35,13 @@ class StreamingRequest(BaseModel):
     "/realtime/start",
     response_model=StreamingStatus,
     summary="Start Real-time Streaming",
-    description="Poll stock prices during active market sessions using free vnstock.",
+    description="Acquire genuine ticks and current depth during active market sessions; depth is not historical replay.",
     dependencies=[Depends(require_admin_automation_access)],
 )
 async def start_streaming(
     request: StreamingRequest = None,
 ) -> StreamingStatus:
-    """Start market-session stock price polling."""
+    """Start bounded market-session trading acquisition."""
     if request is None:
         request = StreamingRequest()
 
@@ -65,7 +66,7 @@ async def start_streaming(
             is_running=False,
             pipeline_available=False,
             data_types=[],
-            message="Only stock price polling is available; index and order book streaming are unavailable",
+            message="Only market-session trading polling is available; index streaming is unavailable",
         )
 
     started = await pipeline.start_streaming(
@@ -84,7 +85,7 @@ async def start_streaming(
         is_running=True,
         pipeline_available=pipeline._pipeline_available,
         data_types=["stockps"],
-        message="Stock price polling started",
+        message="Market-session trading polling started",
     )
 
 
@@ -92,11 +93,11 @@ async def start_streaming(
     "/realtime/stop",
     response_model=StreamingStatus,
     summary="Stop Real-time Streaming",
-    description="Stop stock price polling.",
+    description="Stop market-session trading acquisition.",
     dependencies=[Depends(require_admin_automation_access)],
 )
 async def stop_streaming() -> StreamingStatus:
-    """Stop stock price polling."""
+    """Stop market-session trading acquisition."""
     pipeline = get_realtime_pipeline()
     stopped = await pipeline.stop_streaming()
 
@@ -124,5 +125,6 @@ async def get_status() -> StreamingStatus:
         pipeline_available=status["pipeline_available"],
         data_types=["stockps"] if status["is_running"] else [],
         message="Running" if status["is_running"] else "Stopped",
+        coverage=status.get("coverage", {}),
     )
 

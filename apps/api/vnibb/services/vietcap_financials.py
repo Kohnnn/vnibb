@@ -107,8 +107,8 @@ def _explicit_basis(raw: Mapping[str, Any], keys: tuple[str, ...], allowed: set[
     return next(iter(normalized)) if len(normalized) == 1 and normalized <= allowed else "unknown"
 
 
-def _fiscal_basis(record: Mapping[str, Any]) -> dict[str, Any]:
-    raw = record.get("raw") or {}
+def financial_fiscal_basis(record: Mapping[str, Any]) -> dict[str, Any]:
+    raw = record.get("raw") if isinstance(record.get("raw"), Mapping) else {}
     variant = str(record.get("datasetVariant", "")).rsplit(".", 1)[-1]
     years = {_integer(raw[key]) for key in ("yearReport", "year", "fiscalYear") if raw.get(key) is not None}
     year = next(iter(years)) if len(years) == 1 else None
@@ -117,11 +117,18 @@ def _fiscal_basis(record: Mapping[str, Any]) -> dict[str, Any]:
         quarters = {_integer(raw[key]) for key in ("lengthReport", "quarter", "fiscalQuarter") if raw.get(key) is not None}
         quarter = next(iter(quarters)) if len(quarters) == 1 else None
     valid = year is not None and 1900 <= year <= 9999 and variant in {"year", "quarter"}
+    valid = valid and record.get("dataset") in _MODELS and record.get("datasetVariant") == f"{record.get('dataset')}.{variant}"
     valid = valid and (variant == "year" or quarter in {1, 2, 3, 4})
+    if record.get("dataset") == "finance.ratio" and (
+        raw.get("ratioType") == "RATIO_TTM" or raw.get("ratioTTMId") is not None
+    ):
+        valid = False
     annual_quarters = (None, 0, "0", 5, "5") if record.get("dataset") == "finance.ratio" and raw.get("ratioType") == "RATIO_YEAR" else (None, 0, "0")
     if variant == "year" and (raw.get("quarter") not in annual_quarters or raw.get("lengthReport") not in (None, 5, "5")):
         valid = False
     for supplied in (record, raw):
+        if supplied.get("periodType") is not None and _label(supplied["periodType"]) != variant:
+            valid = False
         if supplied.get("fiscalYear") is not None and _integer(supplied["fiscalYear"]) != year:
             valid = False
         if variant == "quarter" and supplied.get("fiscalQuarter") is not None and _integer(supplied["fiscalQuarter"]) != quarter:
@@ -194,7 +201,7 @@ def decode_vietcap_financial_record(record: Mapping[str, Any]) -> dict[str, Any]
     model = _MODELS.get(dataset)
     if not isinstance(record.get("raw"), Mapping):
         return {"values": {}, "fieldEvidence": {}, "unavailable": {"record": "invalid_raw_row"}, "fiscalBasis": {"period": None}, "source": record.get("source")}
-    result = {"values": {}, "fieldEvidence": {}, "unavailable": {}, "fiscalBasis": _fiscal_basis(record), "source": record.get("source")}
+    result = {"values": {}, "fieldEvidence": {}, "unavailable": {}, "fiscalBasis": financial_fiscal_basis(record), "source": record.get("source")}
     if model is None:
         result["unavailable"]["record"] = "unsupported_dataset"
         return result
@@ -285,6 +292,11 @@ async def persist_vietcap_financials(records: Sequence[Mapping[str, Any]], *, ca
             unavailable.append({"symbol": record.get("symbol"), "dataset": record.get("dataset"), "unavailable": decoded["unavailable"], "fiscalBasis": basis})
             continue
         row = {**decoded["values"], "period": basis["period"], "fiscal_year": basis["year"], "fiscal_quarter": basis["quarter"], "raw_data": {**record, "structured": decoded}}
+        if record["dataset"] == "finance.ratio":
+            row["raw_data"]["ratio_units"] = {
+                field: decoded["fieldEvidence"][field]["unit"]
+                for field in decoded["values"]
+            }
         if record["dataset"] in statement_types:
             value_unit = "VND" if any(decoded["fieldEvidence"][field].get("unit") == "VND" for field in decoded["values"]) else None
             canonical_values = dict(decoded["values"])
@@ -339,7 +351,7 @@ async def load_vietcap_financial_rows(symbol: str, dataset: str, period: str = "
     if dataset not in _MODELS or period not in {"year", "quarter"} or not 1 <= limit <= 5000:
         raise ValueError("Unsupported financial dataset, period, or limit")
     if records is None:
-        records = await get_mongo_market_data_service().get_raw_dataset_records_precise(symbol, dataset=dataset, variant=f"{dataset}.{period}", source="vietcap", raise_errors=True, limit=limit)
+        records = await get_mongo_market_data_service().get_raw_dataset_records_precise(symbol, dataset=dataset, variant=f"{dataset}.{period}", source="vietcap", limit=limit)
     rows, seen = [], set()
     for record in records:
         if record.get("dataset") != dataset or record.get("datasetVariant") != f"{dataset}.{period}":
@@ -364,14 +376,17 @@ async def load_vietcap_financial_rows(symbol: str, dataset: str, period: str = "
     return rows
 
 
-async def persist_vietcap_prices(symbol: str, rows: Sequence[Mapping[str, Any]], *, cache_manager=None) -> int:
-    from vnibb.services.cache_manager import CacheManager
+async def persist_vietcap_prices(symbol: str, rows: Sequence[Mapping[str, Any]], *, cache_manager=None, admission_details: dict[str, Any] | None = None) -> int:
+    from vnibb.services.cache_manager import CacheManager, StructuredPersistenceConflict
 
     prepared = []
+    rejected = Counter()
     for row in rows:
         if row.get("source") != "vietcap" or row.get("priceUnit", row.get("price_unit")) != "VND":
+            rejected["source_or_vnd_unit_unavailable"] += 1
             continue
         if row.get("symbol", symbol) != symbol.upper():
+            rejected["symbol_mismatch"] += 1
             continue
         timestamp = row.get("tradeDate", row.get("time"))
         if isinstance(timestamp, datetime):
@@ -380,21 +395,57 @@ async def persist_vietcap_prices(symbol: str, rows: Sequence[Mapping[str, Any]],
             try:
                 timestamp = date.fromisoformat(timestamp[:10])
             except ValueError:
+                rejected["invalid_date"] += 1
                 continue
         if not isinstance(timestamp, date):
+            rejected["invalid_date"] += 1
             continue
         values = {field: _number(row.get(field)) for field in ("open", "high", "low", "close", "volume")}
-        if any(value is None or value < 0 for value in values.values()) or not values["volume"].is_integer():
+        if any(value is None or value < 0 for value in values.values()):
+            rejected["missing_negative_or_nonfinite_ohlcv"] += 1
+            continue
+        if not values["volume"].is_integer():
+            rejected["noninteger_volume"] += 1
             continue
         if not values["low"] <= min(values["open"], values["close"]) <= max(values["open"], values["close"]) <= values["high"]:
+            rejected["invalid_ohlc_bounds"] += 1
             continue
         prepared.append({**values, "time": timestamp, "volume": int(values["volume"]), "interval": "1D", "value": _number(row.get("value")), "adj_close": _number(row.get("adj_close", row.get("adjClose")))})
+    if admission_details is not None:
+        admission_details.update(source_rows=len(rows), admitted_rows=len(prepared), rejected_rows=sum(rejected.values()), rejected_reasons=dict(rejected),
+                                 admitted_first=min(row["time"] for row in prepared).isoformat() if prepared else None,
+                                 admitted_last=max(row["time"] for row in prepared).isoformat() if prepared else None,
+                                 classification="partial_source_invalid" if rejected and prepared else "source_invalid" if rejected else "admitted_pending_persistence")
     if rows and not prepared:
+        if admission_details is not None:
+            admission_details.update(persisted_rows=0, persisted_first=None, persisted_last=None)
         raise ValueError("IQ prices unavailable: explicit VND source and valid OHLCV dates required")
-    count = await (cache_manager or CacheManager()).store_historical_prices(symbol, prepared, source="vietcap_vnd") if prepared else 0
+    try:
+        count = await (cache_manager or CacheManager()).store_historical_prices(symbol, prepared, source="vietcap_vnd") if prepared else 0
+    except StructuredPersistenceConflict as exc:
+        if admission_details is not None:
+            admission_details.update(persisted_rows=exc.persisted_rows, classification="sql_source_conflict", conflicting_keys=exc.conflicting_keys)
+        raise
+    if admission_details is not None:
+        admission_details.update(persisted_rows=count,
+                                 persisted_first=admission_details["admitted_first"] if count == len(prepared) else None,
+                                 persisted_last=admission_details["admitted_last"] if count == len(prepared) else None,
+                                 classification="partial_sql_persistence" if count != len(prepared) else "partial_source_invalid" if rejected else "persisted_returned_window")
     if prepared and count == 0:
         raise RuntimeError("IQ price persistence affected no PostgreSQL rows")
     return count
+
+
+def listing_projection(row: Mapping[str, Any], company: Mapping[str, Any]) -> dict[str, Any] | None:
+    symbol, board = row.get("symbol"), row.get("board")
+    board = "HOSE" if board == "HSX" else board
+    if row.get("type") != "STOCK" or not isinstance(symbol, str) or not 1 <= len(symbol) <= 10 or board not in {"HOSE", "HNX", "UPCOM", "DELISTED"}:
+        return None
+    industry, sector = company.get("icbLv4"), company.get("icbLv1")
+    return {"symbol": symbol.upper(), "company_name": company.get("name") or row.get("organName"),
+            "short_name": row.get("organShortName"), "exchange": board, "is_active": int(board != "DELISTED"),
+            "industry": industry.get("name") if isinstance(industry, Mapping) else None,
+            "sector": sector.get("name") if isinstance(sector, Mapping) else None}
 
 
 async def persist_vietcap_listings(trading_rows: Sequence[Mapping[str, Any]], search_rows: Sequence[Mapping[str, Any]], *, cache_manager=None) -> int:
@@ -407,16 +458,10 @@ async def persist_vietcap_listings(trading_rows: Sequence[Mapping[str, Any]], se
             search[symbol.upper()].append(row)
     rows = []
     for row in trading_rows:
-        symbol, board = row.get("symbol"), row.get("board")
-        board = "HOSE" if board == "HSX" else board
-        if not isinstance(symbol, str) or not 1 <= len(symbol) <= 10 or board not in {"HOSE", "HNX", "UPCOM"}:
-            continue
-        matches = search.get(symbol.upper(), [])
-        company = matches[0] if len(matches) == 1 else {}
-        industry, sector = company.get("icbLv4"), company.get("icbLv1")
-        rows.append({"symbol": symbol.upper(), "company_name": company.get("name") or row.get("organName"), "short_name": row.get("organShortName"), "exchange": board,
-                     "industry": industry.get("name") if isinstance(industry, Mapping) else None,
-                     "sector": sector.get("name") if isinstance(sector, Mapping) else None})
+        matches = search.get(str(row.get("symbol") or "").upper(), [])
+        projected = listing_projection(row, matches[0] if len(matches) == 1 else {})
+        if projected is not None:
+            rows.append(projected)
     if (trading_rows or search_rows) and not rows:
         raise ValueError("IQ listings unavailable: explicit symbol and exchange board required")
     count = await (cache_manager or CacheManager()).store_listing_data(rows, source="vietcap") if rows else 0

@@ -24,6 +24,7 @@ from vnibb.models.alerts import (
     AlertType, AlertSeverity, TradeSide
 )
 from vnibb.core.database import get_db
+from vnibb.core.insider_units import normalize_deal_action
 from vnibb.services.websocket_service import manager
 
 logger = logging.getLogger(__name__)
@@ -88,9 +89,7 @@ class InsiderTrackingService:
         delegates to the free VCI company provider with existing field-alias
         normalization. Unsupported datasets are recorded as provider errors.
         """
-        from vnibb.providers.vnstock.insider_deals import (
-            VnstockInsiderDealsFetcher,
-        )
+        from vnibb.providers.vnstock.insider_deals import VnstockInsiderDealsFetcher
 
         stats = {"total": 0, "new": 0, "errors": 0}
 
@@ -109,31 +108,44 @@ class InsiderTrackingService:
                     payload = record.model_dump() if hasattr(record, "model_dump") else dict(record)
                     announce_date = payload.get("transaction_date") or payload.get("announce_date")
                     insider_name = payload.get("insider_name") or "Unknown"
-                    transaction_type = payload.get("transaction_type") or "UNKNOWN"
+                    provider_record_id = payload.get("provider_record_id")
+                    record_hash = payload.get("record_hash")
 
-                    existing = await self.db.execute(
-                        select(InsiderDeal).where(
-                            and_(
-                                InsiderDeal.symbol == symbol,
-                                InsiderDeal.announce_date == announce_date,
-                                InsiderDeal.insider_name == insider_name,
+                    existing_rows = (
+                        await self.db.execute(
+                            select(InsiderDeal).where(
+                                and_(
+                                    InsiderDeal.symbol == symbol,
+                                    InsiderDeal.announce_date == announce_date,
+                                    InsiderDeal.insider_name == insider_name,
+                                )
                             )
                         )
-                    )
-                    if existing.scalar_one_or_none():
+                    ).scalars().all()
+                    already_stored = False
+                    for row in existing_rows:
+                        row_raw = row.raw_data or {}
+                        if provider_record_id and row_raw.get("provider_record_id") == provider_record_id:
+                            already_stored = True
+                            break
+                        if record_hash and row_raw.get("record_hash") == record_hash:
+                            already_stored = True
+                            break
+                    if already_stored:
                         continue
 
                     deal = InsiderDeal(
                         symbol=symbol.upper(),
                         announce_date=announce_date,
-                        deal_method=payload.get("deal_method"),
-                        # transaction_type is normalized by the fetcher to
-                        # short-form tokens (BUY/SELL/UNKNOWN) when possible
-                        deal_action=str(transaction_type)[:50],
-                        deal_quantity=payload.get("transaction_volume")
-                        or payload.get("deal_quantity"),
-                        deal_price=payload.get("transaction_price") or payload.get("deal_price"),
-                        deal_value=payload.get("transaction_value") or payload.get("deal_value"),
+                        # Raw provider action text is kept in deal_method; deal_action
+                        # holds the normalized BUY/SELL/UNKNOWN token.
+                        deal_method=(payload.get("raw_data") or {}).get("action_type_vi")
+                        or payload.get("deal_method"),
+                        deal_action=normalize_deal_action(payload.get("deal_action") or payload.get("transaction_type")),
+                        deal_quantity=payload.get("shares_executed") or payload.get("shares_registered")
+                        or payload.get("transaction_volume") or payload.get("deal_quantity"),
+                        deal_price=payload.get("deal_price"),
+                        deal_value=payload.get("deal_value"),
                         deal_ratio=payload.get("ownership_after") or payload.get("deal_ratio"),
                         insider_name=insider_name,
                         insider_position=payload.get("insider_position"),
@@ -237,30 +249,40 @@ class InsiderTrackingService:
         
         return block_trades
     
-    async def _generate_insider_alert(self, deal: InsiderDeal) -> InsiderAlert:
-        """Generate alert for insider deal"""
-        
-        # Determine alert type and severity
-        is_buy = deal.deal_action and "mua" in deal.deal_action.lower()
+    async def _generate_insider_alert(self, deal: InsiderDeal) -> Optional[InsiderAlert]:
+        """Generate a directional alert; None when the source states no direction."""
+
+        action_token = normalize_deal_action(deal.deal_action)
+        if action_token not in ("BUY", "SELL"):
+            logger.info(
+                "Skipping insider alert with undirected action for %s", deal.symbol
+            )
+            return None
+        is_buy = action_token == "BUY"
         alert_type = AlertType.INSIDER_BUY if is_buy else AlertType.INSIDER_SELL
-        
-        # Calculate severity based on deal value
+
+        # Calculate severity based on admitted deal value (VND) only.
         severity = AlertSeverity.LOW
         if deal.deal_value:
             if deal.deal_value >= 10_000_000_000:  # VND 10bn
                 severity = AlertSeverity.HIGH
             elif deal.deal_value >= 1_000_000_000:  # VND 1bn
                 severity = AlertSeverity.MEDIUM
-        
-        # Format title and description
+
+        # Format title and description from admitted fields only.
         action = "bought" if is_buy else "sold"
         title = f"{deal.insider_name} {action} {deal.symbol}"
-        
+
         value_str = f"VND {deal.deal_value:,.0f}" if deal.deal_value else "N/A"
+        quantity_str = (
+            f"{deal.deal_quantity:,.0f} shares" if deal.deal_quantity is not None else "an undisclosed volume"
+        )
+        price_str = (
+            f" at {deal.deal_price:,.0f} VND/share" if deal.deal_price is not None else ""
+        )
         description = (
             f"{deal.insider_position or 'Insider'} {deal.insider_name} "
-            f"{action} {deal.deal_quantity:,.0f} shares of {deal.symbol} "
-            f"at {deal.deal_price:,.0f} VND/share (Total: {value_str})"
+            f"{action} {quantity_str} of {deal.symbol}{price_str} (Total: {value_str})"
         )
         
         # Create alert
@@ -555,12 +577,12 @@ class InsiderTrackingService:
         sell_value = 0.0
         
         for deal in deals:
-            is_buy = deal.deal_action and "mua" in deal.deal_action.lower()
-            
-            if is_buy:
+            action_token = normalize_deal_action(deal.deal_action)
+
+            if action_token == "BUY":
                 buy_count += 1
                 buy_value += deal.deal_value or 0
-            else:
+            elif action_token == "SELL":
                 sell_count += 1
                 sell_value += deal.deal_value or 0
         

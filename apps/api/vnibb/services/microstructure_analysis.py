@@ -9,6 +9,7 @@ from functools import lru_cache
 from math import isfinite, sqrt
 from typing import Any
 
+from vnibb.core.price_units import normalize_price_record
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
 
@@ -58,7 +59,13 @@ def _bar_key(ts: datetime, interval: str) -> str:
 def _normalize_trade(row: dict[str, Any]) -> dict[str, Any] | None:
     raw = row.get("raw") or {}
     trade_time = _parse_time(raw.get("time") or row.get("observedAt"))
-    price = _to_float(raw.get("price"))
+    admitted = normalize_price_record(
+        {"price": raw.get("price"), "price_unit": row.get("price_unit", row.get("priceUnit", "unknown"))},
+        symbol=str(row.get("symbol") or ""), source=row.get("price_source") or row.get("source"),
+    )
+    if admitted["price_unit"] != "VND":
+        return None
+    price = _to_float(admitted.get("price"))
     volume = _to_int(raw.get("volume"))
     if trade_time is None or price <= 0 or volume <= 0:
         return None
@@ -236,7 +243,13 @@ class MicrostructureAnalysisService:
 
         for row in raw_depth:
             raw = row.get("raw") or {}
-            price = _to_float(raw.get("price"))
+            admitted = normalize_price_record(
+                {"price": raw.get("price"), "price_unit": row.get("price_unit", row.get("priceUnit", "unknown"))},
+                symbol=str(row.get("symbol") or ""), source=row.get("price_source") or row.get("source"),
+            )
+            if admitted["price_unit"] != "VND":
+                continue
+            price = _to_float(admitted.get("price"))
             volume = _to_float(raw.get("volume"))
             if price <= 0 or volume <= 0:
                 continue

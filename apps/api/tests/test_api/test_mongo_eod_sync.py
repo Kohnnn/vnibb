@@ -14,6 +14,13 @@ from vnibb.api.v1.market import (
 from vnibb.services import mongo_eod_sync
 
 
+def persisted_summary(result):
+    return {key: result[key] for key in (
+        "symbols", "rows", "failures", "listings", "financials", "fallbacks",
+        "primary_failures", "structured_rows",
+    )}
+
+
 # ---------------------------------------------------------------------------
 # mongo_eod_sync frame normalization
 # ---------------------------------------------------------------------------
@@ -61,7 +68,11 @@ def iq_sync(monkeypatch):
         "t": [datetime.combine(date.today(), datetime.min.time(), tzinfo=UTC).timestamp()],
     }
     collection = MagicMock()
-    collection.distinct.return_value = ["vci", "ssi"]
+    session = AsyncMock()
+    session.execute.return_value.scalars = MagicMock(return_value=SimpleNamespace(all=lambda: ["VCI", "SSI"]))
+    factory = MagicMock()
+    factory.return_value.__aenter__ = AsyncMock(return_value=session)
+    factory.return_value.__aexit__ = AsyncMock(return_value=False)
     collection.aggregate.return_value = []
     database = MagicMock()
     service = MagicMock(enabled=True)
@@ -78,6 +89,7 @@ def iq_sync(monkeypatch):
     fallback = AsyncMock(side_effect=AssertionError("VCI must not run for healthy IQ"))
     wait = AsyncMock()
     monkeypatch.setattr(mongo_eod_sync, "VietcapClient", lambda: client)
+    monkeypatch.setattr(mongo_eod_sync, "async_session_factory", factory)
     monkeypatch.setattr(mongo_eod_sync, "get_mongo_market_data_service", lambda: service)
     monkeypatch.setattr(mongo_eod_sync, "upsert_listing_rows", listings)
     monkeypatch.setattr(mongo_eod_sync, "persist_vietcap_listings", listing_bridge)
@@ -91,6 +103,7 @@ def iq_sync(monkeypatch):
         listings=listings, listing_bridge=listing_bridge, financials=financials,
         financial_bridge=financial_bridge,
         price_bridge=price_bridge, fallback=fallback, wait=wait,
+        session=session,
     )
 
 
@@ -100,7 +113,7 @@ async def test_run_mongo_eod_sync_disabled_service(iq_sync):
 
     result = await mongo_eod_sync.run_mongo_eod_sync()
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 0, "rows": 0, "failures": 1, "listings": 0,
         "financials": 0, "fallbacks": 0, "primary_failures": 0, "structured_rows": 0,
     }
@@ -111,7 +124,7 @@ async def test_run_mongo_eod_sync_disabled_service(iq_sync):
 async def test_run_mongo_eod_sync_writes_explicit_symbols(iq_sync):
     result = await mongo_eod_sync.run_mongo_eod_sync(symbols=["vci", "ssi", "VCI"], window_days=5)
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 2, "rows": 2, "failures": 0, "listings": 4,
         "financials": 2, "fallbacks": 0, "primary_failures": 0, "structured_rows": 4,
     }
@@ -149,7 +162,7 @@ async def test_run_mongo_eod_sync_isolates_symbol_failures(iq_sync, monkeypatch)
     monkeypatch.setattr(mongo_eod_sync.data_pipeline, "_fetch_quote_history_frame", fake_fetch)
     result = await mongo_eod_sync.run_mongo_eod_sync(symbols=["GOOD", "BAD"], window_days=5)
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 1, "rows": 1, "failures": 1, "listings": 4,
         "financials": 2, "fallbacks": 1, "primary_failures": 2, "structured_rows": 2,
     }
@@ -171,7 +184,7 @@ async def test_run_mongo_eod_sync_counts_write_failure_per_symbol(iq_sync):
     iq_sync.service.bulk_upsert_eod_prices.side_effect = write
     result = await mongo_eod_sync.run_mongo_eod_sync(symbols=["GOOD", "BAD"], window_days=5)
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 1, "rows": 1, "failures": 1, "listings": 4,
         "financials": 2, "fallbacks": 0, "primary_failures": 0, "structured_rows": 3,
     }
@@ -195,7 +208,7 @@ async def test_run_mongo_eod_sync_keeps_legitimate_zero_write_success(iq_sync, m
     monkeypatch.setattr(mongo_eod_sync.data_pipeline, "_fetch_quote_history_frame", fake_fetch)
     result = await mongo_eod_sync.run_mongo_eod_sync(symbols=["VCI"], window_days=5)
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 1, "rows": 0, "failures": 0, "listings": 4,
         "financials": 1, "fallbacks": 1, "primary_failures": 1, "structured_rows": 1,
     }
@@ -203,11 +216,11 @@ async def test_run_mongo_eod_sync_keeps_legitimate_zero_write_success(iq_sync, m
 
 @pytest.mark.asyncio
 async def test_run_mongo_eod_sync_reports_universe_read_failure(iq_sync):
-    iq_sync.collection.distinct.side_effect = RuntimeError("Mongo universe unavailable")
+    iq_sync.session.execute.side_effect = RuntimeError("SQL universe unavailable")
 
     result = await mongo_eod_sync.run_mongo_eod_sync()
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 0, "rows": 0, "failures": 1, "listings": 4,
         "financials": 0, "fallbacks": 0, "primary_failures": 0, "structured_rows": 0,
     }
@@ -236,7 +249,7 @@ async def test_run_mongo_eod_sync_reports_listing_failure_and_continues(iq_sync,
     # Financial scheduling must not consume the oldest-50 quota with untyped symbols.
     financial_eligible = stage not in {"trading", "empty", "database"}
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 1, "rows": 1, "failures": 2 if stage == "database" else 1,
         "listings": 4 if stage == "bridge" else 0,
         "financials": int(financial_eligible),
@@ -255,7 +268,7 @@ async def test_run_mongo_eod_sync_counts_structured_listings(iq_sync):
 
     result = await mongo_eod_sync.run_mongo_eod_sync(symbols=["VCI"])
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 1, "rows": 1, "failures": 0, "listings": 4,
         "financials": 1, "fallbacks": 0, "primary_failures": 0, "structured_rows": 6,
     }
@@ -271,7 +284,7 @@ async def test_run_mongo_eod_sync_reports_financial_schedule_failure(iq_sync):
 
     result = await mongo_eod_sync.run_mongo_eod_sync(symbols=["VCI"])
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 1, "rows": 1, "failures": 1, "listings": 4,
         "financials": 0, "fallbacks": 0, "primary_failures": 0, "structured_rows": 1,
     }
@@ -298,7 +311,7 @@ async def test_run_mongo_eod_sync_isolates_financial_failure(iq_sync, stage):
     iq_sync.financial_bridge.side_effect = bridge
     result = await mongo_eod_sync.run_mongo_eod_sync(symbols=["BAD", "GOOD"])
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 2, "rows": 2, "failures": 1, "listings": 4,
         "financials": 2 if stage == "bridge" else 1,
         "fallbacks": 0, "primary_failures": 0, "structured_rows": 3,
@@ -327,7 +340,7 @@ async def test_run_mongo_eod_sync_counts_partial_structured_financial_failure(iq
 
     result = await mongo_eod_sync.run_mongo_eod_sync(symbols=["BAD", "GOOD"])
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 2, "rows": 2, "failures": 1, "listings": 4,
         "financials": 4, "fallbacks": 0, "primary_failures": 0, "structured_rows": 5,
     }
@@ -379,7 +392,7 @@ async def test_run_mongo_eod_sync_bounds_financials_to_oldest_fifty_symbols(iq_s
 
     result = await mongo_eod_sync.run_mongo_eod_sync(symbols=symbols)
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 55, "rows": 55, "failures": 0, "listings": 55,
         "financials": 50, "fallbacks": 0, "primary_failures": 0, "structured_rows": 105,
     }
@@ -392,16 +405,19 @@ async def test_run_mongo_eod_sync_bounds_financials_to_oldest_fifty_symbols(iq_s
 
 
 @pytest.mark.asyncio
-async def test_run_mongo_eod_sync_reads_tracked_universe(iq_sync):
-    iq_sync.collection.distinct.return_value = ["vci", "SSI", "VCI", None]
+async def test_run_mongo_eod_sync_reads_active_sql_universe(iq_sync):
+    iq_sync.session.execute.return_value.scalars.return_value.all = lambda: ["vci", "SSI", "VCI", None]
 
     result = await mongo_eod_sync.run_mongo_eod_sync()
 
-    assert result == {
+    assert persisted_summary(result) == {
         "symbols": 2, "rows": 2, "failures": 0, "listings": 4,
         "financials": 2, "fallbacks": 0, "primary_failures": 0, "structured_rows": 4,
     }
-    iq_sync.collection.distinct.assert_called_once_with("symbol")
+    iq_sync.session.execute.assert_awaited_once()
+    statement = str(iq_sync.session.execute.call_args.args[0])
+    assert "is_active" in statement and "exchange" in statement
+    iq_sync.collection.distinct.assert_not_called()
     assert [call.args[0] for call in iq_sync.client.get_ohlc.call_args_list] == ["SSI", "VCI"]
 
 
@@ -807,7 +823,6 @@ def test_dedup_eod_rows_prefers_vietcap_and_sorts():
     deduped = _dedup_eod_rows(rows)
     assert [r["tradeDate"].day for r in deduped] == [9, 10, 11]
     assert deduped[1]["close"] == 25500.0  # vietcap bar won the duplicate day
-    assert all("source" not in r for r in deduped)  # source stripped from output
 
 
 def test_dedup_eod_rows_duplicate_same_rank_keeps_first():

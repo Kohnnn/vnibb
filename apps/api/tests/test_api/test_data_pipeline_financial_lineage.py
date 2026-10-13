@@ -1,4 +1,5 @@
 from copy import deepcopy
+from datetime import datetime
 
 import pytest
 import vnibb.services.data_pipeline as pipeline_module
@@ -14,6 +15,13 @@ def financial_sync(monkeypatch):
     persisted = []
     cached = []
     pipeline = DataPipeline()
+
+    class FixtureDateTime(datetime):
+        @classmethod
+        def utcnow(cls):
+            return cls(2026, 4, 2)
+
+    monkeypatch.setattr(pipeline_module, "datetime", FixtureDateTime)
 
     class Result:
         def scalars(self):
@@ -71,8 +79,12 @@ def financial_sync(monkeypatch):
             symbols=["VNM"],
             period=period,
             statement_types=list(dict.fromkeys(entry.statement_type for entry in entries)),
+            count=1,
         )
-        assert total == 1
+        expected_complete = all(any(entry.period == "Q1-2026" for entry in entries
+                                    if entry.statement_type == kind)
+                                for kind in {entry.statement_type for entry in entries})
+        assert total == int(expected_complete)
         return persisted, cached
 
     return sync

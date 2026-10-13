@@ -242,7 +242,7 @@ async def test_secondary_statement_refresh_preserves_iq_rows_and_reports_conflic
     progress = {}
 
     assert await pipeline.sync_financials(symbols=["IQZ"], period="year", progress=progress,
-                                          statement_types=[statement_type]) == 0
+                                          statement_types=[statement_type], count=1) == 0
     assert progress["stage_stats"]["financials"]["errors"] == 1
     assert progress["stage_stats"]["financials"]["success"] == 0
     assert progress["error_count"] == 1

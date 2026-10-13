@@ -76,6 +76,8 @@ Analytical-corpus-backed (database reads only, never provider execution):
 - `get_premium_dataset`
 - `get_intraday_trades`
 - `get_price_depth`
+- `get_reference_dataset` — exact IQ profile/metric-map physical-store reads
+- `get_ingestion_receipts` — bounded acquisition receipts; no ingestion execution
 
 Design notes:
 
@@ -84,7 +86,7 @@ Design notes:
 - user-owned or operationally sensitive collections are intentionally excluded from the generic query tool
 - the database-stack tools read the private analytical store directly via `MongoMarketDataService`; they do not proxy through the FastAPI app
 - `get_premium_dataset` is constrained by a dataset allowlist (`PREMIUM_DATASET_SPECS`) and per-dataset max limits; disabled/empty source datasets (`company.capital_history`, `company.insider_deals`, `equity.block_trades`, `equity.put_through`) are intentionally excluded
-- `get_premium_dataset` resolves symbols against the outer storage `symbol` field and returns the full storage envelope (record key, scope, source, provider source) per item, so results stay symbol-exact and provenance-readable
+- `get_premium_dataset` queries symbol-scoped records by outer `symbol`; all ten `macro.*`, `market.pe`, `market.pb`, `market.evaluation`, `analytics.valuation.pe` and `analytics.valuation.pb` instead use exact `scopeType=market, scopeKey=market`, independent of the raw outer symbol. Market datasets require no equity symbol. Analytics valuations support only `index_code=VNINDEX`; other index selections are rejected. Historical market valuation catalog requests use `5Y`, not a complete-history guarantee.
 - `get_price_depth` reads flat price/volume documents from the newest `updatedAt` write batch, caps returned valid levels by `limit`, and includes per-row `observedAt`, batch `updatedAt`, and `recordKey`. Write time is not proof of market-data freshness.
 - Batch selection precedes price/volume filtering. If the newest batch contains only zero-volume or invalid levels, `get_price_depth` returns no items; older positive levels are never substituted as current depth.
 - Catalog ingestion keys flat equity/futures/crypto depth levels by scope and normalized price. Volume changes update the level instead of creating a second identity; symbol/ticker/time metadata cannot collapse distinct prices.
@@ -108,6 +110,28 @@ Generic PostgreSQL financial queries apply the full admitted-source list (`vietc
 The HTTP dividend endpoint retains its PostgreSQL dividend/event fallbacks after a live free VCI provider exception and returns the provider failure in `error` alongside any usable rows. Cancellation propagates rather than being converted into fallback data.
 
 PostgreSQL `StockPrice` has no raw/unit columns. Its stock-only IQ bridge persists `source=vietcap_vnd` only after validating explicit VND source evidence, following the existing `vnstock_vnd` marker convention. MCP returns `price_unit=VND` without rescaling for that exact certified marker. Historical generic `vietcap` rows remain unknown-unit; no numeric-magnitude inference or blanket source admission occurs. Full raw price/unit evidence remains in MongoDB rather than PostgreSQL. Reapply IQ ingestion to upgrade only owned IQ rows; unrelated source rows are not overwritten.
+
+### Full-data JSON and bounds
+
+Generic collection and dedicated history/news/timeline/financial tools preserve every fetched row, model column, nested raw lineage value, evidence string and URL. `row_count` equals `len(items)`; no list, dictionary, string or nesting budget silently removes data. Finite Decimal values and integers outside JavaScript's safe range (`abs(value) > 2**53 - 1`) are exact decimal strings. Ordinary integers, finite floats, booleans, nulls and strings retain their types/contents; dates/timestamps use ISO strings. NaN/Infinity, including nonfinite Decimal values, produce an error before JSON serialization rather than fabricated null values.
+
+`limit=0` requests an empty page; negatives are rejected. Larger requests are capped at the discovered collection/dataset maximum. SQL generic caps remain collection-specific (20–250 for the original 16 tables), news 25, timeline 30, SQL prices 250, EOD/depth 5000 and intraday 20000. The collection/schema resources include the complete ordered model-field inventory. SQL filters/sorts are explicitly mapped columns: screener does not advertise nonexistent `sector` or `value`; sector-performance sorts use `total_volume` and `total_value`. Unmapped constraints are errors. Primary-key ascending tie-breaking makes bounded SQL pages deterministic.
+
+Data responses expose `retrieved_at` separately from retained source observation/publication/fiscal/ingestion fields. Repeated reads update only retrieval time; unknown source age remains unknown.
+
+SQL Date filters compare dates; DateTime bounds cover the full requested day inclusively. No/start/end/both date bounds are supported; invalid or inverted bounds are rejected. EOD uses its bounded range reader whenever either bound is supplied, with the omitted side open, not the default lookback. Every EOD row exposes `time` as the canonical date-only session identity derived from the retained `tradeDate`, matching the SQL price envelope, and keeps the raw `tradeDate` plus source/observation/update provenance. EOD always includes retained source/observation/update provenance. Repeated retrieval never changes stored observation time. `year`, `annual`, `yearly`, `fy` normalize to `year`; `quarter`, `quarterly`, `q` normalize to `quarter` case-insensitively. Unsupported periods, including TTM, are rejected; no arbitrary four-row aggregation is implied.
+
+Snapshots deliberately remain **compact AI summaries**, with explicit `serialization_policy`: prices query 21 daily observations and retain a 20-observation series; foreign/order flow query 20 sessions and summarize the recent 5; news/events and sector leaders/laggards use four entries; news strings use 500 characters. Full financial evidence is retained in the MCP snapshot overlay. For full original records use the dedicated tools or generic collection query; AI-context compaction is not the full-data serializer. Snapshot handlers call local database builders, never an outbound MCP client.
+
+### Explicit stores and coverage
+
+SQL `companies`, `shareholders`, `officers`, and `subsidiaries` are exposed through `query_database_collection`; they are not silently substituted by similarly named raw datasets. `get_reference_dataset(symbol, store)` supports only IQ `market_company_profiles` and `market_financial_metric_map` (the latter matches the symbol descriptor map, not an invented outer symbol). IQ `company.shareholder_structure` is read through `get_premium_dataset` with `source=vietcap`. The explicit source/store, record identity, units and separate observation/fiscal/publication/ingestion timestamps remain in returned rows when retained; absent evidence remains unknown.
+
+Intraday/depth responses derive outer source from the actual selected `sourceCollection` or empty-batch metadata. Raw/derived stores are not mislabeled as premium. Depth is only the latest write batch, not historical session replay. A successful empty current batch does not substitute older rows. SQL retention defaults are prices 5×365 days, news/ticks 7 days, screener/block trades 365 days, foreign/order flow 3×365 days and orderbook 30 days; runtime configuration and retained receipts, not these defaults, determine actual coverage. Catalog long/short-term labels do not enforce TTL.
+
+IQ reference cycle receipts use `iq_company_profile` and `iq_shareholder_structure` under `iq_reference_maintenance`, with destinations `market_company_profiles` and `market_vnstock_premium_records` (`company.shareholder_structure`) respectively.
+
+`get_ingestion_receipts(symbol, dataset, limit)` projects only the selected symbol/dataset from SQL `sync_status` cycles or exact-symbol Mongo `market_eod_catchup_receipts`. Each dataset maps to its actual scheduler owner: `profiles` → `daily_profile_maintenance`; `financials_year`/`financials_quarter`/`ratios_year` → `daily_financial_maintenance`; `ratios_quarter` → `financial_ratios_maintenance`; `iq_company_profile`/`iq_shareholder_structure` → `iq_reference_maintenance`; `foreign_trading`/`intraday_trades` → their universe cycles; `shareholders`/`officers`/`subsidiaries`/`company_news`/`insider_deals` → `supplemental_company_maintenance`. The legacy `supplemental_company_maintenance` cycle stays accepted for financial/profile selectors so older receipts remain readable, and `eod_catchup` selects Mongo receipts. A receipt records acquisition outcome, not complete historical/session coverage. Recent fetch/write timestamps, nominal cadence and successful empty results never certify freshness or full population. Authorized retained-store reads and successful source access must be checked separately before asserting live availability.
 
 Access is gated by the same settings the backend uses:
 

@@ -244,7 +244,7 @@ async def test_sync_foreign_trading_persists_derived_values(monkeypatch):
             return FakeResult()
 
     async def fake_fetch(symbols, source):
-        assert symbols == ["VNM", "FPT"]
+        assert set(symbols) == {"VNM", "FPT"}
         return [
             PriceBoardData(
                 symbol="VNM",

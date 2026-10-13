@@ -43,6 +43,7 @@ from vnibb.core.cache_constants import (
 )
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, engine
+from vnibb.core.insider_units import normalize_deal_action
 from vnibb.core.retry import with_retry
 from vnibb.core.price_units import history_price_records, normalize_price_record, persisted_price_record, persisted_price_source, screener_price_record
 from vnibb.core.ratio_units import admitted_ratio_value, normalize_ratio_payload, ratio_method_kwargs
@@ -2822,8 +2823,10 @@ class DataPipeline:
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
         statement_types: Optional[List[StatementType | str]] = None,
+        start_year: Optional[int] = None,
+        count: Optional[int] = None,
     ) -> int:
-        """Sync income, balance, and cashflow for specified symbols."""
+        """Acquire independent statements; return symbols with a complete requested window."""
         if not symbols:
             async with async_session_maker() as session:
                 result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1))
@@ -2847,11 +2850,74 @@ class DataPipeline:
         total = 0
 
         normalized_period = "quarter" if period in {"quarter", "Q", "QTR"} else "year"
-        # Request the provider max (le=40) so the stored fallback keeps the same
-        # depth as the live widget window (QUARTER_PERIOD_LIMIT=40). limit=8 is
-        # enough for freshness (the transform keeps the newest periods) but leaves
-        # the fallback serving a shorter history than the live path.
-        fetch_limit = 40 if normalized_period == "quarter" else 6
+        now = datetime.utcnow()
+        if start_year is not None and (isinstance(start_year, bool) or not isinstance(start_year, int)
+                                       or not 1900 <= start_year <= now.year):
+            raise ValueError("start_year must be a fiscal year between 1900 and the current year")
+        if count is not None and (isinstance(count, bool) or not isinstance(count, int) or count < 1):
+            raise ValueError("count must be a positive integer")
+        if start_year is not None and count is not None:
+            raise ValueError("Specify start_year or count, not both")
+        latest_year = now.year - 1
+        latest_quarter_index = now.year * 4 + (now.month - 1) // 3 - 1
+        if normalized_period == "year":
+            fetch_limit = count or (latest_year - start_year + 1 if start_year is not None else 6)
+            expected_periods = [str(latest_year - offset) for offset in range(max(0, fetch_limit))]
+        else:
+            fetch_limit = count or (latest_quarter_index - start_year * 4 + 1
+                                   if start_year is not None else 40)
+            expected_periods = [f"Q{index % 4 + 1}-{index // 4}"
+                                for index in range(latest_quarter_index,
+                                                   latest_quarter_index - max(0, fetch_limit), -1)]
+        if fetch_limit < 1:
+            raise ValueError("Requested history contains no closed fiscal periods")
+        requested_source_count = ((now.year - start_year + 1)
+                                  * (4 if normalized_period == "quarter" else 1)
+                                  if start_year is not None else fetch_limit)
+        cycle = {
+            "cycle_id": str(uuid4()), "period_type": normalized_period,
+            "history_window": {"start_year": start_year, "count": fetch_limit,
+                               "requested_source_count": requested_source_count,
+                               "latest_closed_period": expected_periods[0]},
+            "expected_symbols": list(symbols), "expected_periods": expected_periods,
+            "outcomes": {}, "complete": False,
+        }
+        previous_cycle = progress.get("financial_acquisition") if progress is not None else None
+        cycle["expected_statements"] = [
+            item.value if isinstance(item, StatementType) else str(item).strip().lower()
+            for item in (statement_types or list(StatementType))
+        ]
+        if (start_index and isinstance(previous_cycle, dict)
+                and previous_cycle.get("expected_periods") == expected_periods
+                and previous_cycle.get("expected_symbols") == list(symbols)
+                and previous_cycle.get("expected_statements") == cycle["expected_statements"]
+                and previous_cycle.get("period_type") == normalized_period):
+            cycle = previous_cycle
+            total = sum(bool(cycle["outcomes"].get(symbol)) and all(
+                item["complete"] for item in cycle["outcomes"][symbol].values()
+            ) for symbol in symbols[:start_index])
+        elif start_index:
+            start_index = 0
+        if progress is not None:
+            progress["financial_acquisition"] = cycle
+            for key in ("partial", "persisted_rows", "statement_success", "statement_errors"):
+                progress["stage_stats"]["financials"].setdefault(key, 0)
+
+        cycle.update(status="running", complete=False, persisted_rows=0)
+        async def _persist_receipt(outcome: Dict[str, Any], *, cycle_receipt: bool = False):
+            async with async_session_maker() as session:
+                await session.execute(SyncStatus.__table__.insert().values(
+                    sync_type="financial_cycle" if cycle_receipt else "financial_acquisition",
+                    started_at=now, completed_at=None if outcome["status"] == "running" else datetime.utcnow(),
+                    status=outcome["status"],
+                    success_count=outcome.get("persisted_rows", 0),
+                    error_count=0 if outcome["complete"] or outcome["status"] == "running" else 1,
+                    additional_data=outcome,
+                    errors={"message": outcome["error"]} if outcome.get("error") else None,
+                ))
+                await session.commit()
+
+        await _persist_receipt(cycle, cycle_receipt=True)
 
         def _parse_period_fields(
             raw_period: Any,
@@ -2948,24 +3014,33 @@ class DataPipeline:
                     )
                     continue
 
-                symbol_synced = False
+                symbol_synced = True
+                symbol_persisted_rows = 0
+                cycle["outcomes"][symbol] = {}
                 income_depreciation_lookup: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
-                for statement_type, model, cache_slug in statement_specs:
+                async def _acquire_statement(statement_type, model, cache_slug, outcome):
                     params = FinancialsQueryParams(
                         symbol=symbol,
                         statement_type=statement_type,
                         period=normalized_period,
-                        limit=fetch_limit,
+                        limit=requested_source_count,
                     )
                     raw_items = await VnstockFinancialsFetcher.extract_data(
                         VnstockFinancialsFetcher.transform_query(params)
                     )
                     items = VnstockFinancialsFetcher.transform_data(params, raw_items)
+                    outcome["source_returned_period_count"] = len({
+                        _parse_period_fields(entry.period, entry.raw_data)[0] for entry in items
+                    })
+                    outcome["source_returned_periods"] = sorted({
+                        _parse_period_fields(entry.period, entry.raw_data)[0] for entry in items
+                    })
                     if not items:
                         raise RuntimeError(f"Empty {statement_type.value} acquisition for {symbol}")
 
                     latest_cache_payload: List[Dict[str, Any]] = []
                     rejected_updates: List[str] = []
+                    committed_periods = {}
                     async with async_session_maker() as session:
                         for entry in items:
                             payload = entry.model_dump(mode="json")
@@ -3186,14 +3261,38 @@ class DataPipeline:
                             result = await session.execute(stmt.returning(model.id))
                             if not result.scalars().all():
                                 rejected_updates.append(values["period"])
+                            else:
+                                committed_periods[period_value] = {
+                                    "status": "stored", "source": entry.source,
+                                    "unavailable_reason": canonical.get("unavailable_reason"),
+                                    "rejected_metrics": sorted(rejected_fields),
+                                }
 
                             latest_cache_payload.append(payload)
 
+                        stored_receipt = {
+                            **outcome, "status": "running", "complete": False,
+                            "persisted_rows": len(committed_periods),
+                            "period_outcomes": {**outcome["period_outcomes"], **committed_periods,
+                                **{value: {"status": "retained_source_conflict"}
+                                   for value in rejected_updates}},
+                        }
+                        await session.execute(SyncStatus.__table__.insert().values(
+                            sync_type="financial_acquisition", started_at=now, status="running",
+                            success_count=len(committed_periods), error_count=0,
+                            additional_data=stored_receipt,
+                        ))
                         await session.commit()
+                    outcome["persisted_rows"] = len(committed_periods)
+                    outcome["period_outcomes"].update(committed_periods)
+                    for rejected_period in rejected_updates:
+                        outcome["period_outcomes"][rejected_period] = {
+                            "status": "retained_source_conflict",
+                        }
 
                     if rejected_updates:
                         raise StructuredPersistenceConflict(
-                            len(items) - len(rejected_updates),
+                            outcome["persisted_rows"],
                             [{"table": model.__tablename__, "symbol": symbol, "period": entry_period} for entry_period in rejected_updates],
                         )
 
@@ -3203,32 +3302,83 @@ class DataPipeline:
                     await self._cache_set_json(
                         cache_key, latest_cache_payload, CACHE_TTL_FINANCIALS
                     )
-                    symbol_synced = True
 
+                for statement_type, model, cache_slug in statement_specs:
+                    outcome = {
+                        "cycle_id": cycle["cycle_id"], "symbol": symbol,
+                        "statement": statement_type.value, "period_type": normalized_period,
+                        "history_window": cycle["history_window"],
+                        "expected_periods": expected_periods,
+                        "period_outcomes": {value: {"status": "missing"} for value in expected_periods},
+                        "source_returned_period_count": 0, "source_returned_periods": [],
+                        "source_limit": "Provider available periods; requested count is not a source guarantee",
+                        "persisted_rows": 0, "status": "failed", "complete": False,
+                    }
+                    try:
+                        await _acquire_statement(statement_type, model, cache_slug, outcome)
+                        outcome["complete"] = all(outcome["period_outcomes"][value]["status"] == "stored"
+                                                  for value in expected_periods)
+                        outcome["status"] = "completed" if outcome["complete"] else "partial"
+                    except (Exception, SystemExit) as exc:
+                        outcome["error"] = str(exc)
+                        outcome["status"] = "partial" if outcome["persisted_rows"] else "failed"
+                        if statement_type == StatementType.INCOME and not outcome["persisted_rows"]:
+                            income_depreciation_lookup.clear()
+                        for value in outcome["period_outcomes"].values():
+                            if value["status"] == "missing":
+                                value.update(status="failed", error=str(exc))
+                        logger.warning("Financial acquisition failed (%s %s %s): %s",
+                                       symbol, normalized_period, statement_type.value, exc)
+                    outcome["missing_periods"] = [value for value in expected_periods
+                                                   if outcome["period_outcomes"][value]["status"] != "stored"]
+                    outcome["source_missing_periods"] = sorted(
+                        set(expected_periods) - set(outcome["source_returned_periods"])
+                    )
+                    outcome["source_shortfall"] = bool(outcome["source_missing_periods"])
+                    outcome["source_exhausted"] = None
+                    try:
+                        await _persist_receipt(outcome)
+                    except (Exception, SystemExit) as exc:
+                        outcome.update(complete=False, status="partial" if outcome["persisted_rows"] else "failed",
+                                       receipt_error=str(exc))
+                        logger.warning("Financial receipt persistence failed (%s %s): %s",
+                                       symbol, statement_type.value, exc)
+                    cycle["outcomes"][symbol][statement_type.value] = outcome
+                    symbol_synced = symbol_synced and outcome["complete"]
+                    symbol_persisted_rows += outcome["persisted_rows"]
+                    if progress is not None:
+                        stats = progress["stage_stats"]["financials"]
+                        stats["persisted_rows"] += outcome["persisted_rows"]
+                        stats["statement_success" if outcome["complete"] else "statement_errors"] += 1
                 if symbol_synced:
                     total += 1
-                    if progress is not None:
-                        progress["success_count"] = progress.get("success_count", 0) + 1
-                        progress["stage_stats"]["financials"]["success"] += 1
-                elif progress is not None:
-                    progress["error_count"] = progress.get("error_count", 0) + 1
-                    progress["stage_stats"]["financials"]["errors"] += 1
-            except SystemExit as exc:
-                logger.warning(f"Financials sync aborted for {symbol}: {exc}")
+                if progress is not None:
+                    key = "success" if symbol_synced else "errors"
+                    progress["stage_stats"]["financials"][key] += 1
+                    counter = "success_count" if symbol_synced else "error_count"
+                    progress[counter] = progress.get(counter, 0) + 1
+                    if not symbol_synced and symbol_persisted_rows:
+                        progress["stage_stats"]["financials"]["partial"] += 1
+            except (Exception, SystemExit) as exc:
+                logger.warning("Financial sync failed (%s %s): %s", symbol, period, exc)
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["financials"]["errors"] += 1
-                continue
-            except Exception as e:
-                logger.warning("Financial sync failed (symbol=%s period=%s): %s", symbol, period, e)
-                if progress is not None:
-                    progress["error_count"] = progress.get("error_count", 0) + 1
-                    progress["stage_stats"]["financials"]["errors"] += 1
-                continue
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = symbol
                 if self._should_checkpoint(idx, len(symbols)):
                     await self._checkpoint(progress, sync_id)
+        cycle["complete"] = total == len(symbols)
+        cycle["status"] = "completed" if cycle["complete"] else "partial" if any(
+            outcome["persisted_rows"] for outcomes in cycle["outcomes"].values()
+            for outcome in outcomes.values()
+        ) else "failed"
+        cycle["persisted_rows"] = sum(outcome["persisted_rows"]
+                                      for outcomes in cycle["outcomes"].values()
+                                      for outcome in outcomes.values())
+        await _persist_receipt(cycle, cycle_receipt=True)
+        if progress is not None and sync_id is not None:
+            await self._checkpoint(progress, sync_id)
         return total
 
     async def sync_financial_ratios(
@@ -4119,6 +4269,10 @@ class DataPipeline:
 
         total = 0
         if progress is not None:
+            for key in ("attempted_count", "succeeded_count", "empty_count", "error_count"):
+                progress.setdefault(key, 0)
+            progress.setdefault("failed_symbols", [])
+            progress.setdefault("errors", [])
             progress.setdefault("stage_stats", {})
             progress["stage"] = "company_news"
             progress["stage_stats"].setdefault(
@@ -4127,11 +4281,16 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self._wait_for_rate_limit("profiles")
+            if progress is not None:
+                progress["attempted_count"] += 1
             try:
+                await self._wait_for_rate_limit("profiles")
                 params = CompanyNewsQueryParams(symbol=symbol, limit=limit)
                 items = await VnstockCompanyNewsFetcher.fetch(params)
                 if not items:
+                    if progress is not None:
+                        progress["empty_count"] += 1
+                        progress["stage_stats"]["company_news"]["empty"] = progress["stage_stats"]["company_news"].get("empty", 0) + 1
                     continue
 
                 async with async_session_maker() as session:
@@ -4162,10 +4321,11 @@ class DataPipeline:
                             existing.summary = values["summary"]
                             existing.source = values["source"]
                             existing.url = values["url"]
-                        total += 1
                     await session.commit()
+                total += len(items)
 
                 if progress is not None:
+                    progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["company_news"]["success"] += 1
             except Exception as exc:
@@ -4173,11 +4333,14 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["company_news"]["errors"] += 1
+                    progress["failed_symbols"].append(symbol)
+                    progress["errors"].append({"symbol": symbol, "dataset": "company_news", "error": self._describe_provider_exception(exc)})
 
-            if progress is not None and sync_id is not None:
-                progress["last_symbol"] = symbol
-                if self._should_checkpoint(idx, len(symbols)):
-                    await self._checkpoint(progress, sync_id)
+            finally:
+                if progress is not None and sync_id is not None:
+                    progress["last_symbol"] = symbol
+                    if self._should_checkpoint(idx, len(symbols)):
+                        await self._checkpoint(progress, sync_id)
 
         return total
 
@@ -4423,6 +4586,16 @@ class DataPipeline:
 
         total = 0
         if progress is not None:
+            progress["acquisition"] = {
+                "scope": "sample",
+                "limit": limit,
+                "source": settings.vnstock_source,
+                "history_complete": False,
+            }
+            for key in ("attempted_count", "succeeded_count", "empty_count", "error_count"):
+                progress.setdefault(key, 0)
+            progress.setdefault("failed_symbols", [])
+            progress.setdefault("errors", [])
             progress.setdefault("stage_stats", {})
             progress["stage"] = "insider_deals"
             progress["stage_stats"].setdefault(
@@ -4431,21 +4604,25 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self._wait_for_rate_limit("profiles")
+            if progress is not None:
+                progress["attempted_count"] += 1
             try:
+                await self._wait_for_rate_limit("profiles")
                 items = await VnstockInsiderDealsFetcher.fetch(symbol, limit=limit)
                 if not items:
+                    if progress is not None:
+                        progress["empty_count"] += 1
+                        progress["stage_stats"]["insider_deals"]["empty"] = progress["stage_stats"]["insider_deals"].get("empty", 0) + 1
                     continue
 
                 async with async_session_maker() as session:
-                    await session.execute(delete(InsiderDeal).where(InsiderDeal.symbol == symbol))
                     for item in items:
                         payload = item.model_dump()
                         announce_date = self._parse_date_value(
                             payload.get("transaction_date") or payload.get("registration_date")
                         )
                         if not announce_date:
-                            announce_date = self._get_market_date()
+                            raise ValueError(f"Insider deal has no valid source date for {symbol}")
                         ownership_before = payload.get("ownership_before")
                         ownership_after = payload.get("ownership_after")
                         deal_ratio = None
@@ -4455,28 +4632,85 @@ class DataPipeline:
                             except (TypeError, ValueError):
                                 deal_ratio = None
 
-                        deal_quantity = payload.get("shares_executed") or payload.get(
-                            "shares_registered"
-                        )
+                        deal_quantity = payload.get("shares_executed")
+                        if deal_quantity is None:
+                            deal_quantity = payload.get("shares_registered")
+                        provider_record_id = payload.get("provider_record_id")
+                        record_hash = payload.get("record_hash")
+                        raw_action = (payload.get("raw_data") or {}).get("action_type_vi")
+                        deal_action = None
+                        direction_stated = False
+                        for candidate in (payload.get("deal_action"), payload.get("transaction_type"), raw_action):
+                            token = normalize_deal_action(candidate)
+                            if token in ("BUY", "SELL"):
+                                deal_action = token
+                                break
+                            if token == "UNKNOWN":
+                                direction_stated = True
+                        if deal_action is None and direction_stated:
+                            deal_action = "UNKNOWN"
+                        payload["acquisition"] = {
+                            "scope": "sample",
+                            "limit": limit,
+                            "returned_count": len(items),
+                            "source": settings.vnstock_source,
+                            "acquired_at": datetime.utcnow().isoformat(),
+                            "provider_record_id": provider_record_id,
+                            "record_hash": record_hash,
+                        }
                         values = {
                             "symbol": symbol,
                             "announce_date": announce_date,
-                            "deal_method": payload.get("transaction_type"),
-                            "deal_action": None,
+                            "deal_method": raw_action or payload.get("transaction_type"),
+                            "deal_action": deal_action,
                             "deal_quantity": deal_quantity,
-                            "deal_price": None,
-                            "deal_value": None,
+                            "deal_price": payload.get("deal_price"),
+                            "deal_value": payload.get("deal_value"),
                             "deal_ratio": deal_ratio,
                             "insider_name": payload.get("insider_name"),
                             "insider_position": payload.get("insider_position"),
                             "raw_data": payload,
                             "created_at": datetime.utcnow(),
                         }
-                        await session.execute(InsiderDeal.__table__.insert().values(values))
-                        total += 1
+                        candidates = (
+                            await session.scalars(
+                                select(InsiderDeal).where(
+                                    InsiderDeal.symbol == symbol,
+                                    InsiderDeal.announce_date == announce_date,
+                                    InsiderDeal.insider_name == values["insider_name"],
+                                )
+                            )
+                        ).all()
+                        existing = None
+                        for candidate in candidates:
+                            candidate_raw = candidate.raw_data or {}
+                            if provider_record_id and candidate_raw.get("provider_record_id") == provider_record_id:
+                                existing = candidate
+                                break
+                            if record_hash and candidate_raw.get("record_hash") == record_hash:
+                                existing = candidate
+                                break
+                        if existing is None and provider_record_id is None and record_hash is None and len(candidates) == 1:
+                            prior = candidates[0]
+                            if (
+                                prior.deal_action == values["deal_action"]
+                                and prior.deal_quantity == values["deal_quantity"]
+                                and prior.deal_price == values["deal_price"]
+                                and prior.deal_value == values["deal_value"]
+                            ):
+                                existing = prior
+                        if existing is None:
+                            session.add(InsiderDeal(**values))
+                            await session.flush()
+                        else:
+                            for key, value in values.items():
+                                if key != "created_at" and value is not None:
+                                    setattr(existing, key, value)
                     await session.commit()
+                total += len(items)
 
                 if progress is not None:
+                    progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["insider_deals"]["success"] += 1
             except Exception as exc:
@@ -4484,11 +4718,14 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["insider_deals"]["errors"] += 1
+                    progress["failed_symbols"].append(symbol)
+                    progress["errors"].append({"symbol": symbol, "dataset": "insider_deals", "error": self._describe_provider_exception(exc)})
 
-            if progress is not None and sync_id is not None:
-                progress["last_symbol"] = symbol
-                if self._should_checkpoint(idx, len(symbols)):
-                    await self._checkpoint(progress, sync_id)
+            finally:
+                if progress is not None and sync_id is not None:
+                    progress["last_symbol"] = symbol
+                    if self._should_checkpoint(idx, len(symbols)):
+                        await self._checkpoint(progress, sync_id)
 
         return total
 
@@ -4514,6 +4751,10 @@ class DataPipeline:
 
         total = 0
         if progress is not None:
+            for key in ("attempted_count", "succeeded_count", "empty_count", "error_count"):
+                progress.setdefault(key, 0)
+            progress.setdefault("failed_symbols", [])
+            progress.setdefault("errors", [])
             progress.setdefault("stage_stats", {})
             progress["stage"] = "shareholders"
             progress["stage_stats"].setdefault(
@@ -4522,17 +4763,22 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self._wait_for_rate_limit("profiles")
+            if progress is not None:
+                progress["attempted_count"] += 1
             try:
+                await self._wait_for_rate_limit("profiles")
                 params = ShareholdersQueryParams(symbol=symbol)
                 items = await VnstockShareholdersFetcher.fetch(params)
                 if not items:
+                    if progress is not None:
+                        progress["empty_count"] += 1
+                        progress["stage_stats"]["shareholders"]["empty"] = progress["stage_stats"]["shareholders"].get("empty", 0) + 1
                     continue
 
                 async with async_session_maker() as session:
                     company_id = await self._get_or_create_company_id(session, symbol)
                     if not company_id:
-                        continue
+                        raise RuntimeError(f"Company identity unavailable for {symbol}")
                     await session.execute(delete(Shareholder).where(Shareholder.symbol == symbol))
                     for item in items:
                         payload = item.model_dump()
@@ -4547,10 +4793,11 @@ class DataPipeline:
                             "updated_at": datetime.utcnow(),
                         }
                         await session.execute(Shareholder.__table__.insert().values(values))
-                        total += 1
                     await session.commit()
+                total += len(items)
 
                 if progress is not None:
+                    progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["shareholders"]["success"] += 1
             except Exception as exc:
@@ -4558,11 +4805,14 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["shareholders"]["errors"] += 1
+                    progress["failed_symbols"].append(symbol)
+                    progress["errors"].append({"symbol": symbol, "dataset": "shareholders", "error": self._describe_provider_exception(exc)})
 
-            if progress is not None and sync_id is not None:
-                progress["last_symbol"] = symbol
-                if self._should_checkpoint(idx, len(symbols)):
-                    await self._checkpoint(progress, sync_id)
+            finally:
+                if progress is not None and sync_id is not None:
+                    progress["last_symbol"] = symbol
+                    if self._should_checkpoint(idx, len(symbols)):
+                        await self._checkpoint(progress, sync_id)
 
         return total
 
@@ -4588,6 +4838,10 @@ class DataPipeline:
 
         total = 0
         if progress is not None:
+            for key in ("attempted_count", "succeeded_count", "empty_count", "error_count"):
+                progress.setdefault(key, 0)
+            progress.setdefault("failed_symbols", [])
+            progress.setdefault("errors", [])
             progress.setdefault("stage_stats", {})
             progress["stage"] = "officers"
             progress["stage_stats"].setdefault(
@@ -4596,17 +4850,22 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self._wait_for_rate_limit("profiles")
+            if progress is not None:
+                progress["attempted_count"] += 1
             try:
+                await self._wait_for_rate_limit("profiles")
                 params = OfficersQueryParams(symbol=symbol)
                 items = await VnstockOfficersFetcher.fetch(params)
                 if not items:
+                    if progress is not None:
+                        progress["empty_count"] += 1
+                        progress["stage_stats"]["officers"]["empty"] = progress["stage_stats"]["officers"].get("empty", 0) + 1
                     continue
 
                 async with async_session_maker() as session:
                     company_id = await self._get_or_create_company_id(session, symbol)
                     if not company_id:
-                        continue
+                        raise RuntimeError(f"Company identity unavailable for {symbol}")
                     await session.execute(delete(Officer).where(Officer.symbol == symbol))
                     for item in items:
                         payload = item.model_dump()
@@ -4621,10 +4880,11 @@ class DataPipeline:
                             "updated_at": datetime.utcnow(),
                         }
                         await session.execute(Officer.__table__.insert().values(values))
-                        total += 1
                     await session.commit()
+                total += len(items)
 
                 if progress is not None:
+                    progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["officers"]["success"] += 1
             except Exception as exc:
@@ -4632,11 +4892,14 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["officers"]["errors"] += 1
+                    progress["failed_symbols"].append(symbol)
+                    progress["errors"].append({"symbol": symbol, "dataset": "officers", "error": self._describe_provider_exception(exc)})
 
-            if progress is not None and sync_id is not None:
-                progress["last_symbol"] = symbol
-                if self._should_checkpoint(idx, len(symbols)):
-                    await self._checkpoint(progress, sync_id)
+            finally:
+                if progress is not None and sync_id is not None:
+                    progress["last_symbol"] = symbol
+                    if self._should_checkpoint(idx, len(symbols)):
+                        await self._checkpoint(progress, sync_id)
 
         return total
 
@@ -4662,6 +4925,10 @@ class DataPipeline:
 
         total = 0
         if progress is not None:
+            for key in ("attempted_count", "succeeded_count", "empty_count", "error_count"):
+                progress.setdefault(key, 0)
+            progress.setdefault("failed_symbols", [])
+            progress.setdefault("errors", [])
             progress.setdefault("stage_stats", {})
             progress["stage"] = "subsidiaries"
             progress["stage_stats"].setdefault(
@@ -4670,11 +4937,16 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self._wait_for_rate_limit("profiles")
+            if progress is not None:
+                progress["attempted_count"] += 1
             try:
+                await self._wait_for_rate_limit("profiles")
                 params = SubsidiariesQueryParams(symbol=symbol)
                 items = await VnstockSubsidiariesFetcher.fetch(params)
                 if not items:
+                    if progress is not None:
+                        progress["empty_count"] += 1
+                        progress["stage_stats"]["subsidiaries"]["empty"] = progress["stage_stats"]["subsidiaries"].get("empty", 0) + 1
                     continue
 
                 async with async_session_maker() as session:
@@ -4692,10 +4964,11 @@ class DataPipeline:
                             "updated_at": datetime.utcnow(),
                         }
                         await session.execute(Subsidiary.__table__.insert().values(values))
-                        total += 1
                     await session.commit()
+                total += len(items)
 
                 if progress is not None:
+                    progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["subsidiaries"]["success"] += 1
             except Exception as exc:
@@ -4703,16 +4976,19 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["subsidiaries"]["errors"] += 1
+                    progress["failed_symbols"].append(symbol)
+                    progress["errors"].append({"symbol": symbol, "dataset": "subsidiaries", "error": self._describe_provider_exception(exc)})
 
-            if progress is not None and sync_id is not None:
-                progress["last_symbol"] = symbol
-                if self._should_checkpoint(idx, len(symbols)):
-                    await self._checkpoint(progress, sync_id)
+            finally:
+                if progress is not None and sync_id is not None:
+                    progress["last_symbol"] = symbol
+                    if self._should_checkpoint(idx, len(symbols)):
+                        await self._checkpoint(progress, sync_id)
 
         return total
 
     async def sync_market_sectors(self) -> int:
-        """Seed market sector master data from VN_SECTORS."""
+        """Refresh static sector definitions from VN_SECTORS by natural key."""
         from vnibb.core.vn_sectors import get_all_sectors
 
         sectors = get_all_sectors()
@@ -4740,6 +5016,102 @@ class DataPipeline:
                 total += 1
             await session.commit()
 
+        return total
+
+    async def sync_sector_performance(self) -> int:
+        """Persist dated screener aggregates; unknown constituent totals stay null."""
+        from vnibb.providers.vnstock.equity_screener import (
+            StockScreenerParams,
+            VnstockScreenerFetcher,
+        )
+        from vnibb.services.sector_service import SectorService
+
+        def metric(row: dict, *keys: str) -> Optional[float]:
+            extended = row.get("extended_metrics")
+            extended = extended if isinstance(extended, dict) else {}
+            for payload in (row, extended):
+                for key in keys:
+                    value = payload.get(key)
+                    if value is None:
+                        continue
+                    try:
+                        number = float(value)
+                    except (TypeError, ValueError):
+                        return None
+                    return number if math.isfinite(number) else None
+            return None
+
+        params = StockScreenerParams(exchange="ALL", limit=2000, source=settings.vnstock_source)
+        items = await VnstockScreenerFetcher.fetch(params)
+        rows = [item.model_dump() if hasattr(item, "model_dump") else dict(item) for item in items or []]
+        dated_rows = [row for row in rows if self._parse_date_value(row.get("trade_date")) is not None]
+        if not dated_rows:
+            async with async_session_maker() as session:
+                latest_date = await session.scalar(select(func.max(ScreenerSnapshot.snapshot_date)))
+                if latest_date is not None:
+                    snapshots = await session.execute(
+                        select(ScreenerSnapshot, Company.industry)
+                        .join(Company, Company.symbol == ScreenerSnapshot.symbol, isouter=True)
+                        .where(ScreenerSnapshot.snapshot_date == latest_date)
+                    )
+                    dated_rows = [
+                        {
+                            "symbol": snapshot.symbol,
+                            "trade_date": snapshot.trade_date,
+                            "price": snapshot.price,
+                            "volume": snapshot.volume,
+                            "industry_name": snapshot.industry or industry,
+                            "extended_metrics": snapshot.extended_metrics,
+                        }
+                        for snapshot, industry in snapshots.all()
+                        if self._parse_date_value(snapshot.trade_date) is not None
+                    ]
+        if not dated_rows:
+            raise ValueError("Sector performance unavailable: no dated screener observations")
+
+        rows_by_date: Dict[date, List[dict]] = {}
+        for row in dated_rows:
+            row["price_change_1d_pct"] = metric(
+                row, "price_change_1d_pct", "change_pct", "change_1d", "changePct", "price_change_pct"
+            )
+            trade_date = self._parse_date_value(row["trade_date"])
+            rows_by_date.setdefault(trade_date, []).append(row)
+
+        total = 0
+        async with async_session_maker() as session:
+            for trade_date, observations in rows_by_date.items():
+                sectors = await SectorService.calculate_sector_performance(observations)
+                for sector in sectors:
+                    members = await SectorService.get_stocks_by_sector(sector.sector_id, observations)
+                    if not members:
+                        continue
+                    volumes = [metric(row, "volume", "total_volume") for row in members]
+                    turnover = [metric(row, "value_traded", "valueTraded", "trading_value", "value", "total_value") for row in members]
+                    changes = [row["price_change_1d_pct"] for row in members]
+                    total_volume = sum(volumes) if all(value is not None and value >= 0 and value.is_integer() for value in volumes) else None
+                    total_value = sum(turnover) if all(value is not None and value >= 0 for value in turnover) else None
+                    values = {
+                        "sector_code": str(sector.sector_id)[:20],
+                        "trade_date": trade_date,
+                        "change_pct": sector.change_pct,
+                        "avg_change_pct": sector.change_pct,
+                        "total_volume": int(total_volume) if total_volume is not None else None,
+                        "total_value": total_value,
+                        "top_gainer_symbol": sector.top_gainer.symbol if sector.top_gainer else None,
+                        "top_gainer_change": sector.top_gainer.change_pct if sector.top_gainer else None,
+                        "top_loser_symbol": sector.top_loser.symbol if sector.top_loser else None,
+                        "top_loser_change": sector.top_loser.change_pct if sector.top_loser else None,
+                        "advance_count": sum(change > 0 for change in changes if change is not None),
+                        "decline_count": sum(change < 0 for change in changes if change is not None),
+                        "unchanged_count": sum(change == 0 for change in changes if change is not None),
+                        "created_at": datetime.utcnow(),
+                    }
+                    await session.execute(get_upsert_stmt(
+                        SectorPerformance, ["sector_code", "trade_date"], values,
+                        update_overrides=lambda _stmt: {"created_at": SectorPerformance.created_at},
+                    ))
+                    total += 1
+            await session.commit()
         return total
 
     async def sync_market_indices(
@@ -4872,19 +5244,26 @@ class DataPipeline:
 
         trade_date = trade_date or self._get_market_date()
 
-        if not symbols:
+        if symbols is None:
             async with async_session_maker() as session:
-                result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1))
-                symbols = [r[0] for r in result.fetchall()]
+                result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1).order_by(Stock.symbol))
+                universe = [row[0] for row in result.fetchall()]
+            from vnibb.services.sync_all_data import FullMarketSync
 
+            async def acquire(symbol, receipt):
+                return await self.sync_foreign_trading(trade_date=trade_date, symbols=[symbol], progress=receipt)
+
+            cycle = await FullMarketSync().run_maintenance_cycle(
+                "foreign_trading_universe", universe, [("foreign_trading", acquire)],
+                240, 0, max_attempts=settings.intraday_symbols_per_run or None,
+            )
+            if progress is not None:
+                progress["foreign_trading_cycle"] = {"complete": cycle.complete, "pending_count": cycle.pending_count, "error_count": cycle.error_count}
+                progress["error_count"] = progress.get("error_count", 0) + cycle.error_count
+            return cycle.synced_count
+        symbols = sorted(set(symbols))
         if not symbols:
             return 0
-
-        if (
-            settings.intraday_symbols_per_run > 0
-            and len(symbols) > settings.intraday_symbols_per_run
-        ):
-            symbols = symbols[: settings.intraday_symbols_per_run]
 
         symbol_exchange: Dict[str, str] = {}
         symbol_chunk_index: Dict[str, int] = {}
@@ -4932,12 +5311,19 @@ class DataPipeline:
                     progress["error_count"] = progress.get("error_count", 0) + len(batch)
                     progress["stage_stats"]["foreign_trading"]["errors"] += len(batch)
                 continue
+            returned_symbols = {record.symbol for record in records if record.symbol in batch}
+            missing_symbols = set(batch) - returned_symbols
+            if progress is not None:
+                progress["error_count"] = progress.get("error_count", 0) + len(missing_symbols)
+                progress["stage_stats"]["foreign_trading"]["errors"] += len(missing_symbols)
+                for missing in missing_symbols:
+                    progress.setdefault("acquisition_outcomes", {})[missing] = {"sql_foreign": {"status": "unavailable", "rows": 0}, "provider": f"vnstock:{source}", "scope": "source_price_board", "requested_session_date": trade_date.isoformat()}
 
             async with async_session_maker() as session:
                 for record in records:
                     payload = record.model_dump()
                     symbol = payload.get("symbol")
-                    if not symbol:
+                    if symbol not in batch:
                         continue
                     buy_vol = payload.get("foreign_buy_vol")
                     sell_vol = payload.get("foreign_sell_vol")
@@ -4988,6 +5374,9 @@ class DataPipeline:
                         progress["stage_stats"]["foreign_trading"]["success"] += 1
 
                 await session.commit()
+            if progress is not None:
+                for acquired in returned_symbols:
+                    progress.setdefault("acquisition_outcomes", {})[acquired] = {"sql_foreign": {"status": "persisted", "rows": 1}, "provider": f"vnstock:{source}", "scope": "source_price_board", "requested_session_date": trade_date.isoformat(), "source_observed_at": None}
 
             if progress is not None and sync_id is not None:
                 progress["last_index"] = idx + len(batch) - 1
@@ -5017,6 +5406,8 @@ class DataPipeline:
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
         limit: Optional[int] = None,
+        live_session: bool = False,
+        retain_ticks: Optional[bool] = None,
     ) -> int:
         """Sync intraday trades and compute daily order flow."""
         trade_date = trade_date or self._get_market_date()
@@ -5050,7 +5441,7 @@ class DataPipeline:
                         )
                 return 0
 
-        if settings.orderflow_at_close_only and not self._is_after_market_close():
+        if not live_session and settings.orderflow_at_close_only and not self._is_after_market_close():
             logger.info("Intraday sync skipped before market close")
             if progress is not None:
                 progress.setdefault("stage_stats", {})
@@ -5095,19 +5486,26 @@ class DataPipeline:
                         )
                 return 0
 
-        if not symbols:
+        if symbols is None:
             async with async_session_maker() as session:
-                result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1))
-                symbols = [r[0] for r in result.fetchall()]
+                result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1).order_by(Stock.symbol))
+                universe = [row[0] for row in result.fetchall()]
+            from vnibb.services.sync_all_data import FullMarketSync
 
+            async def acquire(symbol, receipt):
+                return await self.sync_intraday_trades(trade_date=trade_date, symbols=[symbol], progress=receipt, limit=limit, live_session=live_session, retain_ticks=retain_ticks)
+
+            cycle = await FullMarketSync().run_maintenance_cycle(
+                "intraday_trades_universe", universe, [("intraday_trades", acquire)],
+                240, 0, max_attempts=settings.intraday_symbols_per_run or None, allow_empty=True,
+            )
+            if progress is not None:
+                progress["intraday_trades_cycle"] = {"complete": cycle.complete, "pending_count": cycle.pending_count, "error_count": cycle.error_count}
+                progress["error_count"] = progress.get("error_count", 0) + cycle.error_count
+            return cycle.synced_count
+        symbols = sorted(set(symbols))
         if not symbols:
             return 0
-
-        if (
-            settings.intraday_symbols_per_run > 0
-            and len(symbols) > settings.intraday_symbols_per_run
-        ):
-            symbols = symbols[: settings.intraday_symbols_per_run]
 
         symbol_exchange: Dict[str, str] = {}
         symbol_chunk_index: Dict[str, int] = {}
@@ -5148,7 +5546,7 @@ class DataPipeline:
 
         total = 0
         consecutive_429 = 0
-        store_intraday = settings.store_intraday_trades
+        store_intraday = settings.store_intraday_trades if retain_ticks is None else retain_ticks
         error_counts: Dict[str, int] = {}
         error_samples: List[str] = []
         for idx in range(start_index, len(symbols)):
@@ -5157,31 +5555,28 @@ class DataPipeline:
             try:
                 source = settings.vnstock_source or "VCI"
 
-                async def _fetch_intraday() -> List[Dict[str, Any]]:
-                    def _sync_fetch() -> List[Dict[str, Any]]:
+                from vnibb.services.trading_acquisition import acquire_session_trades, persist_trade_stores, persist_mongo_trades, fetch_primary_trades
+
+                def _sync_fetch():
+                    from vnibb.services.vietcap_client import VietcapClient
+                    client = VietcapClient(max_retries=0, timeout_seconds=min(10.0, settings.vnstock_timeout / 2))
+                    def primary_fetch(page_size=500):
+                        return fetch_primary_trades(client, symbol, page_size=page_size)
+                    try:
+                        acquired, receipt = acquire_session_trades(primary_fetch, trade_date, limit, session_closed=self._is_after_market_close())
+                        receipt.update(provider="vietcap:Trading", price_multiplier=1, source_price_unit="VND")
+                        return acquired, receipt
+                    except Exception as primary_error:
                         from vnibb.providers.vnstock.runtime import get_vnstock_class
+                        stock = get_vnstock_class()().stock(symbol=symbol, source=validate_source(source))
+                        acquired, receipt = acquire_session_trades(stock.quote.intraday, trade_date, limit, session_closed=self._is_after_market_close())
+                        receipt.update(provider=f"vnstock:{source}", price_multiplier=1000, source_price_unit="thousand_VND", primary_error=type(primary_error).__name__)
+                        return acquired, receipt
 
-                        Vnstock = get_vnstock_class()
-                        stock = Vnstock().stock(symbol=symbol, source=validate_source(source))
-                        df = stock.quote.intraday()
-                        if df is None or df.empty:
-                            return []
-                        return df.tail(limit).to_dict("records")
+                raw_rows, coverage = await asyncio.wait_for(asyncio.to_thread(_sync_fetch), timeout=settings.vnstock_timeout)
+                coverage.update(raw_dataset="equity.intraday", price_unit="VND", volume_unit="shares", current_depth={"status": "unknown"})
 
-                    loop = asyncio.get_event_loop()
-                    return await asyncio.wait_for(
-                        loop.run_in_executor(None, _sync_fetch),
-                        timeout=settings.vnstock_timeout,
-                    )
-
-                raw_rows = await _fetch_intraday()
-
-                # Always seed defaults from foreign_lookup so OrderFlowDaily
-                # rows have a usable signal even when intraday returns empty.
-                # Previously the entire body was gated by `if not raw_rows`,
-                # which left every column NULL for symbols where the
-                # foreign_trading stage had populated ForeignTrading correctly.
-                rows: List[Dict[str, Any]] = [] if store_intraday else []
+                rows: List[Dict[str, Any]] = []
                 buy_volume = 0
                 sell_volume = 0
                 buy_value = 0.0
@@ -5213,19 +5608,26 @@ class DataPipeline:
 
                     if not trade_time:
                         continue
+                    if trade_time.tzinfo is not None:
+                        from zoneinfo import ZoneInfo
+                        trade_time = trade_time.astimezone(ZoneInfo("Asia/Ho_Chi_Minh")).replace(tzinfo=None)
 
-                    price = raw.get("price") or raw.get("close") or raw.get("gia")
-                    volume = raw.get("volume") or raw.get("khoiLuong")
+                    price = raw.get("price", raw.get("close", raw.get("gia")))
+                    volume = raw.get("volume", raw.get("khoiLuong"))
                     if price is None or volume is None:
                         continue
 
                     try:
-                        price = float(price)
-                        volume = int(volume)
-                    except (TypeError, ValueError):
+                        price = float(price) * coverage["price_multiplier"]
+                        raw_volume = float(volume)
+                        volume = int(raw_volume)
+                        import math
+                        if not math.isfinite(price) or price <= 0 or not math.isfinite(raw_volume) or raw_volume < 0 or raw_volume != volume:
+                            continue
+                    except (TypeError, ValueError, OverflowError):
                         continue
                     match_type = (
-                        raw.get("matchType") or raw.get("action") or raw.get("loaiGiaoDich") or ""
+                        raw.get("match_type") or raw.get("matchType") or raw.get("action") or raw.get("loaiGiaoDich") or ""
                     ).upper()
 
                     if match_type.startswith("B"):
@@ -5238,27 +5640,65 @@ class DataPipeline:
                     if price * volume >= settings.big_order_threshold_vnd:
                         big_order_count += 1
 
-                    if store_intraday:
-                        rows.append(
-                            {
-                                "symbol": symbol,
-                                "trade_time": trade_time,
-                                "price": price,
-                                "volume": volume,
-                                "match_type": match_type or None,
-                                "created_at": datetime.utcnow(),
-                            }
-                        )
+                    rows.append({
+                        "symbol": symbol, "trade_time": trade_time, "price": price,
+                        "volume": volume, "match_type": match_type or None,
+                        "transaction_id": int(raw["id"]) if str(raw.get("id", "")).isdigit() else None,
+                        "created_at": datetime.utcnow(),
+                    })
 
-                if store_intraday and rows:
+                if len(rows) != len(raw_rows):
+                    coverage.update(scope="sampled", status="invalid_trade_rows", completed_session=False, denominator_trade_count=None, session_fraction=None)
+                coverage["observed_trade_count"] = len(rows)
+                has_intraday_data = bool(rows)
+
+                async def write_sql_ticks():
                     async with async_session_maker() as session:
-                        await session.execute(IntradayTrade.__table__.insert(), rows)
+                        from collections import Counter
+                        retained = (await session.execute(select(IntradayTrade).where(IntradayTrade.symbol == symbol, IntradayTrade.trade_time >= datetime.combine(trade_date, time.min), IntradayTrade.trade_time < datetime.combine(trade_date + timedelta(days=1), time.min)))).scalars().all()
+                        seen = Counter((row.transaction_id, row.trade_time, row.price, row.volume, row.match_type) for row in retained)
+                        additions = []
+                        for row in rows:
+                            key = (row.get("transaction_id"), row["trade_time"], row["price"], row["volume"], row["match_type"])
+                            if seen[key]:
+                                seen[key] -= 1
+                            else:
+                                additions.append(row)
+                        if additions:
+                            await session.execute(IntradayTrade.__table__.insert(), additions)
                         await session.commit()
-                        total += len(rows)
+                    return len(rows)
 
-                    cache_key = build_cache_key("vnibb", "intraday", "latest", symbol)
-                    cache_payload = [row for row in rows[-100:]]
-                    await self._cache_set_json(cache_key, cache_payload, CACHE_TTL_INTRADAY)
+                async def write_mongo_ticks():
+                    return await asyncio.to_thread(persist_mongo_trades, symbol, rows, coverage)
+
+                from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+                writers = {}
+                if coverage["status"] == "source_session_mismatch":
+                    coverage.update(
+                        sql_ticks={"status": "skipped", "rows": 0},
+                        mongo_ticks={"status": "skipped", "rows": 0},
+                        sql_flows={"status": "skipped", "rows": 0},
+                    )
+                else:
+                    coverage["sql_ticks"] = {"status": "disabled", "rows": 0}
+                    coverage["mongo_ticks"] = {"status": "disabled", "rows": 0}
+                    if store_intraday:
+                        writers["sql_ticks"] = write_sql_ticks
+                    if get_mongo_market_data_service().enabled:
+                        writers["mongo_ticks"] = write_mongo_ticks
+                    coverage.update(await persist_trade_stores(writers, coverage))
+                total += coverage["sql_ticks"].get("rows", 0)
+                if progress is not None:
+                    progress.setdefault("acquisition_outcomes", {})[symbol] = coverage
+                    if not rows and coverage["status"] == "empty":
+                        progress["empty_count"] = progress.get("empty_count", 0) + 1
+                if coverage["status"] == "source_session_mismatch":
+                    if progress is not None:
+                        progress["error_count"] = progress.get("error_count", 0) + 1
+                        progress["stage_stats"]["intraday_trades"]["errors"] += 1
+                    error_counts["SourceSessionMismatch"] = error_counts.get("SourceSessionMismatch", 0) + 1
+                    continue
 
                 # Build OrderFlowDaily values. We keep zeros (instead of NULL)
                 # when intraday data was present but the calculated bucket was
@@ -5285,20 +5725,28 @@ class DataPipeline:
                     "proprietary_buy_volume": None,
                     "proprietary_sell_volume": None,
                     "proprietary_net_volume": None,
+                    "coverage": coverage,
                     "created_at": datetime.utcnow(),
                     "updated_at": datetime.utcnow(),
                 }
-                # Skip the upsert if we have nothing to record at all (no
-                # intraday + no foreign signal). This keeps the table free
-                # of pure-NULL ghost rows.
-                if not has_intraday_data and not foreign_record:
+                async def write_sql_flow():
+                    coverage["sql_flows"] = {"status": "persisted", "rows": 1}
+                    async with async_session_maker() as session:
+                        await session.execute(get_upsert_stmt(OrderFlowDaily, ["symbol", "trade_date"], order_flow_values))
+                        await session.commit()
+                    return 1
+
+                coverage.update(await persist_trade_stores({"sql_flows": write_sql_flow}))
+                failures = [store for store in ("sql_flows", "sql_ticks", "mongo_ticks") if coverage.get(store, {}).get("status") == "failed"]
+                if progress is not None and failures:
+                    progress["error_count"] = progress.get("error_count", 0) + 1
+                    progress["stage_stats"]["intraday_trades"]["errors"] += 1
+                if failures:
+                    error_counts["PersistenceError"] = error_counts.get("PersistenceError", 0) + 1
+                if coverage["sql_flows"]["status"] == "failed":
                     continue
-                async with async_session_maker() as session:
-                    stmt = get_upsert_stmt(
-                        OrderFlowDaily, ["symbol", "trade_date"], order_flow_values
-                    )
-                    await session.execute(stmt)
-                    await session.commit()
+                if not store_intraday:
+                    total += 1
 
                 order_flow_payload = {
                     **order_flow_values,
@@ -5405,11 +5853,15 @@ class DataPipeline:
         symbols: Optional[List[str]] = None,
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
+        *,
+        live_session: bool = False,
     ) -> int:
-        """Capture order book snapshots for symbols."""
+        """Persist each symbol's current provider batch; never promise historical replay."""
         from vnibb.providers.vnstock.price_depth import VnstockPriceDepthFetcher
+        from vnibb.services.trading_acquisition import persist_trade_stores
+        from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
-        if settings.orderbook_at_close_only and not self._is_after_market_close():
+        if not live_session and settings.orderbook_at_close_only and not self._is_after_market_close():
             logger.info("Orderbook snapshot skipped before market close")
             if progress is not None:
                 progress.setdefault("stage_stats", {})
@@ -5431,8 +5883,8 @@ class DataPipeline:
                     )
             return 0
 
-        if settings.intraday_require_market_hours and not self._is_market_hours():
-            if not (settings.orderbook_at_close_only and self._is_after_market_close()):
+        if (live_session or settings.intraday_require_market_hours) and not self._is_market_hours():
+            if live_session or not (settings.orderbook_at_close_only and self._is_after_market_close()):
                 logger.info("Orderbook snapshot skipped outside market hours")
                 if progress is not None:
                     progress.setdefault("stage_stats", {})
@@ -5478,47 +5930,45 @@ class DataPipeline:
             )
 
         total = 0
-        snapshot_time = datetime.utcnow()
-        trade_date = snapshot_time.date()
-        source = settings.vnstock_source or "VCI"
-
-        async with async_session_maker() as session:
-            existing = await session.execute(
-                select(func.count(OrderbookSnapshot.id)).where(
-                    func.date(OrderbookSnapshot.snapshot_time) == trade_date
-                )
-            )
-            if (existing.scalar() or 0) > 0:
-                logger.info("Orderbook snapshot already captured for today; skipping")
-                if progress is not None:
-                    progress.setdefault("stage_stats", {})
-                    progress["stage"] = "orderbook_snapshots"
-                    progress["stage_index"] = DAILY_TRADING_STAGES.index("orderbook_snapshots")
-                    progress["stage_stats"]["orderbook_snapshots"] = {
-                        "success": 0,
-                        "errors": 0,
-                        "total": 0,
-                        "skipped": True,
-                        "reason": "already_captured",
-                    }
-                    if sync_id is not None:
-                        await self._checkpoint(
-                            progress,
-                            sync_id,
-                            key=DAILY_TRADING_PROGRESS_KEY,
-                            ttl=DAILY_TRADING_PROGRESS_TTL,
-                        )
-                return 0
+        source = "VCI"
 
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
             await self._wait_for_rate_limit("orderbook")
+            coverage = {
+                "current_depth": {
+                    "scope": "current_batch",
+                    "historical_replay_supported": False,
+                    "status": "unknown",
+                },
+                "sql_depth": {"status": "not_attempted", "rows": 0, "error": None},
+                "mongo_depth": {"status": "not_attempted", "rows": 0, "error": None},
+            }
+            if progress is not None:
+                outcomes = progress.setdefault("acquisition_outcomes", {}).setdefault(symbol, {})
+                outcomes.update(coverage)
+                coverage = outcomes
             try:
                 depth = await VnstockPriceDepthFetcher.fetch(
                     symbol=symbol,
                     source=source,
                 )
-                payload = depth.model_dump()
+                snapshot_time = datetime.utcnow()
+                trade_date = snapshot_time.date()
+                payload = depth.model_dump(mode="json")
+                raw_levels = payload.get("raw_levels")
+                batch_status = "empty" if raw_levels == [] else "current_batch" if raw_levels else "unknown"
+                coverage["current_depth"].update({
+                    "status": batch_status,
+                    "rows": len(raw_levels or []),
+                    "observed_at": payload.get("observed_at"),
+                    "fetched_at": snapshot_time.isoformat(),
+                    "timestamp_meaning": payload.get("timestamp_meaning", "unknown"),
+                    "price_unit": payload.get("price_unit", "unknown"),
+                    "volume_unit": payload.get("volume_unit", "unknown"),
+                })
+                payload["current_depth"] = dict(coverage["current_depth"])
+                payload["latest_session_status"] = batch_status
                 values = {
                     "symbol": symbol,
                     "snapshot_time": snapshot_time,
@@ -5563,10 +6013,54 @@ class DataPipeline:
                     "total_ask_volume": payload.get("total_ask_volume"),
                     "created_at": datetime.utcnow(),
                 }
-                async with async_session_maker() as session:
-                    await session.execute(OrderbookSnapshot.__table__.insert(), values)
-                    await session.commit()
-                    total += 1
+                async def write_sql_depth():
+                    async with async_session_maker() as session:
+                        await session.execute(OrderbookSnapshot.__table__.insert(), values)
+                        await session.commit()
+                    return 1
+
+                def write_mongo_batch():
+                    from pymongo import ReplaceOne
+
+                    service = get_mongo_market_data_service()
+                    collection = service._get_collection("market_vnstock_premium_records")
+                    envelope = {
+                        "dataset": "equity.price_depth", "symbol": symbol,
+                        "source": "vnstock", "providerSource": "VCI",
+                        "updatedAt": snapshot_time, "syncedAt": snapshot_time,
+                        "observedAt": payload.get("observed_at"),
+                        "timestampMeaning": payload.get("timestamp_meaning", "unknown"),
+                        "priceUnit": payload.get("price_unit", "unknown"),
+                        "volumeUnit": payload.get("volume_unit", "unknown"),
+                        "coverage": dict(coverage["current_depth"]),
+                        "latestSessionStatus": batch_status,
+                        "historicalReplaySupported": False,
+                    }
+                    operations = []
+                    for index, raw in enumerate(raw_levels or []):
+                        key = f"free-vci:depth:{symbol}:{index}"
+                        operations.append(ReplaceOne(
+                            {"recordKey": key},
+                            {**envelope, "recordKey": key, "raw": raw}, upsert=True,
+                        ))
+                    key = f"free-vci:depth:{symbol}:latest-batch"
+                    operations.append(ReplaceOne(
+                        {"recordKey": key},
+                        {**envelope, "recordKey": key, "raw": {}, "batchReceipt": True,
+                         "rowCount": len(raw_levels or [])}, upsert=True,
+                    ))
+                    collection.bulk_write(operations, ordered=True)
+                    return len(raw_levels or [])
+
+                async def write_mongo_depth():
+                    return await asyncio.to_thread(write_mongo_batch)
+
+                coverage.update(await persist_trade_stores({
+                    "sql_depth": write_sql_depth, "mongo_depth": write_mongo_depth,
+                }))
+                for store in ("sql_depth", "mongo_depth"):
+                    coverage[store].setdefault("error", None)
+                total += coverage["sql_depth"]["rows"]
 
                 cache_payload = {
                     "symbol": symbol,
@@ -5600,6 +6094,12 @@ class DataPipeline:
                     "ask_1": payload.get("ask_1"),
                     "ask_2": payload.get("ask_2"),
                     "ask_3": payload.get("ask_3"),
+                    "current_depth": dict(coverage["current_depth"]),
+                    "latest_session_status": batch_status,
+                    "observed_at": payload.get("observed_at"),
+                    "timestamp_meaning": payload.get("timestamp_meaning", "unknown"),
+                    "price_unit": payload.get("price_unit", "unknown"),
+                    "volume_unit": payload.get("volume_unit", "unknown"),
                 }
 
                 latest_key = build_cache_key("vnibb", "orderbook", "latest", symbol)
@@ -5615,10 +6115,18 @@ class DataPipeline:
                 await self._cache_set_json(daily_key, cache_payload, CACHE_TTL_ORDERBOOK_DAILY)
 
                 if progress is not None:
-                    progress["success_count"] = progress.get("success_count", 0) + 1
-                    progress["stage_stats"]["orderbook_snapshots"]["success"] += 1
+                    failed = any(coverage[store]["status"] == "failed" for store in ("sql_depth", "mongo_depth"))
+                    counter = "error_count" if failed else "success_count"
+                    progress[counter] = progress.get(counter, 0) + 1
+                    stage_counter = "errors" if failed else "success"
+                    progress["stage_stats"]["orderbook_snapshots"][stage_counter] += 1
             except Exception as exc:
                 logger.warning(f"Orderbook snapshot failed for {symbol}: {exc}")
+                for store in ("sql_depth", "mongo_depth"):
+                    if coverage[store]["status"] == "not_attempted":
+                        coverage[store] = {"status": "failed", "rows": 0, "error": type(exc).__name__}
+                if coverage["current_depth"]["status"] == "unknown":
+                    coverage["current_depth"]["error"] = type(exc).__name__
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["orderbook_snapshots"]["errors"] += 1
@@ -6188,12 +6696,15 @@ class DataPipeline:
                 if cleanup_results:
                     logger.info(f"Retention cleanup results: {cleanup_results}")
 
-                progress["status"] = "completed"
-                await self._update_sync_record(
-                    sync_id, status="completed", additional_data=progress
-                )
+                cycles_complete = all(progress.get(key, {}).get("complete", True) for key in ("foreign_trading_cycle", "intraday_trades_cycle"))
+                failed = bool(progress.get("error_count", 0))
+                progress["complete"] = cycles_complete and not failed
+                progress["status"] = "failed" if failed else "completed" if cycles_complete else "partial"
+                await self._update_sync_record(sync_id, status=progress["status"], additional_data=progress)
                 await self._clear_progress(key=DAILY_TRADING_PROGRESS_KEY)
-                logger.info("✅ Daily trading updates completed successfully.")
+                if failed:
+                    raise RuntimeError("Daily trading acquisition has failed independent outcomes")
+                logger.info("Daily trading updates completed with status=%s", progress["status"])
             except Exception as exc:
                 progress["status"] = "failed"
                 await self._update_sync_record(sync_id, status="failed", additional_data=progress)
@@ -6446,35 +6957,6 @@ class DataPipeline:
 
 
 # Standalone functions for scheduler
-async def _get_scheduler_priority_symbols(limit: int) -> List[str]:
-    if limit <= 0:
-        return []
-
-    async with async_session_maker() as session:
-        snapshot_result = await session.execute(select(func.max(ScreenerSnapshot.snapshot_date)))
-        latest_snapshot = snapshot_result.scalar()
-
-        if latest_snapshot is not None:
-            rows = await session.execute(
-                select(ScreenerSnapshot.symbol)
-                .where(
-                    ScreenerSnapshot.snapshot_date == latest_snapshot,
-                    ScreenerSnapshot.market_cap.is_not(None),
-                )
-                .order_by(ScreenerSnapshot.market_cap.desc().nullslast())
-                .limit(limit)
-            )
-            symbols = [str(row[0]).upper() for row in rows.fetchall() if row[0]]
-            if symbols:
-                return symbols
-
-        rows = await session.execute(
-            select(Stock.symbol)
-            .where(Stock.is_active == 1)
-            .order_by(Stock.symbol.asc())
-            .limit(limit)
-        )
-        return [str(row[0]).upper() for row in rows.fetchall() if row[0]]
 
 
 async def run_daily_sync():
@@ -6499,25 +6981,6 @@ async def run_hourly_news_sync():
     logger.info(f"Hourly news sync completed with {count} articles")
 
 
-async def run_intraday_sync():
-    """Wrapper for scheduler to run limited market-hours vnstock updates."""
-    if not is_vietnam_market_open():
-        logger.info("Intraday scheduler sync skipped outside active market sessions")
-        return
-    symbols = await _get_scheduler_priority_symbols(settings.scheduler_live_symbols_per_run)
-    if not symbols:
-        logger.info("Intraday sync skipped: no priority symbols available")
-        return
-
-    results: Dict[str, int] = {}
-    results["intraday_trades"] = await data_pipeline.sync_intraday_trades(symbols=symbols)
-    results["orderbook_snapshots"] = await data_pipeline.sync_orderbook_snapshots(symbols=symbols)
-    results["derivative_prices"] = await data_pipeline.sync_derivatives_prices()
-    logger.info(
-        "Intraday scheduler sync completed for %s symbols with results=%s",
-        len(symbols),
-        results,
-    )
 
 
 data_pipeline = DataPipeline()

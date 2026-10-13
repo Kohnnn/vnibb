@@ -113,6 +113,16 @@ VN30_PRIORITY_SYMBOLS = {
 class TransactionFlowPoint(BaseModel):
     date: str
     price: Optional[float] = None
+    flow_scope: str = "unknown"
+    coverage: Optional[Dict[str, Any]] = None
+    observed_buy_value: Optional[float] = None
+    observed_sell_value: Optional[float] = None
+    observed_gross_value: Optional[float] = None
+    observed_net_value: Optional[float] = None
+    observed_buy_volume: Optional[int] = None
+    observed_sell_volume: Optional[int] = None
+    observed_volume: Optional[int] = None
+    observed_net_volume: Optional[int] = None
     total_buy_value: Optional[float] = None
     total_sell_value: Optional[float] = None
     total_gross_value: Optional[float] = None
@@ -6120,6 +6130,31 @@ def _orderbook_payload_has_prices(payload: dict[str, Any] | None) -> bool:
     return False
 
 
+# Depth acquisition receipts travel with the payload so consumers can tell an
+# explicit empty batch from a fetch that never observed anything. Only pass
+# them through when the source actually carries them; never infer a store
+# outcome that the writer did not record.
+_DEPTH_RECEIPT_KEYS = (
+    "current_depth",
+    "latest_session_status",
+    "observed_at",
+    "timestamp_meaning",
+    "price_unit",
+    "volume_unit",
+    "sql_depth",
+    "mongo_depth",
+)
+
+
+def _is_explicit_empty_depth_batch(payload: dict[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("latest_session_status") == "empty":
+        return True
+    receipt = payload.get("current_depth")
+    return isinstance(receipt, dict) and receipt.get("status") == "empty"
+
+
 def _apply_orderbook_reference_price(
     payload: dict[str, Any],
     reference_price: Any,
@@ -6188,6 +6223,14 @@ def _build_orderbook_payload(
         "last_volume": _depth_value(depth_data, "last_volume"),
         "snapshot_time": snapshot_time,
     }
+    for key in _DEPTH_RECEIPT_KEYS:
+        if isinstance(depth_data, dict):
+            if key in depth_data:
+                payload[key] = depth_data[key]
+        else:
+            value = getattr(depth_data, key, None)
+            if value is not None:
+                payload[key] = value
     return _normalize_orderbook_units(payload)
 
 
@@ -6197,7 +6240,7 @@ def _build_orderbook_payload_from_snapshot(snapshot: OrderbookSnapshot) -> dict[
         snapshot.price_depth or {},
         snapshot_time=_serialize_meta_datetime(snapshot.snapshot_time),
     )
-    if payload.get("entries"):
+    if payload.get("entries") or _is_explicit_empty_depth_batch(payload):
         return payload
 
     entries: List[dict[str, Any]] = []
@@ -6251,6 +6294,8 @@ async def _load_cached_orderbook_payload(symbol: str) -> dict[str, Any] | None:
     )
     if payload.get("entries") and _orderbook_payload_has_prices(payload):
         return payload
+    if _is_explicit_empty_depth_batch(payload):
+        return payload
     return None
 
 
@@ -6287,8 +6332,11 @@ async def _cache_orderbook_payload(symbol: str, payload: dict[str, Any]) -> None
 
 
 async def _get_orderbook_payload(symbol: str, db: AsyncSession) -> dict[str, Any]:
+    # A cached payload may carry an auditable depth receipt even without prices;
+    # _load_cached_orderbook_payload already returned None when the cache held
+    # neither prices nor an explicit batch receipt.
     cached_payload = await _load_cached_orderbook_payload(symbol)
-    if cached_payload is not None and _orderbook_payload_has_prices(cached_payload):
+    if cached_payload is not None:
         return cached_payload
 
     try:
@@ -6399,7 +6447,7 @@ async def get_intraday(symbol: str, limit: int = Query(200, ge=1, le=1000)):
     "/{symbol}/transaction-flow",
     response_model=StandardResponse[TransactionFlowPayload],
 )
-@cached(ttl=120, key_prefix="transaction_flow_v2")
+@cached(ttl=120, key_prefix="transaction_flow_v3")
 async def get_transaction_flow(
     symbol: str,
     days: int = Query(30, ge=5, le=90),
@@ -6422,7 +6470,7 @@ async def get_transaction_flow(
                 days=days,
                 scopes=["total", "domestic", "foreign", "proprietary"],
                 modes=["value", "volume"],
-                note="Domestic flow is derived as total minus foreign minus proprietary.",
+                note="Observed flow is the acquired sample; session totals and domestic derivation require verified full-session coverage.",
                 data=[],
             ),
             meta=MetaData(count=0, symbol=symbol_upper),
@@ -6466,6 +6514,15 @@ async def get_transaction_flow(
     for row in flow_rows:
         price_row = price_map.get(row.trade_date)
         foreign_row = foreign_map.get(row.trade_date)
+        coverage = row.coverage if isinstance(row.coverage, dict) else None
+        full_session = bool(
+            coverage
+            and coverage.get("scope") == "full_session"
+            and coverage.get("completed_session") is True
+        )
+        flow_scope = "full_session" if full_session else (
+            "sampled" if coverage and coverage.get("scope") == "sampled" else "unknown"
+        )
 
         price_value = _finite_float(None if price_row is None else price_row.close)
         total_buy_value = _finite_float(row.buy_value)
@@ -6483,6 +6540,14 @@ async def get_transaction_flow(
             and total_sell_volume is not None
         ):
             total_net_volume = _finite_int(total_buy_volume - total_sell_volume)
+        observed_gross_value = (
+            total_buy_value + total_sell_value
+            if total_buy_value is not None and total_sell_value is not None else None
+        )
+        observed_volume = (
+            total_buy_volume + total_sell_volume
+            if total_buy_volume is not None and total_sell_volume is not None else None
+        )
 
         foreign_net_volume = _finite_int(
             row.foreign_net_volume
@@ -6507,7 +6572,8 @@ async def get_transaction_flow(
 
         domestic_net_volume = None
         if (
-            total_net_volume is not None
+            full_session
+            and total_net_volume is not None
             and foreign_net_volume is not None
             and proprietary_net_volume is not None
         ):
@@ -6517,7 +6583,8 @@ async def get_transaction_flow(
 
         domestic_net_value = None
         if (
-            total_net_value is not None
+            full_session
+            and total_net_value is not None
             and foreign_net_value is not None
             and proprietary_net_value is not None
         ):
@@ -6529,18 +6596,24 @@ async def get_transaction_flow(
             TransactionFlowPoint(
                 date=row.trade_date.isoformat(),
                 price=price_value,
-                total_buy_value=total_buy_value,
-                total_sell_value=total_sell_value,
-                total_gross_value=(total_buy_value or 0.0) + (total_sell_value or 0.0)
-                if total_buy_value is not None or total_sell_value is not None
-                else None,
-                total_net_value=total_net_value,
-                total_buy_volume=total_buy_volume,
-                total_sell_volume=total_sell_volume,
-                total_volume=(total_buy_volume or 0) + (total_sell_volume or 0)
-                if total_buy_volume is not None or total_sell_volume is not None
-                else None,
-                total_net_volume=total_net_volume,
+                flow_scope=flow_scope,
+                coverage=coverage,
+                observed_buy_value=total_buy_value,
+                observed_sell_value=total_sell_value,
+                observed_gross_value=observed_gross_value,
+                observed_net_value=total_net_value,
+                observed_buy_volume=total_buy_volume,
+                observed_sell_volume=total_sell_volume,
+                observed_volume=observed_volume,
+                observed_net_volume=total_net_volume,
+                total_buy_value=total_buy_value if full_session else None,
+                total_sell_value=total_sell_value if full_session else None,
+                total_gross_value=observed_gross_value if full_session else None,
+                total_net_value=total_net_value if full_session else None,
+                total_buy_volume=total_buy_volume if full_session else None,
+                total_sell_volume=total_sell_volume if full_session else None,
+                total_volume=observed_volume if full_session else None,
+                total_net_volume=total_net_volume if full_session else None,
                 foreign_net_value=foreign_net_value,
                 foreign_net_volume=foreign_net_volume,
                 proprietary_net_value=proprietary_net_value,
@@ -6557,7 +6630,7 @@ async def get_transaction_flow(
         days=days,
         scopes=["total", "domestic", "foreign", "proprietary"],
         modes=["value", "volume"],
-        note="Domestic flow is derived as total minus foreign minus proprietary.",
+        note="Observed flow is the acquired sample; session totals and domestic derivation require verified full-session coverage.",
         data=points,
     )
     last_data_date = points[-1].date if points else None

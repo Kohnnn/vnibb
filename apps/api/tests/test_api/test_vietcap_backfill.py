@@ -1,28 +1,20 @@
 import sys
 from types import ModuleType
-from unittest.mock import ANY
 
 import pytest
 
 from scripts.vietcap import backfill_vietcap
 
 
-def test_select_symbols_for_fresh_ohlc_filters_before_limit_for_ohlc_only():
-    symbols, skipped_fresh = backfill_vietcap.select_symbols_for_fresh_ohlc(
-        ["AAA", "BBB", "CCC"], {"AAA", "CCC"}, ohlc_only=True
-    )
-
-    assert symbols[:1] == ["BBB"]
-    assert skipped_fresh == 2
+@pytest.fixture(autouse=True)
+def isolated_checkpoint(monkeypatch, tmp_path):
+    monkeypatch.setenv("VNIBB_BACKFILL_CHECKPOINT", str(tmp_path / "checkpoint.json"))
 
 
-def test_select_symbols_for_fresh_ohlc_keeps_mixed_datasets_symbols():
-    symbols, skipped_fresh = backfill_vietcap.select_symbols_for_fresh_ohlc(
-        ["AAA", "BBB"], {"AAA"}, ohlc_only=False
-    )
-
-    assert symbols == ["AAA", "BBB"]
-    assert skipped_fresh == 1
+def test_exact_success_receipt_replaces_fresh_date_heuristic():
+    state = {"receipts": {"AAA": {"ohlc": {"outcome": "succeeded"}}, "BBB": {"ohlc": {"outcome": "failed"}}}}
+    assert backfill_vietcap.completed_pair(state, "AAA", "ohlc")
+    assert not backfill_vietcap.completed_pair(state, "BBB", "ohlc")
 
 
 class FakeDatabase:
@@ -96,54 +88,22 @@ def test_ensure_indexes_creates_global_latest_date_index_in_key_order() -> None:
     ].indexes
 
 
-def test_skip_fresh_through_dry_run_requires_mongodb_url(monkeypatch):
+def test_default_inventory_never_requires_mongo_or_provider(monkeypatch, capsys):
+    monkeypatch.delenv("MONGODB_URL", raising=False)
+    monkeypatch.setattr(backfill_vietcap, "load_env_file", lambda _: None)
+    monkeypatch.setattr(backfill_vietcap, "VietcapClient", lambda: (_ for _ in ()).throw(AssertionError("provider constructed")))
+    monkeypatch.setattr(sys, "argv", ["backfill_vietcap.py"])
+    assert backfill_vietcap.main() == 0
+    assert '"mode": "read_only"' in capsys.readouterr().out
+
+
+def test_applied_backfill_requires_mongodb_url(monkeypatch):
     monkeypatch.delenv("MONGODB_URL", raising=False)
     monkeypatch.setattr(backfill_vietcap, "load_env_file", lambda _: None)
     monkeypatch.setattr(backfill_vietcap, "VietcapClient", FakeVietcapClient)
-    monkeypatch.setattr(sys, "argv", ["backfill_vietcap.py", "--skip-fresh-through", "2026-07-08"])
-
+    monkeypatch.setattr(sys, "argv", ["backfill_vietcap.py", "--apply"])
     with pytest.raises(SystemExit, match="MONGODB_URL is required"):
         backfill_vietcap.main()
-
-
-def test_skip_fresh_through_dry_run_skips_only_ohlc_for_mixed_datasets(
-    monkeypatch, capsys, fake_mongo
-):
-    monkeypatch.setenv("MONGODB_URL", "mongodb://readonly")
-    monkeypatch.setattr(backfill_vietcap, "VietcapClient", FakeVietcapClient)
-    monkeypatch.setattr(backfill_vietcap, "ohlc_rows_from_gap_chart", lambda *_: [])
-    monkeypatch.setattr(
-        "vnibb.services.vietcap_ingestion.upsert_ratio_rows",
-        lambda db, symbol, rows, **kwargs: 1,
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "backfill_vietcap.py",
-            "--symbols",
-            "AAA,BBB",
-            "--datasets",
-            "ohlc,ratios",
-            "--skip-fresh-through",
-            "2026-07-08",
-            "--limit",
-            "1",
-        ],
-    )
-
-    assert backfill_vietcap.main() == 0
-
-    output = capsys.readouterr().out
-    assert '"symbol_count": 1' in output
-    assert '"skipped_fresh": 1' in output
-    assert '"symbol": "AAA"' in output
-    assert '"ohlc": {"skipped_fresh": true}' in output
-    assert '"ratios": 1' in output
-    assert FakeMongoClient.database.pipeline == [
-        {"$match": {"source": "vietcap", "tradeDate": {"$gte": ANY}}},
-        {"$group": {"_id": "$symbol"}},
-    ]
 
 
 def test_cli_rejects_unknown_datasets(monkeypatch):
@@ -154,26 +114,28 @@ def test_cli_rejects_unknown_datasets(monkeypatch):
     assert error.value.code == 2
 
 
-def test_cli_caught_failure_is_nonzero(monkeypatch, capsys):
+def test_cli_caught_failure_is_nonzero(monkeypatch, capsys, fake_mongo):
     class FailedClient(FakeVietcapClient):
         def get_statistics_financial(self, symbol):
             raise RuntimeError("API unavailable")
 
     monkeypatch.setattr(backfill_vietcap, "load_env_file", lambda _: None)
+    monkeypatch.setenv("MONGODB_URL", "mongodb://fixture")
     monkeypatch.setattr(backfill_vietcap, "VietcapClient", FailedClient)
-    monkeypatch.setattr(sys, "argv", ["backfill_vietcap.py", "--symbols", "AAA", "--datasets", "ratios"])
+    monkeypatch.setattr(sys, "argv", ["backfill_vietcap.py", "--symbols", "AAA", "--datasets", "ratios", "--apply"])
     assert backfill_vietcap.main() == 1
     assert '"errors": 1' in capsys.readouterr().out
 
 
-def test_cli_empty_requested_data_is_nonzero(monkeypatch, capsys):
+def test_cli_empty_requested_data_is_nonzero(monkeypatch, capsys, fake_mongo):
     class EmptyClient(FakeVietcapClient):
         def get_statistics_financial(self, symbol):
             return []
 
     monkeypatch.setattr(backfill_vietcap, "load_env_file", lambda _: None)
+    monkeypatch.setenv("MONGODB_URL", "mongodb://fixture")
     monkeypatch.setattr(backfill_vietcap, "VietcapClient", EmptyClient)
-    monkeypatch.setattr(sys, "argv", ["backfill_vietcap.py", "--symbols", "AAA", "--datasets", "ratios"])
+    monkeypatch.setattr(sys, "argv", ["backfill_vietcap.py", "--symbols", "AAA", "--datasets", "ratios", "--apply"])
     assert backfill_vietcap.main() == 1
     assert '"unavailable": 1' in capsys.readouterr().out
 
@@ -266,6 +228,7 @@ def test_listing_writer_keeps_identity_when_metadata_changes():
 
 def test_ratio_annual_variant_retains_original_natural_key_and_units():
     from vnibb.services.vietcap_ingestion import upsert_ratio_rows
+    from vnibb.services.vietcap_financials import financial_fiscal_basis
 
     records = []
     raw = {"yearReport": 2025, "year": "2025", "quarter": 5, "ratioType": "RATIO_YEAR", "ratioYearId": 9, "unit": "ratio", "pe": 12}
@@ -274,6 +237,12 @@ def test_ratio_annual_variant_retains_original_natural_key_and_units():
     assert doc["datasetVariant"] == "finance.ratio.year"
     assert doc["recordKey"] == "vietcap:finance.ratio:VNM:2025-Q5:RATIO_YEAR"
     assert doc["fiscalQuarter"] is None
+    assert doc["period"] == "2025"
+    basis = financial_fiscal_basis(doc)
+    assert (basis["period"], basis["periodType"], basis["year"], basis["quarter"]) == (
+        "2025", "year", 2025, None,
+    )
+    assert doc["raw"] == raw
     assert doc["rawFiscalBasis"]["ratioYearId"] == 9
     assert doc["unitEvidence"] == {"unit": "ratio"}
     assert not doc["structured"]["values"]
@@ -400,7 +369,7 @@ def test_cli_applied_stock_prices_reach_structured_bridge(monkeypatch, capsys, f
     from vnibb.services import vietcap_financials, vietcap_ingestion
 
     class PriceClient(FakeVietcapClient):
-        def get_ohlc(self, symbol, *, count_back):
+        def get_ohlc(self, symbol, *, count_back, to_epoch=None):
             return {"o": [1], "h": [2], "l": [1], "c": [2], "v": [3], "t": [1720000000]}
 
     captured = []
@@ -410,7 +379,7 @@ def test_cli_applied_stock_prices_reach_structured_bridge(monkeypatch, capsys, f
         order.append("listing")
         return 1
 
-    async def persist(symbol, rows):
+    async def persist(symbol, rows, **kwargs):
         assert order == ["listing"]
         order.append("prices")
         captured.extend(rows)
@@ -435,7 +404,7 @@ def test_selected_listing_persists_before_first_stock_price(monkeypatch, fake_mo
     from vnibb.services import vietcap_financials, vietcap_ingestion
 
     class Client(FakeVietcapClient):
-        def get_ohlc(self, symbol, *, count_back):
+        def get_ohlc(self, symbol, *, count_back, to_epoch=None):
             return {"o": [1], "h": [2], "l": [1], "c": [2], "v": [3], "t": [1720000000]}
 
     order = []
@@ -444,7 +413,7 @@ def test_selected_listing_persists_before_first_stock_price(monkeypatch, fake_mo
         order.append("listing")
         return 1
 
-    async def prices(symbol, rows):
+    async def prices(symbol, rows, **kwargs):
         assert order == ["listing"]
         order.append("prices")
         return 1
@@ -459,3 +428,119 @@ def test_selected_listing_persists_before_first_stock_price(monkeypatch, fake_mo
     monkeypatch.setattr(sys, "argv", ["backfill_vietcap.py", "--symbols", "AAA", "--datasets", "listing,ohlc", "--apply"])
     assert backfill_vietcap.main() == 0
     assert order == ["listing", "prices"]
+
+
+def test_receipt_snapshot_survives_later_dataset_failure():
+    from datetime import datetime
+
+    path = backfill_vietcap.Path(backfill_vietcap.os.environ["VNIBB_BACKFILL_CHECKPOINT"])
+    state = backfill_vietcap.load_checkpoint(path, {"source": "vietcap"})
+    details = {"company_error": "API unavailable", "sourceResponse": {"receivedAt": datetime(2026, 10, 13, 12)}}
+    backfill_vietcap.save_receipt(path, state, "AAA", "company", "failed", details)
+    details["company_error"] = "rewritten later"
+    details["sourceResponse"]["receivedAt"] = datetime(2030, 1, 1)
+    backfill_vietcap.save_receipt(path, state, "AAA", "ohlc", "failed", {"ohlc_error": "boom"})
+    saved = backfill_vietcap.load_checkpoint(path, {"source": "vietcap"})["receipts"]["AAA"]["company"]["details"]
+    assert saved["company_error"] == "API unavailable"
+    assert saved["sourceResponse"]["receivedAt"] == str(datetime(2026, 10, 13, 12))
+
+
+def test_persisted_pair_cursor_resumes_company_after_recurring_ohlc_failure(monkeypatch, fake_mongo):
+    from vnibb.services import vietcap_financials, vietcap_ingestion
+
+    class Client(FakeVietcapClient):
+        def get_ohlc(self, symbol, *, count_back, to_epoch=None):
+            raise RuntimeError("OHLC provider down")
+
+        def get_company_details(self, symbol):
+            return {"organName": "Fixture Co"}
+
+    def pack(db, collection, symbol, rows, *, dry_run):
+        return len(rows) if rows else 1
+
+    monkeypatch.setenv("MONGODB_URL", "mongodb://fixture")
+    monkeypatch.setattr(backfill_vietcap, "load_env_file", lambda _: None)
+    monkeypatch.setattr(backfill_vietcap, "VietcapClient", Client)
+    monkeypatch.setattr(backfill_vietcap, "upsert_eod_rows", pack)
+    monkeypatch.setattr(vietcap_ingestion, "upsert_listing_rows", lambda *a, **k: 1)
+
+    async def listings(trading, search):
+        return len(trading)
+
+    monkeypatch.setattr(vietcap_financials, "persist_vietcap_listings", listings)
+    monkeypatch.setattr(vietcap_ingestion, "upsert_company_profile", lambda *a, **k: 1)
+
+    def base_argv(*datasets):
+        return ["backfill_vietcap.py", "--symbols", "AAA", "--datasets", ",".join(datasets),
+                "--apply", "--max-pairs", "1", "--checkpoint-file",
+                backfill_vietcap.os.environ["VNIBB_BACKFILL_CHECKPOINT"]]
+
+    monkeypatch.setattr(sys, "argv", base_argv("ohlc,company"))
+    assert backfill_vietcap.main() == 1
+    monkeypatch.setattr(sys, "argv", base_argv("ohlc,company"))
+    assert backfill_vietcap.main() == 0
+    state = backfill_vietcap.json.loads(
+        backfill_vietcap.Path(backfill_vietcap.os.environ["VNIBB_BACKFILL_CHECKPOINT"]).read_text()
+    )
+    assert state["receipts"]["AAA"]["company"]["outcome"] == "succeeded"
+    assert state["receipts"]["AAA"]["company"]["details"]["company"] == 1
+
+
+def test_cli_retains_invalid_source_bars_and_reports_failed_partial_window(monkeypatch, fake_mongo):
+    from datetime import UTC, datetime
+    from unittest.mock import AsyncMock
+
+    from vnibb.services import cache_manager, vietcap_financials, vietcap_ingestion
+
+    timestamps = [int(datetime(2013, 6, day, tzinfo=UTC).timestamp()) for day in (20, 21, 22)]
+
+    class Client(FakeVietcapClient):
+        def get_ohlc(self, symbol, *, count_back, to_epoch=None):
+            # Middle bar reproduces the observed AAA source bounds discrepancy.
+            return {"o": [3694.95] * 3, "h": [3694.95] * 3, "l": [3694.95] * 3,
+                    "c": [3694.95, 3722.12, 3694.95], "v": [11900, 11900, None], "t": timestamps}
+
+    mongo_rows = []
+
+    def preserve(db, collection, symbol, rows, *, dry_run):
+        mongo_rows.extend(rows)
+        return len(rows)
+
+    cache = AsyncMock()
+    cache.store_historical_prices.return_value = 1
+
+    async def listings(trading, search):
+        return 1
+
+    monkeypatch.setenv("MONGODB_URL", "mongodb://fixture")
+    monkeypatch.setattr(backfill_vietcap, "load_env_file", lambda _: None)
+    monkeypatch.setattr(backfill_vietcap, "VietcapClient", Client)
+    monkeypatch.setattr(backfill_vietcap, "upsert_eod_rows", preserve)
+    monkeypatch.setattr(vietcap_ingestion, "upsert_listing_rows", lambda *a, **k: 1)
+    monkeypatch.setattr(vietcap_financials, "persist_vietcap_listings", listings)
+    monkeypatch.setattr(cache_manager, "CacheManager", lambda: cache)
+    monkeypatch.setattr(sys, "argv", ["backfill_vietcap.py", "--symbols", "AAA", "--datasets", "ohlc", "--apply"])
+
+    assert backfill_vietcap.main() == 1
+    state = backfill_vietcap.json.loads(backfill_vietcap.Path(backfill_vietcap.os.environ["VNIBB_BACKFILL_CHECKPOINT"]).read_text())
+    receipt = state["receipts"]["AAA"]["ohlc"]
+    assert receipt["outcome"] == "failed"
+    assert not backfill_vietcap.completed_pair(state, "AAA", "ohlc")
+    details = receipt["details"]
+    assert details["ohlc"]["rows"] == len(mongo_rows) == 3
+    assert details["ohlc"]["history_complete"] is None
+    assert mongo_rows[1]["close"] == mongo_rows[1]["raw"]["c"] == 3722.12
+    assert details["price_admission"] == {
+        "source_rows": 3, "admitted_rows": 1, "rejected_rows": 2,
+        "rejected_reasons": {"invalid_ohlc_bounds": 1, "missing_negative_or_nonfinite_ohlcv": 1},
+        "admitted_first": "2013-06-20", "admitted_last": "2013-06-20",
+        "persisted_rows": 1, "persisted_first": "2013-06-20", "persisted_last": "2013-06-20",
+        "classification": "partial_source_invalid",
+    }
+    assert details["structured_price_rows"] == 1
+    assert "2 source rows unadmitted; 1/3 SQL rows persisted" in details["ohlc_error"]
+    persisted = cache.store_historical_prices.call_args.args[1]
+    assert len(persisted) == 1
+    assert persisted[0]["time"].isoformat() == "2013-06-20"
+    assert persisted[0]["open"] == persisted[0]["high"] == persisted[0]["low"] == persisted[0]["close"] == 3694.95
+    assert persisted[0]["volume"] == 11900

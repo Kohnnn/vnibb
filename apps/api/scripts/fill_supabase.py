@@ -17,12 +17,10 @@ from vnibb.models.stock import Stock, StockIndex
 from vnibb.models.technical_indicator import TechnicalIndicator
 from vnibb.models.trading import FinancialRatio, OrderbookSnapshot
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.providers.vnstock.equity_screener import VnstockScreenerFetcher, StockScreenerParams
 from vnibb.providers.vnstock.market_overview import VnstockMarketOverviewFetcher
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.data_pipeline import data_pipeline
 from vnibb.services.news_crawler import NewsCrawlerService
-from vnibb.services.sector_service import SectorService
 from vnibb.services.technical_analysis import TechnicalAnalysisService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -144,98 +142,6 @@ async def _sync_stock_indices(days: int = 30) -> int:
     return total
 
 
-async def _sync_sector_performance() -> int:
-    logger.info("Syncing sector performance...")
-    params = StockScreenerParams(
-        exchange="ALL",
-        limit=2000,
-        source=settings.vnstock_source,
-    )
-    screener_result = await VnstockScreenerFetcher.fetch(params)
-    screener_data = [s.model_dump() for s in screener_result] if screener_result else []
-    if not screener_data:
-        async with async_session_maker() as session:
-            latest_date = await session.scalar(select(func.max(ScreenerSnapshot.snapshot_date)))
-            if latest_date is None:
-                return 0
-            rows = await session.execute(
-                select(
-                    ScreenerSnapshot.symbol,
-                    ScreenerSnapshot.price,
-                    Company.industry,
-                )
-                .join(Company, Company.symbol == ScreenerSnapshot.symbol, isouter=True)
-                .where(ScreenerSnapshot.snapshot_date == latest_date)
-            )
-            screener_data = [
-                {
-                    "symbol": row[0],
-                    "price": row[1],
-                    "industry": row[2],
-                }
-                for row in rows.fetchall()
-            ]
-            if not screener_data:
-                return 0
-
-    sector_data = await SectorService.calculate_sector_performance(screener_data)
-    if not sector_data:
-        return 0
-
-    trade_date = date.today()
-    total = 0
-    async with async_session_maker() as session:
-        for sector in sector_data:
-            advance_count = 0
-            decline_count = 0
-            unchanged_count = 0
-            for stock in sector.stocks:
-                change = stock.change_pct
-                if change is None:
-                    continue
-                if change > 0:
-                    advance_count += 1
-                elif change < 0:
-                    decline_count += 1
-                else:
-                    unchanged_count += 1
-
-            sector_code = str(sector.sector_id)[:20]
-            values = {
-                "sector_code": sector_code,
-                "trade_date": trade_date,
-                "change_pct": sector.change_pct,
-                "avg_change_pct": sector.change_pct,
-                "top_gainer_symbol": sector.top_gainer.symbol if sector.top_gainer else None,
-                "top_gainer_change": sector.top_gainer.change_pct if sector.top_gainer else None,
-                "top_loser_symbol": sector.top_loser.symbol if sector.top_loser else None,
-                "top_loser_change": sector.top_loser.change_pct if sector.top_loser else None,
-                "advance_count": advance_count,
-                "decline_count": decline_count,
-                "unchanged_count": unchanged_count,
-                "created_at": datetime.utcnow(),
-            }
-            stmt = pg_insert(SectorPerformance).values(values).on_conflict_do_update(
-                constraint="uq_sector_perf_code_date",
-                set_={
-                    "change_pct": values["change_pct"],
-                    "avg_change_pct": values["avg_change_pct"],
-                    "top_gainer_symbol": values["top_gainer_symbol"],
-                    "top_gainer_change": values["top_gainer_change"],
-                    "top_loser_symbol": values["top_loser_symbol"],
-                    "top_loser_change": values["top_loser_change"],
-                    "advance_count": values["advance_count"],
-                    "decline_count": values["decline_count"],
-                    "unchanged_count": values["unchanged_count"],
-                },
-            )
-            await session.execute(stmt)
-            total += 1
-        await session.commit()
-
-    return total
-
-
 async def _sync_technical_indicators(symbols: list[str]) -> int:
     logger.info("Syncing technical indicators...")
     service = TechnicalAnalysisService()
@@ -336,7 +242,7 @@ async def main() -> None:
         await _sync_stock_indices()
 
     if counts["sector_performance"] < 1:
-        await _sync_sector_performance()
+        await data_pipeline.sync_sector_performance()
 
     if counts["technical_indicators"] < 100:
         symbols = await _get_active_symbols()
