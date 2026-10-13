@@ -33,9 +33,13 @@ class Collection:
         self.query = query
         if self.error:
             raise self.error
+        selected = [
+            row for row in self.rows
+            if all(row.get(key) == value for key, value in query.items() if not isinstance(value, dict))
+        ]
         # Exercise the actual reader projection, not a projection-ignoring stub.
         projected = []
-        for row in self.rows:
+        for row in selected:
             if any(value == 1 for value in projection.values()):
                 projected.append({key: value for key, value in row.items() if projection.get(key) == 1})
             else:
@@ -145,7 +149,7 @@ async def test_eod_one_sided_bounds(monkeypatch, start, end, key):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("period_type", ["YEAR", "Year", " year "])
 async def test_period_type_case_preserves_original_envelope(monkeypatch, period_type):
-    envelope = {"dataset": "finance.ratio", "datasetVariant": "finance.ratio.year", "source": "vietcap",
+    envelope = {"dataset": "finance.ratio", "symbol": "VNM", "datasetVariant": "finance.ratio.year", "source": "vietcap",
                 "periodType": period_type, "period": "FY2025", "fiscalYear": 2025,
                 "raw": {"yearReport": 2025, "quarter": 0}}
     service = MongoMarketDataService()
@@ -155,17 +159,60 @@ async def test_period_type_case_preserves_original_envelope(monkeypatch, period_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("override,state", [({"fiscalYear": 2024}, "invalid_financial_identity"), ({"periodType": "quarter"}, "invalid_financial_identity"), ({"periodType": "TTM"}, "unsupported_financial_period"), ({"period": "2025-Q5"}, "invalid_financial_identity")])
-async def test_supplied_contradictory_identity_is_disclosed(monkeypatch, override, state):
-    envelope = {"dataset": "finance.ratio", "datasetVariant": "finance.ratio.year", "source": "vietcap",
+@pytest.mark.parametrize("override", [
+    {"fiscalYear": 2024},
+    {"period": "2025-Q1"},
+    {"raw": {"yearReport": 2025, "quarter": 2}},
+    {"datasetVariant": "finance.ratio.ttm", "raw": {"yearReport": 2025, "quarter": 5, "ratioType": "RATIO_YEAR"}},
+    {"datasetVariant": "finance.ratio.ttm", "periodType": "year"},
+    {"period": "2018-Q5", "raw": {"yearReport": 2018, "quarter": 5, "ratioType": "RATIO_YEAR"}, "fiscalYear": 2019},
+    {"period": "2018-Q5", "raw": {"yearReport": 2018, "year": 2019, "quarter": 5, "ratioType": "RATIO_YEAR"}},
+])
+async def test_contradictory_supplied_identity_still_raises(monkeypatch, override):
+    envelope = {"dataset": "finance.ratio", "symbol": "VNM", "datasetVariant": "finance.ratio.year", "source": "vietcap",
                 "periodType": "year", "period": "FY2025", "fiscalYear": 2025,
                 "raw": {"yearReport": 2025, "quarter": 0}, **override}
     service = MongoMarketDataService()
     monkeypatch.setattr(service, "_get_collection", lambda _: Collection([envelope]))
     with pytest.raises(RuntimeError) as caught:
         await service.get_raw_dataset_records_precise("VNM", dataset="finance.ratio", source="vietcap")
-    assert caught.value.state == state
+    assert caught.value.state == "invalid_financial_identity"
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("override,reason", [
+    # Unsupported basis with no contradicting supplied identity.
+    ({"datasetVariant": "finance.ratio.ttm", "periodType": "TTM", "period": None, "fiscalQuarter": None,
+      "raw": {"yearReport": 2025, "quarter": 1, "ratioType": "RATIO_TTM", "pe": 1}}, "ratio_ttm"),
+    ({"datasetVariant": "finance.ratio.ttm", "periodType": "TTM", "period": None, "fiscalQuarter": None,
+      "raw": {"yearReport": 2025, "ratioTTMId": 7, "pe": 1}}, "ratio_ttm"),
+    ({"datasetVariant": "finance.ratio.monthly", "periodType": None, "period": None,
+      "raw": {"yearReport": 2025, "pe": 1}}, "unsupported_variant:finance.ratio.monthly"),
+])
+async def test_unrepresentable_period_is_disclosed_not_coerced(monkeypatch, override, reason):
+    envelope = {"dataset": "finance.ratio", "symbol": "VNM", "datasetVariant": "finance.ratio.year", "source": "vietcap",
+                "recordKey": "vietcap:finance.ratio:VNM:ttm", "periodType": None, "fiscalQuarter": None,
+                "period": "FY2025", "fiscalYear": 2025, "raw": {"yearReport": 2025, "quarter": 0, "pe": 1}, **override}
+    service = MongoMarketDataService()
+    monkeypatch.setattr(service, "_get_collection", lambda _: Collection([envelope]))
+    rows = await service.get_raw_dataset_records_precise("VNM", dataset="finance.ratio", source="vietcap")
+    assert rows == []
+    assert rows.metadata["unrepresentable_financial_identity"] == {envelope["recordKey"]: reason}
+    assert rows.metadata["legacy_period_labels"] == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_annual_period_label_disclosed_without_poisoning_read(monkeypatch):
+    legacy = {"dataset": "finance.ratio", "symbol": "VNM", "datasetVariant": "finance.ratio.year", "source": "vietcap", "recordKey": "vietcap:finance.ratio:VNM:2025-Q5:RATIO_YEAR",
+              "periodType": "YEAR", "period": "2025-Q5", "fiscalYear": 2025, "fiscalQuarter": None, "raw": {"yearReport": 2025, "quarter": 5, "ratioType": "RATIO_YEAR", "pe": 1}}
+    canonical = {"dataset": "finance.ratio", "symbol": "VNM", "datasetVariant": "finance.ratio.year", "source": "vietcap", "recordKey": "vietcap:finance.ratio:VNM:FY2024:RATIO_YEAR",
+                 "periodType": "year", "period": "FY2024", "fiscalYear": 2024, "raw": {"yearReport": 2024, "quarter": 0, "pe": 2}}
+    service = MongoMarketDataService()
+    monkeypatch.setattr(service, "_get_collection", lambda _: Collection([legacy, canonical]))
+    rows = await service.get_raw_dataset_records_precise("VNM", dataset="finance.ratio", source="vietcap")
+    assert rows == [canonical]
+    assert rows.metadata["legacy_period_labels"] == [legacy["recordKey"]]
+    assert rows.metadata["unrepresentable_financial_identity"] == {}
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method,args,kwargs", READS)
@@ -257,6 +304,26 @@ async def test_actual_iq_writer_envelope_reader_parity(monkeypatch, dataset, sec
     assert set(response["items"][0]) == set(records[0])
     assert response["items"][0]["period"] == records[0]["period"]
     assert response["items"][0]["recordKey"] == records[0]["recordKey"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", [{"yearReport": 2025, "quarter": 1, "ratioType": "RATIO_TTM", "pe": 1}, {"yearReport": 2025, "ratioTTMId": 7, "pe": 1}])
+async def test_actual_ttm_writer_row_disclosed_not_coerced(monkeypatch, raw):
+    from vnibb.services.vietcap_ingestion import upsert_ratio_rows
+    records = []
+    upsert_ratio_rows({}, "VNM", [raw], records=records, dry_run=True)
+    assert records[0]["datasetVariant"] == "finance.ratio.ttm"
+    assert records[0]["periodType"] is None
+    assert records[0]["fiscalQuarter"] is None
+    server = enable_public_reader(monkeypatch, DatasetCollection(records))
+    for kwargs in ({}, {"period_type": "quarter"}, {"period_type": "year"}):
+        response = await server.get_premium_dataset("VNM", "finance.ratio", **kwargs)
+        assert response["row_count"] == 0
+        if not kwargs:
+            assert response["unrepresentable_financial_identity"] == {records[0]["recordKey"]: "ratio_ttm"}
+        else:
+            assert "unrepresentable_financial_identity" not in response
+    assert records[0]["raw"] == raw
 
 
 @pytest.mark.asyncio

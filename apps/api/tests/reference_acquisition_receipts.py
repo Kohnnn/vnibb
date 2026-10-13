@@ -2,9 +2,10 @@
 
 Covers the reference acquisition receipts and the insider identity/unit repair:
 native provider admission, durable same-day identity against real SQL, and the
-unknown-direction consumer contract.
+unknown-direction and 90-day window monetary admission contracts.
 """
 
+from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -13,10 +14,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import vnibb.services.data_pipeline as pipeline_module
-from vnibb.core.insider_units import normalize_deal_action
+from vnibb.core.insider_units import admitted_deal_value, normalize_deal_action
 from vnibb.providers.vnstock.insider_deals import VnstockInsiderDealsFetcher
+from vnibb.models.news import InsiderDeal
 from vnibb.services.ai_context_service import _build_insider_context
 from vnibb.services.data_pipeline import DataPipeline
+from vnibb.services.insider_tracking import InsiderTrackingService
 
 
 WRITERS = [
@@ -358,6 +361,19 @@ def test_utility_normalizes_supplied_direction_and_preserves_unknown():
     assert normalize_deal_action("chuyển nhượng") == "UNKNOWN"
 
 
+def test_admitted_deal_value_requires_finite_value_and_vnd_evidence():
+    def deal(value, unit):
+        raw = {} if unit is None else {"value_unit": unit}
+        return SimpleNamespace(deal_value=value, raw_data=raw)
+
+    assert admitted_deal_value(deal(1000.0, "VND")) == 1000.0
+    assert admitted_deal_value(deal(0.0, "VND")) == 0.0
+    assert admitted_deal_value(deal(1000.0, None)) is None
+    assert admitted_deal_value(deal(1000.0, "unknown")) is None
+    assert admitted_deal_value(deal(None, "VND")) is None
+    assert admitted_deal_value(deal(float("nan"), "VND")) is None
+
+
 def test_consumer_counts_sell_and_ignores_unknown_direction():
     context = _build_insider_context([
         {"announce_date": "2026-07-09", "deal_action": "Bán", "deal_value": 5},
@@ -370,3 +386,98 @@ def test_consumer_counts_sell_and_ignores_unknown_direction():
     assert context["summary"]["buy_count"] == 1
     assert context["summary"]["sell_count"] == 1
     assert context["summary"]["total_disclosed_value"] == 24
+
+
+# ---------------------------------------------------------------------------
+# 90-day sentiment window against real SQL (no limit, no partial sums)
+# ---------------------------------------------------------------------------
+
+async def _sentiment_db():
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as conn:
+        await conn.execute(text(_DDL))
+    return engine, async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+
+
+def _stored_deal(symbol, days_ago, action, value, unit, name="Insider"):
+    raw = {"action_type_vi": action}
+    if unit is not None:
+        raw["value_unit"] = unit
+    return InsiderDeal(
+        symbol=symbol,
+        announce_date=date.today() - timedelta(days=days_ago),
+        deal_action=action,
+        deal_value=value,
+        insider_name=name,
+        raw_data=raw,
+    )
+
+
+@pytest.mark.asyncio
+async def test_sentiment_withholds_money_when_any_classified_row_lacks_units():
+    engine, session_factory = await _sentiment_db()
+    async with session_factory() as session:
+        session.add_all(
+            [_stored_deal("VNM", day, "BUY", 1000.0, "VND") for day in range(1, 21)]
+            + [_stored_deal("VNM", 25, "BUY", 1000.0, "unknown")]
+        )
+        await session.commit()
+        sentiment = await InsiderTrackingService(session).calculate_insider_sentiment("VNM", 90)
+
+    # The 21st row is inside the window; without a row limit it is seen, so the
+    # partial sum is withheld instead of certified as VND.
+    assert sentiment["total_deals"] == 21
+    assert sentiment["buy_count"] == 21
+    assert (sentiment["buy_value"], sentiment["sell_value"]) == (None, None)
+    assert (sentiment["net_value"], sentiment["sentiment_score"]) == (None, None)
+    assert sentiment["value_unit"] is None
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sentiment_certifies_money_and_keeps_admitted_zero():
+    engine, session_factory = await _sentiment_db()
+    async with session_factory() as session:
+        session.add_all(
+            [_stored_deal("VNM", day, "BUY", 1000.0, "VND") for day in range(1, 21)]
+            + [_stored_deal("VNM", 25, "SELL", 1000.0, "VND")]
+        )
+        await session.commit()
+        certified = await InsiderTrackingService(session).calculate_insider_sentiment("VNM", 90)
+
+    assert certified["value_unit"] == "VND"
+    assert certified["buy_value"] == 20000.0 and certified["sell_value"] == 1000.0
+    assert certified["net_value"] == 19000.0
+    assert certified["sell_count"] == 1 and certified["total_deals"] == 21
+
+    async with session_factory() as session:
+        session.add_all([
+            _stored_deal("SSI", 1, "BUY", 0.0, "VND"),
+            _stored_deal("SSI", 2, "SELL", 0.0, "VND"),
+        ])
+        await session.commit()
+        zero = await InsiderTrackingService(session).calculate_insider_sentiment("SSI", 90)
+
+    # An admitted zero stays zero; only the absent value/unit withholds money.
+    assert (zero["buy_value"], zero["sell_value"], zero["net_value"]) == (0.0, 0.0, 0.0)
+    assert zero["sentiment_score"] == 0.0 and zero["value_unit"] == "VND"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sentiment_unknown_direction_counts_but_never_certifies_money():
+    engine, session_factory = await _sentiment_db()
+    async with session_factory() as session:
+        session.add_all([
+            _stored_deal("HPG", 1, "BUY", 500.0, "VND"),
+            _stored_deal("HPG", 2, "chuyển nhượng", 500.0, None, name="Other"),
+        ])
+        await session.commit()
+        sentiment = await InsiderTrackingService(session).calculate_insider_sentiment("HPG", 90)
+
+    # UNKNOWN direction is neither a buy nor a sell, and its unadmitted value
+    # does not poison the classified aggregate.
+    assert sentiment["total_deals"] == 2
+    assert (sentiment["buy_count"], sentiment["sell_count"]) == (1, 0)
+    assert sentiment["buy_value"] == 500.0 and sentiment["value_unit"] == "VND"
+    await engine.dispose()

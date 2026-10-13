@@ -4,6 +4,7 @@ import { buildOwnershipSummary } from '../ownershipAnalytics'
 import { computePairStats, dailyReturns, makeRng, runDrawdownBootstrap, toDatedCloses } from '../quantLabMath'
 import { buildQuantRegimeSummary, computeHurstFromPrices, scoreDrawdown, scoreFlow } from '../quantRegime'
 import { runDcf, solveImpliedGrowth } from '../valuationLab'
+import type { InsiderSentiment } from '@/types/insider'
 
 describe('quant analytics helpers', () => {
   it('normalizes close rows and computes daily returns', () => {
@@ -94,17 +95,33 @@ describe('valuation analytics', () => {
   })
 })
 
+// The sentiment endpoint only ships money when its own windowed unit evidence is
+// VND; this stub exercises both the admitted and undeclared payload shapes.
+function insider(netValue: number | null, valueUnit: string | null): InsiderSentiment {
+  return {
+    symbol: 'FPT', period_days: 90, buy_count: 1, sell_count: 1,
+    buy_value: netValue, sell_value: 0, net_value: netValue,
+    sentiment_score: 0, total_deals: 2, value_unit: valueUnit,
+  }
+}
+
 describe('ownership analytics', () => {
   it('normalizes ratio ownership fields and scores positive flows', () => {
     const summary = buildOwnershipSummary([
       { symbol: 'FPT', shareholder_name: 'Fund A', shareholder_type: 'Institutional fund', ownership_pct: 0.3 },
       { symbol: 'FPT', shareholder_name: 'Foreign B', shareholder_type: 'Foreign investor', ownership_pct: 0.2 },
       { symbol: 'FPT', shareholder_name: 'Exec C', shareholder_type: 'Management insider', ownership_pct: 0.1 },
-    ], [{ buy_volume: 1000, sell_volume: 250 }], { net_value: 500 } as never)
+    ], [{ buy_volume: 1000, sell_volume: 250 }], insider(500, 'VND'))
     expect(summary.top3Pct).toBe(60)
     expect(summary.foreignNetVolume).toBe(750)
     expect(summary.insiderNetValue).toBe(500)
     expect(summary.grade).toBe('A')
+  })
+
+  it('ignores insider net value that ships without its own unit evidence', () => {
+    expect(buildOwnershipSummary([], [], insider(500, 'VND')).insiderNetValue).toBe(500)
+    expect(buildOwnershipSummary([], [], insider(500, null)).insiderNetValue).toBeNull()
+    expect(buildOwnershipSummary([], [], insider(null, null)).insiderNetValue).toBeNull()
   })
 })
 

@@ -88,6 +88,7 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
     interpretation: 'Use it to judge whether the ownership base looks constructive, overly concentrated, or distribution-prone before doing deeper ownership work.',
     limitations: [
       'This is a synthesis layer over available ownership and insider datasets, not a regulatory ownership-quality grade.',
+      'The insider net value stays unavailable unless the sentiment payload declares its own VND unit evidence; an undeclared unit neither scores nor renders a figure.',
     ],
   },
   derivatives_analytics: {

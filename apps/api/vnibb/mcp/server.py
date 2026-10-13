@@ -1879,6 +1879,7 @@ async def get_premium_dataset(
         "period_type": normalized_period,
         "data_status": "available" if records else "empty",
         "freshness": "not_assessed; inspect observedAt/sourceDate and fiscal period",
+        **serialize_data_value(getattr(records, "metadata", {})),
         "provider_execution": False,
         "row_count": len(records),
         "items": serialize_data_value(records),

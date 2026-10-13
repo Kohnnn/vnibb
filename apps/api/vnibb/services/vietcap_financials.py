@@ -112,40 +112,58 @@ def financial_fiscal_basis(record: Mapping[str, Any]) -> dict[str, Any]:
     variant = str(record.get("datasetVariant", "")).rsplit(".", 1)[-1]
     years = {_integer(raw[key]) for key in ("yearReport", "year", "fiscalYear") if raw.get(key) is not None}
     year = next(iter(years)) if len(years) == 1 else None
+    contradictory = len(years - {None}) > 1
     quarter = None
-    if variant == "quarter":
+    if variant in {"quarter", "ttm"}:
         quarters = {_integer(raw[key]) for key in ("lengthReport", "quarter", "fiscalQuarter") if raw.get(key) is not None}
         quarter = next(iter(quarters)) if len(quarters) == 1 else None
+        contradictory = contradictory or len(quarters - {None}) > 1
     valid = year is not None and 1900 <= year <= 9999 and variant in {"year", "quarter"}
     valid = valid and record.get("dataset") in _MODELS and record.get("datasetVariant") == f"{record.get('dataset')}.{variant}"
     valid = valid and (variant == "year" or quarter in {1, 2, 3, 4})
-    if record.get("dataset") == "finance.ratio" and (
-        raw.get("ratioType") == "RATIO_TTM" or raw.get("ratioTTMId") is not None
-    ):
+    ratio_type = raw.get("ratioType") if record.get("dataset") == "finance.ratio" else None
+    ttm = record.get("dataset") == "finance.ratio" and (
+        ratio_type == "RATIO_TTM" or (ratio_type in (None, "") and raw.get("ratioTTMId") is not None)
+    )
+    if record.get("dataset") == "finance.ratio" and ratio_type not in (None, "", "RATIO_YEAR", "RATIO_TTM"):
         valid = False
+    if ratio_type == "RATIO_YEAR" and variant == "quarter":
+        valid = False
+        contradictory = True
     annual_quarters = (None, 0, "0", 5, "5") if record.get("dataset") == "finance.ratio" and raw.get("ratioType") == "RATIO_YEAR" else (None, 0, "0")
     if variant == "year" and (raw.get("quarter") not in annual_quarters or raw.get("lengthReport") not in (None, 5, "5")):
         valid = False
+        contradictory = contradictory or not ttm
     for supplied in (record, raw):
         if supplied.get("periodType") is not None and _label(supplied["periodType"]) != variant:
             valid = False
+            contradictory = contradictory or variant in {"year", "quarter", "ttm"}
         if supplied.get("fiscalYear") is not None and _integer(supplied["fiscalYear"]) != year:
             valid = False
-        if variant == "quarter" and supplied.get("fiscalQuarter") is not None and _integer(supplied["fiscalQuarter"]) != quarter:
+            contradictory = contradictory or year is not None
+        if variant in {"quarter", "ttm"} and supplied.get("fiscalQuarter") is not None and _integer(supplied["fiscalQuarter"]) != quarter:
             valid = False
+            contradictory = contradictory or quarter is not None
         if variant == "year" and supplied.get("fiscalQuarter") is not None and supplied["fiscalQuarter"] not in annual_quarters:
             valid = False
+            contradictory = True
         if supplied.get("period") is None:
             continue
         text = str(supplied["period"]).upper()
         annual = re.fullmatch(r"(?:FY)?(\d{4})", text)
         quarterly = re.fullmatch(r"Q([1-4])-(\d{4})|(\d{4})-Q([1-4])", text)
         if variant == "year":
-            valid = valid and annual is not None and int(annual[1]) == year
+            matches = annual is not None and int(annual[1]) == year
+            valid = valid and matches
+            contradictory = contradictory or (year is not None and not matches)
         else:
             period_year = int(quarterly[2] or quarterly[3]) if quarterly else None
             period_quarter = int(quarterly[1] or quarterly[4]) if quarterly else None
-            valid = valid and quarterly is not None and (period_year, period_quarter) == (year, quarter)
+            matches = quarterly is not None and (period_year, period_quarter) == (year, quarter)
+            valid = valid and matches
+            contradictory = contradictory or (year is not None and quarter is not None and not matches)
+    reason = "contradictory" if contradictory else "ratio_ttm" if ttm else None if valid else "unavailable"
+    valid = valid and not ttm and not contradictory
     quarter_basis = _explicit_basis(raw, ("quarterBasis", "flowBasis", "flow_basis"), {"single_quarter", "cumulative_ytd"})
     scopes = [raw[key] for key in ("consolidationBasis", "consolidation_basis") if raw.get(key) is not None]
     scopes.extend("consolidated" if raw[key] else "separate" for key in ("consolidated", "isConsolidated") if isinstance(raw.get(key), bool))
@@ -155,6 +173,7 @@ def financial_fiscal_basis(record: Mapping[str, Any]) -> dict[str, Any]:
             "year": year if valid else None, "quarter": quarter if valid else None,
             "periodType": variant if valid else None,
             "period": (str(year) if variant == "year" else f"Q{quarter}-{year}") if valid else None,
+            "reason": reason,
             "quarterBasis": quarter_basis, "consolidation": consolidation, "publicationDate": _publication_date(raw.get("publicDate"))}
 
 

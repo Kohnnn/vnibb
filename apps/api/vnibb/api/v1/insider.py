@@ -146,16 +146,25 @@ class AlertSettingsUpdate(BaseModel):
 
 
 class InsiderSentimentResponse(BaseModel):
-    """Insider sentiment analysis response"""
+    """Insider sentiment analysis response.
+
+    `buy_value`/`sell_value`/`net_value` are canonical VND only when every
+    classified deal in the window carries finite value + VND unit evidence;
+    `value_unit` reports that admission ("VND" or null). Unadmitted aggregates
+    and the derived `sentiment_score` are null rather than a partial sum.
+    `buy_count`/`sell_count`/`total_deals` always count stored rows and UNKNOWN
+    direction stays neutral.
+    """
 
     symbol: str
     period_days: int
     buy_count: int
     sell_count: int
-    buy_value: float
-    sell_value: float
-    net_value: float
-    sentiment_score: float
+    buy_value: Optional[float]
+    sell_value: Optional[float]
+    net_value: Optional[float]
+    sentiment_score: Optional[float]
+    value_unit: Optional[str] = None
     total_deals: int
 
 

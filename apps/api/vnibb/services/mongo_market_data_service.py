@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
@@ -489,19 +490,65 @@ class MongoMarketDataService:
             if dataset.startswith("finance."):
                 from vnibb.services.vietcap_financials import financial_fiscal_basis
 
+                retained: list[dict[str, Any]] = []
+                legacy_labels: list[str] = []
+                unrepresentable: dict[str, str] = {}
                 for row in rows:
                     if row.get("source") != "vietcap":
+                        retained.append(row)
                         continue
                     raw = row.get("raw") or {}
-                    supplied_variant = row.get("datasetVariant")
+                    basis = financial_fiscal_basis(row)
+                    if basis["period"] is not None:
+                        retained.append(row)
+                        continue
+                    key = str(row.get("recordKey"))
+                    # A legacy row whose only defect is the pre-canonical writer
+                    # stamping an annual RATIO_YEAR row (raw quarter 5) with a
+                    # ``YYYY-Q5`` outer period label: the raw identity is valid and
+                    # the label alone is unusable. Any other contradictory fiscal
+                    # identity keeps failing the read.
+                    if basis["reason"] == "contradictory":
+                        alias = re.fullmatch(r"(\d{4})-Q5", str(row.get("period") or ""))
+                        stripped = {field: value for field, value in row.items() if field != "period"}
+                        stripped_year = financial_fiscal_basis(stripped)["year"]
+                        if (
+                            alias
+                            and raw.get("ratioType") == "RATIO_YEAR"
+                            and raw.get("quarter") in (5, "5")
+                            and stripped_year is not None
+                            and int(alias[1]) == stripped_year
+                        ):
+                            legacy_labels.append(key)
+                            continue
+                        raise MongoReadError("invalid_financial_identity")
+                    supplied_variant = str(row.get("datasetVariant"))
                     supplied_type = row.get("periodType", raw.get("periodType"))
-                    if supplied_type is not None and str(supplied_type).strip().lower() not in {"year", "quarter"}:
-                        raise MongoReadError("unsupported_financial_period")
-                    if supplied_variant is not None and supplied_variant not in {f"{dataset}.year", f"{dataset}.quarter"}:
-                        raise MongoReadError("unsupported_financial_period")
-                    if supplied_variant and any(raw.get(key) is not None for key in ("yearReport", "year", "fiscalYear")):
-                        if financial_fiscal_basis(row)["period"] is None:
-                            raise MongoReadError("invalid_financial_identity")
+                    normalized_type = str(supplied_type).strip().lower() if supplied_type is not None else None
+                    # Any supplied period type that disagrees with the stored
+                    # variant basis is an explicit conflicting identity.
+                    if normalized_type is not None and normalized_type != supplied_variant.rsplit(".", 1)[-1]:
+                        raise MongoReadError("invalid_financial_identity")
+                    # A trailing-twelve-month row has no canonical annual/quarterly
+                    # identity and must never be coerced into one; it is disclosed
+                    # rather than failing the whole symbol/dataset read.
+                    if basis["reason"] == "ratio_ttm":
+                        unrepresentable[key] = "ratio_ttm"
+                        continue
+                    if supplied_variant not in {f"{dataset}.year", f"{dataset}.quarter"}:
+                        unrepresentable[key] = f"unsupported_variant:{supplied_variant}"
+                        continue
+                    if not any(raw.get(field) is not None for field in ("yearReport", "year", "fiscalYear")):
+                        # Legacy ordinary row without fiscal identity; retained as stored.
+                        retained.append(row)
+                        continue
+                    unrepresentable[key] = "unavailable"
+                if legacy_labels or unrepresentable:
+                    return MongoReadRows(retained, {
+                        "legacy_period_labels": legacy_labels,
+                        "unrepresentable_financial_identity": unrepresentable,
+                    })
+                rows = retained
             return rows
 
         return await _read_mongo(_read, empty_page=empty_page)

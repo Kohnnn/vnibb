@@ -12,7 +12,7 @@ from vnibb.services.data_pipeline import DataPipeline
 def acquisition(monkeypatch):
     attempts, rows, receipts, queries = [], [], [], []
     state = SimpleNamespace(failure=None, conflict=None, cache_failure=False, periods=None,
-                            empty=None, system_exit=None)
+                            empty=None, system_exit=None, failure_by_symbol=None)
     pipeline = DataPipeline()
 
     class Result:
@@ -76,7 +76,9 @@ def acquisition(monkeypatch):
         if state.failure == kind:
             raise RuntimeError(f'{kind} unavailable')
         periods = state.periods or [str(datetime.utcnow().year - 1)]
-        return [FinancialStatementData(symbol='VNM', statement_type=kind, period=period,
+        if state.failure_by_symbol == query['symbol']:
+            raise RuntimeError(f'{kind} unavailable for {query["symbol"]}')
+        return [FinancialStatementData(symbol=query['symbol'], statement_type=kind, period=period,
                     source='VCI', value_unit=None, unavailable_reason='unknown_source_unit',
                     raw_data={'provider_value': 123}).model_dump(mode='json') for period in periods]
 
@@ -103,10 +105,9 @@ async def test_independent_failure_retains_other_statement_commits(acquisition, 
     outcomes = progress['financial_acquisition']['outcomes']['VNM']
     assert outcomes[failed]['status'] == 'failed'
     assert all(outcomes[kind]['status'] == 'completed' for kind in attempts if kind != failed)
-    assert len([r for r in receipts if r['sync_type'] == 'financial_acquisition'
-                and r['status'] != 'running']) == 3
-    assert len([r for r in receipts if r['sync_type'] == 'financial_acquisition'
-                and r['status'] == 'running']) == 2
+    terminal = [r for r in receipts if r['sync_type'] == 'financial_acquisition'
+                and r['status'] != 'running']
+    assert len(terminal) == 3
     assert all(r['additional_data']['cycle_id'] for r in receipts)
 
 
@@ -241,3 +242,41 @@ async def test_empty_or_aborted_statement_does_not_skip_other_statements(acquisi
     assert attempts == ['income', 'balance', 'cashflow']
     assert len(rows) == 2
     assert progress['financial_acquisition']['outcomes']['VNM']['income']['status'] == 'failed'
+
+
+@pytest.mark.asyncio
+async def test_resumed_cycle_completeness_counts_whole_cycle_not_suffix(acquisition):
+    pipeline, state, _, _, receipts, _ = acquisition
+    cycle_receipts = lambda: [r['additional_data'] for r in receipts
+                              if r['sync_type'] == 'financial_cycle']
+    progress = {}
+    await pipeline.sync_financials(symbols=['AAA', 'BBB'], count=1, progress=progress)
+    assert progress['financial_acquisition']['complete'] is True
+    assert progress['financial_acquisition']['expected_symbol_count'] == 2
+    assert progress['financial_acquisition']['attempted_symbols'] == ['AAA', 'BBB']
+    assert cycle_receipts()[-1]['status'] == 'completed'
+    assert cycle_receipts()[-1]['cycle_outcome'] == 'completed'
+
+    # Resume the checkpointed cycle: AAA already admitted, BBB re-fails.
+    progress['last_symbol'] = 'AAA'
+    state.failure_by_symbol = 'BBB'
+    await pipeline.sync_financials(symbols=['AAA', 'BBB'], count=1, progress=progress)
+    resumed = progress['financial_acquisition']
+    assert resumed['attempted_symbols'] == ['BBB']
+    assert resumed['expected_symbol_count'] == 2
+    assert resumed['complete'] is False
+    assert resumed['cycle_outcome'] == 'incomplete'
+    assert resumed['symbol_statuses']['AAA'] == ['completed']
+    assert resumed['symbol_statuses']['BBB'] == ['failed']
+    assert cycle_receipts()[-1]['status'] == 'partial'
+
+    # Caller re-presents the cycle with the checkpoint rewound to the last admitted symbol;
+    # BBB now succeeds and the cycle certifies both without re-acquiring AAA.
+    progress['last_symbol'] = 'AAA'
+    state.failure_by_symbol = None
+    await pipeline.sync_financials(symbols=['AAA', 'BBB'], count=1, progress=progress)
+    assert cycle_receipts()[-1]['complete'] is True
+    assert cycle_receipts()[-1]['cycle_outcome'] == 'completed'
+    assert cycle_receipts()[-1]['status'] == 'completed'
+    assert cycle_receipts()[-1]['attempted_symbols'] == ['BBB']
+    assert cycle_receipts()[-1]['symbol_statuses']['AAA'] == ['completed']

@@ -24,7 +24,7 @@ from vnibb.models.alerts import (
     AlertType, AlertSeverity, TradeSide
 )
 from vnibb.core.database import get_db
-from vnibb.core.insider_units import normalize_deal_action
+from vnibb.core.insider_units import admitted_deal_value, normalize_deal_action
 from vnibb.services.websocket_service import manager
 
 logger = logging.getLogger(__name__)
@@ -547,18 +547,20 @@ class InsiderTrackingService:
         return settings
     
     async def calculate_insider_sentiment(
-        self, 
-        symbol: str, 
+        self,
+        symbol: str,
         days: int = 90
     ) -> Dict[str, Any]:
-        """
-        Calculate insider sentiment score for a symbol.
-        
-        Returns:
-            Dict with buy/sell counts, net value, and sentiment score
+        """Aggregate insider sentiment over a window.
+
+        Direction counts cover every stored row and UNKNOWN direction stays
+        neutral (never counted as a buy or a sell). Monetary aggregates are
+        certified only when every classified deal in the window carries a finite
+        `deal_value` and stored VND unit evidence; otherwise the affected
+        aggregates and the score are None rather than an unstated partial sum.
         """
         cutoff_date = datetime.now().date() - timedelta(days=days)
-        
+
         result = await self.db.execute(
             select(InsiderDeal)
             .where(
@@ -568,41 +570,54 @@ class InsiderTrackingService:
                 )
             )
         )
-        
+
         deals = result.scalars().all()
-        
+
         buy_count = 0
         sell_count = 0
         buy_value = 0.0
         sell_value = 0.0
-        
+        classified_have_units = True
+
         for deal in deals:
             action_token = normalize_deal_action(deal.deal_action)
+            if action_token not in ("BUY", "SELL"):
+                continue
 
             if action_token == "BUY":
                 buy_count += 1
-                buy_value += deal.deal_value or 0
-            elif action_token == "SELL":
+            else:
                 sell_count += 1
-                sell_value += deal.deal_value or 0
-        
-        net_value = buy_value - sell_value
-        total_value = buy_value + sell_value
-        
-        # Calculate sentiment score (-100 to +100)
-        if total_value > 0:
-            sentiment_score = (net_value / total_value) * 100
+
+            value = admitted_deal_value(deal)
+            if value is None:
+                classified_have_units = False
+                continue
+            if action_token == "BUY":
+                buy_value += value
+            else:
+                sell_value += value
+
+        if classified_have_units:
+            net_value: Optional[float] = buy_value - sell_value
+            total_value = buy_value + sell_value
+            sentiment_score: Optional[float] = (
+                (net_value / total_value) * 100 if total_value > 0 else 0.0
+            )
+            value_unit: Optional[str] = "VND"
         else:
-            sentiment_score = 0
-        
+            net_value = sentiment_score = None
+            value_unit = None
+
         return {
             "symbol": symbol,
             "period_days": days,
             "buy_count": buy_count,
             "sell_count": sell_count,
-            "buy_value": buy_value,
-            "sell_value": sell_value,
+            "buy_value": buy_value if classified_have_units else None,
+            "sell_value": sell_value if classified_have_units else None,
             "net_value": net_value,
             "sentiment_score": sentiment_score,
-            "total_deals": len(deals)
+            "value_unit": value_unit,
+            "total_deals": len(deals),
         }

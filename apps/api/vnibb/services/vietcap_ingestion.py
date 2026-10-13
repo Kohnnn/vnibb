@@ -245,14 +245,20 @@ def upsert_ratio_rows(
         else:
             period = f"{year}-Q{quarter}"
         record_key = f"vietcap:finance.ratio:{symbol_upper}:{period}:{raw.get('ratioType') or 'RATIO'}"
-        annual = raw.get("ratioType") == "RATIO_YEAR" or quarter in (None, "", 0)
+        ratio_type = raw.get("ratioType")
+        annual = ratio_type == "RATIO_YEAR" or quarter in (None, "", 0)
+        # Rolling-twelve-month rows carry no canonical year/quarter identity; keep the raw
+        # ratioType/ratioTTMId and recordKey, but never label them annual or quarterly.
+        # Mirrors financial_fiscal_basis: an explicit type governs an opaque ratioTTMId.
+        ttm = ratio_type == "RATIO_TTM" or (ratio_type in (None, "") and raw.get("ratioTTMId") is not None)
+        variant = "ttm" if ttm else "year" if annual else "quarter"
         doc = {
             "dataset": "finance.ratio",
-            "datasetVariant": "finance.ratio.year" if annual else "finance.ratio.quarter",
+            "datasetVariant": f"finance.ratio.{variant}",
             "comTypeCode": com_type,
             "fiscalYear": year,
-            "fiscalQuarter": None if annual else quarter,
-            "periodType": "YEAR" if annual else "QUARTER",
+            "fiscalQuarter": None if ttm or annual else quarter,
+            "periodType": None if ttm else "YEAR" if annual else "QUARTER",
             "datasetGroup": "finance",
             "symbol": symbol_upper,
             "scopeKey": symbol_upper,

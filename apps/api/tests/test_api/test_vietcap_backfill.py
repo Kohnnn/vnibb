@@ -231,21 +231,70 @@ def test_ratio_annual_variant_retains_original_natural_key_and_units():
     from vnibb.services.vietcap_financials import financial_fiscal_basis
 
     records = []
-    raw = {"yearReport": 2025, "year": "2025", "quarter": 5, "ratioType": "RATIO_YEAR", "ratioYearId": 9, "unit": "ratio", "pe": 12}
+    raw = {"yearReport": 2018, "year": "2018", "quarter": 5, "ratioType": "RATIO_YEAR", "ratioYearId": 12238614, "ratioTTMId": 12238614, "unit": "ratio", "pe": 12}
     assert upsert_ratio_rows(None, "VNM", [raw], com_type="CT", records=records, dry_run=True) == 1
     doc = records[0]
     assert doc["datasetVariant"] == "finance.ratio.year"
-    assert doc["recordKey"] == "vietcap:finance.ratio:VNM:2025-Q5:RATIO_YEAR"
+    assert doc["recordKey"] == "vietcap:finance.ratio:VNM:2018-Q5:RATIO_YEAR"
     assert doc["fiscalQuarter"] is None
-    assert doc["period"] == "2025"
+    assert doc["period"] == "2018"
     basis = financial_fiscal_basis(doc)
     assert (basis["period"], basis["periodType"], basis["year"], basis["quarter"]) == (
-        "2025", "year", 2025, None,
+        "2018", "year", 2018, None,
     )
     assert doc["raw"] == raw
-    assert doc["rawFiscalBasis"]["ratioYearId"] == 9
+    assert doc["rawFiscalBasis"]["ratioYearId"] == doc["rawFiscalBasis"]["ratioTTMId"] == 12238614
     assert doc["unitEvidence"] == {"unit": "ratio"}
     assert not doc["structured"]["values"]
+    assert basis["reason"] is None
+    legacy = {**doc, "period": "2018-Q5"}
+    assert financial_fiscal_basis(legacy)["reason"] == "contradictory"
+    assert financial_fiscal_basis(legacy)["period"] is None
+    conflict = {**doc, "raw": {**raw, "year": "2019"}}
+    assert financial_fiscal_basis(conflict)["reason"] == "contradictory"
+    ttm = {**doc, "datasetVariant": "finance.ratio.quarter", "periodType": "QUARTER",
+           "period": "2018-Q1", "fiscalQuarter": 1,
+           "raw": {**raw, "quarter": 1, "ratioType": "RATIO_TTM"}}
+    assert financial_fiscal_basis(ttm)["reason"] == "ratio_ttm"
+    assert financial_fiscal_basis(ttm)["period"] is None
+    ttm["raw"]["fiscalQuarter"] = "1"
+    assert financial_fiscal_basis(ttm)["reason"] == "ratio_ttm"
+    ttm["raw"]["fiscalQuarter"] = 2
+    assert financial_fiscal_basis(ttm)["reason"] == "contradictory"
+    ttm["datasetVariant"] = "finance.ratio.ttm"
+    ttm["periodType"] = "TTM"
+    ttm["fiscalQuarter"] = None
+    assert financial_fiscal_basis(ttm)["reason"] == "contradictory"
+
+
+
+@pytest.mark.parametrize("raw,expected_variant,expected_period", [
+    ({"yearReport": 2018, "year": "2018", "quarter": 1, "ratioType": "RATIO_TTM", "ratioTTMId": 5}, "ttm", None),
+    ({"yearReport": 2018, "year": "2018", "quarter": None, "ratioTTMId": 5}, "ttm", None),
+    ({"yearReport": 2018, "year": "2018", "quarter": 2, "ratioType": "RATIO_YEAR", "ratioTTMId": 5}, "year", None),
+    ({"yearReport": 2018, "year": "2018", "quarter": 5, "ratioType": "RATIO_YEAR", "ratioTTMId": 5}, "year", "2018"),
+])
+def test_ttm_rows_claim_no_identity_and_explicit_ratio_type_governs(
+    raw, expected_variant, expected_period
+):
+    from vnibb.services.vietcap_financials import financial_fiscal_basis
+    from vnibb.services.vietcap_ingestion import upsert_ratio_rows
+
+    records = []
+    assert upsert_ratio_rows(None, "VNM", [raw], com_type="CT", records=records, dry_run=True) == 1
+    doc = records[0]
+    assert doc["datasetVariant"] == f"finance.ratio.{expected_variant}"
+    assert financial_fiscal_basis(doc)["period"] == expected_period
+    assert doc["recordKey"].endswith(f":{raw.get('ratioType') or 'RATIO'}")
+    assert doc["raw"] == raw
+    reason = financial_fiscal_basis(doc)["reason"]
+    if expected_variant == "ttm":
+        assert reason == "ratio_ttm" and doc["periodType"] is None and doc["fiscalQuarter"] is None
+    elif expected_period is None:
+        assert reason == "contradictory"
+    else:
+        assert reason is None, "admitted canonical rows must carry no conflict reason"
+
 
 
 def test_sync_fetches_symbol_descriptors_once_and_actual_iq_type():

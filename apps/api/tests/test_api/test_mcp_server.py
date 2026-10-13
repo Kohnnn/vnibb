@@ -536,16 +536,59 @@ async def test_latest_financial_prefers_iq_before_newer_vci(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_financial_envelope_does_not_truncate_source_evidence(monkeypatch):
+    from vnibb.services.mongo_market_data_service import MongoReadRows
+
     evidence = {f"metric_{i}": i for i in range(30)}
 
     class EvidenceMongo(_FakeMongoService):
         async def get_raw_dataset_records_precise(self, *args, **kwargs):
-            return [{"raw": evidence, "descriptors": evidence, "structured": evidence}]
+            return MongoReadRows(
+                [{"recordKey": "q2-2024", "raw": evidence, "descriptors": evidence, "structured": evidence}],
+                {"unrepresentable_financial_identity": {"ttm-2024": "ratio_ttm"}},
+            )
 
     monkeypatch.setattr(server, "get_mongo_market_data_service", EvidenceMongo)
     result = await server.get_premium_dataset("FPT", "finance.ratio")
+    assert result["data_status"] == "available"
+    assert result["scope_type"] == "symbol" and result["scope_key"] == "FPT"
+    assert result["row_count"] == len(result["items"]) == 1
+    assert result["items"][0]["recordKey"] == "q2-2024"
     assert result["items"][0]["raw"] == evidence
     assert result["items"][0]["descriptors"] == evidence
+    assert result["unrepresentable_financial_identity"] == {"ttm-2024": "ratio_ttm"}
+
+@pytest.mark.asyncio
+async def test_premium_dataset_surfaces_unrepresentable_row_disclosures(monkeypatch):
+    from vnibb.services.mongo_market_data_service import MongoReadRows
+
+    class DisclosureMongo(_FakeMongoService):
+        async def get_raw_dataset_records_precise(self, *args, **kwargs):
+            return MongoReadRows(
+                [{"recordKey": "kept", "raw": {"value": 1}}],
+                {"legacy_period_labels": ["legacy-key"],
+                 "unrepresentable_financial_identity": {"ttm-key": "ratio_ttm",
+                                                        "variant-key": "unsupported_variant:finance.ratio.month"}},
+            )
+
+    monkeypatch.setattr(server, "get_mongo_market_data_service", DisclosureMongo)
+    result = await server.get_premium_dataset("FPT", "finance.ratio")
+
+    assert result["row_count"] == len(result["items"]) == 1
+    assert result["items"][0]["recordKey"] == "kept"
+    assert result["legacy_period_labels"] == ["legacy-key"]
+    assert result["unrepresentable_financial_identity"] == {
+        "ttm-key": "ratio_ttm",
+        "variant-key": "unsupported_variant:finance.ratio.month",
+    }
+
+    class PlainMongo(_FakeMongoService):
+        async def get_raw_dataset_records_precise(self, *args, **kwargs):
+            return [{"recordKey": "kept"}]
+
+    monkeypatch.setattr(server, "get_mongo_market_data_service", PlainMongo)
+    plain = await server.get_premium_dataset("FPT", "finance.ratio")
+    assert "legacy_period_labels" not in plain
+    assert "unrepresentable_financial_identity" not in plain
 
 
 @pytest.mark.asyncio

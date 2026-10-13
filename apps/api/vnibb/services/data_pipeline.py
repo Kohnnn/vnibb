@@ -2880,8 +2880,9 @@ class DataPipeline:
                                "requested_source_count": requested_source_count,
                                "latest_closed_period": expected_periods[0]},
             "expected_symbols": list(symbols), "expected_periods": expected_periods,
-            "outcomes": {}, "complete": False,
+            "outcomes": {}, "attempted_symbols": [], "complete": False,
         }
+        cycle["expected_symbol_count"] = len(symbols)
         previous_cycle = progress.get("financial_acquisition") if progress is not None else None
         cycle["expected_statements"] = [
             item.value if isinstance(item, StatementType) else str(item).strip().lower()
@@ -2893,9 +2894,8 @@ class DataPipeline:
                 and previous_cycle.get("expected_statements") == cycle["expected_statements"]
                 and previous_cycle.get("period_type") == normalized_period):
             cycle = previous_cycle
-            total = sum(bool(cycle["outcomes"].get(symbol)) and all(
-                item["complete"] for item in cycle["outcomes"][symbol].values()
-            ) for symbol in symbols[:start_index])
+            cycle["expected_symbol_count"] = len(symbols)
+            cycle.update(attempted_symbols=[], complete=False)
         elif start_index:
             start_index = 0
         if progress is not None:
@@ -2984,6 +2984,7 @@ class DataPipeline:
 
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
+            cycle.setdefault("attempted_symbols", []).append(symbol)
             await self._wait_for_rate_limit("financials")
             try:
                 default_statement_specs = [
@@ -3008,11 +3009,7 @@ class DataPipeline:
                     statement_specs = default_statement_specs
 
                 if not statement_specs:
-                    logger.warning(
-                        "No valid statement types requested for financial sync: %s",
-                        statement_types,
-                    )
-                    continue
+                    raise ValueError(f"No valid statement types requested: {statement_types}")
 
                 symbol_synced = True
                 symbol_persisted_rows = 0
@@ -3368,7 +3365,17 @@ class DataPipeline:
                 progress["last_symbol"] = symbol
                 if self._should_checkpoint(idx, len(symbols)):
                     await self._checkpoint(progress, sync_id)
-        cycle["complete"] = total == len(symbols)
+        # Overall completeness compares admitted symbols against the whole cycle, never the
+        # resumed suffix: a resumed run that re-fails one symbol must not certify the cycle.
+        admitted = sum(bool(cycle["outcomes"].get(symbol)) and all(
+            item["complete"] for item in cycle["outcomes"][symbol].values()
+        ) for symbol in symbols)
+        cycle["complete"] = admitted == cycle["expected_symbol_count"]
+        cycle["cycle_outcome"] = "completed" if cycle["complete"] else "incomplete"
+        cycle["symbol_statuses"] = {
+            symbol: sorted({outcome["status"] for outcome in outcomes.values()})
+            for symbol, outcomes in cycle["outcomes"].items()
+        }
         cycle["status"] = "completed" if cycle["complete"] else "partial" if any(
             outcome["persisted_rows"] for outcomes in cycle["outcomes"].values()
             for outcome in outcomes.values()

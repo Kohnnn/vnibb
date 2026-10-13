@@ -42,14 +42,22 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove, onDataChange }
   const summary = useMemo(() => {
     const buys = deals.filter((deal) => normalizeInsiderAction(deal.deal_action) === 'BUY');
     const sells = deals.filter((deal) => normalizeInsiderAction(deal.deal_action) === 'SELL');
-    const buyValue = buys.reduce((sum, deal) => sum + (deal.value_unit === 'VND' ? deal.deal_value ?? 0 : 0), 0);
-    const sellValue = sells.reduce((sum, deal) => sum + (deal.value_unit === 'VND' ? deal.deal_value ?? 0 : 0), 0);
+    // Unknown deal actions are not classified as buy or sell, so they never
+    // contribute to either aggregate. A side sums only when every classified row
+    // carries a finite admitted VND value; otherwise the sum would be a partial
+    // total masquerading as the side total.
+    const admitted = (deal: (typeof deals)[number]) =>
+      deal.deal_value != null && Number.isFinite(deal.deal_value) && deal.value_unit === 'VND';
+    const buyAdmitted = buys.length > 0 && buys.every(admitted);
+    const sellAdmitted = sells.length > 0 && sells.every(admitted);
+    const buyValue = buys.reduce((sum, deal) => sum + (admitted(deal) ? deal.deal_value ?? 0 : 0), 0);
+    const sellValue = sells.reduce((sum, deal) => sum + (admitted(deal) ? deal.deal_value ?? 0 : 0), 0);
     return {
       buyCount: buys.length,
       sellCount: sells.length,
-      buyValue,
-      sellValue,
-      netValue: buyValue - sellValue,
+      buyValue: buyAdmitted ? buyValue : null,
+      sellValue: sellAdmitted ? sellValue : null,
+      netValue: buyAdmitted && sellAdmitted ? buyValue - sellValue : null,
     };
   }, [deals]);
 
@@ -108,17 +116,17 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove, onDataChange }
                 <div>
                   <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Buys</div>
                   <div className="text-xs font-semibold text-emerald-400">{summary.buyCount}</div>
-                  <div className="text-[10px] text-[var(--text-muted)]">{formatVND(summary.buyValue)}</div>
+                  <div className="text-[10px] text-[var(--text-muted)]">{summary.buyValue === null ? '—' : formatVND(summary.buyValue)}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Sells</div>
                   <div className="text-xs font-semibold text-red-400">{summary.sellCount}</div>
-                  <div className="text-[10px] text-[var(--text-muted)]">{formatVND(summary.sellValue)}</div>
+                  <div className="text-[10px] text-[var(--text-muted)]">{summary.sellValue === null ? '—' : formatVND(summary.sellValue)}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Net</div>
-                  <div className={`text-xs font-semibold ${summary.netValue >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {summary.netValue >= 0 ? '+' : '-'}{formatVND(Math.abs(summary.netValue))}
+                  <div className={`text-xs font-semibold ${summary.netValue === null ? 'text-[var(--text-muted)]' : summary.netValue >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {summary.netValue === null ? '—' : `${summary.netValue >= 0 ? '+' : '-'}${formatVND(Math.abs(summary.netValue))}`}
                   </div>
                 </div>
               </div>
