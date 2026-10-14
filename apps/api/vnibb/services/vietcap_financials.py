@@ -107,6 +107,41 @@ def _explicit_basis(raw: Mapping[str, Any], keys: tuple[str, ...], allowed: set[
     return next(iter(normalized)) if len(normalized) == 1 and normalized <= allowed else "unknown"
 
 
+def _response_metadata(record: Mapping[str, Any]) -> list[tuple[Mapping[str, Any], Mapping[str, Any]]]:
+    dataset, symbol = record.get("dataset"), record.get("symbol")
+    section = _SECTIONS.get(dataset)
+    if not section or record.get("source") != "vietcap" or not record.get("comTypeCode"):
+        return []
+    endpoint = (f"/v1/company/{symbol}/statistics-financial" if dataset == "finance.ratio"
+                else f"/v1/company/{symbol}/financial-statement?section={section}")
+    descriptor_evidence = record.get("descriptorEvidence")
+    candidates = [(record.get("sourceResponse"), record.get("responseEvidence"), endpoint)]
+    if isinstance(descriptor_evidence, Mapping):
+        descriptor_response = descriptor_evidence.get("sourceResponse")
+        if isinstance(descriptor_response, Mapping) and descriptor_response.get("section") == section:
+            candidates.append((descriptor_response, descriptor_evidence,
+                               f"/v1/company/{symbol}/financial-statement/metrics"))
+    sources = []
+    for metadata, evidence, expected_endpoint in candidates:
+        if not isinstance(metadata, Mapping) or not isinstance(evidence, Mapping):
+            continue
+        scope = {"symbol": symbol, "section": section, "comTypeCode": record.get("comTypeCode"), "source": "vietcap"}
+        if any(evidence.get(key) != value for key, value in scope.items()) or evidence.get("endpoint") != expected_endpoint or not evidence.get("receivedAt"):
+            continue
+        declarations = {**scope, "dataset": dataset, "datasetVariant": record.get("datasetVariant"), "endpoint": expected_endpoint}
+        if any(key in metadata and metadata[key] != value for key, value in declarations.items()):
+            continue
+        if metadata.get("receivedAt") != evidence["receivedAt"]:
+            continue
+        raw = record.get("raw") if isinstance(record.get("raw"), Mapping) else {}
+        fiscal_keys = (("fiscalYear", "yearReport", "year"), ("fiscalQuarter", "lengthReport", "quarter"))
+        if any(key in metadata and (_integer(metadata[key]) is None or _integer(metadata[key]) not in {_integer(raw[name]) for name in names if name in raw})
+               for names in fiscal_keys for key in names):
+            continue
+        sources.append((metadata, evidence))
+    return sources
+
+
 def financial_fiscal_basis(record: Mapping[str, Any]) -> dict[str, Any]:
     raw = record.get("raw") if isinstance(record.get("raw"), Mapping) else {}
     variant = str(record.get("datasetVariant", "")).rsplit(".", 1)[-1]
@@ -164,9 +199,12 @@ def financial_fiscal_basis(record: Mapping[str, Any]) -> dict[str, Any]:
             contradictory = contradictory or (year is not None and quarter is not None and not matches)
     reason = "contradictory" if contradictory else "ratio_ttm" if ttm else None if valid else "unavailable"
     valid = valid and not ttm and not contradictory
-    quarter_basis = _explicit_basis(raw, ("quarterBasis", "flowBasis", "flow_basis"), {"single_quarter", "cumulative_ytd"})
-    scopes = [raw[key] for key in ("consolidationBasis", "consolidation_basis") if raw.get(key) is not None]
-    scopes.extend("consolidated" if raw[key] else "separate" for key in ("consolidated", "isConsolidated") if isinstance(raw.get(key), bool))
+    basis_sources = [raw, *[metadata for metadata, _ in _response_metadata(record)]]
+    flow_keys = ("quarterBasis", "flowBasis", "flow_basis")
+    flows = [_explicit_basis(source, flow_keys, {"single_quarter", "cumulative_ytd"}) for source in basis_sources if any(source.get(key) is not None for key in flow_keys)]
+    quarter_basis = flows[0] if flows and len(set(flows)) == 1 else "unknown"
+    scopes = [source[key] for source in basis_sources for key in ("consolidationBasis", "consolidation_basis") if source.get(key) is not None]
+    scopes.extend("consolidated" if source[key] else "separate" for source in basis_sources for key in ("consolidated", "isConsolidated") if isinstance(source.get(key), bool))
     normalized_scopes = {_label(value).replace(" ", "_") for value in scopes}
     consolidation = next(iter(normalized_scopes)) if len(normalized_scopes) == 1 and normalized_scopes <= {"consolidated", "separate"} else "unknown"
     return {"raw": record.get("rawFiscalBasis", {key: raw[key] for key in ("yearReport", "year", "lengthReport", "quarter", "period") if key in raw}),
@@ -182,11 +220,15 @@ def _unit(record: Mapping[str, Any], descriptor: Mapping[str, Any], field: str) 
     unit_evidence = record.get("unitEvidence") or {}
     if not isinstance(unit_evidence, Mapping):
         return None, None, {"invalidUnitEvidence": unit_evidence}
-    sources = (descriptor, raw, unit_evidence)
+    response_sources = _response_metadata(record)
+    sources = (descriptor, raw, unit_evidence, *[metadata for metadata, _ in response_sources])
     units = [source[key] for source in sources for key in ("unit", "unitCode") if source.get(key) is not None]
     currency = [source[key] for source in sources for key in ("currency", "currencyCode") if source.get(key) is not None]
     scales = [source["scale"] for source in sources if source.get("scale") is not None]
     evidence = {"units": units, "currencies": currency, "scales": scales}
+    if response_sources:
+        evidence["responseEvidence"] = response_sources[0][1]
+        evidence["responses"] = [{"metadata": metadata, "evidence": scope} for metadata, scope in response_sources]
     if field == "eps" and any(_label(descriptor.get(key)) == "eps basic (vnd)" for key in ("fullTitleEn", "titleEn")):
         evidence["unitTitle"] = "EPS basic (VND)"
         if not units and not currency and not scales:

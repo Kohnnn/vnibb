@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 from sqlalchemy import select
 from vnibb.core.database import async_session_maker
@@ -41,6 +42,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--datasets", default=",".join(DATASETS))
     parser.add_argument("--max-pairs", type=int, default=50)
     parser.add_argument("--budget-seconds", type=float, default=300)
+    parser.add_argument("--first-pass-only", action="store_true", help="Skip every terminal receipt, including failed; resume pending/deferred only.")
+    parser.add_argument("--revalidate-empty-file", help="Exact symbol/stage pairs with expected receipt timestamps; only matching legacy empty outcomes are reacquired.")
     parser.add_argument("--window-days", type=int, default=30)
     parser.add_argument("--bootstrap-listing", action="store_true", help="With --apply, confirm fresh Trading STOCK listing and persist SQL before selection.")
     parser.add_argument("--universe-file", help="Explicit cached Trading getAll envelope for opt-in listing bootstrap; provenance is printed.")
@@ -56,6 +59,31 @@ def parse_args(argv=None) -> argparse.Namespace:
         parser.error("inventory is read-only; use backfill/resume --apply")
     if args.universe_file and not args.bootstrap_listing:
         parser.error("--universe-file requires --bootstrap-listing")
+    if args.first_pass_only and args.revalidate_empty_file:
+        parser.error("--first-pass-only cannot be combined with --revalidate-empty-file")
+    if args.revalidate_empty_file and (not args.apply or args.datasets != ["reference"] or args.bootstrap_listing):
+        parser.error("--revalidate-empty-file requires reference-only --apply without listing bootstrap")
+    args.revalidate_empty_receipts = None
+    if args.revalidate_empty_file:
+        try:
+            targets = json.loads(Path(args.revalidate_empty_file).read_text())
+            if not isinstance(targets, list) or not targets:
+                raise ValueError("target list must not be empty")
+            pairs = set()
+            for target in targets:
+                if not isinstance(target, dict) or not isinstance(target.get("symbol"), str) or not target["symbol"]:
+                    raise ValueError("each target requires a symbol")
+                if target.get("stage") not in REFERENCE:
+                    raise ValueError("unknown reference stage")
+                for field in ("expected_last_attempted_at", "expected_last_succeeded_at"):
+                    datetime.fromisoformat(target[field])
+                pair = (target["symbol"], target["stage"])
+                if pair in pairs:
+                    raise ValueError("duplicate target pair")
+                pairs.add(pair)
+            args.revalidate_empty_receipts = targets
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            parser.error(f"invalid revalidation file: {exc}")
     return args
 
 
@@ -89,7 +117,7 @@ def dataset_scope(dataset, symbols):
 
 
 def summarize_receipts(metadata, symbols, stage_names):
-    report = {"pending_count": 0, "failed_count": 0, "empty_count": 0, "unattempted_count": 0, "attempted_terminal_count": 0, "stages": {}, "history_complete": None}
+    report = {"pending_count": 0, "failed_count": 0, "empty_count": 0, "unattempted_count": 0, "deferred_count": 0, "incomplete_attempt_count": 0, "attempted_terminal_count": 0, "stages": {}, "history_complete": None}
     for name in stage_names:
         state = metadata.get("stages", {}).get(name, {})
         receipts = {symbol: state.get("receipts", {}).get(symbol, {"outcome": "pending"}) for symbol in symbols}
@@ -97,13 +125,16 @@ def summarize_receipts(metadata, symbols, stage_names):
         outcomes = [receipt.get("outcome") for receipt in receipts.values()]
         stage = {"pending_count": sum(symbol not in acquired for symbol in symbols),
                  "unattempted_count": outcomes.count("pending"),
+                 "deferred_count": outcomes.count("deferred"),
+                 "incomplete_attempt_count": outcomes.count("attempted"),
                  "attempted_terminal_count": sum(outcome in {"succeeded", "failed", "empty"} for outcome in outcomes),
                  "failed_count": outcomes.count("failed"),
                  "empty_count": outcomes.count("empty"), "receipts": receipts}
-        for key in ("pending_count", "failed_count", "empty_count", "unattempted_count", "attempted_terminal_count"):
+        for key in ("pending_count", "failed_count", "empty_count", "unattempted_count", "deferred_count", "incomplete_attempt_count", "attempted_terminal_count"):
             report[key] += stage[key]
         report["stages"][name] = stage
     report["acquisition_complete"] = report["pending_count"] == 0 and bool(symbols)
+    report["first_pass_complete"] = bool(symbols) and not any(report[key] for key in ("unattempted_count", "deferred_count", "incomplete_attempt_count"))
     report["attempted_this_run"] = metadata.get("attempted_this_run", 0)
     return report
 
@@ -165,7 +196,7 @@ async def apply_backfill(args, symbols):
             results[dataset] = result
         else:
             scope = dataset_scope(dataset, symbols)
-            await FullMarketSync().run_maintenance_cycle(cycle_name(args, dataset), scope, stages_for(args, dataset), remaining, 36500, max_attempts=remaining_pairs, allow_empty=dataset in {"reference", "market"})
+            await FullMarketSync().run_maintenance_cycle(cycle_name(args, dataset), scope, stages_for(args, dataset), remaining, 36500, max_attempts=remaining_pairs, allow_empty=dataset in {"reference", "market"}, first_pass_only=args.first_pass_only, revalidate_empty_receipts=args.revalidate_empty_receipts)
             result = await sql_inventory(args, dataset, scope)
             remaining_pairs -= int(result.get("attempted_this_run", 0))
             results[dataset] = result
@@ -205,7 +236,7 @@ async def bootstrap_listing(args):
 async def main(argv=None):
     args = parse_args(argv)
     bootstrap = None
-    if args.apply and (args.bootstrap_listing or not args.symbols):
+    if args.apply and args.revalidate_empty_receipts is None and (args.bootstrap_listing or not args.symbols):
         bootstrap = await bootstrap_listing(args)
     symbols = await resolve_symbols(args.symbols)
     mutations = await apply_backfill(args, symbols) if args.apply else None

@@ -5,6 +5,7 @@ from datetime import date
 from unittest.mock import AsyncMock
 
 import pytest
+
 from vnibb.services.vietcap_financials import (
     decode_vietcap_financial_record,
     financial_fiscal_basis,
@@ -49,6 +50,81 @@ def test_explicit_amount_unit_and_scale_are_evidence_not_magnitude(envelope):
     assert decoded["values"]["revenue"] == 12_000_000
     assert decoded["fieldEvidence"]["revenue"]["unitEvidence"]["scales"] == [1_000_000]
     assert envelope["raw"]["random_amount"] == 12
+
+
+def scoped_response(envelope, **metadata):
+    envelope["sourceResponse"] = {"receivedAt": envelope["receivedAt"], **metadata}
+    section = envelope["descriptorEvidence"]["section"]
+    envelope["responseEvidence"] = {
+        "symbol": envelope["symbol"], "section": section, "comTypeCode": envelope["comTypeCode"],
+        "source": "vietcap", "receivedAt": envelope["receivedAt"],
+        "endpoint": f"/v1/company/{envelope['symbol']}/financial-statement?section={section}",
+    }
+
+
+@pytest.mark.asyncio
+async def test_scoped_response_amount_and_flow_metadata_survive_sql_lineage(envelope):
+    envelope["raw"].pop("unit")
+    envelope["datasetVariant"] = "finance.income_statement.quarter"
+    envelope["raw"]["lengthReport"] = 2
+    scoped_response(envelope, unit="VND", currency="VND", scale=1_000_000,
+                    flowBasis="single_quarter", consolidationBasis="consolidated")
+    original = deepcopy(envelope)
+    cache = AsyncMock()
+    cache.store_financial_data.return_value = 1
+    assert await persist_vietcap_financials([envelope], cache_manager=cache) == 1
+    row = cache.store_financial_data.call_args.args[3][0]
+    assert row["revenue"] == 12_000_000
+    lineage = row["raw_data"]["_financial_lineage"]
+    assert lineage["flow_basis"] == "single_quarter"
+    assert lineage["consolidation_basis"] == "consolidated"
+    assert row["raw_data"]["sourceResponse"] == original["sourceResponse"]
+    assert row["raw_data"]["responseEvidence"] == original["responseEvidence"]
+    assert lineage["unit_metadata"]["revenue"]["unitEvidence"]["responseEvidence"] == original["responseEvidence"]
+    assert envelope == original
+
+
+@pytest.mark.parametrize("change", ["no_scope", "wrong_symbol", "wrong_section", "wrong_endpoint", "declared_symbol", "wrong_receipt", "wrong_year", "wrong_quarter", "wrong_variant", "unit_conflict", "flow_conflict"])
+def test_unscoped_or_conflicting_response_metadata_never_admits_amounts(envelope, change):
+    envelope["raw"].pop("unit")
+    envelope["datasetVariant"] = "finance.income_statement.quarter"
+    envelope["raw"]["lengthReport"] = 2
+    scoped_response(envelope, unit="VND", flowBasis="single_quarter")
+    if change == "no_scope":
+        envelope.pop("responseEvidence")
+    elif change in {"wrong_symbol", "wrong_section", "wrong_endpoint"}:
+        envelope["responseEvidence"][change.removeprefix("wrong_")] = "WRONG"
+    elif change == "declared_symbol":
+        envelope["sourceResponse"]["symbol"] = "FPT"
+    elif change in {"wrong_receipt", "wrong_year", "wrong_quarter", "wrong_variant"}:
+        key, value = {"wrong_receipt": ("receivedAt", "2026-01-01"), "wrong_year": ("fiscalYear", 2024),
+                      "wrong_quarter": ("fiscalQuarter", 3), "wrong_variant": ("datasetVariant", "finance.income_statement.year")}[change]
+        envelope["sourceResponse"][key] = value
+    elif change == "unit_conflict":
+        envelope["raw"]["unit"] = "billion VND"
+    else:
+        envelope["raw"]["flowBasis"] = "cumulative_ytd"
+    decoded = decode_vietcap_financial_record(envelope)
+    assert "revenue" not in decoded["values"]
+
+
+def test_response_status_does_not_manufacture_units(envelope):
+    envelope["raw"].pop("unit")
+    scoped_response(envelope, status=200, code=0, successful=True)
+    decoded = decode_vietcap_financial_record(envelope)
+    assert decoded["values"] == {"eps": 0}
+    assert decoded["unavailable"]["revenue"] == "unit_unverified"
+
+@pytest.mark.parametrize("section", [None, "BALANCE_SHEET", "INCOME_STATEMENT"])
+def test_multisection_metrics_response_requires_explicit_section(envelope, section):
+    envelope["raw"].pop("unit")
+    metadata = {"receivedAt": envelope["receivedAt"], "unit": "VND", "scale": 1_000_000}
+    if section is not None:
+        metadata["section"] = section
+    envelope["descriptorEvidence"]["sourceResponse"] = metadata
+    decoded = decode_vietcap_financial_record(envelope)
+    assert decoded["values"].get("revenue") == (12_000_000 if section == "INCOME_STATEMENT" else None)
+
 
 
 @pytest.mark.parametrize("change", ["repeated_code", "repeated_label", "null_value", "missing_parent", "cycle"])
@@ -355,6 +431,7 @@ async def test_sql_upsert_preserves_non_iq_source_and_reports_conflicting_keys(m
     from unittest.mock import Mock
 
     from sqlalchemy.dialects.postgresql import dialect
+
     from vnibb.models import IncomeStatement
     from vnibb.models.stock import StockPrice
     from vnibb.services.cache_manager import CacheManager, StructuredPersistenceConflict
@@ -388,6 +465,7 @@ async def test_fresh_certified_price_replaces_owned_generic_iq_not_other_sources
     from unittest.mock import Mock
 
     from sqlalchemy.dialects.postgresql import dialect
+
     from vnibb.models.stock import StockPrice
     from vnibb.services.cache_manager import CacheManager
 
@@ -411,6 +489,7 @@ async def test_secondary_sql_writer_retains_primary_owner_and_conflict_evidence(
     from unittest.mock import Mock
 
     from sqlalchemy.dialects.postgresql import dialect
+
     from vnibb.models.trading import FinancialRatio
     from vnibb.services.cache_manager import CacheManager, StructuredPersistenceConflict
 

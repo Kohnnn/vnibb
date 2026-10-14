@@ -7,9 +7,11 @@ from sqlalchemy import BigInteger, Integer, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from vnibb.mcp import server
+from vnibb.models.financials import IncomeStatement
 from vnibb.models.trading import FinancialRatio
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.vietcap_financials import (
+    StructuredFinancialUnavailable,
     decode_vietcap_financial_record,
     persist_vietcap_financials,
 )
@@ -21,14 +23,14 @@ async def portable_ratio_primary_key(setup_tables, test_engine):
         return
 
     def recreate_table(connection):
-        table = FinancialRatio.__table__
-        table.drop(connection)
-        original_type = table.c.id.type
-        table.c.id.type = BigInteger().with_variant(Integer, "sqlite")
-        try:
-            table.create(connection)
-        finally:
-            table.c.id.type = original_type
+        for table in (FinancialRatio.__table__, IncomeStatement.__table__):
+            table.drop(connection)
+            original_type = table.c.id.type
+            table.c.id.type = BigInteger().with_variant(Integer, "sqlite")
+            try:
+                table.create(connection)
+            finally:
+                table.c.id.type = original_type
 
     async with test_engine.begin() as connection:
         await connection.run_sync(recreate_table)
@@ -138,3 +140,82 @@ async def test_prior_iq_structured_row_recovers_units_by_normal_reingestion(
     assert after["item"]["roe"] == 0.25
     assert after["item"]["raw_data"]["ratio_units"]["roe"] == "percent"
     assert {key: value for key, value in after["item"]["raw_data"].items() if key != "ratio_units"} == legacy_raw_data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["verified", "wrong_symbol", "conflicting_unit", "unknown_unit"])
+async def test_ratio_ingestion_scoped_response_survives_sql_and_public_mcp(
+    monkeypatch, test_engine, test_db, scope
+):
+    from vnibb.services.vietcap_ingestion import upsert_ratio_rows
+
+    envelope = ratio_envelope(0.25, None)
+    response = {"receivedAt": envelope["receivedAt"], "unit": "percent", "traceId": "retained-trace"}
+    records = []
+    assert upsert_ratio_rows(
+        None, "FPT", [envelope["raw"]], com_type="CT", descriptors=envelope["descriptors"],
+        source_response=response, records=records, dry_run=True,
+    ) == 1
+    record = records[0]
+    if scope == "wrong_symbol":
+        record["responseEvidence"]["symbol"] = "VNM"
+    elif scope == "conflicting_unit":
+        record["raw"]["unit"] = "times"
+    elif scope == "unknown_unit":
+        response.pop("unit")
+    # Keep independently certified fields available when response units cannot be used.
+    if scope in {"verified", "conflicting_unit"}:
+        record["descriptors"] = record["descriptors"][:1]
+    if scope == "conflicting_unit":
+        with pytest.raises(StructuredFinancialUnavailable):
+            await persist_vietcap_financials([record], cache_manager=CacheManager(db=test_db))
+        assert (await test_db.execute(select(FinancialRatio))).scalars().all() == []
+        return
+    assert await persist_vietcap_financials([record], cache_manager=CacheManager(db=test_db)) == 1
+    monkeypatch.setattr(server, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
+
+    async def database_available():
+        return True
+
+    monkeypatch.setattr(server, "check_database_connection", database_available)
+    result = await server.get_latest_financial_ratios("FPT", period_type="year")
+    assert result["item"]["roe"] == (0.25 if scope == "verified" else None)
+    assert result["item"]["raw_data"]["sourceResponse"] == response
+    assert result["item"]["raw_data"]["descriptors"] == record["descriptors"]
+    assert result["item"]["raw_data"]["responseEvidence"] == record["responseEvidence"]
+
+
+@pytest.mark.asyncio
+async def test_statement_ingestion_scoped_response_survives_sql_and_public_mcp(monkeypatch, test_engine, test_db):
+    from vnibb.services.vietcap_ingestion import upsert_statement_periods
+
+    received_at = "2026-10-13T01:00:00Z"
+    response = {"receivedAt": received_at, "unit": "VND", "currency": "VND", "scale": 1_000_000,
+                "flowBasis": "single_quarter", "consolidationBasis": "consolidated", "traceId": "retained-statement"}
+    raw = {"yearReport": 2025, "lengthReport": 2, "reported_sales": 12}
+    descriptors = [{"field": "reported_sales", "parent": None, "fullTitleEn": "Net sales"}]
+    records = []
+    assert upsert_statement_periods(
+        None, "FPT", "finance.income_statement", "INCOME_STATEMENT", {"quarters": [raw]},
+        com_type="CT", descriptors=descriptors, source_response=response,
+        records=records, dry_run=True,
+    ) == 1
+    assert records[0]["structured"]["values"] == {"revenue": 12_000_000}
+    assert await persist_vietcap_financials(records, cache_manager=CacheManager(db=test_db)) == 1
+    monkeypatch.setattr(server, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
+
+    async def database_available():
+        return True
+
+    monkeypatch.setattr(server, "check_database_connection", database_available)
+    result = await server.get_latest_financial_statement("FPT", statement="income_statement", period_type="quarter")
+    assert result["found"] is True
+    assert result["provider_source"] == "vietcap"
+    assert result["item"]["revenue"] == 12_000_000
+    stored_raw = result["item"]["raw_data"]
+    assert stored_raw["raw"] == raw
+    assert stored_raw["sourceResponse"] == response
+    lineage = stored_raw["_financial_lineage"]
+    assert lineage["flow_basis"] == "single_quarter"
+    assert lineage["consolidation_basis"] == "consolidated"
+    assert lineage["unit_metadata"]["revenue"]["unitEvidence"]["responses"][0]["metadata"] == response

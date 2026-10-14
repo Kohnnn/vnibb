@@ -4,17 +4,16 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pandas as pd
-from requests.exceptions import ReadTimeout
-
 import pytest
+from requests.exceptions import ReadTimeout
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from vnibb.core.config import settings
 from vnibb.models.sync_status import SyncStatus
+from vnibb.providers.vnstock import runtime
 from vnibb.services import sync_all_data
 from vnibb.services.sync_all_data import FullMarketSync
-from vnibb.core.config import settings
-from vnibb.providers.vnstock import runtime
 
 
 @pytest.mark.asyncio
@@ -48,8 +47,8 @@ async def test_provider_failure_and_successful_empty_reach_persisted_reference_r
 
             try:
                 raise RateLimitExceeded("API quota exhausted")
-            except RateLimitExceeded:
-                raise SystemExit("Rate limit exceeded. API quota exhausted. Process terminated.")
+            except RateLimitExceeded as exc:
+                raise SystemExit("Rate limit exceeded. API quota exhausted. Process terminated.") from exc
         if released is not None:
             # Real provider work outlives the configured deadline; the executor thread exits after assertion.
             released.wait(30)
@@ -223,3 +222,113 @@ async def test_skipped_runs_do_not_reset_and_new_cycles_retain_last_success(test
         receipt = row.additional_data["stages"]["officers"]["receipts"]["VNM"]
         assert receipt["last_succeeded_at"]
         assert "VNM" not in row.additional_data["stages"]["officers"]["acquired_symbols"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_empty_revalidation_is_exact_guarded_and_preserves_receipt(test_engine, monkeypatch):
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(sync_all_data, "async_session_maker", sessions)
+    monkeypatch.setattr("vnibb.services.data_pipeline.async_session_maker", sessions)
+    calls = []
+
+    async def acquire(symbol, progress):
+        calls.append(symbol)
+        if symbol == "ACC":
+            progress["empty_count"] = 1
+            return 0
+        return 1
+
+    stages = [("officers", acquire)]
+    await FullMarketSync().run_maintenance_cycle("revalidation_fixture", ["ACC", "VNM"], stages, 30, 1, allow_empty=True)
+    async with sessions() as session:
+        row = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "revalidation_fixture"))).one()
+        original = row.additional_data["stages"]["officers"]["receipts"]["ACC"].copy()
+    targets = [{"symbol": "ACC", "stage": "officers", "expected_last_attempted_at": original["last_attempted_at"],
+                "expected_last_succeeded_at": original["last_succeeded_at"]}]
+    await FullMarketSync().run_maintenance_cycle(
+        "revalidation_fixture", ["ACC", "VNM"], stages, 30, 1, allow_empty=True,
+        revalidate_empty_receipts=[{**targets[0], "expected_last_attempted_at": "2020-01-01T00:00:00"}],
+    )
+    assert calls == ["ACC", "VNM"]
+    result = await FullMarketSync().run_maintenance_cycle(
+        "revalidation_fixture", ["ACC", "VNM"], stages, 30, 1, allow_empty=True, revalidate_empty_receipts=targets,
+    )
+    assert result.complete and calls == ["ACC", "VNM", "ACC"]
+    async with sessions() as session:
+        row = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "revalidation_fixture"))).one()
+        receipt = row.additional_data["stages"]["officers"]["receipts"]["ACC"]
+        assert receipt["previous_empty_receipts"] == [original]
+    await FullMarketSync().run_maintenance_cycle(
+        "revalidation_fixture", ["ACC", "VNM"], stages, 30, 1, allow_empty=True, revalidate_empty_receipts=targets,
+    )
+    assert calls == ["ACC", "VNM", "ACC"]
+
+
+@pytest.mark.asyncio
+async def test_first_pass_resumes_deferred_but_skips_terminal_failures(test_engine, monkeypatch):
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(sync_all_data, "async_session_maker", sessions)
+    monkeypatch.setattr("vnibb.services.data_pipeline.async_session_maker", sessions)
+    calls = []
+
+    async def acquire(symbol, progress):
+        calls.append(symbol)
+        progress["error_count"] = 1
+        return 0
+
+    stages = [("officers", acquire)]
+    await FullMarketSync().run_maintenance_cycle("first_pass_fixture", ["ACC", "VNM"], stages, 30, 1, max_attempts=1)
+    async with sessions() as session:
+        row = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "first_pass_fixture"))).one()
+        metadata = dict(row.additional_data)
+        metadata["stages"]["officers"]["receipts"]["VNM"] = {"outcome": "deferred", "error": "TimeoutError"}
+        row.additional_data = metadata
+        await session.commit()
+    await FullMarketSync().run_maintenance_cycle(
+        "first_pass_fixture", ["ACC", "VNM"], stages, 30, 1, first_pass_only=True,
+    )
+    await FullMarketSync().run_maintenance_cycle(
+        "first_pass_fixture", ["ACC", "VNM"], stages, 30, 1, first_pass_only=True,
+    )
+    assert calls == ["ACC", "VNM"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_revalidation_resumes_budget_interruption_without_duplicate_lineage(test_engine, monkeypatch):
+    import asyncio
+
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(sync_all_data, "async_session_maker", sessions)
+    monkeypatch.setattr("vnibb.services.data_pipeline.async_session_maker", sessions)
+    calls = []
+    interrupted = False
+
+    async def acquire(symbol, progress):
+        calls.append(symbol)
+        if interrupted:
+            await asyncio.sleep(60)
+        progress["empty_count"] = 1
+        return 0
+
+    stages = [("officers", acquire)]
+    await FullMarketSync().run_maintenance_cycle("interrupted_revalidation", ["ACC"], stages, 30, 1, allow_empty=True)
+    async with sessions() as session:
+        row = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "interrupted_revalidation"))).one()
+        original = row.additional_data["stages"]["officers"]["receipts"]["ACC"].copy()
+    targets = [{"symbol": "ACC", "stage": "officers", "expected_last_attempted_at": original["last_attempted_at"],
+                "expected_last_succeeded_at": original["last_succeeded_at"]}]
+    interrupted = True
+    result = await FullMarketSync().run_maintenance_cycle(
+        "interrupted_revalidation", ["ACC"], stages, 0.25, 1, allow_empty=True, revalidate_empty_receipts=targets,
+    )
+    assert not result.complete
+    interrupted = False
+    await FullMarketSync().run_maintenance_cycle(
+        "interrupted_revalidation", ["ACC"], stages, 30, 1, allow_empty=True, revalidate_empty_receipts=targets,
+    )
+    async with sessions() as session:
+        row = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "interrupted_revalidation"))).one()
+        receipt = row.additional_data["stages"]["officers"]["receipts"]["ACC"]
+        assert receipt["outcome"] == "empty"
+        assert receipt["previous_empty_receipts"] == [original]
+    assert calls == ["ACC", "ACC", "ACC"]

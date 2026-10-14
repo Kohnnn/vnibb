@@ -98,6 +98,36 @@ def test_receipt_inventory_does_not_infer_history_from_rows(cli):
     assert report["stages"]["financials_year"]["receipts"]["ACB"]["financial_acquisition"]["support_limited"]
 
 
+def test_deferred_and_interrupted_receipts_remain_explicit(cli):
+    metadata = {"stages": {"officers": {"acquired_symbols": [], "receipts": {
+        "ACC": {"outcome": "deferred"}, "VNM": {"outcome": "attempted"},
+    }}}}
+    report = cli.summarize_receipts(metadata, ["ACC", "VNM", "FPT"], ["officers"])
+    assert report["unattempted_count"] == 1
+    assert report["deferred_count"] == 1
+    assert report["incomplete_attempt_count"] == 1
+    assert report["attempted_terminal_count"] == 0
+    assert report["pending_count"] == 3 and not report["acquisition_complete"]
+    assert not report["first_pass_complete"]
+    terminal = cli.summarize_receipts({"stages": {"officers": {"acquired_symbols": [], "receipts": {"ACC": {"outcome": "failed"}}}}}, ["ACC"], ["officers"])
+    assert terminal["first_pass_complete"] and not terminal["acquisition_complete"]
+
+
+def test_revalidation_file_requires_exact_guarded_reference_scope(cli, tmp_path):
+    path = tmp_path / "pairs.json"
+    target = {"symbol": "ACC", "stage": "officers", "expected_last_attempted_at": "2026-10-13T12:00:00",
+              "expected_last_succeeded_at": "2026-10-13T12:00:25"}
+    path.write_text(json.dumps([target]))
+    args = cli.parse_args(["resume", "--apply", "--datasets", "reference", "--revalidate-empty-file", str(path)])
+    assert args.revalidate_empty_receipts == [target]
+    for extra in (["--first-pass-only"], ["--bootstrap-listing"], ["--datasets", "financials"]):
+        with pytest.raises(SystemExit):
+            cli.parse_args(["resume", "--apply", "--datasets", "reference", "--revalidate-empty-file", str(path), *extra])
+    path.write_text(json.dumps([target, target]))
+    with pytest.raises(SystemExit):
+        cli.parse_args(["resume", "--apply", "--datasets", "reference", "--revalidate-empty-file", str(path)])
+
+
 @pytest.mark.asyncio
 async def test_apply_routes_real_pipeline_periods_with_pair_and_time_bounds(cli_db, monkeypatch):
     cli = cli_db

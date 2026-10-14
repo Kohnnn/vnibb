@@ -299,6 +299,11 @@ def upsert_statement_periods(
                 **_financial_provenance(raw, synced_at), "raw": raw,
                 "descriptors": descriptors,
                 "sourceResponse": source_response,
+                "responseEvidence": {
+                    "symbol": symbol_upper, "section": section, "comTypeCode": com_type,
+                    "source": "vietcap", "receivedAt": (source_response or {}).get("receivedAt") or synced_at,
+                    "endpoint": f"/v1/company/{symbol_upper}/financial-statement?section={section}",
+                },
                 "descriptorEvidence": {
                     "symbol": symbol_upper, "section": section, "comTypeCode": com_type,
                     "source": "vietcap", "receivedAt": (descriptor_response or {}).get("receivedAt") or synced_at,
@@ -328,6 +333,7 @@ def upsert_statement_periods(
 
 def upsert_ratio_rows(
     db: Any, symbol: str, rows: list[dict[str, Any]], *, com_type: str | None = None,
+    descriptors: Any = None, descriptor_response: dict[str, Any] | None = None,
     source_response: dict[str, Any] | None = None,
     received_at: datetime | None = None, records: list[dict[str, Any]] | None = None, dry_run: bool,
 ) -> int:
@@ -370,6 +376,18 @@ def upsert_ratio_rows(
             **_financial_provenance(raw, synced_at),
             "raw": raw,
             "sourceResponse": source_response,
+            "descriptors": descriptors,
+            "descriptorEvidence": {
+                "symbol": symbol_upper, "section": "RATIO", "comTypeCode": com_type,
+                "source": "vietcap", "receivedAt": (descriptor_response or {}).get("receivedAt") or synced_at,
+                "endpoint": f"/v1/company/{symbol_upper}/financial-statement/metrics",
+                "sourceResponse": descriptor_response,
+            },
+            "responseEvidence": {
+                "symbol": symbol_upper, "section": "RATIO", "comTypeCode": com_type,
+                "source": "vietcap", "receivedAt": (source_response or {}).get("receivedAt") or synced_at,
+                "endpoint": f"/v1/company/{symbol_upper}/statistics-financial",
+            },
             "updatedAt": synced_at,
             "syncedAt": synced_at,
             "schemaVersion": 1,
@@ -468,6 +486,7 @@ def sync_symbol_financials(db: Any, client: Any, symbol: str, *, com_type: str |
         if not ratios:
             raise ValueError(f"Financial ratios unavailable for {symbol}")
         mongo_rows += upsert_ratio_rows(db, symbol, ratios, com_type=com_type, records=records, dry_run=dry_run,
+            descriptors=metric_map.get("RATIO"), descriptor_response=descriptor_response,
             source_response=response_metadata.get(f"{IQ_BASE}/v1/company/{symbol.upper()}/statistics-financial"))
     except Exception as exc:
         errors["finance.ratio"] = str(exc)
