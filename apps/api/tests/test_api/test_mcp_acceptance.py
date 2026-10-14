@@ -170,6 +170,28 @@ def test_sql_row_missing_a_metric_kept_in_source_evidence_rejected():
     assert type(caught.value) is qa.Failure
 
 
+def raw_financial_row():
+    """A premium row shaped like the live storage envelope `get_premium_dataset`
+    serves: source evidence and the decoded `structured` payload at the top level.
+    """
+    return {
+        "symbol": "MSR", "source": "vietcap", "dataset": "finance.balance_sheet",
+        "datasetVariant": "finance.balance_sheet.year",
+        "raw": {"bsa1": 100}, "descriptors": [{"field": "bsa1"}],
+        "descriptorEvidence": {"symbol": "MSR", "section": "BALANCE_SHEET", "source": "vietcap",
+                               "endpoint": "/v1/company/MSR/financial-statement/metrics",
+                               "receivedAt": "2026-01-01T00:00:00Z"},
+        "comTypeCode": "CT", "sourceDate": "2025-12-31",
+        "structured": {"fiscalBasis": {"year": 2025, "periodType": "year"},
+                       "values": {}, "unavailable": {"total_assets": "unit_unverified"}},
+    }
+
+
+def raw_financial_packet(*rows):
+    return {"symbol": "MSR", "dataset": "finance.balance_sheet", "period_type": "year",
+            "row_count": len(rows), "items": list(rows)}
+
+
 def test_raw_financial_withholding_every_monetary_metric_is_partial():
     """Unit-admitted reads that withhold every metric must not read as FAIL.
 
@@ -178,31 +200,37 @@ def test_raw_financial_withholding_every_monetary_metric_is_partial():
     record-level admission failure, or that carries no withholding map at all,
     stays a hard failure.
     """
-    packet = {"symbol": "MSR", "dataset": "finance.balance_sheet", "period_type": "year", "row_count": 1,
-              "items": [{
-                  "symbol": "MSR", "source": "vietcap", "dataset": "finance.balance_sheet",
-                  "datasetVariant": "finance.balance_sheet.year", "period_type": "year",
-                  "raw": {"yearReport": 2025}, "descriptors": [{"field": "bsa1"}],
-                  "descriptorEvidence": {"symbol": "MSR"}, "comTypeCode": "CT",
-                  "rawFiscalBasis": {"year": 2025, "periodType": "year"},
-                  "unavailable": {"total_assets": "unit_unverified"},
-              }]}
-    packet["items"][0]["raw_data"] = {"structured": {
-        "fiscalBasis": {"year": 2025, "periodType": "year"},
-        "values": {}, "unavailable": {"total_assets": "unit_unverified"},
-    }}
     args = {"symbol": "MSR", "dataset": "finance.balance_sheet", "period_type": "year", "limit": 100}
+    packet = raw_financial_packet(raw_financial_row())
     with pytest.raises(qa.Partial, match="no admitted finite financial metrics"):
         qa.financial(packet, args, raw=True)
-    structured = packet["items"][0]["raw_data"]["structured"]
-    structured["unavailable"] = {"record": "invalid_raw_row"}
+    packet["items"][0]["structured"]["unavailable"] = {"record": "invalid_raw_row"}
     with pytest.raises(qa.Failure) as caught:
         qa.financial(packet, args, raw=True)
     assert type(caught.value) is qa.Failure
-    structured.pop("unavailable")
+    packet["items"][0]["structured"].pop("unavailable")
     with pytest.raises(qa.Failure) as caught:
         qa.financial(packet, args, raw=True)
     assert type(caught.value) is qa.Failure
+
+
+def test_later_row_hard_violation_is_not_masked_by_earlier_withholding():
+    """A withheld row must not abort the loop before later rows are validated.
+
+    Every row is hard-checked; a later wrong provider or conflicting fiscal basis
+    fails the whole check instead of being reported as the earlier row's partial.
+    """
+    args = {"symbol": "MSR", "dataset": "finance.balance_sheet", "period_type": "year", "limit": 100}
+    wrong_provider = raw_financial_row()
+    wrong_provider["source"] = "vci"
+    with pytest.raises(qa.Failure) as caught:
+        qa.financial(raw_financial_packet(raw_financial_row(), wrong_provider), args, raw=True)
+    assert type(caught.value) is qa.Failure and "IQ provider" in str(caught.value)
+    conflicting = raw_financial_row()
+    conflicting["structured"]["fiscalBasis"] = {"year": 2025, "periodType": "quarter"}
+    with pytest.raises(qa.Failure) as caught:
+        qa.financial(raw_financial_packet(raw_financial_row(), conflicting), args, raw=True)
+    assert type(caught.value) is qa.Failure and "fiscal identity" in str(caught.value)
 
 
 def test_empty_content_is_withheld_not_failed():

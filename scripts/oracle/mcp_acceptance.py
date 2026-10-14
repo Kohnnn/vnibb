@@ -311,6 +311,8 @@ def financial(payload, args, *, raw=False):
             require(not payload["item"], "found false with populated item")
             raise Partial("EMPTY: no admitted SQL financial row")
         rows = [payload["item"]]
+    deferred: list[str] = []
+    admitted_rows: list[dict] = []
     for item in rows:
         finite_tree(item)
         require(item.get("symbol") == args["symbol"] and item.get("source") == "vietcap", "wrong financial symbol/IQ provider")
@@ -332,26 +334,36 @@ def financial(payload, args, *, raw=False):
         values = structured.get("values") if raw else item
         require(isinstance(values, dict), "missing financial metric values")
         fields = financial_metrics(dataset)
-        if not any(finite_metric(values.get(field)) for field in fields):
-            if not raw:
-                # The writer only persists a row that admitted at least one value, so a
-                # SQL row with no expected metric while its retained source evidence
-                # holds one is lost data, not withholding.
-                admitted = structured.get("values")
-                if isinstance(admitted, dict) and any(finite_metric(admitted.get(field)) for field in fields):
-                    raise Failure("SQL row dropped an admitted financial metric kept in source evidence")
-            # The decoded reader records a reason per withheld field, or one
-            # whole-record code when the row never decoded. A whole-record admission
-            # code means nothing survived ingestion (hard failure); any other
-            # populated map means the source was read and each metric was held back
-            # on unit/basis or coverage evidence, which `unit_basis` also treats as
-            # partial. An empty map means the record carries no evidence at all.
-            reasons = set((structured.get("unavailable") or {}).values())
-            if reasons - ADMISSION_FAILURE_REASONS:
-                raise Partial("no admitted finite financial metrics; source units/basis unverified")
-            raise Failure("no finite financial metrics")
-    for item in rows:
-        unit_basis(item, period)
+        if any(finite_metric(values.get(field)) for field in fields):
+            admitted_rows.append(item)
+            continue
+        if not raw:
+            # The writer only persists a row that admitted at least one value, so a
+            # SQL row with no expected metric while its retained source evidence
+            # holds one is lost data, not withholding.
+            source_values = structured.get("values")
+            if isinstance(source_values, dict) and any(finite_metric(source_values.get(field)) for field in fields):
+                raise Failure("SQL row dropped an admitted financial metric kept in source evidence")
+        # The decoded reader records a reason per withheld field, or one
+        # whole-record code when the row never decoded. A whole-record admission
+        # code means nothing survived ingestion (hard failure); any other populated
+        # map means the source was read and each metric was held back on unit/basis
+        # or coverage evidence, which `unit_basis` also treats as partial. An empty
+        # map means the record carries no evidence at all.
+        reasons = set((structured.get("unavailable") or {}).values())
+        if reasons - ADMISSION_FAILURE_REASONS:
+            # Record the verdict but keep looping: a hard violation in any later row
+            # must still fail the check rather than hide behind this withholding.
+            deferred.append("no admitted finite financial metrics; source units/basis unverified")
+            continue
+        raise Failure("no finite financial metrics")
+    for item in admitted_rows:
+        try:
+            unit_basis(item, period)
+        except Partial as exc:
+            deferred.append(str(exc))
+    if deferred:
+        raise Partial("; ".join(dict.fromkeys(deferred))[:400])
     return rows
 
 
