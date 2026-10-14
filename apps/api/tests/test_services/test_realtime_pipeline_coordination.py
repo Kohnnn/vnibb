@@ -258,8 +258,8 @@ async def test_polling_waits_without_acquisition_calls_outside_active_session(mo
 
 @pytest.mark.asyncio
 async def test_active_session_acquires_ticks_and_current_depth(monkeypatch):
-    from vnibb.services import sync_all_data
     from vnibb.providers.vnstock import runtime
+    from vnibb.services import sync_all_data
 
     class Session:
         async def __aenter__(self):

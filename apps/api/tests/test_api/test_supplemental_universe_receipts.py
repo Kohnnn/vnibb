@@ -8,7 +8,6 @@ import pytest
 from requests.exceptions import ReadTimeout
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.core.config import settings
 from vnibb.models.sync_status import SyncStatus
 from vnibb.providers.vnstock import runtime
@@ -332,3 +331,113 @@ async def test_legacy_revalidation_resumes_budget_interruption_without_duplicate
         assert receipt["outcome"] == "empty"
         assert receipt["previous_empty_receipts"] == [original]
     assert calls == ["ACC", "ACC", "ACC"]
+
+
+@pytest.mark.asyncio
+async def test_subset_work_retains_canonical_universe_progress(test_engine, monkeypatch):
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(sync_all_data, "async_session_maker", sessions)
+    monkeypatch.setattr("vnibb.services.data_pipeline.async_session_maker", sessions)
+    calls = []
+
+    async def acquire(symbol, progress):
+        calls.append(symbol)
+        return 1
+
+    sync = FullMarketSync()
+    symbols = ["ACC", "FPT", "VNM"]
+    stages = [("officers", acquire)]
+    first = await sync.run_maintenance_cycle(
+        "subset_reference_fixture", symbols, stages, 30, 7, work_symbols=["ACC"],
+    )
+    assert first.success and not first.complete and first.pending_count == 2
+    second = await sync.run_maintenance_cycle(
+        "subset_reference_fixture", symbols, stages, 30, 7, work_symbols=["VNM"],
+    )
+    assert second.success and not second.complete and second.pending_count == 1
+    async with sessions() as session:
+        row = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "subset_reference_fixture"))).one()
+        metadata = row.additional_data
+        assert row.status == "partial" and row.success_count == 2
+        assert metadata["expected_symbols"] == symbols and metadata["expected_pairs"] == 3
+        assert metadata["stages"]["officers"]["acquired_symbols"] == ["ACC", "VNM"]
+    repeated = await sync.run_maintenance_cycle(
+        "subset_reference_fixture", symbols, stages, 30, 7, work_symbols=["ACC"],
+    )
+    assert not repeated.complete and repeated.synced_count == 0
+    completed = await sync.run_maintenance_cycle("subset_reference_fixture", symbols, stages, 30, 7)
+    assert completed.complete and calls == ["ACC", "VNM", "FPT"]
+    fresh = await sync.run_maintenance_cycle(
+        "subset_reference_fixture", symbols, stages, 30, 7, work_symbols=["VNM"],
+    )
+    assert fresh.complete and fresh.synced_count == 0 and calls == ["ACC", "VNM", "FPT"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("max_attempts", [0, 1])
+async def test_all_legacy_revalidation_targets_are_outstanding_before_bounded_work(test_engine, monkeypatch, max_attempts):
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(sync_all_data, "async_session_maker", sessions)
+    monkeypatch.setattr("vnibb.services.data_pipeline.async_session_maker", sessions)
+    calls = []
+    revalidating = False
+
+    async def acquire(symbol, progress):
+        if revalidating and not calls:
+            async with sessions() as session:
+                row = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "bounded_revalidation"))).one()
+                state = row.additional_data["stages"]["officers"]
+                assert row.status == "running" and row.additional_data["complete"] is False
+                assert state["acquired_symbols"] == [] and state["pending_count"] == 2
+                assert all(state["receipts"][item]["revalidation_pending"] for item in ("ACC", "VNM"))
+        calls.append(symbol)
+        progress["empty_count"] = 1
+        return 0
+
+    sync = FullMarketSync()
+    symbols = ["ACC", "VNM"]
+    stages = [("officers", acquire)]
+    await sync.run_maintenance_cycle("bounded_revalidation", symbols, stages, 30, 7, allow_empty=True)
+    async with sessions() as session:
+        row = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "bounded_revalidation"))).one()
+        sync_id = row.id
+        originals = row.additional_data["stages"]["officers"]["receipts"]
+    targets = [{"symbol": symbol, "stage": "officers", "expected_last_attempted_at": originals[symbol]["last_attempted_at"],
+                "expected_last_succeeded_at": originals[symbol]["last_succeeded_at"]} for symbol in symbols]
+    calls.clear()
+    revalidating = True
+    bounded = await sync.run_maintenance_cycle(
+        "bounded_revalidation", symbols, stages, 30, 7, allow_empty=True,
+        max_attempts=max_attempts, revalidate_empty_receipts=targets,
+    )
+    assert not bounded.complete and bounded.pending_count == 2 - max_attempts
+    assert len(calls) == max_attempts
+    async with sessions() as session:
+        row = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "bounded_revalidation"))).one()
+        metadata = row.additional_data
+        state = metadata["stages"]["officers"]
+        assert row.id == sync_id and row.status == "partial" and metadata["complete"] is False
+        assert state["pending_count"] == 2 - max_attempts
+        assert set(state["acquired_symbols"]) == set(calls)
+        for symbol in symbols:
+            receipt = state["receipts"][symbol]
+            assert receipt["previous_empty_receipts"] == [originals[symbol]]
+            if symbol not in calls:
+                assert receipt["outcome"] == "pending" and receipt["revalidation_pending"] is True
+                assert receipt["last_attempted_at"] == originals[symbol]["last_attempted_at"]
+                assert receipt["last_succeeded_at"] == originals[symbol]["last_succeeded_at"]
+    resumed = await sync.run_maintenance_cycle(
+        "bounded_revalidation", symbols, stages, 30, 7, allow_empty=True,
+        max_attempts=2, revalidate_empty_receipts=targets,
+    )
+    assert resumed.complete and sorted(calls) == symbols
+    replay = await sync.run_maintenance_cycle(
+        "bounded_revalidation", symbols, stages, 30, 7, allow_empty=True, revalidate_empty_receipts=targets,
+    )
+    assert replay.complete and replay.synced_count == 0 and sorted(calls) == symbols
+    async with sessions() as session:
+        row = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "bounded_revalidation"))).one()
+        for symbol in symbols:
+            receipt = row.additional_data["stages"]["officers"]["receipts"][symbol]
+            assert receipt["previous_empty_receipts"] == [originals[symbol]]
+            assert "revalidation_pending" not in receipt

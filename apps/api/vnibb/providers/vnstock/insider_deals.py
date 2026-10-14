@@ -22,7 +22,7 @@ import asyncio
 import hashlib
 import logging
 import re
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -193,7 +193,7 @@ class VnstockInsiderDealsFetcher:
     """
 
     @staticmethod
-    def _raw_records(company, limit: int) -> List[dict]:
+    def _raw_records(company, limit: int) -> list[dict]:
         if hasattr(company, "insider_deals"):
             df = company.insider_deals()
             if df is not None and len(df) > 0:
@@ -217,7 +217,7 @@ class VnstockInsiderDealsFetcher:
     async def fetch(
         symbol: str,
         limit: int = 20,
-    ) -> List[InsiderDealData]:
+    ) -> list[InsiderDealData]:
         """
         Fetch insider deals for a company.
 
@@ -238,7 +238,7 @@ class VnstockInsiderDealsFetcher:
             loop = asyncio.get_event_loop()
             records = await loop.run_in_executor(None, _fetch)
 
-            result: List[InsiderDealData] = []
+            result: list[InsiderDealData] = []
             for r in records:
                 raw_price = _first_supplied(r, "dealPrice", "deal_price", "price", "transaction_price")
                 raw_value = _first_supplied(r, "dealValue", "deal_value", "value", "transaction_value")

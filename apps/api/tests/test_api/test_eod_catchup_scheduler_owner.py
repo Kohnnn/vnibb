@@ -1,7 +1,6 @@
 import pytest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.core import scheduler
 from vnibb.models.scheduler_state import SchedulerJobState
 from vnibb.services import mongo_eod_sync, sync_all_data

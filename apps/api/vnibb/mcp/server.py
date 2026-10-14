@@ -2034,12 +2034,28 @@ async def get_ingestion_receipts(
             records = (await session.execute(statement)).scalars().all()
         rows = []
         for record in records:
-            stage = record.additional_data["stages"][dataset]
+            metadata = record.additional_data
+            stage = metadata["stages"][dataset]
+            expected_count = metadata.get("expected_count")
+            pending_count = stage.get("pending_count")
+            complete = None
+            if isinstance(metadata.get("expected_symbols"), list):
+                expected_symbols = set(metadata["expected_symbols"])
+                acquired_symbols = set(stage.get("acquired_symbols", []))
+                outstanding = expected_symbols - acquired_symbols
+                outstanding.update(
+                    symbol for symbol in expected_symbols
+                    if stage["receipts"].get(symbol, {}).get("outcome") in {"failed", "deferred", "attempted", "pending"}
+                    or stage["receipts"].get(symbol, {}).get("revalidation_pending")
+                )
+                expected_count = len(expected_symbols)
+                pending_count = len(outstanding)
+                complete = pending_count == 0
             rows.append({"record_id": record.id, "sync_type": record.sync_type,
                          "status": record.status, "started_at": record.started_at,
                          "completed_at": record.completed_at,
-                         "expected_count": stage.get("expected_count"),
-                         "pending_count": stage.get("pending_count"), "complete": stage.get("complete"),
+                         "expected_count": expected_count,
+                         "pending_count": pending_count, "complete": complete,
                          "receipt": stage["receipts"][normalized]})
         store = "postgres:sync_status"
     return {"symbol": normalized, "dataset": dataset, "source": store,

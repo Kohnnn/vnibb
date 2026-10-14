@@ -2,7 +2,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-
 from vnibb.core.config import settings
 from vnibb.providers.vnstock.price_depth import PriceDepthData, VnstockPriceDepthFetcher
 from vnibb.services import data_pipeline, mongo_market_data_service

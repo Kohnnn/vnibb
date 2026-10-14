@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
 from vnibb.core.config import settings
 from vnibb.services import realtime_pipeline, sync_all_data
 

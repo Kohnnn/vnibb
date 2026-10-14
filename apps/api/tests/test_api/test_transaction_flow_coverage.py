@@ -1,7 +1,6 @@
 from datetime import date
 
 import pytest
-
 from vnibb.models.trading import OrderFlowDaily
 
 

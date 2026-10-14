@@ -3,7 +3,6 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-
 from vnibb.services import mongo_market_data_service, vietcap_client, vietcap_ingestion
 
 

@@ -7,7 +7,8 @@ unmapped direction is never silently treated as a sale.
 """
 
 import math
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
 def normalize_deal_action(value: object) -> str | None:

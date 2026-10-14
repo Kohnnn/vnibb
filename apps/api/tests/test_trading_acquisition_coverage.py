@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock
 
 import pandas as pd
 import pytest
-
 from vnibb.services.trading_acquisition import acquire_session_trades, persist_trade_stores
 
 

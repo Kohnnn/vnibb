@@ -2,7 +2,6 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
-
 import vnibb.services.data_pipeline as module
 from vnibb.providers.vnstock.financials import FinancialStatementData, VnstockFinancialsFetcher
 from vnibb.services.data_pipeline import DataPipeline
@@ -247,8 +246,9 @@ async def test_empty_or_aborted_statement_does_not_skip_other_statements(acquisi
 @pytest.mark.asyncio
 async def test_resumed_cycle_completeness_counts_whole_cycle_not_suffix(acquisition):
     pipeline, state, _, _, receipts, _ = acquisition
-    cycle_receipts = lambda: [r['additional_data'] for r in receipts
-                              if r['sync_type'] == 'financial_cycle']
+    def cycle_receipts():
+        return [r['additional_data'] for r in receipts
+                if r['sync_type'] == 'financial_cycle']
     progress = {}
     await pipeline.sync_financials(symbols=['AAA', 'BBB'], count=1, progress=progress)
     assert progress['financial_acquisition']['complete'] is True

@@ -3,7 +3,6 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.models.sync_status import SyncStatus
 from vnibb.services import sync_all_data, vietcap_ingestion
 
@@ -26,7 +25,7 @@ async def test_iq_reference_cycle_is_separate_full_universe_bounded_owner(monkey
         assert selected == symbols
         assert budget_seconds == 600 and refresh_days == 7
         assert kwargs == {"max_attempts": 50, "allow_empty": True}
-        for name, operation in stages:
+        for _, operation in stages:
             assert await operation("S0800", {}) == 1
         return sync_all_data.SyncResult(True, 2, 0, 0, [], False, 1600)
 

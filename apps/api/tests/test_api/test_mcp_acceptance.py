@@ -1,5 +1,4 @@
 """Behavioral regressions for issue111's external-harness blind spots."""
-import copy
 import importlib.util
 import json
 from pathlib import Path

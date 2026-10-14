@@ -2,7 +2,6 @@ import sys
 from types import ModuleType
 
 import pytest
-
 from scripts.vietcap import backfill_vietcap
 
 
@@ -204,8 +203,8 @@ def test_listing_writer_keeps_identity_when_metadata_changes():
 
 
 def test_ratio_annual_variant_retains_original_natural_key_and_units():
-    from vnibb.services.vietcap_ingestion import upsert_ratio_rows
     from vnibb.services.vietcap_financials import financial_fiscal_basis
+    from vnibb.services.vietcap_ingestion import upsert_ratio_rows
 
     records = []
     raw = {"yearReport": 2018, "year": "2018", "quarter": 5, "ratioType": "RATIO_YEAR", "ratioYearId": 12238614, "ratioTTMId": 12238614, "unit": "ratio", "pe": 12}

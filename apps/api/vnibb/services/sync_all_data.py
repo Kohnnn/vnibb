@@ -177,12 +177,16 @@ class FullMarketSync:
         allow_empty: bool = False,
         first_pass_only: bool = False,
         revalidate_empty_receipts: list[dict] | None = None,
+        work_symbols: list[str] | None = None,
     ) -> SyncResult:
-        """Resume every active symbol × stage; receipts survive ranking/universe changes."""
+        """Resume the canonical universe; work_symbols limits work, never cycle scope."""
         started = time.monotonic()
         symbols = sorted(set(symbols))
         if not symbols:
             return SyncResult(False, 0, 1, 0, ["Active Universe is empty"])
+        selected_symbols = symbols if work_symbols is None else sorted(set(work_symbols))
+        if set(selected_symbols) - set(symbols):
+            raise ValueError("Work symbols are outside the maintenance scope")
         async with async_session_maker() as session:
             previous = (await session.scalars(
                 select(SyncStatus).where(SyncStatus.sync_type == sync_type)
@@ -197,7 +201,7 @@ class FullMarketSync:
             receipt = metadata.get("stages", {}).get(name, {}).get("receipts", {}).get(symbol, {})
             original = receipt if receipt.get("outcome") == "empty" else next((
                 prior for prior in receipt.get("previous_empty_receipts", [])
-                if receipt.get("outcome") in {"deferred", "attempted"} and all(
+                if receipt.get("outcome") in {"pending", "deferred", "attempted"} and all(
                     prior.get(key) == target[f"expected_{key}"]
                     for key in ("last_attempted_at", "last_succeeded_at")
                 )
@@ -230,7 +234,25 @@ class FullMarketSync:
             state["failed_symbols"] = [symbol for symbol in state["failed_symbols"] if symbol in symbols]
             state.setdefault("receipts", {})
             state["pending_count"] = len(symbols) - len(state["acquired_symbols"])
-        work = [(symbol, name, operation) for symbol in symbols for name, operation in stages]
+        for (symbol, name), prior_empty in revalidation_targets.items():
+            state = stage_metadata[name]
+            receipt = state["receipts"][symbol]
+            previous_receipts = receipt.setdefault("previous_empty_receipts", [])
+            original = {key: value for key, value in prior_empty.items() if key != "previous_empty_receipts"}
+            if original not in previous_receipts:
+                previous_receipts.append(original)
+            if receipt.get("outcome") == "empty":
+                receipt["outcome"] = "pending"
+            receipt["revalidation_pending"] = True
+            state["acquired_symbols"] = [item for item in state["acquired_symbols"] if item != symbol]
+            state["pending_count"] = len(symbols) - len(state["acquired_symbols"])
+        if revalidation_targets:
+            metadata["complete"] = False
+            await data_pipeline._update_sync_record(
+                sync_id, status="running", additional_data=metadata,
+                success_count=sum(len(value["acquired_symbols"]) for value in stage_metadata.values()),
+            )
+        work = [(symbol, name, operation) for symbol in selected_symbols for name, operation in stages]
         if revalidate_empty_receipts is not None:
             work = [item for item in work if (item[0], item[1]) in revalidation_targets]
         cursor = (metadata.get("last_symbol"), metadata.get("last_stage"))
@@ -259,12 +281,6 @@ class FullMarketSync:
                 progress: dict = {}
                 attempted += 1
                 receipt = state["receipts"].setdefault(symbol, {})
-                if prior_empty is not None:
-                    previous_receipts = receipt.setdefault("previous_empty_receipts", [])
-                    original = {key: value for key, value in prior_empty.items() if key != "previous_empty_receipts"}
-                    if original not in previous_receipts:
-                        previous_receipts.append(original)
-                    state["acquired_symbols"] = [item for item in state["acquired_symbols"] if item != symbol]
                 receipt.update(last_attempted_at=datetime.utcnow().isoformat(), outcome="attempted")
                 if prior_empty is not None:
                     state["pending_count"] = len(symbols) - len(state["acquired_symbols"])
@@ -278,6 +294,7 @@ class FullMarketSync:
                     receipt.update(last_succeeded_at=datetime.utcnow().isoformat(), outcome="empty" if not count else "succeeded", rows=int(count))
                     receipt.pop("error", None)
                     receipt.pop("errors", None)
+                    receipt.pop("revalidation_pending", None)
                     state["acquired_symbols"].append(symbol)
                     state["failed_symbols"] = [item for item in state["failed_symbols"] if item != symbol]
                     acquired += 1

@@ -6,9 +6,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import JSON, insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.mcp import server
-
 
 ORIGINAL_COLLECTIONS = (
     "stocks", "stock_prices", "stock_indices", "income_statements",
@@ -278,7 +276,7 @@ async def test_public_sql_date_bounds_are_inclusive_and_invalid_ranges_raise(sql
         moments[2] = datetime.combine(days[2], datetime.max.time())
     rows = [_row(collection, ordinal, **{field: moments[ordinal - 1] if is_datetime else days[ordinal - 1]}) for ordinal in range(1, 5)]
     await sql_tool(collection, rows)
-    arguments = dict(collection=collection, start_date=start, end_date=end, sort_by=field, descending=False)
+    arguments = {"collection": collection, "start_date": start, "end_date": end, "sort_by": field, "descending": False}
 
     if expected_ids is None:
         with pytest.raises(ValueError):

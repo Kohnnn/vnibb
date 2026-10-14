@@ -10,7 +10,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
-
 import pytest
 import uvicorn
 from httpx import AsyncClient

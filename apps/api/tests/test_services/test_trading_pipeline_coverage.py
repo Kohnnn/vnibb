@@ -5,14 +5,17 @@ from unittest.mock import AsyncMock, Mock
 
 import pandas as pd
 import pytest
-
 from vnibb.core.config import settings
 from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
 from vnibb.models.trading import ForeignTrading, IntradayTrade, OrderFlowDaily
 from vnibb.providers.vnstock import runtime
-from vnibb.services import data_pipeline, mongo_market_data_service, sync_all_data, trading_acquisition
-
+from vnibb.services import (
+    data_pipeline,
+    mongo_market_data_service,
+    sync_all_data,
+    trading_acquisition,
+)
 
 REAL_FETCH_PRIMARY_TRADES = trading_acquisition.fetch_primary_trades
 

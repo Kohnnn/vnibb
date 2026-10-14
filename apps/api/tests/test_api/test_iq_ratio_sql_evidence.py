@@ -5,7 +5,6 @@ from copy import deepcopy
 import pytest
 from sqlalchemy import BigInteger, Integer, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.mcp import server
 from vnibb.models.financials import IncomeStatement
 from vnibb.models.trading import FinancialRatio
@@ -67,20 +66,25 @@ def ratio_envelope(value, unit):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("value", [0.25, 25.0])
-@pytest.mark.parametrize("unit", ["percent", "%", None, "unknown"])
+@pytest.mark.parametrize("unit", ["percent", "%", None, "unknown", "ratio", "times", "fraction"])
+@pytest.mark.parametrize("metric, column, title", [
+    ("roe", "roe", "Return on equity"),
+    ("debt_assets", "debt_to_assets", "Debt to assets"),
+])
 async def test_iq_ratio_decode_sql_public_mcp_preserves_admitted_units(
-    monkeypatch, test_engine, test_db, value, unit
+    monkeypatch, test_engine, test_db, value, unit, metric, column, title
 ):
     envelope = ratio_envelope(value, unit)
+    envelope["descriptors"][0]["fullTitleEn"] = title
     original = deepcopy(envelope)
     decoded = decode_vietcap_financial_record(envelope)
     admitted = unit in {"percent", "%"}
     expected_units = {"eps": "VND/share", "pe": "ratio"}
     if admitted:
-        expected_units["roe"] = "percent"
+        expected_units[metric] = "percent"
     else:
-        assert "roe" not in decoded["values"]
-        assert decoded["unavailable"]["roe"] == "unit_unverified"
+        assert metric not in decoded["values"]
+        assert decoded["unavailable"][metric] == "unit_unverified"
     expected_raw_data = {**original, "structured": decoded, "ratio_units": expected_units}
 
     assert await persist_vietcap_financials(
@@ -98,12 +102,12 @@ async def test_iq_ratio_decode_sql_public_mcp_preserves_admitted_units(
 
     assert result["found"] is True
     assert result["provider_source"] == "vietcap"
-    assert result["item"]["roe"] == (value if admitted else None)
+    assert result["item"][column] == (value if admitted else None)
     assert result["item"]["eps"] == 4200.0
     assert result["item"]["pe_ratio"] == 12.5
     assert result["item"]["raw_data"] == expected_raw_data
     stored = (await test_db.execute(select(FinancialRatio))).scalar_one()
-    assert stored.roe == (value if admitted else None)
+    assert getattr(stored, column) == (value if admitted else None)
     assert stored.raw_data == expected_raw_data
     assert envelope == original
 

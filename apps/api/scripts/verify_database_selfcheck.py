@@ -1,8 +1,8 @@
 """Offline assertions for the opt-in inventory; run directly, without providers."""
 import importlib.util
 import json
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 spec = importlib.util.spec_from_file_location("verify_database", Path(__file__).with_name("verify_database.py"))

@@ -10,11 +10,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 import vnibb.services.data_pipeline as pipeline_module
 import vnibb.services.sync_all_data as sync_all_data_module
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from vnibb.core.exceptions import ProviderError
 from vnibb.core.insider_units import admitted_deal_value, normalize_deal_action
 from vnibb.models.news import InsiderDeal
@@ -735,8 +734,8 @@ async def test_dividend_rerun_updates_same_natural_key_without_duplicating(monke
     ]))
     progress = {}
 
-    first = await pipeline(monkeypatch).sync_dividends(symbols=["VNM"], progress=progress)
-    second = await pipeline(monkeypatch).sync_dividends(symbols=["VNM"], progress={})
+    await pipeline(monkeypatch).sync_dividends(symbols=["VNM"], progress=progress)
+    await pipeline(monkeypatch).sync_dividends(symbols=["VNM"], progress={})
 
     async with engine.connect() as conn:
         rows = (await conn.execute(

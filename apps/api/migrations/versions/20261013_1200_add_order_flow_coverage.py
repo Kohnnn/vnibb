@@ -1,7 +1,7 @@
 """Persist source coverage receipts without certifying historical flow rows."""
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "f8c3a102d679"
 down_revision = "e5f1a7c9d2b4"

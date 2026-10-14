@@ -2,7 +2,6 @@ import importlib.util
 from datetime import datetime
 from pathlib import Path
 
-
 MODULE_PATH = Path(__file__).parents[4] / "scripts" / "mongodb" / "derive_intraday_trades.py"
 SPEC = importlib.util.spec_from_file_location("derive_intraday_trades", MODULE_PATH)
 derivation = importlib.util.module_from_spec(SPEC)

@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.dialects import sqlite
-
 from vnibb.core.vn_sectors import SectorConfig
 from vnibb.providers.vnstock.equity_screener import VnstockScreenerFetcher
 from vnibb.services import data_pipeline as pipeline_module

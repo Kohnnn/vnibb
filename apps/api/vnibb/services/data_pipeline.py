@@ -5598,10 +5598,10 @@ class DataPipeline:
 
                 from vnibb.services.trading_acquisition import acquire_session_trades, persist_trade_stores, persist_mongo_trades, fetch_primary_trades
 
-                def _sync_fetch():
+                def _sync_fetch(symbol=symbol, source=source):
                     from vnibb.services.vietcap_client import VietcapClient
                     client = VietcapClient(max_retries=0, timeout_seconds=min(10.0, settings.vnstock_timeout / 2))
-                    def primary_fetch(page_size=500):
+                    def primary_fetch(page_size=500, symbol=symbol):
                         return fetch_primary_trades(client, symbol, page_size=page_size)
                     try:
                         acquired, receipt = acquire_session_trades(primary_fetch, trade_date, limit, session_closed=self._is_after_market_close())
@@ -5613,7 +5613,6 @@ class DataPipeline:
                         acquired, receipt = acquire_session_trades(stock.quote.intraday, trade_date, limit, session_closed=self._is_after_market_close())
                         receipt.update(provider=f"vnstock:{source}", price_multiplier=1000, source_price_unit="thousand_VND", primary_error=type(primary_error).__name__)
                         return acquired, receipt
-
                 raw_rows, coverage = await asyncio.wait_for(asyncio.to_thread(_sync_fetch), timeout=settings.vnstock_timeout)
                 coverage.update(raw_dataset="equity.intraday", price_unit="VND", volume_unit="shares", current_depth={"status": "unknown"})
 
@@ -5693,7 +5692,7 @@ class DataPipeline:
                 coverage["observed_trade_count"] = len(rows)
                 has_intraday_data = bool(rows)
 
-                async def write_sql_ticks():
+                async def write_sql_ticks(symbol=symbol, rows=rows):
                     async with async_session_maker() as session:
                         from collections import Counter
                         retained = (await session.execute(select(IntradayTrade).where(IntradayTrade.symbol == symbol, IntradayTrade.trade_time >= datetime.combine(trade_date, time.min), IntradayTrade.trade_time < datetime.combine(trade_date + timedelta(days=1), time.min)))).scalars().all()
@@ -5710,7 +5709,7 @@ class DataPipeline:
                         await session.commit()
                     return len(rows)
 
-                async def write_mongo_ticks():
+                async def write_mongo_ticks(symbol=symbol, rows=rows, coverage=coverage):
                     return await asyncio.to_thread(persist_mongo_trades, symbol, rows, coverage)
 
                 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
@@ -5770,7 +5769,7 @@ class DataPipeline:
                     "created_at": datetime.utcnow(),
                     "updated_at": datetime.utcnow(),
                 }
-                async def write_sql_flow():
+                async def write_sql_flow(coverage=coverage, order_flow_values=order_flow_values):
                     coverage["sql_flows"] = {"status": "persisted", "rows": 1}
                     async with async_session_maker() as session:
                         await session.execute(get_upsert_stmt(OrderFlowDaily, ["symbol", "trade_date"], order_flow_values))
@@ -6054,13 +6053,13 @@ class DataPipeline:
                     "total_ask_volume": payload.get("total_ask_volume"),
                     "created_at": datetime.utcnow(),
                 }
-                async def write_sql_depth():
+                async def write_sql_depth(values=values):
                     async with async_session_maker() as session:
                         await session.execute(OrderbookSnapshot.__table__.insert(), values)
                         await session.commit()
                     return 1
 
-                def write_mongo_batch():
+                def write_mongo_batch(symbol=symbol, snapshot_time=snapshot_time, payload=payload, coverage=coverage, batch_status=batch_status, raw_levels=raw_levels):
                     from pymongo import ReplaceOne
 
                     service = get_mongo_market_data_service()
@@ -6093,7 +6092,7 @@ class DataPipeline:
                     collection.bulk_write(operations, ordered=True)
                     return len(raw_levels or [])
 
-                async def write_mongo_depth():
+                async def write_mongo_depth(write_mongo_batch=write_mongo_batch):
                     return await asyncio.to_thread(write_mongo_batch)
 
                 coverage.update(await persist_trade_stores({

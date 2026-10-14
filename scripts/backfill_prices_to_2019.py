@@ -38,7 +38,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--start", "--start-date", type=date.fromisoformat, default=date(2000, 1, 1))
     parser.add_argument("--end", "--end-date", type=date.fromisoformat)
-    parser.add_argument("--symbols", default="", help="Confirmed active SQL symbols; omitted selects the entire active universe.")
+    parser.add_argument("--symbols", default="", help="Confirmed active SQL symbols to work on; canonical cycle scope remains the entire active universe.")
     parser.add_argument("--datasets", default=",".join(DATASETS))
     parser.add_argument("--max-pairs", type=int, default=50)
     parser.add_argument("--budget-seconds", type=float, default=300)
@@ -142,7 +142,8 @@ def summarize_receipts(metadata, symbols, stage_names):
 async def sql_inventory(args, dataset, symbols):
     async with async_session_maker() as session:
         row = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == cycle_name(args, dataset)).order_by(SyncStatus.id.desc()).limit(1))).first()
-    report = summarize_receipts(dict(row.additional_data or {}) if row else {}, symbols, [name for name, _ in stages_for(args, dataset)])
+    metadata = dict(row.additional_data or {}) if row else {}
+    report = summarize_receipts(metadata, symbols, [name for name, _ in stages_for(args, dataset)])
     report.update(cycle=cycle_name(args, dataset), sync_id=row.id if row else None, status=row.status if row else "not_started")
     return report
 
@@ -178,6 +179,7 @@ async def save_dataset_cursor(sync_id, dataset):
 
 
 async def apply_backfill(args, symbols):
+    universe = await resolve_symbols("") if args.symbols else symbols
     deadline = time.monotonic() + args.budget_seconds
     remaining_pairs = args.max_pairs
     cursor, cursor_id = await load_dataset_cursor()
@@ -195,8 +197,8 @@ async def apply_backfill(args, symbols):
             remaining_pairs -= int(result.get("attempted", min(50, remaining_pairs)))
             results[dataset] = result
         else:
-            scope = dataset_scope(dataset, symbols)
-            await FullMarketSync().run_maintenance_cycle(cycle_name(args, dataset), scope, stages_for(args, dataset), remaining, 36500, max_attempts=remaining_pairs, allow_empty=dataset in {"reference", "market"}, first_pass_only=args.first_pass_only, revalidate_empty_receipts=args.revalidate_empty_receipts)
+            scope = dataset_scope(dataset, universe)
+            await FullMarketSync().run_maintenance_cycle(cycle_name(args, dataset), scope, stages_for(args, dataset), remaining, 36500, max_attempts=remaining_pairs, allow_empty=dataset in {"reference", "market"}, first_pass_only=args.first_pass_only, revalidate_empty_receipts=args.revalidate_empty_receipts, work_symbols=dataset_scope(dataset, symbols))
             result = await sql_inventory(args, dataset, scope)
             remaining_pairs -= int(result.get("attempted_this_run", 0))
             results[dataset] = result
@@ -239,11 +241,12 @@ async def main(argv=None):
     if args.apply and args.revalidate_empty_receipts is None and (args.bootstrap_listing or not args.symbols):
         bootstrap = await bootstrap_listing(args)
     symbols = await resolve_symbols(args.symbols)
+    universe = await resolve_symbols("") if args.symbols else symbols
     mutations = await apply_backfill(args, symbols) if args.apply else None
     report = {"mode": "apply" if args.apply else "read_only", "command": args.command,
-              "universe": {"scope": "SQL-confirmed active instruments", "count": len(symbols), "symbols": symbols, "source_listing_bootstrap": bootstrap},
+              "universe": {"scope": "SQL-confirmed active instruments", "count": len(universe), "symbols": universe, "work_symbols": symbols, "source_listing_bootstrap": bootstrap},
               "start": args.start, "end": args.end, "history_support": {dataset: HISTORY_SUPPORT[dataset] for dataset in args.datasets},
-              "datasets": await collect_inventory(args, symbols), "run": mutations}
+              "datasets": await collect_inventory(args, universe), "run": mutations}
     print(json.dumps(report, indent=2, default=str))
     return 0 if symbols else 1
 

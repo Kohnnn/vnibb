@@ -1,10 +1,9 @@
 import copy
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 from types import SimpleNamespace
+from uuid import uuid4
 
 import httpx
-
 import pytest
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient

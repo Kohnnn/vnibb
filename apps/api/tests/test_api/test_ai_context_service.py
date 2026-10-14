@@ -243,8 +243,8 @@ def test_price_context_discloses_unknown_rows_without_bridging_return_windows():
 
 @pytest.mark.asyncio
 async def test_postgres_price_snapshot_loads_daily_rows_with_full_source(monkeypatch, test_db):
-    from vnibb.services import ai_context_service
     from vnibb.mcp import server
+    from vnibb.services import ai_context_service
 
     class SessionContext:
         async def __aenter__(self):

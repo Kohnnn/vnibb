@@ -1,12 +1,11 @@
 import json
 import time
 from copy import deepcopy
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
-from types import SimpleNamespace
 
 import httpx
-
 import pytest
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient

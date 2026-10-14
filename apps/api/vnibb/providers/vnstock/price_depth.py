@@ -50,7 +50,7 @@ class PriceDepthData(BaseModel):
     last_volume: Optional[int] = Field(None, alias="lastVolume")
     raw_levels: Optional[list[dict]] = None
     provider_source: str = "VCI"
-    observed_at: Optional[str] = None
+    observed_at: str | None = None
     timestamp_meaning: str = "unknown"
     price_unit: str = "unknown"
     volume_unit: str = "unknown"

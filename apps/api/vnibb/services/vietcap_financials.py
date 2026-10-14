@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import Any
 
+from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
 from vnibb.providers.vnstock.balance_sheet import BalanceSheetData
 from vnibb.providers.vnstock.cash_flow import CashFlowData
 from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
@@ -65,7 +66,7 @@ _LABELS = {
     "revenue_growth": ("revenue growth",), "earnings_growth": ("earnings growth",),
     "dps": ("dividend per share",), "dividend_yield": ("dividend yield",),
 }
-_PERCENT_FIELDS = {"roe", "roa", "roic", "gross_margin", "net_margin", "operating_margin", "revenue_growth", "earnings_growth", "dividend_yield"}
+_PERCENT_FIELDS = PERCENT_RATIO_FIELDS | {"dividend_yield"}
 _PER_SHARE_FIELDS = {"eps", "bvps", "dps"}
 
 

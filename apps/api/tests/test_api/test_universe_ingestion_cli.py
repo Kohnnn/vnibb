@@ -255,3 +255,75 @@ async def test_dataset_cursor_rotates_after_each_attempt_and_persists(cli_db, mo
     assert cli.rotate_datasets(args.datasets, "market") == ["eod", "financials", "ratios", "market"]
     assert cli.rotate_datasets(args.datasets, None) == args.datasets
     assert cli.rotate_datasets(args.datasets, "eod") == args.datasets
+
+
+@pytest.mark.asyncio
+async def test_subset_apply_keeps_full_universe_scope_and_inventory(cli_db, monkeypatch):
+    from vnibb.services import sync_all_data
+
+    cli = cli_db
+    monkeypatch.setattr(sync_all_data, "async_session_maker", cli.async_session_maker)
+    symbols = ["ACC", "FPT", "VNM"]
+    calls = []
+
+    async def seeded(self):
+        return symbols
+
+    async def acquire(symbol, progress):
+        calls.append(symbol)
+        return 1
+
+    monkeypatch.setattr(cli.FullMarketSync, "_get_seeded_symbols", seeded)
+    monkeypatch.setattr(cli, "stages_for", lambda args, dataset: [("officers", acquire)])
+    args = cli.parse_args(["resume", "--apply", "--datasets", "reference", "--symbols", "VNM", "--max-pairs", "1"])
+    first = await cli.apply_backfill(args, await cli.resolve_symbols(args.symbols))
+    assert calls == ["VNM"]
+    assert first["reference"]["status"] == "partial"
+    assert first["reference"]["pending_count"] == 2 and not first["reference"]["acquisition_complete"]
+    args.symbols = "ACC"
+    second = await cli.apply_backfill(args, await cli.resolve_symbols(args.symbols))
+    assert calls == ["VNM", "ACC"] and second["reference"]["pending_count"] == 1
+    assert second["reference"]["sync_id"] == first["reference"]["sync_id"]
+    repeated = await cli.apply_backfill(args, await cli.resolve_symbols(args.symbols))
+    assert calls == ["VNM", "ACC"] and repeated["reference"]["attempted_this_run"] == 0
+    inventory = await cli.sql_inventory(args, "reference", symbols)
+    assert inventory["pending_count"] == 1 and not inventory["acquisition_complete"]
+    assert set(inventory["stages"]["officers"]["receipts"]) == set(symbols)
+    async with cli.async_session_maker() as session:
+        row = await session.get(cli.SyncStatus, first["reference"]["sync_id"])
+        assert row.additional_data["expected_symbols"] == symbols
+        assert row.additional_data["expected_pairs"] == 3
+        assert row.additional_data["stages"]["officers"]["acquired_symbols"] == ["VNM", "ACC"]
+    args.symbols = ""
+    completed = await cli.apply_backfill(args, symbols)
+    assert completed["reference"]["acquisition_complete"] and calls == ["VNM", "ACC", "FPT"]
+    args.symbols = "ACC"
+    fresh = await cli.apply_backfill(args, ["ACC"])
+    assert fresh["reference"]["attempted_this_run"] == 0 and calls == ["VNM", "ACC", "FPT"]
+
+
+@pytest.mark.asyncio
+async def test_sql_inventory_reconciles_current_universe_without_mutating_cycle(cli_db, monkeypatch):
+    cli = cli_db
+    args = cli.parse_args(["inventory", "--datasets", "reference"])
+    monkeypatch.setattr(cli, "stages_for", lambda args, dataset: [("officers", None)])
+    metadata = {"expected_symbols": ["ACC", "VNM"], "expected_pairs": 2, "complete": True,
+                "stages": {"officers": {"acquired_symbols": ["ACC", "VNM"], "failed_symbols": [],
+                                       "receipts": {symbol: {"outcome": "succeeded"} for symbol in ("ACC", "VNM")}}}}
+    async with cli.async_session_maker() as session:
+        row = cli.SyncStatus(sync_type=cli.cycle_name(args, "reference"), status="completed", additional_data=metadata)
+        session.add(row)
+        await session.commit()
+        sync_id = row.id
+    grown = await cli.sql_inventory(args, "reference", ["ACC", "FPT", "VNM"])
+    assert grown["status"] == "completed" and grown["sync_id"] == sync_id
+    assert grown["pending_count"] == 1 and grown["unattempted_count"] == 1
+    assert not grown["acquisition_complete"] and not grown["first_pass_complete"]
+    assert grown["stages"]["officers"]["receipts"]["FPT"] == {"outcome": "pending"}
+    shrunk = await cli.sql_inventory(args, "reference", ["VNM"])
+    assert shrunk["pending_count"] == 0 and shrunk["acquisition_complete"]
+    assert shrunk["attempted_terminal_count"] == 1
+    assert shrunk["stages"]["officers"]["receipts"] == {"VNM": {"outcome": "succeeded"}}
+    async with cli.async_session_maker() as session:
+        row = await session.get(cli.SyncStatus, sync_id)
+        assert row.status == "completed" and row.additional_data == metadata

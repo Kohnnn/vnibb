@@ -1,14 +1,16 @@
-from datetime import date, timedelta
 import json
+from datetime import date, timedelta
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-
 from vnibb.core.config import settings
 from vnibb.mcp import server
-from vnibb.services.ai_context_service import AIContextService, _build_price_context
-from vnibb.services.ai_context_service import _build_flow_context
+from vnibb.services.ai_context_service import (
+    AIContextService,
+    _build_flow_context,
+    _build_price_context,
+)
 
 
 def sessions(count, end=date(2026, 10, 13), holidays=()):
@@ -130,11 +132,13 @@ async def test_runtime_remote_fallback_is_nonrecursive_and_preserves_real_databa
     if kind == "symbol":
         monkeypatch.setattr("vnibb.services.ai_context_service.vnibb_mcp_client_service.get_symbol_snapshot", remote)
         monkeypatch.setattr(service, "_build_postgres_snapshot", local)
-        invoke = lambda: service._build_symbol_snapshot("VNM", prefer_database_data=True)
+        async def invoke():
+            return await service._build_symbol_snapshot("VNM", prefer_database_data=True)
     else:
         monkeypatch.setattr("vnibb.services.ai_context_service.vnibb_mcp_client_service.get_market_snapshot", remote)
         monkeypatch.setattr(service, "_build_postgres_market_snapshot", local)
-        invoke = lambda: service._build_market_snapshot(prefer_database_data=True)
+        async def invoke():
+            return await service._build_market_snapshot(prefer_database_data=True)
     result = await invoke()
     assert result["source"] == ("remote" if enabled and error is None else "postgres")
     assert remote.await_count == int(enabled)

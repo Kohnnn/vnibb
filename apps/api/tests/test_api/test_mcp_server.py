@@ -749,8 +749,8 @@ async def test_public_sql_tool_preserves_fetched_rows_and_deep_evidence(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("limit", [0, 1, 19, 20, 21, 60, 5000])
 async def test_eod_tool_preserves_deep_evidence_and_all_rows(monkeypatch, limit):
-    from decimal import Decimal
     import json
+    from decimal import Decimal
 
     evidence = "  raw\n" + "evidence " * 100 + "qualified unit=VND"
     class MongoService(_FakeMongoService):
@@ -822,21 +822,23 @@ async def test_premium_tool_rejects_unapplied_period_and_index_constraints(monke
 @pytest.mark.asyncio
 async def test_ingestion_receipt_tool_projects_selected_pair_from_real_sql(monkeypatch, test_engine, test_db):
     from datetime import datetime
-    from vnibb.models.sync_status import SyncStatus
 
+    from vnibb.models.sync_status import SyncStatus
     receipt = {"last_attempted_at": "2026-10-01T12:00:00", "last_succeeded_at": None,
                "outcome": "failed", "rows": 0, "error": "ProviderUnavailable", "stage_stats": {"zero": 0}}
     test_db.add_all([
         SyncStatus(id=1, sync_type="supplemental_company_maintenance", status="partial",
-            started_at=datetime(2026, 10, 1), additional_data={"stages": {"profiles": {
-                "expected_count": 2, "pending_count": 1, "complete": False,
+            started_at=datetime(2026, 10, 1), additional_data={"expected_symbols": ["VCB", "VNM"],
+                "expected_count": 2, "complete": False, "stages": {"profiles": {
+                "acquired_symbols": ["VCB"], "failed_symbols": ["VNM"], "pending_count": 1,
                 "receipts": {"VNM": receipt, "VCB": {"private_other_symbol": True}}}}, "unrelated": "not exposed"}),
         SyncStatus(id=2, sync_type="supplemental_company_maintenance", status="completed",
             started_at=datetime(2026, 10, 2), additional_data={"stages": {"profiles": {
                 "receipts": {"VCB": {"outcome": "success"}}}}}),
         SyncStatus(id=3, sync_type="daily_profile_maintenance", status="completed",
-            started_at=datetime(2026, 10, 3), additional_data={"stages": {"profiles": {
-                "expected_count": 1, "pending_count": 0, "complete": True,
+            started_at=datetime(2026, 10, 3), additional_data={"expected_symbols": ["VNM"],
+                "expected_count": 1, "complete": True, "stages": {"profiles": {
+                "acquired_symbols": ["VNM"], "failed_symbols": [], "pending_count": 0,
                 "receipts": {"VNM": {"outcome": "succeeded", "owner": "daily_profile"}}}}}),
         SyncStatus(id=4, sync_type="daily_financial_maintenance", status="completed",
             started_at=datetime(2026, 10, 4), additional_data={"stages": {"ratios_year": {
@@ -857,9 +859,15 @@ async def test_ingestion_receipt_tool_projects_selected_pair_from_real_sql(monke
     # Newest matching cycle wins: the daily profile owner, not the older legacy row.
     assert result["items"][0]["record_id"] == 3
     assert result["items"][0]["receipt"] == {"outcome": "succeeded", "owner": "daily_profile"}
+    assert result["items"][0]["expected_count"] == 1
+    assert result["items"][0]["pending_count"] == 0
+    assert result["items"][0]["complete"] is True
     history = await server.get_ingestion_receipts("VNM", "profiles", limit=3)
     assert [item["record_id"] for item in history["items"]] == [3, 1]
     assert history["items"][1]["record_id"] == 1 and history["items"][1]["receipt"] == receipt
+    assert history["items"][1]["expected_count"] == 2
+    assert history["items"][1]["pending_count"] == 1
+    assert history["items"][1]["complete"] is False
     assert "unrelated" not in history["items"][1]
     assert "private_other_symbol" not in str(history)
     empty = await server.get_ingestion_receipts("VNM", "profiles", limit=0)
@@ -869,10 +877,62 @@ async def test_ingestion_receipt_tool_projects_selected_pair_from_real_sql(monke
     assert profiles["items"][0]["receipt"]["owner"] == "daily_profile"
     ratios_year = await server.get_ingestion_receipts("VNM", "ratios_year", limit=2)
     assert [item["record_id"] for item in ratios_year["items"]] == [4]
+    assert ratios_year["items"][0]["expected_count"] is None
+    assert ratios_year["items"][0]["complete"] is None
     ratios_quarter = await server.get_ingestion_receipts("VNM", "ratios_quarter", limit=2)
     assert [item["record_id"] for item in ratios_quarter["items"]] == [5]
     legacy_only = await server.get_ingestion_receipts("VNM", "officers", limit=2)
     assert legacy_only["row_count"] == 0 and legacy_only["items"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("root_complete", [False, True])
+@pytest.mark.parametrize("unattempted_symbol", [False, True])
+@pytest.mark.parametrize("outcome, revalidation_pending, pending_count", [
+    ("succeeded", False, 0),
+    ("empty", False, 0),
+    ("failed", False, 1),
+    ("deferred", False, 1),
+    ("attempted", False, 1),
+    ("pending", False, 1),
+    ("empty", True, 1),
+])
+async def test_ingestion_receipt_stage_completion_uses_root_universe_and_outstanding_receipts(
+    monkeypatch, test_engine, test_db, root_complete, unattempted_symbol, outcome, revalidation_pending, pending_count
+):
+    from datetime import datetime
+
+    from vnibb.models.sync_status import SyncStatus
+
+    receipt = {"outcome": outcome, "rows": 0, "revalidation_pending": revalidation_pending}
+    test_db.add(SyncStatus(
+        id=1, sync_type="daily_profile_maintenance", status="completed",
+        started_at=datetime(2026, 10, 3), additional_data={
+            "expected_symbols": ["VCB", "VNM"] + (["NEW"] if unattempted_symbol else []),
+            "expected_count": 2 + int(unattempted_symbol), "complete": root_complete,
+            "stages": {"profiles": {
+                "acquired_symbols": ["VCB", "VNM", "RETIRED"], "failed_symbols": [],
+                "pending_count": 0,
+                "receipts": {"VNM": receipt, "VCB": {"outcome": "succeeded"},
+                             "RETIRED": {"outcome": "deferred"}},
+            }},
+        },
+    ))
+    await test_db.commit()
+    monkeypatch.setattr(server, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
+
+    async def available():
+        return True
+
+    monkeypatch.setattr(server, "check_database_connection", available)
+    result = await server.get_ingestion_receipts("VNM", "profiles", limit=1)
+
+    item = result["items"][0]
+    assert item["expected_count"] == 2 + int(unattempted_symbol)
+    assert item["pending_count"] == pending_count + int(unattempted_symbol)
+    assert item["complete"] is (pending_count == 0 and not unattempted_symbol)
+    assert item["receipt"] == receipt
+    assert "RETIRED" not in str(result)
 
 
 @pytest.mark.asyncio

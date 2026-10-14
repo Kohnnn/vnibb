@@ -513,8 +513,8 @@ async def test_price_depth_precise_limit_caps_rows_within_newest_batch(monkeypat
 
 @pytest.mark.parametrize("writer", ["statement", "ratio"])
 def test_vietcap_raw_upserts_preserve_periods_and_refresh_without_duplicates(writer):
-    from vnibb.services.vietcap_ingestion import upsert_ratio_rows, upsert_statement_periods
     from vnibb.services.vietcap_financials import financial_fiscal_basis
+    from vnibb.services.vietcap_ingestion import upsert_ratio_rows, upsert_statement_periods
 
     class UpsertCollection(Collection):
         def bulk_write(self, operations, *, ordered):

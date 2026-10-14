@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from vnibb.services import mongo_eod_sync as sync
 from vnibb.services.mongo_market_data_service import MongoMarketDataService
 

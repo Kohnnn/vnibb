@@ -5,7 +5,6 @@ from datetime import date
 from unittest.mock import AsyncMock
 
 import pytest
-
 from vnibb.services.vietcap_financials import (
     decode_vietcap_financial_record,
     financial_fiscal_basis,
@@ -431,7 +430,6 @@ async def test_sql_upsert_preserves_non_iq_source_and_reports_conflicting_keys(m
     from unittest.mock import Mock
 
     from sqlalchemy.dialects.postgresql import dialect
-
     from vnibb.models import IncomeStatement
     from vnibb.models.stock import StockPrice
     from vnibb.services.cache_manager import CacheManager, StructuredPersistenceConflict
@@ -465,7 +463,6 @@ async def test_fresh_certified_price_replaces_owned_generic_iq_not_other_sources
     from unittest.mock import Mock
 
     from sqlalchemy.dialects.postgresql import dialect
-
     from vnibb.models.stock import StockPrice
     from vnibb.services.cache_manager import CacheManager
 
@@ -489,7 +486,6 @@ async def test_secondary_sql_writer_retains_primary_owner_and_conflict_evidence(
     from unittest.mock import Mock
 
     from sqlalchemy.dialects.postgresql import dialect
-
     from vnibb.models.trading import FinancialRatio
     from vnibb.services.cache_manager import CacheManager, StructuredPersistenceConflict
 

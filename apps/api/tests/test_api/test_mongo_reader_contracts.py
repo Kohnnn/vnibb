@@ -3,7 +3,6 @@ from datetime import date, datetime
 
 import pytest
 from pymongo.errors import ConnectionFailure, ExecutionTimeout, OperationFailure
-
 from vnibb.services.mongo_market_data_service import MongoMarketDataService
 
 
@@ -276,6 +275,7 @@ async def test_reference_envelope_public_tool(monkeypatch, store):
 @pytest.mark.asyncio
 async def test_metric_map_same_type_section_stays_independent_through_public_consumer(monkeypatch):
     from copy import deepcopy
+
     from vnibb.services.vietcap_ingestion import upsert_metric_map
 
     class WritableCollection(Collection):
@@ -316,6 +316,7 @@ async def test_migrated_objectid_lineage_reaches_public_reference_json(monkeypat
     import json
     from copy import deepcopy
     from types import SimpleNamespace
+
     from bson import ObjectId
     from vnibb.services.vietcap_ingestion import migrate_metric_maps
 
