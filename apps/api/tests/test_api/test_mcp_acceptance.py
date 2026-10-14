@@ -149,8 +149,25 @@ def financial_packet():
 def test_numeric_period_with_all_financial_metrics_null_rejected():
     packet = financial_packet()
     packet["item"].update(revenue=None, period=2025)
-    with pytest.raises(qa.Failure, match="no finite financial metrics"):
+    with pytest.raises(qa.Failure) as caught:
         qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": "income_statement"})
+    assert type(caught.value) is qa.Failure, "withheld-but-present evidence must fail, not read as partial"
+
+
+def test_sql_row_missing_a_metric_kept_in_source_evidence_rejected():
+    """The writer persists only rows with at least one admitted value.
+
+    A SQL row whose expected metrics are all null while its retained `structured`
+    evidence still holds an admitted value is lost data, so it must fail rather
+    than take the withholding path.
+    """
+    packet = financial_packet()
+    packet["item"].update(revenue=None, period=2025)
+    packet["item"]["raw_data"]["structured"]["values"] = {"revenue": 10}
+    packet["item"]["raw_data"]["structured"]["unavailable"] = {"revenue": "unit_unverified"}
+    with pytest.raises(qa.Failure) as caught:
+        qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": "income_statement"})
+    assert type(caught.value) is qa.Failure
 
 
 def test_raw_financial_withholding_every_monetary_metric_is_partial():
@@ -179,11 +196,13 @@ def test_raw_financial_withholding_every_monetary_metric_is_partial():
         qa.financial(packet, args, raw=True)
     structured = packet["items"][0]["raw_data"]["structured"]
     structured["unavailable"] = {"record": "invalid_raw_row"}
-    with pytest.raises(qa.Failure, match="no finite financial metrics"):
+    with pytest.raises(qa.Failure) as caught:
         qa.financial(packet, args, raw=True)
+    assert type(caught.value) is qa.Failure
     structured.pop("unavailable")
-    with pytest.raises(qa.Failure, match="no finite financial metrics"):
+    with pytest.raises(qa.Failure) as caught:
         qa.financial(packet, args, raw=True)
+    assert type(caught.value) is qa.Failure
 
 
 def test_empty_content_is_withheld_not_failed():

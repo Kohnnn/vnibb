@@ -333,6 +333,13 @@ def financial(payload, args, *, raw=False):
         require(isinstance(values, dict), "missing financial metric values")
         fields = financial_metrics(dataset)
         if not any(finite_metric(values.get(field)) for field in fields):
+            if not raw:
+                # The writer only persists a row that admitted at least one value, so a
+                # SQL row with no expected metric while its retained source evidence
+                # holds one is lost data, not withholding.
+                admitted = structured.get("values")
+                if isinstance(admitted, dict) and any(finite_metric(admitted.get(field)) for field in fields):
+                    raise Failure("SQL row dropped an admitted financial metric kept in source evidence")
             # The decoded reader records a reason per withheld field, or one
             # whole-record code when the row never decoded. A whole-record admission
             # code means nothing survived ingestion (hard failure); any other
