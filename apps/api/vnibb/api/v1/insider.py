@@ -13,12 +13,12 @@ Endpoints:
 """
 
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from vnibb.core.database import get_db
 from vnibb.services.insider_tracking import InsiderTrackingService
@@ -34,7 +34,13 @@ router = APIRouter(tags=["Insider Trading & Alerts"])
 
 
 class InsiderDealResponse(BaseModel):
-    """Insider deal response model"""
+    """Insider deal response model.
+
+    `deal_price`/`deal_value` are canonical VND only when the provider supplied
+    explicit unit evidence; `price_unit`/`value_unit` report that admission
+    ("VND" or "unknown") so consumers never assume VND from magnitude alone.
+    `deal_action` is the normalized BUY/SELL/UNKNOWN token.
+    """
 
     id: int
     symbol: str
@@ -44,10 +50,32 @@ class InsiderDealResponse(BaseModel):
     deal_quantity: Optional[float]
     deal_price: Optional[float]
     deal_value: Optional[float]
+    price_unit: Optional[str] = None
+    value_unit: Optional[str] = None
     announce_date: datetime
 
     class Config:
         from_attributes = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _admit_units(cls, value: Any) -> Any:
+        raw = getattr(value, "raw_data", None)
+        if isinstance(raw, dict):
+            return {
+                "price_unit": raw.get("price_unit"),
+                "value_unit": raw.get("value_unit"),
+                "id": value.id,
+                "symbol": value.symbol,
+                "insider_name": value.insider_name,
+                "insider_position": value.insider_position,
+                "deal_action": value.deal_action,
+                "deal_quantity": value.deal_quantity,
+                "deal_price": value.deal_price,
+                "deal_value": value.deal_value,
+                "announce_date": value.announce_date,
+            }
+        return value
 
 
 class BlockTradeResponse(BaseModel):
@@ -118,16 +146,25 @@ class AlertSettingsUpdate(BaseModel):
 
 
 class InsiderSentimentResponse(BaseModel):
-    """Insider sentiment analysis response"""
+    """Insider sentiment analysis response.
+
+    `buy_value`/`sell_value`/`net_value` are canonical VND only when every
+    classified deal in the window carries finite value + VND unit evidence;
+    `value_unit` reports that admission ("VND" or null). Unadmitted aggregates
+    and the derived `sentiment_score` are null rather than a partial sum.
+    `buy_count`/`sell_count`/`total_deals` always count stored rows and UNKNOWN
+    direction stays neutral.
+    """
 
     symbol: str
     period_days: int
     buy_count: int
     sell_count: int
-    buy_value: float
-    sell_value: float
-    net_value: float
-    sentiment_score: float
+    buy_value: Optional[float]
+    sell_value: Optional[float]
+    net_value: Optional[float]
+    sentiment_score: Optional[float]
+    value_unit: Optional[str] = None
     total_deals: int
 
 

@@ -21,6 +21,7 @@ from vnibb.models.financials import IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.trading import FinancialRatio
+from vnibb.providers.vnstock.runtime import validate_source
 
 logger = logging.getLogger(__name__)
 
@@ -86,16 +87,7 @@ def _non_empty_text(value: str | None) -> bool:
 
 
 def _get_listing_sources() -> list[str]:
-    configured_source = _normalize_text(getattr(settings, "vnstock_source", None))
-    sources: list[str] = []
-    for source in (configured_source, "VCI", "KBS"):
-        normalized = _normalize_text(source)
-        if not normalized:
-            continue
-        upper = normalized.upper()
-        if upper not in sources:
-            sources.append(upper)
-    return sources
+    return [validate_source(getattr(settings, "vnstock_source", None))]
 
 
 async def _fetch_provider_industry_map() -> dict[str, str]:

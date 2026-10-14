@@ -1,11 +1,4 @@
-"""
-Technical Analysis Service using vnstock_ta
-
-Calculates and stores technical indicators for stocks.
-Supports: SMA, EMA, RSI, MACD, Bollinger Bands, Stochastic, ATR, Fibonacci, Support/Resistance.
-
-Uses vnstock_ta premium package when available, falls back to pandas calculations.
-"""
+"""Calculate and store technical indicators using local pandas computations."""
 
 import logging
 from contextvars import ContextVar
@@ -65,29 +58,13 @@ def normalize_history_frame(
 
 class TechnicalAnalysisService:
     """
-    Technical analysis calculations using vnstock_ta.
+    Technical analysis calculations using free market history and pandas.
 
     Provides methods for calculating and storing technical indicators.
-    Falls back to pandas-based calculations if vnstock_ta is not available.
     """
 
     def __init__(self):
         self._ta_available = False
-        self._check_vnstock_ta()
-
-    def _check_vnstock_ta(self):
-        """Check if vnstock_ta is available."""
-        try:
-            from vnstock_ta import DataSource, Indicator
-
-            self._ta_available = True
-            logger.info("vnstock_ta premium package detected")
-        except Exception as exc:
-            self._ta_available = False
-            logger.warning(
-                "vnstock_ta unavailable (%s). Using fallback calculations.",
-                exc,
-            )
 
     async def calculate_indicators(
         self,
@@ -106,106 +83,8 @@ class TechnicalAnalysisService:
         Returns:
             Dictionary of indicator values
         """
-        if self._ta_available:
-            return await self._calculate_with_vnstock_ta(symbol, start_date, end_date)
-        else:
-            return await self._calculate_fallback(symbol, start_date, end_date)
+        return await self._calculate_fallback(symbol, start_date, end_date)
 
-    async def _calculate_with_vnstock_ta(
-        self,
-        symbol: str,
-        start_date: date,
-        end_date: date,
-    ) -> Dict[str, Any]:
-        """Calculate using vnstock_ta premium package."""
-        import asyncio
-
-        def _sync_calculate():
-            from vnstock_ta import DataSource, Indicator
-
-            # Get OHLCV data
-            data_source = DataSource(
-                symbol=symbol,
-                start=start_date.strftime("%Y-%m-%d"),
-                end=end_date.strftime("%Y-%m-%d"),
-                interval="1D",
-                source=settings.vnstock_source,
-            )
-            data = data_source.get_data()
-
-            if data is None or data.empty:
-                return {}
-            data = normalize_history_frame(
-                data, symbol=symbol, source=settings.vnstock_source,
-                provider=data_source,
-            )
-            if data.empty:
-                return {}
-
-            # Initialize indicator calculator
-            ta = Indicator(data)
-
-            indicators = {}
-
-            # Moving Averages
-            try:
-                if len(data) >= 20:
-                    indicators["sma_20"] = float(ta.sma(length=20).iloc[-1])
-                if len(data) >= 50:
-                    indicators["sma_50"] = float(ta.sma(length=50).iloc[-1])
-                if len(data) >= 200:
-                    indicators["sma_200"] = float(ta.sma(length=200).iloc[-1])
-                if len(data) >= 12:
-                    indicators["ema_12"] = float(ta.ema(length=12).iloc[-1])
-                if len(data) >= 26:
-                    indicators["ema_26"] = float(ta.ema(length=26).iloc[-1])
-            except Exception as e:
-                logger.warning(f"MA calculation error for {symbol}: {e}")
-
-            # RSI
-            try:
-                if len(data) >= 14:
-                    rsi = ta.rsi(length=14)
-                    if rsi is not None and len(rsi) > 0:
-                        indicators["rsi_14"] = float(rsi.iloc[-1])
-            except Exception as e:
-                logger.warning(f"RSI calculation error for {symbol}: {e}")
-
-            # MACD
-            try:
-                if len(data) >= 26:
-                    macd_df = ta.macd(fast=12, slow=26, signal=9)
-                    if isinstance(macd_df, pd.DataFrame) and len(macd_df) > 0:
-                        indicators["macd"] = float(macd_df["MACD_12_26_9"].iloc[-1])
-                        indicators["macd_signal"] = float(macd_df["MACDs_12_26_9"].iloc[-1])
-                        indicators["macd_hist"] = float(macd_df["MACDh_12_26_9"].iloc[-1])
-            except Exception as e:
-                logger.warning(f"MACD calculation error for {symbol}: {e}")
-
-            # Bollinger Bands
-            try:
-                if len(data) >= 20:
-                    bb_df = ta.bbands(length=20, std=2)
-                    if isinstance(bb_df, pd.DataFrame) and len(bb_df) > 0:
-                        indicators["bb_upper"] = float(bb_df["BBU_20_2.0"].iloc[-1])
-                        indicators["bb_middle"] = float(bb_df["BBM_20_2.0"].iloc[-1])
-                        indicators["bb_lower"] = float(bb_df["BBL_20_2.0"].iloc[-1])
-            except Exception as e:
-                logger.warning(f"Bollinger Bands calculation error for {symbol}: {e}")
-
-            # ATR
-            try:
-                if len(data) >= 14:
-                    atr = ta.atr(length=14)
-                    if atr is not None and len(atr) > 0:
-                        indicators["atr_14"] = float(atr.iloc[-1])
-            except Exception as e:
-                logger.warning(f"ATR calculation error for {symbol}: {e}")
-
-            return indicators
-
-        # Run in thread pool to avoid blocking
-        return await asyncio.to_thread(_sync_calculate)
 
     async def _calculate_fallback(
         self,
@@ -213,14 +92,14 @@ class TechnicalAnalysisService:
         start_date: date,
         end_date: date,
     ) -> Dict[str, Any]:
-        """Fallback calculations using basic vnstock and pandas."""
+        """Calculate indicators using free vnstock history and pandas."""
         import asyncio
 
         def _sync_calculate():
-            from vnibb.providers.vnstock.runtime import get_vnstock_class
+            from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
 
             Vnstock = get_vnstock_class()
-            stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
+            stock = Vnstock().stock(symbol=symbol, source=validate_source(settings.vnstock_source))
 
             df = stock.quote.history(
                 start=start_date.strftime("%Y-%m-%d"),
@@ -395,10 +274,10 @@ class TechnicalAnalysisService:
 
         def _fetch():
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
 
                 Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
+                stock = Vnstock().stock(symbol=symbol, source=validate_source(settings.vnstock_source))
 
                 df = stock.quote.history(
                     start=start_date.strftime("%Y-%m-%d"),

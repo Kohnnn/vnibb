@@ -10,9 +10,10 @@ from vnibb.api.v1.screener import (
     _build_screener_meta,
     _enrich_discovery_fields,
     _enrich_screener_metrics,
+    _prepare_cached_screener_rows,
     _resolve_index_universe,
-    _validated_target_reference,
     _to_screener_data_row,
+    _validated_target_reference,
     fill_market_cap,
 )
 from vnibb.providers.vnstock.equity_screener import ScreenerData
@@ -84,7 +85,10 @@ class _RecordingDB:
         if "financial_ratios" in query:
             ratio = SimpleNamespace(
                 symbol="VNM",
-                raw_data={},
+                raw_data={
+                    "ratio_units": {"roic": "percent"},
+                    "provider_evidence": [{"roic_pct": 12.5}],
+                },
                 roic=12.5,
                 fiscal_year=2024,
                 fiscal_quarter=4,
@@ -154,6 +158,8 @@ async def test_enrich_skips_price_query_for_fundamental_only_gap():
 
     assert len(result) == 1
     assert result[0].roic == 12.5
+    assert result[0].ratio_units["roic"] == "percent"
+    assert result[0].provider_evidence == [{"roic_pct": 12.5}]
     assert any("financial_ratios" in query for query in db.queries)
     assert all("stock_prices" not in query for query in db.queries)
 
@@ -261,6 +267,76 @@ def test_stored_screener_prices_require_provenance(metrics, price, expected, uni
 
     assert row.price == expected
     assert row.price_unit == unit
+
+@pytest.mark.parametrize("unit,expected", [("percent", 0.25), ("unknown", None), (None, None)])
+def test_cached_screener_percent_cells_require_certification(unit, expected):
+    units = {"roe": unit, "debt_assets": unit} if unit else {}
+    evidence = [{"roe_pct": 0.25}]
+    row = _to_screener_data_row(SimpleNamespace(
+        symbol="FPT", roe=0.25, roa=0.5,
+        extended_metrics={
+            "ratio_units": units, "provider_evidence": evidence, "debt_to_asset": 0.25,
+        },
+    ))
+    assert row.roe == expected
+    assert row.debt_to_asset == expected
+    assert row.roa is None
+    assert row.ratio_units == units
+    assert row.provider_evidence == evidence
+
+
+def test_cached_screener_preserves_certified_debt_alias():
+    row = _to_screener_data_row(SimpleNamespace(symbol="FPT", extended_metrics={
+        "ratio_units": {"debt_assets": "percent"}, "debt_to_assets": 0.25,
+    }))
+    assert row.debt_to_asset == 0.25
+
+
+@pytest.mark.asyncio
+async def test_cached_screener_preparation_preserves_certified_low_percentages(monkeypatch):
+    import vnibb.api.v1.screener as module
+
+    async def unchanged(rows, *_args, **_kwargs):
+        return rows
+
+    async def universe(_universe):
+        return None, {}
+
+    for name in ("_hydrate_screener_rows", "_enrich_screener_metrics", "_enrich_discovery_fields"):
+        monkeypatch.setattr(module, name, unchanged)
+    monkeypatch.setattr(module, "_resolve_index_universe", universe)
+    evidence = [{"roe_pct": 0.25}]
+    snapshot = SimpleNamespace(symbol="FPT", roe=0.25, roa=0.5, extended_metrics={
+        "ratio_units": {"roe": "percent", "roa": "unknown"}, "provider_evidence": evidence,
+    })
+    rows, _, _, matched, _ = await _prepare_cached_screener_rows(
+        [snapshot], _NoQueryDB(), limit=10, universe="ALL", exchange="ALL", industry=None,
+        filters=None, sort=None, pe_min=None, pe_max=None, pb_min=None, pb_max=None,
+        ps_min=None, ps_max=None, roe_min=0.2, roa_min=None, debt_to_equity_max=None,
+        market_cap_min=None, market_cap_max=None, volume_min=None, sort_by=None,
+        sort_order="desc", as_of_date=None, min_listing_age_days=None, target_upside_min=None,
+        enrich=unchanged, fundamental_filter=lambda rows: rows, needs_fundamental_enrichment=False,
+    )
+    assert matched == 1
+    assert rows[0].roe == 0.25
+    assert rows[0].roa is None
+    assert rows[0].ratio_units["roe"] == "percent"
+    assert rows[0].provider_evidence == evidence
+
+
+@pytest.mark.asyncio
+async def test_screener_enrichment_withholds_uncertified_stored_percentages():
+    class UncertifiedDB(_RecordingDB):
+        async def execute(self, statement):
+            result = await super().execute(statement)
+            for row in result.all():
+                row.raw_data = {}
+            return result
+
+    rows = await _enrich_screener_metrics([ScreenerData(
+        symbol="VNM", change_1d=1, perf_1w=1, perf_1m=1, perf_ytd=1,
+    )], UncertifiedDB())
+    assert rows[0].roic is None
 
 
 def test_screener_market_cap_preserves_low_vnd_and_rejects_unknown_prices():

@@ -105,15 +105,16 @@ async def fetch_chart_data(
     Args:
         symbol: Stock ticker (e.g. VNM, FPT)
         period: Time period (1M, 3M, 6M, 1Y, 3Y, 5Y, 10Y, ALL)
-        source: Data source (KBS, VCI, DNSE). Defaults to settings.
+        source: Free VCI only. Defaults to settings.
 
     Returns:
         List of dicts with {time, open, high, low, close, volume, price_unit}
         sorted ascending by time.
     """
+    from vnibb.providers.vnstock.runtime import validate_source
+
     symbol = symbol.upper().strip()
-    if source is None:
-        source = settings.vnstock_source
+    source = validate_source(source if source is not None else settings.vnstock_source)
 
     # Check cache
     key = _cache_key(symbol, period, source)

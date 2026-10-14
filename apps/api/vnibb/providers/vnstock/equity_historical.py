@@ -16,6 +16,7 @@ from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.core.price_units import PriceUnit, history_price_records, normalize_price_record
+from vnibb.providers.vnstock.runtime import validate_source
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,9 @@ class EquityHistoricalQueryParams(BaseModel):
         description="Data interval: 1m, 5m, 15m, 30m, 1H, 1D, 1W, 1M",
     )
     source: str = Field(
-        default="KBS",
-        pattern=r"^(KBS|VCI|MSN|FMP)$",
-        description="Data source: KBS (default), VCI, MSN, or FMP (vnstock 4.x)",
+        default="VCI",
+        pattern=r"^VCI$",
+        description="Data source: free VCI",
     )
 
     @field_validator("symbol")
@@ -181,6 +182,7 @@ class VnstockEquityHistoricalFetcher(
         vnstock is synchronous, so we run it in a thread pool executor
         to avoid blocking the async event loop.
         """
+        source = validate_source(query.get("source"))
         loop = asyncio.get_event_loop()
 
         def _fetch_sync() -> List[dict[str, Any]]:
@@ -191,7 +193,7 @@ class VnstockEquityHistoricalFetcher(
                 Vnstock = get_vnstock_class()
                 stock = Vnstock().stock(
                     symbol=query["symbol"],
-                    source=query["source"],
+                    source=source,
                 )
                 df = stock.quote.history(
                     start=query["start"],
@@ -203,7 +205,7 @@ class VnstockEquityHistoricalFetcher(
                     logger.warning(f"No data returned for {query['symbol']}")
                     return []
 
-                return history_price_records(df, symbol=query["symbol"], source=query["source"], provider=stock.quote)
+                return history_price_records(df, symbol=query["symbol"], source=source, provider=stock.quote)
 
             except Exception as e:
                 logger.error(f"vnstock fetch error for {query['symbol']}: {e}")
@@ -219,10 +221,7 @@ class VnstockEquityHistoricalFetcher(
                 timeout=settings.vnstock_timeout,
             )
         except asyncio.TimeoutError:
-            raise ProviderTimeoutError(
-                provider="vnstock",
-                timeout=settings.vnstock_timeout,
-            )
+            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
 
     @staticmethod
     def transform_data(

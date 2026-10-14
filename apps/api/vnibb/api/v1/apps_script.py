@@ -77,7 +77,7 @@ async def gs_screener(
     exchange: str = Query(default="HOSE", pattern=r"^(HOSE|HNX|UPCOM|ALL)$"),
     industry: Optional[str] = Query(default=None),
     limit: int = Query(default=100, ge=1, le=2000),
-    source: str = Query(default="KBS"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     _: str = Depends(_require_api_key),
     db: AsyncSession = Depends(get_db),
 ) -> List[dict[str, Any]]:
@@ -197,7 +197,7 @@ from vnibb.api.v1.equity import get_quote  # re-use existing endpoint handler
 async def gs_quote(
     symbol: str,
     request: Request,
-    source: str = Query(default="VCI"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     _: str = Depends(_require_api_key),
     db: AsyncSession = Depends(get_db),
 ) -> StandardResponse[dict[str, Any]]:
@@ -552,7 +552,7 @@ async def gs_bounded(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     limit: int = Query(default=5, ge=1, le=BOUNDED_LIMIT_MAX),
-    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     _: str = Depends(_require_api_key),
     db: AsyncSession = Depends(get_db),
 ) -> StandardResponse[List[dict[str, Any]]]:

@@ -1,4 +1,5 @@
 from copy import deepcopy
+from datetime import datetime
 
 import pytest
 import vnibb.services.data_pipeline as pipeline_module
@@ -15,6 +16,24 @@ def financial_sync(monkeypatch):
     cached = []
     pipeline = DataPipeline()
 
+    class FixtureDateTime(datetime):
+        @classmethod
+        def utcnow(cls):
+            return cls(2026, 4, 2)
+
+    monkeypatch.setattr(pipeline_module, "datetime", FixtureDateTime)
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [1]
+
+    class Statement:
+        def returning(self, *columns):
+            return self
+
     class RecordingSession:
         async def __aenter__(self):
             return self
@@ -23,7 +42,7 @@ def financial_sync(monkeypatch):
             return False
 
         async def execute(self, values):
-            persisted.append(values)
+            return Result()
 
         async def commit(self):
             pass
@@ -40,7 +59,12 @@ def financial_sync(monkeypatch):
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", wait_for_rate_limit)
     monkeypatch.setattr(pipeline, "_cache_set_json", cache_set_json)
     monkeypatch.setattr(pipeline_module, "async_session_maker", RecordingSession)
-    monkeypatch.setattr(pipeline_module, "get_upsert_stmt", lambda model, keys, values: values)
+    def upsert(model, index_elements, values, **kwargs):
+        persisted.append(values)
+        return Statement()
+
+    monkeypatch.setattr(pipeline_module, "get_upsert_stmt", upsert)
+
     monkeypatch.setattr(VnstockFinancialsFetcher, "extract_data", extract_data)
 
     async def sync(entries, period="quarter"):
@@ -55,8 +79,12 @@ def financial_sync(monkeypatch):
             symbols=["VNM"],
             period=period,
             statement_types=list(dict.fromkeys(entry.statement_type for entry in entries)),
+            count=1,
         )
-        assert total == 1
+        expected_complete = all(any(entry.period == "Q1-2026" for entry in entries
+                                    if entry.statement_type == kind)
+                                for kind in {entry.statement_type for entry in entries})
+        assert total == int(expected_complete)
         return persisted, cached
 
     return sync

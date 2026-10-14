@@ -39,6 +39,7 @@ async def test_scheduled_mongo_sync_persists_failures_and_zero_write_recovery(te
     sync = AsyncMock(side_effect=[
         {"symbols": 1, "rows": 2, "failures": 1},
         {"symbols": 0, "rows": 0, "failures": 3},
+        {"symbols": 1, "rows": 2, "failures": 0, "primary_failures": 1, "fallbacks": 1},
         {"symbols": 1, "rows": 0, "failures": 0},
     ])
     monkeypatch.setattr(mongo_eod_sync, "run_mongo_eod_sync", sync)
@@ -46,7 +47,7 @@ async def test_scheduled_mongo_sync_persists_failures_and_zero_write_recovery(te
     job = scheduler.get_scheduler().get_job("mongo_eod_sync")
 
     try:
-        for expected_outcome, expected_count in [("failed", 1), ("failed", 2), ("ok", 0)]:
+        for expected_outcome, expected_count in [("failed", 1), ("failed", 2), ("failed", 3), ("ok", 0)]:
             await job.func()
             async with sessions() as session:
                 state = await session.get(SchedulerJobState, "mongo_eod_sync")

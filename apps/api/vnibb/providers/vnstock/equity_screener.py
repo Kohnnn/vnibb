@@ -19,7 +19,9 @@ from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError, ProviderRateLimitError
 from vnibb.core.price_units import PriceUnit, history_price_records, normalize_price_record
+from vnibb.core.ratio_units import admitted_ratio_value, normalize_ratio_payload, ratio_method_kwargs
 from vnibb.providers.vnstock import get_vnstock
+from vnibb.providers.vnstock.runtime import validate_source
 from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
@@ -121,8 +123,9 @@ class StockScreenerParams(BaseModel):
         description="Maximum number of stocks to return",
     )
     source: str = Field(
-        default="KBS",
-        description="Data source: KBS (default), VCI, MSN, FMP (vnstock 4.x), or vnstock (internal)",
+        default="VCI",
+        pattern=r"^VCI$",
+        description="Data source: free VCI",
     )
 
     @field_validator("symbol")
@@ -138,7 +141,7 @@ class StockScreenerParams(BaseModel):
                 "exchange": "HOSE",
                 "industry": None,
                 "limit": 100,
-                "source": "KBS",
+                "source": "VCI",
             }
         }
     }
@@ -206,6 +209,8 @@ class ScreenerData(BaseModel):
     roe: Optional[float] = Field(None, description="Return on Equity (%)")
     roa: Optional[float] = Field(None, description="Return on Assets (%)")
     roic: Optional[float] = Field(None, description="Return on Invested Capital (%)")
+    ratio_units: dict[str, str] = Field(default_factory=dict)
+    provider_evidence: list[dict[str, Any]] = Field(default_factory=list)
     gross_margin: Optional[float] = Field(
         None, alias="grossProfitMargin", description="Gross Profit Margin (%)"
     )
@@ -496,6 +501,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
         vnstock.stock().company.ratio_summary() returns financial metrics.
         We also fetch price/volume from quote.history() and company name from Listing.
         """
+        source = validate_source(query.get("source"))
         loop = asyncio.get_running_loop()
 
         def _fetch_sync() -> List[dict[str, Any]]:
@@ -506,7 +512,6 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
 
                 Listing = get_listing_class()
                 stock = get_vnstock()
-                source = query.get("source", "KBS")
 
                 def _extract_ratio_snapshot(stock_obj: Any) -> dict[str, Any]:
                     """Extract latest ratio snapshot from vnstock finance.ratio output."""
@@ -521,7 +526,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                         return {}
 
                     try:
-                        ratio_df = ratio_method(period="year")
+                        ratio_df = ratio_method(**ratio_method_kwargs(ratio_method, {"period": "year"}))
                     except Exception as ratio_err:
                         logger.debug("finance.ratio() failed: %s", ratio_err)
                         return {}
@@ -580,10 +585,11 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                         ):
                             metrics["de"] = liabilities / owners_equity
 
-                        return metrics
+                        return normalize_ratio_payload(metrics, records, latest_year)
 
                     # Legacy format: one row per period with columns already normalized
-                    return ratio_df.head(1).to_dict("records")[0]
+                    raw = ratio_df.head(1).to_dict("records")[0]
+                    return normalize_ratio_payload(raw, [raw])
 
                 # Get company names mapping from Listing
                 listing = Listing(source=source)
@@ -823,10 +829,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                 timeout=settings.vnstock_timeout,
             )
         except asyncio.TimeoutError:
-            raise ProviderTimeoutError(
-                provider="vnstock",
-                timeout=settings.vnstock_timeout,
-            )
+            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
 
     @staticmethod
     def transform_data(
@@ -896,8 +899,8 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
             "pcf": "price_to_cash_flow",  # vnstock 3.x actual column
             "ebitda_on_stock": "ebitda_on_stock",
             # =================================================================
-            # PROFITABILITY METRICS (verified from vnstock 3.x ratio_summary)
-            # Note: vnstock returns decimals (0.26), not percentages (26%)
+            # PROFITABILITY METRICS: units come from per-cell provider evidence.
+            # Old ratio_summary decimals do not establish finance.ratio units.
             # =================================================================
             "roe": "roe",
             "roa": "roa",
@@ -928,14 +931,14 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
             "book_value_per_share_change": "bvps_change",
             "ebitda_on_stock_change": "ebitda_on_stock_change",
             # =================================================================
-            # GROWTH METRICS (verified from vnstock 3.x ratio_summary)
-            # Note: vnstock returns decimals (0.05), not percentages (5%)
+            # GROWTH METRICS: explicit units only, never inferred from magnitude.
+            # Unknown provider units are withheld before constructing ScreenerData.
             # =================================================================
             "revenue_growth": "revenue_growth",  # vnstock 3.x actual column
             "revenueGrowth": "revenue_growth",
             "net_profit_growth": "earnings_growth",  # vnstock 3.x actual column
             "earningsGrowth": "earnings_growth",
-            "netProfitGrowth": "net_profit_growth",
+            "netProfitGrowth": "earnings_growth",
             # =================================================================
             # DIVIDEND (verified from vnstock 3.x ratio_summary)
             # =================================================================
@@ -1034,6 +1037,17 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                 mapped["price"] = normalized.get("price")
                 mapped["price_unit"] = normalized["price_unit"]
                 mapped["price_source"] = normalized.get("price_source")
+                if row.get("ratio_units"):
+                    for metric in row["ratio_units"]:
+                        mapped[metric] = row.get(metric, row.get("debt_to_asset") if metric == "debt_assets" else None) if row["ratio_units"][metric] == "percent" else None
+                    mapped["ratio_units"] = row["ratio_units"]
+                    mapped["provider_evidence"] = row.get("provider_evidence", [])
+                else:
+                    mapped = normalize_ratio_payload(mapped, [row])
+                mapped["debt_to_asset"] = mapped.pop("debt_assets", None)
+                mapped["net_profit_growth"] = admitted_ratio_value(
+                    mapped.get("earnings_growth"), "earnings_growth", ratio_units=mapped["ratio_units"],
+                )
 
                 mapped["updated_at"] = datetime.utcnow()
 

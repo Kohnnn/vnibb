@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vnibb
+      POSTGRES_USER: vnibb
+      POSTGRES_PASSWORD: ${LOCAL_POSTGRES_PASSWORD:?Set LOCAL_POSTGRES_PASSWORD in a private env file}
+    ports:
+      - "127.0.0.1:${LOCAL_POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - local_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vnibb -d vnibb"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: vnibb
+      MONGO_INITDB_ROOT_PASSWORD: ${LOCAL_MONGO_PASSWORD:?Set LOCAL_MONGO_PASSWORD in a private env file}
+    ports:
+      - "127.0.0.1:${LOCAL_MONGO_PORT:-57017}:27017"
+    volumes:
+      - local_mongo:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 2)'"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+volumes:
+  local_postgres:
+  local_mongo:

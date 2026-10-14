@@ -106,7 +106,7 @@ describe.each([
         globalThis.fetch = fetchMock;
         const wrapper = ({ children }: { children: ReactNode }) =>
             <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-        const view = renderHook(({ symbol }) => useHistory(symbol, { interval: '1D', source: 'KBS' }), {
+        const view = renderHook(({ symbol }) => useHistory(symbol, { interval: '1D', source: 'VCI' }), {
             initialProps: { symbol: 'FPT' },
             wrapper,
         });
@@ -124,7 +124,7 @@ describe.each([
             expect(view.result.current.data).toEqual(history);
             expect(currentSignal?.aborted).toBe(false);
             expect(fetchMock).toHaveBeenCalledTimes(2);
-            const obsoleteKey = queryKeys.historical('FPT', { interval: '1D', source: 'KBS' });
+            const obsoleteKey = queryKeys.historical('FPT', { interval: '1D', source: 'VCI' });
             expect(client.getQueryData(obsoleteKey)).toBeUndefined();
             expect(client.getQueryState(obsoleteKey)?.fetchStatus).toBe('idle');
         } finally {

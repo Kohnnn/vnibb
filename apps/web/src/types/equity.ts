@@ -303,6 +303,7 @@ export interface FinancialRatiosResponse {
   symbol: string;
   count: number;
   data: FinancialRatioData[];
+  error?: string | null;
   meta?: {
     count?: number;
     data_points?: number;
@@ -352,9 +353,45 @@ export interface ForeignTradingResponse {
   error?: string | null;
 }
 
+export interface TransactionFlowPersistenceCoverage {
+  status?: 'persisted' | 'failed' | 'disabled' | 'empty' | 'not_attempted';
+  rows?: number | null;
+  error?: string | null;
+}
+
+export interface TransactionFlowCoverage {
+  scope?: 'full_session' | 'sampled' | 'unknown';
+  status?: string | null;
+  completed_session?: boolean;
+  observed_trade_count?: number | null;
+  observed_window_start?: string | null;
+  observed_window_end?: string | null;
+  session_date?: string | null;
+  requested_session_date?: string | null;
+  denominator_trade_count?: number | null;
+  session_fraction?: number | null;
+  provider?: string | null;
+  price_unit?: string | null;
+  volume_unit?: string | null;
+  sql_flows?: TransactionFlowPersistenceCoverage | null;
+  sql_ticks?: TransactionFlowPersistenceCoverage | null;
+  mongo_ticks?: TransactionFlowPersistenceCoverage | null;
+  current_depth?: string | null;
+}
+
 export interface TransactionFlowPoint {
   date: string;
   price?: number | null;
+  flow_scope?: 'full_session' | 'sampled' | 'unknown';
+  coverage?: TransactionFlowCoverage | null;
+  observed_buy_value?: number | null;
+  observed_sell_value?: number | null;
+  observed_gross_value?: number | null;
+  observed_net_value?: number | null;
+  observed_buy_volume?: number | null;
+  observed_sell_volume?: number | null;
+  observed_volume?: number | null;
+  observed_net_volume?: number | null;
   total_buy_value?: number | null;
   total_sell_value?: number | null;
   total_gross_value?: number | null;

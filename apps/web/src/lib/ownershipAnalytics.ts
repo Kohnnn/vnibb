@@ -81,7 +81,11 @@ export function buildOwnershipSummary(
   const foreignNetVolume = foreignTrading.length
     ? foreignTrading.reduce((sum, row) => sum + (row.buy_volume || 0) - (row.sell_volume || 0), 0)
     : null
-  const insiderNetValue = insiderSentiment?.net_value ?? null
+  // The sentiment aggregate only ships money when its own windowed unit evidence
+  // is VND; an undeclared unit (older payloads) must not feed the score.
+  const insiderNetValue = insiderSentiment?.value_unit === 'VND'
+    ? insiderSentiment.net_value ?? null
+    : null
 
   let score = 50
   if (top3Pct !== null) {

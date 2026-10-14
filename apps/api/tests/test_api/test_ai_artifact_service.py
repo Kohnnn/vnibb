@@ -140,10 +140,15 @@ def test_build_chart_artifacts_returns_compare_charts_for_compare_prompt():
                 {
                     "symbol": "VNM",
                     "price_context": {
+                        "latest": {"time": "2026-04-02", "close": 73000, "price_unit": "VND"},
+                        "summary": {"range_window_20d": {
+                            "status": "available",
+                            "expected_dates": ["2026-04-01", "2026-04-02"],
+                        }},
                         "recent_series": [
                             {"time": "2026-04-01", "close": 72400, "price_unit": "VND"},
                             {"time": "2026-04-02", "close": 73000, "price_unit": "VND"},
-                        ]
+                        ],
                     },
                     "ratios": {"roe": 18.6, "revenue_growth": 7.4},
                     "available_source_ids": ["VNM-PRICES", "VNM-RATIOS"],
@@ -151,10 +156,15 @@ def test_build_chart_artifacts_returns_compare_charts_for_compare_prompt():
                 {
                     "symbol": "FPT",
                     "price_context": {
+                        "latest": {"time": "2026-04-02", "close": 131000, "price_unit": "VND"},
+                        "summary": {"range_window_20d": {
+                            "status": "available",
+                            "expected_dates": ["2026-04-01", "2026-04-02"],
+                        }},
                         "recent_series": [
                             {"time": "2026-04-01", "close": 128900, "price_unit": "VND"},
                             {"time": "2026-04-02", "close": 131000, "price_unit": "VND"},
-                        ]
+                        ],
                     },
                     "ratios": {"roe": 21.2, "revenue_growth": 16.9},
                     "available_source_ids": ["FPT-PRICES", "FPT-RATIOS"],
@@ -253,19 +263,32 @@ def test_comparison_prices_normalize_certified_lineage_and_withhold_unknown():
 def test_base100_normalizes_each_point_and_rejects_uncertified_or_incoherent_series():
     rows, series, sources = _price_trend_chart([
         {"symbol": "VNM", "available_source_ids": ["VNM-PRICES"], "price_context": {
+            "latest": {"time": "2026-04-02", "close": 73000, "price_unit": "VND"},
+            "summary": {"range_window_20d": {"status": "available",
+                                             "expected_dates": ["2026-04-01", "2026-04-02"]}},
             "recent_series": [
                 {"time": "2026-04-02", "close": 73000, "source": "vnstock_vnd:VCI"},
                 {"time": "2026-04-01", "close": 72.4, "source": "VCI"},
             ],
         }},
-        {"symbol": "FPT", "price_context": {"recent_series": [
-            {"time": "2026-04-01", "close": 128.9, "source": "vnstock"},
-            {"time": "2026-04-02", "close": 131000, "source": "vnstock_vnd"},
-        ]}},
-        {"symbol": "VCB", "price_context": {"recent_series": [
-            {"time": "2026-04-01", "close": 70000, "price_unit": "VND"},
-            {"time": "2026-04-02", "close": 71, "price_unit": "index_points"},
-        ]}},
+        {"symbol": "FPT", "price_context": {
+            "latest": {"time": "2026-04-02", "close": 131000, "price_unit": "VND"},
+            "summary": {"range_window_20d": {"status": "available",
+                                             "expected_dates": ["2026-04-01", "2026-04-02"]}},
+            "recent_series": [
+                {"time": "2026-04-01", "close": 128.9, "source": "vnstock"},
+                {"time": "2026-04-02", "close": 131000, "source": "vnstock_vnd"},
+            ],
+        }},
+        {"symbol": "VCB", "price_context": {
+            "latest": {"time": "2026-04-02", "close": 71000, "price_unit": "VND"},
+            "summary": {"range_window_20d": {"status": "available",
+                                             "expected_dates": ["2026-04-01", "2026-04-02"]}},
+            "recent_series": [
+                {"time": "2026-04-01", "close": 70000, "price_unit": "VND"},
+                {"time": "2026-04-02", "close": 71, "price_unit": "index_points"},
+            ],
+        }},
     ])
 
     assert [item["key"] for item in series] == ["VNM"]

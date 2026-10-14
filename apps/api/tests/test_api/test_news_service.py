@@ -1,9 +1,13 @@
+import sys
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from vnibb.services.news_crawler import (
+    FREE_RSS_FEEDS,
+    NewsCrawlerService,
     _coerce_published_date,
     _extract_vnexpress_published_date_from_html,
     _to_market_news_storage_datetime,
@@ -701,3 +705,28 @@ async def test_get_company_news_rows_sorts_unknown_and_mixed_timezone_publicatio
 
     assert [row["title"] for row in rows] == ["VNM newer", "VNM older", "VNM unknown"]
     assert rows[-1]["published_date"] is None
+
+
+@pytest.mark.asyncio
+async def test_installed_paid_news_is_never_selected(monkeypatch):
+    module = ModuleType("vnstock_news")
+
+    def paid_access(name):
+        pytest.fail(f"Paid news package accessed: {name}")
+
+    module.__getattr__ = paid_access
+    monkeypatch.setitem(sys.modules, "vnstock_news", module)
+    crawler = NewsCrawlerService()
+    rss = AsyncMock(return_value=3)
+    sentiment = AsyncMock()
+    monkeypatch.setattr(crawler, "_crawl_with_rss", rss)
+    monkeypatch.setattr(crawler, "analyze_unprocessed_articles", sentiment)
+
+    assert await crawler.crawl_market_news(limit=10) == 3
+    assert crawler._news_available is False
+    assert set(crawler.SOURCES) == set(FREE_RSS_FEEDS)
+    rss.assert_awaited_once_with(["cafef.vn", "vietstock.vn", "vnexpress.net"], 10)
+    sentiment.assert_awaited_once_with(batch_size=20)
+    assert await crawler.analyze_trending() == {
+        "available": False, "reason": "trending_analysis_unavailable",
+    }

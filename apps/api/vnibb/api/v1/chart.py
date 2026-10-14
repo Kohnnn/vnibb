@@ -22,7 +22,7 @@ VALID_PERIODS = {"1M", "3M", "6M", "1Y", "3Y", "5Y", "10Y", "ALL"}
 async def get_chart_data(
     symbol: str,
     period: str = Query(default="5Y", description="Time period: 1M, 3M, 6M, 1Y, 3Y, 5Y, 10Y, ALL"),
-    source: Optional[str] = Query(default=None, description="Data source: KBS, VCI, DNSE"),
+    source: Optional[str] = Query(default=None, pattern=r"^VCI$", description="Data source: VCI"),
 ):
     """
     Get OHLCV chart data for a symbol.

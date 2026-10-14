@@ -6,16 +6,17 @@ Extracts logic from DataPipeline to avoid circular dependency issues.
 
 import logging
 from datetime import datetime
-from typing import List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import case, func, select
 
-from vnibb.core.database import async_session_maker
 from vnibb.core.config import settings
-from vnibb.models.screener import ScreenerSnapshot
+from vnibb.core.database import async_session_maker
 from vnibb.core.price_units import normalize_screener_record
-from vnibb.providers.vnstock.equity_screener import VnstockScreenerFetcher, StockScreenerParams
+from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
+from vnibb.models.screener import ScreenerSnapshot
+from vnibb.providers.vnstock.equity_screener import StockScreenerParams, VnstockScreenerFetcher
+from vnibb.services.screener_metadata import screener_metadata_updates
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class ScreenerService:
 
     async def sync_screener_data(
         self,
-        exchanges: List[str] = None,
+        exchanges: list[str] = None,
         limit: int = 1700,
     ) -> int:
         """
@@ -100,6 +101,23 @@ class ScreenerService:
 
                         values["price_unit"] = getattr(item, "price_unit", "unknown")
                         values["price_source"] = getattr(item, "price_source", None)
+                        values["extended_metrics"] = {
+                            "ratio_units": getattr(item, "ratio_units", {}),
+                        }
+                        evidence = getattr(item, "provider_evidence", None)
+                        if evidence is not None:
+                            values["extended_metrics"]["provider_evidence"] = evidence
+                        for metric in PERCENT_RATIO_FIELDS:
+                            field = "debt_to_asset" if metric == "debt_assets" else metric
+                            units = values["extended_metrics"]["ratio_units"]
+                            value = (
+                                getattr(item, field, None) if units.get(metric) == "percent" else None
+                            )
+                            if metric == "debt_assets":
+                                if metric in units:
+                                    values["extended_metrics"][field] = value
+                            else:
+                                values[metric] = value
                         values = normalize_screener_record(values)
                         # Same ownership rule as `CacheManager.store_screener_data`:
                         # a scheduled sync must not blank a column another writer
@@ -111,10 +129,9 @@ class ScreenerService:
                             for k in values
                             if k not in ("symbol", "snapshot_date", "source")
                         }
-                        update_cols["extended_metrics"] = case(
-                            (stmt.excluded.price.is_(None), ScreenerSnapshot.extended_metrics),
-                            else_=stmt.excluded.extended_metrics,
-                        )
+                        update_cols.update(screener_metadata_updates(
+                            stmt, session.bind.dialect.name, stmt.excluded.price.is_(None)
+                        ))
                         stmt = stmt.on_conflict_do_update(
                             constraint="uq_screener_snapshot_symbol_date", set_=update_cols
                         )

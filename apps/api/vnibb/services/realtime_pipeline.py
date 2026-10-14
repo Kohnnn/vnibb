@@ -1,27 +1,13 @@
-"""
-Real-time Data Pipeline using vnstock_pipeline
-
-Streams live market data via WebSocket and stores in database.
-Supports: stockps (stock prices), index, board, boardps, etc.
-
-Uses vnstock_pipeline premium package when available, falls back to polling.
-"""
+"""Acquire bounded, durable trading rotations during active market sessions."""
 
 import asyncio
-import importlib
-import inspect
 import logging
 from datetime import datetime, time
+from hashlib import sha256
 from zoneinfo import ZoneInfo
 
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from vnibb.core.config import settings
-from vnibb.core.database import async_session_maker
 from vnibb.core.scheduler_lock import DistributedJobLock
-from vnibb.models.stock import StockIndex
-from vnibb.models.trading import IntradayTrade, OrderbookSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -38,27 +24,66 @@ def is_vietnam_market_open(check_time: datetime | None = None) -> bool:
     return time(9) <= current_time < time(11, 30) or time(13) <= current_time < time(14, 45)
 
 
+async def run_intraday_sync(symbols: list[str] | None = None):
+    """Continue a complete-Universe tick/current-depth cycle, never a ranked subset."""
+    if not is_vietnam_market_open():
+        return None
+    from vnibb.services.sync_all_data import FullMarketSync, data_pipeline
+
+    budget_seconds = 240
+    lease = DistributedJobLock("trading_acquisition_rotation", budget_seconds)
+    if await lease.acquire() != "acquired":
+        return None
+    try:
+        sync = FullMarketSync()
+        universe = sorted(set(await sync._get_seeded_symbols()))
+        sync_type = "intraday_universe_rotation"
+        if symbols is not None:
+            requested = {str(symbol).strip().upper() for symbol in symbols}
+            universe = [symbol for symbol in universe if symbol in requested]
+            fingerprint = sha256(",".join(universe).encode()).hexdigest()[:12]
+            sync_type = f"intraday_subset_rotation_{fingerprint}"
+        stages = [
+            ("intraday_trades", lambda symbol, progress: data_pipeline.sync_intraday_trades(
+                symbols=[symbol], progress=progress, live_session=True, retain_ticks=True)),
+            ("orderbook_snapshots", lambda symbol, progress: data_pipeline.sync_orderbook_snapshots(
+                symbols=[symbol], progress=progress, live_session=True)),
+        ]
+        result = await sync.run_maintenance_cycle(
+            sync_type, universe, stages, budget_seconds=210, refresh_days=0,
+            max_attempts=max(1, settings.scheduler_live_symbols_per_run) * len(stages),
+            allow_empty=True,
+        )
+        derivative_id = await data_pipeline._create_sync_record(
+            "intraday_derivatives", "intraday-derivatives", 0,
+        )
+        derivative_progress: dict = {}
+        try:
+            async with asyncio.timeout(25):
+                count = await data_pipeline.sync_derivatives_prices(progress=derivative_progress)
+            failed = derivative_progress.get("error_count", 0)
+            await data_pipeline._update_sync_record(
+                derivative_id, status="failed" if failed else "completed", success_count=count,
+                error_count=failed,
+                additional_data={"scope": "derivatives_only", "rows": count, "acquisition": derivative_progress},
+            )
+        except Exception as exc:
+            await data_pipeline._update_sync_record(
+                derivative_id, status="failed", error_count=1,
+                additional_data={"scope": "derivatives_only", "error": str(exc), "acquisition": derivative_progress},
+            )
+        return result
+    finally:
+        await lease.release()
+
+
 class RealtimePipeline:
     """
-    Real-time data streaming manager.
+    Market-session acquisition manager for genuine ticks and current depth.
 
-    Uses vnstock_pipeline WebSocket for live data during market hours.
-    Stores snapshots in PostgreSQL for historical analysis.
-
-    Data types supported:
-    - stockps: Stock price updates
-    - index: Market index updates (VNINDEX, HNXINDEX, etc.)
-    - board: Order board data
-    - boardps: Order board price updates
-    - aggregatemarket: Market aggregate data
+    Coverage receipts survive restarts; snapshots are not historical depth replay.
     """
 
-    # Default symbols for real-time tracking
-    DEFAULT_SYMBOLS = [
-        "FPT", "VNM", "VCB", "MBB", "TCB", "HPG", "VIC", "VHM",
-        "MSN", "VRE", "PLX", "GAS", "SAB", "BID", "CTG", "ACB",
-        "STB", "SSI", "VCI", "HCM", "VND", "SHS", "MWG", "PNJ",
-    ]
 
     def __init__(self, data_path: str = "./data"):
         self.data_path = data_path
@@ -67,21 +92,13 @@ class RealtimePipeline:
         self._lease: DistributedJobLock | None = None
         self._lease_renewal_task: asyncio.Task | None = None
         self._session_guard_task: asyncio.Task | None = None
-        self._stream_client = None
         self._control_lock = asyncio.Lock()
         self._pipeline_available = False
-        self._check_pipeline()
-
-    def _check_pipeline(self):
-        """Check if vnstock_pipeline is available."""
-        try:
-            importlib.import_module("vnstock_pipeline.wss")
-            self._pipeline_available = True
-            logger.info("vnstock_pipeline premium package detected")
-        except ImportError:
-            logger.warning(
-                "vnstock_pipeline not installed. Real-time will use polling fallback."
-            )
+        self._coverage: dict = {
+            "scope": "full_universe_rotation", "complete": False,
+            "completion_basis": "symbol_dataset_acquisition_cycle",
+            "tick_session_totals_verified": False, "historical_depth_replay": False,
+        }
 
     async def start_streaming(
         self,
@@ -89,9 +106,10 @@ class RealtimePipeline:
         symbols: list[str] | None = None,
     ) -> bool:
         if data_types is None:
-            data_types = ["stockps", "index", "board"]
-        if symbols is None:
-            symbols = self.DEFAULT_SYMBOLS
+            data_types = ["stockps"]
+        if "stockps" not in data_types:
+            logger.info("Only market-session trading polling is available")
+            return False
         async with self._control_lock:
             if not is_vietnam_market_open():
                 logger.info("Real-time streaming is unavailable outside active market sessions")
@@ -111,11 +129,11 @@ class RealtimePipeline:
                 return False
             self._lease = lease if lease_state == "acquired" else None
             self.is_running = True
-            self._task = asyncio.create_task(self._run_stream(data_types, symbols))
+            self._task = asyncio.create_task(self._run_stream(symbols))
             self._session_guard_task = asyncio.create_task(self._stop_when_session_ends())
             if self._lease:
                 self._lease_renewal_task = asyncio.create_task(self._renew_lease(self._lease))
-            logger.info("Starting real-time streaming for: %s", data_types)
+            logger.info("Starting stock price polling")
             return True
 
     async def reconcile_streaming(self) -> bool:
@@ -125,12 +143,9 @@ class RealtimePipeline:
             return False
         return await self.start_streaming()
 
-    async def _run_stream(self, data_types: list[str], symbols: list[str]) -> None:
+    async def _run_stream(self, symbols: list[str] | None) -> None:
         try:
-            if self._pipeline_available:
-                await self._start_websocket_streaming(data_types)
-            else:
-                await self._polling_fallback(symbols)
+            await self._polling_fallback(symbols)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -139,123 +154,28 @@ class RealtimePipeline:
             self.is_running = False
             await self._release_lease()
 
-    async def _start_websocket_streaming(self, data_types: list[str]) -> None:
-        from vnstock_pipeline.wss import MarketStreamClient
 
-        def _sync_stream() -> None:
-            client = MarketStreamClient(data_path=self.data_path, data_types=data_types)
-            self._stream_client = client
-            if not self.is_running:
-                return
-            client.start()
-
-        try:
-            await asyncio.to_thread(_sync_stream)
-        finally:
-            self._stream_client = None
-
-    async def _on_data_received(self, data_type: str, data: dict):
-        """Callback for incoming WebSocket data."""
-        try:
-            async with async_session_maker() as session:
-                if data_type == "stockps":
-                    await self._store_stock_price(session, data)
-                elif data_type == "index":
-                    await self._store_index(session, data)
-                elif data_type in ("board", "boardps"):
-                    await self._store_orderbook(session, data)
-
-                await session.commit()
-        except Exception as e:
-            logger.error(f"Failed to store {data_type} data: {e}")
-
-    async def _store_stock_price(self, session: AsyncSession, data: dict):
-        """Store real-time stock price snapshot."""
-        symbol = data.get("symbol", data.get("code", ""))
-        if not symbol:
-            return
-
-        stmt = pg_insert(IntradayTrade).values(
-            symbol=symbol.upper(),
-            trade_time=datetime.now(),
-            price=float(data.get("price", data.get("close", 0))),
-            volume=int(data.get("volume", data.get("vol", 0))),
-            match_type=data.get("side", data.get("type", "unknown")),
-        ).on_conflict_do_nothing()
-
-        await session.execute(stmt)
-
-    async def _store_index(self, session: AsyncSession, data: dict):
-        """Store index data (VNINDEX, HNXINDEX, etc)."""
-        index_code = data.get("code", data.get("symbol", ""))
-        if not index_code:
-            return
-
-        stmt = pg_insert(StockIndex).values(
-            index_code=index_code.upper(),
-            time=datetime.now(),
-            value=float(data.get("value", data.get("close", 0))),
-            change=float(data.get("change", 0)),
-            change_percent=float(data.get("changePct", data.get("change_pct", 0))),
-            volume=int(data.get("volume", data.get("vol", 0))),
-        ).on_conflict_do_nothing()
-
-        await session.execute(stmt)
-
-    async def _store_orderbook(self, session: AsyncSession, data: dict):
-        """Store order book snapshot."""
-        symbol = data.get("symbol", data.get("code", ""))
-        if not symbol:
-            return
-
-        stmt = pg_insert(OrderbookSnapshot).values(
-            symbol=symbol.upper(),
-            snapshot_time=datetime.now(),
-            bid1_price=float(data.get("bid1", data.get("bidPrice1", 0))),
-            bid1_volume=int(data.get("bid1_vol", data.get("bidVol1", 0))),
-            bid2_price=float(data.get("bid2", data.get("bidPrice2", 0))),
-            bid2_volume=int(data.get("bid2_vol", data.get("bidVol2", 0))),
-            bid3_price=float(data.get("bid3", data.get("bidPrice3", 0))),
-            bid3_volume=int(data.get("bid3_vol", data.get("bidVol3", 0))),
-            ask1_price=float(data.get("ask1", data.get("offerPrice1", 0))),
-            ask1_volume=int(data.get("ask1_vol", data.get("offerVol1", 0))),
-            ask2_price=float(data.get("ask2", data.get("offerPrice2", 0))),
-            ask2_volume=int(data.get("ask2_vol", data.get("offerVol2", 0))),
-            ask3_price=float(data.get("ask3", data.get("offerPrice3", 0))),
-            ask3_volume=int(data.get("ask3_vol", data.get("offerVol3", 0))),
-            price_depth=data,  # Store full order book as JSON
-        ).on_conflict_do_nothing()
-
-        await session.execute(stmt)
-
-    async def _polling_fallback(self, symbols: list[str]):
-        """Fallback to polling if WebSocket not available."""
-        from vnibb.providers.vnstock.runtime import get_trading_class
-
-        Trading = get_trading_class()
-
-        logger.info(f"Starting polling fallback for {len(symbols)} symbols")
-
+    async def _polling_fallback(self, symbols: list[str] | None):
+        """Continue durable acquisition without treating quote boards as matched ticks."""
+        self._coverage = {
+            "scope": "full_universe_rotation" if symbols is None else "explicit_subset_rotation",
+            "complete": False,
+            "completion_basis": "symbol_dataset_acquisition_cycle",
+            "tick_session_totals_verified": False,
+            "historical_depth_replay": False,
+        }
         while self.is_running:
             if not is_vietnam_market_open():
                 await asyncio.sleep(60)
                 continue
             try:
-                trading = Trading()
-                df = trading.price_board(symbols_list=symbols)
-
-                if df is not None and not df.empty:
-                    async with async_session_maker() as session:
-                        for _, row in df.iterrows():
-                            await self._store_stock_price(session, row.to_dict())
-                        await session.commit()
-
-                    logger.debug(f"Polled {len(df)} price updates")
-
-            except Exception as e:
-                logger.error(f"Polling fallback error: {e}")
-
-            await asyncio.sleep(5)
+                result = await run_intraday_sync(symbols=symbols)
+                if result is not None:
+                    self._coverage.update(complete=result.complete, pending_pairs=result.pending_count)
+            except Exception as exc:
+                self._coverage["complete"] = False
+                logger.error("Trading rotation failed: %s", exc)
+            await asyncio.sleep(60)
 
     async def _stop_when_session_ends(self) -> None:
         while self.is_running:
@@ -271,27 +191,10 @@ class RealtimePipeline:
                 await asyncio.sleep(interval)
                 if self.is_running and not await lease.renew():
                     self.is_running = False
-                    await self._stop_stream_client()
                     return
         except asyncio.CancelledError:
             raise
 
-    async def _stop_stream_client(self) -> None:
-        client = self._stream_client
-        if client is None:
-            return
-        for method_name in ("stop", "close"):
-            method = getattr(client, method_name, None)
-            if not callable(method):
-                continue
-            if inspect.iscoroutinefunction(method):
-                await method()
-            else:
-                result = await asyncio.to_thread(method)
-                if inspect.isawaitable(result):
-                    await result
-            self._stream_client = None
-            return
 
     async def _release_lease(self) -> None:
         lease, self._lease = self._lease, None
@@ -325,15 +228,6 @@ class RealtimePipeline:
             task = self._task
             if self._session_guard_task is current_task:
                 self._session_guard_task = None
-            try:
-                await asyncio.wait_for(
-                    self._stop_stream_client(),
-                    timeout=settings.realtime_streaming_stop_timeout_seconds,
-                )
-            except TimeoutError:
-                logger.error("Real-time stream client did not stop before timeout")
-            except Exception as exc:
-                logger.error("Failed to stop real-time stream client: %s", exc)
         if task is not current_task and task and not task.done():
             try:
                 await asyncio.wait_for(
@@ -365,6 +259,7 @@ class RealtimePipeline:
             "is_running": self.is_running,
             "pipeline_available": self._pipeline_available,
             "data_path": self.data_path,
+            "coverage": dict(self._coverage),
         }
 
 

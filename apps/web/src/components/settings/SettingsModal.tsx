@@ -1126,7 +1126,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">vnstock Data Source</h4>
                   <div className="grid grid-cols-2 gap-2">
-                    {(['KBS', 'VCI', 'MSN', 'FMP'] as VnstockSource[]).map(src => (
+                    {(['VCI'] as VnstockSource[]).map(src => (
                       <button
                         key={src}
                         onClick={() => {
@@ -1147,7 +1147,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       </button>
                     ))}
                   </div>
-                  <p className="text-[10px] text-[var(--text-muted)] mt-2">KBS is the recommended default for vnstock 4.x (KBS, VCI, MSN, FMP)</p>
+                  <p className="text-[10px] text-[var(--text-muted)] mt-2">Vietcap IQ is the primary source; free VCI is the only secondary provider. Previous selections are migrated to VCI.</p>
                 </div>
 
                 {/* Phase 2 of the QA evaluation remediation plan: per-source

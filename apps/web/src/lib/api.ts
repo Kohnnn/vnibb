@@ -326,7 +326,7 @@ export async function getHistoricalPrices(
         startDate?: string;
         endDate?: string;
         interval?: string;
-        source?: string;
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         signal?: AbortSignal;
     }
@@ -979,7 +979,7 @@ export interface ScreenerFilterParams {
     target_upside_min?: number;
     industry?: string;
     limit?: number;
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+    source?: 'VCI';
 
     // Dynamic Filters
     filters?: string; // JSON FilterGroup
@@ -1735,7 +1735,7 @@ export async function getSectorsCatalog(options?: {
 export async function getSectorTopMovers(options?: {
     type?: 'gainers' | 'losers';
     limit?: number;
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+    source?: 'VCI';
 
 }): Promise<SectorTopMoversResponse> {
     const params = {
@@ -1776,7 +1776,7 @@ export interface SectorPerformanceResponse {
 }
 
 export async function getSectorPerformance(_options?: {
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+    source?: 'VCI';
 
 }): Promise<SectorPerformanceResponse> {
     return fetchAPI<SectorPerformanceResponse>('/market/sector-performance');
@@ -2213,7 +2213,7 @@ export interface QuantBacktestRequest {
     as_of_date?: string
     initial_capital?: number
     fee_bps?: number
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+    source?: 'VCI'
     adjustment_mode?: 'raw' | 'adjusted'
     strategy?: {
         type: 'moving_average_crossover'
@@ -2297,7 +2297,7 @@ export interface QuantSweepRequest {
     period?: QuantPeriod
     initial_capital?: number
     fee_bps?: number
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+    source?: 'VCI'
     adjustment_mode?: 'raw' | 'adjusted'
     fast_windows?: number[]
     slow_windows?: number[]
@@ -2346,7 +2346,7 @@ export async function getQuantMetrics(
     options?: {
         period?: QuantPeriod
         metrics?: QuantMetric[]
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+        source?: 'VCI'
         adjustmentMode?: 'raw' | 'adjusted'
     }
 ): Promise<QuantResponse> {
@@ -2366,7 +2366,7 @@ export async function getSeasonalityMatrix(
     options?: {
         granularity?: SeasonalityGranularity
         period?: QuantPeriod
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+        source?: 'VCI'
         adjustmentMode?: 'raw' | 'adjusted'
     }
 ): Promise<SeasonalityMatrixResponse> {
@@ -2644,7 +2644,7 @@ export async function getMarketStructureTests(
     symbol: string,
     options?: {
         period?: QuantPeriod
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+        source?: 'VCI'
         adjustmentMode?: 'raw' | 'adjusted'
     }
 ): Promise<MarketStructureTestsResponse> {
@@ -2663,7 +2663,7 @@ export async function getPairDiagnostics(
     other: string,
     options?: {
         period?: QuantPeriod
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+        source?: 'VCI'
         adjustmentMode?: 'raw' | 'adjusted'
     }
 ): Promise<PairDiagnosticsResponse> {
@@ -2681,7 +2681,7 @@ export async function getGammaExposure(
     symbol: string,
     options?: {
         period?: QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
     }
 ): Promise<GammaExposureResponse> {
@@ -2699,7 +2699,7 @@ export async function getMomentumProfile(
     symbol: string,
     options?: {
         period?: QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
     }
 ): Promise<MomentumProfileResponse> {

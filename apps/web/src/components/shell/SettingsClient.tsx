@@ -9,10 +9,7 @@ import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { resetDashboardWalkthroughPreference } from '@/lib/userPreferences';
 
 const VNSTOCK_SOURCES: { value: VnstockSource; label: string; description: string }[] = [
-  { value: 'KBS', label: 'KBS (Korea)', description: 'Recommended - default in vnstock 4.x' },
-  { value: 'VCI', label: 'VCI (Vietcap)', description: 'Most stable, comprehensive coverage' },
-  { value: 'MSN', label: 'MSN', description: 'Microsoft Money source (vnstock 4.x)' },
-  { value: 'FMP', label: 'FMP', description: 'Financial Modeling Prep source (vnstock 4.x)' },
+  { value: 'VCI', label: 'VCI (Vietcap)', description: 'Free secondary provider; Vietcap IQ is the primary source' },
 ];
 
 export default function SettingsPage() {
@@ -86,7 +83,7 @@ export default function SettingsPage() {
                 <Database size={16} className="text-emerald-500" />
                 vnstock Provider
               </h2>
-              <p className="mt-1 text-xs text-[var(--text-muted)]">Changes apply immediately and are saved in this browser.</p>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">The backend uses Vietcap IQ first and free VCI only. Previous provider selections are migrated to VCI.</p>
             </div>
             <div className="divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">
               {VNSTOCK_SOURCES.map((source) => (

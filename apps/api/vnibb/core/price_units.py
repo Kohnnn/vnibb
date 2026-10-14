@@ -39,7 +39,7 @@ def normalize_price_record(
     provenance = str(source or record.get("price_source") or record.get("source") or "")
     unit = str(marker or "").strip().upper()
     if marker is None:
-        if provenance.lower() == "vnstock_vnd" or re.fullmatch(r"vnstock_vnd:(?:KBS|VCI|TCBS)", provenance, re.IGNORECASE):
+        if provenance.lower() in {"vnstock_vnd", "vietcap_vnd"} or re.fullmatch(r"vnstock_vnd:(?:KBS|VCI|TCBS)", provenance, re.IGNORECASE):
             unit = "VND"
         elif provenance.lower() == "vnstock_points" or re.fullmatch(r"vnstock_points:(?:KBS|VCI|TCBS)", provenance, re.IGNORECASE):
             unit = "INDEX_POINTS"
@@ -79,7 +79,7 @@ def persisted_price_record(row: Any) -> dict[str, Any]:
         payload = {field: getattr(row, field, None) for field in fields}
     if str(payload.get("source") or "").upper() in _HISTORY_SOURCES and not payload.get("price_source"):
         payload["price_source"] = f"vnstock_history:{str(payload['source']).upper()}"
-    raw_data = getattr(row, "raw_data", None)
+    raw_data = payload.get("raw_data") if isinstance(row, Mapping) else getattr(row, "raw_data", None)
     if isinstance(raw_data, dict):
         payload.update({key: raw_data[key] for key in ("price_unit", "priceUnit", "price_source") if key in raw_data})
     return normalize_price_record(payload)

@@ -1,9 +1,9 @@
-# Context Map
+# Glossary Map
 
 ## Contexts
 
-- [api](./apps/api/CONTEXT.md) — assembles, filters, and serves screens of Vietnamese listed equities
-- [web](./apps/web/CONTEXT.md) — the widget dashboard through which users compose and read those screens
+- [api](./apps/api/GLOSSARY.md) — assembles, filters, and serves screens of Vietnamese listed equities
+- [web](./apps/web/GLOSSARY.md) — the widget dashboard through which users compose and read those screens
 
 ## Relationships
 

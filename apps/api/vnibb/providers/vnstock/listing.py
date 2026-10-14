@@ -12,8 +12,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from vnibb.core.exceptions import ProviderError
-from vnibb.core.config import settings
-from vnibb.providers.vnstock.runtime import get_listing_class
+from vnibb.providers.vnstock.runtime import get_listing_class, validate_source
 
 
 logger = logging.getLogger(__name__)
@@ -79,20 +78,20 @@ class IndustryData(BaseModel):
 class ListingQueryParams(BaseModel):
     """Query parameters for listing endpoints."""
 
-    source: str = "KBS"
+    source: str = Field(default="VCI", pattern=r"^VCI$")
 
 
 class SymbolsByExchangeQueryParams(BaseModel):
     """Query parameters for symbols by exchange."""
 
-    source: str = "KBS"
+    source: str = Field(default="VCI", pattern=r"^VCI$")
     lang: str = "en"
 
 
 class SymbolsByGroupQueryParams(BaseModel):
     """Query parameters for symbols by index group."""
 
-    source: str = "KBS"
+    source: str = Field(default="VCI", pattern=r"^VCI$")
     group: str = "VN30"
 
 
@@ -114,22 +113,23 @@ class VnstockListingFetcher:
 
     @staticmethod
     async def fetch_all_symbols(
-        source: str = "KBS",
+        source: str = "VCI",
     ) -> List[SymbolData]:
         """
         Fetch all stock symbols.
 
         Args:
-            source: Data source (VCI, VND)
+            source: Free VCI data source
 
         Returns:
             List of SymbolData records
         """
+        source = validate_source(source)
         try:
 
             def _fetch():
                 Listing = get_listing_class()
-                listing = Listing(source=source.lower())
+                listing = Listing(source=source)
                 df = listing.all_symbols(to_df=True)
                 return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
 
@@ -144,24 +144,25 @@ class VnstockListingFetcher:
 
     @staticmethod
     async def fetch_symbols_by_exchange(
-        source: str = "KBS",
+        source: str = "VCI",
         lang: str = "en",
     ) -> List[ExchangeSymbolData]:
         """
         Fetch symbols categorized by exchange.
 
         Args:
-            source: Data source (VCI, VND)
+            source: Free VCI data source
             lang: Language for names (en, vi)
 
         Returns:
             List of ExchangeSymbolData records
         """
+        source = validate_source(source)
         try:
 
             def _fetch():
                 Listing = get_listing_class()
-                listing = Listing(source=source.lower())
+                listing = Listing(source=source)
                 df = listing.symbols_by_exchange(lang=lang)
                 return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
 
@@ -179,7 +180,7 @@ class VnstockListingFetcher:
     @staticmethod
     async def fetch_symbols_by_group(
         group: str = "VN30",
-        source: str = "KBS",
+        source: str = "VCI",
     ) -> List[IndexGroupSymbolData]:
         """
         Fetch symbols in a specific index group.
@@ -191,11 +192,12 @@ class VnstockListingFetcher:
         Returns:
             List of IndexGroupSymbolData records
         """
+        source = validate_source(source)
         try:
 
             def _fetch():
                 Listing = get_listing_class()
-                listing = Listing(source=source.lower())
+                listing = Listing(source=source)
                 df = listing.symbols_by_group(group=group)
                 if df is None or len(df) == 0:
                     return []
@@ -221,7 +223,7 @@ class VnstockListingFetcher:
 
     @staticmethod
     async def fetch_industries_icb(
-        source: str = "KBS",
+        source: str = "VCI",
     ) -> List[IndustryData]:
         """
         Fetch ICB industry classification.
@@ -232,11 +234,12 @@ class VnstockListingFetcher:
         Returns:
             List of IndustryData records
         """
+        source = validate_source(source)
         try:
 
             def _fetch():
                 Listing = get_listing_class()
-                listing = Listing(source=source.lower())
+                listing = Listing(source=source)
                 df = listing.industries_icb()
                 return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
 

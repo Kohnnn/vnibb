@@ -62,7 +62,8 @@ async def test_partial_live_write_cannot_blank_a_field_the_sync_populated(test_d
 
     manager = CacheManager(db=test_db)
     await manager.store_screener_data(
-        data=[{"symbol": "VNM", "price": None, "pe": None, "market_cap": None, "roe": 0.31}],
+        data=[{"symbol": "VNM", "price": None, "pe": None, "market_cap": None,
+               "roe": 31, "ratio_units": {"roe": "percent"}}],
         source="KBS",
     )
 
@@ -71,7 +72,7 @@ async def test_partial_live_write_cannot_blank_a_field_the_sync_populated(test_d
     assert stored.pe == 14.2
     assert stored.market_cap == 1.26e14
     # A non-null incoming value still lands.
-    assert stored.roe == 0.31
+    assert stored.roe == 31
 
 
 @pytest.mark.asyncio
@@ -321,3 +322,89 @@ async def test_sparse_screener_write_keeps_price_unit_coupled_to_retained_price(
     assert row.price == 60300
     assert row.extended_metrics["price_unit"] == "VND"
     assert row.extended_metrics["price_source"] == "vnstock_history:VCI"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("roe,unit,expected_roe", [
+    (25.0, "percent", 25.0), (0.0, "percent", 0.0),
+    (None, "unknown", None), (0.25, "unknown", None),
+])
+async def test_quote_less_cache_refresh_pairs_ratios_with_new_evidence(test_db, roe, unit, expected_roe):
+    evidence = [{"item_id": "roe", "unit": unit, "2025": roe}]
+    test_db.add(_row(
+        "VNM", source="scheduled_sync", price=60300, volume=100,
+        trade_date=TODAY - timedelta(days=1), roe=20, roa=8,
+        extended_metrics={
+            "price_unit": "VND", "price_source": "vnstock_history:VCI",
+            "ratio_units": {"roe": "percent", "roa": "percent"},
+            "provider_evidence": [{"item_id": "roe", "2024": 20}],
+            "days_payable": 12, "debt_to_asset": 30,
+        },
+    ))
+    await test_db.commit()
+    manager = CacheManager(db=test_db)
+
+    assert await manager.store_screener_data([{
+        "symbol": "VNM", "price": None, "volume": 999, "trade_date": TODAY,
+        "price_unit": "unknown", "price_source": "unavailable",
+        "roe": roe, "debt_assets": 42, "debt_to_asset": 0.42,
+        "ratio_units": {"roe": unit, "debt_assets": "percent"},
+        "provider_evidence": evidence, "days_receivable": 15,
+    }]) == 1
+
+    cached = await manager.get_screener_data(symbol="VNM", allow_stale=True)
+    assert cached.hit is True
+    row = cached.data[0]
+    assert row.roe == expected_roe
+    assert row.roa == 8
+    assert row.extended_metrics["ratio_units"] == {
+        "roe": unit, "roa": "percent", "debt_assets": "percent",
+    }
+    assert row.extended_metrics["provider_evidence"] == evidence
+    assert row.extended_metrics["debt_to_asset"] == 42
+    assert row.extended_metrics["days_receivable"] == 15
+    assert row.extended_metrics["days_payable"] == 12
+    assert (row.price, row.volume, row.trade_date) == (60300, 100, TODAY - timedelta(days=1))
+    assert row.extended_metrics["price_unit"] == "VND"
+    assert row.extended_metrics["price_source"] == "vnstock_history:VCI"
+
+
+@pytest.mark.asyncio
+async def test_quote_less_cache_refresh_creates_evidence_for_legacy_null_metadata(test_db):
+    test_db.add(_row("VNM", source="scheduled_sync", price=60300, roe=20))
+    await test_db.commit()
+    manager = CacheManager(db=test_db)
+
+    assert await manager.store_screener_data([{
+        "symbol": "VNM", "roe": 25, "ratio_units": {"roe": "percent"},
+        "provider_evidence": [{"item_id": "roe", "unit": "percent", "2025": 25}],
+    }]) == 1
+
+    row = (await manager.get_screener_data(symbol="VNM")).data[0]
+    assert row.price == 60300
+    assert row.roe == 25
+    assert row.extended_metrics["ratio_units"]["roe"] == "percent"
+    assert row.extended_metrics["provider_evidence"][0]["2025"] == 25
+    assert "price_unit" not in row.extended_metrics
+
+
+@pytest.mark.asyncio
+async def test_unmarked_cache_refresh_cannot_relabel_retained_certified_ratios(test_db):
+    evidence = [{"item_id": "roe", "unit": "percent", "2025": 20}]
+    test_db.add(_row(
+        "VNM", price=60300, roe=20,
+        extended_metrics={"ratio_units": {"roe": "percent", "debt_assets": "percent"},
+                          "provider_evidence": evidence, "debt_to_asset": 30},
+    ))
+    await test_db.commit()
+    manager = CacheManager(db=test_db)
+
+    assert await manager.store_screener_data([{
+        "symbol": "VNM", "roe": 0.4, "debt_to_asset": 0.5,
+    }]) == 1
+
+    row = (await manager.get_screener_data(symbol="VNM")).data[0]
+    assert row.roe == 20
+    assert row.extended_metrics["debt_to_asset"] == 30
+    assert row.extended_metrics["ratio_units"] == {"roe": "percent", "debt_assets": "percent"}
+    assert row.extended_metrics["provider_evidence"] == evidence

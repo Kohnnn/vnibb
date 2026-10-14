@@ -34,15 +34,11 @@ dependencies = [
     "numpy>=1.24.0",
     
     # Data Providers
-    "vnstock>=4.0.4,<4.1",  # Vietnam stock data, keep current with Sponsor runtime warnings
-    # NOTE: `vnii` is not guaranteed on default PyPI in all build environments.
-    # It is installed via VNStock premium bootstrap path (installer/extra-index) when needed.
-    # Premium packages (vnstock_data, vnstock_ta, vnstock_news, vnstock_pipeline)
-    # are installed via CLI installer, not pip
+    "vnstock>=4.0.4,<4.1",  # Community VCI only; paid runtime packages are excluded
 
 
     
-    # Pipeline dependencies (for vnstock_pipeline)
+    # Pipeline data-frame dependencies
     "duckdb>=1.2.0",
     "pyarrow>=14.0.1",
     

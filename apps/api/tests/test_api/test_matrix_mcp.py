@@ -1,11 +1,15 @@
 import asyncio
 import copy
+import json
 import socket
 import sys
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
+import httpx
 import pytest
 import uvicorn
 from httpx import AsyncClient
@@ -21,25 +25,23 @@ from vnibb.services.matrix_observations import build_matrix_fixture
 from vnibb.services.matrix_service import revoke_matrix_snapshot
 
 JWT_SECRET = "matrix-mcp-test-signing-key-not-a-production-secret"
-OWNER = "matrix-mcp-owner"
-OTHER = "matrix-mcp-other"
+OWNER = "00000000-0000-4000-8000-000000000001"
+OTHER = "00000000-0000-4000-8000-000000000002"
 SOURCE = "mcp-test-licensed-source"
 
 
-def signed_token(user_id=OWNER, *, secret=JWT_SECRET, expired=False):
+def signed_token(user_id=OWNER, *, secret=JWT_SECRET, expired=False, claims=None, omit=()):
     now = datetime.now(UTC)
-    return jwt.encode(
-        {
-            "sub": user_id,
-            "email": "matrix-test@example.invalid",
-            "aud": "authenticated",
-            "role": "authenticated",
-            "iat": now,
-            "exp": now + timedelta(minutes=-5 if expired else 5),
-        },
-        secret,
-        algorithm="HS256",
-    )
+    payload = {
+        "sub": user_id, "email": "matrix-test@example.invalid", "aud": "authenticated",
+        "role": "authenticated", "iss": "https://matrix-auth.invalid/auth/v1",
+        "session_id": "00000000-0000-4000-8000-000000000003",
+        "iat": int(now.timestamp()), "exp": int((now + timedelta(minutes=-5 if expired else 5)).timestamp()),
+        **(claims or {}),
+    }
+    for key in omit:
+        payload.pop(key, None)
+    return jwt.encode(payload, secret, algorithm="HS256")
 
 
 @pytest.fixture
@@ -64,7 +66,28 @@ async def matrix_store(test_engine, monkeypatch):
 
 
 @pytest.fixture
-async def matrix_http(monkeypatch):
+def session_authority(monkeypatch):
+    from vnibb.core import auth
+
+    state = {"status": 200, "identity": None, "calls": []}
+    monkeypatch.setattr(server.settings, "supabase_url", "https://matrix-auth.invalid")
+    monkeypatch.setattr(server.settings, "supabase_anon_key", "disposable-fixture-key")
+
+    def respond(request):
+        state["calls"].append(request)
+        assert request.url == "https://matrix-auth.invalid/auth/v1/user"
+        token = request.headers["authorization"].split(" ", 1)[1]
+        return httpx.Response(state["status"], json={"id": state["identity"] or jwt.get_unverified_claims(token)["sub"]})
+
+    monkeypatch.setattr(auth, "httpx", SimpleNamespace(
+        AsyncClient=lambda **kwargs: AsyncClient(transport=httpx.MockTransport(respond), **kwargs),
+        RequestError=httpx.RequestError,
+    ))
+    return state
+
+
+@pytest.fixture
+async def matrix_http(monkeypatch, session_authority):
     monkeypatch.setattr(server.settings, "supabase_jwt_secret", JWT_SECRET)
     monkeypatch.setattr(server.settings, "vnibb_mcp_shared_bearer_token", "deployment-shared")
     # SDK managers are single-lifespan objects; each test owns its own HTTP app.
@@ -157,7 +180,7 @@ async def test_http_selection_rejects_duplicates_empty_and_foreign_results(matri
     async with connected_client(matrix_http, signed_token()) as (session, _):
         for result_ids in ([], [result_id, result_id], [result_id] * 121):
             result = await session.call_tool("get_matrix_selection", {**args, "result_ids": result_ids})
-            assert "Invalid Matrix selection" in error_text(result)
+            assert result.isError
             assert result.structuredContent is None
         result = await session.call_tool(
             "get_matrix_selection", {**args, "result_ids": [result_id, "unowned-result"]}
@@ -219,8 +242,12 @@ async def test_shared_bearer_can_read_premium_dataset_but_user_jwt_cannot(matrix
     class PremiumService:
         enabled = True
 
-        async def get_raw_dataset_records_precise(self, symbol, *, dataset, limit):
-            assert (symbol, dataset, limit) == ("FPT", "company.info", 20)
+        async def get_raw_dataset_records_precise(
+            self, symbol, *, dataset, variant=None, limit=100, source=None,
+            scope_type="symbol", scope_key=None,
+        ):
+            assert (symbol, dataset, limit, scope_type, scope_key) == ("FPT", "company.info", 20, "symbol", "FPT")
+            assert variant is None and source is None
             return [{"symbol": "FPT", "name": "licensed data"}]
 
     monkeypatch.setattr(server, "get_mongo_market_data_service", PremiumService)
@@ -316,3 +343,69 @@ async def test_stdio_cannot_impersonate_matrix_owner(tmp_path):
             assert "verified user JWT" in error_text(await session.call_tool("get_matrix_selection", args))
             impersonation = {**args, "user_id": OWNER, "token": signed_token()}
             assert (await session.call_tool("get_matrix_selection", impersonation)).isError
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims,omit", [
+    ({"iss": "https://wrong.invalid/auth/v1"}, ()), ({"aud": "service_role"}, ()),
+    ({"session_id": "not-a-session"}, ()), ({"iat": 1, "exp": 2}, ()),
+    *[({}, (key,)) for key in ("iss", "aud", "exp", "iat", "sub", "session_id")],
+])
+async def test_matrix_http_rejects_invalid_session_claims_before_online_lookup(matrix_http, session_authority, claims, omit):
+    async with AsyncClient() as client:
+        response = await client.post(matrix_http, headers={"Authorization": f"Bearer {signed_token(claims=claims, omit=omit)}"},
+                                     json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    assert response.status_code == 401
+    assert session_authority["calls"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,identity,expected", [(401, None, 401), (503, None, 503), (200, OTHER, 401)])
+async def test_established_matrix_session_is_rechecked_online_after_logout_or_authority_failure(
+    matrix_http, matrix_store, session_authority, status, identity, expected
+):
+    fixture, _ = matrix_store
+    async with connected_client(matrix_http, signed_token()) as (session, http):
+        result = await session.call_tool("get_matrix_selection", selection_args(fixture))
+        assert not result.isError
+        assert result.structuredContent["snapshot"]["snapshot_id"] == fixture["snapshot"]["snapshot_id"]
+        calls = len(session_authority["calls"])
+        session_authority.update(status=status, identity=identity)
+        response = await http.post(matrix_http, json={"jsonrpc": "2.0", "id": 99, "method": "tools/call",
+                                  "params": {"name": "get_matrix_selection", "arguments": selection_args(fixture)}})
+        assert response.status_code == expected
+        assert len(session_authority["calls"]) == calls + 1
+        assert "snapshot" not in response.json()
+
+
+@pytest.mark.asyncio
+async def test_official_http_client_preserves_full_data_and_rejects_nonfinite_store_values(matrix_http, monkeypatch):
+    raw = {"nested": {"amount": Decimal("12345678901234567890.123456789"),
+                      "large_integer": 2**63, "enabled": True, "missing": None,
+                      "description": "retained evidence " * 500}}
+    rows = [{"symbol": "FPT", "raw": raw}]
+
+    class Store:
+        enabled = True
+
+        async def get_raw_dataset_records_precise(
+            self, symbol, *, dataset, variant=None, limit=100, source=None,
+            scope_type="symbol", scope_key=None,
+        ):
+            assert (symbol, dataset, scope_type, scope_key) == ("FPT", "company.info", "symbol", "FPT")
+            return rows
+
+    monkeypatch.setattr(server, "get_mongo_market_data_service", Store)
+    async with connected_client(matrix_http, "deployment-shared") as (session, _):
+        args = {"dataset": "company.info", "symbol": "FPT"}
+        result = await session.call_tool("get_premium_dataset", args)
+        assert not result.isError
+        returned = result.structuredContent["items"][0]["raw"]["nested"]
+        assert returned == {"amount": "12345678901234567890.123456789", "large_integer": str(2**63),
+                            "enabled": True, "missing": None, "description": raw["nested"]["description"]}
+        json.dumps(result.structuredContent, allow_nan=False)
+        for value in (float("inf"), float("nan"), Decimal("Infinity")):
+            raw["nested"]["amount"] = value
+            rejected = await session.call_tool("get_premium_dataset", args)
+            assert rejected.isError
+            assert rejected.structuredContent is None

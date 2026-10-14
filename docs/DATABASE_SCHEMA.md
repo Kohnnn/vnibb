@@ -1,18 +1,11 @@
 # Database Schema
 
-**Persistence:** fully self-hosted on n6v (Tailscale `<n6v-tailscale-ip>`, private network only — no cloud database)
-**Physical stores:** PostgreSQL app model (28 tables, via self-hosted Supabase) + MongoDB `vnibb-market` corpus + Redis cache
-**Total Collections:** 29 (PostgreSQL/app model) + Mongo `vnibb-market` market corpus
-**Active Alembic revision:** `b6c7d8e9f012` (2026-07-05 — adds `prediction_market_intraday_snapshots` for Phase 8 alerts/history endpoints)
+**Persistence:** self-hosted PostgreSQL app/structured financial model, MongoDB `vnibb-market` analytical corpus, and optional Redis cache. Oracle Compose defines these stores on the application host; confirm deployed connection targets and mounts rather than assuming the historical n6v topology.
+**Migration head:** `e5f1a7c9d2b4` restores the financial-ratio natural key. Local startup applied the full chain on 13 October 2026; production revision requires an authenticated runtime check.
 
-> Two physical stores are described here:
-> 1. The **PostgreSQL app model (n6v)** — the 27 collections below that power the
->    application (dashboards, screener, app-facing financials, prediction markets, etc.).
-> 2. The **MongoDB `vnibb-market` market corpus** on n6v — the canonical
->    analytical/market datastore that runtime market reads (`/equity/historical`,
->    quant, MCP) prefer. See the dedicated section
->    "MongoDB Market Corpus (n6v)" near the end of this document and
->    `VIETCAP_DATA_SOURCE.md` for the Vietcap-sourced collections.
+> PostgreSQL owns app state and admitted structured observations. MongoDB retains provider envelopes, descriptor evidence and analytical records. Vietcap IQ/Trading is the primary Vietnamese ingestion source; free `vnstock` VCI is supplementary and shares the same upstream. Never infer financial units, fiscal basis or publication dates from value magnitude or receipt time. Unknown fields remain unavailable rather than being certified by storage.
+>
+> The provider contract is documented at [`../../docs/VIETCAP_DATA_SOURCE.md`](../../docs/VIETCAP_DATA_SOURCE.md). The legacy collection names and n6v sections below describe compatibility/history, not proof of current provider execution or host placement. Local startup and safe production recovery are in [`oracle_runbook.md`](oracle_runbook.md#database-recovery-and-local-startup).
 
 ---
 
@@ -1055,17 +1048,23 @@ Multi-dataset raw record store for fundamentals and company data.
 **Indexes:** `(dataset, symbol, recordKey)` unique
 
 ### `market_financial_metric_map`
-Code->label dictionary for decoding `raw` financial fields.
+Original symbol-specific financial descriptors; one bounded snapshot per `(symbol, comTypeCode, section, source)`. A symbol write cannot append to another symbol's document.
 
 | Attribute | Type | Description |
 |---|---|---|
+| `symbol` | string | Exact uppercase issuer symbol |
 | `comTypeCode` | string | Company type (e.g. `IN`, `CT`, bank/securities/insurance) |
 | `section` | string | `INCOME_STATEMENT`, `BALANCE_SHEET`, `CASH_FLOW`, `NOTE` |
 | `source` | string | `vietcap` |
-| `labels` | object | `{ field: {field, name, level, parent, titleEn, titleVi, ...} }` |
-| `fieldCount` | int | Number of mapped fields |
+| `descriptors` | array | Original section list, preserving hierarchy, null/repeated fields and unknown properties |
+| `descriptorEvidence` | object | Exact `symbol`, `comTypeCode`, `section`, `source`, metrics `endpoint`, receipt `receivedAt`, optional original `sourceResponse` |
+| `receivedAt`, `updatedAt`, `createdAt` | datetime | Retained receipt/storage lineage, not fiscal publication dates |
+| `schemaVersion` | int | `3` for served per-symbol descriptor documents |
+| `migrationSource` | object | Migrated records only: original collection, string document ID and exact symbol evidence path; aggregate legacy timestamps remain separate provenance |
 
-**Indexes:** `(comTypeCode, section, source)` unique
+**Index:** `uq_metric_map_symbol_type_section_source`, unique `(symbol, comTypeCode, section, source)`, partial filter `symbol: {$type: "string"}`. The old type-wide unique index must be retired by the controlled migration, not silently ignored during index initialization.
+
+Readers select exact `source="vietcap"`, `symbol`, `schemaVersion=3`. Old type-wide `labels`/`symbolDescriptors` documents remain untouched historical raw data and are not served. Migration copies only exact retained symbol entries or inline symbol-scoped `descriptorEvidence`; it never joins generic type descriptors, invents receipt dates or overwrites existing symbol keys. See `apps/api/scripts/vietcap/README.md` for the paused-writer, backed-up cutover.
 
 ### `market_company_profiles`
 Company master + analyst coverage (Vietcap `details` + `search-bar`).

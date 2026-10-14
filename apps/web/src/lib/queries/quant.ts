@@ -12,16 +12,16 @@ export const quantQueryKeys = {
     rsLeaders: (limit: number, sector?: string) => ['rsLeaders', limit, sector] as const,
     rsLaggards: (limit: number, sector?: string) => ['rsLaggards', limit, sector] as const,
     rsGainers: (limit: number, lookbackDays: number) => ['rsGainers', limit, lookbackDays] as const,
-    quant: (symbol: string, period: string, metrics: string[], source: string) =>
+    quant: (symbol: string, period: string, metrics: string[], source: 'VCI') =>
         ['quant', symbol, period, metrics.join(','), source] as const,
-    garchVolatility: (symbol: string, period: string, source: string, adjustmentMode: string) =>
+    garchVolatility: (symbol: string, period: string, source: 'VCI', adjustmentMode: string) =>
         ['garchVolatility', symbol, period, source, adjustmentMode] as const,
     quantBacktest: (
         symbol: string,
         period: string,
         fastWindow: number,
         slowWindow: number,
-        source: string,
+        source: 'VCI',
         adjustmentMode: string
     ) => ['quantBacktest', symbol, period, fastWindow, slowWindow, source, adjustmentMode] as const,
     quantSweep: (
@@ -30,27 +30,27 @@ export const quantQueryKeys = {
         fastWindows: number[],
         slowWindows: number[],
         objective: string,
-        source: string,
+        source: 'VCI',
         adjustmentMode: string
     ) => ['quantSweep', symbol, period, fastWindows.join(','), slowWindows.join(','), objective, source, adjustmentMode] as const,
     seasonalityMatrix: (
         symbol: string,
         granularity: string,
         period: string,
-        source: string,
+        source: 'VCI',
         adjustmentMode: string
     ) => ['seasonalityMatrix', symbol, granularity, period, source, adjustmentMode] as const,
-    gammaExposure: (symbol: string, period: string, source: string, adjustmentMode: string) =>
+    gammaExposure: (symbol: string, period: string, source: 'VCI', adjustmentMode: string) =>
         ['gammaExposure', symbol, period, source, adjustmentMode] as const,
-    momentumProfile: (symbol: string, period: string, source: string, adjustmentMode: string) =>
+    momentumProfile: (symbol: string, period: string, source: 'VCI', adjustmentMode: string) =>
         ['momentumProfile', symbol, period, source, adjustmentMode] as const,
     earningsQuality: (symbol: string) => ['earningsQuality', symbol] as const,
     smartMoneyFlow: (symbol: string) => ['smartMoneyFlow', symbol] as const,
     relativeRotation: (symbol: string, lookbackDays: number) =>
         ['relativeRotation', symbol, lookbackDays] as const,
-    marketStructureTests: (symbol: string, period: string, source: string, adjustmentMode: string) =>
+    marketStructureTests: (symbol: string, period: string, source: 'VCI', adjustmentMode: string) =>
         ['marketStructureTests', symbol, period, source, adjustmentMode] as const,
-    pairDiagnostics: (symbol: string, other: string, period: string, source: string, adjustmentMode: string) =>
+    pairDiagnostics: (symbol: string, other: string, period: string, source: 'VCI', adjustmentMode: string) =>
         ['pairDiagnostics', symbol, other, period, source, adjustmentMode] as const,
 };
 
@@ -103,7 +103,7 @@ export function useQuantMetrics(
     options?: {
         period?: api.QuantPeriod;
         metrics?: api.QuantMetric[];
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -142,7 +142,7 @@ export function useGarchVolatility(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -190,7 +190,7 @@ export function useQuantBacktest(
         slowWindow?: number;
         initialCapital?: number;
         feeBps?: number;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -231,7 +231,7 @@ export function useQuantSweep(
         objective?: api.QuantSweepRequest['objective'];
         initialCapital?: number;
         feeBps?: number;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -270,7 +270,7 @@ export function useSeasonalityMatrix(
     options?: {
         granularity?: api.SeasonalityGranularity;
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -294,7 +294,7 @@ export function useGammaExposure(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -317,7 +317,7 @@ export function useMomentumProfile(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -345,7 +345,7 @@ export function usePairDiagnostics(
     other: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -378,7 +378,7 @@ export function useMarketStructureTests(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }

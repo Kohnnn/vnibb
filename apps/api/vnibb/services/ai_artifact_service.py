@@ -238,7 +238,8 @@ def _price_trend_chart(
 
     for index, snapshot in enumerate(market_context):
         symbol = str(snapshot.get("symbol") or "").strip().upper()
-        recent_series = (snapshot.get("price_context") or {}).get("recent_series") or []
+        price_context = snapshot.get("price_context") or {}
+        recent_series = price_context.get("recent_series") or []
         if not symbol or not recent_series:
             continue
 
@@ -246,23 +247,31 @@ def _price_trend_chart(
             persisted_price_record({"symbol": symbol, **point}) for point in recent_series
         ]
         units = {point["price_unit"] for point in normalized_points}
-        if "unknown" in units or len(units) != 1:
-            continue
-        valid_points = sorted(
-            [
-                point for point in normalized_points
-                if _coerce_number(point.get("close")) not in (None, 0)
-                and str(point.get("time") or "").strip()
-            ],
-            key=lambda point: str(point["time"]),
+        latest = price_context.get("latest") or {}
+        window = ((price_context.get("summary") or {}).get("range_window_20d") or {})
+        points = sorted(
+            (
+                {
+                    "time": str(point.get("time") or "")[:10],
+                    "close": _coerce_number(point.get("close")),
+                }
+                for point in normalized_points
+            ),
+            key=lambda point: point["time"],
         )
-        if len(valid_points) < 2:
+        if (
+            len(units) != 1
+            or units == {"unknown"}
+            or window.get("status") != "available"
+            or latest.get("close") is None
+            or any(point["close"] is None or point["close"] <= 0 for point in points)
+            or [point["time"] for point in points][-1] != str(latest.get("time") or "")[:10]
+            or len({point["time"] for point in points}) != len(points)
+            or [point["time"] for point in points] != window.get("expected_dates")
+        ):
             continue
 
-        base_close = _coerce_number(valid_points[0].get("close"))
-        if base_close in (None, 0):
-            continue
-
+        base_close = points[0]["close"]
         series.append(
             {
                 "key": symbol,
@@ -270,21 +279,17 @@ def _price_trend_chart(
                 "color": CHART_COLORS[index % len(CHART_COLORS)],
             }
         )
-        for source_id in _symbol_source_ids(snapshot, "-PRICES"):
-            if source_id not in source_ids:
-                source_ids.append(source_id)
-
-        for point in valid_points:
-            date = str(point.get("time") or "")[:10]
-            close = _coerce_number(point.get("close"))
-            if not date or close is None:
-                continue
+        for point in points:
+            date = point["time"]
             if date not in date_seen:
                 date_seen.add(date)
                 all_dates.append(date)
             rows_by_date.setdefault(date, {"date": date})[symbol] = round(
-                (close / base_close) * 100, 2
+                (point["close"] / base_close) * 100, 2
             )
+        for source_id in _symbol_source_ids(snapshot, "-PRICES"):
+            if source_id not in source_ids:
+                source_ids.append(source_id)
 
     rows = [rows_by_date[date] for date in all_dates if date in rows_by_date]
     return rows, series, source_ids

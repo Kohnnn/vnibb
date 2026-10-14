@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import requests
@@ -52,6 +53,7 @@ class VietcapClient:
         self._last_request_at = 0.0
         self._lock = threading.Lock()
         self._session = requests.Session()
+        self.response_metadata: dict[str, dict[str, Any]] = {}
 
     # -- internal helpers --------------------------------------------------
 
@@ -64,14 +66,12 @@ class VietcapClient:
             self._last_request_at = time.monotonic()
 
     def _headers(self, base: str) -> dict[str, str]:
-        referer = "https://trading.vietcap.com.vn/" if base == TRADING_BASE else "https://iq.vietcap.com.vn/"
         headers = {
             "user-agent": _UA,
             "accept": "application/json, text/plain, */*",
-            "referer": referer,
+            "referer": "https://trading.vietcap.com.vn/",
+            "origin": "https://trading.vietcap.com.vn",
         }
-        if base == TRADING_BASE:
-            headers["origin"] = "https://trading.vietcap.com.vn"
         return headers
 
     def _request(self, method: str, url: str, base: str, *, json_body: Any | None = None) -> Any:
@@ -97,7 +97,11 @@ class VietcapClient:
                 self._consecutive_failures = 0
                 if not resp.content:
                     return None
-                return resp.json()
+                payload = resp.json()
+                if isinstance(payload, dict):
+                    self.response_metadata[url] = {key: value for key, value in payload.items() if key != "data"}
+                    self.response_metadata[url]["receivedAt"] = datetime.now(UTC).replace(tzinfo=None)
+                return payload
             except Exception as exc:  # noqa: BLE001 - retried below
                 last_exc = exc
                 if attempt < self._max_retries:
@@ -108,9 +112,20 @@ class VietcapClient:
 
     @staticmethod
     def _unwrap(payload: Any) -> Any:
-        """IQ endpoints wrap results in ``{status, code, data, ...}``."""
-        if isinstance(payload, dict) and "data" in payload and "successful" in payload:
-            return payload.get("data")
+        """Reject IQ application failures even when HTTP returned 200."""
+        if not isinstance(payload, dict):
+            return payload
+        failed = payload.get("successful") is False or payload.get("success") is False
+        status = str(payload.get("status") or "").upper()
+        code = payload.get("code")
+        failed = failed or status in {"ERROR", "FAILED", "FAILURE"}
+        failed = failed or (status.isdigit() and int(status) >= 400) or payload.get("exception") is not None
+        if code is not None and str(code) not in {"0", "200"}:
+            failed = True
+        if failed:
+            raise RuntimeError(f"Vietcap API failure: {payload.get('message') or payload.get('msg') or payload.get('error') or payload}")
+        if "data" in payload and any(key in payload for key in ("successful", "success", "status", "code")):
+            return payload["data"]
         return payload
 
     # -- trading.vietcap.com.vn (market data) ------------------------------
@@ -158,13 +173,21 @@ class VietcapClient:
 
     def get_company_details(self, symbol: str) -> dict[str, Any] | None:
         url = f"{IQ_BASE}/v1/company/details?ticker={symbol.upper()}"
-        data = self._unwrap(self._request("GET", url, IQ_BASE))
-        return data if isinstance(data, dict) else None
+        payload = self._request("GET", url, IQ_BASE)
+        data = self._unwrap(payload)
+        envelope = isinstance(payload, dict) and any(key in payload for key in ("data", "successful", "success", "status", "code"))
+        if (envelope and ("data" not in payload or data is payload)) or (data is not None and not isinstance(data, dict)):
+            raise ValueError(f"Invalid company details response for {symbol}")
+        return data
 
     def get_shareholder_structure(self, symbol: str) -> dict[str, Any] | None:
         url = f"{IQ_BASE}/v1/company/{symbol.upper()}/shareholder-structure"
-        data = self._unwrap(self._request("GET", url, IQ_BASE))
-        return data if isinstance(data, dict) else None
+        payload = self._request("GET", url, IQ_BASE)
+        data = self._unwrap(payload)
+        envelope = isinstance(payload, dict) and any(key in payload for key in ("data", "successful", "success", "status", "code"))
+        if (envelope and ("data" not in payload or data is payload)) or (data is not None and not isinstance(data, dict)):
+            raise ValueError(f"Invalid shareholder structure response for {symbol}")
+        return data
 
     def get_financial_metrics_map(self, symbol: str) -> dict[str, list[dict[str, Any]]]:
         """Return code->label maps keyed by section (INCOME_STATEMENT/BALANCE_SHEET/CASH_FLOW/NOTE)."""

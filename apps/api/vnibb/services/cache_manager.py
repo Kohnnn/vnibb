@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Generic, List, Optional, TypeVar
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import Float, and_, case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,7 @@ from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
+from vnibb.services.screener_metadata import screener_metadata_updates
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,21 @@ class CacheResult(Generic[T]):
     def is_fresh(self) -> bool:
         """Returns True if cache was hit and data is not stale."""
         return self.hit and not self.is_stale
+
+
+class StructuredPersistenceConflict(ValueError):
+    def __init__(self, persisted_rows: int, conflicting_keys: List[dict[str, Any]]):
+        self.persisted_rows = persisted_rows
+        self.conflicting_keys = conflicting_keys
+        super().__init__(f"IQ PostgreSQL source conflict: persisted {persisted_rows} rows; conflicting keys {conflicting_keys}")
+
+
+def source_update_condition(model, source: str | None):
+    if source == "vietcap":
+        return model.source == source
+    if source == "vietcap_vnd":
+        return model.source.in_(("vietcap", "vietcap_vnd"))
+    return or_(model.source.is_(None), model.source.not_in(("vietcap", "vietcap_vnd")))
 
 
 class CacheManager:
@@ -330,7 +346,7 @@ class CacheManager:
                     "perf_1w": _pick(record.get("perf_1w"), record.get("perf1W")),
                     "perf_1m": _pick(record.get("perf_1m"), record.get("perf1M")),
                     "perf_ytd": _pick(record.get("perf_ytd"), record.get("perfYTD")),
-                    "debt_to_asset": _pick(record.get("debt_to_asset"), record.get("debtToAsset")),
+                    "debt_to_asset": _pick(record.get("debt_assets"), record.get("debt_to_asset"), record.get("debtToAsset")),
                     "days_receivable": _pick(
                         record.get("days_receivable"),
                         record.get("daysReceivable"),
@@ -360,9 +376,19 @@ class CacheManager:
                     price_unit=record.get("price_unit") or record.get("priceUnit") or (record.get("extended_metrics") or {}).get("price_unit"),
                     price_source=record.get("price_source") or (record.get("extended_metrics") or {}).get("price_source"),
                 )
+                for key in ("ratio_units", "provider_evidence"):
+                    value = record.get(key, (record.get("extended_metrics") or {}).get(key))
+                    if value is not None:
+                        extended_metrics[key] = value
                 compact_extended_metrics = {
                     key: value for key, value in extended_metrics.items() if value is not None
                 }
+                if "debt_assets" in (extended_metrics.get("ratio_units") or {}):
+                    compact_extended_metrics["debt_to_asset"] = (
+                        record.get("debt_assets", record.get("debt_to_asset"))
+                        if extended_metrics["ratio_units"]["debt_assets"] == "percent"
+                        else None
+                    )
 
                 price_value = record.get("price")
                 values = {
@@ -405,6 +431,9 @@ class CacheManager:
                     "source": source,
                     "created_at": now,
                 }
+                for metric, unit in (extended_metrics.get("ratio_units") or {}).items():
+                    if metric in values:
+                        values[metric] = record.get(metric) if unit == "percent" else None
                 prep_data.append(normalize_screener_record(values))
 
             if not prep_data:
@@ -429,17 +458,22 @@ class CacheManager:
             # Regressing a populated field to NULL is never a legitimate
             # update: a genuinely delisted or unavailable value is handled by
             # the retention sweep, not by an incidental request-path write.
-            stmt = insert(ScreenerSnapshot).values(prep_data)
+            dialect_name = session.get_bind().dialect.name
+            dialect_insert = insert if dialect_name == "postgresql" else sqlite_insert
+            stmt = dialect_insert(ScreenerSnapshot).values(prep_data)
 
             update_cols = {
                 k: func.coalesce(stmt.excluded[k], ScreenerSnapshot.__table__.c[k])
                 for k in prep_data[0].keys()
                 if k not in ["symbol", "snapshot_date", "source"]
             }
-            update_cols["extended_metrics"] = case(
-                (stmt.excluded.price.is_(None), ScreenerSnapshot.extended_metrics),
-                else_=stmt.excluded.extended_metrics,
-            )
+            quote_missing = stmt.excluded.price.is_(None)
+            for column in ("trade_date", "volume"):
+                update_cols[column] = case(
+                    (quote_missing, ScreenerSnapshot.__table__.c[column]),
+                    else_=update_cols[column],
+                )
+            update_cols.update(screener_metadata_updates(stmt, dialect_name, quote_missing))
 
             stmt = stmt.on_conflict_do_update(
                 index_elements=["symbol", "snapshot_date"], set_=update_cols
@@ -738,6 +772,8 @@ class CacheManager:
                 symbol = record.get("symbol") or record.get("ticker")
                 if not symbol:
                     continue
+                if source == "vietcap" and record.get("exchange") not in {"HOSE", "HNX", "UPCOM", "DELISTED"}:
+                    continue
 
                 symbol = symbol.upper()
                 values = {
@@ -747,7 +783,7 @@ class CacheManager:
                     "exchange": record.get("exchange") or "HOSE",
                     "industry": record.get("industry") or record.get("industry_name") or None,
                     "sector": record.get("sector") or None,
-                    "is_active": 1,
+                    "is_active": int(record.get("is_active", 1)) if source == "vietcap" else 1,
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -756,13 +792,13 @@ class CacheManager:
                     key: func.coalesce(stmt.excluded[key], getattr(Stock, key))
                     for key in ("company_name", "short_name", "industry", "sector")
                 }
-                updates.update(is_active=1, updated_at=now)
+                updates.update(is_active=values["is_active"], updated_at=now)
                 if record.get("exchange"):
                     updates["exchange"] = stmt.excluded.exchange
-                await session.execute(
-                    stmt.on_conflict_do_update(index_elements=["symbol"], set_=updates)
+                result = await session.execute(
+                    stmt.on_conflict_do_update(index_elements=["symbol"], set_=updates).returning(Stock.id)
                 )
-                count += 1
+                count += len(result.scalars().all())
 
             await session.commit()
             logger.info(f"Stored {count} listing records in cache (source={source})")
@@ -771,6 +807,8 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Cache store error for listing: {e}")
             await session.rollback()
+            if source == "vietcap":
+                raise
             return 0
         finally:
             if own_session:
@@ -850,6 +888,106 @@ class CacheManager:
     # ========================================================================
     # FINANCIAL DATA CACHING
     # ========================================================================
+
+    async def _store_rows(self, model, rows: List[dict[str, Any]], keys: List[str]) -> int:
+        if not rows:
+            return 0
+        session = await self._get_session()
+        own_session = self._db is None
+        try:
+            dialect_insert = insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+            count = 0
+            conflicts = []
+            for values in rows:
+                stmt = dialect_insert(model).values(values)
+                updates = {key: stmt.excluded[key] for key in values if key not in keys and key != "created_at"}
+                condition = source_update_condition(model, values.get("source"))
+                stmt = stmt.on_conflict_do_update(index_elements=keys, set_=updates, where=condition).returning(model.id)
+                result = await session.execute(stmt)
+                affected = len(result.scalars().all())
+                count += affected
+                if affected == 0:
+                    conflicts.append({"table": model.__tablename__, **{key: values[key] for key in keys}})
+            await session.commit()
+            if conflicts:
+                raise StructuredPersistenceConflict(count, conflicts)
+            return count
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            if own_session:
+                await session.close()
+
+    async def store_financial_data(
+        self, symbol: str, statement_type: str, period: str,
+        data: List[dict[str, Any]], source: str = "vietcap",
+    ) -> int:
+        from vnibb.models import IncomeStatement, BalanceSheet, CashFlow
+        from vnibb.models.trading import FinancialRatio
+        import json
+
+        models = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow, "ratio": FinancialRatio}
+        if statement_type not in models or period not in {"year", "quarter"}:
+            raise ValueError("Unsupported financial statement or period")
+        model = models[statement_type]
+        aliases = {
+            "operating_expense": "operating_expenses", "profit_before_tax": "income_before_tax",
+            "tax_expense": "income_tax", "equity": "total_equity", "cash": "cash_and_equivalents",
+            "receivables": "accounts_receivable", "long_term_liabilities": "non_current_liabilities",
+            "net_cash_flow": "net_change_in_cash", "pe": "pe_ratio", "pb": "pb_ratio", "ps": "ps_ratio",
+            "debt_equity": "debt_to_equity", "debt_assets": "debt_to_assets",
+        }
+        columns = {column.name for column in model.__table__.columns}
+        rows = []
+        for record in data:
+            year, quarter = record.get("fiscal_year"), record.get("fiscal_quarter")
+            if isinstance(year, bool) or not isinstance(year, int) or not 1900 <= year <= 9999:
+                raise ValueError("Explicit fiscal year required")
+            if (period == "year" and quarter is not None) or (period == "quarter" and (isinstance(quarter, bool) or quarter not in (1, 2, 3, 4))):
+                raise ValueError("Fiscal quarter disagrees with period")
+            label = str(year) if period == "year" else f"Q{quarter}-{year}"
+            if record.get("period") != label:
+                raise ValueError("Explicit fiscal period required")
+            values = {aliases.get(key, key): value for key, value in record.items() if aliases.get(key, key) in columns and key not in {"id", "symbol", "source", "created_at", "updated_at", "period_type"}}
+            if source == "vietcap":
+                for column in model.__table__.columns:
+                    if isinstance(column.type, Float):
+                        values.setdefault(column.name, None)
+            if values.get("raw_data") is not None:
+                def encode(value):
+                    if isinstance(value, (date, datetime)):
+                        return value.isoformat()
+                    raise TypeError(f"Unsupported financial evidence type: {type(value).__name__}")
+                values["raw_data"] = json.loads(json.dumps(values["raw_data"], default=encode, allow_nan=False))
+            values.update(symbol=symbol.upper(), period_type=period, source=source, updated_at=datetime.utcnow())
+            rows.append(values)
+        return await self._store_rows(model, rows, ["symbol", "period", "period_type"])
+
+    async def store_financial_ratios(
+        self, symbol: str, period: str, data: List[dict[str, Any]], source: str = "vietcap",
+    ) -> int:
+        return await self.store_financial_data(symbol, "ratio", period, data, source=source)
+
+    async def store_historical_prices(
+        self, symbol: str, data: List[dict[str, Any]], source: str = "vietcap",
+    ) -> int:
+        from vnibb.models.stock import StockPrice
+
+        if not data:
+            return 0
+        session = await self._get_session()
+        own_session = self._db is None
+        try:
+            stock_id = (await session.execute(select(Stock.id).where(Stock.symbol == symbol.upper()))).scalar_one_or_none()
+            if stock_id is None:
+                raise ValueError(f"Listing must exist before price persistence: {symbol.upper()}")
+        finally:
+            if own_session:
+                await session.close()
+        fields = {"time", "open", "high", "low", "close", "volume", "value", "adj_close", "interval"}
+        rows = [{**{key: value for key, value in row.items() if key in fields}, "stock_id": stock_id, "symbol": symbol.upper(), "source": source} for row in data]
+        return await self._store_rows(StockPrice, rows, ["symbol", "time", "interval"])
 
     async def get_financial_data(
         self,

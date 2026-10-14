@@ -6,10 +6,7 @@ ticker so Quant widgets (Seasonality, Sortino Monthly, Drawdown Recovery,
 Risk Dashboard) have a meaningful 5Y window. Today most VN tickers only
 have data from 2024-01-02 forward.
 
-Source priority:
-  1. vnstock_data Golden Sponsor (premium, fast bulk fetch)
-  2. vnstock free tier (slower per-symbol)
-  3. CafeF/VietStock scraper (last resort, manual)
+Source: free vnstock VCI only.
 
 Targets:
   - PostgreSQL `stock_prices` (canonical)
@@ -51,6 +48,7 @@ from vnibb.core.price_units import (
     persisted_price_source,
 )
 from vnibb.models.stock import Stock, StockPrice
+from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
 
 logger = logging.getLogger("ohlcv_backfill")
 
@@ -131,17 +129,13 @@ async def _list_target_symbols() -> list[tuple[int, str]]:
 
 
 
-def _fetch_premium(symbol: str, start_date: date, end_date: date) -> list[dict[str, Any]] | None:
-    """Use vnstock_data Golden Sponsor to fetch daily OHLCV.
-
-    Returns a list of dicts with keys (time, open, high, low, close, volume).
-    Returns None on failure so the caller can fall back to vnstock free.
-    """
+def _fetch_vci(symbol: str, start_date: date, end_date: date) -> list[dict[str, Any]] | None:
+    """Fetch daily OHLCV from free VCI, returning None when unavailable."""
 
     try:
-        from vnstock_data import Quote  # type: ignore
-
-        quote = Quote(symbol=symbol, source="KBS")
+        Quote = get_quote_class()
+        source = validate_source("VCI")
+        quote = Quote(symbol=symbol, source=source)
         df = quote.history(
             start=start_date.isoformat(),
             end=end_date.isoformat(),
@@ -150,7 +144,7 @@ def _fetch_premium(symbol: str, start_date: date, end_date: date) -> list[dict[s
         if df is None or len(df) == 0:
             return []
         import pandas as pd
-        df = pd.DataFrame(history_price_records(df, symbol=symbol, source="KBS", provider=quote, asset_type=getattr(quote, "asset_type", None)), index=df.index)
+        df = pd.DataFrame(history_price_records(df, symbol=symbol, source=source, provider=quote, asset_type=getattr(quote, "asset_type", None)), index=df.index)
         if (df["price_unit"] == "unknown").any():
             return None
         df = df.rename(columns={c: c.lower() for c in df.columns})
@@ -182,50 +176,7 @@ def _fetch_premium(symbol: str, start_date: date, end_date: date) -> list[dict[s
             )
         return records
     except Exception as exc:  # noqa: BLE001
-        logger.debug("Premium fetch failed for %s: %s", symbol, exc)
-        return None
-
-
-def _fetch_free(symbol: str, start_date: date, end_date: date) -> list[dict[str, Any]] | None:
-    try:
-        from vnstock import Vnstock  # type: ignore
-
-        stock = Vnstock().stock(symbol=symbol, source="VCI")
-        df = stock.quote.history(
-            start=start_date.isoformat(),
-            end=end_date.isoformat(),
-        )
-        if df is None or len(df) == 0:
-            return []
-        import pandas as pd
-        df = pd.DataFrame(history_price_records(df, symbol=symbol, source="VCI", provider=stock.quote, asset_type=getattr(stock.quote, "asset_type", None)))
-        df = df.rename(columns={c: c.lower() for c in df.columns})
-        if "time" not in df.columns and "date" in df.columns:
-            df = df.rename(columns={"date": "time"})
-        records: list[dict[str, Any]] = []
-        for _, row in df.iterrows():
-            t = row.get("time")
-            if hasattr(t, "isoformat"):
-                t = t.isoformat()
-            elif hasattr(t, "strftime"):
-                t = t.strftime("%Y-%m-%d")
-            records.append(
-                {
-                    "time": str(t)[:10],
-                    "open": float(row["open"]) if "open" in row else None,
-                    "high": float(row["high"]) if "high" in row else None,
-                    "low": float(row["low"]) if "low" in row else None,
-                    "close": float(row["close"]) if "close" in row else None,
-                    "volume": int(row["volume"]) if "volume" in row else 0,
-                    "value": row.get("value"),
-                    "adj_close": next((row.get(field) for field in ("adj_close", "adjusted_close", "adjclose") if row.get(field) is not None), None),
-                    "price_unit": row.get("price_unit"),
-                    "price_source": row.get("price_source"),
-                }
-            )
-        return records
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Free fetch failed for %s: %s", symbol, exc)
+        logger.debug("VCI fetch failed for %s: %s", symbol, exc)
         return None
 
 
@@ -359,11 +310,9 @@ async def _process_symbol(
     start_date: date,
     end_date: date,
 ) -> tuple[int, int, str | None]:
-    """Run premium → free fallback. Returns (postgres_n, mongo_n, error)."""
+    """Fetch VCI history. Returns (postgres_n, mongo_n, error)."""
 
-    records = await asyncio.to_thread(_fetch_premium, symbol, start_date, end_date)
-    if records is None:
-        records = await asyncio.to_thread(_fetch_free, symbol, start_date, end_date)
+    records = await asyncio.to_thread(_fetch_vci, symbol, start_date, end_date)
     if records is None:
         return 0, 0, "fetch_failed"
     if not records:

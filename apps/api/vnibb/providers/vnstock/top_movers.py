@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
+from vnibb.providers.vnstock.runtime import validate_source
 from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
@@ -24,19 +25,6 @@ logger = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=10)
 
 
-def _build_source_candidates(preferred_source: str | None) -> list[str]:
-    preferred = (preferred_source or "").strip().upper()
-    if preferred == "KBS":
-        ordered = ("VCI", "MSN", "KBS")
-    else:
-        ordered = (preferred, "VCI", "MSN", "KBS")
-
-    candidates: list[str] = []
-    for source in ordered:
-        normalized = (source or "").strip().upper()
-        if normalized and normalized not in candidates:
-            candidates.append(normalized)
-    return candidates
 
 
 # =============================================================================
@@ -315,7 +303,7 @@ class VnstockTopMoversFetcher:
                 group = INDEX_TO_GROUP.get(index, "VN100")
                 last_error: BaseException | None = None
 
-                for source in _build_source_candidates(settings.vnstock_source):
+                for source in [validate_source(settings.vnstock_source)]:
                     listing = Listing(source=source)
                     trading = Trading(source=source)
                     symbols = []
@@ -463,11 +451,12 @@ class VnstockTopMoversFetcher:
     async def fetch_sector_top_movers(
         type: Literal["gainers", "losers"] = "gainers",
         limit_per_sector: int = 5,
-        source: str = settings.vnstock_source,
+        source: str = "VCI",
     ) -> List[SectorTopMoversData]:
         """
         Fetch top movers grouped by sector/industry.
         """
+        source = validate_source(source)
         try:
 
             def _fetch() -> Tuple[List[dict], dict]:
@@ -477,7 +466,7 @@ class VnstockTopMoversFetcher:
                 Trading = get_trading_class()
 
                 last_error: BaseException | None = None
-                for candidate_source in _build_source_candidates(source):
+                for candidate_source in [source]:
                     listing = Listing(source=candidate_source)
                     trading = Trading(source=candidate_source)
 

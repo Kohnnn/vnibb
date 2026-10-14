@@ -9,7 +9,7 @@ import userEvent from '@testing-library/user-event'
 
 jest.mock('@/lib/queries', () => ({
   useScreenerData: jest.fn(),
-  useVnstockSource: () => 'KBS',
+  useVnstockSource: () => 'VCI',
 }))
 jest.mock('@/lib/alertActivity', () => ({ recordAlertActivity: jest.fn() }))
 jest.mock('@/contexts/DashboardContext', () => ({ useDashboard: jest.fn() }))

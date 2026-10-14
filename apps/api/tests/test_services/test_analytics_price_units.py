@@ -82,11 +82,10 @@ async def test_chart_db_keeps_index_points(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("symbol,source,close,expected,unit,metadata", [
-    ("FPT", "KBS", 0.5, 500, "VND", None),
-    ("FPT", "MSN", 0.5, None, None, None),
-    ("VNINDEX", "KBS", 1200, 1200, "index_points", None),
-    ("VN30F2610", "KBS", 1200, 1200, "index_points", "frame"),
-    ("VN30F2610", "KBS", 1200, 1200, "index_points", "quote"),
+    ("FPT", "VCI", 0.5, 500, "VND", None),
+    ("VNINDEX", "VCI", 1200, 1200, "index_points", None),
+    ("VN30F2610", "VCI", 1200, 1200, "index_points", "frame"),
+    ("VN30F2610", "VCI", 1200, 1200, "index_points", "quote"),
 ])
 async def test_live_chart_normalizes_only_known_provider_units(
     monkeypatch, symbol, source, close, expected, unit, metadata,
@@ -113,11 +112,23 @@ async def test_live_chart_normalizes_only_known_provider_units(
     monkeypatch.setattr(chart_data_service, "_fetch_chart_data_from_db", no_db_history)
     bars = await chart_data_service.fetch_chart_data(symbol, source=source)
 
-    if expected is None:
-        assert bars == []
-    else:
-        assert bars[0]["close"] == expected
-        assert bars[0]["price_unit"] == unit
+    assert bars[0]["close"] == expected
+    assert bars[0]["price_unit"] == unit
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["KBS", "TCBS", "MSN", "DNSE"])
+async def test_live_chart_rejects_unsupported_source_before_provider_call(monkeypatch, source):
+    from vnibb.providers.vnstock import runtime
+
+    def forbid_provider():
+        raise AssertionError("provider must not be loaded for an unsupported source")
+
+    monkeypatch.setattr(runtime, "get_vnstock_class", forbid_provider)
+    monkeypatch.setattr(chart_data_service, "_cache", {})
+
+    with pytest.raises(ValueError, match="only free VCI"):
+        await chart_data_service.fetch_chart_data("FPT", source=source)
 
 
 @pytest.mark.asyncio
@@ -209,26 +220,31 @@ async def test_rs_snapshot_rankings_disclose_units_through_response_schema(
     assert item["price_unit"] == unit
 
 
-def test_chart_cache_does_not_share_provider_unit_provenance():
-    assert chart_data_service._cache_key("FPT", "1Y", "KBS") != (
-        chart_data_service._cache_key("FPT", "1Y", "MSN")
-    )
+def test_chart_cache_stays_scoped_per_source_and_period():
+    key = chart_data_service._cache_key("FPT", "1Y", "VCI")
+
+    assert "VCI" in key
+    assert key != chart_data_service._cache_key("FPT", "5Y", "VCI")
+    assert key != chart_data_service._cache_key("VNM", "1Y", "VCI")
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("unit,expected", [(None, []), ("VND", [0.5])])
-async def test_sponsor_chart_requires_explicit_equity_unit(monkeypatch, unit, expected):
+@pytest.mark.parametrize("marker,expected,unit", [
+    ({"price_unit": "VND"}, [0.5], "VND"),
+    ({}, [500], "VND"),
+    ({"price_unit": "UNKNOWN"}, [], None),
+])
+async def test_chart_requires_provider_declared_equity_unit(monkeypatch, marker, expected, unit):
     from vnibb.providers.vnstock import runtime
 
     frame = pd.DataFrame([{
         "time": date(2026, 1, 1), "open": 0.5, "high": 0.5,
         "low": 0.5, "close": 0.5, "volume": 100,
     }])
-    if unit:
-        frame.attrs["price_unit"] = unit
+    frame.attrs.update(marker)
 
     class Quote:
-        __module__ = "vnstock_data.explorer.kbs.quote"
+        __module__ = "vnstock.explorer.vci.quote"
 
         def history(self, **kwargs):
             return frame
@@ -243,8 +259,38 @@ async def test_sponsor_chart_requires_explicit_equity_unit(monkeypatch, unit, ex
 
     monkeypatch.setattr(chart_data_service, "_fetch_chart_data_from_db", no_db_history)
 
-    result = await chart_data_service.fetch_chart_data("FPT", source="KBS")
+    result = await chart_data_service.fetch_chart_data("FPT", source="VCI")
 
     assert [bar["close"] for bar in result] == expected
     if result:
-        assert result[0]["price_unit"] == "VND"
+        assert result[0]["price_unit"] == unit
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("price_unit,expected_price", [("unknown", None), ("VND", 12.5), ("thousand_vnd", 12500)])
+async def test_microstructure_admits_depth_prices_only_with_envelope_units(price_unit, expected_price):
+    from vnibb.services.microstructure_analysis import MicrostructureAnalysisService
+
+    depth = {"symbol": "FPT", "source": "vnstock", "providerSource": "VCI", "priceUnit": price_unit,
+             "raw": {"price": 12.5, "volume": 100, "buy_volume": 60, "sell_volume": 40, "price_unit": "VND"}}
+    class Store:
+        async def get_intraday_trades(self, *args, **kwargs):
+            return [{"symbol": "FPT", "priceUnit": "unknown", "observedAt": "2026-10-13T09:00:00",
+                     "raw": {"time": "2026-10-13T09:00:00", "price": 12500, "volume": 100, "price_unit": "VND"}}]
+
+        async def get_price_depth(self, *args, **kwargs):
+            return [depth]
+
+    service = MicrostructureAnalysisService()
+    service.mongo = Store()
+    result = await service.analyze("FPT", features={"volume_profile"})
+    profile = result["volume_profile"]
+    if expected_price is None:
+        assert result["data_quality"]["volume_profile"] == "unavailable"
+        assert profile["bins"] == []
+        assert profile["poc_price"] is None
+    else:
+        assert result["data_quality"]["volume_profile"] == "volume_at_price"
+        assert profile["bins"] == [{"price": expected_price, "volume": 100, "buy_volume": 60, "sell_volume": 40}]
+        assert profile["poc_price"] == expected_price
+    assert depth["raw"]["price"] == 12.5

@@ -20,7 +20,9 @@
 
 Current source of truth:
 
-- VNIBB persistence is fully self-hosted on n6v (Tailscale `<n6v-tailscale-ip>`, private network only, no cloud database): MongoDB `vnibb-market` corpus (`:27017`), self-hosted Supabase Postgres app model (`:15433`/`:16543`), and Redis cache (`:6379`). Reachable from the OCI backend over Tailscale; portable to other infrastructure in the future.
+- The executable Oracle deployment defines PostgreSQL (`vnibb-db`), MongoDB (`vnibb-mongo`, database `vnibb-market`) and Redis (`vnibb-redis`) on the application host. The last recorded production release retained those containers and their volumes; inspect actual mounts and connection targets before recovery. Older n6v instructions describe a separate historical topology, not proof of current routing.
+- Vietnamese structured-data ingestion uses Vietcap IQ/Trading first, then free `vnstock` VCI only where supported. KBS, TCBS and sponsor packages are not runtime fallbacks. Raw provider records, descriptor evidence and source units remain available alongside admitted structured fields.
+- Local database startup uses `docker-compose.data.local.yml`, private credentials and loopback ports `55432` / `57017`; see `oracle_runbook.md` for setup and the distinct production recovery procedure.
 
 - `DEPLOYMENT_AND_OPERATIONS.md`: deployment profile, Oracle runtime guidance, and ops notes
 - `DATABASE_SCHEMA.md`: database stack schema and collection model

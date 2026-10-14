@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from datetime import datetime
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -17,7 +16,6 @@ from vnibb.services.technical_analysis import TechnicalAnalysisService
 
 @pytest.mark.asyncio
 async def test_signal_summary_respects_long_term_trend_context(monkeypatch):
-    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
     service = TechnicalAnalysisService()
 
     async def fake_ma(*_args, **_kwargs):
@@ -63,7 +61,6 @@ async def test_signal_summary_respects_long_term_trend_context(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_signal_summary_balances_category_weights(monkeypatch):
-    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
     service = TechnicalAnalysisService()
 
     async def fake_ma(*_args, **_kwargs):
@@ -109,8 +106,7 @@ async def test_signal_summary_balances_category_weights(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_full_analysis_loads_and_merges_quote_once(monkeypatch):
-    monkeypatch.setattr(TechnicalAnalysisService, "_check_vnstock_ta", lambda self: None)
-    monkeypatch.setattr(settings, "vnstock_source", "KBS")
+    monkeypatch.setattr(settings, "vnstock_source", "VCI")
     history_calls = 0
     quote_calls = 0
     frame = pd.DataFrame(
@@ -161,7 +157,7 @@ async def test_direct_indicators_uses_shared_asyncio_thread_pool(monkeypatch):
     calls = 0
 
     class Quote:
-        __module__ = "vnstock_data.explorer.kbs.quote"
+        __module__ = "vnstock.explorer.vci.quote"
 
         def __init__(self, **_kwargs):
             pass
@@ -178,14 +174,12 @@ async def test_direct_indicators_uses_shared_asyncio_thread_pool(monkeypatch):
         calls += 1
         return await original_to_thread(func, *args, **kwargs)
 
-    module = ModuleType("vnstock_data")
-    module.Quote = Quote
-    monkeypatch.setitem(sys.modules, "vnstock_data", module)
+    monkeypatch.setattr(technical, "get_quote_class", lambda: Quote)
     monkeypatch.setattr(asyncio, "to_thread", to_thread)
     monkeypatch.setattr(settings, "vnstock_timeout", 5, raising=False)
 
     payload = await technical.get_technical_indicators_direct(
-        "VCI", indicators="rsi,sma,ema", period=14, source="KBS"
+        "VCI", indicators="rsi,sma,ema", period=14, source="VCI"
     )
 
     assert calls == 1

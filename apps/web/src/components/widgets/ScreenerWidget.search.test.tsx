@@ -6,7 +6,7 @@ import { ScreenerWidget } from './ScreenerWidget';
 
 jest.mock('@/lib/queries', () => ({
   useScreenerData: jest.fn(),
-  useVnstockSource: () => 'KBS',
+  useVnstockSource: () => 'VCI',
 }));
 jest.mock('@/lib/alertActivity', () => ({ recordAlertActivity: jest.fn() }));
 

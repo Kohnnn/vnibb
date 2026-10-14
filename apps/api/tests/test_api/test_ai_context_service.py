@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
 import pytest
@@ -192,9 +193,15 @@ def test_build_dividends_context_keeps_recent_items_and_summary():
 
 
 def test_price_context_normalizes_full_orm_lineage_before_returns():
+    days = []
+    cursor = date(2026, 4, 1)
+    while len(days) < 21:
+        if cursor.weekday() < 5:
+            days.append(cursor)
+        cursor += timedelta(days=1)
     rows = [
         StockPrice(
-            symbol="VNM", time=date(2026, 4, 1) + timedelta(days=index),
+            symbol="VNM", time=days[index],
             close=70 + index if index < 10 else (70 + index) * 1000,
             volume=100, source="VCI" if index < 10 else "vnstock_vnd:VCI",
         )
@@ -236,6 +243,7 @@ def test_price_context_discloses_unknown_rows_without_bridging_return_windows():
 
 @pytest.mark.asyncio
 async def test_postgres_price_snapshot_loads_daily_rows_with_full_source(monkeypatch, test_db):
+    from vnibb.mcp import server
     from vnibb.services import ai_context_service
 
     class SessionContext:
@@ -246,6 +254,11 @@ async def test_postgres_price_snapshot_loads_daily_rows_with_full_source(monkeyp
             pass
 
     monkeypatch.setattr(ai_context_service, "async_session_maker", SessionContext)
+    monkeypatch.setattr(server, "_ensure_database_available", AsyncMock())
+    monkeypatch.setattr(server, "_get_latest_symbol_document", AsyncMock(return_value=None))
+    monkeypatch.setattr(server.settings, "vnibb_mcp_url", "http://mcp:8001/mcp")
+    outbound = AsyncMock(side_effect=AssertionError("snapshot self-call"))
+    monkeypatch.setattr(ai_context_service.vnibb_mcp_client_service, "_call_tool", outbound)
     try:
         test_db.add(Stock(
             id=995100, symbol="MXA", company_name="Test MXA",
@@ -261,7 +274,9 @@ async def test_postgres_price_snapshot_loads_daily_rows_with_full_source(monkeyp
             ))
         await test_db.flush()
 
-        snapshot = await AIContextService()._build_postgres_snapshot("MXA")
+        response = await server.get_symbol_snapshot("MXA")
+        snapshot = response["snapshot"]
+        outbound.assert_not_awaited()
 
         assert snapshot["price_context"]["latest"]["close"] == 72000
         assert snapshot["price_context"]["latest"]["source"] == "VCI"

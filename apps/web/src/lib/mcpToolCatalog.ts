@@ -47,7 +47,8 @@ export const MCP_PERMISSION_LABELS: Record<McpPermissionClass, { label: string; 
   },
   authenticated_read: {
     label: 'Authenticated read',
-    detail: 'Read that requires the shared bearer token when called over remote HTTP.',
+    detail:
+      'Requires an authenticated remote transport: the shared bearer token, or a verified user JWT for tools scoped to the caller\'s own data.',
   },
   confirm_action: {
     label: 'Confirm action',
@@ -56,6 +57,19 @@ export const MCP_PERMISSION_LABELS: Record<McpPermissionClass, { label: string; 
 }
 
 export const MCP_TOOL_CATALOG: McpToolDescriptor[] = [
+  // Bootstrap + user-scoped (no curated store of their own)
+  {
+    name: 'get_agent_connection_guide',
+    description: 'Connection guide plus retrieval skills catalog inline, for agent self-bootstrap.',
+    source: 'app_collections',
+    permission: 'read_only',
+  },
+  {
+    name: 'get_matrix_selection',
+    description: "Caller's frozen Matrix selection and evidence, subject to source export rights. Requires a verified user JWT; the shared bearer is rejected.",
+    source: 'app_collections',
+    permission: 'authenticated_read',
+  },
   // App-collection-backed (curated app collections)
   {
     name: 'list_supported_collections',
@@ -164,6 +178,20 @@ export const MCP_TOOL_CATALOG: McpToolDescriptor[] = [
     permission: 'authenticated_read',
     sampleInput: { symbol: 'SSI' },
   },
+  {
+    name: 'get_reference_dataset',
+    description: 'Exact IQ profile/metric-map document from its explicit physical store.',
+    source: 'analytical_corpus',
+    permission: 'authenticated_read',
+    sampleInput: { symbol: 'VNM', store: 'market_company_profiles' },
+  },
+  {
+    name: 'get_ingestion_receipts',
+    description: 'Bounded per-dataset acquisition receipts from SQL or Mongo; never runs ingestion.',
+    source: 'analytical_corpus',
+    permission: 'authenticated_read',
+    sampleInput: { symbol: 'VNM', dataset: 'profiles' },
+  },
 ]
 
 export const MCP_RESOURCE_CATALOG: McpResourceDescriptor[] = [
@@ -171,11 +199,17 @@ export const MCP_RESOURCE_CATALOG: McpResourceDescriptor[] = [
   { uri: 'vnibb://database/collections', description: 'Allowlisted app collections.' },
   { uri: 'vnibb://mongo/datasets', description: 'Allowlisted analytical datasets.' },
   { uri: 'vnibb://database/schema/{collection}', description: 'Schema intent for an allowlisted collection.' },
+  { uri: 'vnibb://mcp/guide', description: 'Connection guide: transport, auth, discovery order, read-only contract.' },
+  { uri: 'vnibb://mcp/skills', description: 'Retrieval skills catalog: named workflows for recurring agent intents.' },
 ]
 
 export const MCP_PROMPT_CATALOG: McpPromptDescriptor[] = [
   { name: 'symbol_deep_dive', description: 'Recurring single-symbol research workflow.' },
   { name: 'market_brief', description: 'Recurring market overview workflow.' },
+  { name: 'eod_price_history', description: 'Long-horizon OHLCV history retrieval.' },
+  { name: 'premium_dataset', description: 'One allowlisted vnstock premium dataset.' },
+  { name: 'intraday_trades', description: 'Recent intraday tick activity for one symbol.' },
+  { name: 'price_depth', description: 'Volume-at-price depth retrieval.' },
   { name: 'database_collection_audit', description: 'Audit an allowlisted collection.' },
 ]
 

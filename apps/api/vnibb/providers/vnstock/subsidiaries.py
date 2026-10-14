@@ -66,10 +66,10 @@ class VnstockSubsidiariesFetcher(BaseFetcher[SubsidiariesQueryParams, Subsidiary
         
         def _fetch_sync() -> List[dict]:
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
 
                 Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
+                stock = Vnstock().stock(symbol=query["symbol"], source=validate_source(settings.vnstock_source))
                 df = stock.company.subsidiaries()
                 
                 if df is None or df.empty:
@@ -86,7 +86,7 @@ class VnstockSubsidiariesFetcher(BaseFetcher[SubsidiariesQueryParams, Subsidiary
                 timeout=settings.vnstock_timeout,
             )
         except asyncio.TimeoutError:
-            raise ProviderTimeoutError(provider="vnstock", timeout=settings.vnstock_timeout)
+            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
     
     @staticmethod
     def transform_data(

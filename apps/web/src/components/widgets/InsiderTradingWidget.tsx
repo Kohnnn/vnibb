@@ -12,6 +12,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { formatShortDate } from '@/lib/format';
+import { normalizeInsiderAction } from '@/lib/insiderActions';
 
 interface InsiderTradingWidgetProps {
   id?: string;
@@ -33,6 +34,13 @@ function formatCurrency(value: number | null | undefined): string {
   if (magnitude >= 1e6) return `${sign}VND${(magnitude / 1e6).toFixed(1)}mn`;
   if (magnitude >= 1e3) return `${sign}VND${(magnitude / 1e3).toFixed(1)}k`;
   return `${sign}VND${magnitude}`;
+}
+
+// Admitted money is canonical VND only when the provider supplied unit
+// evidence; anything else renders unavailable instead of assuming VND.
+function formatAdmittedMoney(value: number | null | undefined, unit: string | null | undefined): string {
+  if (unit !== 'VND') return '—';
+  return formatCurrency(value);
 }
 
 function formatDate(dateStr: string): string {
@@ -88,8 +96,9 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
 
   const filteredDeals = deals.filter((deal) => {
     if (filter === 'all') return true;
-    if (filter === 'buy') return deal.deal_action?.toLowerCase().includes('mua') || deal.deal_action?.toLowerCase().includes('buy');
-    if (filter === 'sell') return deal.deal_action?.toLowerCase().includes('bán') || deal.deal_action?.toLowerCase().includes('sell');
+    const action = normalizeInsiderAction(deal.deal_action);
+    if (filter === 'buy') return action === 'BUY';
+    if (filter === 'sell') return action === 'SELL';
     return true;
   });
 
@@ -98,6 +107,26 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
   const isFetching = dealsFetching || sentimentFetching;
   const hasData = deals.length > 0;
   const isFallback = Boolean(error && hasData);
+  // The backend aggregates the requested 90-day window itself: money fields are
+  // canonical VND only when every classified deal in that window carried finite
+  // value plus VND evidence, and it reports that admission through
+  // `value_unit`. The separate undated 20-row deals list never certifies this
+  // window, so it is deliberately not read here. A missing `value_unit` (older
+  // deployments) withholds instead of guessing a denomination.
+  const sentimentAdmitted = sentiment
+    ? sentiment.value_unit === 'VND' &&
+      sentiment.buy_value != null &&
+      Number.isFinite(sentiment.buy_value) &&
+      sentiment.sell_value != null &&
+      Number.isFinite(sentiment.sell_value) &&
+      sentiment.net_value != null &&
+      Number.isFinite(sentiment.net_value)
+    : false;
+  // The score is derived from that same aggregate, so it ships null whenever
+  // money is withheld; mirror the withholding rather than render an unbacked score.
+  const rawScore = sentiment?.sentiment_score;
+  const admittedScore =
+    sentimentAdmitted && rawScore != null && Number.isFinite(rawScore) ? rawScore : null;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   // Source observation = latest disclosed transaction date; ignore scheduled future dates.
@@ -130,11 +159,11 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
           {sentiment && (
             <div className="flex items-center gap-1.5 text-xs">
               <span className="text-[var(--text-muted)]">Sentiment:</span>
-              <span className={`font-medium ${getSentimentColor(sentiment.sentiment_score)}`}>
-                {sentiment.sentiment_score > 0 ? '+' : ''}{sentiment.sentiment_score.toFixed(0)}
+              <span className={`font-medium ${admittedScore != null ? getSentimentColor(admittedScore) : 'text-[var(--text-muted)]'}`}>
+                {admittedScore == null ? '—' : `${admittedScore > 0 ? '+' : ''}${admittedScore.toFixed(0)}`}
               </span>
-              <span className={`text-[10px] ${getSentimentColor(sentiment.sentiment_score)}`}>
-                ({getSentimentLabel(sentiment.sentiment_score)})
+              <span className={`text-[10px] ${admittedScore != null ? getSentimentColor(admittedScore) : 'text-[var(--text-muted)]'}`}>
+                ({admittedScore == null ? 'Unavailable' : getSentimentLabel(admittedScore)})
               </span>
             </div>
           )}
@@ -211,13 +240,13 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
           <WidgetEmpty
             message={
               filter === 'all'
-                ? 'No insider disclosures in the last 90 days'
-                : `No ${filter === 'buy' ? 'buy' : 'sell'} disclosures in the last 90 days`
+                ? 'No insider disclosures returned'
+                : `No ${filter === 'buy' ? 'buy' : 'sell'} disclosures in the returned filings`
             }
             detail={
               filter === 'all'
-                ? 'This panel shows official insider transactions filed with HOSE/HNX over the last 90 days. Empty state means no disclosures were filed in that window — not the same as "insiders never trade".'
-                : 'Try the All filter to see every disclosure in the 90-day window.'
+                ? 'This panel lists the most recent official insider transactions filed with HOSE/HNX; the deals feed is not date-filtered, unlike the separate 90-day sentiment summary. Empty state means no disclosures were returned — not the same as "insiders never trade".'
+                : 'Try the All filter to see every returned disclosure.'
             }
             icon={<AlertCircle size={18} />}
             size="compact"
@@ -225,9 +254,12 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
         ) : (
           <div className="space-y-1.5">
             {filteredDeals.map((deal) => {
-              const isBuy = deal.deal_action?.toLowerCase().includes('mua') || deal.deal_action?.toLowerCase().includes('buy');
-              const ActionIcon = isBuy ? TrendingUp : TrendingDown;
-              const actionColor = isBuy ? 'text-green-400' : 'text-red-400';
+              const action = normalizeInsiderAction(deal.deal_action);
+              const isBuy = action === 'BUY';
+              const isSell = action === 'SELL';
+              const ActionIcon = isBuy ? TrendingUp : isSell ? TrendingDown : AlertCircle;
+              const actionColor = isBuy ? 'text-green-400' : isSell ? 'text-red-400' : 'text-[var(--text-muted)]';
+              const actionLabel = isBuy ? 'BUY' : isSell ? 'SELL' : 'UNKNOWN';
 
               return (
                 <div
@@ -240,9 +272,10 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
                       <span className="break-words whitespace-normal text-xs text-[var(--text-primary)]" title={deal.insider_name || 'Unknown'}>
                         {deal.insider_name || 'Unknown'}
                       </span>
+                      <span className={`text-[10px] font-semibold uppercase ${actionColor}`}>{actionLabel}</span>
                     </div>
                     <span className={`text-xs font-medium ${actionColor}`}>
-                      {formatCurrency(deal.deal_value)}
+                      {formatAdmittedMoney(deal.deal_value, deal.value_unit)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)]">
@@ -251,11 +284,11 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
                     </span>
                     <span>{formatDate(deal.announce_date)}</span>
                   </div>
-                  {deal.deal_quantity && (
+                  {deal.deal_quantity ? (
                     <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">
-                      {deal.deal_quantity.toLocaleString()} shares @ {formatCurrency(deal.deal_price)}
+                      {deal.deal_quantity.toLocaleString()} shares @ {formatAdmittedMoney(deal.deal_price, deal.price_unit)}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               );
             })}
@@ -269,22 +302,32 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
           <div className="grid grid-cols-2 gap-2 text-[10px]">
             <div className="flex items-center justify-between">
               <span className="text-[var(--text-muted)]">Buy:</span>
-              <span className="text-green-400 font-medium">{formatCurrency(sentiment.buy_value)}</span>
+              <span className={sentimentAdmitted ? 'text-green-400 font-medium' : 'text-[var(--text-muted)] font-medium'}>
+                {sentimentAdmitted ? formatCurrency(sentiment.buy_value) : '—'}
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[var(--text-muted)]">Sell:</span>
-              <span className="text-red-400 font-medium">{formatCurrency(sentiment.sell_value)}</span>
+              <span className={sentimentAdmitted ? 'text-red-400 font-medium' : 'text-[var(--text-muted)] font-medium'}>
+                {sentimentAdmitted ? formatCurrency(sentiment.sell_value) : '—'}
+              </span>
             </div>
           </div>
           <div className="flex items-center justify-between mt-1">
             <span className="text-[var(--text-muted)]">Net:</span>
             <span className={`font-medium ${
-              sentiment.net_value == null
+              !sentimentAdmitted || sentiment.net_value == null
                 ? 'text-[var(--text-muted)]'
                 : sentiment.net_value >= 0 ? 'text-green-400' : 'text-red-400'
             }`}>
-              {sentiment.net_value != null && sentiment.net_value > 0 ? '+' : ''}{formatCurrency(sentiment.net_value)}
+              {sentimentAdmitted && sentiment.net_value != null && sentiment.net_value > 0 ? '+' : ''}
+              {sentimentAdmitted ? formatCurrency(sentiment.net_value) : '—'}
             </span>
+          </div>
+          <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+            {sentimentAdmitted
+              ? `Buy ${sentiment.buy_count} · Sell ${sentiment.sell_count} · ${sentiment.total_deals} deals reported in ${sentiment.period_days}d window.`
+              : `Money withheld: this ${sentiment.period_days}d window is not fully VND-admitted. Buy ${sentiment.buy_count} · Sell ${sentiment.sell_count} · ${sentiment.total_deals} deals reported.`}
           </div>
         </div>
       )}

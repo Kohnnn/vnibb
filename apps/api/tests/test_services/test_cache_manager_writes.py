@@ -53,6 +53,20 @@ async def test_listing_conflict_preserves_created_at_and_sparse_existing_fields(
     await test_db.commit()
 
 @pytest.mark.asyncio
+async def test_iq_delisting_changes_only_explicit_confirmed_symbol(test_db):
+    suffix = uuid4().hex[:7].upper()
+    old, untouched = f"D{suffix}", f"U{suffix}"
+    test_db.add_all([Stock(symbol=old, exchange="HOSE", is_active=1), Stock(symbol=untouched, exchange="HOSE", is_active=1)])
+    await test_db.commit()
+    assert await CacheManager(test_db).store_listing_data([{ "symbol": old, "exchange": "DELISTED", "is_active": 0}], source="vietcap") == 1
+    test_db.expire_all()
+    rows = (await test_db.execute(select(Stock).where(Stock.symbol.in_([old, untouched])))).scalars().all()
+    assert {row.symbol: row.is_active for row in rows} == {old: 0, untouched: 1}
+    await test_db.execute(Stock.__table__.delete().where(Stock.symbol.in_([old, untouched])))
+    await test_db.commit()
+
+
+@pytest.mark.asyncio
 async def test_profile_sparse_update_preserves_existing_fields_and_normalizes_values(test_db):
     symbol = f"P{uuid4().hex[:7]}".upper()
     created_at = datetime(2020, 1, 1)

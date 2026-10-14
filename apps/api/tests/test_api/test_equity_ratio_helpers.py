@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from datetime import date
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -16,6 +17,49 @@ from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
 from vnibb.providers.vnstock.financials import FinancialStatementData
 
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preferred_units,preferred_roe,expected", [
+    ({"roe": "unknown"}, None, None),
+    ({"roe": "percent"}, 0.25, 0.25),
+    ({}, 99.0, None),
+])
+async def test_ratio_endpoint_does_not_resurrect_rejected_merged_metrics(monkeypatch, test_db, preferred_units, preferred_roe, expected):
+    from vnibb.api.v1 import equity
+    from vnibb.models.trading import FinancialRatio
+
+    test_db.add(FinancialRatio(id=901, symbol="VNM", period="2024", period_type="year", fiscal_year=2024, roe=25.0, pe_ratio=10.0, raw_data={"ratio_units": {"roe": "percent"}}))
+    await test_db.commit()
+
+    async def mongo_rows(*args, **kwargs):
+        return [FinancialRatioData(symbol="VNM", period="2024", roe=preferred_roe, ratio_units=preferred_units)]
+
+    async def latest_statement(*args, **kwargs):
+        return 0
+
+    async def unchanged(*args, **kwargs):
+        return kwargs["rows"]
+
+    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", mongo_rows)
+    monkeypatch.setattr(equity, "_get_latest_statement_period_key", latest_statement)
+    monkeypatch.setattr(equity, "_enrich_ratio_ev_sales_from_income", unchanged)
+    monkeypatch.setattr(equity, "_enrich_missing_ratio_metrics", unchanged)
+    response = await equity.get_financial_ratios.__wrapped__(symbol="VNM", period="year", db=test_db)
+    assert response.data[0].roe == expected
+    assert response.data[0].pe == 10.0
+
+
+def test_ratio_merge_retains_fallback_cell_evidence():
+    from vnibb.api.v1.equity import _merge_ratio_rows
+
+    fallback = FinancialRatioData(symbol="VNM", period="2024", roe=0.25, roa=0.5, ratio_units={"roe": "percent", "roa": "percent"}, provider_evidence=[{"roe_percent": 0.25}])
+    preferred = FinancialRatioData(symbol="VNM", period="2024", roe=None, ratio_units={"roe": "unknown"}, provider_evidence=[{"roe": 99}])
+    merged = _merge_ratio_rows(preferred, fallback)
+    assert merged.roe is None
+    assert merged.roa == 0.5
+    assert merged.ratio_units == {"roe": "unknown", "roa": "percent"}
+    assert merged.provider_evidence == [{"roe_percent": 0.25}, {"roe": 99}]
+
 class FakeMongoMarketDataService:
     enabled = True
 
@@ -23,7 +67,7 @@ class FakeMongoMarketDataService:
         self.rows = rows
         self.requests = []
 
-    async def get_raw_dataset_records(self, symbol, *, dataset, variant=None, limit):
+    async def get_raw_dataset_records_precise(self, symbol, *, dataset, variant=None, limit):
         self.requests.append({"symbol": symbol, "dataset": dataset, "variant": variant, "limit": limit})
         return self.rows
 
@@ -180,9 +224,11 @@ def test_to_ratio_data_reads_ev_sales_from_raw_data_fallback():
 
 @pytest.mark.asyncio
 async def test_load_mongo_financial_statement_rows_transforms_raw_records(monkeypatch):
+    monkeypatch.setattr("vnibb.services.vietcap_financials.load_vietcap_financial_rows", AsyncMock(return_value=[]))
     fake_service = FakeMongoMarketDataService(
         [
             {
+                "providerSource": "VCI",
                 "raw": {
                     "yearReport": 2024,
                     "_value_unit": "VND",
@@ -191,6 +237,7 @@ async def test_load_mongo_financial_statement_rows_transforms_raw_records(monkey
                 }
             },
             {
+                "providerSource": "VCI",
                 "raw": {
                     "yearReport": 2023,
                     "_value_unit": "VND",
@@ -213,11 +260,12 @@ async def test_load_mongo_financial_statement_rows_transforms_raw_records(monkey
 
 @pytest.mark.asyncio
 async def test_load_mongo_financial_ratio_rows_transforms_and_filters_raw_records(monkeypatch):
+    monkeypatch.setattr("vnibb.services.vietcap_financials.load_vietcap_financial_rows", AsyncMock(return_value=[]))
     fake_service = FakeMongoMarketDataService(
         [
-            {"raw": {"yearReport": 2024, "quarter": 1, "priceToEarning": 9.2, "priceToBook": 1.4}},
-            {"raw": {"yearReport": 2024, "quarter": 2, "priceToEarning": 9.6, "priceToBook": 1.5}},
-            {"raw": {"yearReport": 2023, "quarter": 1, "priceToEarning": 8.5, "priceToBook": 1.2}},
+            {"providerSource": "VCI", "raw": {"yearReport": 2024, "quarter": 1, "priceToEarning": 9.2, "priceToBook": 1.4}},
+            {"providerSource": "VCI", "raw": {"yearReport": 2024, "quarter": 2, "priceToEarning": 9.6, "priceToBook": 1.5}},
+            {"providerSource": "VCI", "raw": {"yearReport": 2023, "quarter": 1, "priceToEarning": 8.5, "priceToBook": 1.2}},
         ]
     )
     monkeypatch.setattr("vnibb.api.v1.equity.get_mongo_market_data_service", lambda: fake_service)
@@ -338,7 +386,8 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
     assert item.asset_turnover == pytest.approx(0.6)
     assert item.inventory_turnover == pytest.approx(700.0 / 190.0)
     assert item.receivables_turnover == pytest.approx(1200.0 / 230.0)
-    assert item.debt_assets == pytest.approx(0.4)
+    assert item.debt_assets == pytest.approx(40.0)
+    assert item.ratio_units["debt_assets"] == "percent"
     assert item.equity_multiplier == pytest.approx(2000.0 / 1200.0)
     assert item.roic == pytest.approx((150.0 / 1400.0) * 100)
     assert item.revenue_growth == pytest.approx(20.0)

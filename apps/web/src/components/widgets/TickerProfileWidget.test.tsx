@@ -38,6 +38,10 @@ jest.mock('@/hooks/useLoadingTimeout', () => ({
   useLoadingTimeout: () => ({ timedOut: false, resetTimeout: jest.fn() }),
 }))
 
+import type { UseQueryResult } from '@tanstack/react-query'
+import type { EquityProfileResponse } from '@/types/equity'
+import type { ScreenerResponse } from '@/types/screener'
+
 import {
   useProfile,
   useDividends,
@@ -85,6 +89,24 @@ function setupReturns() {
   } as any)
 }
 
+// The widget reads only these fields; the caller names the response type the
+// stub stands in for, so a missing field surfaces at the mock site.
+function queryResult<T>(data: T): UseQueryResult<T, Error> {
+  return {
+    data,
+    isLoading: false,
+    error: null,
+    refetch: jest.fn(),
+    isFetching: false,
+    dataUpdatedAt: 0,
+  } as unknown as UseQueryResult<T, Error>
+}
+
+// The label and its value sit in sibling divs inside one info card.
+function marketCapCard() {
+  return screen.getByText('Market Cap').closest('div.rounded-xl') as HTMLElement
+}
+
 describe('TickerProfileWidget', () => {
   beforeEach(() => {
     mockProfile.mockReset()
@@ -128,5 +150,24 @@ describe('TickerProfileWidget', () => {
     render(<TickerProfileWidget symbol="VNM" />)
 
     expect(screen.getByTestId('widget-error')).toHaveTextContent(/profile fetch failed/i)
+  })
+
+  test('withholds market cap when no source declares its unit', () => {
+    mockProfile.mockReturnValue(queryResult<EquityProfileResponse>({ symbol: 'VNM', data: { symbol: 'VNM', company_name: 'Vietnam Dairy Products' } }))
+    mockScreener.mockReturnValue(queryResult<ScreenerResponse>({ data: [{ ticker: 'VNM', market_cap: 126_024_313_333.5 }] }))
+    render(<TickerProfileWidget symbol="VNM" />)
+
+    expect(marketCapCard()).toHaveTextContent('Not disclosed')
+    expect(screen.queryByText(/VND 126/)).not.toBeInTheDocument()
+  })
+
+  test('renders the screener magnitude once it declares a VND market-cap unit', () => {
+    mockProfile.mockReturnValue(queryResult<EquityProfileResponse>({ symbol: 'VNM', data: { symbol: 'VNM', company_name: 'Vietnam Dairy Products' } }))
+    mockScreener.mockReturnValue(queryResult<ScreenerResponse>({
+      data: [{ ticker: 'VNM', market_cap: 126_024_313_333.5, market_cap_unit: 'VND' }],
+    }))
+    render(<TickerProfileWidget symbol="VNM" />)
+
+    expect(marketCapCard()).toHaveTextContent('VND 126.02B')
   })
 })
