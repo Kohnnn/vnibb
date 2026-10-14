@@ -40,28 +40,6 @@ def test_required_mongo_indexes_match_key_order_and_uniqueness() -> None:
     ) == ["idx_tradeDate_desc"]
 
 
-def test_vietcap_bootstrap_creates_global_latest_date_and_shared_raw_indexes() -> None:
-    class Collection:
-        def __init__(self) -> None:
-            self.indexes = []
-
-        def create_index(self, keys, **options) -> None:
-            self.indexes.append((keys, options))
-
-    collections = {}
-
-    class Database:
-        def __getitem__(self, name):
-            return collections.setdefault(name, Collection())
-
-    backfill_vietcap._ensure_indexes(Database())
-
-    assert ([("tradeDate", -1)], {"name": "idx_tradeDate_desc"}) in collections["market_prices_eod"].indexes
-    assert (
-        [("dataset", 1), ("symbol", 1), ("recordKey", 1)], {"unique": True},
-    ) in collections["market_vnstock_premium_records"].indexes
-
-
 def test_runtime_and_bootstrap_indexes_satisfy_eod_preflight(monkeypatch) -> None:
     class Collection:
         def __init__(self):

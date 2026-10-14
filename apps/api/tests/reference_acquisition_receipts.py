@@ -14,13 +14,17 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import vnibb.services.data_pipeline as pipeline_module
+import vnibb.services.sync_all_data as sync_all_data_module
+from vnibb.core.exceptions import ProviderError
 from vnibb.core.insider_units import admitted_deal_value, normalize_deal_action
-from vnibb.providers.vnstock.insider_deals import VnstockInsiderDealsFetcher
 from vnibb.models.news import InsiderDeal
+from vnibb.providers.vnstock.company_news import VnstockCompanyNewsFetcher
+from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
+from vnibb.providers.vnstock.insider_deals import VnstockInsiderDealsFetcher
 from vnibb.services.ai_context_service import _build_insider_context
 from vnibb.services.data_pipeline import DataPipeline
 from vnibb.services.insider_tracking import InsiderTrackingService
-
+from vnibb.services.sync_all_data import FullMarketSync
 
 WRITERS = [
     ("shareholders", "VnstockShareholdersFetcher"),
@@ -489,4 +493,258 @@ async def test_sentiment_unknown_direction_counts_but_never_certifies_money():
     assert sentiment["total_deals"] == 2
     assert (sentiment["buy_count"], sentiment["sell_count"]) == (1, 0)
     assert sentiment["buy_value"] == 500.0 and sentiment["value_unit"] == "VND"
+    await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Company news natural-key idempotency against real SQL (sqlite)
+# ---------------------------------------------------------------------------
+
+_NEWS_DDL = """
+CREATE TABLE company_news (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol VARCHAR(10) NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT,
+    source VARCHAR(50),
+    url TEXT,
+    published_date DATETIME,
+    rsi FLOAT,
+    rs FLOAT,
+    price FLOAT,
+    price_change FLOAT,
+    price_change_ratio FLOAT,
+    news_id INTEGER,
+    created_at DATETIME,
+    CONSTRAINT uq_news_symbol_title_date UNIQUE (symbol, title, published_date)
+)
+"""
+
+
+async def _news_sqlite_writer(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as conn:
+        await conn.execute(text(_NEWS_DDL))
+    monkeypatch.setattr(
+        pipeline_module, "async_session_maker",
+        async_sessionmaker(engine, expire_on_commit=False, autoflush=False),
+    )
+    return engine
+
+
+def _news_item(title, published_at, summary=None, url=None):
+    payload = {
+        "symbol": "ARM",
+        "title": title,
+        "published_at": published_at,
+        "summary": summary,
+        "url": url,
+        "source": "VCI",
+    }
+    return SimpleNamespace(model_dump=lambda: dict(payload))
+
+
+@pytest.mark.asyncio
+async def test_repeated_news_batch_persists_idempotently_without_losing_distinct_items(monkeypatch):
+    # Mirrors the capture: the provider returns the same (symbol, title,
+    # published_date) row twice in one batch plus a genuinely distinct article.
+    # The old select-then-add path raised IntegrityError on the natural key.
+    engine = await _news_sqlite_writer(monkeypatch)
+    batch = [
+        _news_item("Untitled", "2026-08-17 22:37", summary="first"),
+        _news_item("Untitled", "2026-08-17 22:37", summary="first"),
+        _news_item("Board approves dividend", "2026-08-18 09:00", url="https://vci/x"),
+    ]
+    monkeypatch.setattr(
+        VnstockCompanyNewsFetcher, "extract_data", AsyncMock(return_value=batch),
+    )
+    monkeypatch.setattr(
+        VnstockCompanyNewsFetcher, "transform_data", lambda params, rows: rows,
+    )
+    progress = {}
+
+    first = await pipeline(monkeypatch).sync_company_news(symbols=["ARM"], progress=progress)
+    second = await pipeline(monkeypatch).sync_company_news(symbols=["ARM"], progress={})
+    async with engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT id, title, summary, url, published_date FROM company_news ORDER BY title")
+            )
+        ).all()
+
+    assert first == 3 and second == 3
+    assert progress["error_count"] == 0 and progress["succeeded_count"] == 1
+    # One row per natural key even after the second identical delivery; the
+    # duplicate observation neither duplicates the row nor mutates its identity.
+    assert len(rows) == 2 and len({row[0] for row in rows}) == 2
+    assert [(row[1], row[2], row[3]) for row in rows] == [
+        ("Board approves dividend", None, "https://vci/x"),
+        ("Untitled", "first", None),
+    ]
+    # published_date is derived deterministically from the provider timestamp.
+    assert [str(row[4])[:10] for row in rows] == ["2026-08-18", "2026-08-17"]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_news_rerun_refreshes_observed_fields_and_keeps_unobserved_values(monkeypatch):
+    engine = await _news_sqlite_writer(monkeypatch)
+    batches = [
+        [_news_item("Untitled", "2026-08-17 22:37", summary="first", url="https://vci/old")],
+        [_news_item("Untitled", "2026-08-17 22:37", summary="revised")],
+        [_news_item("Untitled", "2026-08-17 22:37", summary="revised")],
+    ]
+    monkeypatch.setattr(
+        VnstockCompanyNewsFetcher, "extract_data", AsyncMock(side_effect=batches),
+    )
+    monkeypatch.setattr(
+        VnstockCompanyNewsFetcher, "transform_data", lambda params, rows: rows,
+    )
+
+    await pipeline(monkeypatch).sync_company_news(symbols=["ARM"])
+    # Columns the provider never re-sends (news_id, rsi) must survive a repeat
+    # acquisition that carries NULL for them, instead of being nulled out.
+    async with engine.begin() as conn:
+        await conn.execute(text("UPDATE company_news SET news_id = 42, rsi = 1.5"))
+    await pipeline(monkeypatch).sync_company_news(symbols=["ARM"])
+    await pipeline(monkeypatch).sync_company_news(symbols=["ARM"])
+
+    async with engine.connect() as conn:
+        rows = (
+            await conn.execute(text("SELECT id, summary, url, news_id, rsi FROM company_news"))
+        ).all()
+
+    # Observed summary refreshed, unobserved url/news_id/rsi preserved, one row.
+    assert [(row[1], row[2], row[3], row[4]) for row in rows] == [
+        ("revised", "https://vci/old", 42, 1.5),
+    ]
+    await engine.dispose()
+
+# ---------------------------------------------------------------------------
+# Dividend outcome honesty against real SQL (sqlite)
+# ---------------------------------------------------------------------------
+
+_DIVIDEND_DDL = """
+CREATE TABLE dividends (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol VARCHAR(10) NOT NULL,
+    exercise_date DATE,
+    cash_year INTEGER,
+    dividend_rate FLOAT,
+    dividend_value FLOAT,
+    issue_method VARCHAR(50),
+    record_date DATE,
+    payment_date DATE,
+    raw_data JSON,
+    created_at DATETIME,
+    CONSTRAINT uq_dividend_symbol_date_year UNIQUE (symbol, exercise_date, cash_year)
+);
+CREATE TABLE sync_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sync_type VARCHAR(50) NOT NULL,
+    started_at DATETIME NOT NULL,
+    completed_at DATETIME,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
+    errors JSON,
+    additional_data JSON
+)
+"""
+
+
+async def _dividend_sqlite_writer(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as conn:
+        for statement in filter(None, (part.strip() for part in _DIVIDEND_DDL.split(";"))):
+            await conn.execute(text(statement))
+    sessions = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    monkeypatch.setattr(pipeline_module, "async_session_maker", sessions)
+    monkeypatch.setattr(sync_all_data_module, "async_session_maker", sessions)
+    monkeypatch.setattr(pipeline_module.data_pipeline, "_wait_for_rate_limit", AsyncMock())
+    return engine
+
+
+def _dividend_item(ex_date, year, cash):
+    payload = {
+        "symbol": "VNM",
+        "ex_date": ex_date,
+        "fiscal_year": year,
+        "cash_dividend": cash,
+        "dividend_type": "cash",
+    }
+    return SimpleNamespace(model_dump=lambda: dict(payload))
+
+
+@pytest.mark.asyncio
+async def test_confirmed_empty_dividend_source_is_empty_not_failed(monkeypatch):
+    # A provider that answers with an empty history is a confirmed empty outcome;
+    # the old code left empty_count unset, so run_maintenance_cycle reclassified
+    # every no-dividend symbol as "acquisition unavailable or incomplete".
+    engine = await _dividend_sqlite_writer(monkeypatch)
+    monkeypatch.setattr(VnstockDividendsFetcher, "fetch", AsyncMock(return_value=[]))
+    progress = {}
+
+    count = await pipeline(monkeypatch).sync_dividends(symbols=["VNM"], progress=progress)
+
+    assert count == 0
+    assert progress["empty_count"] == 1 and progress["error_count"] == 0
+    assert progress["stage_stats"]["dividends"]["empty"] == 1
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text("SELECT COUNT(*) FROM dividends"))).scalar()
+    assert rows == 0
+
+    result = await FullMarketSync().run_maintenance_cycle(
+        "dividend_empty_fixture", ["VNM"],
+        [("dividends", lambda symbol, prog: pipeline_module.data_pipeline.sync_dividends(
+            symbols=[symbol], progress=prog,
+        ))],
+        30, 1, allow_empty=True,
+    )
+    assert result.success and result.complete
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_unavailable_dividend_source_stays_a_typed_failure(monkeypatch):
+    engine = await _dividend_sqlite_writer(monkeypatch)
+    monkeypatch.setattr(
+        VnstockDividendsFetcher, "fetch",
+        AsyncMock(side_effect=ProviderError("Failed to fetch dividends for BGW", provider="vnstock")),
+    )
+    progress = {}
+
+    count = await pipeline(monkeypatch).sync_dividends(symbols=["BGW"], progress=progress)
+
+    assert count == 0
+    assert progress["error_count"] == 1 and progress["empty_count"] == 0
+    assert progress["failed_symbols"] == ["BGW"]
+    assert progress["errors"][0]["error"].startswith("ProviderError:")
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text("SELECT COUNT(*) FROM dividends"))).scalar()
+    assert rows == 0
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dividend_rerun_updates_same_natural_key_without_duplicating(monkeypatch):
+    engine = await _dividend_sqlite_writer(monkeypatch)
+    monkeypatch.setattr(VnstockDividendsFetcher, "fetch", AsyncMock(side_effect=[
+        [_dividend_item("2026-05-12", 2026, 1500.0)],
+        [_dividend_item("2026-05-12", 2026, 1500.0)],
+    ]))
+    progress = {}
+
+    first = await pipeline(monkeypatch).sync_dividends(symbols=["VNM"], progress=progress)
+    second = await pipeline(monkeypatch).sync_dividends(symbols=["VNM"], progress={})
+
+    async with engine.connect() as conn:
+        rows = (await conn.execute(
+            text("SELECT id, exercise_date, cash_year, dividend_value FROM dividends")
+        )).all()
+
+    assert [(str(row[1])[:10], row[2], row[3]) for row in rows] == [
+        ("2026-05-12", 2026, 1500.0),
+    ]
+    assert progress["succeeded_count"] == 1 and progress["error_count"] == 0
     await engine.dispose()

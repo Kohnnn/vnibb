@@ -4320,19 +4320,26 @@ class DataPipeline:
                             "published_date": published_dt,
                             "created_at": datetime.utcnow(),
                         }
-                        existing = await session.scalar(
-                            select(CompanyNews).where(
-                                CompanyNews.symbol == symbol,
-                                CompanyNews.title == values["title"],
-                                CompanyNews.published_date == published_dt,
-                            )
+                        # Natural-key upsert: repeated source observations of the same
+                        # (symbol, title, published_date) are idempotent, distinct items stay
+                        # separate rows, and unobserved columns keep their stored values.
+                        stmt = get_upsert_stmt(
+                            CompanyNews,
+                            ["symbol", "title", "published_date"],
+                            values,
+                            preserve_existing_on_null={
+                                "summary",
+                                "url",
+                                "news_id",
+                                "rsi",
+                                "rs",
+                                "price",
+                                "price_change",
+                                "price_change_ratio",
+                            },
+                            update_overrides=lambda _stmt: {"created_at": CompanyNews.created_at},
                         )
-                        if existing is None:
-                            session.add(CompanyNews(**values))
-                        else:
-                            existing.summary = values["summary"]
-                            existing.source = values["source"]
-                            existing.url = values["url"]
+                        await session.execute(stmt)
                     await session.commit()
                 total += len(items)
 
@@ -4523,6 +4530,10 @@ class DataPipeline:
 
         total = 0
         if progress is not None:
+            for key in ("attempted_count", "succeeded_count", "empty_count", "error_count"):
+                progress.setdefault(key, 0)
+            progress.setdefault("failed_symbols", [])
+            progress.setdefault("errors", [])
             progress.setdefault("stage_stats", {})
             progress["stage"] = "dividends"
             progress["stage_stats"].setdefault(
@@ -4531,10 +4542,15 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
+            if progress is not None:
+                progress["attempted_count"] += 1
             await self._wait_for_rate_limit("profiles")
             try:
                 items = await VnstockDividendsFetcher.fetch(symbol)
                 if not items:
+                    if progress is not None:
+                        progress["empty_count"] += 1
+                        progress["stage_stats"]["dividends"]["empty"] = progress["stage_stats"]["dividends"].get("empty", 0) + 1
                     continue
 
                 async with async_session_maker() as session:
@@ -4564,6 +4580,7 @@ class DataPipeline:
                     await session.commit()
 
                 if progress is not None:
+                    progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["dividends"]["success"] += 1
             except Exception as exc:
@@ -4571,6 +4588,7 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["dividends"]["errors"] += 1
+                    progress["failed_symbols"].append(symbol)
                     progress.setdefault("errors", []).append({"symbol": symbol, "dataset": "dividends", "error": self._describe_provider_exception(exc)})
 
             if progress is not None and sync_id is not None:
