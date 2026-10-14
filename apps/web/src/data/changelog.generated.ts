@@ -40,6 +40,17 @@ The entries below describe source changes, not deployment or full-population acc
   \`updatedAt\` write batch and preserves raw/unit/observation provenance; write
   time does not establish market-data freshness or historical replay.
 
+- The read-only MCP skills catalog now covers the full retrieval surface: the
+  \`database_audit\` skill is named \`database_collection_audit\` to mirror its
+  prompt, and \`reference_dataset\` and \`ingestion_receipts\` skills cover
+  \`get_reference_dataset\` and \`get_ingestion_receipts\`. The connection guide
+  points at \`get_agent_connection_guide\` for one-call bootstrap, and
+  \`docs/VNIBB_MCP_READONLY.md\` lists all 20 registered tools instead of 18,
+  including \`get_agent_connection_guide\` and \`get_matrix_selection\`. The
+  frontend tool/resource/prompt catalog mirrors the same surface and is guarded
+  against drift by \`mcpToolCatalog.test.ts\`, which derives the expected names
+  from the server source.
+
 ### Fixed
 - Supplemental, reference and trading acquisition resume durable active SQL symbol × dataset cycles rather than rank buckets or fixed prefixes. Source-confirmed empty responses remain distinct from failures; successful pairs survive partial runs and refresh eligibility starts after cycle completion. IQ historical EOD has a 12:15 UTC owner for 50 symbols × one at-most-30-day window, defaulting its end to the day where a separate rolling bounded recent-tail window stops, so the walk advances the adjacent gap. Separate IQ profile/shareholder stores have a 14:15 UTC owner for 50 pairs/600 seconds and a seven-day completed-cycle refresh. These bounds do not promise daily or weekly full-population completion.
 - Existing population CLIs expose provider-free \`inventory\` and opt-in durable \`backfill\`/\`resume\`, actual Trading STOCK bootstrap and fixed native source/start/cutoff checkpoints with 10,000-bar requests. Returned provider ranges and failed/empty pairs remain explicit; successful acquisition is not verified full history or exchange-session completeness. DELISTED instruments retain inactive listing identity rather than being promoted into the active universe.
@@ -119,6 +130,7 @@ The entries below describe source changes, not deployment or full-population acc
 - Screener table actions retain full touch targets; technical and valuation widgets disclose unavailable indicators and source/cache provenance rather than implying unsupported freshness.
 - The built-in Investor Home thesis editor is read-only and directs users to an editable personal workspace; the system dashboard rejects widget configuration writes, so it no longer claims that unsaved thesis text was saved.
 - Big Flow reports provider failure as unavailable instead of a zero-activity tape; the block-trade service no longer converts query errors into an empty result. Positioning Dashboard is not promotable until its request count and symbol coverage are bounded and disclosed; saved instances keep resolving as an explicit unavailable state.
+- Insider-deals retrieval keeps the free-VCI capability guard its sibling price-depth fetcher retained: a client exposing neither \`insider_deals\` nor the \`events\` feed now raises a truthful "unavailable in free VCI" provider error instead of a bare \`AttributeError\` about a missing \`events\` attribute. The events-feed fallback and dedicated-dataset preference are unchanged.
 
 ### Deployed
 - Released the financial-ratio natural-key repair to cloud-01 on 2026-10-05. API, MCP and scheduler run \`2c57654277ef5546662afc3cc7ed4a4e355e441e\`, pinned to \`ghcr.io/kohnnn/vnibb-api@sha256:c87b372fc0416a7369a2a01ba58c56d6fb79d9435ac1dcc33b6512362f7bda4e\`. The one-shot \`migrate\` applied \`b7312f0c4e88 -> e5f1a7c9d2b4\`; \`migrate current\` confirms \`e5f1a7c9d2b4\` and \`uq_financial_ratio_symbol_period\` now exists, with all 17,400 \`financial_ratios\` rows preserved and zero duplicate keys. Health, MCP health and scheduler heartbeat passed at the new revision, and the production natural-key upsert is accepted (proved inside a rolled-back transaction). Existing databases, proxy and the premium runtime mount were preserved. The separately recorded \`financial_ratios_sync\` 5400s timeout and upstream prediction-source failures remain open. See the dated repair section in \`docs/oracle_runbook.md\` for rollback.

@@ -200,6 +200,9 @@ class VnstockInsiderDealsFetcher:
                 return df.head(limit).to_dict(orient="records")
             return []
 
+        if not hasattr(company, "events"):
+            raise AttributeError("Insider deals are unavailable in free VCI")
+
         df = company.events()
         if df is None or len(df) == 0:
             return []

@@ -601,6 +601,9 @@ Discovery:
 - `vnibb://database/schema/{collection}` — one table's MCP-facing metadata.
 - `vnibb://mongo/datasets` — allowlisted persisted datasets (legacy storage names).
 - `vnibb://mcp/skills` — retrieval workflows for common agent tasks.
+- `vnibb://mcp/guide` — this connection guide. The `get_agent_connection_guide`
+  tool returns this guide and `vnibb://mcp/skills` inline, so a client that
+  cannot read resources can still self-bootstrap from the tool surface alone.
 
 Recommended call order:
 1. `get_database_status` / `get_mongo_status` — confirm reachability and sources.
@@ -641,7 +644,9 @@ VNIBB Read-Only MCP — retrieval skills for downstream agents.
 
 Each skill is a named workflow the agent can adopt when the matching intent is
 detected. Skills are read-only: they compose existing tools and resources and
-never mutate data.
+never mutate data. An agent that needs transport/auth/discovery facts first can
+call `get_agent_connection_guide`, which returns the connection guide and this
+catalog inline.
 
 1. symbol_deep_dive
    Intent: research one symbol (fundamental + price + catalysts).
@@ -683,7 +688,7 @@ never mutate data.
    Steps:
    - `get_price_depth` (symbol, limit) — newest write batch only.
 
-7. database_audit
+7. database_collection_audit
    Intent: safe table-level inspection / coverage check.
    Steps:
    - `list_supported_collections` to confirm the table is exposed.
@@ -695,6 +700,22 @@ never mutate data.
    Steps:
    - `get_matrix_selection` (snapshot_id, result_ids) over an authorized HTTP
      request; stdio and shared bearer cannot authorize it.
+
+9. reference_dataset
+   Intent: exact IQ profile or metric-map document from its physical store.
+   Steps:
+   - `get_reference_dataset` (symbol, store) with store
+     `market_company_profiles` or `market_financial_metric_map`.
+   - Report the selected store, record identity, and descriptor evidence;
+     legacy type-wide documents are historical retention, not a fallback.
+
+10. ingestion_receipts
+    Intent: check how a symbol's dataset was acquired, without running jobs.
+    Steps:
+    - `get_ingestion_receipts` (symbol, dataset, limit) for bounded SQL/Mongo
+      acquisition evidence.
+    - Report the actual scheduler owner, outcome, and source window; a receipt
+      is acquisition evidence, not data freshness.
 """.strip()
 
 

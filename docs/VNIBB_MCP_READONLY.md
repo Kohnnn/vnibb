@@ -79,6 +79,15 @@ Analytical-corpus-backed (database reads only, never provider execution):
 - `get_reference_dataset` — exact IQ profile/metric-map physical-store reads
 - `get_ingestion_receipts` — bounded acquisition receipts; no ingestion execution
 
+Agent bootstrap and user-scoped reads:
+
+- `get_agent_connection_guide` — returns the connection guide and the retrieval
+  skills catalog inline, so an agent can self-bootstrap from the tool surface
+  alone without a prior resource read
+- `get_matrix_selection` — the caller's frozen Matrix selection and evidence,
+  subject to source export rights; requires an authorized user JWT, so stdio and
+  the shared bearer cannot call it
+
 Design notes:
 
 - `get_symbol_snapshot` and `get_market_snapshot` are the preferred high-level tools
@@ -185,8 +194,11 @@ without a prior resource read.
 - `intraday_trades`
 - `price_depth`
 
-These prompts are lightweight helpers for recurring research workflows and
-mirror the named skills in `vnibb://mcp/skills`.
+These prompts are lightweight helpers for recurring research workflows. Each
+mirrors the identically named skill in `vnibb://mcp/skills`. The catalog also
+covers read-only workflows that deliberately have no prompt template:
+`matrix_selection` (a verified user JWT is required) and `reference_dataset`
+and `ingestion_receipts` (low-level store reads).
 
 ## Security and guardrails
 

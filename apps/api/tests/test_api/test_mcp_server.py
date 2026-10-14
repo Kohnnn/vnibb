@@ -222,22 +222,26 @@ def test_agent_guide_resource_covers_connect_auth_and_discovery() -> None:
     assert "vnibb://mongo/datasets" in text
     assert "get_symbol_snapshot" in text
     assert "query_database_collection" in text
+    assert "vnibb://mcp/guide" in text
+    assert "get_agent_connection_guide" in text
 
 
-def test_skills_catalog_lists_named_retrieval_workflows() -> None:
+def test_skills_catalog_lists_promptless_retrieval_workflows() -> None:
+    # Prompt-backed skills are covered by the mirror test below; these three
+    # workflows deliberately have no prompt template.
     text = server.read_skills_catalog_resource()
-    for skill in (
-        "symbol_deep_dive",
-        "market_brief",
-        "eod_price_history",
-        "premium_dataset",
-        "intraday_trades",
-        "price_depth",
-        "database_audit",
-        "matrix_selection",
-    ):
+    for skill in ("matrix_selection", "reference_dataset", "ingestion_receipts"):
         assert skill in text
     assert "read-only" in text
+
+
+@pytest.mark.asyncio
+async def test_skills_catalog_mirrors_every_advertised_prompt() -> None:
+    text = server.read_skills_catalog_resource()
+    advertised = await server.mcp.list_prompts()
+    assert advertised, "no prompt templates registered"
+    for prompt in advertised:
+        assert prompt.name in text, f"skills catalog is missing the {prompt.name} prompt"
 
 
 def test_agent_connection_guide_tool_exposes_guide_and_skills() -> None:
