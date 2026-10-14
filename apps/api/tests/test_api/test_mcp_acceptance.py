@@ -156,10 +156,10 @@ def test_numeric_period_with_all_financial_metrics_null_rejected():
 def test_raw_financial_withholding_every_monetary_metric_is_partial():
     """Unit-admitted reads that withhold every metric must not read as FAIL.
 
-    The live IQ balance-sheet/cash-flow/ratio records carry descriptors and a
-    per-field withholding reason but no admitted monetary value, which
-    `unit_basis` already records as partial. Only a row with no withholding map
-    is a writer/admission failure.
+    The live IQ records carry a per-field withholding reason for every metric,
+    which `unit_basis` already records as partial. A row that only reports a
+    record-level admission failure, or that carries no withholding map at all,
+    stays a hard failure.
     """
     packet = {"symbol": "MSR", "dataset": "finance.balance_sheet", "period_type": "year", "row_count": 1,
               "items": [{
@@ -177,25 +177,32 @@ def test_raw_financial_withholding_every_monetary_metric_is_partial():
     args = {"symbol": "MSR", "dataset": "finance.balance_sheet", "period_type": "year", "limit": 100}
     with pytest.raises(qa.Partial, match="no admitted finite financial metrics"):
         qa.financial(packet, args, raw=True)
-    packet["items"][0]["raw_data"]["structured"].pop("unavailable")
+    structured = packet["items"][0]["raw_data"]["structured"]
+    structured["unavailable"] = {"record": "invalid_raw_row"}
+    with pytest.raises(qa.Failure, match="no finite financial metrics"):
+        qa.financial(packet, args, raw=True)
+    structured.pop("unavailable")
     with pytest.raises(qa.Failure, match="no finite financial metrics"):
         qa.financial(packet, args, raw=True)
 
 
-def test_empty_timeline_is_withheld_not_failed():
+def test_empty_content_is_withheld_not_failed():
     """A successful read with no rows is withheld coverage, matching `objects`.
 
     `company_events` is populated only for part of the universe, so an exact
-    symbol with no events must not read as a regression. Malformed containers
-    stay hard failures.
+    symbol with no events must not read as a regression. Malformed or
+    wrongly-typed containers stay hard failures.
     """
     with pytest.raises(qa.Partial, match="EMPTY"):
-        qa.present_content({"items": []}, "items", "timeline")
+        qa.require_content({"items": []}, "items", "timeline", list)
     with pytest.raises(qa.Partial, match="EMPTY"):
-        qa.present_content({"items": {}}, "items", "timeline")
-    assert qa.present_content({"items": [{"kind": "company_event"}]}, "items", "timeline")
+        qa.require_content({"snapshot": {}}, "snapshot", "market snapshot", dict)
+    assert qa.require_content({"items": [{"kind": "company_event"}]}, "items", "timeline", list)
     with pytest.raises(qa.Failure, match="not typed"):
-        qa.present_content({"items": "nope"}, "items", "timeline")
+        qa.require_content({"items": "nope"}, "items", "timeline", list)
+    with pytest.raises(qa.Failure, match="not typed"):
+        qa.require_content({"items": {}}, "items", "timeline", list)
+
 
 def test_sql_financial_year_conflicting_with_raw_source_basis_rejected():
     packet = financial_packet()

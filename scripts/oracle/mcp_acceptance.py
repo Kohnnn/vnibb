@@ -40,6 +40,10 @@ if not SOURCE.is_file():
 SYMBOLS = ("MSR", "VNM", "VCB")
 STATEMENTS = {"income_statement": "income_statements", "balance_sheet": "balance_sheets", "cash_flow": "cash_flows"}
 MARKET_DATASETS = {"market.pe", "market.pb", "market.evaluation", "analytics.valuation.pe", "analytics.valuation.pb"}
+# Why a decoded row admitted no finite metric. These codes mean the record never
+# decoded, so nothing survived ingestion (hard failure). Any other reason means the
+# source was read and that metric was held back, which is withheld coverage.
+ADMISSION_FAILURE_REASONS = {"invalid_raw_row", "unsupported_dataset", "descriptor_scope_unverified"}
 GATES = {
     "1": "Finite complete OHLC, timestamp/window/order, session freshness, coherent units",
     "2": "Typed financial envelopes, exact statement/period, finite values, source/unit/scale/basis",
@@ -189,10 +193,11 @@ def objects(payload, *, symbol=None, dataset=None):
         raise Partial("EMPTY: backend read succeeded but no content evidence")
     return rows
 
-def present_content(container, key, label):
+
+def require_content(container, key, label, kind):
     """A typed, non-empty container; a successful read with no rows is withheld
     coverage, matching `objects`' EMPTY contract, not a failure."""
-    require(isinstance(container.get(key), (list, dict)), f"{label} is not typed")
+    require(isinstance(container.get(key), kind), f"{label} is not typed")
     if not container[key]:
         raise Partial(f"EMPTY: backend read succeeded but no {label} evidence")
     return container[key]
@@ -328,12 +333,14 @@ def financial(payload, args, *, raw=False):
         require(isinstance(values, dict), "missing financial metric values")
         fields = financial_metrics(dataset)
         if not any(finite_metric(values.get(field)) for field in fields):
-            # The decoded reader records every withheld field with its reason. A
-            # populated withholding map means the source was read and its metrics
-            # were deliberately withheld on unit/basis evidence, which `unit_basis`
-            # also treats as partial. Without it, nothing survived decoding: all-null
-            # metrics are a hard writer/admission failure.
-            if structured.get("unavailable"):
+            # The decoded reader records a reason per withheld field, or one
+            # whole-record code when the row never decoded. A whole-record admission
+            # code means nothing survived ingestion (hard failure); any other
+            # populated map means the source was read and each metric was held back
+            # on unit/basis or coverage evidence, which `unit_basis` also treats as
+            # partial. An empty map means the record carries no evidence at all.
+            reasons = set((structured.get("unavailable") or {}).values())
+            if reasons - ADMISSION_FAILURE_REASONS:
                 raise Partial("no admitted finite financial metrics; source units/basis unverified")
             raise Failure("no finite financial metrics")
     for item in rows:
@@ -681,9 +688,9 @@ class Runner:
                 await self.checked(f"{symbol}/{tool}", lambda t=tool, a=args: self.call(session, t, a), lambda p, a=args: objects(p, symbol=a["symbol"]))
                 if tool == "get_intraday_trades":
                     await self.checked(f"{symbol}/Mongo/ticks/session_receipt", lambda a=args: self.call(session, "get_intraday_trades", a), lambda p: trading_receipts(objects(p), session_day))
-            await self.checked(f"{symbol}/timeline", lambda s=symbol: self.call(session, "get_corporate_timeline", {"symbol": s, "limit": 25}), lambda p: present_content(p, "items", "timeline"))
+            await self.checked(f"{symbol}/timeline", lambda s=symbol: self.call(session, "get_corporate_timeline", {"symbol": s, "limit": 25}), lambda p: require_content(p, "items", "timeline", list))
             await self.checked(f"{symbol}/snapshot", lambda s=symbol: self.call(session, "get_symbol_snapshot", {"symbol": s}), lambda p, s=symbol: snapshot_content(p, s))
-        await self.checked("market_snapshot", lambda: self.call(session, "get_market_snapshot"), lambda p: require(isinstance(p.get("snapshot"), dict) and p["snapshot"], "market snapshot content absent"))
+        await self.checked("market_snapshot", lambda: self.call(session, "get_market_snapshot"), lambda p: require_content(p, "snapshot", "market snapshot", dict))
         for label in ("TTM statements/ratios/raw variants", "provider historical repair beyond retained windows"):
             self.record(label, "UNSUPPORTED", "deliberately outside retained read-only protocol; no unexecuted check passed")
         large = [c for c in self.report["calls"] if c.get("executed") and isinstance(c.get("payload", {}).get("items"), list) and len(c["payload"]["items"]) > 20]
