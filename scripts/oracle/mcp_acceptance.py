@@ -318,7 +318,16 @@ def financial(payload, args, *, raw=False):
                 require(basis.get("quarter") == item["fiscal_quarter"], "SQL/source fiscal quarter conflict")
         values = structured.get("values") if raw else item
         require(isinstance(values, dict), "missing financial metric values")
-        require(any(finite_metric(values.get(field)) for field in financial_metrics(dataset)), "no finite financial metrics")
+        fields = financial_metrics(dataset)
+        if not any(finite_metric(values.get(field)) for field in fields):
+            # The decoded reader records every withheld field with its reason. A
+            # populated withholding map means the source was read and its metrics
+            # were deliberately withheld on unit/basis evidence, which `unit_basis`
+            # also treats as partial. Without it, nothing survived decoding: all-null
+            # metrics are a hard writer/admission failure.
+            if structured.get("unavailable"):
+                raise Partial("no admitted finite financial metrics; source units/basis unverified")
+            raise Failure("no finite financial metrics")
     for item in rows:
         unit_basis(item, period)
     return rows

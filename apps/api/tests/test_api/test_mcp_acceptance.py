@@ -153,6 +153,35 @@ def test_numeric_period_with_all_financial_metrics_null_rejected():
         qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": "income_statement"})
 
 
+def test_raw_financial_withholding_every_monetary_metric_is_partial():
+    """Unit-admitted reads that withhold every metric must not read as FAIL.
+
+    The live IQ balance-sheet/cash-flow/ratio records carry descriptors and a
+    per-field withholding reason but no admitted monetary value, which
+    `unit_basis` already records as partial. Only a row with no withholding map
+    is a writer/admission failure.
+    """
+    packet = {"symbol": "MSR", "dataset": "finance.balance_sheet", "period_type": "year", "row_count": 1,
+              "items": [{
+                  "symbol": "MSR", "source": "vietcap", "dataset": "finance.balance_sheet",
+                  "datasetVariant": "finance.balance_sheet.year", "period_type": "year",
+                  "raw": {"yearReport": 2025}, "descriptors": [{"field": "bsa1"}],
+                  "descriptorEvidence": {"symbol": "MSR"}, "comTypeCode": "CT",
+                  "rawFiscalBasis": {"year": 2025, "periodType": "year"},
+                  "unavailable": {"total_assets": "unit_unverified"},
+              }]}
+    packet["items"][0]["raw_data"] = {"structured": {
+        "fiscalBasis": {"year": 2025, "periodType": "year"},
+        "values": {}, "unavailable": {"total_assets": "unit_unverified"},
+    }}
+    args = {"symbol": "MSR", "dataset": "finance.balance_sheet", "period_type": "year", "limit": 100}
+    with pytest.raises(qa.Partial, match="no admitted finite financial metrics"):
+        qa.financial(packet, args, raw=True)
+    packet["items"][0]["raw_data"]["structured"].pop("unavailable")
+    with pytest.raises(qa.Failure, match="no finite financial metrics"):
+        qa.financial(packet, args, raw=True)
+
+
 def test_sql_financial_year_conflicting_with_raw_source_basis_rejected():
     packet = financial_packet()
     packet["item"]["raw_data"]["structured"]["fiscalBasis"]["year"] = 2024
