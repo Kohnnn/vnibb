@@ -263,15 +263,18 @@ def unit_basis(item, period):
     require(isinstance(evidence, dict), "invalid source evidence")
     require(evidence.get("raw") and (evidence.get("descriptors") or evidence.get("descriptorEvidence")), "missing lossless financial source/descriptor evidence")
     require(evidence.get("comTypeCode"), "missing financial company evidence")
-    if not evidence.get("sourceDate"):
-        raise Partial("IQ publication/source date unknown; receipt time is not source age")
     structured = evidence.get("structured") or {}
     basis = evidence.get("fiscalBasis") or structured.get("fiscalBasis")
+    # Hard fiscal-shape checks run before any coverage partial: a basis that is
+    # absent, mistyped or off-period is lost data whether or not the row also
+    # lacks the source date, so it must not read as withholding.
     require(isinstance(basis, dict) and type(basis.get("year")) is int and basis.get("periodType") == period, "missing/exact fiscal basis")
     if period == "quarter":
         require(basis.get("quarter") in (1, 2, 3, 4), "missing fiscal quarter")
-        if basis.get("quarterBasis") in (None, "", "unknown"):
-            raise Partial("IQ quarterly standalone/cumulative basis unknown")
+    if not evidence.get("sourceDate"):
+        raise Partial("IQ publication/source date unknown; receipt time is not source age")
+    if period == "quarter" and basis.get("quarterBasis") in (None, "", "unknown"):
+        raise Partial("IQ quarterly standalone/cumulative basis unknown")
     if basis.get("consolidation") in (None, "", "unknown"):
         raise Partial("IQ consolidated/separate basis unknown")
     fields = structured.get("fieldEvidence")

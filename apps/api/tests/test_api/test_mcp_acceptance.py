@@ -233,6 +233,32 @@ def test_later_row_hard_violation_is_not_masked_by_earlier_withholding():
     assert type(caught.value) is qa.Failure and "fiscal identity" in str(caught.value)
 
 
+def test_admitted_row_with_malformed_fiscal_basis_fails_despite_missing_source_date():
+    """A hard fiscal-shape violation must not hide behind a coverage partial.
+
+    This row omits `sourceDate` (a coverage partial) and mistypes the fiscal year
+    as a string (a hard violation). The malformed basis is lost data, so the
+    verdict is FAIL, not PARTIAL — and a well-formed basis with the same missing
+    date stays PARTIAL, so the reordered checks do not over-fail.
+    """
+    args = {"symbol": "MSR", "dataset": "finance.balance_sheet", "period_type": "year", "limit": 100}
+    field = sorted(qa.financial_metrics("finance.balance_sheet"))[0]
+    malformed = raw_financial_row()
+    malformed.pop("sourceDate")
+    malformed["structured"].pop("unavailable")
+    malformed["structured"]["values"] = {field: 123.0}
+    malformed["structured"]["fiscalBasis"] = {"year": "2025", "periodType": "year"}
+    with pytest.raises(qa.Failure) as caught:
+        qa.financial(raw_financial_packet(malformed), args, raw=True)
+    assert type(caught.value) is qa.Failure and "fiscal basis" in str(caught.value)
+    withheld = raw_financial_row()
+    withheld.pop("sourceDate")
+    withheld["structured"].pop("unavailable")
+    withheld["structured"]["values"] = {field: 123.0}
+    with pytest.raises(qa.Partial, match="source date unknown"):
+        qa.financial(raw_financial_packet(withheld), args, raw=True)
+
+
 def test_empty_content_is_withheld_not_failed():
     """A successful read with no rows is withheld coverage, matching `objects`.
 
