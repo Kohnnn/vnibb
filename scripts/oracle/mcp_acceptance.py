@@ -189,6 +189,14 @@ def objects(payload, *, symbol=None, dataset=None):
         raise Partial("EMPTY: backend read succeeded but no content evidence")
     return rows
 
+def present_content(container, key, label):
+    """A typed, non-empty container; a successful read with no rows is withheld
+    coverage, matching `objects`' EMPTY contract, not a failure."""
+    require(isinstance(container.get(key), (list, dict)), f"{label} is not typed")
+    if not container[key]:
+        raise Partial(f"EMPTY: backend read succeeded but no {label} evidence")
+    return container[key]
+
 
 def timestamp(value):
     require(isinstance(value, str) and bool(value.strip()), "missing timestamp")
@@ -673,7 +681,7 @@ class Runner:
                 await self.checked(f"{symbol}/{tool}", lambda t=tool, a=args: self.call(session, t, a), lambda p, a=args: objects(p, symbol=a["symbol"]))
                 if tool == "get_intraday_trades":
                     await self.checked(f"{symbol}/Mongo/ticks/session_receipt", lambda a=args: self.call(session, "get_intraday_trades", a), lambda p: trading_receipts(objects(p), session_day))
-            await self.checked(f"{symbol}/timeline", lambda s=symbol: self.call(session, "get_corporate_timeline", {"symbol": s, "limit": 25}), lambda p: require(isinstance(p.get("items"), list) and p["items"], "timeline content absent"))
+            await self.checked(f"{symbol}/timeline", lambda s=symbol: self.call(session, "get_corporate_timeline", {"symbol": s, "limit": 25}), lambda p: present_content(p, "items", "timeline"))
             await self.checked(f"{symbol}/snapshot", lambda s=symbol: self.call(session, "get_symbol_snapshot", {"symbol": s}), lambda p, s=symbol: snapshot_content(p, s))
         await self.checked("market_snapshot", lambda: self.call(session, "get_market_snapshot"), lambda p: require(isinstance(p.get("snapshot"), dict) and p["snapshot"], "market snapshot content absent"))
         for label in ("TTM statements/ratios/raw variants", "provider historical repair beyond retained windows"):

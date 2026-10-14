@@ -182,6 +182,21 @@ def test_raw_financial_withholding_every_monetary_metric_is_partial():
         qa.financial(packet, args, raw=True)
 
 
+def test_empty_timeline_is_withheld_not_failed():
+    """A successful read with no rows is withheld coverage, matching `objects`.
+
+    `company_events` is populated only for part of the universe, so an exact
+    symbol with no events must not read as a regression. Malformed containers
+    stay hard failures.
+    """
+    with pytest.raises(qa.Partial, match="EMPTY"):
+        qa.present_content({"items": []}, "items", "timeline")
+    with pytest.raises(qa.Partial, match="EMPTY"):
+        qa.present_content({"items": {}}, "items", "timeline")
+    assert qa.present_content({"items": [{"kind": "company_event"}]}, "items", "timeline")
+    with pytest.raises(qa.Failure, match="not typed"):
+        qa.present_content({"items": "nope"}, "items", "timeline")
+
 def test_sql_financial_year_conflicting_with_raw_source_basis_rejected():
     packet = financial_packet()
     packet["item"]["raw_data"]["structured"]["fiscalBasis"]["year"] = 2024
