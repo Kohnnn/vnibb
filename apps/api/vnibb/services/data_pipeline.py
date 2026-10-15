@@ -2626,7 +2626,10 @@ class DataPipeline:
                     errors: list[Exception] = []
                     for method_name, target in (("overview", overview_row), ("profile", profile_row)):
                         try:
-                            frame = getattr(company, method_name)()
+                            method = getattr(company, method_name, None)
+                            if method is None:
+                                continue
+                            frame = method()
                             if frame is not None and not frame.empty:
                                 target.update(frame.iloc[0].to_dict())
                         except Exception as exc:

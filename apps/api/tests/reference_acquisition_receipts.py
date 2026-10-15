@@ -91,6 +91,97 @@ def stub_reference_fetch(monkeypatch, dataset, fetcher, **kwargs):
 # Receipt honesty (all five reference writers)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.parametrize("source,guard_error", [("KBS", None), ("VCI", RuntimeError("paid runtime forbidden"))])
+def test_reference_company_guards_precede_provider_construction(monkeypatch, source, guard_error):
+    import sys
+    from unittest.mock import Mock
+
+    from vnibb.providers.vnstock import runtime
+
+    constructor = Mock(side_effect=AssertionError("rejected runtime must not construct a provider"))
+    guarded_import = Mock(side_effect=guard_error)
+    monkeypatch.setitem(sys.modules, "vnstock.explorer.vci", SimpleNamespace(Company=constructor))
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", guarded_import)
+
+    with pytest.raises(RuntimeError if guard_error else ValueError):
+        runtime.create_reference_company("VNM", source)
+
+    constructor.assert_not_called()
+    if guard_error:
+        guarded_import.assert_called_once_with("Company")
+    else:
+        guarded_import.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dataset,fetcher,method", [
+    ("shareholders", "VnstockShareholdersFetcher", "shareholders"),
+    ("officers", "VnstockOfficersFetcher", "officers"),
+    ("subsidiaries", "VnstockSubsidiariesFetcher", "subsidiaries"),
+    ("company_news", "VnstockCompanyNewsFetcher", "news"),
+    ("company_events", "VnstockCompanyEventsFetcher", "events"),
+])
+async def test_reference_fetcher_constructs_only_company(monkeypatch, dataset, fetcher, method):
+    import sys
+    from importlib import import_module
+
+    import pandas as pd
+    from vnibb.providers.vnstock import runtime
+
+    calls = []
+    rows = [{"title": "Company announcement", "value": 1}]
+
+    def fetch_rows():
+        calls.append(method)
+        return pd.DataFrame(rows)
+
+    def company(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(**{method: fetch_rows})
+
+    def forbid_legacy_client():
+        raise AssertionError("Reference requests must not construct Finance through Vnstock")
+
+    def guarded_import(name):
+        calls.append(("guard", name))
+
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", guarded_import)
+    monkeypatch.setitem(sys.modules, "vnstock.explorer.vci", SimpleNamespace(Company=company))
+    monkeypatch.setattr(runtime, "get_vnstock_class", forbid_legacy_client)
+    provider = getattr(import_module(f"vnibb.providers.vnstock.{dataset}"), fetcher)
+
+    assert await provider.extract_data({"symbol": "VNM", "limit": 20}) == rows
+    assert calls == [("guard", "Company"), {"symbol": "VNM"}, method]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_error", [ConnectionError("HTTP 418 denied"), TimeoutError("overview timed out")])
+async def test_profile_receipt_preserves_overview_failure_without_optional_profile(monkeypatch, provider_error):
+    class OverviewOnlyCompany:
+        def __init__(self, **kwargs):
+            pass
+
+        def overview(self):
+            raise provider_error
+
+    async def run_provider(operation, timeout):
+        return operation()
+
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_company_class", lambda: OverviewOnlyCompany)
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.run_financial_provider", run_provider)
+    session_factory = AsyncMock(side_effect=AssertionError("failed fetch must not open a write session"))
+    monkeypatch.setattr(pipeline_module, "async_session_maker", session_factory)
+    progress = {}
+
+    assert await pipeline(monkeypatch).sync_company_profiles(symbols=["VNM"], progress=progress) == 0
+    assert progress["error_count"] == progress["stage_stats"]["profiles"]["errors"] == 1
+    assert progress["errors"] == [{
+        "symbol": "VNM", "dataset": "profiles",
+        "error": f"{type(provider_error).__name__}: {provider_error}",
+    }]
+    session_factory.assert_not_called()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("dataset,fetcher", WRITERS)
 async def test_empty_reference_receipt_preserves_records(monkeypatch, dataset, fetcher):

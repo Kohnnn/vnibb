@@ -53,12 +53,11 @@ async def test_provider_failure_and_successful_empty_reach_persisted_reference_r
             released.wait(30)
         return pd.DataFrame()
 
-    class Vnstock:
-        def stock(self, *, symbol, source):
-            assert symbol == "ACC" and source == "VCI"
-            return SimpleNamespace(company=SimpleNamespace(**{method: request}))
+    def company(symbol, source):
+        assert symbol == "ACC" and source == "VCI"
+        return SimpleNamespace(**{method: request})
 
-    monkeypatch.setattr(runtime, "get_vnstock_class", lambda: Vnstock)
+    monkeypatch.setattr(runtime, "create_reference_company", company)
 
     async def acquire(symbol, progress):
         return await getattr(sync_all_data.data_pipeline, f"sync_{dataset}")(symbols=[symbol], progress=progress)

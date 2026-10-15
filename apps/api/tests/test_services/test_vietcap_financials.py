@@ -43,6 +43,41 @@ def test_decodes_descriptor_code_not_fixed_provider_code_and_preserves_zero(enve
     assert decoded["fiscalBasis"]["quarterBasis"] == "unknown"
 
 
+@pytest.mark.parametrize("field", ["eps_diluted", "epsDiluted", "dilutedEps"])
+def test_income_provider_preserves_diluted_eps_zero(field):
+    from vnibb.providers.vnstock.income_statement import (
+        IncomeStatementQueryParams,
+        VnstockIncomeStatementFetcher,
+    )
+
+    rows = VnstockIncomeStatementFetcher.transform_data(
+        IncomeStatementQueryParams(symbol="FPT"), [{"yearReport": 2025, field: 0}],
+    )
+    assert rows[0].eps_diluted == 0
+
+
+@pytest.mark.parametrize("failure", ["null", "source", "scope", "fiscal"])
+def test_diluted_eps_requires_numeric_value_and_verified_identity(envelope, failure):
+    envelope["raw"].pop("unit")
+    envelope["raw"]["arbitrary_diluted"] = None if failure == "null" else 1507
+    envelope["descriptors"].append({"field": "arbitrary_diluted", "parent": None,
+                                    "fullTitleEn": "EPS diluted (VND)"})
+    if failure == "source":
+        envelope["source"] = "VCI"
+    elif failure == "scope":
+        envelope["descriptorEvidence"]["symbol"] = "FPT"
+    elif failure == "fiscal":
+        envelope["raw"]["fiscalYear"] = 2024
+    decoded = decode_vietcap_financial_record(envelope)
+    if failure == "fiscal":
+        assert decoded["fiscalBasis"]["period"] is None
+    else:
+        assert "eps_diluted" not in decoded["values"]
+        assert decoded["unavailable"]["eps_diluted"] == {
+            "null": "value_unavailable", "source": "descriptor_unavailable", "scope": "descriptor_scope_unverified",
+        }[failure]
+
+
 def test_explicit_amount_unit_and_scale_are_evidence_not_magnitude(envelope):
     envelope["raw"]["scale"] = 1_000_000
     decoded = decode_vietcap_financial_record(envelope)

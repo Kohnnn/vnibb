@@ -190,15 +190,14 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
 
         def _fetch_sync() -> List[dict]:
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
+                from vnibb.providers.vnstock.runtime import create_reference_company
 
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=query["symbol"], source=validate_source(settings.vnstock_source))
+                company = create_reference_company(query["symbol"], settings.vnstock_source)
 
                 # Get company events
                 events_df = None
                 try:
-                    events_callable = getattr(stock.company, "events", None)
+                    events_callable = getattr(company, "events", None)
                     if callable(events_callable):
                         events_df = events_callable()
                 except Exception:
@@ -208,7 +207,7 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                     # Fallback: synthesize event-like records from dividends
                     dividends_df = None
                     try:
-                        dividends_callable = getattr(stock.company, "dividends", None)
+                        dividends_callable = getattr(company, "dividends", None)
                         if callable(dividends_callable):
                             dividends_df = dividends_callable()
                     except Exception:

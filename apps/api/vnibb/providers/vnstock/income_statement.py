@@ -44,6 +44,7 @@ class IncomeStatementData(BaseModel):
     tax_expense: Optional[float] = None
     net_income: Optional[float] = None
     eps: Optional[float] = None
+    eps_diluted: Optional[float] = None
     source: str | None = None
     raw_data: dict[str, Any] | None = None
     fiscal_year: int | None = None
@@ -133,6 +134,8 @@ class VnstockIncomeStatementFetcher(BaseFetcher[IncomeStatementQueryParams, Inco
                         or row.get("earningsPerShare")
                         or row.get("earning_per_share")
                         or row.get("eps"),
+                        eps_diluted=next((row[key] for key in ("eps_diluted", "epsDiluted", "dilutedEps")
+                                          if row.get(key) is not None), None),
                     )
                 )
             except Exception as e:

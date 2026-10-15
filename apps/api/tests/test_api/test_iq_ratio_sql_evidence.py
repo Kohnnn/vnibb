@@ -223,3 +223,84 @@ async def test_statement_ingestion_scoped_response_survives_sql_and_public_mcp(m
     assert lineage["flow_basis"] == "single_quarter"
     assert lineage["consolidation_basis"] == "consolidated"
     assert lineage["unit_metadata"]["revenue"]["unitEvidence"]["responses"][0]["metadata"] == response
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("year,quarter,value,unit,scale,admitted", [
+    (2025, None, 5216, None, None, True),
+    (2026, 2, 1507, None, None, True),
+    (2026, 2, 0, None, None, True),
+    (2026, 2, 1507, "unknown", None, False),
+    (2026, 2, 1507, "VND", 1_000_000, False),
+    (2026, 2, 1507, "million VND", None, False),
+    (2026, 2, 1507, "VND/share", 1_000_000, False),
+])
+async def test_diluted_eps_decode_sql_public_mcp_preserves_per_share_evidence(
+    monkeypatch, test_engine, test_db, year, quarter, value, unit, scale, admitted
+):
+    from vnibb.services.vietcap_financials import load_vietcap_financial_rows
+    from vnibb.services.vietcap_ingestion import upsert_statement_periods
+
+    period_type = "quarter" if quarter else "year"
+    raw = {"yearReport": year, "lengthReport": quarter or 5, "isa24": value,
+           "reported_basic": 42, "reported_sales": 900}
+    diluted = {"level": 1, "parent": None, "titleEn": "EPS diluted (VND)",
+               "fullTitleEn": "EPS diluted (VND)", "field": "isa24", "name": "ISA24"}
+    if unit is not None:
+        diluted["unit"] = unit
+    if scale is not None:
+        diluted["scale"] = scale
+    descriptors = [diluted,
+        {"field": "reported_basic", "parent": None, "fullTitleEn": "EPS basic (VND)"},
+        {"field": "reported_sales", "parent": None, "fullTitleEn": "Net sales"}]
+    records = []
+    assert upsert_statement_periods(
+        None, "FPT", "finance.income_statement", "INCOME_STATEMENT",
+        {"quarters" if quarter else "years": [raw]}, com_type="CT", descriptors=descriptors,
+        source_response={"receivedAt": "2026-10-13T01:00:00Z"}, records=records, dry_run=True,
+    ) == 1
+    envelope = records[0]
+    original = deepcopy(envelope)
+    decoded = decode_vietcap_financial_record(envelope)
+    assert decoded["values"] == ({"eps": 42.0, "eps_diluted": value} if admitted else {"eps": 42.0})
+    assert decoded["unavailable"]["revenue"] == "unit_unverified"
+    evidence = decoded["fieldEvidence"]["eps_diluted"]
+    assert evidence["rawValue"] == value
+    assert evidence["unitEvidence"]["unitTitle"] == "EPS diluted (VND)"
+    if admitted:
+        assert evidence["unit"] == "VND/share"
+    else:
+        assert decoded["unavailable"]["eps_diluted"] == "unit_unverified"
+    rows = await load_vietcap_financial_rows(
+        "FPT", "finance.income_statement", period_type, records=records,
+    )
+    assert rows[0].eps_diluted == (value if admitted else None)
+    assert rows[0].flow_basis is None
+    assert rows[0].value_unit is None
+    assert await persist_vietcap_financials(records, cache_manager=CacheManager(db=test_db)) == 1
+    stored = (await test_db.execute(select(IncomeStatement))).scalar_one()
+    assert stored.eps_diluted == (value if admitted else None)
+    assert stored.revenue is None
+    monkeypatch.setattr(server, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
+
+    async def database_available():
+        return True
+
+    monkeypatch.setattr(server, "check_database_connection", database_available)
+    result = await server.get_latest_financial_statement("FPT", statement="income_statement", period_type=period_type)
+    assert result["found"] is True
+    assert result["provider_source"] == "vietcap"
+    assert result["item"]["eps_diluted"] == (value if admitted else None)
+    assert result["item"]["revenue"] is None
+    stored_raw = result["item"]["raw_data"]
+    assert stored_raw["raw"] == raw
+    assert stored_raw["descriptors"] == descriptors
+    assert stored_raw["descriptorEvidence"] == envelope["descriptorEvidence"]
+    assert stored_raw["structured"] == decoded
+    lineage = stored_raw["_financial_lineage"]
+    assert lineage["canonical_data"]["eps_diluted"] == (value if admitted else None)
+    assert lineage["canonical_data"]["value_unit"] is None
+    assert lineage["unit_metadata"]["eps_diluted"] == evidence
+    assert lineage["flow_basis"] is None
+    assert lineage["consolidation_basis"] is None
+    assert envelope == original
