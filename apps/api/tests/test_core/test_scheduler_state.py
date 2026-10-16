@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -227,3 +228,192 @@ async def test_scheduled_cleanup_executes_guarded_runner(job_id, monkeypatch):
         assert outcome.await_args.args[:2] == (job_id, "ok")
     finally:
         scheduled.shutdown(wait=True)
+
+
+@pytest.mark.asyncio
+async def test_retention_failures_reach_scheduler_after_remaining_cleanup(monkeypatch, caplog):
+    from vnibb.services import data_pipeline as pipeline_module
+
+    scheduled = AsyncIOScheduler(timezone="UTC")
+    monkeypatch.setattr(scheduler, "_scheduler", scheduled)
+    class UnavailableLock:
+        def __init__(self, *_):
+            pass
+
+        async def acquire(self):
+            return "unavailable"
+
+    monkeypatch.setattr(scheduler, "_job_guards", {})
+    monkeypatch.setattr(scheduler, "DistributedJobLock", UnavailableLock)
+    monkeypatch.setattr(scheduler.settings, "scheduler_lock_mode", "best_effort")
+    outcome = AsyncMock()
+    monkeypatch.setattr(scheduler, "_record_job_outcome", outcome)
+    caplog.set_level("INFO")
+    actions = {}
+    for label, method in (
+        ("stock_prices", "cleanup_price_history"),
+        ("screener_snapshots", "cleanup_screener_snapshots"),
+        ("company_news", "cleanup_company_news"),
+        ("intraday_trades", "cleanup_intraday_trades"),
+        ("orderbook_snapshots", "cleanup_orderbook_snapshots"),
+        ("block_trades", "cleanup_block_trades"),
+        ("foreign_trading", "cleanup_foreign_trading"),
+        ("order_flow_daily", "cleanup_order_flow_daily"),
+    ):
+        action = AsyncMock(
+            side_effect=RuntimeError("cleanup unavailable")
+            if label in {"stock_prices", "company_news"} else None,
+            return_value=2,
+        )
+        actions[label] = action
+        monkeypatch.setattr(data_pipeline, method, action)
+    terminal = AsyncMock(side_effect=RuntimeError("terminal report unavailable"))
+    monkeypatch.setattr(pipeline_module, "prediction_market_retention", terminal)
+
+    scheduler.schedule_retention_cleanup()
+    await scheduled.get_job("retention_cleanup").func()
+
+    for action in actions.values():
+        action.assert_awaited_once_with()
+    terminal.assert_awaited_once_with(limit=100)
+    assert outcome.await_args.args[:2] == ("retention_cleanup", "failed")
+    assert "Retention cleanup failed: stock_prices, company_news, prediction_market_candidates" in caplog.text
+    assert "Retention cleanup removed rows" not in caplog.text
+    assert "Retention cleanup found nothing" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_snapshot", [None, "nightly_snapshot", "intraday_snapshot"])
+@pytest.mark.parametrize("failed_source", [None, "polymarket"])
+async def test_startup_populate_reports_snapshot_failures(
+    test_engine, monkeypatch, failed_snapshot, failed_source
+):
+    from vnibb.services import populate_prediction_markets as populate
+
+    class UnavailableLock:
+        def __init__(self, *_):
+            pass
+
+        async def acquire(self):
+            return "unavailable"
+
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(database, "async_session_maker", sessions)
+    monkeypatch.setattr(scheduler, "_scheduler", AsyncIOScheduler(timezone="UTC"))
+    monkeypatch.setattr(scheduler, "_job_guards", {})
+    monkeypatch.setattr(scheduler, "DistributedJobLock", UnavailableLock)
+    monkeypatch.setattr(scheduler.settings, "scheduler_lock_mode", "best_effort")
+    monkeypatch.setattr(scheduler, "_last_populate_at", None)
+    monkeypatch.setattr(scheduler, "_last_populate_counts", None)
+    outcome = AsyncMock()
+    monkeypatch.setattr(scheduler, "_record_job_outcome", outcome)
+    for source, name in (
+        ("polymarket", "ingest_polymarket_gamma_markets_with_default_client"),
+        ("kalshi", "ingest_kalshi_markets_with_default_client"),
+        ("predictit", "ingest_predictit_markets_with_default_client"),
+        ("limitless", "ingest_limitless_markets_with_default_client"),
+        ("manifold", "ingest_manifold_markets_with_default_client"),
+    ):
+        monkeypatch.setattr(populate, name, AsyncMock(
+            side_effect=RuntimeError("provider unavailable") if source == failed_source else None,
+            return_value=0,
+        ))
+    snapshots = {}
+    for label, name, result in (
+        ("nightly_snapshot", "snapshot_active_prediction_markets", 0),
+        ("intraday_snapshot", "snapshot_active_prediction_markets_intraday", SimpleNamespace(rows_written=0)),
+    ):
+        snapshots[label] = AsyncMock(
+            side_effect=RuntimeError("snapshot unavailable") if label == failed_snapshot else None,
+            return_value=result,
+        )
+        monkeypatch.setattr(populate, name, snapshots[label])
+
+    scheduler._maybe_populate_prediction_markets_on_startup()
+    await scheduler.get_scheduler().get_job("populate_prediction_markets_on_startup").func()
+
+    expected = "failed" if failed_source or failed_snapshot else "ok"
+    assert outcome.await_args.args[:2] == ("populate_prediction_markets_on_startup", expected)
+    counts = scheduler.get_predictions_status()["populate"]["counts"]
+    assert counts["failed_sources"] == ([failed_source] if failed_source else [])
+    assert counts["failed_snapshots"] == ([failed_snapshot] if failed_snapshot else [])
+    for snapshot in snapshots.values():
+        snapshot.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_prediction_retention_jobs_prune_sql_rows_after_fetch_failure(test_engine, monkeypatch):
+    from sqlalchemy import select
+    from vnibb.models.prediction_market import PredictionMarket
+    from vnibb.models.prediction_market_intraday_snapshot import PredictionMarketIntradaySnapshot
+    from vnibb.models.prediction_market_snapshot import PredictionMarketSnapshot
+    from vnibb.services import (
+        kalshi_service,
+        limitless_service,
+        manifold_service,
+        prediction_market_service,
+        predictit_service,
+    )
+
+    class UnavailableLock:
+        def __init__(self, *_):
+            pass
+
+        async def acquire(self):
+            return "unavailable"
+
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(database, "async_session_maker", sessions)
+    monkeypatch.setattr(scheduler, "_scheduler", AsyncIOScheduler(timezone="UTC"))
+    monkeypatch.setattr(scheduler, "_job_guards", {})
+    monkeypatch.setattr(scheduler, "DistributedJobLock", UnavailableLock)
+    monkeypatch.setattr(scheduler.settings, "scheduler_lock_mode", "best_effort")
+    monkeypatch.setattr(scheduler, "_last_daily_prune", None)
+    monkeypatch.setattr(scheduler, "_last_intraday_prune", None)
+    outcome = AsyncMock()
+    monkeypatch.setattr(scheduler, "_record_job_outcome", outcome)
+    fetches = []
+    for module, name in (
+        (prediction_market_service, "ingest_polymarket_gamma_markets_with_default_client"),
+        (kalshi_service, "ingest_kalshi_markets_with_default_client"),
+        (predictit_service, "ingest_predictit_markets_with_default_client"),
+        (limitless_service, "ingest_limitless_markets_with_default_client"),
+        (manifold_service, "ingest_manifold_markets_with_default_client"),
+    ):
+        fetch = AsyncMock(side_effect=RuntimeError("fetch unavailable"))
+        fetches.append(fetch)
+        monkeypatch.setattr(module, name, fetch)
+
+    now = datetime.now(UTC)
+    async with sessions() as session:
+        for model, expired_days in (
+            (PredictionMarketSnapshot, 31), (PredictionMarketIntradaySnapshot, 8),
+        ):
+            for source_id, days in (("expired", expired_days), ("recent", 1)):
+                session.add(model(
+                    source="polymarket", source_id=source_id, question="Observed market?",
+                    yes_price=0.5, extra={}, captured_at=now - timedelta(days=days),
+                ))
+        for source_id, days in (("expired", 8), ("recent", 1)):
+            session.add(PredictionMarket(
+                source="polymarket", source_id=source_id, question="Real market?",
+                active=True, closed=False, is_synthetic=False,
+                updated_at=(now - timedelta(days=days)).replace(tzinfo=None),
+            ))
+        await session.commit()
+
+    scheduler.configure_scheduler()
+    scheduler.schedule_prediction_market_catalogue_retention()
+    for job_id in (
+        "prediction_market_ingest", "prediction_market_daily_prune",
+        "prediction_market_intraday_prune", "prediction_market_catalogue_retention",
+    ):
+        await scheduler.get_scheduler().get_job(job_id).func()
+        assert outcome.await_args.args[:2] == (
+            job_id, "failed" if job_id == "prediction_market_ingest" else "ok",
+        )
+    for fetch in fetches:
+        fetch.assert_awaited_once()
+    async with sessions() as session:
+        for model in (PredictionMarketSnapshot, PredictionMarketIntradaySnapshot, PredictionMarket):
+            assert (await session.scalars(select(model.source_id))).all() == ["recent"]

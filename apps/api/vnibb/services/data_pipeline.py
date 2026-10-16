@@ -2501,6 +2501,7 @@ class DataPipeline:
 
     async def run_retention_cleanup(self, include_price_history: bool = True) -> Dict[str, int]:
         results: Dict[str, int] = {}
+        failed_labels: list[str] = []
 
         cleanup_actions: List[Tuple[str, Any]] = [
             ("screener_snapshots", self.cleanup_screener_snapshots),
@@ -2522,6 +2523,7 @@ class DataPipeline:
                     results[label] = removed
             except Exception as exc:
                 logger.warning(f"Retention cleanup failed for {label}: {exc}")
+                failed_labels.append(label)
 
         try:
             market_report = await prediction_market_retention(limit=100)
@@ -2529,6 +2531,9 @@ class DataPipeline:
             logger.info("Terminal market retention dry-run (no deletion): %s", market_report)
         except Exception as exc:
             logger.warning("Terminal market retention dry-run failed: %s", exc)
+            failed_labels.append("prediction_market_candidates")
+        if failed_labels:
+            raise RuntimeError("Retention cleanup failed: " + ", ".join(failed_labels))
         return results
 
     async def sync_company_profiles(

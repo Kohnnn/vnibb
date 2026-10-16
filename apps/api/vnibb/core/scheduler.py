@@ -948,15 +948,16 @@ def _maybe_populate_prediction_markets_on_startup() -> None:
             populate_prediction_markets_now,
         )
 
-        global _last_populate_at, _last_populate_counts
-
         async def _runner() -> None:
+            global _last_populate_at, _last_populate_counts
+
             async with async_session_maker() as session:
                 counts = await populate_prediction_markets_now(session)
             _last_populate_at = datetime.utcnow()
             _last_populate_counts = counts
-            if counts["failed_sources"]:
-                raise RuntimeError("Prediction-market sources failed: " + ", ".join(counts["failed_sources"]))
+            failed_steps = counts["failed_sources"] + counts["failed_snapshots"]
+            if failed_steps:
+                raise RuntimeError("Prediction-market population failed: " + ", ".join(failed_steps))
 
         await _run_guarded_job(
             "populate_prediction_markets_on_startup",

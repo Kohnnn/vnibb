@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily VNIBB scoped Docker image retention
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15m
+Unit=vnibb-image-retention.service
+
+[Install]
+WantedBy=timers.target

@@ -52,6 +52,8 @@ The entries below describe source changes, not deployment or full-population acc
   from the server source.
 
 ### Fixed
+- Mongo services now run with Docker init and exec-based health probes with explicit two-second server-selection/connection deadlines inside the five-second health timeout, preventing orphaned probe accumulation without changing credentials or persistent volumes. The Oracle runbook includes a disposable real-Mongo reaping check and targeted recreation guidance.
+- Oracle image retention now inventories exact IDs in plan mode by default and requires explicit apply, immutable local rollback/prepared images and selected repository or untagged CI WorkingDir families. It retains the newest two eligible unused images per family plus every container-referenced/protected image; multiple-reference images are withheld for manual review and removal operands are immutable IDs only. Native oneshot/daily persistent timer templates require a private protected-image environment file, enforce a 300-second run timeout and idle priority, and include approved installation/release-refresh instructions. No container, volume, build-cache, database-history or backup pruning is performed.
 - IQ debt-to-assets decoding shares the canonical percentage classification, preserving explicitly declared \`0.25%\` through SQL storage and MCP without magnitude inference. MCP acquisition receipts derive each stage's denominator from the root expected universe and completion from outstanding stage work, including failed, deferred, interrupted and pending revalidation receipts; another stage's status cannot certify completion.
 - IQ financial decoding consumes response-level units, scales and reporting basis only with matching symbol/section/company evidence; conflicting declarations stay withheld. Ratio ingestion retains scoped descriptors and their response evidence instead of discarding them. Current IQ captures still lack authoritative monetary scales and ratio units, so those fields remain unavailable rather than inferred.
 - Descriptor-confirmed \`EPS diluted (VND)\` now survives income decoding, typed rows, SQL and MCP as \`VND/share\`, alongside basic EPS. Genuine zero is preserved; unknown units, monetary amount scales and unverified totals remain withheld, with unchanged fiscal/source guards and full descriptor lineage. The existing SQL column is reused without a migration.
@@ -259,6 +261,13 @@ The entries below describe source changes, not deployment or full-population acc
   from exceeding bucket limits. Daily and intraday retention run independently.
   Random historical backfill and production fixture fallback no longer create
   fabricated observations. Index migration supports bounded catalogue reads.
+- Retention cleanup now raises an aggregate failure after attempting all independent
+  cleanup steps and the terminal-market dry-run, so scheduler/admin callers cannot
+  report partial failures as success. One-shot prediction population exposes failed
+  daily/intraday snapshot labels separately from genuine zero-row buckets and marks
+  startup population failed for either provider or snapshot errors. Catalogue cleanup
+  clamps caller-supplied batch limits to the existing 5,000-row ceiling and rejects
+  nonpositive limits. Retention ages and independent prune schedules are unchanged.
 - OCI backup container-space probes now support BusyBox as well as GNU \`df\`,
   and reject stopped containers before starting a dump.
 - Financial ratio tables no longer present absent data as real numbers. A period the

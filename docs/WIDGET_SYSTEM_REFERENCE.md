@@ -335,10 +335,20 @@ ManifoldWidget) is now a one-liner.
 live-provider pass over Polymarket, Kalshi, PredictIt, Limitless and Manifold,
 then attempts nightly and intraday snapshots. Failed providers return a zero
 ingest count and appear in `failed_sources`; outages never insert offline
-fixtures as market observations. Snapshot failures are logged separately.
-The one-shot scheduler job and CLI entry point call
-`populate_prediction_markets_now()` (see
-`apps/api/vnibb/scripts/populate_prediction_markets.py`).
+fixtures as market observations. Snapshot failures appear in `failed_snapshots`
+as `nightly_snapshot` or `intraday_snapshot`; a successful empty bucket has a zero
+count without a failure label. Both snapshot attempts run even after provider
+failures. The startup scheduler records the returned counts in prediction health
+and marks the guarded job failed if either failure list is nonempty.
+
+Daily (30-day), intraday (seven-day), and stale nonterminal catalogue (seven-day)
+retention remain independent scheduled jobs, so failed fetches do not skip cleanup.
+Catalogue cleanup caps each caller-requested batch at 5,000 rows and rejects
+nonpositive limits; terminal, archived, and synthetic catalogue rows remain protected.
+The general retention sweep attempts every independent cleanup action and terminal
+market dry-run before raising with all failed labels; failures cannot be announced
+as successful cleanup. Terminal market deletion still requires archive-first
+operator approval and verified backup/isolated restore evidence.
 
 ## Dashboard Persistence Hardening (Phase 0)
 

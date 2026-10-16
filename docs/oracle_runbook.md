@@ -33,6 +33,60 @@ set +a
 
 Ports bind only to loopback; named volumes survive restarts. This stack is not the production corpus. The local migration observed on 13 October 2026 reached `f8c3a102d679`; adding nullable flow coverage does not certify existing rows or complete market sessions.
 
+### Mongo health-probe reaping and bounded connections
+
+Both data compose files use Docker `init: true` so PID 1 reaps adopted probe children. The health shell `exec`s `mongosh`, uses explicit 2-second server-selection and connection deadlines, and retains Docker's 5-second outer timeout. Credentials, image, volumes and resource limits are unchanged. Apply the fix with an approved Mongo-only recreation (not a restart) to preserve the existing named volume; recreating removes already orphaned probes. Never run `down -v`.
+
+Compose validation (do not publish rendered secrets):
+
+```bash
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml config --quiet
+docker compose --env-file /private/data.local.env -f docker-compose.data.local.yml config --quiet
+```
+
+Run this **disposable local** check before production recreation. It uses the local compose's actual health command, generated temporary credentials, no network, and tmpfs rather than production volumes. It checks a healthy real Mongo probe, a failed connection under the outer deadline, and orphan adoption/reaping; cleanup removes only its generated container.
+
+```bash
+python3 - <<'PY'
+import json, os, secrets, subprocess, time
+
+def run(*args, **kwargs):
+    return subprocess.run(args, check=True, capture_output=True, text=True, **kwargs).stdout.strip()
+
+env = os.environ | {'LOCAL_POSTGRES_PASSWORD': secrets.token_hex(16), 'LOCAL_MONGO_PASSWORD': secrets.token_hex(16)}
+mongo = json.loads(run('docker', 'compose', '-f', 'docker-compose.data.local.yml', 'config', '--format', 'json', env=env))['services']['mongo']
+name = 'vnibb-mongo-reaping-' + secrets.token_hex(6)
+probe = mongo['healthcheck']['test'][1].replace('$$', '$')
+try:
+    run('docker', 'run', '-d', '--name', name, '--init', '--network', 'none',
+        '--tmpfs', '/data/db', '--tmpfs', '/data/configdb',
+        '-e', 'MONGO_INITDB_ROOT_USERNAME=vnibb', '-e', 'MONGO_INITDB_ROOT_PASSWORD=' + env['LOCAL_MONGO_PASSWORD'],
+        '--health-cmd', probe, '--health-interval', '2s', '--health-timeout', '5s', '--health-retries', '20', mongo['image'])
+    for _ in range(60):
+        if run('docker', 'inspect', '--format', '{{.State.Health.Status}}', name) == 'healthy':
+            break
+        time.sleep(1)
+    else:
+        raise AssertionError('disposable Mongo did not become healthy')
+    assert 'init' in run('docker', 'exec', name, 'cat', '/proc/1/comm')
+    started = time.monotonic()
+    failed = subprocess.run(['docker', 'exec', name, 'sh', '-c', probe.replace('127.0.0.1:27017', '127.0.0.1:1')], capture_output=True, timeout=5)
+    assert failed.returncode != 0 and time.monotonic() - started < 5
+    for _ in range(20):
+        run('docker', 'exec', name, 'sh', '-c', '(sleep 0.1 &) ; exit 0')
+    time.sleep(3)
+    processes = run('docker', 'top', name, '-eo', 'pid,ppid,stat,args')
+    assert not any('Z' in line.split()[2] for line in processes.splitlines()[1:]), processes
+    assert run('docker', 'inspect', '--format', '{{.State.Health.Status}}', name) == 'healthy'
+    print('PASS: real probes bounded; PID 1 reaped 20 orphan children; no zombies')
+finally:
+    subprocess.run(['docker', 'rm', '-f', '-v', name], check=True)
+PY
+```
+
+After the approved Mongo recreation, confirm `docker inspect --format '{{.HostConfig.Init}}' vnibb-mongo` reports `true`, health returns `healthy`, and `docker top vnibb-mongo -eo pid,ppid,stat,args` has no zombie or accumulating `mongosh` processes across multiple probe intervals. This is a targeted maintenance operation, separate from application-only rollout commands below.
+
+
 New Vietnamese ingestion uses Vietcap IQ/Trading as primary and free vnstock VCI as the only supplementary provider. Do not enable historical premium mounts, KBS or TCBS routing. Preserve historical release evidence below; its old premium runtime instructions are not the new provider policy.
 
 ### Historical pre-release observation (13 October 2026)
@@ -257,6 +311,58 @@ bash scripts/oracle/build_release_image.sh registry.example.com/vnibb/api:<relea
 After publishing, resolve the registry's manifest digest and set `VNIBB_API_IMAGE_REPOSITORY=registry.example.com/vnibb/api` plus `VNIBB_API_IMAGE_DIGEST=sha256:<published-digest>` in `deployment/env.oracle`. Compose joins these fields as `repository@digest`, so a mutable tag cannot enter the release path. The image stores its build revision in `/app/.release-revision`; stale `RELEASE_REVISION` runtime keys cannot override health, logs, or Sentry. The identical image value is used by API, MCP, scheduler, and the one-shot migration service.
 
 Release smoke scripts use normal HTTPS certificate validation. A certificate or trust-chain failure blocks verification; repair the certificate/trust configuration instead of adding `--insecure`. `CURL_CA_BUNDLE` can select an explicitly trusted CA bundle when the deployment uses a private CA.
+
+### Bound local release and CI image storage
+
+Run this on the Docker host **after pulling the prepared immutable release**, after a successful rollout, and after each local CI build batch. Install the approved daily timer below so cleanup also runs when no release occurs. Build/publish off production; this procedure removes accumulated local artifacts, not registry images. Keep the independent rollback digest from the prior verified release, not a tag or a value copied from current health. Both protected images must already resolve locally; a missing prepared/rollback image stops even the plan. Do not substitute the current image for a missing rollback.
+
+```bash
+# Set these from reviewed release records; do not copy the literal placeholders.
+ROLLBACK_IMAGE='ghcr.io/kohnnn/vnibb-api@sha256:<verified-rollback-digest>'
+PREPARED_IMAGE='ghcr.io/kohnnn/vnibb-api@sha256:<reviewed-prepared-digest>'
+retention=(--repository ghcr.io/kohnnn/vnibb-api --workdir /app/VCIDataPlatform
+  --rollback-image "$ROLLBACK_IMAGE" --prepared-image "$PREPARED_IMAGE" --keep 2)
+python3 scripts/oracle/cleanup_images.py "${retention[@]}"
+# Review every full ID, references, WorkingDir and remove/keep decision above.
+# Save both JSON inventories in the private release evidence directory.
+python3 scripts/oracle/cleanup_images.py "${retention[@]}" --apply
+docker system df
+```
+
+The default is **plan only**. Explicit apply inventories full IDs before the first removal, rechecks all container references before each removal, and uses only `docker image rm --no-prune <full-ID>` without force. Mutable tags or digest references are never removal operands. Images with multiple local references are withheld for separate manual review, not automatically untagged. Every running **or stopped** container image, the configured rollback, and the pulled prepared release are protected. Each selected repository retains its newest two additional eligible unused images; the exact `/app/VCIDataPlatform` WorkingDir family retains its newest two **untagged** unused CI images. Unknown families, tagged CI images and images also referenced by an unselected repository are untouched. Count retention, not age, bounds eligible artifacts even during frequent builds. Protected/stopped-container images, multiple-reference images and excluded families can still grow: inspect the printed inventory and resolve those owners explicitly instead of widening scope silently. Pause builds/tag changes while reviewing/applying; Docker removal conflicts fail visibly and must be investigated before rerunning. Do not add `--force` to bypass Docker's guards.
+
+This procedure never removes containers, volumes, build cache, database history or backup sets. Do not replace it with `docker system prune`, `docker image prune -a` or any volume prune. Backup retention remains seven verified sets and is independent of image retention.
+
+#### Install the approved daily native timer
+
+The checked-in service is a bounded oneshot, not a daemon: Docker must be available, the required private environment file must exist, both immutable images must resolve, and failure remains visible in systemd/journal. It applies the same explicit repository and untagged CI WorkingDir scope as the reviewed plan, with a 300-second timeout and idle I/O/low CPU priority. The daily `Persistent=true` timer catches a missed run after boot; installation itself requires operator approval and is not performed by the source changes.
+
+After the plan above has been reviewed, confirm the reviewed checkout/helper is installed at `/srv/vnibb` and `/usr/bin/python3` is available. Install the units and a root-only file with the **actual** protected image values; no default digest is provided:
+
+```bash
+# ROLLBACK_IMAGE and PREPARED_IMAGE must be the reviewed local immutable images above.
+# PREPARED_IMAGE is the image selected by deployment/env.oracle, pulled before enabling.
+sudo install -d -m 0700 /etc/vnibb
+sudo install -m 0600 /dev/null /etc/vnibb/image-retention.env
+printf 'VNIBB_ROLLBACK_IMAGE=%s\nVNIBB_PREPARED_IMAGE=%s\n' \
+  "${ROLLBACK_IMAGE:?Set the verified rollback image}" \
+  "${PREPARED_IMAGE:?Set the pulled deployment image}" | \
+  sudo tee /etc/vnibb/image-retention.env >/dev/null
+sudo install -m 0644 deployment/vnibb-image-retention.service deployment/vnibb-image-retention.timer /etc/systemd/system/
+sudo systemd-analyze verify /etc/systemd/system/vnibb-image-retention.service /etc/systemd/system/vnibb-image-retention.timer
+sudo systemctl daemon-reload
+sudo systemctl start vnibb-image-retention.service
+sudo systemctl status vnibb-image-retention.service --no-pager
+sudo journalctl -u vnibb-image-retention.service -n 30 --no-pager
+sudo systemctl enable --now vnibb-image-retention.timer
+sudo systemctl list-timers vnibb-image-retention.timer --no-pager
+```
+
+The service journal contains the full-ID inventory and successful removals. Treat nonzero/failed units, missing protected images, growing withheld families or a missed daily run as operator failures to investigate, not successful retention. Check `systemctl --failed` and the service journal with routine host monitoring. Bound applies to the selected eligible families, not to live/stopped containers, manually withheld images or unrelated Docker data.
+
+Before a release pull or rollback, stop the timer and wait for any active oneshot to finish (`systemctl is-active vnibb-image-retention.service` must no longer report `active` or `activating`). Pull the new prepared image, update both entries in the root-only environment file from the independently reviewed release/rollback records, rerun the plan, then restart the timer. After successful deployment, leave `VNIBB_PREPARED_IMAGE` at the current selected deployment digest and retain the explicitly verified rollback digest. Never resume the timer with stale rollback/prepared configuration; the file does not auto-read Compose or infer release identity. To suspend automated application, use `sudo systemctl disable --now vnibb-image-retention.timer`; this does not remove images or volumes.
+
+
 
 ### Release the stack
 
