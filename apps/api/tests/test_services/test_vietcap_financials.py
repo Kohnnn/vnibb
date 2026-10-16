@@ -428,7 +428,7 @@ async def test_partial_dataset_failure_persists_reachable_rows_before_reporting(
 
 
 @pytest.mark.asyncio
-async def test_cache_storage_keeps_lineage_and_clears_uncertified_metrics(envelope, monkeypatch):
+async def test_cache_storage_keeps_lineage_without_inventing_null_metrics(envelope, monkeypatch):
     from vnibb.services.cache_manager import CacheManager
 
     cache = CacheManager()
@@ -440,9 +440,85 @@ async def test_cache_storage_keeps_lineage_and_clears_uncertified_metrics(envelo
     assert keys == ["symbol", "period", "period_type"]
     assert rows[0]["source"] == "vietcap"
     assert rows[0]["revenue"] == 12
-    assert rows[0]["net_income"] is None
+    assert "net_income" not in rows[0]
     assert rows[0]["raw_data"]["descriptorEvidence"] == envelope["descriptorEvidence"]
     assert rows[0]["raw_data"]["rawFiscalBasis"] == envelope["rawFiscalBasis"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refresh", ["missing_eps", "missing_raw", "alternate_source", "changed_receipt", "changed_metric",
+                                     "list_scalar_type", "list_length", "list_order"])
+async def test_readthrough_retains_existing_admitted_evidence(test_db, envelope, refresh):
+    from datetime import datetime
+
+    from sqlalchemy import select
+    from vnibb.models import IncomeStatement
+    from vnibb.services.cache_manager import CacheManager
+
+    prepared = AsyncMock()
+    prepared.store_financial_data.return_value = 1
+    await persist_vietcap_financials([envelope], cache_manager=prepared)
+    incoming = prepared.store_financial_data.call_args.args[3][0]
+    retained_raw = deepcopy(incoming["raw_data"])
+    retained_raw["_transferOrigin"] = {"receipt": "approved-original"}
+    retained_raw["_financial_lineage"]["canonical_data"]["eps_diluted"] = 1507.0
+    retained_raw["structured"]["values"]["eps_diluted"] = 1507.0
+    retained_raw["retainedEvidence"] = [{"flag": True}, {"flag": False}]
+    retained_at = datetime(2026, 10, 14)
+    test_db.add(IncomeStatement(id=186780, symbol="VNM", period="2025", period_type="year",
+        fiscal_year=2025, source="vietcap", revenue=12, eps=0, eps_diluted=1507,
+        raw_data=retained_raw, updated_at=retained_at))
+    await test_db.commit()
+    source = "vietcap"
+    if refresh == "missing_raw":
+        incoming.pop("raw_data")
+    elif refresh == "alternate_source":
+        source = "vietcap_vnd"
+    elif refresh != "missing_eps":
+        incoming["raw_data"] = deepcopy(retained_raw)
+        incoming["eps_diluted"] = 1507.0
+        if refresh == "changed_receipt":
+            incoming["raw_data"]["receivedAt"] = "2026-10-16T05:33:50Z"
+        elif refresh == "list_scalar_type":
+            incoming["raw_data"]["retainedEvidence"][0]["flag"] = 1
+        elif refresh == "list_length":
+            incoming["raw_data"]["retainedEvidence"].append({"flag": True})
+        elif refresh == "list_order":
+            incoming["raw_data"]["retainedEvidence"].reverse()
+        else:
+            incoming["revenue"] = 99
+    assert await CacheManager(test_db).store_financial_data("VNM", "income", "year", [incoming], source=source) == 1
+    test_db.expire_all()
+    stored = (await test_db.execute(select(IncomeStatement).where(IncomeStatement.id == 186780))).scalar_one()
+    assert (stored.eps_diluted, stored.revenue, stored.raw_data, stored.updated_at) == (1507, 12, retained_raw, retained_at)
+
+
+@pytest.mark.asyncio
+async def test_readthrough_allows_additive_decoder_enrichment(test_db, envelope):
+    from sqlalchemy import select
+    from vnibb.models import IncomeStatement
+    from vnibb.services.cache_manager import CacheManager
+
+    prepared = AsyncMock()
+    prepared.store_financial_data.return_value = 1
+    await persist_vietcap_financials([envelope], cache_manager=prepared)
+    incoming = prepared.store_financial_data.call_args.args[3][0]
+    original_raw = deepcopy(incoming["raw_data"])
+    test_db.add(IncomeStatement(id=186780, symbol="VNM", period="2025", period_type="year",
+        fiscal_year=2025, source="vietcap", revenue=12, eps=0, raw_data=original_raw))
+    await test_db.commit()
+    incoming["eps_diluted"] = 1507.0
+    incoming["raw_data"]["structured"]["values"]["eps_diluted"] = 1507.0
+    incoming["raw_data"]["_financial_lineage"]["canonical_data"]["eps_diluted"] = 1507.0
+    evidence = {"unit": "VND/share", "descriptors": [{"fullTitleEn": "EPS diluted (VND)"}]}
+    incoming["raw_data"]["structured"]["unavailable"].pop("eps_diluted", None)
+    incoming["raw_data"]["structured"]["fieldEvidence"]["eps_diluted"] = evidence
+    incoming["raw_data"]["_financial_lineage"]["unit_metadata"]["eps_diluted"] = evidence
+    incoming["raw_data"]["_financial_lineage"]["canonical_data"]["unit_metadata"]["eps_diluted"] = evidence
+    assert await CacheManager(test_db).store_financial_data("VNM", "income", "year", [incoming]) == 1
+    test_db.expire_all()
+    stored = (await test_db.execute(select(IncomeStatement).where(IncomeStatement.id == 186780))).scalar_one()
+    assert (stored.eps_diluted, stored.raw_data) == (1507, incoming["raw_data"])
 
 
 def test_ratio_requires_descriptor_and_explicit_numeric_unit(envelope):
@@ -473,6 +549,7 @@ async def test_sql_upsert_preserves_non_iq_source_and_reports_conflicting_keys(m
     session.get_bind = Mock(return_value=SimpleNamespace(dialect=dialect()))
     result = Mock()
     result.scalars.return_value.all.return_value = []
+    result.scalar_one_or_none.return_value = None
     session.execute.return_value = result
     cache = CacheManager(session)
     model = StockPrice if price else IncomeStatement
@@ -484,7 +561,7 @@ async def test_sql_upsert_preserves_non_iq_source_and_reports_conflicting_keys(m
     assert raised.value.persisted_rows == 0
     assert raised.value.conflicting_keys == [{"table": model.__tablename__, **{key: row[key] for key in keys}}]
     statement = session.execute.call_args.args[0].compile(dialect=dialect())
-    assert f"WHERE {model.__tablename__}.source {'IN' if price else '='}" in str(statement)
+    assert (f"WHERE {model.__tablename__}.source IN" if price else "DO NOTHING") in str(statement)
     if price:
         assert next(value for value in statement.params.values() if isinstance(value, list)) == ["vietcap", "vietcap_vnd"]
     else:
@@ -528,11 +605,12 @@ async def test_secondary_sql_writer_retains_primary_owner_and_conflict_evidence(
     session.get_bind = Mock(return_value=SimpleNamespace(dialect=dialect()))
     result = Mock()
     result.scalars.return_value.all.return_value = []
+    result.scalar_one_or_none.return_value = None
     session.execute.return_value = result
     row = {"symbol": "VNM", "period": "2025", "period_type": "year", "source": "VCI", "eps": 99}
     with pytest.raises(StructuredPersistenceConflict) as raised:
         await CacheManager(session)._store_rows(FinancialRatio, [row], ["symbol", "period", "period_type"])
     assert raised.value.conflicting_keys == [{"table": "financial_ratios", "symbol": "VNM", "period": "2025", "period_type": "year"}]
     statement = session.execute.call_args.args[0].compile(dialect=dialect())
-    assert "financial_ratios.source NOT IN" in str(statement)
-    assert ["vietcap", "vietcap_vnd"] in statement.params.values()
+    assert "DO NOTHING" in str(statement)
+    assert "VCI" in statement.params.values()

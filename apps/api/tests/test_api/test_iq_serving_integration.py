@@ -168,7 +168,6 @@ async def test_empty_store_financials_http_acquires_actual_iq_eps_before_vci(
     assert stored.await_count == 2
     income_write = next(call for call in stored.await_args_list if call.args[0] is IncomeStatement)
     assert income_write.args[1][0]["eps"] == 4321
-    assert income_write.args[1][0]["revenue"] is None
     assert income_write.args[1][0]["source"] == "vietcap"
     iq.get_company_details.assert_called_once_with("VNM")
     iq.get_financial_metrics_map.assert_called_once_with("VNM")

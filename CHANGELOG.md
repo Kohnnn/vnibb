@@ -14,6 +14,7 @@ live in `docs/`.
 ## [Unreleased]
 
 The entries below describe source changes, not deployment or full-population acceptance. The dated deployment records remain separate; the 13 October observed production revision is still `2c57654277ef5546662afc3cc7ed4a4e355e441e` with KBS routing. Current source acceptance starts from `552e29678164eba168b90a0b64fff779bac84e55` plus working-tree changes, not a published target image.
+- Vietcap financial read-through no longer manufactures missing metrics as SQL nulls. Existing same-source statements refresh only when the incoming observation preserves every admitted metric and retained evidence field; incompatible revisions keep the existing payload and timestamp for explicit reconciliation. New natural keys remain insertable, and concurrent inserts cannot bypass that evidence guard.
 
 ### Added
 - Personal workspace JSON backup with multi-tab layouts, widget configuration, nested folders, isolated ticker-group snapshots and linked TradingView ticker snapshots. Imports preview contents and restore as local copies without replacing existing dashboards or syncing them to the backend.
