@@ -992,15 +992,15 @@ def schedule_retention_cleanup() -> None:
     so tables grew without bound: ``prediction_markets`` reached 13 M rows /
     9.3 GB, and unbounded reads against it OOM-killed the scheduler every 15
     minutes. Running it nightly at 19:10 UTC (02:10 VNT, after the daily sync
-    window and before the 03:30 host-time backup) keeps the corpus bounded and
-    the backup size predictable.
+    window and before the 03:30 host-time backup) keeps non-price tables bounded.
+    Price history is preserved unless a manual cleanup explicitly includes it.
     """
     from apscheduler.triggers.cron import CronTrigger
 
     from vnibb.services.data_pipeline import data_pipeline
 
     async def _run() -> None:
-        removed = await data_pipeline.run_retention_cleanup(include_price_history=True)
+        removed = await data_pipeline.run_retention_cleanup()
         if removed:
             logger.info("Retention cleanup removed rows: %s", removed)
         else:

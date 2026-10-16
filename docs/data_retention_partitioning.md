@@ -5,15 +5,17 @@ partitioning for large time-series tables.
 
 ## Retention cleanup
 
-Retention cleanup removes old rows based on configuration settings. Cleanup is
-triggered automatically after daily trading syncs and full seed runs, and can be
-run on demand.
+Automatic maintenance preserves all stored price history. The nightly retention
+sweep excludes prices, and full seed runs do not prune prices after syncing.
+Non-price cleanup continues to use its configured retention windows. Price rows
+are deleted only by a manually requested cleanup that includes prices.
 
 ### Config
 
 Set these environment variables as needed:
 
-- `PRICE_HISTORY_YEARS` (default 5)
+- `PRICE_HISTORY_YEARS` (default 5; seeding window and manual price-cleanup age,
+  not an automatic storage limit)
 - `NEWS_RETENTION_DAYS` (default 7)
 - `SCREENER_RETENTION_DAYS` (default 365)
 - `ORDER_FLOW_RETENTION_YEARS` (default 3)
@@ -22,7 +24,8 @@ Set these environment variables as needed:
 - `ORDERBOOK_RETENTION_DAYS` (default 30)
 - `BLOCK_TRADES_RETENTION_DAYS` (default 365)
 
-Set any value to `0` to disable that cleanup.
+`PRICE_HISTORY_YEARS=0` does not disable explicitly requested price cleanup.
+Automatic maintenance preserves prices regardless of this setting.
 
 ### Prediction-market storage limits
 
@@ -68,7 +71,9 @@ Kalshi's filter contract is documented at
 
 ### Cleanup endpoint
 
-Run cleanup on demand:
+Run cleanup on demand. The manual endpoint retains its `include_prices=true`
+default, which deletes price rows older than `PRICE_HISTORY_YEARS`; pass
+`include_prices=false` to preserve prices while cleaning non-price data:
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/data/sync/cleanup?async_mode=true&include_prices=true"

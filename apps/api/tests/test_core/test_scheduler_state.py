@@ -174,8 +174,8 @@ async def test_cancelled_run_is_recorded_and_releases_guard(test_engine, monkeyp
     assert outcome["failing_jobs"]["cancelled"]["last_detail"] == "worker cancelled"
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("job_id", ["retention_cleanup", "prediction_market_catalogue_retention"])
-async def test_scheduled_cleanup_executes_guarded_runner(job_id, monkeypatch):
+async def test_scheduled_catalogue_cleanup_executes_guarded_runner(monkeypatch):
+    job_id = "prediction_market_catalogue_retention"
     class UnavailableLock:
         def __init__(self, *_):
             pass
@@ -194,15 +194,10 @@ async def test_scheduled_cleanup_executes_guarded_runner(job_id, monkeypatch):
     monkeypatch.setattr(database, "async_session_maker", session_maker)
     outcome = AsyncMock()
     monkeypatch.setattr(scheduler, "_record_job_outcome", outcome)
-    retention = AsyncMock(return_value={"expired_rows": 2})
     purge = AsyncMock(return_value={"candidates": 0, "deleted": 2})
-    monkeypatch.setattr(data_pipeline, "run_retention_cleanup", retention)
     monkeypatch.setattr(catalogue_retention, "purge_catalogue_debris", purge)
 
-    if job_id == "retention_cleanup":
-        scheduler.schedule_retention_cleanup()
-    else:
-        scheduler.schedule_prediction_market_catalogue_retention()
+    scheduler.schedule_prediction_market_catalogue_retention()
 
     completed = asyncio.Event()
     events = []
@@ -219,11 +214,8 @@ async def test_scheduled_cleanup_executes_guarded_runner(job_id, monkeypatch):
         scheduled.resume()
         await asyncio.wait_for(completed.wait(), timeout=5)
         assert events[0].code == EVENT_JOB_EXECUTED
-        if job_id == "retention_cleanup":
-            retention.assert_awaited_once_with(include_price_history=True)
-        else:
-            assert purge.await_count == 1
-            assert purge.await_args.kwargs == {"apply": True}
+        assert purge.await_count == 1
+        assert purge.await_args.kwargs == {"apply": True}
         outcome.assert_awaited_once()
         assert outcome.await_args.args[:2] == (job_id, "ok")
     finally:
@@ -251,7 +243,6 @@ async def test_retention_failures_reach_scheduler_after_remaining_cleanup(monkey
     caplog.set_level("INFO")
     actions = {}
     for label, method in (
-        ("stock_prices", "cleanup_price_history"),
         ("screener_snapshots", "cleanup_screener_snapshots"),
         ("company_news", "cleanup_company_news"),
         ("intraday_trades", "cleanup_intraday_trades"),
@@ -262,7 +253,7 @@ async def test_retention_failures_reach_scheduler_after_remaining_cleanup(monkey
     ):
         action = AsyncMock(
             side_effect=RuntimeError("cleanup unavailable")
-            if label in {"stock_prices", "company_news"} else None,
+            if label == "company_news" else None,
             return_value=2,
         )
         actions[label] = action
@@ -277,7 +268,7 @@ async def test_retention_failures_reach_scheduler_after_remaining_cleanup(monkey
         action.assert_awaited_once_with()
     terminal.assert_awaited_once_with(limit=100)
     assert outcome.await_args.args[:2] == ("retention_cleanup", "failed")
-    assert "Retention cleanup failed: stock_prices, company_news, prediction_market_candidates" in caplog.text
+    assert "Retention cleanup failed: company_news, prediction_market_candidates" in caplog.text
     assert "Retention cleanup removed rows" not in caplog.text
     assert "Retention cleanup found nothing" not in caplog.text
 

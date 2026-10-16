@@ -2499,7 +2499,7 @@ class DataPipeline:
             await session.commit()
             return result.rowcount or 0
 
-    async def run_retention_cleanup(self, include_price_history: bool = True) -> Dict[str, int]:
+    async def run_retention_cleanup(self, include_price_history: bool = False) -> dict[str, int]:
         results: Dict[str, int] = {}
         failed_labels: list[str] = []
 
@@ -6957,11 +6957,6 @@ class DataPipeline:
                                     sync_id=sync_id,
                                     cache_recent=False,
                                 )
-                                removed = await self.cleanup_price_history()
-                                if removed:
-                                    logger.info(
-                                        f"Pruned {removed} old price rows beyond retention window"
-                                    )
                             except Exception as e:
                                 logger.warning(f"Price sync failed: {e}")
                     elif stage == "indices":
