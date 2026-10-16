@@ -49,6 +49,7 @@ from vnibb.core.price_units import history_price_records, normalize_price_record
 from vnibb.core.ratio_units import admitted_ratio_value, normalize_ratio_payload, ratio_method_kwargs
 from vnibb.core.vn_sectors import resolve_sector_name
 from vnibb.providers.vnstock.runtime import validate_source
+from vnibb.providers.vnstock.reference_fields import identity, parse_datetime, supplied
 from vnibb.services.screener_metadata import screener_metadata_updates
 from vnibb.services.cache_manager import StructuredPersistenceConflict, source_update_condition
 from vnibb.models.alerts import BlockTrade
@@ -690,34 +691,7 @@ class DataPipeline:
         return None
 
     def _parse_datetime_value(self, value: Any) -> Optional[datetime]:
-        if value is None:
-            return None
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, date):
-            return datetime.combine(value, time.min)
-        if hasattr(pd, "Timestamp") and isinstance(value, pd.Timestamp):
-            return value.to_pydatetime()
-        raw = str(value).strip()
-        if not raw:
-            return None
-        try:
-            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        except ValueError:
-            pass
-        for fmt in (
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%d %H:%M",
-            "%d/%m/%Y %H:%M:%S",
-            "%d/%m/%Y %H:%M",
-            "%Y-%m-%d",
-            "%d/%m/%Y",
-        ):
-            try:
-                return datetime.strptime(raw, fmt)
-            except ValueError:
-                continue
-        return None
+        return parse_datetime(value)
 
     @staticmethod
     def _normalize_market_index_code(value: Any) -> str:
@@ -4312,19 +4286,22 @@ class DataPipeline:
                         progress["empty_count"] += 1
                         progress["stage_stats"]["company_news"]["empty"] = progress["stage_stats"]["company_news"].get("empty", 0) + 1
                     continue
+                payloads = [item.model_dump() for item in items]
+                for payload in payloads:
+                    payload["title"] = identity(payload.get("title"), "news")
+                    if self._parse_datetime_value(payload.get("published_at")) is None:
+                        raise ValueError("Invalid news source publication date")
 
                 async with async_session_maker() as session:
-                    for item in items:
-                        payload = item.model_dump()
+                    for payload in payloads:
                         published_dt = self._parse_datetime_value(payload.get("published_at"))
-                        if not published_dt:
-                            published_dt = datetime.combine(self._get_market_date(), time.min)
                         values = {
                             "symbol": symbol,
-                            "title": payload.get("title") or "Untitled",
+                            "title": payload["title"],
                             "summary": payload.get("summary"),
-                            "source": payload.get("source") or settings.vnstock_source,
+                            "source": payload.get("source"),
                             "url": payload.get("url"),
+                            "news_id": payload.get("news_id"),
                             "published_date": published_dt,
                             "created_at": datetime.utcnow(),
                         }
@@ -4439,8 +4416,7 @@ class DataPipeline:
                                 "ex_date": div_payload.get("ex_date"),
                                 "record_date": div_payload.get("record_date"),
                                 "payment_date": div_payload.get("payment_date"),
-                                "value": div_payload.get("cash_dividend")
-                                or div_payload.get("dividend_ratio"),
+                                "value": supplied(div_payload, "cash_dividend", "dividend_ratio"),
                                 "description": div_payload.get("content")
                                 or "Dividend event synthesized from dividend history",
                                 "raw_data": div_payload,
@@ -4450,17 +4426,20 @@ class DataPipeline:
                 if not payloads:
                     logger.info(f"No events data for {symbol}")
                     continue
+                for payload in payloads:
+                    payload["event_type"] = identity(payload.get("event_type"), "event type")
+                    payload["event_name"] = identity(payload.get("event_name"), "event")
+                    if self._parse_date_value(payload.get("event_date")) is None:
+                        raise ValueError("Invalid event source date")
 
                 async with async_session_maker() as session:
                     for payload in payloads:
-                        event_type = str(payload.get("event_type") or "event").strip()
+                        event_type = payload["event_type"]
                         event_name = str(payload.get("event_name") or "").strip()
                         event_date = self._parse_date_value(payload.get("event_date"))
                         ex_date = self._parse_date_value(payload.get("ex_date"))
                         record_date = self._parse_date_value(payload.get("record_date"))
                         payment_date = self._parse_date_value(payload.get("payment_date"))
-                        if event_date is None:
-                            event_date = ex_date or record_date or payment_date
 
                         description = payload.get("description")
                         if event_name:
@@ -4487,8 +4466,8 @@ class DataPipeline:
                             values,
                         )
                         await session.execute(stmt)
-                        total += 1
                     await session.commit()
+                total += len(payloads)
 
                 if progress is not None:
                     progress["success_count"] = progress.get("success_count", 0) + 1
@@ -4907,18 +4886,20 @@ class DataPipeline:
                         progress["empty_count"] += 1
                         progress["stage_stats"]["officers"]["empty"] = progress["stage_stats"]["officers"].get("empty", 0) + 1
                     continue
+                payloads = [item.model_dump() for item in items]
+                for payload in payloads:
+                    payload["name"] = identity(payload.get("name"), "officer")
 
                 async with async_session_maker() as session:
                     company_id = await self._get_or_create_company_id(session, symbol)
                     if not company_id:
                         raise RuntimeError(f"Company identity unavailable for {symbol}")
                     await session.execute(delete(Officer).where(Officer.symbol == symbol))
-                    for item in items:
-                        payload = item.model_dump()
+                    for payload in payloads:
                         values = {
                             "company_id": company_id,
                             "symbol": symbol,
-                            "name": payload.get("name") or "Unknown",
+                            "name": payload["name"],
                             "title": payload.get("position"),
                             "position_type": None,
                             "shares_held": payload.get("shares_owned"),
@@ -4997,18 +4978,20 @@ class DataPipeline:
                         progress["empty_count"] += 1
                         progress["stage_stats"]["subsidiaries"]["empty"] = progress["stage_stats"]["subsidiaries"].get("empty", 0) + 1
                     continue
+                payloads = [item.model_dump() for item in items]
+                for payload in payloads:
+                    payload["company_name"] = identity(payload.get("company_name"), "subsidiary")
 
                 async with async_session_maker() as session:
                     await session.execute(delete(Subsidiary).where(Subsidiary.symbol == symbol))
-                    for item in items:
-                        payload = item.model_dump()
+                    for payload in payloads:
                         values = {
                             "symbol": symbol,
-                            "subsidiary_name": payload.get("company_name") or "Unknown",
-                            "subsidiary_symbol": None,
+                            "subsidiary_name": payload["company_name"],
+                            "subsidiary_symbol": payload.get("subsidiary_symbol"),
                             "ownership_pct": payload.get("ownership_pct"),
                             "charter_capital": payload.get("charter_capital"),
-                            "relationship_type": None,
+                            "relationship_type": payload.get("relationship_type"),
                             "business_description": None,
                             "updated_at": datetime.utcnow(),
                         }

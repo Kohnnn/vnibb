@@ -6,7 +6,8 @@ Fetches company news/announcements for Vietnam-listed companies via vnstock libr
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, UTC
+from numbers import Integral
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.providers.vnstock.reference_fields import identity, parse_datetime, supplied
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,7 @@ class CompanyNewsData(BaseModel):
     url: Optional[str] = Field(None, description="Link to full article")
     summary: Optional[str] = Field(None, description="Article summary/snippet")
     category: Optional[str] = Field(None, description="News category")
+    news_id: Optional[int] = None
 
     model_config = {
         "json_schema_extra": {
@@ -77,6 +80,7 @@ class VnstockCompanyNewsFetcher(BaseFetcher[CompanyNewsQueryParams, CompanyNewsD
 
     provider_name = "vnstock"
     requires_credentials = False
+    propagate_provider_errors = True
 
     @staticmethod
     def transform_query(params: CompanyNewsQueryParams) -> dict[str, Any]:
@@ -139,39 +143,35 @@ class VnstockCompanyNewsFetcher(BaseFetcher[CompanyNewsQueryParams, CompanyNewsD
         for row in data:
             try:
                 # Preserve timestamp aliases from retained provider payloads.
-                published = (
-                    row.get("publishDate")
-                    or row.get("publish_date")
-                    or row.get("publishedDate")
-                    or row.get("published_date")
-                    or row.get("publishedAt")
-                    or row.get("published_at")
-                    or row.get("publish_time")
-                    or row.get("publicDate")
-                    or row.get("public_date")
-                    or row.get("date")
-                    or row.get("time")
-                    or row.get("createdAt")
-                    or row.get("created_at")
-                    or row.get("dateModified")
-                    or row.get("releaseDate")
+                published = supplied(
+                    row, "public_date", "publishDate", "publish_date", "publishedDate",
+                    "published_date", "publishedAt", "published_at", "publish_time",
+                    "publicDate", "date", "time", "createdAt", "created_at",
+                    "dateModified", "releaseDate",
                 )
-                if published and not isinstance(published, str):
+                if isinstance(published, Integral) and not isinstance(published, bool) and supplied(row, "public_date") is not None:
+                    # VCI news public_date is epoch milliseconds (SDK reference notebook).
+                    parsed = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(milliseconds=int(published))
+                    published = parsed.replace(tzinfo=None).isoformat()
+                else:
+                    parsed = parse_datetime(published)
+                    if parsed is None or isinstance(published, (int, float, bool)):
+                        raise ProviderError("Invalid news source publication date", provider="vnstock")
                     published = str(published)
 
                 news_item = CompanyNewsData(
                     symbol=params.symbol.upper(),
-                    title=row.get("title") or row.get("Title") or "Untitled",
-                    source=row.get("source") or row.get("Source") or "VCI",
+                    title=identity(supplied(row, "news_title", "title", "Title"), "news"),
+                    source=supplied(row, "news_source", "source", "Source"),
                     published_at=published,
-                    url=row.get("url") or row.get("link") or row.get("URL"),
-                    summary=row.get("summary") or row.get("content") or row.get("description"),
-                    category=row.get("category") or row.get("type"),
+                    url=supplied(row, "news_source_link", "url", "link", "URL"),
+                    summary=supplied(row, "news_short_content", "news_full_content", "summary", "content", "description"),
+                    category=supplied(row, "news_category_code", "category", "type"),
+                    news_id=supplied(row, "news_id"),
                 )
                 results.append(news_item)
 
             except Exception as e:
-                logger.warning(f"Skipping invalid news row: {e}")
-                continue
+                raise ProviderError("Invalid news row", provider="vnstock", cause=e) from e
 
         return results

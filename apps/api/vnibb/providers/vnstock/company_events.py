@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.providers.vnstock.reference_fields import identity, supplied
 
 logger = logging.getLogger(__name__)
 RATIO_PATTERN = re.compile(r"(\d+(?:[\.,]\d+)?)\s*[:/]\s*(\d+(?:[\.,]\d+)?)")
@@ -148,6 +149,7 @@ class CompanyEventData(BaseModel):
         None, description="Parsed cash amount per share when available"
     )
     share_ratio: Optional[str] = Field(None, description="Parsed ratio text such as 2:1 or 10:3")
+    raw_data: Optional[dict[str, Any]] = None
 
     model_config = {
         "json_schema_extra": {
@@ -171,6 +173,7 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
 
     provider_name = "vnstock"
     requires_credentials = False
+    propagate_provider_errors = True
 
     @staticmethod
     def transform_query(params: CompanyEventsQueryParams) -> dict[str, Any]:
@@ -227,9 +230,7 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                                     "recordDate": row.get("recordDate"),
                                     "paymentDate": row.get("paymentDate"),
                                     "description": row.get("description"),
-                                    "value": row.get("cashDividend")
-                                    or row.get("ratio")
-                                    or row.get("stockDividend"),
+                                    "value": supplied(row, "cashDividend", "ratio", "stockDividend"),
                                 }
                             )
                         if fallback_events:
@@ -285,9 +286,9 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                             "recordDate": dividend.record_date,
                             "paymentDate": dividend.payment_date,
                             "description": dividend.description,
-                            "value": dividend.cash_dividend
-                            or dividend.dividend_ratio
-                            or dividend.stock_dividend,
+                            "value": next((value for value in (
+                                dividend.cash_dividend, dividend.dividend_ratio, dividend.stock_dividend,
+                            ) if value is not None), None),
                         }
                     )
                 return sorted(
@@ -325,32 +326,29 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                         return None
                     return text
 
-                # Handle various column name variations from vnstock
-                event_date = row.get("eventDate") or row.get("date") or row.get("ngayGDKHQ")
-                if event_date and not isinstance(event_date, str):
-                    event_date = str(event_date)
+                def _date(*keys: str, source: dict[str, Any] = row) -> Optional[str]:
+                    for key in keys:
+                        parsed = _parse_sortable_event_date(supplied(source, key))
+                        if parsed is not None:
+                            return parsed.date().isoformat()
+                    return None
 
-                ex_date = row.get("exDate") or row.get("exRightDate") or row.get("ngayDKCC")
-                if ex_date and not isinstance(ex_date, str):
-                    ex_date = str(ex_date)
-
+                event_date = _date("public_date", "display_date", "event_date", "eventDate", "date", "ngayGDKHQ")
+                ex_date = _date("exright_date", "ex_date", "exDate", "exRightDate")
                 event_item = CompanyEventData(
                     symbol=params.symbol.upper(),
-                    event_type=_clean(
-                        row.get("eventType") or row.get("type") or row.get("loaiSuKien")
-                    ),
-                    event_name=_clean(
-                        row.get("eventName") or row.get("title") or row.get("noiDung")
-                    ),
-                    event_date=_clean(event_date),
-                    ex_date=_clean(ex_date),
-                    record_date=_clean(row.get("recordDate") or row.get("ngayDKCC")),
-                    payment_date=_clean(row.get("paymentDate") or row.get("ngayThanhToan")),
-                    description=_clean(
-                        row.get("description") or row.get("content") or row.get("ghiChu")
-                    ),
-                    value=_clean(row.get("value") or row.get("ratio") or row.get("tyLe")),
+                    event_type=identity(supplied(row, "event_code", "event_type", "eventType", "type", "loaiSuKien"), "event type"),
+                    event_name=identity(supplied(row, "event_title_vi", "event_title_en", "event_name_vi", "event_name_en", "event_name", "eventName", "title", "noiDung"), "event"),
+                    event_date=event_date,
+                    ex_date=ex_date,
+                    record_date=_date("record_date", "recordDate", "ngayDKCC"),
+                    payment_date=_date("payout_date", "payment_date", "paymentDate", "ngayThanhToan"),
+                    description=_clean(supplied(row, "event_name_vi", "event_name_en", "action_type_vi", "action_type_en", "description", "content", "ghiChu")),
+                    value=_clean(supplied(row, "value_per_share", "exercise_ratio", "value", "ratio", "tyLe")),
+                    raw_data=row,
                 )
+                if event_item.event_date is None:
+                    raise ProviderError("Invalid event source date", provider="vnstock")
                 action_category, action_subtype = _normalize_company_action_category(
                     event_item.event_type,
                     event_item.event_name,
@@ -360,6 +358,8 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                     event_item.value,
                     event_item.description,
                 )
+                if supplied(row, "value_per_share", "exercise_ratio") is not None:
+                    cash_amount_per_share = None
                 event_item = event_item.model_copy(
                     update={
                         "action_category": action_category,
@@ -375,8 +375,7 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                 results.append(event_item)
 
             except Exception as e:
-                logger.warning(f"Skipping invalid event row: {e}")
-                continue
+                raise ProviderError("Invalid event row", provider="vnstock", cause=e) from e
 
         results.sort(
             key=lambda item: _parse_sortable_event_date(

@@ -24,7 +24,7 @@ from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.core.cache import build_cache_key, cached, redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
-from vnibb.core.exceptions import ProviderTimeoutError
+from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
 from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.core.vn_sectors import VN_SECTORS
@@ -1543,6 +1543,8 @@ async def _load_corporate_actions_for_adjustment(
             str(row.value) if row.value is not None else None,
             row.description,
         )
+        if "value_per_share" in raw_payload or "exercise_ratio" in raw_payload:
+            parsed_cash = None
 
         actions.append(
             {
@@ -5738,6 +5740,15 @@ def _build_event_row_from_db(item: CompanyEvent) -> dict[str, Any]:
     """Render a CompanyEvent ORM row as the wire payload returned by the
     upstream provider, so consumers don't need to branch on source."""
     payload = item.raw_data if isinstance(item.raw_data, dict) else {}
+    if payload:
+        try:
+            normalized = VnstockCompanyEventsFetcher.transform_data(
+                CompanyEventsQueryParams(symbol=item.symbol), [payload]
+            )
+            if normalized:
+                payload = normalized[0].model_dump()
+        except ProviderError:
+            pass
     event_date_iso = item.event_date.isoformat() if item.event_date else None
     ex_date_iso = item.ex_date.isoformat() if item.ex_date else None
     record_date_iso = item.record_date.isoformat() if item.record_date else None
@@ -5751,7 +5762,7 @@ def _build_event_row_from_db(item: CompanyEvent) -> dict[str, Any]:
         "record_date": record_date_iso,
         "payment_date": payment_date_iso,
         "description": item.description,
-        "value": payload.get("value") or item.value,
+        "value": payload.get("value") if payload.get("value") is not None else item.value,
         "action_category": payload.get("action_category"),
         "action_subtype": payload.get("action_subtype"),
         "effective_date": (

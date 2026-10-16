@@ -217,7 +217,7 @@ async def test_provider_failure_is_not_an_empty_receipt(monkeypatch, dataset, fe
 @pytest.mark.asyncio
 @pytest.mark.parametrize("dataset,fetcher", WRITERS)
 async def test_failed_commit_does_not_count_rows_as_persisted(monkeypatch, dataset, fetcher):
-    payload = {"title": "Results", "published_at": "2026-10-12", "transaction_date": "2026-10-12", "insider_name": "Director", "transaction_type": "Purchase"}
+    payload = {"name": "Director", "company_name": "Subsidiary", "title": "Results", "published_at": "2026-10-12", "transaction_date": "2026-10-12", "insider_name": "Director", "transaction_type": "Purchase"}
     stub_reference_fetch(monkeypatch, dataset, fetcher, return_value=[SimpleNamespace(model_dump=lambda: payload)])
     monkeypatch.setattr(pipeline_module, "async_session_maker", lambda: Session(fail_commit=True))
     progress = {}
@@ -232,7 +232,7 @@ async def test_failed_commit_does_not_count_rows_as_persisted(monkeypatch, datas
 @pytest.mark.asyncio
 @pytest.mark.parametrize("dataset,fetcher", WRITERS)
 async def test_committed_reference_receipt_counts_success(monkeypatch, dataset, fetcher):
-    payload = {"title": "Results", "published_at": "2026-10-12", "transaction_date": "2026-10-12", "insider_name": "Director", "transaction_type": "Purchase"}
+    payload = {"name": "Director", "company_name": "Subsidiary", "title": "Results", "published_at": "2026-10-12", "transaction_date": "2026-10-12", "insider_name": "Director", "transaction_type": "Purchase"}
     stub_reference_fetch(monkeypatch, dataset, fetcher, return_value=[SimpleNamespace(model_dump=lambda: payload)])
     monkeypatch.setattr(pipeline_module, "async_session_maker", lambda: Session())
     progress = {}
@@ -641,8 +641,8 @@ async def test_repeated_news_batch_persists_idempotently_without_losing_distinct
     # The old select-then-add path raised IntegrityError on the natural key.
     engine = await _news_sqlite_writer(monkeypatch)
     batch = [
-        _news_item("Untitled", "2026-08-17 22:37", summary="first"),
-        _news_item("Untitled", "2026-08-17 22:37", summary="first"),
+        _news_item("Issuer results", "2026-08-17 22:37", summary="first"),
+        _news_item("Issuer results", "2026-08-17 22:37", summary="first"),
         _news_item("Board approves dividend", "2026-08-18 09:00", url="https://vci/x"),
     ]
     monkeypatch.setattr(
@@ -669,7 +669,7 @@ async def test_repeated_news_batch_persists_idempotently_without_losing_distinct
     assert len(rows) == 2 and len({row[0] for row in rows}) == 2
     assert [(row[1], row[2], row[3]) for row in rows] == [
         ("Board approves dividend", None, "https://vci/x"),
-        ("Untitled", "first", None),
+        ("Issuer results", "first", None),
     ]
     # published_date is derived deterministically from the provider timestamp.
     assert [str(row[4])[:10] for row in rows] == ["2026-08-18", "2026-08-17"]
@@ -680,9 +680,9 @@ async def test_repeated_news_batch_persists_idempotently_without_losing_distinct
 async def test_news_rerun_refreshes_observed_fields_and_keeps_unobserved_values(monkeypatch):
     engine = await _news_sqlite_writer(monkeypatch)
     batches = [
-        [_news_item("Untitled", "2026-08-17 22:37", summary="first", url="https://vci/old")],
-        [_news_item("Untitled", "2026-08-17 22:37", summary="revised")],
-        [_news_item("Untitled", "2026-08-17 22:37", summary="revised")],
+        [_news_item("Issuer results", "2026-08-17 22:37", summary="first", url="https://vci/old")],
+        [_news_item("Issuer results", "2026-08-17 22:37", summary="revised")],
+        [_news_item("Issuer results", "2026-08-17 22:37", summary="revised")],
     ]
     monkeypatch.setattr(
         VnstockCompanyNewsFetcher, "extract_data", AsyncMock(side_effect=batches),
