@@ -628,7 +628,7 @@ and `/health/` revision rather than candidate naming to identify production.
 **2026-09-27 fresh-cap follow-up (historical observation):** Kalshi filled
 the historical 10,000-row source quota, refusing new markets. The follow-up
 code counts only fresh eligible contracts toward that quota while retaining
-older catalogue history; the independent 16 GiB physical guard remains.
+older catalogue history; the then-current independent physical guard was 16 GiB.
 At that session, 52 prediction tests and a full backend run (976 passed,
 one skipped) passed. The existing `(source, updated_at DESC, id)` partial
 index served the fresh-cap query without a new migration; catalogue-retention
@@ -653,6 +653,29 @@ scheduler were healthy on digest
 The fresh-cap image above is therefore not currently serving. Do not treat
 the candidate manifest or previous smoke as proof of a live fresh-cap rollout;
 verify the container pin, migration head and actual ingestion after deployment.
+
+**Prediction storage policy hardening (source change, not deployment proof):**
+The catalogue admission ceiling is now **4 GiB**, and the combined daily plus
+intraday snapshot ceiling is **1 GiB**, measured with `pg_total_relation_size`
+including indexes/TOAST plus conservative mutation reserves. Both fail closed;
+an already allocated relation near its ceiling can stop writes even after deletes.
+These are application admission guards, **not filesystem quotas**. Archives,
+WAL, backups, unrelated data and direct-SQL bypasses remain outside them.
+
+The stable `prediction_market_catalogue_retention` job now runs hourly at
+**:40 UTC**, independently of provider ingestion, with the same maximum
+**12 × 5,000 = 60,000 rows per sweep** and 30-minute timeout. Eligibility is
+unchanged: real rows unrefreshed for seven days, excluding inactive-and-closed,
+synthetic and archive-owned rows. Daily history remains 30 days and intraday
+history seven days. Copied observations survive catalogue pruning. A final
+bounded existence probe marks unfinished cleanup `partial`; failure/timeout
+remain distinct. Inspect this job in `/api/v1/data/sync/status` and inventory
+relation allocation and host free space before any operator-approved deletion.
+Prediction-only dry run: `python -m vnibb.services.prediction_market_catalogue_retention --limit 5000`.
+Ordinary deletion only makes PostgreSQL pages reusable; it does not guarantee
+filesystem shrinkage. Do not raise guards, automatically archive terminal rows,
+or run `VACUUM FULL` as a workaround. See [retention policy](data_retention_partitioning.md#prediction-market-storage-limits).
+
 
 The 200 GB boot volume filled; PostgreSQL could not start and Redis AOF writes
 failed with `ENOSPC`. Reclaiming unused build caches and an off-host-verified

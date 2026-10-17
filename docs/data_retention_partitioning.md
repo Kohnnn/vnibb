@@ -42,10 +42,10 @@ above do not disable them.
   remain as history and are handled separately by bounded retention. The
   independent physical storage ceiling still limits the entire catalogue.
 - PostgreSQL catalogue mutations serialize under an advisory transaction lock.
-  A 16 GiB relation ceiling, including indexes/TOAST, reserves 256 KiB per
+  A 4 GiB relation ceiling, including indexes/TOAST, reserves 256 KiB per
   distinct mutation before either insert or update. Insufficient headroom fails
   closed rather than continuing updates. This is a conservative application
-  guard, not a filesystem quota against unrelated SQL writers.
+  guard, not a filesystem quota; archives, WAL, backups and unrelated data are outside it.
 - Only real, active, nonclosed, nonexpired markets refreshed within 24 hours
   are snapshot candidates. Missing provider refreshes do not imply settlement
   and never manufacture a closed-market status.
@@ -53,15 +53,23 @@ above do not disable them.
   at most 1,000 per source. SQL limits apply before materialization. Repeated
   runs, including a changed eligible universe, share the same bucket quota;
   unique keys and writer serialization prevent duplicate captures.
-- Snapshot storage has a combined 4 GiB relation-size guard with conservative
+- Snapshot storage has a combined 1 GiB relation-size guard with conservative
   row-growth reserves. When it refuses writes, retention still runs separately:
   seven days intraday and 30 days daily, in bounded resumable transactions.
+- `prediction_market_catalogue_retention` runs hourly at :40 UTC, independently
+  of ingestion. Each sweep commits at most 12 batches of 5,000 rows (60,000/hour)
+  under the existing 30-minute timeout. It deletes only real rows unrefreshed
+  for seven days that are neither inactive-and-closed nor archive-owned.
+  Synthetic provenance, terminal contracts and copied snapshot history stay.
+  A bounded existence probe reports remaining eligible debris as scheduler
+  `partial`, not `ok`; failures and timeouts retain their own outcomes.
 - Automatic fixture fallback and random historical backfill are removed. A
   provider failure remains observable; other providers still get an independent
   attempt. Empty history stays empty until genuine measurements arrive.
 
-At maximum coverage, seven intraday days contain at most 3,360,000 rows, plus
-150,000 daily rows over 30 days, before considering storage-guard refusals.
+The nominal full-window coverage is 3,360,000 intraday rows over seven days plus
+150,000 daily rows over 30 days, before storage-guard refusals. This is not an
+instantaneous row bound: boundary buckets and cleanup lag can add rows.
 Deletion generally makes PostgreSQL pages reusable; it does not promise an
 immediate drop in filesystem usage. Do not disable guards to overcome a full
 relation: investigate payloads, retention outcomes and allocated space first.
@@ -96,7 +104,7 @@ successful ingest to reach cleanup:
   active, nonclosed, unexpired non-combo markets; older catalogue rows remain
   stored but do not consume fresh admission slots.
 - PostgreSQL catalogue mutations serialize with an advisory transaction lock.
-  At the 16 GiB relation ceiling, including a conservative per-mutation reserve,
+  At the 4 GiB relation ceiling, including a conservative per-mutation reserve,
   all mutations fail closed. Legacy combo rows remain stored but do not consume
   non-combo admission slots. These limits do not delete the catalogue.
 - Snapshots select only real, active, nonclosed, unexpired markets refreshed
@@ -104,10 +112,10 @@ successful ingest to reach cleanup:
   Each 15-minute/day bucket holds at most 5,000 rows total and 1,000 per source.
   Unique bucket keys and writer serialization prevent retries or concurrent
   runs from multiplying rows, including when the selected universe changes.
-- The combined daily/intraday snapshot relations have a 4 GiB admission ceiling,
+- The combined daily/intraday snapshot relations have a 1 GiB admission ceiling,
   including conservative reserved space for each pending insert batch. A
   capacity failure stops writes rather than disabling retention or returning
-  fabricated history. This bounds these tables, not unrelated host workloads.
+  fabricated history. This is an application admission guard, not a filesystem quota.
 - Separate scheduled sweeps prune intraday history after seven days and daily
   history after 30 days in bounded transactions, even when ingestion fails.
   Random synthetic historical backfill and production fixture fallbacks are
@@ -117,11 +125,15 @@ Relation-size guards include indexes and allocated space. Deletes make space
 reusable by PostgreSQL but do not guarantee filesystem shrinkage. A guard that
 remains tripped after cleanup needs operator investigation, not a raised limit
 or a blind `VACUUM FULL`. The latter rewrites data and needs extra disk space.
+Archives, WAL, backups and unrelated database/host files are outside both guards.
+Direct SQL can bypass application admission. Protected catalogue rows do not
+expire automatically; admission still fails closed when their allocation fills
+the catalogue ceiling. Do not enable terminal archival as a storage workaround.
 
 
 ### Prediction-market terminal archive (operator-only)
 
-The daily cleanup above does **not** prune `prediction_markets`. `python -m vnibb.services.prediction_market_retention --limit 100` reports a dry-run batch. Eligibility is deliberately narrow: inactive and closed, end date older than 365 days, provider-certified resolved outcome present in the market's outcomes, and no nightly or intraday snapshot references. It skips markets already archived. Batch size is capped at 100; no scheduled mass deletion is enabled.
+General daily cleanup does **not** prune `prediction_markets`; the separate hourly catalogue job above removes only stale nonterminal debris. `python -m vnibb.services.prediction_market_retention --limit 100` reports an operator-only terminal dry-run batch. Eligibility is deliberately narrow: inactive and closed, end date older than 365 days, provider-certified resolved outcome present in the market's outcomes, and no nightly or intraday snapshot references. It skips markets already archived. Batch size is capped at 100; no scheduled terminal archival or mass deletion is enabled.
 
 Before applying, measure eligible rows by age/source/status on the serving PostgreSQL database and prove a recent database-matched backup with an actual isolated restore. An operator supplies a private JSON receipt with `backup_path`, its `sha256`, database name, and UTC `verified_at` from the last 24 hours, then chooses a unique protected archive file path. Only after these checks, run `python -m vnibb.services.prediction_market_retention --apply --limit 100 --backup-receipt /secure/verified-backup.json --archive-file /secure/batch.json --confirm-isolated-restore`. It writes and verifies each complete row in the archive table plus an exclusive local artifact before deleting only locked eligible rows; never discard either artifact. Restore a verified batch with `python -m vnibb.services.prediction_market_retention --restore /secure/batch.json`; an already re-ingested ID fails rather than being overwritten. The receipt is an operator assertion, not independent proof of the isolated restore. No production batch has been applied or sized in this release work.
 

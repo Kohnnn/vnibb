@@ -15,7 +15,7 @@ SNAPSHOT_SOURCE_LIMIT = 1_000
 MARKET_FRESHNESS = timedelta(hours=24)
 MAX_INGEST_MARKETS = 1_000
 MAX_MARKET_PAYLOAD_BYTES = 4 * 1024 * 1024
-MAX_CATALOGUE_RELATION_BYTES = 16 * 1024 * 1024 * 1024
+MAX_CATALOGUE_RELATION_BYTES = 4 * 1024 * 1024 * 1024
 MAX_SOURCE_MARKETS = 10_000
 MAX_MARKET_TEXT_BYTES = 8_192
 MAX_MARKET_EXTRA_BYTES = 4_096
@@ -29,7 +29,7 @@ MAX_MARKET_OUTCOMES = 32
 # job deletes exactly the rows this predicate selects.
 MARKET_RETENTION = timedelta(days=7)
 # Never let a single provider's sweep run unbounded; the retention job is
-# resumable and re-runs daily, so batches keep each transaction short.
+# resumable and re-runs hourly, so batches keep each transaction short.
 MARKET_RETENTION_BATCH = 5_000
 
 
