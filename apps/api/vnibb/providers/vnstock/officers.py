@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.providers.vnstock.reference_fields import identity, supplied
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class OfficerData(BaseModel):
     position: Optional[str] = None
     shares_owned: Optional[float] = None
     ownership_pct: Optional[float] = None
+    raw_data: Optional[dict[str, Any]] = None
     
     model_config = {
         "json_schema_extra": {
@@ -55,6 +57,7 @@ class VnstockOfficersFetcher(BaseFetcher[OfficersQueryParams, OfficerData]):
     
     provider_name = "vnstock"
     requires_credentials = False
+    propagate_provider_errors = True
     
     @staticmethod
     def transform_query(params: OfficersQueryParams) -> dict[str, Any]:
@@ -69,11 +72,10 @@ class VnstockOfficersFetcher(BaseFetcher[OfficersQueryParams, OfficerData]):
         
         def _fetch_sync() -> List[dict]:
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
+                from vnibb.providers.vnstock.runtime import create_reference_company
 
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=query["symbol"], source=validate_source(settings.vnstock_source))
-                df = stock.company.officers()
+                company = create_reference_company(query["symbol"], settings.vnstock_source)
+                df = company.officers()
                 
                 if df is None or df.empty:
                     return []
@@ -101,11 +103,12 @@ class VnstockOfficersFetcher(BaseFetcher[OfficersQueryParams, OfficerData]):
             try:
                 results.append(OfficerData(
                     symbol=params.symbol.upper(),
-                    name=row.get("name") or row.get("officerName") or row.get("hoTen"),
-                    position=row.get("position") or row.get("chucVu"),
-                    shares_owned=row.get("shares") or row.get("quantity"),
-                    ownership_pct=row.get("ratio") or row.get("ownership"),
+                    name=identity(supplied(row, "officer_name", "name", "officerName", "hoTen"), "officer"),
+                    position=supplied(row, "officer_position", "position", "chucVu"),
+                    shares_owned=supplied(row, "officer_own_quantity", "shares_owned", "total_shares", "shares", "quantity"),
+                    ownership_pct=supplied(row, "ownership_pct"),
+                    raw_data=row,
                 ))
             except Exception as e:
-                logger.warning(f"Skipping invalid officer row: {e}")
+                raise ProviderError("Invalid officer row", provider="vnstock", cause=e) from e
         return results

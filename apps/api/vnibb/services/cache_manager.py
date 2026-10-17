@@ -73,6 +73,32 @@ def source_update_condition(model, source: str | None):
     return or_(model.source.is_(None), model.source.not_in(("vietcap", "vietcap_vnd")))
 
 
+def _retains_financial_evidence(existing: Any, incoming: Any) -> bool:
+    if existing is None:
+        return True
+    if isinstance(existing, dict):
+        if isinstance(incoming, dict) and isinstance(existing.get("structured"), dict) and isinstance(incoming.get("structured"), dict):
+            prior, fresh = existing["structured"], incoming["structured"]
+            resolved = {
+                field for field, reason in prior.get("unavailable", {}).items()
+                if reason == "descriptor_unavailable" and fresh.get("values", {}).get(field) is not None
+                and fresh.get("fieldEvidence", {}).get(field)
+            }
+            if resolved:
+                existing = {**existing, "structured": {**prior, "unavailable": {
+                    field: reason for field, reason in prior["unavailable"].items() if field not in resolved
+                }}}
+        return isinstance(incoming, dict) and all(
+            key in incoming and _retains_financial_evidence(value, incoming[key])
+            for key, value in existing.items()
+        )
+    if isinstance(existing, list):
+        return isinstance(incoming, list) and len(existing) == len(incoming) and all(
+            _retains_financial_evidence(prior, fresh) for prior, fresh in zip(existing, incoming, strict=True)
+        )
+    return type(existing) is type(incoming) and existing == incoming
+
+
 class CacheManager:
     """
     Database cache layer for vnstock API responses.
@@ -898,17 +924,53 @@ class CacheManager:
             dialect_insert = insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
             count = 0
             conflicts = []
+            retained = 0
             for values in rows:
-                stmt = dialect_insert(model).values(values)
-                updates = {key: stmt.excluded[key] for key in values if key not in keys and key != "created_at"}
-                condition = source_update_condition(model, values.get("source"))
-                stmt = stmt.on_conflict_do_update(index_elements=keys, set_=updates, where=condition).returning(model.id)
+                guarded = "raw_data" in model.__table__.columns and keys == ["symbol", "period", "period_type"]
+                existing = None
+                if guarded:
+                    existing = (await session.execute(select(model).where(
+                        *(getattr(model, key) == values[key] for key in keys)
+                    ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+                if existing is not None:
+                    source = values.get("source")
+                    allowed = (existing.source == "vietcap" if source == "vietcap" else
+                               existing.source in {"vietcap", "vietcap_vnd"} if source == "vietcap_vnd" else
+                               existing.source not in {"vietcap", "vietcap_vnd"})
+                    if not allowed:
+                        conflicts.append({"table": model.__tablename__, **{key: values[key] for key in keys}})
+                        continue
+                    # ponytail: automatic refreshes are additive; revisions require explicit reconciliation.
+                    metrics_retained = existing.source not in {"vietcap", "vietcap_vnd"} or all(
+                        getattr(existing, column.name) is None
+                        or values.get(column.name, getattr(existing, column.name)) == getattr(existing, column.name)
+                        for column in model.__table__.columns if isinstance(column.type, Float)
+                    )
+                    evidence_retained = existing.source not in {"vietcap", "vietcap_vnd"} or (
+                        _retains_financial_evidence(existing.raw_data, values.get("raw_data"))
+                    )
+                    if not metrics_retained or not evidence_retained:
+                        count += 1
+                        retained += 1
+                        continue
+                    stmt = model.__table__.update().where(model.id == existing.id).values(values).returning(model.id)
+                else:
+                    stmt = dialect_insert(model).values(values)
+                    if guarded:
+                        # A concurrent insert must not bypass the evidence check above.
+                        stmt = stmt.on_conflict_do_nothing(index_elements=keys).returning(model.id)
+                    else:
+                        updates = {key: stmt.excluded[key] for key in values if key not in keys and key != "created_at"}
+                        condition = source_update_condition(model, values.get("source"))
+                        stmt = stmt.on_conflict_do_update(index_elements=keys, set_=updates, where=condition).returning(model.id)
                 result = await session.execute(stmt)
                 affected = len(result.scalars().all())
                 count += affected
                 if affected == 0:
                     conflicts.append({"table": model.__tablename__, **{key: values[key] for key in keys}})
             await session.commit()
+            if retained:
+                logger.info("Retained %s existing %s rows: refresh would replace admitted evidence", retained, model.__tablename__)
             if conflicts:
                 raise StructuredPersistenceConflict(count, conflicts)
             return count
@@ -950,10 +1012,6 @@ class CacheManager:
             if record.get("period") != label:
                 raise ValueError("Explicit fiscal period required")
             values = {aliases.get(key, key): value for key, value in record.items() if aliases.get(key, key) in columns and key not in {"id", "symbol", "source", "created_at", "updated_at", "period_type"}}
-            if source == "vietcap":
-                for column in model.__table__.columns:
-                    if isinstance(column.type, Float):
-                        values.setdefault(column.name, None)
             if values.get("raw_data") is not None:
                 def encode(value):
                     if isinstance(value, (date, datetime)):

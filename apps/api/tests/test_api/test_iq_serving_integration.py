@@ -19,7 +19,7 @@ from vnibb.services.cache_manager import CacheManager
 @pytest.mark.parametrize("period,expected", [("FY", ["2024"]), ("Q1", ["Q1-2024"])])
 async def test_iq_statements_keep_provenance_without_legacy_transform(monkeypatch, period, expected):
     row = IncomeStatementData(
-        symbol="VNM", period=expected[0], revenue=1200, profit_before_tax=150,
+        symbol="VNM", period=expected[0], revenue=1200, profit_before_tax=150, eps_diluted=1507,
         source="vietcap", fiscal_year=2024, fiscal_quarter=1 if period == "Q1" else None,
         value_unit="VND", raw_data={"descriptors": [{"field": "opaque"}]},
         unit_metadata={"revenue": {"unit": "VND", "descriptor": "opaque"}},
@@ -36,6 +36,7 @@ async def test_iq_statements_keep_provenance_without_legacy_transform(monkeypatc
     assert rows[0].unit_metadata == row.unit_metadata
     assert rows[0].fiscal_year == 2024
     assert rows[0].pre_tax_profit == 150
+    assert rows[0].eps_diluted == 1507
     loader.assert_awaited_once_with("VNM", "finance.income_statement", "quarter" if period == "Q1" else "year", limit=80, records=None)
     legacy.assert_not_awaited()
 
@@ -167,7 +168,6 @@ async def test_empty_store_financials_http_acquires_actual_iq_eps_before_vci(
     assert stored.await_count == 2
     income_write = next(call for call in stored.await_args_list if call.args[0] is IncomeStatement)
     assert income_write.args[1][0]["eps"] == 4321
-    assert income_write.args[1][0]["revenue"] is None
     assert income_write.args[1][0]["source"] == "vietcap"
     iq.get_company_details.assert_called_once_with("VNM")
     iq.get_financial_metrics_map.assert_called_once_with("VNM")

@@ -18,6 +18,7 @@ services:
   mongo:
     image: mongo:7
     restart: unless-stopped
+    init: true
     environment:
       MONGO_INITDB_ROOT_USERNAME: vnibb
       MONGO_INITDB_ROOT_PASSWORD: ${LOCAL_MONGO_PASSWORD:?Set LOCAL_MONGO_PASSWORD in a private env file}
@@ -26,7 +27,7 @@ services:
     volumes:
       - local_mongo:/data/db
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 2)'"]
+      test: ["CMD-SHELL", "exec mongosh 'mongodb://127.0.0.1:27017/?serverSelectionTimeoutMS=2000&connectTimeoutMS=2000' --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 2)'"]
       interval: 5s
       timeout: 5s
       retries: 12

@@ -59,6 +59,14 @@ def get_company_class():
     return import_vnstock_symbol("Company")[0]
 
 
+def create_reference_company(symbol: str, source: str):
+    validate_source(source)
+    import_vnstock_symbol("Company")
+    from vnstock.explorer.vci import Company
+
+    return Company(symbol=symbol)
+
+
 def validate_source(source: str | None = None) -> str:
     """Reject alternate providers before constructing a vnstock client."""
     normalized = (source or "VCI").strip().upper()

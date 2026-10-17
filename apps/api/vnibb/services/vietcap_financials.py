@@ -54,6 +54,7 @@ _LABELS = {
     "free_cash_flow": ("free cash flow",), "capital_expenditure": ("capital expenditure",),
     "dividends_paid": ("dividends paid",),
     "eps": ("eps basic (vnd)", "earnings per share", "basic earnings per share", "eps"),
+    "eps_diluted": ("eps diluted (vnd)",),
     "bvps": ("book value per share", "bvps"), "pe": ("p/e", "price to earnings"),
     "pb": ("p/b", "price to book"), "ps": ("p/s", "price to sales"),
     "ev_ebitda": ("ev/ebitda",), "ev_sales": ("ev/sales",),
@@ -67,7 +68,7 @@ _LABELS = {
     "dps": ("dividend per share",), "dividend_yield": ("dividend yield",),
 }
 _PERCENT_FIELDS = PERCENT_RATIO_FIELDS | {"dividend_yield"}
-_PER_SHARE_FIELDS = {"eps", "bvps", "dps"}
+_PER_SHARE_FIELDS = {"eps", "eps_diluted", "bvps", "dps"}
 
 
 def _label(value: Any) -> str:
@@ -230,8 +231,9 @@ def _unit(record: Mapping[str, Any], descriptor: Mapping[str, Any], field: str) 
     if response_sources:
         evidence["responseEvidence"] = response_sources[0][1]
         evidence["responses"] = [{"metadata": metadata, "evidence": scope} for metadata, scope in response_sources]
-    if field == "eps" and any(_label(descriptor.get(key)) == "eps basic (vnd)" for key in ("fullTitleEn", "titleEn")):
-        evidence["unitTitle"] = "EPS basic (VND)"
+    eps_title = {"eps": "EPS basic (VND)", "eps_diluted": "EPS diluted (VND)"}.get(field)
+    if eps_title and any(_label(descriptor.get(key)) == _label(eps_title) for key in ("fullTitleEn", "titleEn")):
+        evidence["unitTitle"] = eps_title
         if not units and not currency and not scales:
             return 1.0, "VND/share", evidence
     normalized = {_label(value) for value in units}

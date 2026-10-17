@@ -666,6 +666,110 @@ async def scheduled_price_database(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_automatic_maintenance_preserves_history_until_explicit_price_cleanup(
+    monkeypatch, scheduled_price_database
+):
+    from datetime import datetime, time, timedelta
+    from unittest.mock import AsyncMock
+
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from sqlalchemy import select
+
+    from vnibb.core import scheduler
+    from vnibb.models.stock import StockPrice
+
+    today = date.today()
+    old_day = date(2006, 1, 3)
+    pipeline = DataPipeline()
+    sessions = scheduled_price_database
+    cleanup_models = (
+        data_pipeline_module.ScreenerSnapshot,
+        data_pipeline_module.CompanyNews,
+        data_pipeline_module.IntradayTrade,
+        data_pipeline_module.OrderbookSnapshot,
+        data_pipeline_module.BlockTrade,
+        data_pipeline_module.ForeignTrading,
+        data_pipeline_module.OrderFlowDaily,
+    )
+    async with data_pipeline_module.engine.begin() as conn:
+        for model in cleanup_models:
+            await conn.run_sync(model.__table__.create)
+    async with sessions() as session:
+        session.add(StockPrice(
+            stock_id=1, symbol="VNM", time=old_day, open=10000, high=11000,
+            low=9000, close=10500, volume=100, source="vietcap_vnd", interval="1D",
+        ))
+        session.add_all([
+            data_pipeline_module.CompanyNews(
+                id=1, symbol="VNM", title="Expired news",
+                published_date=datetime.combine(today - timedelta(days=8), time.min),
+            ),
+            data_pipeline_module.CompanyNews(
+                id=2, symbol="VNM", title="Current news",
+                published_date=datetime.combine(today, time.min),
+            ),
+        ])
+        await session.commit()
+
+    monkeypatch.setattr(settings, "price_history_years", 5)
+    monkeypatch.setattr(settings, "news_retention_days", 7)
+    monkeypatch.setattr(pipeline, "_get_market_date", lambda: today)
+    monkeypatch.setattr(data_pipeline_module, "data_pipeline", pipeline)
+    monkeypatch.setattr(
+        data_pipeline_module, "prediction_market_retention",
+        AsyncMock(return_value={"eligible_in_batch": 0}),
+    )
+
+    async def run_guarded_job(job_id, runner, timeout):
+        await runner()
+
+    scheduled = AsyncIOScheduler(timezone="UTC")
+    monkeypatch.setattr(scheduler, "_scheduler", scheduled)
+    monkeypatch.setattr(scheduler, "_run_guarded_job", run_guarded_job)
+    scheduler.schedule_retention_cleanup()
+    await scheduled.get_job("retention_cleanup").func()
+    async with sessions() as session:
+        assert (await session.execute(select(StockPrice.time))).scalars().all() == [old_day]
+        assert (await session.execute(
+            select(data_pipeline_module.CompanyNews.title)
+        )).scalars().all() == ["Current news"]
+
+    async def fetch_history(**kwargs):
+        return pd.DataFrame([{
+            "time": today, "open": 60000, "high": 61000, "low": 59000,
+            "close": 60500, "volume": 100, "price_unit": "VND",
+            "price_source": "vnstock_history:VCI",
+        }])
+
+    monkeypatch.setattr(pipeline, "_fetch_quote_history_frame", fetch_history)
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", AsyncMock())
+    monkeypatch.setattr(pipeline, "_cache_set_json", AsyncMock())
+    # Isolate job bookkeeping, not the price writer or retention SQL.
+    for method in (
+        "_mark_stale_running_sync_records", "_checkpoint", "_update_sync_record",
+        "_clear_progress", "_release_sync_run_guard",
+    ):
+        monkeypatch.setattr(pipeline, method, AsyncMock())
+    monkeypatch.setattr(
+        pipeline, "_acquire_sync_run_guard", AsyncMock(return_value=(True, "test", "token"))
+    )
+    monkeypatch.setattr(pipeline, "_create_sync_record", AsyncMock(return_value=1))
+    await pipeline.run_full_seeding(days=1, resume=False, stages=["prices"])
+    async with sessions() as session:
+        dates = (await session.execute(
+            select(StockPrice.time).where(StockPrice.symbol == "VNM").order_by(StockPrice.time)
+        )).scalars().all()
+        assert dates == [old_day, today]
+
+    removed = await pipeline.run_retention_cleanup(include_price_history=True)
+    assert removed["stock_prices"] == 1
+    async with sessions() as session:
+        assert (await session.execute(
+            select(StockPrice.time).where(StockPrice.symbol == "VNM")
+        )).scalars().all() == [today]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["live_iq", "cached_iq", "free_vci"])
 async def test_scheduled_price_acquisition_ingests_real_sql_source_rows(monkeypatch, scheduled_price_database, outcome):
     from datetime import UTC, datetime

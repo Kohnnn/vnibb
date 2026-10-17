@@ -18,6 +18,7 @@ import time
 from typing import Any, Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel
+from vnibb.core.exceptions import ProviderError
 
 QueryT = TypeVar("QueryT", bound=BaseModel)
 DataT = TypeVar("DataT", bound=BaseModel)
@@ -68,6 +69,7 @@ class BaseFetcher(ABC, Generic[QueryT, DataT]):
 
     # Whether this provider requires authentication
     requires_credentials: bool = False
+    propagate_provider_errors: bool = False
 
     @staticmethod
     @abstractmethod
@@ -185,6 +187,8 @@ class BaseFetcher(ABC, Generic[QueryT, DataT]):
                 )
             return []
         except Exception as e:
+            if cls.propagate_provider_errors and isinstance(e, ProviderError):
+                raise
             # Phase 50: Graceful degradation - log and return empty instead of 502/500
             _log_throttled(
                 logging.WARNING,
