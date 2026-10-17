@@ -227,7 +227,6 @@ async def test_scheduled_catalogue_cleanup_executes_guarded_runner(monkeypatch):
 @pytest.mark.parametrize("pending_rows", [0, 1])
 async def test_hourly_catalogue_cleanup_reports_remaining_backlog(test_engine, monkeypatch, pending_rows):
     from sqlalchemy import select
-
     from vnibb.models.prediction_market import PredictionMarket
     from vnibb.models.prediction_market_archive import PredictionMarketArchive
     from vnibb.models.prediction_market_snapshot import PredictionMarketSnapshot
