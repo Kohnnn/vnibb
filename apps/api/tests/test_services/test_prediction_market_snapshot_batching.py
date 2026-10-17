@@ -6,7 +6,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.models.prediction_market_intraday_snapshot import PredictionMarketIntradaySnapshot
@@ -237,16 +237,41 @@ async def test_combined_snapshot_ceiling_reserves_next_row(test_db, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_storage_ceiling_blocks_both_writers_before_inserting(test_db, monkeypatch):
+@pytest.mark.parametrize("writer", [
+    daily.snapshot_active_prediction_markets,
+    intraday.snapshot_active_prediction_markets_intraday,
+])
+async def test_allocated_ceiling_blocks_both_writers_without_mutating_history(test_db, monkeypatch, writer):
     test_db.add(_market(1))
     await test_db.commit()
-    monkeypatch.setattr(daily, "SNAPSHOT_STORAGE_CEILING_BYTES", 1)
+    await daily.snapshot_active_prediction_markets(test_db)
+    await intraday.snapshot_active_prediction_markets_intraday(test_db)
+    test_db.add(_market(2))
+    await test_db.commit()
+
+    class _PostgresBind:
+        dialect = type("_Dialect", (), {"name": "postgresql"})()
+
+    monkeypatch.setattr(test_db, "get_bind", lambda: _PostgresBind())
+    real_execute = test_db.execute
+
+    async def capped_execute(statement, *args, **kwargs):
+        if "pg_advisory_xact_lock" in str(statement):
+            return None
+        if "pg_total_relation_size" in str(statement):
+            class Size:
+                def scalar_one(self):
+                    # One reserved insert crosses 1 GiB, below the former 4 GiB guard.
+                    return 1024**3 - daily.SNAPSHOT_RESERVED_BATCH_BYTES - daily.SNAPSHOT_RESERVED_ROW_BYTES + 1
+            return Size()
+        return await real_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(test_db, "execute", capped_execute)
     with pytest.raises(RuntimeError, match="storage ceiling"):
-        await intraday.snapshot_active_prediction_markets_intraday(test_db)
-    with pytest.raises(RuntimeError, match="storage ceiling"):
-        await daily.snapshot_active_prediction_markets(test_db)
+        await writer(test_db)
     for model in (PredictionMarketSnapshot, PredictionMarketIntradaySnapshot):
-        assert (await test_db.scalar(select(func.count()).select_from(model))) == 0
+        rows = (await real_execute(select(model))).scalars().all()
+        assert [(row.source_id, row.yes_price) for row in rows] == [("polymarket-1", 0.4)]
 
 
 @pytest.mark.asyncio

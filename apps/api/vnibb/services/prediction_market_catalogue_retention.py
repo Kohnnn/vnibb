@@ -13,7 +13,7 @@ a ``LIMIT`` instead of counting the complement first. Measuring on production
 showed the debris is ~83 % of a 14.7 M row table, so a count is planned as a
 parallel sequential scan (~112 s) while the bounded ordered walk resolves via
 ``ix_prediction_markets_updated_at_id`` in a few milliseconds. Deletion is
-batched and resumable so each transaction stays short and the daily schedule can
+batched and resumable so each transaction stays short and the hourly schedule can
 drain a large backlog over several runs.
 
 Rows that retention cannot safely drop are deliberately kept:

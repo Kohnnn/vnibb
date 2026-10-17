@@ -287,23 +287,38 @@ async def test_snapshot_eligibility_is_fresh_per_source_and_rejects_inactive(tes
 
 
 @pytest.mark.asyncio
-async def test_storage_ceiling_rejects_existing_updates_without_mutation(test_db, monkeypatch):
+async def test_storage_ceiling_rejects_batch_without_mutating_retained_history(test_db, monkeypatch):
     await service.persist_prediction_markets(test_db, [market("KXREAL-1")])
+    test_db.add(PredictionMarket(**market(
+        "KXHISTORY", active=False, closed=True,
+        updated_at=datetime.utcnow() - timedelta(days=30),
+    )))
+    await test_db.commit()
+
     class _PostgresBind:
         dialect = type("_Dialect", (), {"name": "postgresql"})()
+
     monkeypatch.setattr(test_db, "get_bind", lambda: _PostgresBind())
     real_execute = test_db.execute
+
     async def capped_execute(statement, *args, **kwargs):
         if "pg_advisory_xact_lock" in str(statement):
             return None
         if "pg_total_relation_size" in str(statement):
             class Size:
                 def scalar_one(self):
-                    return service.MAX_CATALOGUE_RELATION_BYTES
+                    # Two mutations would cross 4 GiB by one byte, below the old ceiling.
+                    return 4 * 1024**3 - 2 * 256 * 1024 + 1
             return Size()
         return await real_execute(statement, *args, **kwargs)
+
     monkeypatch.setattr(test_db, "execute", capped_execute)
     with pytest.raises(service.PredictionMarketAdmissionError, match="no markets mutated"):
-        await service.persist_prediction_markets(test_db, [market("KXREAL-1", question="Should not persist")])
-    stored = (await real_execute(select(PredictionMarket))).scalars().one()
-    assert stored.question == "Will the policy rate rise?"
+        await service.persist_prediction_markets(test_db, [
+            market("KXREAL-1", question="Should not persist"), market("KXREAL-2"),
+        ])
+    stored = (await real_execute(select(PredictionMarket))).scalars().all()
+    assert {(row.source_id, row.question, row.active, row.closed) for row in stored} == {
+        ("KXREAL-1", "Will the policy rate rise?", True, False),
+        ("KXHISTORY", "Will the policy rate rise?", False, True),
+    }

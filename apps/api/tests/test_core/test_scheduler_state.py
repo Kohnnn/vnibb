@@ -196,6 +196,7 @@ async def test_scheduled_catalogue_cleanup_executes_guarded_runner(monkeypatch):
     monkeypatch.setattr(scheduler, "_record_job_outcome", outcome)
     purge = AsyncMock(return_value={"candidates": 0, "deleted": 2})
     monkeypatch.setattr(catalogue_retention, "purge_catalogue_debris", purge)
+    monkeypatch.setattr(catalogue_retention, "has_catalogue_debris", AsyncMock(return_value=False))
 
     scheduler.schedule_prediction_market_catalogue_retention()
 
@@ -220,6 +221,82 @@ async def test_scheduled_catalogue_cleanup_executes_guarded_runner(monkeypatch):
         assert outcome.await_args.args[:2] == (job_id, "ok")
     finally:
         scheduled.shutdown(wait=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pending_rows", [0, 1])
+async def test_hourly_catalogue_cleanup_reports_remaining_backlog(test_engine, monkeypatch, pending_rows):
+    from sqlalchemy import select
+    from vnibb.models.prediction_market import PredictionMarket
+    from vnibb.models.prediction_market_archive import PredictionMarketArchive
+    from vnibb.models.prediction_market_snapshot import PredictionMarketSnapshot
+    from vnibb.services import prediction_market_policy as policy
+
+    class UnavailableLock:
+        def __init__(self, *_):
+            pass
+
+        async def acquire(self):
+            return "unavailable"
+
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(database, "async_session_maker", sessions)
+    monkeypatch.setattr(scheduler, "_scheduler", AsyncIOScheduler(timezone="UTC"))
+    monkeypatch.setattr(scheduler, "_job_guards", {})
+    monkeypatch.setattr(scheduler, "DistributedJobLock", UnavailableLock)
+    monkeypatch.setattr(scheduler.settings, "scheduler_lock_mode", "best_effort")
+    monkeypatch.setattr(scheduler, "PREDICTION_MARKET_CATALOGUE_RETENTION_BATCHES", 2)
+    monkeypatch.setattr(policy, "MARKET_RETENTION_BATCH", 2)
+    monkeypatch.setattr(catalogue_retention, "MARKET_RETENTION_BATCH", 2)
+    outcome = AsyncMock()
+    monkeypatch.setattr(scheduler, "_record_job_outcome", outcome)
+    now = datetime.now(UTC)
+    async with sessions() as session:
+        for index in range(4 + pending_rows):
+            session.add(PredictionMarket(
+                source="polymarket", source_id=f"debris-{index}", question="Old open market?",
+                active=True, closed=False, is_synthetic=False,
+                updated_at=(now - timedelta(days=8)).replace(tzinfo=None),
+            ))
+        protected = [
+            PredictionMarket(
+                source="polymarket", source_id=kind, question="Protected market?",
+                active=kind != "terminal", closed=kind == "terminal", is_synthetic=kind == "synthetic",
+                updated_at=(now - timedelta(days=8)).replace(tzinfo=None),
+            ) for kind in ("terminal", "synthetic", "archived")
+        ]
+        session.add_all(protected)
+        await session.flush()
+        session.add(PredictionMarketArchive(
+            market_id=protected[-1].id, batch_id="retained", payload={}, sha256="a" * 64,
+            archived_at=now.replace(tzinfo=None), backup_sha256="a" * 64,
+        ))
+        session.add(PredictionMarketSnapshot(
+            source="polymarket", source_id="debris-0", question="Retained observation?",
+            yes_price=0.4, captured_at=now - timedelta(days=2), extra={},
+        ))
+        await session.commit()
+
+    scheduler.schedule_prediction_market_catalogue_retention()
+    job = scheduler.get_scheduler().get_job("prediction_market_catalogue_retention")
+    first = job.trigger.get_next_fire_time(None, now)
+    assert job.trigger.get_next_fire_time(first, first) - first == timedelta(hours=1)
+    await job.func()
+    assert outcome.await_args.args[:2] == (job.id, "partial" if pending_rows else "ok")
+    if pending_rows:
+        assert outcome.await_args.args[2] == "progress saved; work remains"
+    async with sessions() as session:
+        retained = set((await session.scalars(select(PredictionMarket.source_id))).all())
+        assert retained == {"terminal", "synthetic", "archived"} | ({"debris-4"} if pending_rows else set())
+        observation = (await session.scalars(select(PredictionMarketSnapshot))).one()
+        assert (observation.source_id, observation.yes_price) == ("debris-0", 0.4)
+    if pending_rows:
+        await job.func()
+        assert outcome.await_args.args[:2] == (job.id, "ok")
+        async with sessions() as session:
+            assert set((await session.scalars(select(PredictionMarket.source_id))).all()) == {
+                "terminal", "synthetic", "archived",
+            }
 
 
 @pytest.mark.asyncio

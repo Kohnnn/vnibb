@@ -168,7 +168,7 @@ DATA_QUALITY_TIMEOUT_SECONDS = 15 * 60
 # gets a much longer budget than any provider-backed job.
 RETENTION_CLEANUP_TIMEOUT_SECONDS = 45 * 60
 # Catalogue debris drains in ``MARKET_RETENTION_BATCH`` chunks. The sweep
-# re-runs daily and resumes where it stopped, so a large backlog clears over
+# re-runs hourly and resumes where it stopped, so a large backlog clears over
 # several cycles instead of holding one long transaction.
 PREDICTION_MARKET_CATALOGUE_RETENTION_TIMEOUT_SECONDS = 30 * 60
 PREDICTION_MARKET_CATALOGUE_RETENTION_BATCHES = 12
@@ -291,7 +291,8 @@ async def _run_guarded_job(
             elapsed = (datetime.utcnow() - started_at).total_seconds()
             pending = sum(getattr(stage, "pending_count", 0) for stage in stages)
             if any(getattr(stage, "complete", True) is False for stage in stages):
-                await _record_job_outcome(job_name, "partial", f"progress saved; pending acquisitions={pending}")
+                detail = f"progress saved; pending acquisitions={pending}" if pending else "progress saved; work remains"
+                await _record_job_outcome(job_name, "partial", detail)
                 return
             await _record_job_outcome(job_name, "ok", f"completed in {elapsed:.1f}s")
             logger.info("%s completed in %.1fs", job_name, elapsed)
@@ -1027,24 +1028,26 @@ def schedule_retention_cleanup() -> None:
 
 
 def schedule_prediction_market_catalogue_retention() -> None:
-    """Drain unreadable ``prediction_markets`` debris nightly.
+    """Drain unreadable ``prediction_markets`` debris hourly.
 
     The ingest upserts on ``(source, source_id)`` and never deletes, so every
     contract a provider has since delisted stays forever. Reads only ever serve
     rows refreshed within ``MARKET_FRESHNESS`` inside ``SNAPSHOT_SOURCE_LIMIT``
     per source, which makes the rest provably unreadable while still costing
     disk and index maintenance. This sweep deletes that complement in bounded
-    batches, resuming nightly until the backlog is gone.
+    batches, resuming hourly until the backlog is gone.
     """
     from apscheduler.triggers.cron import CronTrigger
 
     from vnibb.core.database import async_session_maker
     from vnibb.services.prediction_market_catalogue_retention import (
+        has_catalogue_debris,
         purge_catalogue_debris,
     )
     from vnibb.services.prediction_market_policy import MARKET_RETENTION_BATCH
+    from vnibb.services.sync_all_data import SyncResult
 
-    async def _run() -> None:
+    async def _run() -> SyncResult:
         total = 0
         for _ in range(PREDICTION_MARKET_CATALOGUE_RETENTION_BATCHES):
             async with async_session_maker() as session:
@@ -1054,7 +1057,10 @@ def schedule_prediction_market_catalogue_retention() -> None:
             # of re-probing a table that has nothing left to remove.
             if receipt["candidates"] < MARKET_RETENTION_BATCH:
                 break
-        logger.info("prediction_market_catalogue_retention removed rows: %s", total)
+        async with async_session_maker() as session:
+            pending = await has_catalogue_debris(session)
+        logger.info("prediction_market_catalogue_retention removed rows: %s; debris_pending=%s", total, pending)
+        return SyncResult(True, total, 0, 0, [], complete=not pending)
 
     async def guarded_prediction_market_catalogue_retention() -> None:
         await _run_guarded_job(
@@ -1066,14 +1072,14 @@ def schedule_prediction_market_catalogue_retention() -> None:
     scheduler = get_scheduler()
     scheduler.add_job(
         guarded_prediction_market_catalogue_retention,
-        trigger=CronTrigger(hour=19, minute=40, timezone="UTC"),
+        trigger=CronTrigger(minute=40, timezone="UTC"),
         id="prediction_market_catalogue_retention",
-        name="Prediction market catalogue retention (daily 19:40 UTC)",
+        name="Prediction market catalogue retention (hourly at :40 UTC)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
     )
-    logger.info("Scheduled: prediction_market_catalogue_retention daily at 19:40 UTC")
+    logger.info("Scheduled: prediction_market_catalogue_retention hourly at :40 UTC")
 
 
 async def shutdown_scheduler() -> bool:
