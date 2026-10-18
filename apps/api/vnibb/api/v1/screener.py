@@ -38,6 +38,7 @@ from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
 )
 from vnibb.services.cache_manager import CacheManager
+from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.screener_filter_service import ScreenerFilterService
 
@@ -1385,7 +1386,17 @@ async def _apply_fundamental_enrichment(
             doc = docs.get((row.symbol or "").upper())
             if not isinstance(doc, dict):
                 continue
+            valuation_reason = fundamental_valuation_unavailable_reason(doc)
+            if valuation_reason:
+                row.provider_evidence.append({
+                    "dataset": "market_fundamental_screener",
+                    "snapshotDate": doc.get("snapshotDate"),
+                    "unavailable_reason": valuation_reason,
+                })
             for doc_key, attr in _FUNDAMENTAL_DOC_FIELD_MAP.items():
+                if valuation_reason and doc_key in {"intrinsicValue", "marginOfSafety", "valuationMethod"}:
+                    setattr(row, attr, None)
+                    continue
                 value = doc.get(doc_key)
                 if value is not None:
                     setattr(row, attr, value)

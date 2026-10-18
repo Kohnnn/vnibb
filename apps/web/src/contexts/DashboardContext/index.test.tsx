@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useLayoutEffect, useRef } from 'react';
 import { NotesWidget } from '@/components/widgets/NotesWidget';
+import { WidgetSettingsModal } from '@/components/modals/WidgetSettingsModal';
+import { GlobalMarketsSymbolProvider } from '@/contexts/GlobalMarketsSymbolContext';
 import type { Dashboard, SystemDashboardTemplateListResponse } from '@/types/dashboard';
 import {
   DashboardProvider,
@@ -377,6 +379,37 @@ describe('DashboardProvider browser persistence', () => {
   afterEach(() => {
     jest.useRealTimers();
     jest.restoreAllMocks();
+  });
+
+  it.each([
+    ['an explicit local-period opt-out', { periodSyncGroup: null, defaultPeriod: 'Q' }, { periodSyncGroup: null, defaultPeriod: 'Q' }],
+    ['an omitted period group', { defaultPeriod: 'Q' }, { defaultPeriod: 'Q' }],
+  ])('preserves %s when widget settings are saved and reloaded', async (_label, advancedConfig, expectedConfig) => {
+    const existing: Dashboard = {
+      ...customDashboard,
+      tabs: [{ id: 'saved-tab', name: 'Saved tab', order: 0, widgets: [{
+        id: 'local-income', type: 'income_statement', tabId: 'saved-tab', config: {},
+        layout: { i: 'local-income', x: 0, y: 0, w: 12, h: 8 },
+      }] }],
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([existing]));
+
+    const settings = (
+      <DashboardProvider>
+        <GlobalMarketsSymbolProvider>
+          <WidgetSettingsModal isOpen onClose={() => {}} dashboardId={existing.id} tabId="saved-tab" widgetId="local-income" />
+        </GlobalMarketsSymbolProvider>
+      </DashboardProvider>
+    );
+    const { unmount } = render(settings);
+    const rawJson = await screen.findByLabelText('Raw JSON');
+    fireEvent.change(rawJson, { target: { value: JSON.stringify({ ...advancedConfig, unrelated: null }) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(storedDashboards().find((dashboard) => dashboard.id === existing.id)?.tabs[0].widgets[0].config).toEqual(expectedConfig));
+    unmount();
+    render(settings);
+    await waitFor(() => expect(JSON.parse((screen.getByLabelText('Raw JSON') as HTMLTextAreaElement).value)).toEqual(expectedConfig));
   });
 
   it('reloads bottom-placed widgets without changing authored dashboard geometry or config', async () => {

@@ -1025,6 +1025,21 @@ def compute_fundamental_snapshot(
     return snapshot
 
 
+def fundamental_valuation_unavailable_reason(snapshot: dict[str, Any] | None) -> str | None:
+    if not snapshot:
+        return None
+    inputs = snapshot.get("inputs")
+    inputs = inputs if isinstance(inputs, dict) else {}
+    reason = inputs.get("comparisonUnavailableReason")
+    if reason:
+        return str(reason)
+    lineage = inputs.get("unitLineage")
+    price = lineage.get("price") if isinstance(lineage, dict) else None
+    if inputs.get("unitQuality") != "verified" or not isinstance(price, dict) or price.get("unit") != "VND":
+        return "Retained snapshot valuation basis is unverified; verified input units and declared VND price lineage are required."
+    return None
+
+
 def to_document(snapshot: FundamentalSnapshot, snapshot_date: date) -> dict[str, Any]:
     """Render the snapshot as the camelCase Mongo document from the contract."""
 

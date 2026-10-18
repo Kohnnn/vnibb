@@ -149,7 +149,14 @@ class FakeMongoMarketDataService:
 
 
 @pytest.mark.asyncio
-async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch):
+@pytest.mark.parametrize("snapshot_inputs,valuation_available", [
+    ({}, False),
+    ({"unitQuality": "unknown", "comparisonUnavailableReason": "Price currency/scale is unknown; margin of safety cannot be compared in VND."}, False),
+    ({"unitQuality": "verified", "unitLineage": {"price": {"unit": "unknown"}}}, False),
+    ({"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}, "comparisonUnavailableReason": "Statement currency/scale is unknown."}, False),
+    ({"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}}, True),
+])
+async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch, snapshot_inputs, valuation_available):
     async def fake_profile(symbol, refresh, db):
         return StandardResponse(data={"symbol": symbol, "company_name": "FPT Corp"})
 
@@ -181,6 +188,8 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch):
             "intrinsicValue": 120000,
             "marginOfSafety": 25.0,
             "valuationMethod": "dcf",
+            "price": 90000,
+            "inputs": snapshot_inputs,
             "moat": "wide",
             "roe": 22.5,
             "netMargin": 15.0,
@@ -204,8 +213,17 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch):
     assert response.data["profile"]["company_name"] == "FPT Corp"
     assert response.data["latest_fundamental_snapshot"]["ratio"]["period"] == "2024"
     assert response.data["latest_fundamental_snapshot"]["financials"]["income"]["period"] == "2024"
-    assert response.data["valuation"]["intrinsic_value"] == 120000
-    assert response.data["valuation"]["valuation_method"] == "dcf"
+    if valuation_available:
+        assert response.data["valuation"]["intrinsic_value"] == 120000
+        assert response.data["valuation"]["valuation_method"] == "dcf"
+    else:
+        assert response.data["valuation"] is None
+        assert response.data["section_errors"].pop("valuation")
+    assert response.data["fundamental_snapshot"]["intrinsicValue"] == 120000
+    assert response.data["fundamental_snapshot"]["inputs"] == snapshot_inputs
+    assert response.data["latest_fundamental_snapshot"]["derived"] == (
+        response.data["fundamental_snapshot"] if valuation_available else None
+    )
     assert response.data["competitive_advantage"]["moat"] == "wide"
     assert "ROE 22.5%" in response.data["competitive_advantage"]["reasons"]
     assert response.data["subsidiaries"] == []

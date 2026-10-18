@@ -80,6 +80,21 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
   const risks = normalizeItems(payload?.risks).slice(0, 3);
   const sections = [...(payload?.sections ?? payload?.metrics ?? [])].slice(0, 4);
   const hasData = Boolean(summary || strengths.length || risks.length || sections.length || valuation || competitiveAdvantage);
+  const sectionErrors = Object.entries(payload?.section_errors ?? {});
+  const partialWarning = (textValue(data?.error) || sectionErrors.length > 0) ? (
+    <div role="alert" aria-label="Partial fundamental analysis" className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">
+      <p>Partial data unavailable</p>
+      {sectionErrors.length > 0 && (
+        <ul className="mt-1 list-inside list-disc">
+          {sectionErrors.map(([section, reason]) => (
+            <li key={section}>
+              {section.replace(/[._]/g, ' ')}: {/deadline|timed?\s*out/i.test(reason) ? 'Section deadline exceeded' : 'Unavailable'}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  ) : null;
   const source = textValue(payload?.source) || textValue(valuation?.source) || 'vnstock';
   // The endpoint serves no source observation date: `as_of` is the valuation engine's
   // run date and `dataUpdatedAt` is a retrieval receipt, so both belong outside
@@ -104,11 +119,17 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
   if (!symbol) return <WidgetEmpty message="Select a symbol to view fundamental analysis" icon={<FileText size={18} />} />;
   if (isLoading && !hasData) return <WidgetSkeleton lines={6} />;
   if (error && !hasData) return <WidgetError title="Fundamental analysis unavailable" error={error as Error} onRetry={() => refetch()} />;
-  if (!hasData) return <WidgetEmpty message={`No fundamental analysis available for ${symbol}`} icon={<FileText size={18} />} />;
+  if (!hasData) return (
+    <div className="h-full space-y-3 overflow-auto">
+      {partialWarning}
+      <WidgetEmpty message={`No fundamental analysis available for ${symbol}`} icon={<FileText size={18} />} />
+    </div>
+  );
 
   return (
     <div className="h-full space-y-3 overflow-auto">
       <WidgetMeta updatedAt={updatedAt} fetchedAt={dataUpdatedAt || null} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note="Fundamental analysis" align="right" />
+      {partialWarning}
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         {valuation && (

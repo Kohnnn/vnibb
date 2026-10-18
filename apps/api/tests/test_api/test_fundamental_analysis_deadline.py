@@ -28,7 +28,10 @@ def fundamental_app(monkeypatch):
     )
     monkeypatch.setattr(
         equity, "_load_latest_fundamental_snapshot",
-        AsyncMock(return_value={"snapshotDate": "2024-12-31", "intrinsicValue": None}),
+        AsyncMock(return_value={
+            "snapshotDate": "2024-12-31", "intrinsicValue": None,
+            "inputs": {"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}},
+        }),
     )
     return app
 

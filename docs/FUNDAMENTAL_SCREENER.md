@@ -76,6 +76,20 @@ One doc per `{symbol, snapshotDate}` (upsert, idempotent). Flat fields for query
 
 Index: `{symbol: 1, snapshotDate: -1}` unique. Created by the backfill script.
 
+Serving valuation comparisons requires `inputs.unitQuality == "verified"`, no
+`inputs.comparisonUnavailableReason`, and `inputs.unitLineage.price.unit == "VND"`.
+These are the engine's existing statement/share-unit and price-unit attestations;
+neither snapshot age nor price magnitude certifies a legacy record. Retained
+snapshots without this evidence are not converted or silently recertified.
+
+The fundamental-analysis API preserves `fundamental_snapshot` as raw evidence,
+but returns `valuation` and `latest_fundamental_snapshot.derived` as null with a
+`section_errors.valuation` reason when admission fails. Screener enrichment leaves
+`intrinsic_value`, `margin_of_safety`, and `valuation_method` null and records the
+same reason in `provider_evidence` for `market_fundamental_screener`. Independent
+quality fields remain available.
+
+
 ## Valuation engine contract (`fundamental_valuation.py`)
 
 Pure functions over dataclasses; no I/O except the loader.

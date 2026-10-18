@@ -118,10 +118,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   useEffect(() => {
     if (!open) return;
+    const previousFocus = document.activeElement;
     setRecentSearches(readCommandPaletteRecents());
     setSearch('');
     setSelectedIndex(0);
-    requestAnimationFrame(() => inputRef.current?.focus());
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => {
+      cancelAnimationFrame(frame);
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+        previousFocus.focus();
+      }
+    };
   }, [open]);
 
   const trimmedSearch = search.trim();

@@ -89,6 +89,7 @@ from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_pipeline import CACHE_TTL_ORDERBOOK, CACHE_TTL_ORDERBOOK_DAILY
 from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.financial_service import build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
+from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
 from vnibb.services.vietcap_client import VietcapClient
@@ -2017,7 +2018,7 @@ async def _load_latest_fundamental_snapshot(symbol: str) -> dict[str, Any] | Non
 
 
 def _build_fundamental_valuation_section(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not snapshot:
+    if not snapshot or fundamental_valuation_unavailable_reason(snapshot):
         return None
     return {
         "intrinsic_value": snapshot.get("intrinsicValue"),
@@ -4647,6 +4648,9 @@ async def get_fundamental_analysis(
         "fundamental_snapshot", _load_latest_fundamental_snapshot, None, symbol=symbol_upper,
     )
     valuation = _build_fundamental_valuation_section(fundamental_snapshot)
+    valuation_reason = fundamental_valuation_unavailable_reason(fundamental_snapshot)
+    if valuation_reason:
+        section_errors["valuation"] = valuation_reason
     competitive_advantage = _build_competitive_advantage_section(fundamental_snapshot)
 
     latest_ratio = ratios[-1] if isinstance(ratios, list) and ratios else None
@@ -4663,7 +4667,7 @@ async def get_fundamental_analysis(
         "latest_fundamental_snapshot": {
             "ratio": latest_ratio,
             "financials": latest_financials,
-            "derived": fundamental_snapshot,
+            "derived": fundamental_snapshot if not valuation_reason else None,
         },
         "financials": financials,
         "ratios": ratios,
