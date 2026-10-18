@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useScreenerData, useMetricsHistory, useFinancialRatios, useProfile, useStockQuote, useQuantMetrics } from '@/lib/queries';
-import { formatDividendYield, formatRatio, normalizeDividendYield } from '@/lib/formatters';
+import { formatDividendYield, formatRatio, readDividendYield } from '@/lib/formatters';
 import { formatUnitValue, formatPercent } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { TableSkeleton } from '@/components/ui/widget-skeleton';
@@ -183,8 +183,8 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
             { value: derivedMarketCap, source: 'Profile+Quote', positiveOnly: true },
         ]),
         dividendYield: resolveMetric([
-            { value: normalizeDividendYield(latestRatio?.dividend_yield), source: 'Ratios' },
-            { value: normalizeDividendYield(stock?.dividend_yield), source: 'Screener' },
+            { value: readDividendYield(latestRatio?.dividend_yield, latestRatio?.ratio_units?.dividend_yield), source: 'Ratios' },
+            { value: readDividendYield(stock?.dividend_yield, stock?.ratio_units?.dividend_yield), source: 'Screener' },
         ]),
         beta: resolveMetric([
             { value: quantBeta63d, source: 'Quant 63D' },

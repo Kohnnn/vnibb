@@ -1419,6 +1419,7 @@ export interface DividendRecord {
     issue_year?: number | null;
     year?: number | null;
     annual_dps?: number | null;
+    /** Canonical percent points, computed by the dividends endpoint as annual DPS / VND price * 100. */
     dividend_yield?: number | null;
     description?: string | null;
 }

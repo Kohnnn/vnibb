@@ -295,6 +295,7 @@ export interface FinancialRatioData {
   earnings_growth?: number;
   dps?: number;
   dividend_yield?: number;
+  ratio_units?: Record<string, string | undefined> | null;
   payout_ratio?: number;
   peg_ratio?: number;
 }

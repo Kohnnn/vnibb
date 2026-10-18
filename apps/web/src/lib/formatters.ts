@@ -54,23 +54,16 @@ export function formatPercent(value: number | null | undefined, decimals = 2): s
     return `${percent >= 0 ? '+' : ''}${formatted}%`;
 }
 
-export function normalizeDividendYield(value: number | null | undefined): number | null {
-    if (value === null || value === undefined) return null;
-    if (!Number.isFinite(value) || value < 0) return null;
-
-    let percent = Math.abs(value) <= 1 ? value * 100 : value;
-    if (percent > 100 && percent / 100 <= 50) {
-        percent /= 100;
-    }
-
-    return percent <= 50 ? percent : null;
+export function readDividendYield(value: unknown, unit: unknown): number | null {
+    if (unit !== 'percent') return null;
+    if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null;
+    const percent = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(percent) && percent >= 0 ? percent : null;
 }
 
 export function formatDividendYield(value: number | null | undefined, decimals = 2): string {
-    const percent = normalizeDividendYield(value);
-    if (percent === null) return '-';
-
-    return `${percent.toFixed(decimals)}%`;
+    if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return '-';
+    return `${value.toFixed(decimals)}%`;
 }
 
 /**

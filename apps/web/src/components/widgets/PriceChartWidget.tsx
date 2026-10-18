@@ -16,7 +16,7 @@ import {
   normalizePriceChartTimeframe,
   normalizePriceChartMode,
 } from '@/lib/priceChartControls';
-import { formatDividendYield, formatPercent, formatRatio, normalizeDividendYield } from '@/lib/formatters';
+import { formatDividendYield, formatPercent, formatRatio, readDividendYield } from '@/lib/formatters';
 import type { FinancialRatioData } from '@/types/equity';
 import type { ScreenerData } from '@/types/screener';
 import { firstFinite } from './utils';
@@ -86,8 +86,8 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
     pb: firstFinite(latestRatio?.pb, metrics?.pb),
     roe: firstFinite(latestRatio?.roe, metrics?.roe),
     dividendYield: firstFinite(
-      normalizeDividendYield(latestRatio?.dividend_yield),
-      normalizeDividendYield(metrics?.dividend_yield),
+      readDividendYield(latestRatio?.dividend_yield, latestRatio?.ratio_units?.dividend_yield),
+      readDividendYield(metrics?.dividend_yield, metrics?.ratio_units?.dividend_yield),
     ),
   };
   const hasMetrics = Boolean(
