@@ -53,6 +53,7 @@ The entries below describe source changes, not deployment or full-population acc
 ### Fixed
 - Financial ratios preserve declared dividend percentages without magnitude guesses across SQL, API and both table consumers; unknown percentage units remain unavailable even for named providers. Uncertified fiscal/current-share valuation synthesis is removed rather than presenting unsupported historical ratios.
 - Key Metrics, Price Chart and Share Statistics preserve declared dividend percentage points, including `0.25%` and zero, and skip unknown-unit inputs without magnitude inference. Shared dividend formatting no longer rescales canonical values or rejects certified yields by an arbitrary ceiling.
+- News + Corporate Actions and Dividend Ladder format endpoint-computed dividend yields as canonical percentage points, so `0.25%` and `1.00%` are not multiplied by 100. Missing yield labels remain omitted; reported zero stays visible.
 - Bank Metrics keeps null, omitted and blank table values unavailable instead of coercing them to zero; reported numeric zero remains valid.
 - Gross-margin enrichment requires reported gross profit instead of subtracting costs with an unverified sign convention. Missing gross profit stays unavailable for either cost sign; reported gross profit, including zero, remains usable.
 - Command-palette dismissal restores opener focus; widget settings preserve explicit local financial-period opt-outs.

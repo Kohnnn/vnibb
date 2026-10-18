@@ -9,7 +9,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useDividends } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatTimestamp } from '@/lib/format';
-import { formatPercent, formatVND } from '@/lib/formatters';
+import { formatDividendYield, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 
 const EMPTY_DIVIDENDS: DividendRecord[] = [];
@@ -185,7 +185,7 @@ export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: Div
                     <div className="text-[10px] text-[var(--text-muted)]">
                       {event.payoutType}
                       {event.dividendYield !== null && event.dividendYield !== undefined
-                        ? ` • ${formatPercent(event.dividendYield)}`
+                        ? ` • ${formatDividendYield(event.dividendYield)}`
                         : ''}
                     </div>
                   </div>

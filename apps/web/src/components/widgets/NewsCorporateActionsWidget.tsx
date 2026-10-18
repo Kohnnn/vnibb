@@ -8,7 +8,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useCompanyNews, useDividends, useInsiderDeals } from '@/lib/queries';
 import { formatTimestamp } from '@/lib/format';
-import { formatNumber, formatPercent, formatVND } from '@/lib/formatters';
+import { formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 import { normalizeInsiderAction } from '@/lib/insiderActions';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
@@ -323,7 +323,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                               <div className="text-[10px] text-[var(--text-muted)]">
                                 {formatDividendType(dividend.dividend_type || dividend.type)}
                                 {dividend.dividend_yield !== null && dividend.dividend_yield !== undefined
-                                  ? ` • ${formatPercent(dividend.dividend_yield)}`
+                                  ? ` • ${formatDividendYield(dividend.dividend_yield)}`
                                   : ''}
                                 {dividend.ex_date ? ` • Ex ${formatTimestamp(dividend.ex_date)}` : ''}
                               </div>
