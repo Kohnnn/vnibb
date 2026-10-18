@@ -3733,15 +3733,12 @@ async def _enrich_missing_ratio_metrics(
             and revenue not in (None, 0)
             and not is_bank_like
         ):
-            # Prefer the explicit gross_profit value (sourced from raw_data
-            # in income_lookup), then fall back to revenue - cost_of_revenue.
+            # Only reported gross profit is safe without an evidenced cost sign convention.
             # Banks/securities firms don't report gross_profit so we skip
             # them via the is_bank_like guard.
             gross_profit_value = (
                 None if income is None else _coerce_optional_float(income.get("gross_profit"))
             )
-            if gross_profit_value is None and cost_of_revenue is not None:
-                gross_profit_value = revenue - cost_of_revenue
             if gross_profit_value is not None:
                 item.gross_margin = (gross_profit_value / revenue) * 100
                 item.ratio_units["gross_margin"] = "percent"

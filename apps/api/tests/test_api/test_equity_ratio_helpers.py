@@ -370,6 +370,46 @@ async def test_compute_rolling_high_low_prefers_mongo_eod(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cost_of_revenue,gross_profit,expected_margin", [
+    (-60.0, None, None),
+    (60.0, None, None),
+    (-60.0, 40.0, 40.0),
+    (-60.0, 0.0, 0.0),
+])
+async def test_enrich_missing_ratio_metrics_requires_reported_gross_profit(
+    test_db, cost_of_revenue, gross_profit, expected_margin,
+):
+    statement = FinancialStatementData(
+        symbol="VNM", period="2024", fiscal_year=2024, statement_type="income", source="fixture",
+        value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+        revenue=100.0, cost_of_revenue=cost_of_revenue, gross_profit=gross_profit,
+        operating_income=20.0,
+    )
+    test_db.add(IncomeStatement(
+        id=900, symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+        revenue=100.0, cost_of_revenue=cost_of_revenue, gross_profit=gross_profit,
+        operating_income=20.0,
+        raw_data={"_financial_lineage": {
+            "value_unit": "VND", "canonical_data": statement.model_dump(mode="json"),
+        }},
+    ))
+    await test_db.commit()
+
+    enriched = await _enrich_missing_ratio_metrics(
+        "VNM", "year", [FinancialRatioData(symbol="VNM", period="2024")], test_db,
+    )
+    item = enriched[0]
+
+    assert item.operating_margin == pytest.approx(20.0)
+    if expected_margin is None:
+        assert item.gross_margin is None
+        assert "gross_margin" not in item.ratio_units
+    else:
+        assert item.gross_margin == pytest.approx(expected_margin)
+        assert item.ratio_units["gross_margin"] == "percent"
+
+
+@pytest.mark.asyncio
 async def test_enrich_missing_ratio_metrics_computes_certified_statement_metrics_without_current_valuation(test_db):
     test_db.add(
         Company(
