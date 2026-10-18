@@ -13,11 +13,11 @@ jest.mock('@/components/ui/WidgetMeta', () => ({ WidgetMeta: () => null }));
 
 const mockUseFinancialRatios = jest.mocked(useFinancialRatios);
 
-function renderRatios(casaRatio: unknown, creditCost: unknown) {
+function renderRatios(casaRatio: unknown, creditCost: unknown, nim?: number, depositGrowth?: number) {
   // Runtime payloads may contain nulls or blanks despite the numeric API field types.
   const result = {
     data: { symbol: 'VCB', count: 1, data: [{ symbol: 'VCB', period: '2025', loan_to_deposit: 0.8,
-      casa_ratio: casaRatio, credit_cost: creditCost }] },
+      casa_ratio: casaRatio, credit_cost: creditCost, nim, deposit_growth: depositGrowth }] },
     isLoading: false, isFetching: false, error: null, refetch: jest.fn(), dataUpdatedAt: 0,
   } as unknown as UseQueryResult<FinancialRatiosResponse, Error>;
   mockUseFinancialRatios.mockReturnValue(result);
@@ -41,5 +41,23 @@ describe('BankMetricsWidget missing values', () => {
 
     expect(within(screen.getByRole('row', { name: /CASA Ratio/i })).getByText('0.00%')).toBeInTheDocument();
     expect(within(screen.getByRole('row', { name: /Credit Cost/i })).getByText('0.00%')).toBeInTheDocument();
+  });
+});
+
+describe('BankMetricsWidget percentage points', () => {
+  it('preserves reported bank percentage points at or below one in cards and table', () => {
+    renderRatios(0.5, 1, 0.25);
+
+    expect(within(screen.getByRole('row', { name: /NIM/i })).getByText('0.25%')).toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: /CASA Ratio/i })).getByText('0.50%')).toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: /Credit Cost/i })).getByText('1.00%')).toBeInTheDocument();
+    expect(screen.getAllByText('0.25%')).toHaveLength(2);
+    expect(screen.getAllByText('1.00%')).toHaveLength(2);
+  });
+
+  it('preserves reported deposit growth above two hundred percentage points', () => {
+    renderRatios(0.5, 1, 0.25, 300);
+
+    expect(within(screen.getByRole('row', { name: /Deposit Growth/i })).getByText('300.00%')).toBeInTheDocument();
   });
 });

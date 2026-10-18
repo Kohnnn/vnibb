@@ -69,7 +69,7 @@ function formatMetricValue(metricKey: string, value: number | string | null | un
   if (value === null || value === undefined || (typeof value === 'string' && !value.trim())) return 'N/A';
   const numeric = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(numeric)) return 'N/A';
-  if (PERCENT_KEYS.has(metricKey)) return formatPercent(numeric, { decimals: 2, input: 'auto', clamp: 'margin' });
+  if (PERCENT_KEYS.has(metricKey)) return formatPercent(numeric, { decimals: 2, input: 'percent' });
   if (RATIO_KEYS.has(metricKey)) return formatNumber(numeric, { decimals: 2 });
   return formatNumber(numeric, { decimals: 2 });
 }
