@@ -32,7 +32,7 @@ function formatRatio(value: number | null | undefined, decimals = 2): string {
 
 const CANONICAL_PERCENT_KEYS: Record<string, true> = {
     roe: true, roa: true, roic: true, gross_margin: true, net_margin: true,
-    operating_margin: true, revenue_growth: true, earnings_growth: true, debt_assets: true,
+    operating_margin: true, revenue_growth: true, earnings_growth: true, debt_assets: true, dividend_yield: true,
 };
 
 function formatPct(metricKey: string, value: number | null | undefined): string {
@@ -131,6 +131,10 @@ const RATIO_FIELD_ALIASES: Record<string, string[]> = {
 
 function readRatioMetric(entry: Record<string, unknown> | undefined, metricKey: string): number | null {
     if (!entry) return null;
+    if (metricKey === 'dividend_yield') {
+        const units = entry.ratio_units;
+        if (!units || typeof units !== 'object' || !('dividend_yield' in units) || units.dividend_yield !== 'percent') return null;
+    }
     const keys = RATIO_FIELD_ALIASES[metricKey] ?? [metricKey];
     const zeroMeansUndefined = UNDEFINED_WHEN_ZERO_RATIO_KEYS[metricKey] === true;
     for (const key of keys) {

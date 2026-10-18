@@ -266,26 +266,30 @@ const ZERO_IS_ABSENT_RATIO_KEYS: Record<string, true> = {
     ev_ebitda: true,
 };
 
-function readRatioValue(row: Record<string, any>, key: string): any {
+function readRatioValue(row: Record<string, unknown>, key: string): number | null {
+    if (key === 'dividend_yield') {
+        const units = row.ratio_units;
+        if (!units || typeof units !== 'object' || !('dividend_yield' in units) || units.dividend_yield !== 'percent') return null;
+    }
     const aliases = RATIO_METRIC_ALIASES[key] || [key];
     const zeroIsAbsent = ZERO_IS_ABSENT_RATIO_KEYS[key] === true;
-    const usable = (value: unknown) => {
-        if (value === null || value === undefined || value === '') return false;
-        if (!zeroIsAbsent) return true;
+    const numericValue = (value: unknown): number | null => {
+        if (typeof value !== 'number' && typeof value !== 'string') return null;
+        if (typeof value === 'string' && !value.trim()) return null;
         const numeric = typeof value === 'number' ? value : Number(value);
-        return Number.isFinite(numeric) ? numeric !== 0 : true;
+        return Number.isFinite(numeric) && (!zeroIsAbsent || numeric !== 0) ? numeric : null;
     };
     const rowLookup = buildMetricLookup(row);
     for (const alias of aliases) {
-        const value = rowLookup.get(alias) ?? rowLookup.get(normalizeMetricKey(alias));
-        if (usable(value)) return value;
+        const value = numericValue(rowLookup.get(alias) ?? rowLookup.get(normalizeMetricKey(alias)));
+        if (value !== null) return value;
     }
     const rawData = row.raw_data || row.rawData || row.raw;
     const rawLookup = buildMetricLookup(rawData);
     if (rawLookup.size > 0) {
         for (const alias of aliases) {
-            const value = rawLookup.get(alias) ?? rawLookup.get(normalizeMetricKey(alias));
-            if (usable(value)) return value;
+            const value = numericValue(rawLookup.get(alias) ?? rawLookup.get(normalizeMetricKey(alias)));
+            if (value !== null) return value;
         }
     }
     return null;
@@ -499,13 +503,9 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                                 comparisonRows[periodIndex - 1]?.__period,
                             )
                     );
-                    // One convention for the statement tables, the Growth Bridge and
-                    // the API's `_growth_rate`: divide by the ABSOLUTE prior value
-                    // (issue #104). A negative endpoint still makes the sign
-                    // unreadable as ordinary growth, so the pair is classified
-                    // (loss to profit / narrowed / widened) instead of calling every
-                    // negative pair a turnaround.
-                    const growthDetail = percentChangeDetail(currentVal, prevVal);
+                    // The table and Growth Bridge share absolute-prior arithmetic;
+                    // only identified earnings use profit/loss transition language.
+                    const growthDetail = percentChangeDetail(currentVal, prevVal, { metricKey: m.key });
 
                     values[periodLabel] = {
                         val: currentVal,
@@ -593,15 +593,15 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
 
     const denseRows = useMemo<DenseTableRow[]>(() => {
         if (!tableData) return []
-        return tableData.rows.map((row, index) => ({
-            id: `${activeTab}-${index}`,
+        return tableData.rows.map((row) => ({
+            id: row.metricKey,
             label: row.label,
             values: tableData.periods.reduce<Record<string, number | null>>((acc, periodLabel) => {
                 acc[periodLabel] = row.values[periodLabel]?.val ?? null
                 return acc
             }, {}),
         }))
-    }, [activeTab, tableData])
+    }, [tableData])
     // Disclose the negative-base comparisons actually present, using the same
     // classification as the statement tables (issue #104).
     const negativeBaseLabels = useMemo(() => {
@@ -619,12 +619,12 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
     const denseRowMeta = useMemo(() => {
         if (!tableData) return new Map<string, { isPct?: boolean; isPerShare?: boolean }>()
         return new Map(
-            tableData.rows.map((row, index) => [
-                `${activeTab}-${index}`,
+            tableData.rows.map((row) => [
+                row.metricKey,
                 { isPct: row.isPct, isPerShare: PER_SHARE_METRIC_KEYS.has(String(row.metricKey || '')) },
             ])
         )
-    }, [activeTab, tableData])
+    }, [tableData])
 
     return (
         <WidgetContainer
@@ -728,7 +728,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                             action={{ label: 'Refresh data', onClick: () => activeQuery.refetch() }}
                         />
                     ) : (
-                        <div className="min-w-max">
+                        <div className="min-w-0">
                             {isSparseData && (
                                 <div className="px-2 pb-1 text-[10px] text-amber-400">
                                     Partial dataset: some provider fields are still missing for this symbol.
@@ -778,7 +778,7 @@ function formatRatio(value: number | null | undefined): string {
 }
 
 function formatPct(value: number | null | undefined): string {
-    return formatPercent(value, { decimals: 2, input: 'auto', clamp: 'margin' });
+    return formatPercent(value, { decimals: 2, input: 'percent', clamp: 'margin' });
 }
 
 export const FinancialsWidget = memo(FinancialsWidgetComponent);

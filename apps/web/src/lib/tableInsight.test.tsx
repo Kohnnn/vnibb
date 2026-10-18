@@ -385,7 +385,10 @@ describe('IncomeStatementWidget table selection', () => {
     it('selects a metric from the keyboard and clears it with Escape', () => {
         render(<IncomeStatementWidget id="income-1" symbol="FPT" />);
         fireEvent.keyDown(screen.getByRole('button', { name: 'Chart Operating Income' }), { key: 'Enter' });
-        fireEvent.keyDown(screen.getByRole('listbox', { name: 'Financial statement rows' }), { key: 'Escape' });
+        openChart();
+        expect(screen.getByTestId('income-chart-focus')).toHaveTextContent('Operating Income');
+        openTable();
+        fireEvent.keyDown(screen.getByRole('region', { name: /Financial statement periods/ }), { key: 'Escape' });
         openChart();
 
         expect(screen.getByTestId('income-chart-focus')).toHaveTextContent('All metrics');

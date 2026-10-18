@@ -3,7 +3,7 @@ import { useIncomeStatement, useBalanceSheet, useCashFlow, useFinancialRatios } 
 import { FinancialsWidget } from '@/components/widgets/FinancialsWidget';
 import { UnitProvider } from '@/contexts/UnitContext';
 import type { UseQueryResult } from '@tanstack/react-query';
-import type { IncomeStatementResponse } from '@/types/equity';
+import type { IncomeStatementResponse, FinancialRatiosResponse } from '@/types/equity';
 
 jest.mock('@/lib/queries', () => ({
   useIncomeStatement: jest.fn(),
@@ -125,6 +125,18 @@ describe('FinancialsWidget', () => {
     });
 
     expect(mockUseFinancialRatios).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'FY', enabled: true }));
+  });
+
+  test.each([['percent', '0.25%'], ['unknown', '—']])('preserves declared dividend percent and withholds %s units', async (unit, expected) => {
+    // The existing query fixture supplies the settled fields consumed by this widget.
+    const result = makeQueryResult({ data: [{ period: '2025', pe: 14.64,
+      dividend_yield: 0.25, ratio_units: { dividend_yield: unit } }] }) as unknown as UseQueryResult<FinancialRatiosResponse, Error>;
+    mockUseFinancialRatios.mockReturnValue(result);
+    renderWithProviders(<FinancialsWidget id="fin-yield" symbol="FPT" />);
+    act(() => screen.getByRole('button', { name: /ratios/i }).click());
+    const row = screen.getByText('Dividend Yield').closest('tr');
+    await waitFor(() => expect(row).toHaveTextContent(expected));
+    expect(row).not.toHaveTextContent('25.00%');
   });
 
   test('shows error state when query fails', () => {
@@ -284,6 +296,23 @@ describe('FinancialsWidget', () => {
     expect(screen.getByText('TTM ratios are not supported')).toBeInTheDocument();
     expect(mockUseFinancialRatios).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'TTM', enabled: false }));
     expect(document.querySelector('table')).toBeNull();
+  });
+
+  test('keeps cost comparisons neutral and earnings labels consistent in the table and note', () => {
+    // Only the statement fields consumed by the widget are needed in this fixture.
+    const result = makeQueryResult({ symbol: 'FPT', count: 2, data: [
+      { period: '2024', cost_of_revenue: -10, net_income: -10 },
+      { period: '2025', cost_of_revenue: -15, net_income: -5 },
+    ] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>;
+    mockUseIncomeStatement.mockReturnValue(result);
+    renderWithProviders(<FinancialsWidget id="financial-language" symbol="FPT" config={{ periodSyncGroup: null }} />);
+
+    const costRow = screen.getByText('Cost of Revenue').closest('tr')!;
+    expect(costRow).toHaveTextContent('-50.0%');
+    expect(costRow).not.toHaveTextContent(/profit|loss/i);
+    expect(screen.getByText('Net Income').closest('tr')).toHaveTextContent('loss narrowed +50.0%');
+    expect(screen.getByText(/Growth divides by the absolute prior-period value/)).toHaveTextContent('(loss narrowed)');
+    expect(screen.queryByText(/loss widened/)).not.toBeInTheDocument();
   });
 
   test('excludes conflicting fiscal rows instead of overwriting their values', async () => {

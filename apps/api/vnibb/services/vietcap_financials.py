@@ -67,7 +67,7 @@ _LABELS = {
     "revenue_growth": ("revenue growth",), "earnings_growth": ("earnings growth",),
     "dps": ("dividend per share",), "dividend_yield": ("dividend yield",),
 }
-_PERCENT_FIELDS = PERCENT_RATIO_FIELDS | {"dividend_yield"}
+_PERCENT_FIELDS = PERCENT_RATIO_FIELDS
 _PER_SHARE_FIELDS = {"eps", "eps_diluted", "bvps", "dps"}
 
 

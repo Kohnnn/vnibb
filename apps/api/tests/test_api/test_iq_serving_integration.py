@@ -225,7 +225,6 @@ async def test_ratio_endpoint_falls_back_on_empty_or_failed_iq(monkeypatch, test
     monkeypatch.setattr(equity, "_get_latest_statement_period_key", AsyncMock(return_value=0))
     async def unchanged(**kwargs):
         return kwargs["rows"]
-    monkeypatch.setattr(equity, "_enrich_ratio_ev_sales_from_income", unchanged)
     monkeypatch.setattr(equity, "_enrich_missing_ratio_metrics", unchanged)
     fallback = AsyncMock(return_value=rows)
     monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", fallback)

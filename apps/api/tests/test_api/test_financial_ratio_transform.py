@@ -10,6 +10,29 @@ def test_financial_ratio_query_params_normalize_symbol():
     assert params.symbol == "VNM"
 
 
+@pytest.mark.parametrize("value,unit,expected", [
+    (0.25, "percent", 0.25),
+    (47.02, "percent", 47.02),
+    (0.4702, "fraction", 47.02),
+    (0.0, "percent", 0.0),
+    (0.25, None, None),
+])
+@pytest.mark.parametrize("shape", ["standard", "row_item"])
+def test_transform_dividend_yield_requires_declared_units(value, unit, expected, shape):
+    if shape == "standard":
+        raw = {"yearReport": 2025, "dividendYield": value, "unit": unit}
+    else:
+        raw = {"item_id": "dividend_yield", "2025": value, "unit": unit}
+
+    rows = VnstockFinancialRatiosFetcher.transform_data(
+        FinancialRatiosQueryParams(symbol="FPT", period="year"), [raw],
+    )
+
+    assert rows[0].dividend_yield == expected
+    assert rows[0].ratio_units["dividend_yield"] == ("percent" if expected is not None else "unknown")
+    assert rows[0].provider_evidence == [raw]
+
+
 def test_transform_data_row_based_maps_key_metrics():
     params = FinancialRatiosQueryParams(symbol="VNM", period="year")
     raw_rows = [
@@ -27,7 +50,7 @@ def test_transform_data_row_based_maps_key_metrics():
     assert data[0].roe == 19.3
 
 
-def test_transform_data_row_based_computes_debt_equity_when_missing():
+def test_transform_data_does_not_infer_debt_equity_from_unitless_liabilities():
     params = FinancialRatiosQueryParams(symbol="VNM", period="year")
     raw_rows = [
         {"item_id": "liabilities", "2024": 240.0},
@@ -38,7 +61,7 @@ def test_transform_data_row_based_computes_debt_equity_when_missing():
 
     assert len(data) == 1
     assert data[0].period == "2024"
-    assert data[0].debt_equity == 2.0
+    assert data[0].debt_equity is None
 
 
 def test_transform_data_row_based_returns_empty_without_period_columns():
@@ -85,14 +108,14 @@ def test_transform_data_standard_shape_maps_ev_sales_aliases():
     assert data[0].ev_sales == 2.6
 
 
-def test_transform_data_standard_shape_computes_ev_sales_from_ev_and_revenue():
+def test_transform_data_does_not_divide_unitless_ev_and_revenue():
     params = FinancialRatiosQueryParams(symbol="VNM", period="year")
     raw_rows = [{"yearReport": 2024, "enterpriseValue": 1000.0, "revenue": 250.0}]
 
     data = VnstockFinancialRatiosFetcher.transform_data(params, raw_rows)
 
     assert len(data) == 1
-    assert data[0].ev_sales == 4.0
+    assert data[0].ev_sales is None
 
 
 def test_transform_data_returns_empty_when_input_empty():
@@ -132,7 +155,7 @@ def test_declared_provider_units_reach_stored_comparison_without_guessing():
     assert _metric_from_ratio_row(stored, "net_margin") == -5.0
     assert _metric_from_ratio_row(stored, "gross_margin") is None
     assert _metric_from_ratio_row(stored, "pe") == 12.0
-    assert _metric_from_ratio_row(stored, "debt_to_equity") == 2.0
+    assert _metric_from_ratio_row(stored, "debt_to_equity") is None
     assert raw == evidence
     assert stored.raw_data["ratio_units"]["roe"] == "percent"
     assert stored.raw_data["provider_evidence"][0]["2024"] == 0.25
@@ -218,3 +241,22 @@ def test_public_finance_adapter_receives_evidence_preserving_display_mode():
         return kwargs
 
     assert adapter(**ratio_method_kwargs(adapter, {"period": "year"})) == {"period": "year", "display_mode": "all"}
+
+
+@pytest.mark.parametrize("raw,period", [
+    ({"period": "2020", "fiscalYear": 2022, "pe": 0.03}, "year"),
+    ({"fiscalYear": 2025, "pe": 14.64}, "quarter"),
+    ({"period": "2025-Q2", "fiscalYear": 2025, "fiscalQuarter": 3, "pe": 14.64}, "quarter"),
+])
+def test_provider_ratio_withholds_conflicting_or_missing_fiscal_identity(raw, period):
+    assert VnstockFinancialRatiosFetcher.transform_data(
+        FinancialRatiosQueryParams(symbol="FPT", period=period), [raw],
+    ) == []
+
+
+def test_provider_ratio_preserves_reported_zero_before_alias_fallbacks():
+    rows = VnstockFinancialRatiosFetcher.transform_data(FinancialRatiosQueryParams(symbol="FPT"), [{
+        "yearReport": 2025, "priceToEarning": 0, "pe": 14.64,
+        "earningPerShare": 0, "eps": 4200, "dividendPerShare": 0, "dps": 2000,
+    }])
+    assert (rows[0].pe, rows[0].eps, rows[0].dps) == (0, 0, 0)

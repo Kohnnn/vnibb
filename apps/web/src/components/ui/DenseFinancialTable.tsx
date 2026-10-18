@@ -308,12 +308,13 @@ export function DenseFinancialTable({
   }
 
   return (
-    <div className={cn('w-full', className)}>
+    <div className={cn('min-w-0 w-full', className)}>
       <div
         ref={scrollRef}
-        className="overflow-auto"
-        role="listbox"
-        aria-label="Financial statement rows"
+        className="overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-400"
+        role="region"
+        aria-label="Financial statement periods; scroll horizontally for all columns"
+        tabIndex={0}
         onKeyDown={(event) => {
           if (event.key === 'Escape') onSelectionClear?.()
         }}
@@ -335,9 +336,9 @@ export function DenseFinancialTable({
                     column.align === 'left' ? 'text-left' : 'text-right',
                     sortable ? 'cursor-pointer select-none hover:text-[var(--text-primary)]' : '',
                     chartable && isSelectedColumn ? 'text-blue-400' : '',
-                    chartable ? 'focus-visible:outline-2 focus-visible:outline-blue-400' : ''
+                    sortable || chartable ? 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-400' : ''
                   )}
-                  style={column.width ? { minWidth: column.width, width: column.width } : { minWidth: `${yearColumnWidth}px`, width: `${yearColumnWidth}px` }}
+                  style={{ ...(column.width ? { minWidth: column.width, width: column.width } : { minWidth: `${yearColumnWidth}px`, width: `${yearColumnWidth}px` }), scrollMarginLeft: metricColumnWidth }}
                   aria-sort={isActiveSort ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
                   aria-pressed={chartable ? isSelectedColumn : undefined}
                   aria-label={chartable ? `Chart ${column.label}` : undefined}
@@ -376,8 +377,6 @@ export function DenseFinancialTable({
               <Fragment key={row.id}>
                 <tr
                   key={row.id}
-                  role={row.selectable ? 'option' : undefined}
-                  aria-selected={row.selectable ? row.selected === true : undefined}
                   className={cn(
                     'h-6 border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-hover)]',
                     rowIndex % 2 === 1 && !row.isGroup ? 'bg-[var(--bg-secondary)]/25' : '',
@@ -465,14 +464,11 @@ export function DenseFinancialTable({
                         ? asNumber(row.values[comparisonColumnKey])
                         : null
 
-                    // Absolute prior-period denominator: the project convention, and the
-                    // one the API's growth payload uses, so the same fiscal period cannot
-                    // read +100.7% here and -100.7% in the Growth Bridge (issue #104). A
-                    // negative prior value is classified rather than lumped into a single
-                    // "turnaround" label: a loss that narrowed is not a loss that flipped
-                    // to profit.
+                    // Share the Growth Bridge's absolute-prior arithmetic without
+                    // implying profitability for non-earnings metrics.
                     const growthDetail = showGrowth && !row.isGroup
                       ? percentChangeDetail(currentNumber, previousNumber, {
+                          metricKey: row.id,
                           minimumBase: 0.001,
                           clamp: 'yoy_change',
                         })
@@ -502,7 +498,9 @@ export function DenseFinancialTable({
                           <span
                             className={cn(
                               'inline-flex rounded px-1 py-0.5 text-[9px] font-semibold leading-none',
-                              growthDetail.hasNegativeBase
+                              growthDetail.basis === 'change'
+                                ? 'bg-slate-500/15 text-slate-300'
+                                : growthDetail.hasNegativeBase
                                 ? 'bg-amber-500/15 text-amber-400'
                                 : growthPct === 0
                                 ? 'bg-slate-500/15 text-slate-300'

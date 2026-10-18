@@ -3274,8 +3274,9 @@ async def test_ratios_period_aliases_fy_year_and_q_quarter_share_one_basis(clien
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("certified", [True, False])
 async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_support(
-    client, monkeypatch
+    client, monkeypatch, certified
 ):
     async def fake_ratio_fetch(_params):
         return []
@@ -3284,12 +3285,16 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
         assert symbol == "VCI"
         assert period == "quarter"
         _ = limit
+        basis = ({"source": "fixture", "value_unit": "VND", "consolidation_basis": "Consolidated",
+                  "flow_basis": "single_quarter", "fiscal_year": 2020, "fiscal_quarter": 1}
+                 if certified else {})
         if statement_type == "income":
             return [
                 FinancialStatementData(
                     symbol="VCI",
                     period="Q1-2020",
                     statement_type="income",
+                    **basis,
                     revenue=100.0,
                     operating_income=30.0,
                     net_income=20.0,
@@ -3301,6 +3306,7 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
                     symbol="VCI",
                     period="Q1-2020",
                     statement_type="balance",
+                    **basis,
                     total_assets=120.0,
                     current_assets=60.0,
                     total_liabilities=60.0,
@@ -3314,6 +3320,7 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
                 symbol="VCI",
                 period="Q1-2020",
                 statement_type="cashflow",
+                **basis,
                 operating_cash_flow=18.0,
                 free_cash_flow=10.0,
             )
@@ -3325,9 +3332,6 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
     async def fake_cross_fill_income_statement_rows(**kwargs):
         return kwargs["rows"]
 
-    async def fake_resolve_profile_market_cap(**_kwargs):
-        return None
-
     monkeypatch.setattr("vnibb.api.v1.equity.VnstockFinancialRatiosFetcher.fetch", fake_ratio_fetch)
     monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", fake_get_financials_with_ttm)
     monkeypatch.setattr(
@@ -3337,17 +3341,20 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
         "vnibb.api.v1.equity._cross_fill_income_statement_rows",
         fake_cross_fill_income_statement_rows,
     )
-    monkeypatch.setattr(
-        "vnibb.api.v1.equity._resolve_profile_market_cap", fake_resolve_profile_market_cap
-    )
 
     response = await client.get("/api/v1/equity/VCI/ratios?period=quarter")
     assert response.status_code == 200
     payload = response.json()
     assert payload["meta"]["count"] >= 1
     support_row = next(item for item in payload["data"] if "2020" in item["period"])
-    assert support_row["operating_margin"] == pytest.approx(30.0)
-    assert support_row["current_ratio"] == pytest.approx(2.5)
+    if certified:
+        assert support_row["operating_margin"] == pytest.approx(30.0)
+        assert support_row["current_ratio"] == pytest.approx(2.5)
+    else:
+        assert support_row["operating_margin"] is None
+        assert support_row["current_ratio"] is None
+        assert any(item.get("unavailable_reason") == "unverified_statement_basis"
+                   for item in support_row["provider_evidence"])
 
 
 @pytest.mark.asyncio

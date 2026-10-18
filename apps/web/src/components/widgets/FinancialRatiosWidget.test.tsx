@@ -129,14 +129,24 @@ describe('FinancialRatiosWidget period columns', () => {
 
   test('renders canonical low percentage points without magnitude conversion', async () => {
     mockUseFinancialRatios.mockReturnValue(queryResult({
-      symbol: 'FPT', count: 1, data: [{ period: '2025', roe: 0.25, dividend_yield: 0.03 }],
+      symbol: 'FPT', count: 1, data: [{ period: '2025', roe: 0.25, dividend_yield: 0.25,
+        ratio_units: { roe: 'percent', dividend_yield: 'percent' } }],
     }));
     mockUseIncomeStatement.mockReturnValue(queryResult(undefined));
 
     renderWidget();
 
     await waitFor(() => expect(rowValues(screen.getByText('ROE'))).toContain('0.25%'));
-    expect(rowValues(screen.getByText('Dividend Yield'))).toContain('3.00%');
+    expect(rowValues(screen.getByText('Dividend Yield'))).toContain('0.25%');
+    expect(screen.queryByText('25.00%')).not.toBeInTheDocument();
+  });
+
+  test('withholds dividend yield when its source unit is unknown', () => {
+    mockUseFinancialRatios.mockReturnValue(queryResult({ data: [{ period: '2025', pe: 14.64,
+      dividend_yield: 0.25, ratio_units: { dividend_yield: 'unknown' } }] }));
+    mockUseIncomeStatement.mockReturnValue(queryResult(undefined));
+    renderWidget();
+    expect(screen.queryByText('Dividend Yield')).not.toBeInTheDocument();
     expect(screen.queryByText('25.00%')).not.toBeInTheDocument();
   });
 

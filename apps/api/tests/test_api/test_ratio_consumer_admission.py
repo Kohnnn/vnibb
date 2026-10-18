@@ -56,6 +56,30 @@ async def test_comparison_debt_assets_requires_its_own_evidence(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("units,expected", [({}, None), ({"roe": "percent", "debt_assets": "percent"}, 0.25)])
+async def test_comparison_never_uses_source_name_as_percentage_unit_evidence(
+    test_engine, test_db, monkeypatch, units, expected,
+):
+    ratio = ratio_row("FPT", units, 0.25)
+    ratio.source = "vietcap"
+    test_db.add(ratio)
+    await test_db.commit()
+    service = comparison_service.ComparisonService()
+
+    async def cached_snapshot(*args, **kwargs):
+        return CacheResult(data=[ScreenerSnapshot(symbol="FPT", snapshot_date=date.today())],
+                           is_stale=False, cached_at=datetime.utcnow(), hit=True)
+
+    monkeypatch.setattr(service.cache_manager, "get_screener_data", cached_snapshot)
+    monkeypatch.setattr(comparison_service, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
+    response = await service.get_stock_metrics("FPT")
+
+    assert response.metrics.get("roe") == expected
+    assert response.metrics.get("debt_assets") == expected
+    assert response.metrics["pe"] == 10.0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("units,value,expected", CASES)
 @pytest.mark.parametrize("roe_source", ["snapshot", "ratio", "cache"])
 async def test_comparison_peer_roe_admits_snapshot_and_ratio_evidence(
@@ -189,3 +213,17 @@ async def test_ai_postgres_context_withholds_uncertified_ratio_cells(test_engine
     response = await ai_context_service.AIContextService()._build_postgres_snapshot("VNM")
     assert {metric: response["ratios"][metric] for metric in metrics} == dict.fromkeys(metrics, expected)
     assert response["ratios"]["pe"] == response["ratios"]["pe_ratio"] == 10.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unit,expected", [("percent", 0.25), ("unknown", None)])
+async def test_cached_screener_yield_keeps_canonical_percent_without_rescaling(test_db, unit, expected):
+    from vnibb.api.v1.screener import _enrich_screener_metrics, _to_screener_data_row
+
+    row = _to_screener_data_row(ScreenerSnapshot(
+        symbol="FPT", snapshot_date=date.today(), dividend_yield=0.25,
+        extended_metrics={"ratio_units": {"dividend_yield": unit}},
+    ))
+    enriched = await _enrich_screener_metrics([row], test_db)
+
+    assert enriched[0].dividend_yield == expected

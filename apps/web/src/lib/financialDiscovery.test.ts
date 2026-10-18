@@ -46,13 +46,20 @@ describe('financial growth classification', () => {
     [-5, 10, -150, 'profit-to-loss'],
     [0, -10, 100, 'loss-narrowed'],
     [15, 10, 50, 'growth'],
+    [-10, -10, 0, 'growth'],
+    [0, 10, -100, 'growth'],
   ])('classifies %s versus %s using an absolute denominator', (current, previous, change, basis) => {
-    expect(percentChangeDetail(current, previous)).toMatchObject({ change, basis })
+    expect(percentChangeDetail(current, previous, { metricKey: 'net_income' })).toMatchObject({ change, basis })
+  })
+
+  test.each(['cost_of_revenue', 'debt_to_equity', 'investing_cash_flow', 'asset_turnover', 'earnings_growth', 'unknown'])('keeps %s changes neutral', (metricKey) => {
+    const detail = percentChangeDetail(10, -10, { metricKey })
+    expect(detail).toMatchObject({ change: 200, basis: 'change', label: null })
   })
 
   test('does not fabricate growth for zero or missing bases', () => {
-    expect(percentChangeDetail(10, 0).change).toBeNull()
-    expect(percentChangeDetail(10, null).change).toBeNull()
-    expect(percentChangeDetail(null, -10).change).toBeNull()
+    expect(percentChangeDetail(10, 0, { metricKey: 'net_income' }).change).toBeNull()
+    expect(percentChangeDetail(10, null, { metricKey: 'net_income' }).change).toBeNull()
+    expect(percentChangeDetail(null, -10, { metricKey: 'net_income' }).change).toBeNull()
   })
 })

@@ -7,7 +7,7 @@ from typing import Any
 
 PERCENT_RATIO_FIELDS = frozenset({
     "roe", "roa", "roic", "gross_margin", "net_margin", "operating_margin",
-    "revenue_growth", "earnings_growth", "debt_assets",
+    "revenue_growth", "earnings_growth", "debt_assets", "dividend_yield",
 })
 _ALIASES = {
     "roe": {"roe"}, "roa": {"roa"}, "roic": {"roic"},
@@ -17,16 +17,14 @@ _ALIASES = {
     "revenue_growth": {"revenue_growth", "revenuegrowth"},
     "earnings_growth": {"earnings_growth", "earningsgrowth", "net_profit_growth", "netprofitgrowth"},
     "debt_assets": {"debt_assets", "debt_to_assets", "debt_to_asset", "debt_on_assets", "debt_on_asset", "debtonassets", "debtonasset", "debtassets", "debttoassets", "debttoasset"},
+    "dividend_yield": {"dividend_yield", "dividendyield", "dividend"},
 }
 
 def admitted_ratio_value(
     value: Any, metric: str, *, ratio_units: Mapping[str, Any] | None = None,
     source: str | None = "vnstock",
 ) -> Any:
-    if metric in PERCENT_RATIO_FIELDS and (
-        (ratio_units and ratio_units.get(metric) != "percent")
-        or (not ratio_units and source == "vnstock")
-    ):
+    if metric in PERCENT_RATIO_FIELDS and (ratio_units or {}).get(metric) != "percent":
         return None
     return value
 
@@ -72,6 +70,9 @@ def normalize_ratio_payload(payload: Mapping[str, Any], evidence: list[dict], pe
                     continue
                 if math.isfinite(numeric):
                     candidates.append((numeric, _declared_unit(key, unit)))
+        if metric == "dividend_yield" and not candidates and payload.get(metric) is None:
+            normalized[metric] = None
+            continue
         canonical = [value * 100 if unit == "fraction" else value
                      for value, unit in candidates if unit in {"fraction", "percent"}]
         conflicted = any(unit not in {"fraction", "percent"} for _, unit in candidates) or any(

@@ -411,11 +411,8 @@ export function normalizePercentValue(
  * The absolute denominator is deliberately the only option: a second convention
  * in this helper is what let the two surfaces drift apart.
  *
- * A negative prior value still makes the percentage unreadable as ordinary
- * growth, so `percentChangeDetail` classifies the pair and callers MUST render
- * that classification rather than labelling every negative-base cell as one
- * undifferentiated "turnaround": a loss that narrowed is not a loss that flipped
- * to profit.
+ * `percentChangeDetail` uses metric identity to reserve profit/loss language for
+ * earnings. Other metrics retain neutral signed changes with the same arithmetic.
  */
 export function calculatePercentChange(
   current: number | null | undefined,
@@ -436,6 +433,7 @@ export function calculatePercentChange(
 
 /** How a comparison reads once a negative endpoint is accounted for. */
 export type PercentChangeBasis =
+  | 'change'
   | 'growth'
   | 'loss-to-profit'
   | 'loss-narrowed'
@@ -451,7 +449,27 @@ export interface PercentChangeDetail {
   label: string | null
 }
 
+const EARNINGS_METRIC_KEYS: Record<string, true> = {
+  gross_profit: true,
+  operating_income: true,
+  operating_profit: true,
+  pre_tax_income: true,
+  pre_tax_profit: true,
+  profit_before_tax: true,
+  net_income: true,
+  net_income_cf: true,
+  npat_before_mi: true,
+  npat_reported: true,
+  npat_adjusted: true,
+  ebit: true,
+  ebitda: true,
+  eps: true,
+  eps_diluted: true,
+  eps_reported: true,
+}
+
 const PERCENT_CHANGE_LABELS: Record<PercentChangeBasis, string | null> = {
+  change: null,
   growth: null,
   'loss-to-profit': 'to profit',
   'loss-narrowed': 'loss narrowed',
@@ -473,14 +491,17 @@ export function percentChangeDetail(
   current: number | null | undefined,
   previous: number | null | undefined,
   options: {
+    metricKey: string
     minimumBase?: number
     clamp?: 'yoy_change' | 'margin' | 'yield' | 'ratio'
-  } = {}
+  }
 ): PercentChangeDetail {
   const hasNegativeBase = isFiniteNumber(previous) && (previous < 0 || (previous > 0 && isFiniteNumber(current) && current < 0))
-  const basis = isFiniteNumber(current) && isFiniteNumber(previous)
-    ? classifyPercentChange(current, previous)
-    : 'growth'
+  const basis = EARNINGS_METRIC_KEYS[options.metricKey] === true
+    ? isFiniteNumber(current) && isFiniteNumber(previous)
+      ? classifyPercentChange(current, previous)
+      : 'growth'
+    : 'change'
   return {
     change: calculatePercentChange(current, previous, options),
     hasNegativeBase,
@@ -496,11 +517,12 @@ export function percentChangeDetail(
 export function describePercentChange(detail: PercentChangeDetail): string | undefined {
   if (!detail.hasNegativeBase) return undefined
   const denominator = 'This percentage divides by the absolute prior value.'
+  if (detail.basis === 'change') return `An endpoint is negative. ${denominator}`
   switch (detail.basis) {
     case 'loss-to-profit':
       return `Prior period was a loss and the current period is profitable (loss to profit). ${denominator}`
     case 'loss-narrowed':
-      return `Both periods are losses and the loss narrowed. ${denominator}`
+      return `The loss narrowed relative to the prior period. ${denominator}`
     case 'loss-widened':
       return `Both periods are losses and the loss widened. ${denominator}`
     case 'profit-to-loss':
