@@ -1,4 +1,4 @@
-import { formatDividendYield, readDividendYield } from './formatters'
+import { formatDividendPayout, formatDividendYield, readDividendYield } from './formatters'
 
 describe('dividend yield formatting', () => {
   it.each([
@@ -28,5 +28,26 @@ describe('dividend yield formatting', () => {
 
   it.each([undefined, null, 'unknown', 'ratio', 'percent_fraction'])('rejects dividend yield with unit %s', unit => {
     expect(readDividendYield(0.25, unit)).toBeNull()
+  })
+})
+
+describe('dividend payout formatting', () => {
+  it.each<[Parameters<typeof formatDividendPayout>[0], string]>([
+    [{ cash_dividend: 0 }, 'VND0'],
+    [{ stock_dividend: 0 }, '0.00% stock'],
+    [{ cash_dividend: 0, stock_dividend: 0 }, 'VND0'],
+    [{ cash_dividend: 1000 }, 'VND1,000'],
+    [{ stock_dividend: 10 }, '10.00% stock'],
+    [{ cash_dividend: 1000, stock_dividend: 10 }, 'VND1,000 + 10.00% stock'],
+    [{ cash_dividend: -1000, stock_dividend: 10 }, '-VND1,000 + 10.00% stock'],
+    [{ cash_dividend: 0, dividend_ratio: 10, value: 1000 }, 'VND0'],
+    [{ stock_dividend: 0, dividend_ratio: 10, value: 1000 }, '0.00% stock'],
+    [{ dividend_ratio: 0, value: 1000 }, '0'],
+    [{ dividend_ratio: '10:1', value: 1000 }, '10:1'],
+    [{ dividend_ratio: null, value: 0 }, 'VND0'],
+    [{ cash_dividend: null, stock_dividend: null, dividend_ratio: null, value: null }, '-'],
+    [{}, '-'],
+  ])('preserves reported payout %j as %s', (row, expected) => {
+    expect(formatDividendPayout(row)).toBe(expected)
   })
 })

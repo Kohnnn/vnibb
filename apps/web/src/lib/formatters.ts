@@ -39,6 +39,25 @@ export function formatVND(value: number | null | undefined, options?: {
     return `${sign}${prefix}${absValue.toFixed(decimals)}`;
 }
 
+export function formatDividendPayout(row: {
+    cash_dividend?: number | null;
+    stock_dividend?: number | null;
+    dividend_ratio?: number | string | null;
+    value?: number | null;
+}): string {
+    const cash = row.cash_dividend;
+    const stock = row.stock_dividend;
+    if (cash != null && cash !== 0 && stock != null && stock !== 0) {
+        return `${formatVND(cash)} + ${stock.toFixed(2)}% stock`;
+    }
+    if (stock != null && stock !== 0) return `${stock.toFixed(2)}% stock`;
+    if (cash != null) return formatVND(cash);
+    if (stock != null) return `${stock.toFixed(2)}% stock`;
+    if (row.dividend_ratio != null) return String(row.dividend_ratio);
+    if (row.value != null) return formatVND(row.value);
+    return '-';
+}
+
 /**
  * Format a percentage value
  * Example: 0.1523 → "15.23%", -0.05 → "-5.00%"

@@ -8,7 +8,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useCompanyNews, useDividends, useInsiderDeals } from '@/lib/queries';
 import { formatTimestamp } from '@/lib/format';
-import { formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
+import { formatDividendPayout, formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 import { normalizeInsiderAction } from '@/lib/insiderActions';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
@@ -40,22 +40,6 @@ function formatDividendType(type: string | null | undefined): string {
   if (normalized === 'stock') return 'Stock';
   if (normalized === 'mixed') return 'Mixed';
   return 'Other';
-}
-
-function formatDividendValue(row: DividendRecord): string {
-  if (row.cash_dividend !== null && row.cash_dividend !== undefined) {
-    return formatVND(row.cash_dividend);
-  }
-  if (row.stock_dividend !== null && row.stock_dividend !== undefined) {
-    return `${row.stock_dividend.toFixed(2)}% stock`;
-  }
-  if (row.dividend_ratio !== null && row.dividend_ratio !== undefined) {
-    return String(row.dividend_ratio);
-  }
-  if (row.value !== null && row.value !== undefined) {
-    return formatVND(row.value);
-  }
-  return '-';
 }
 
 export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange }: NewsCorporateActionsWidgetProps) {
@@ -114,7 +98,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
     const eventDate = dividend.ex_date || dividend.record_date || dividend.payment_date || undefined;
     addNotebookItem({
       kind: 'news',
-      title: `Dividend ${symbol} — ${formatDividendValue(dividend)}`,
+      title: `Dividend ${symbol} — ${formatDividendPayout(dividend)}`,
       body: [formatDividendType(dividend.dividend_type || dividend.type), eventDate ? `Event date: ${eventDate}` : null, dividend.description].filter(Boolean).join('\n'),
       symbol,
       sources: [{ label: dividend.source, sourceName: dividend.source, url, publishedAt: eventDate }],
@@ -318,7 +302,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                           >
                             <div className="space-y-1">
                               <div className="text-xs font-semibold text-[var(--text-primary)]">
-                                {formatDividendValue(dividend)}
+                                {formatDividendPayout(dividend)}
                               </div>
                               <div className="text-[10px] text-[var(--text-muted)]">
                                 {formatDividendType(dividend.dividend_type || dividend.type)}

@@ -45,3 +45,19 @@ test.each<[number | null | undefined, string]>([
   expect(screen.getByText('VND1,000')).toBeInTheDocument()
   expect(screen.getByText('Corporate Actions')).toBeInTheDocument()
 })
+
+test.each([
+  [0, 'stock', '10.00% stock'],
+  [1000, 'mixed', 'VND1,000 + 10.00% stock'],
+] as const)('renders reported stock payout with %s cash (%s)', (cashDividend, type, payout) => {
+  mockUseCompanyNews.mockReturnValue(queryResult({ symbol: 'VNM', count: 0, data: [] }))
+  mockUseInsiderDeals.mockReturnValue(queryResult([]))
+  mockUseDividends.mockReturnValue(queryResult<DividendsResponse>({
+    data: [{ cash_dividend: cashDividend, stock_dividend: 10, type }],
+  }))
+
+  render(<NewsCorporateActionsWidget id="news-corporate-actions" symbol="VNM" />)
+
+  expect(screen.getByText(payout)).toBeInTheDocument()
+  expect(screen.queryByText('VND0')).not.toBeInTheDocument()
+})
