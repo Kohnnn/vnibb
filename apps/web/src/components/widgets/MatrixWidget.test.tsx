@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import MatrixWidget from './MatrixWidget';
 import { matrixApi } from '@/lib/matrix';
-import type { MatrixSnapshot } from '@/types/matrix';
+import type { MatrixPreparation, MatrixSnapshot } from '@/types/matrix';
 
 let mockUser: { id: string; provider: string } | null = null;
 const mockUpdateWidget = jest.fn();
@@ -171,6 +171,37 @@ it('ignores an obsolete edited shortlist response and keeps ineligible peers blo
   expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeDisabled();
 });
 
+
+it.each([
+  ['companies', 'Companies · maximum 10', 'FPT, NEW'],
+  ['playbook', 'Sector playbook', 'banking'],
+])('keeps a manual %s edit when the first peer preparation finishes', async (_field, label, value) => {
+  const pending = Promise.withResolvers<MatrixPreparation>();
+  jest.spyOn(matrixApi, 'prepare').mockReturnValue(pending.promise);
+  jest.spyOn(matrixApi, 'playbooks').mockResolvedValue([
+    { playbook_id: 'nonfinancial', label: 'Nonfinancial', description: 'Stored classification required.', definition_revision: 'definition-1', dimensions: snapshot.dimensions },
+    { playbook_id: 'banking', label: 'Banking', description: 'Bank-specific research questions.', definition_revision: 'definition-2', dimensions: snapshot.dimensions },
+  ]);
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  await screen.findByRole('option', { name: 'Banking' });
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  expect(matrixApi.prepare).toHaveBeenCalledWith('FPT');
+  expect(screen.getByRole('button', { name: 'Prepare peer scope' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  expect(screen.getByLabelText(label)).toHaveValue(value);
+  await act(async () => {
+    pending.resolve({
+      anchor_symbol: 'FPT', playbook_id: 'nonfinancial', symbols: ['FPT', 'CMG'], peer_basis: 'Old stored peers',
+      periods: ['2025'], period_type: 'year', limitations: [], periods_by_symbol: {
+        FPT: { year: ['2025'], quarter: [] }, CMG: { year: ['2025'], quarter: [] },
+      },
+    });
+    await pending.promise;
+  });
+  expect(screen.getByRole('button', { name: 'Prepare peer scope' })).toBeEnabled();
+  expect(screen.getByLabelText(label)).toHaveValue(value);
+  expect(matrixApi.prepare).toHaveBeenCalledTimes(1);
+});
 
 it('keeps edited shortlist and selected year when preparing the same anchor again', async () => {
   mockUser = { id: 'owner-a', provider: 'supabase' };
