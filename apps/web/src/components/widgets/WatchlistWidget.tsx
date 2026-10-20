@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect, memo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useId, memo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, TrendingUp, TrendingDown, Minus, Star, Trash2 } from 'lucide-react';
 import { getSymbols } from '@/lib/api';
@@ -108,6 +108,8 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
     const [sortConfig, setSortConfig] = useState<SortConfig>(persistedSortConfig);
 
     const [newSymbol, setNewSymbol] = useState('');
+    const [symbolError, setSymbolError] = useState<string | null>(null);
+    const symbolErrorId = useId();
     const [showAddInput, setShowAddInput] = useState(false);
     const [showClearConfirm, setShowClearConfirm] = useState(false);
 
@@ -215,8 +217,12 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
     }, [hasSymbols, lastUpdate, showCached, symbols.length, onDataChange]);
 
     const handleAddSymbol = useCallback(() => {
-        if (!newSymbol.trim()) return;
-        const symbolUpper = newSymbol.toUpperCase().trim();
+        const symbolUpper = normalizeTickerSymbol(newSymbol);
+        if (!symbolUpper) {
+            setSymbolError('Enter a three-character ticker using letters or numbers.');
+            return;
+        }
+        setSymbolError(null);
         if (symbols.includes(symbolUpper)) {
             setNewSymbol('');
             setShowAddInput(false);
@@ -323,8 +329,10 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                             <input
                                 type="text"
                                 aria-label="Watchlist symbol"
+                                aria-invalid={Boolean(symbolError)}
+                                aria-describedby={symbolError ? symbolErrorId : undefined}
                                 value={newSymbol}
-                                onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+                                onChange={(e) => { setNewSymbol(e.target.value.toUpperCase()); setSymbolError(null); }}
                                 onKeyDown={(e) => e.key === 'Enter' && handleAddSymbol()}
                                 className="min-h-11 flex-1 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-2 py-1 text-xs text-[var(--text-primary)] uppercase font-bold focus-visible:ring-2 focus-visible:ring-blue-500/40 outline-none"
                                 placeholder="SYMBOL"
@@ -332,6 +340,7 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                             />
                             <button type="button" onClick={handleAddSymbol} className="min-h-11 rounded bg-blue-600 px-3 py-1 text-[10px] font-black uppercase tracking-tighter focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Add</button>
                         </div>
+                        {symbolError && <p id={symbolErrorId} role="alert" className="mt-2 text-xs text-red-400">{symbolError}</p>}
                     </div>
                 )}
 

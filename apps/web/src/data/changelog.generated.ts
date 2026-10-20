@@ -54,6 +54,8 @@ The entries below describe source changes, not deployment or full-population acc
   from the server source.
 
 ### Fixed
+- Workspace backup dialogs start a clean session after dismissal; abandoned file reads cannot restore old previews or errors in a reopened dialog.
+- Watchlist additions use the same ticker syntax validation as saved configuration, with an accessible correction message instead of persisting malformed symbols that disappear after reload. Valid symbols do not require catalogue coverage.
 - Alert activity gains keyboard focus containment, Escape dismissal and opener restoration, explicit expanded-state semantics, and viewport-bounded sizing with a scrollable list.
 - Research-file imports retain only the latest file selection: obsolete reads and read failures cannot replace its preview or imported contents, and closing invalidates pending reads.
 - Manage Tabs respects the existing 12-tab limit without truncating saved workspaces, supports keyboard reordering with Alt+Arrow keys, and exposes the active dashboard tab to assistive technology.

@@ -135,6 +135,29 @@ describe('WatchlistWidget quotes', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Add watchlist symbol' }));
         expect(screen.getByRole('textbox', { name: 'Watchlist symbol' })).toHaveFocus();
     });
+    it('keeps malformed input editable and accepts normalized symbols without catalogue coverage', () => {
+        renderWatchlist(['VCI']);
+        fireEvent.click(screen.getByRole('button', { name: 'Add watchlist symbol' }));
+        const input = screen.getByRole('textbox', { name: 'Watchlist symbol' });
+        for (const value of ['F!T', 'ABCD', 'A B']) {
+            fireEvent.change(input, { target: { value } });
+            fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+            expect(input).toHaveValue(value);
+            expect(input).toHaveAttribute('aria-invalid', 'true');
+            expect(screen.getByRole('alert')).toBeVisible();
+            expect(screen.queryByRole('button', { name: `View ${value}` })).not.toBeInTheDocument();
+        }
+        fireEvent.change(input, { target: { value: ' zzz ' } });
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        fireEvent.keyDown(input, { key: 'Enter' });
+        expect(screen.getByRole('button', { name: 'View ZZZ' })).toBeInTheDocument();
+        expect(screen.queryByRole('textbox', { name: 'Watchlist symbol' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Add watchlist symbol' }));
+        fireEvent.change(screen.getByRole('textbox', { name: 'Watchlist symbol' }), { target: { value: 'zzz' } });
+        fireEvent.keyDown(screen.getByRole('textbox', { name: 'Watchlist symbol' }), { key: 'Enter' });
+        expect(screen.getAllByRole('button', { name: 'View ZZZ' })).toHaveLength(1);
+    });
+
     it('preserves an externally added symbol when dashboard config catches up to the mounted watchlist', () => {
         const view = renderWatchlist(['VCI']);
         updateWidget.mockClear();

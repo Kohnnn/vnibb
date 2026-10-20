@@ -937,7 +937,7 @@ export function Sidebar({
             </aside>
 
             <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
-            <WorkspaceBackupModal isOpen={workspaceBackupOpen} onClose={() => setWorkspaceBackupOpen(false)} />
+            {workspaceBackupOpen && <WorkspaceBackupModal isOpen onClose={() => setWorkspaceBackupOpen(false)} />}
             {researchBundleOpen && <ResearchBundleModal onClose={() => setResearchBundleOpen(false)} />}
 
 

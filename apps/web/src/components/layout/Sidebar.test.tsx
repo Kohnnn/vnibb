@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 
 import { Sidebar } from '@/components/layout/Sidebar'
 import { useDashboard } from '@/contexts/DashboardContext'
+import { createWorkspaceBackup } from '@/lib/workspaceBackup'
 import type {
   Dashboard,
   DashboardFolder,
@@ -161,6 +162,47 @@ describe('Sidebar context menu accessibility', () => {
     expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Close backup dialog' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  test('reopens a clean backup session and ignores a file still reading when it closed', async () => {
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+    const oldBackup = createWorkspaceBackup({
+      dashboards: [makeDashboard('old-backup', 'Old backup', 0)],
+      folders: [], activeDashboardId: null, activeTabId: null,
+    })
+    const currentBackup = createWorkspaceBackup({
+      dashboards: [makeDashboard('current-backup', 'Current backup', 0)],
+      folders: [], activeDashboardId: null, activeTabId: null,
+    })
+    let finishOldRead!: (text: string) => void
+    const oldRead = new Promise<string>((resolve) => { finishOldRead = resolve })
+    const oldFile = new File([''], 'old.json', { type: 'application/json' })
+    Object.defineProperty(oldFile, 'text', { value: () => oldRead })
+    fireEvent.click(screen.getByRole('button', { name: 'Backup workspaces' }))
+    fireEvent.change(screen.getByLabelText('Restore from a backup file (up to 5 MB)'), { target: { files: [oldFile] } })
+    expect(screen.getByLabelText('Restore from a backup file (up to 5 MB)')).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close backup dialog' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Backup workspaces' }))
+    const input = screen.getByLabelText('Restore from a backup file (up to 5 MB)')
+    expect(input).toBeEnabled()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    const currentFile = new File([''], 'current.json', { type: 'application/json' })
+    Object.defineProperty(currentFile, 'text', { value: () => Promise.resolve(JSON.stringify(currentBackup)) })
+    fireEvent.change(input, { target: { files: [currentFile] } })
+    await screen.findByText('Dashboards: Current backup')
+    await act(async () => { finishOldRead(JSON.stringify(oldBackup)) })
+
+    expect(screen.getByText('Dashboards: Current backup')).toBeInTheDocument()
+    expect(screen.queryByText('Dashboards: Old backup')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close backup dialog' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Backup workspaces' }))
+    expect(screen.queryByText('Import preview')).not.toBeInTheDocument()
+    expect(mockUseDashboard().restoreWorkspace).not.toHaveBeenCalled()
+    expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
   })
 
   test('renders workspace actions inside a menu with menuitem children', () => {
