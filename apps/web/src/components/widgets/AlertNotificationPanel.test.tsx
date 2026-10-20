@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { AlertNotificationPanel } from './AlertNotificationPanel';
@@ -31,6 +32,58 @@ describe('AlertNotificationPanel', () => {
     Object.defineProperty(window, 'Notification', { configurable: true, value: { permission: 'denied', requestPermission: jest.fn() } });
     getAlerts.mockResolvedValue([]);
     markRead.mockResolvedValue(undefined as never);
+  });
+
+  it('keeps keyboard focus in the labeled alert dialog across filter updates and restores the bell on dismissal', async () => {
+    const rects = jest.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => ({ length: 1 }) as DOMRectList);
+    const user = userEvent.setup();
+    recordAlertActivity({ id: 'price:keyboard', source: 'price', triggerTime: '2026-07-20T00:00:00Z', deliveryClass: 'browser_local', serverBacked: false, title: 'Keyboard trigger' });
+    getAlerts.mockRejectedValue(new Error('Insider API unavailable'));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    try {
+      render(<QueryClientProvider client={client}><AlertNotificationPanel /></QueryClientProvider>);
+      const bell = screen.getByRole('button', { name: 'Alert activity, 1 unread' });
+      expect(bell).toHaveAttribute('aria-expanded', 'false');
+      bell.focus();
+      await user.keyboard('{Enter}');
+
+      const dialog = await screen.findByRole('dialog', { name: 'Alerts' });
+      expect(dialog).toHaveAttribute('aria-modal', 'true');
+      expect(bell).toHaveAttribute('aria-expanded', 'true');
+      expect(bell).toHaveAttribute('aria-controls', dialog.id);
+      const close = within(dialog).getByRole('button', { name: 'Close alert activity' });
+      await waitFor(() => expect(close).toHaveFocus());
+      expect(await within(dialog).findByRole('button', { name: 'Retry' })).toBeEnabled();
+
+      await user.tab();
+      const filter = within(dialog).getByRole('button', { name: 'Show all' });
+      expect(filter).toHaveFocus();
+      await user.keyboard(' ');
+      expect(within(dialog).getByRole('button', { name: 'Show unread only' })).toHaveFocus();
+      const list = within(dialog).getByRole('region', { name: 'Alert activity list' });
+      expect(list).toHaveAttribute('tabindex', '0');
+      const activity = within(dialog).getByRole('button', { name: 'Mark Keyboard trigger read' });
+      activity.focus();
+      await user.tab();
+      expect(close).toHaveFocus();
+      await user.tab({ shift: true });
+      expect(activity).toHaveFocus();
+
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog', { name: 'Alerts' })).not.toBeInTheDocument();
+      expect(bell).toHaveFocus();
+      expect(bell).toHaveAttribute('aria-expanded', 'false');
+      await user.keyboard(' ');
+      const reopened = await screen.findByRole('dialog', { name: 'Alerts' });
+      expect(reopened.id).toBe(dialog.id);
+      expect(within(reopened).getByRole('button', { name: 'Show unread only' })).toBeInTheDocument();
+      await user.click(within(reopened).getByRole('button', { name: 'Close alert activity' }));
+      expect(screen.queryByRole('dialog', { name: 'Alerts' })).not.toBeInTheDocument();
+      expect(bell).toHaveFocus();
+    } finally {
+      rects.mockRestore();
+    }
   });
 
   it('shows unified activity with truthful delivery wording and linked navigation', async () => {

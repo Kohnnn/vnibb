@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useId } from 'react';
 import { Bell, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getInsiderAlerts, markAlertRead } from '@/lib/api';
@@ -11,6 +11,7 @@ import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy
 import { formatTimestamp } from '@/lib/format';
 import { markAlertActivityRead, readAlertActivity, recordAlertActivity, subscribeAlertActivity, type AlertActivity } from '@/lib/alertActivity';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { normalizeTickerSymbol } from '@/lib/defaultTicker';
 
 interface AlertNotificationPanelProps {
@@ -23,6 +24,9 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
   const [isOpen, setIsOpen] = useState(false);
   const [showUnreadOnly, setShowUnreadOnly] = useState(true);
   const [activity, setActivity] = useState<AlertActivity[]>([]);
+  const panelId = useId();
+  const closePanel = useCallback(() => setIsOpen(false), []);
+  const panelRef = useDialogFocusTrap<HTMLDivElement>({ enabled: isOpen, onClose: closePanel });
   const queryClient = useQueryClient();
   const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'alert_notification_panel' });
 
@@ -128,8 +132,11 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
       {/* Bell Icon Button */}
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => setIsOpen((open) => !open)}
         aria-label={`Alert activity${unreadCount ? `, ${unreadCount} unread` : ''}`}
+        aria-expanded={isOpen}
+        aria-controls={panelId}
+        aria-haspopup="dialog"
         className="relative min-h-11 min-w-11 rounded-lg border border-transparent p-2 text-[var(--text-secondary)] transition-colors hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
       >
         <Bell size={20} />
@@ -146,16 +153,24 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
           {/* Backdrop */}
           <div
             className="fixed inset-0 z-40"
-            onClick={() => setIsOpen(false)}
+            onClick={closePanel}
           />
 
           {/* Panel */}
-          <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[600px] w-96 flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] shadow-xl">
+          <div
+            ref={panelRef}
+            id={panelId}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`${panelId}-title`}
+            tabIndex={-1}
+            className="fixed inset-x-2 top-20 z-50 flex max-h-[min(600px,calc(100dvh-6rem))] flex-col overflow-y-auto rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96 sm:max-w-[calc(100vw-1rem)]"
+          >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] p-3">
+            <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] p-3">
               <div className="flex items-center gap-2">
                 <Bell size={16} className="text-[var(--text-secondary)]" />
-                <h3 className="text-sm font-medium text-[var(--text-primary)]">Alerts</h3>
+                <h3 id={`${panelId}-title`} className="text-sm font-medium text-[var(--text-primary)]">Alerts</h3>
                 {unreadCount > 0 && (
                   <span className="px-1.5 py-0.5 text-[10px] font-medium bg-red-500/20 text-red-400 rounded">
                     {unreadCount} new
@@ -164,7 +179,7 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
               </div>
               <button
                 type="button"
-                onClick={() => setIsOpen(false)}
+                onClick={closePanel}
                 aria-label="Close alert activity"
                 className="min-h-9 min-w-9 rounded p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
               >
@@ -173,7 +188,7 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
             </div>
 
             {/* Filter Toggle */}
-            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] p-3">
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] p-3">
               <button
                 onClick={() => setShowUnreadOnly(!showUnreadOnly)}
                 className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
@@ -190,7 +205,7 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
               )}
             </div>
             {isError && (
-              <div role="alert" className="border-b border-[var(--border-subtle)] bg-red-500/5 p-3">
+              <div role="alert" className="shrink-0 border-b border-[var(--border-subtle)] bg-red-500/5 p-3">
                 <p className="text-sm text-red-400">Unable to load insider alerts.</p>
                 <p className="mt-1 text-xs text-[var(--text-secondary)]">Local and previously observed activity is still available.</p>
                 <button
@@ -205,7 +220,7 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
             )}
 
             {/* Alerts List */}
-            <div className="flex-1 overflow-y-auto">
+            <div role="region" aria-label="Alert activity list" tabIndex={0} className="min-h-0 flex-1 overflow-y-auto overscroll-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/40">
               {isLoading && visibleActivity.length === 0 ? (
                 <div className="p-4 space-y-3">
                   {[...Array(3)].map((_, i) => (

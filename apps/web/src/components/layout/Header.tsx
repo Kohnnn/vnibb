@@ -545,9 +545,7 @@ export function Header({
             </DropdownMenu>
           )}
 
-          <div className="hidden sm:block">
-            <AlertNotificationPanel />
-          </div>
+          <AlertNotificationPanel />
 
           <div
             className={cn(

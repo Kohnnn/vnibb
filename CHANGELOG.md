@@ -51,6 +51,8 @@ The entries below describe source changes, not deployment or full-population acc
   from the server source.
 
 ### Fixed
+- Alert activity gains keyboard focus containment, Escape dismissal and opener restoration, explicit expanded-state semantics, and viewport-bounded sizing with a scrollable list.
+- Research-file imports retain only the latest file selection: obsolete reads and read failures cannot replace its preview or imported contents, and closing invalidates pending reads.
 - Manage Tabs respects the existing 12-tab limit without truncating saved workspaces, supports keyboard reordering with Alt+Arrow keys, and exposes the active dashboard tab to assistive technology.
 - Alert activity reports insider-source fetch failures with an explicit Retry while retaining browser-local and cached activity; successful empty results remain distinct from unavailable sources.
 - Financial ratios preserve declared dividend percentages without magnitude guesses across SQL, API and both table consumers; unknown percentage units remain unavailable even for named providers. Uncertified fiscal/current-share valuation synthesis is removed rather than presenting unsupported historical ratios.

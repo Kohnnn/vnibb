@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useDashboard } from '@/contexts/DashboardContext';
@@ -16,6 +16,8 @@ export function ResearchBundleModal({ onClose }: { onClose: () => void }) {
     const [incoming, setIncoming] = useState<ResearchBundle | null>(null);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
+    const fileReadGeneration = useRef(0);
+    useEffect(() => () => { fileReadGeneration.current += 1; }, []);
     const dialogRef = useDialogFocusTrap<HTMLElement>({ enabled: true, onClose });
     const available = useMemo(() => {
         const records: { key: string; label: string; value: BundledThesis }[] = [];
@@ -50,6 +52,7 @@ export function ResearchBundleModal({ onClose }: { onClose: () => void }) {
     };
 
     const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
+        const generation = ++fileReadGeneration.current;
         setIncoming(null);
         setMessage('');
         setError('');
@@ -58,8 +61,13 @@ export function ResearchBundleModal({ onClose }: { onClose: () => void }) {
         if (!file) return;
         try {
             if (file.size > MAX_RESEARCH_BUNDLE_BYTES) throw new Error('Research bundle exceeds the 5 MB import limit.');
-            setIncoming(parseResearchBundle(await file.text()));
-        } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not read research bundle.'); }
+            const raw = await file.text();
+            if (generation !== fileReadGeneration.current) return;
+            setIncoming(parseResearchBundle(raw));
+        } catch (cause) {
+            if (generation !== fileReadGeneration.current) return;
+            setError(cause instanceof Error ? cause.message : 'Could not read research bundle.');
+        }
     };
 
     const handleImport = () => {
