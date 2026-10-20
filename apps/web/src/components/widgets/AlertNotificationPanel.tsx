@@ -26,7 +26,7 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
   const queryClient = useQueryClient();
   const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'alert_notification_panel' });
 
-  const { data: alerts = [], isLoading, dataUpdatedAt } = useQuery({
+  const { data: alerts = [], isLoading, isError, isFetching, refetch, dataUpdatedAt } = useQuery({
     queryKey: ['insider-alerts', userId, showUnreadOnly],
     queryFn: () => getInsiderAlerts({ userId, unreadOnly: showUnreadOnly, limit: 50 }),
     refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.alerts),
@@ -189,10 +189,24 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
                 </button>
               )}
             </div>
+            {isError && (
+              <div role="alert" className="border-b border-[var(--border-subtle)] bg-red-500/5 p-3">
+                <p className="text-sm text-red-400">Unable to load insider alerts.</p>
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">Local and previously observed activity is still available.</p>
+                <button
+                  type="button"
+                  onClick={() => { void refetch(); }}
+                  disabled={isFetching}
+                  className="mt-2 min-h-9 rounded px-2 text-xs text-blue-400 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:opacity-50"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
 
             {/* Alerts List */}
             <div className="flex-1 overflow-y-auto">
-              {isLoading && activity.length === 0 ? (
+              {isLoading && visibleActivity.length === 0 ? (
                 <div className="p-4 space-y-3">
                   {[...Array(3)].map((_, i) => (
                     <div key={i} className="animate-pulse">
@@ -201,7 +215,7 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
                     </div>
                   ))}
                 </div>
-              ) : visibleActivity.length === 0 ? (
+              ) : visibleActivity.length === 0 ? isError ? null : (
                 <div className="flex h-40 flex-col items-center justify-center text-[var(--text-muted)]">
                   <Bell size={32} className="mb-2 opacity-30" />
                   <p className="text-sm">No alert activity</p>

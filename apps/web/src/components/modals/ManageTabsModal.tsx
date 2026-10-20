@@ -2,10 +2,11 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { X, GripVertical, Trash2, Plus } from 'lucide-react';
 import type { DashboardTab } from '@/types/dashboard';
 import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
+import { MAX_TABS } from '@/contexts/DashboardContext/constants';
 
 interface ManageTabsModalProps {
     isOpen: boolean;
@@ -18,6 +19,12 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
     const [localTabs, setLocalTabs] = useState<DashboardTab[]>([]);
     const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
     const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+    const movedHandleRef = useRef<HTMLButtonElement | null>(null);
+
+    useLayoutEffect(() => {
+        movedHandleRef.current?.focus();
+        movedHandleRef.current = null;
+    }, [localTabs]);
 
     // Reset local state when modal opens
     useEffect(() => {
@@ -40,13 +47,15 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
     };
 
     const handleAddTab = () => {
-        const newTab: DashboardTab = {
-            id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-            name: 'New Tab',
-            order: localTabs.length,
-            widgets: [],
-        };
-        setLocalTabs(prev => [...prev, newTab]);
+        setLocalTabs(prev => {
+            if (prev.length >= MAX_TABS) return prev;
+            return [...prev, {
+                id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                name: 'New Tab',
+                order: prev.length,
+                widgets: [],
+            }];
+        });
     };
 
     const handleDragStart = (index: number) => {
@@ -74,6 +83,20 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
         setDragOverIndex(null);
     };
 
+    const handleReorderKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+        if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const targetIndex = index + (event.key === 'ArrowUp' ? -1 : 1);
+        if (targetIndex < 0 || targetIndex >= localTabs.length) return;
+        movedHandleRef.current = event.currentTarget;
+        setLocalTabs(prev => {
+            const updated = [...prev];
+            [updated[index], updated[targetIndex]] = [updated[targetIndex], updated[index]];
+            return updated.map((tab, order) => ({ ...tab, order }));
+        });
+    };
+
     const handleSave = () => {
         // Update order values and save
         const orderedTabs = localTabs.map((tab, i) => ({ ...tab, order: i }));
@@ -86,6 +109,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
         onClose();
     };
     const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: isOpen, onClose: handleCancel });
+    const reachedTabLimit = localTabs.length >= MAX_TABS;
 
     if (!isOpen) return null;
 
@@ -144,6 +168,9 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                                     type="button"
                                     className="p-1 cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                     onMouseDown={(e) => e.stopPropagation()}
+                                    onKeyDown={(event) => handleReorderKeyDown(event, index)}
+                                    aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                                    title="Move tab with Alt+ArrowUp or Alt+ArrowDown"
                                     aria-label="Reorder tab"
                                 >
                                     <GripVertical size={18} />
@@ -183,11 +210,18 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                         <button
                             type="button"
                             onClick={handleAddTab}
-                            className="w-full flex items-center justify-center gap-2 p-3 rounded-lg border-2 border-dashed border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:border-blue-400/50 transition-colors"
+                            disabled={reachedTabLimit}
+                            title={reachedTabLimit ? `Maximum ${MAX_TABS} tabs` : undefined}
+                            className="w-full flex items-center justify-center gap-2 p-3 rounded-lg border-2 border-dashed border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:border-blue-400/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <Plus size={18} />
                             <span>Add New Tab</span>
                         </button>
+                        {reachedTabLimit && (
+                            <p className="text-xs text-[var(--text-muted)]">
+                                Maximum {MAX_TABS} tabs. Delete a tab to add another.
+                            </p>
+                        )}
                     </div>
 
                     {/* Footer */}

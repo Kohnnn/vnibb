@@ -51,6 +51,8 @@ The entries below describe source changes, not deployment or full-population acc
   from the server source.
 
 ### Fixed
+- Manage Tabs respects the existing 12-tab limit without truncating saved workspaces, supports keyboard reordering with Alt+Arrow keys, and exposes the active dashboard tab to assistive technology.
+- Alert activity reports insider-source fetch failures with an explicit Retry while retaining browser-local and cached activity; successful empty results remain distinct from unavailable sources.
 - Financial ratios preserve declared dividend percentages without magnitude guesses across SQL, API and both table consumers; unknown percentage units remain unavailable even for named providers. Uncertified fiscal/current-share valuation synthesis is removed rather than presenting unsupported historical ratios.
 - Key Metrics, Price Chart and Share Statistics preserve declared dividend percentage points, including `0.25%` and zero, and skip unknown-unit inputs without magnitude inference. Shared dividend formatting no longer rescales canonical values or rejects certified yields by an arbitrary ceiling.
 - News + Corporate Actions and Dividend Ladder format endpoint-computed dividend yields as canonical percentage points, so `0.25%` and `1.00%` are not multiplied by 100. Missing yield labels remain omitted; reported zero stays visible.
