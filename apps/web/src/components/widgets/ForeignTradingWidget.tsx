@@ -34,7 +34,7 @@ interface ForeignTradingWidgetProps {
 }
 
 function formatVolume(vol: number | null | undefined): string {
-    if (!vol) return '-';
+    if (vol == null) return '-';
     if (Math.abs(vol) >= 1e6) return `${(vol / 1e6).toFixed(2)}M`;
     if (Math.abs(vol) >= 1e3) return `${(vol / 1e3).toFixed(1)}K`;
     return vol.toLocaleString();

@@ -58,6 +58,7 @@ The entries below describe source changes, not deployment or full-population acc
 - Bank Metrics formats backend-computed percentage points explicitly: `0.25%` is no longer multiplied into `25%`, and deposit growth above 200% is no longer rescaled by a margin heuristic. Missing values remain unavailable and reported zero remains valid.
 - Dividend Ladder, Dividend Payment, Ticker Profile and News + Corporate Actions show both cash and stock components of mixed payouts. A zero cash field no longer hides a reported stock distribution; zero-only payouts and existing ratio/value fallbacks remain visible.
 - Comparison Analysis follows dashboard ticker changes without retaining the stale primary. Manually selected peers, analysis category and periods remain selected; promoting an existing peer does not duplicate it.
+- Foreign Trading displays reported zero Buy/Sell volume as `0` instead of a missing-value dash; unavailable volumes and compact formatting remain unchanged.
 - Gross-margin enrichment requires reported gross profit instead of subtracting costs with an unverified sign convention. Missing gross profit stays unavailable for either cost sign; reported gross profit, including zero, remains usable.
 - Command-palette dismissal restores opener focus; widget settings preserve explicit local financial-period opt-outs.
 - Fundamental Analysis exposes partial-section failures while retaining usable content. API and screener valuation projections withhold uncertified retained snapshots with explicit evidence reasons; raw snapshots remain unchanged.
