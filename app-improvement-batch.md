@@ -9,7 +9,7 @@ Goal: ship six confirmed usability and recovery improvements together, without A
 - [x] News + Corporate Actions recovery: terminal Retry refreshes all three sources; native dividend/insider failures recovered to payout/insider content through actual failed-source GETs.
 - [x] Matrix error ownership: obsolete rejected preparations after anchor/company/playbook edits stay hidden; native current failures remain visible, busy clears and Prepare is enabled.
 - [x] Focused rendered regressions and native before/after interactions passed; typechecking and the complete nine-stage gate passed (169 frontend suites, 1,230 frontend tests, 3,060 backend tests). Standards and spec reviews found no issues.
-- [ ] Commit only the scoped batch, deploy its immutable archive frontend-only with rollback retained, verify all six behaviors on both aliases, and commit acceptance evidence.
+- [x] Scoped batch committed as `fb1bed1` and deployed frontend-only from its immutable archive with rollback retained. Both aliases passed all six improvement groups, including 24 recovery checks and desktop/mobile keyboard/resize controls. Acceptance evidence is recorded in the [release record](qa-improvement-plan.md#bundled-usability-and-recovery--20-october-2026).
 
 Test seams: existing rendered component tests and native dashboard interactions. No source-text assertions or private-state tests. Existing source-inspection tests in modified files are removed rather than repinned.
 
