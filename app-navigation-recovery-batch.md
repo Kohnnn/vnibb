@@ -7,8 +7,8 @@ Goal: improve existing tab management and alert recovery without new dependencie
 - [x] TabBar exposes exactly the active button with `aria-current="page"`; native selection changes preserve existing button interactions.
 - [x] Insider-alert errors offer current-filter Retry while preserving local/cached activity; native failure-to-row and failure-to-empty recovery clears errors without false empty coverage.
 - [x] Before reproduction and ten focused regressions pass after fixes; typechecking, native local acceptance and the full nine-stage gate pass (171 frontend suites, 1,239 frontend tests, 3,060 backend tests).
-- [ ] Review standards and spec independently; commit only scoped code/tests/changelog/plan to the current branch.
-- [ ] Deploy an immutable archive of that exact commit frontend-only; preserve rollback, verify metadata and both aliases, six health probes and unchanged protected backend container IDs/images.
-- [ ] Exercise every acceptance scenario against both production aliases and commit the acceptance record.
+- [x] Standards and spec reviews found no actionable issues; scoped batch committed as `6a49e5d` on the current branch.
+- [x] Exact immutable archive deployed frontend-only as `dpl_DYPB4MKXMcedw6mkp3xAYF29iLXf`; metadata, both aliases, six health probes and unchanged protected backend IDs/images verified. Previous release retained for rollback.
+- [x] All four groups passed ten native production scenarios across both aliases; acceptance evidence is recorded in the [release record](qa-improvement-plan.md#navigation-and-alert-recovery--20-october-2026).
 
 Test seams: existing rendered components with real focus/query behavior where practical; native dashboard interactions in disposable browser contexts, with controlled GET responses for alert errors/recovery. Controlled responses prove consumers, not provider truth. No source-text or mock-forwarding assertions. Preserve unrelated `next-env.d.ts`, readability experiments and artifacts. No API/environment/data changes or speculative features.
