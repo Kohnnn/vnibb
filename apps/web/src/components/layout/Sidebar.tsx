@@ -513,6 +513,7 @@ export function Sidebar({
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
                         if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
                             if (!isEditing) setActiveDashboard(dashboard.id);
@@ -550,7 +551,8 @@ export function Sidebar({
                             <span className="flex-1 truncate">{dashboard.name}</span>
                             {(isEditableDashboard || isDeletableDashboard) && (
                                 <button
-                                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
+                                    className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-blue-400 p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
+                                    aria-label={`Workspace actions for ${dashboard.name}`}
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         handleContextMenu(e, dashboard.id, 'dashboard');
@@ -624,6 +626,7 @@ export function Sidebar({
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
                         if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
                             if (!isEditing) toggleFolder(folder.id);

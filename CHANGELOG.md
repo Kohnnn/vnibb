@@ -61,6 +61,9 @@ The entries below describe source changes, not deployment or full-population acc
 - Foreign Trading displays reported zero Buy/Sell volume as `0` instead of a missing-value dash; unavailable volumes and compact formatting remain unchanged.
 - Foreign Trading no longer invents flat or directional net flow from missing volumes. Incomplete rows and incomplete or empty windows show neutral `Unavailable`; reported zero and complete-data calculations remain intact.
 - Matrix peer preparation no longer overwrites company-list or playbook edits made while its response is pending. Unchanged preparation and explicit repreparation retain their existing behavior.
+- Mobile Settings exposes every section through a labeled native selector; desktop navigation shares the same selection.
+- Sidebar workspace and folder controls preserve keyboard input in rename fields. Workspace actions are named and visible on keyboard focus; research transfer contains focus, supports Escape and restores its opener.
+- Foreign Trading distinguishes empty provider failures from ordinary coverage gaps and offers retry. News + Corporate Actions terminal retry refreshes all three sources; obsolete Matrix preparation failures cannot overwrite newer draft scope.
 - Gross-margin enrichment requires reported gross profit instead of subtracting costs with an unverified sign convention. Missing gross profit stays unavailable for either cost sign; reported gross profit, including zero, remains usable.
 - Command-palette dismissal restores opener focus; widget settings preserve explicit local financial-period opt-outs.
 - Fundamental Analysis exposes partial-section failures while retaining usable content. API and screener valuation projections withhold uncertified retained snapshots with explicit evidence reasons; raw snapshots remain unchanged.

@@ -61,10 +61,12 @@ function makeDashboard(id: string, name: string, order: number): Dashboard {
   }
 }
 
-function renderSidebarWithDashboards(dashboards: readonly [Dashboard, Dashboard]): void {
+function renderSidebarWithDashboards(
+  dashboards: readonly [Dashboard, Dashboard],
+  folders: DashboardFolder[] = [],
+): void {
   const firstDashboard = dashboards[0]
   const firstTab = firstDashboard.tabs[0] ?? null
-  const emptyFolders: DashboardFolder[] = []
   const fallbackWidget: WidgetInstance = {
     id: 'widget-1',
     type: 'ticker_info',
@@ -84,7 +86,7 @@ function renderSidebarWithDashboards(dashboards: readonly [Dashboard, Dashboard]
     userNavigationSeq: 0,
     state: {
       dashboards: [...dashboards],
-      folders: emptyFolders,
+      folders,
       activeDashboardId: firstDashboard.id,
       activeTabId: firstTab?.id ?? null,
     },
@@ -194,5 +196,55 @@ describe('Sidebar context menu accessibility', () => {
     expect(moveUp).toBeVisible()
     expect(moveUp).toBeDisabled()
     expect(moveUp).toHaveAttribute('aria-disabled', 'true')
+  })
+  test('keeps Space available to workspace name inputs', () => {
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+
+    fireEvent.doubleClick(screen.getByText('First Workspace'))
+    const input = screen.getByRole('textbox', { name: 'Dashboard name' })
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+    input.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
+  })
+
+  test('does not intercept Space on the workspace actions control', () => {
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+
+    const actions = screen.getByRole('button', { name: 'Workspace actions for First Workspace' })
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+    actions.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
+  })
+  test('keeps Space available to folder name inputs', () => {
+    const folder: DashboardFolder = {
+      id: 'folder-custom',
+      name: 'Research',
+      order: 0,
+      isExpanded: true,
+    }
+    renderSidebarWithDashboards(
+      [makeDashboard('workspace-1', 'First Workspace', 0), makeDashboard('workspace-2', 'Second Workspace', 1)],
+      [folder],
+    )
+
+    fireEvent.contextMenu(screen.getByText('Research'))
+    const menu = screen.getByRole('menu', { name: 'Folder actions' })
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Rename' }))
+    const input = screen.getByRole('textbox', { name: 'Folder name' })
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+    input.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(mockUseDashboard().toggleFolder).not.toHaveBeenCalled()
   })
 })

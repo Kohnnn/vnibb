@@ -351,8 +351,8 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                         />
                     ) : isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={6} />
-                    ) : error && !hasData ? (
-                        <WidgetError error={error as Error} onRetry={() => refetch()} />
+                    ) : (error || responseWarning) && !hasData ? (
+                        <WidgetError error={(error as Error) || new Error(responseWarning ?? undefined)} onRetry={() => refetch()} />
                     ) : !hasData ? (
                         <WidgetEmpty
                             message={`No data for ${symbol}`}

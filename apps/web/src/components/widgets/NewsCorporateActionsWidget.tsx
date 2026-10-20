@@ -162,6 +162,12 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
     insiderDeals.length,
   ]);
 
+  const handleRefresh = () => {
+    refetchNews();
+    refetchDividends();
+    refetchInsider();
+  };
+
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view news and actions" />;
   }
@@ -170,11 +176,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
     <WidgetContainer
       title="News + Corporate Actions"
       symbol={symbol}
-      onRefresh={() => {
-        refetchNews();
-        refetchDividends();
-        refetchInsider();
-      }}
+      onRefresh={handleRefresh}
       onClose={onRemove}
       isLoading={isLoading && !hasData}
       noPadding
@@ -198,9 +200,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
             error={new Error('News and corporate actions took too long to load.')}
             onRetry={() => {
               resetTimeout();
-              refetchNews();
-              refetchDividends();
-              refetchInsider();
+              handleRefresh();
             }}
           />
         ) : isLoading && !hasData ? (
@@ -208,7 +208,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
             <WidgetSkeleton lines={6} />
           </div>
         ) : error && !hasData ? (
-          <WidgetError error={error as Error} onRetry={() => refetchNews()} />
+          <WidgetError error={error as Error} onRetry={handleRefresh} />
         ) : !hasData ? (
           <WidgetEmpty message="No news or corporate actions available" icon={<Newspaper size={18} />} />
         ) : (

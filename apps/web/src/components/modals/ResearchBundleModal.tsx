@@ -8,6 +8,7 @@ import { normalizeThesisConfig } from '@/lib/investorWorkflow';
 import { createResearchBundle, MAX_RESEARCH_BUNDLE_BYTES, parseResearchBundle, planResearchImport, type BundledThesis, type ResearchBundle } from '@/lib/researchBundle';
 import { readNotebookItems } from '@/lib/researchNotebook';
 import { ResearchShareControls } from '@/components/research/ResearchShareControls';
+import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 
 export function ResearchBundleModal({ onClose }: { onClose: () => void }) {
     const { state, importResearchBundle } = useDashboard();
@@ -15,6 +16,7 @@ export function ResearchBundleModal({ onClose }: { onClose: () => void }) {
     const [incoming, setIncoming] = useState<ResearchBundle | null>(null);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
+    const dialogRef = useDialogFocusTrap<HTMLElement>({ enabled: true, onClose });
     const available = useMemo(() => {
         const records: { key: string; label: string; value: BundledThesis }[] = [];
         for (const dashboard of state.dashboards) for (const tab of dashboard.tabs) for (const widget of tab.widgets) {
@@ -72,8 +74,8 @@ export function ResearchBundleModal({ onClose }: { onClose: () => void }) {
         } catch (cause) { setError(cause instanceof Error ? cause.message : 'Research import failed.'); }
     };
 
-    return createPortal(<div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" role="presentation" onKeyDown={(event) => { if (event.key === 'Escape') onClose(); }} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-        <section role="dialog" aria-modal="true" aria-labelledby="research-bundle-title" className="max-h-[90vh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-xl border border-[var(--border-color)] bg-[var(--bg-elevated)] p-5 text-[var(--text-primary)] shadow-2xl">
+    return createPortal(<div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+        <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="research-bundle-title" className="max-h-[90vh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-xl border border-[var(--border-color)] bg-[var(--bg-elevated)] p-5 text-[var(--text-primary)] shadow-2xl">
             <div className="flex items-center justify-between"><h2 id="research-bundle-title" className="text-base font-semibold">Transfer Thesis &amp; Evidence</h2><button type="button" aria-label="Close research transfer" onClick={onClose} className="rounded p-2 hover:bg-[var(--bg-tertiary)] focus-visible:ring-2 focus-visible:ring-blue-500"><X size={18} aria-hidden="true" /></button></div>
             <p className="mt-3 text-xs leading-5 text-amber-300">Sensitive research: the JSON contains selected thesis text, notes and full linked notebook originals, including sources and URLs. Review before sharing. This is separate from workspace configuration backup; holdings are not included.</p>
             <fieldset className="mt-4 space-y-1"><legend className="text-sm font-semibold">Select theses to export (up to 50)</legend>

@@ -127,11 +127,16 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
   const prepare = () => run(async () => {
     const ticket = ++prepareGeneration.current;
     const requestedAnchor = anchor.trim().toUpperCase();
-    const result = await matrixApi.prepare(requestedAnchor);
-    if (!mounted.current || ticket !== prepareGeneration.current) return;
-    setPreparation(result);
-    setSymbols((previous) => previous && preparation?.anchor_symbol === requestedAnchor ? previous : result.symbols.join(', '));
-    setPlaybook(result.playbook_id);
+    try {
+      const result = await matrixApi.prepare(requestedAnchor);
+      if (!mounted.current || ticket !== prepareGeneration.current) return;
+      setPreparation(result);
+      setSymbols((previous) => previous && preparation?.anchor_symbol === requestedAnchor ? previous : result.symbols.join(', '));
+      setPlaybook(result.playbook_id);
+    } catch (reason) {
+      if (!mounted.current || ticket !== prepareGeneration.current) return;
+      throw reason;
+    }
   });
   const entities = useMemo(() => {
     const query = view.filter.toLocaleLowerCase();

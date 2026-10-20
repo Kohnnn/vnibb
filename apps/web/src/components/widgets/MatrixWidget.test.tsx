@@ -203,6 +203,38 @@ it.each([
   expect(matrixApi.prepare).toHaveBeenCalledTimes(1);
 });
 
+it.each([
+  ['anchor', 'Anchor company', 'CMG'],
+  ['companies', 'Companies · maximum 10', 'FPT, NEW'],
+  ['playbook', 'Sector playbook', 'banking'],
+])('ignores an obsolete preparation error after a %s edit but shows a current failure', async (_field, label, value) => {
+  const pending = Promise.withResolvers<MatrixPreparation>();
+  jest.spyOn(matrixApi, 'prepare')
+    .mockReturnValueOnce(pending.promise)
+    .mockRejectedValueOnce(new Error('Current peer preparation failed'));
+  jest.spyOn(matrixApi, 'playbooks').mockResolvedValue([
+    { playbook_id: 'nonfinancial', label: 'Nonfinancial', description: 'Stored classification required.', definition_revision: 'definition-1', dimensions: snapshot.dimensions },
+    { playbook_id: 'banking', label: 'Banking', description: 'Bank-specific research questions.', definition_revision: 'definition-2', dimensions: snapshot.dimensions },
+  ]);
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  await screen.findByRole('option', { name: 'Banking' });
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  expect(screen.getByRole('button', { name: 'Prepare peer scope' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  await act(async () => {
+    pending.reject(new Error('Obsolete peer preparation failed'));
+    await pending.promise.catch(() => undefined);
+  });
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.queryByText('Working on your explicit request…')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Prepare peer scope' })).toBeEnabled();
+  expect(screen.getByLabelText(label)).toHaveValue(value);
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Current peer preparation failed');
+  expect(screen.queryByText('Working on your explicit request…')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Prepare peer scope' })).toBeEnabled();
+});
+
 it('keeps edited shortlist and selected year when preparing the same anchor again', async () => {
   mockUser = { id: 'owner-a', provider: 'supabase' };
   jest.spyOn(matrixApi, 'prepare').mockResolvedValue({ anchor_symbol: 'FPT', playbook_id: 'nonfinancial', symbols: ['FPT', 'CMG'], peer_basis: 'Stored peers', periods: ['2025', '2024'], period_type: 'year', limitations: [], periods_by_symbol: {
