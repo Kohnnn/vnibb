@@ -163,6 +163,22 @@ async def test_unavailable_statement_never_persists_guessed_numbers(
     assert lineage["derived_data"] == {}
 
 
+
+@pytest.mark.asyncio
+async def test_ingestion_withholds_broad_interest_alias_without_rewriting_source(financial_sync):
+    entry = statement("income", interest_expense=900, revenue=1000,
+        raw_data={"financial_expenses": 900}, unit_metadata={"interest_expense": {
+            "label": "financial_expenses", "source_unit": "VND", "value_unit": "VND"}})
+    original = deepcopy(entry.model_dump(mode="json"))
+    persisted, cached = await financial_sync([entry])
+    assert persisted[0]["interest_expense"] is None
+    assert cached[0]["interest_expense"] is None
+    assert persisted[0]["revenue"] == 1000
+    lineage = persisted[0]["raw_data"]["_financial_lineage"]
+    assert lineage["unit_metadata"]["interest_expense"]["unavailable_reason"] == "interest_semantics_unverified"
+    assert persisted[0]["raw_data"]["financial_expenses"] == 900
+    assert entry.model_dump(mode="json") == original
+
 @pytest.mark.asyncio
 async def test_derived_fields_do_not_overwrite_provider_originals(financial_sync):
     income = statement(

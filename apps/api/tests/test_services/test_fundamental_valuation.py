@@ -292,6 +292,9 @@ class TestMoat:
             row["gross_profit"] = 420.0
             row["ebit"] = 160.0
             row["interest_expense"] = -20.0
+            row["unit_metadata"] = {"interest_expense": {
+                "label": "interest_expense", "source_unit": "VND", "value_unit": "VND",
+            }}
 
         score, factors = compute_moat_factors(
             income,
@@ -306,6 +309,71 @@ class TestMoat:
         assert factors["roic"] == pytest.approx(18.0)
         assert factors["roic_spread"] == pytest.approx(6.0)
         assert factors["sector_rank_score"] == pytest.approx(90.0)
+
+    @pytest.mark.parametrize("interest_fields", [
+        {"interest_expense": -20.0},
+        {"interest_expense": -20.0, "unit_metadata": {"interest_expense": {"value_unit": "VND"}}},
+        {"interest_expense": -20.0, "_valuation_unit_lineage": {
+            "interest_expense": {"rawValue": -20.0, "rawUnit": "VND", "scaleToVnd": 1},
+        }},
+        {"interest_expense": -20.0, "unit_metadata": {"interest_expense": {
+            "label": "financial_expenses", "source_unit": "VND", "value_unit": "VND",
+            "unavailable_reason": "ambiguous_interest_expense_semantics",
+        }}},
+        {"finance_cost": -20.0, "unit": "VND"},
+        {"financial_expenses": -20.0, "unit": "VND"},
+    ])
+    def test_unproven_interest_is_not_a_moat_factor(self, interest_fields) -> None:
+        income, balance = self._statements(
+            npats=[180.0] * 5, revenues=[1000.0] * 5, equities=[1000.0] * 5
+        )
+        for row in income:
+            row.update(gross_profit=420.0, ebit=160.0)
+        baseline_score, baseline_factors = compute_moat_factors(
+            income, balance, {"roic": 0.18}, discount_rate=0.12,
+        )
+        income[-1].update(interest_fields)
+
+        score, factors = compute_moat_factors(
+            income, balance, {"roic": 0.18}, discount_rate=0.12,
+        )
+
+        assert "interest_coverage" not in factors
+        assert score == pytest.approx(baseline_score)
+        assert factors == baseline_factors
+        assert factors["gross_margin_avg"] == pytest.approx(42.0)
+        assert factors["roe_avg"] == pytest.approx(18.0)
+        assert factors["roic_spread"] == pytest.approx(6.0)
+
+    @pytest.mark.parametrize("unit", ["VND", "million VND"])
+    @pytest.mark.parametrize("interest_key", ["interest_expense", "interestExpense"])
+    def test_normalized_interest_requires_original_semantics_and_unit(self, unit, interest_key) -> None:
+        income, balance = self._statements(
+            npats=[180.0] * 5, revenues=[1000.0] * 5, equities=[1000.0] * 5
+        )
+        for row in income:
+            row.update(gross_profit=420.0, ebit=160.0, unit=unit)
+            row[interest_key] = -20.0
+
+        _, factors = compute_moat_factors(_normalize_statement_rows([{"raw": row} for row in income]), balance)
+
+        assert factors["interest_coverage"] == pytest.approx(8.0)
+
+    def test_normalization_does_not_override_explicit_interest_rejection(self) -> None:
+        income, balance = self._statements(
+            npats=[180.0] * 5, revenues=[1000.0] * 5, equities=[1000.0] * 5
+        )
+        for row in income:
+            row.update(gross_profit=420.0, ebit=160.0, interest_expense=-20.0, unit="VND")
+            row["unit_metadata"] = {"interest_expense": {
+                "label": "financial_expenses", "source_unit": "VND", "value_unit": "VND",
+                "unavailable_reason": "ambiguous_interest_expense_semantics",
+            }}
+
+        _, factors = compute_moat_factors(_normalize_statement_rows([{"raw": row} for row in income]), balance)
+
+        assert "interest_coverage" not in factors
+        assert factors["gross_margin_avg"] == pytest.approx(42.0)
 
 
 # --- margin of safety --------------------------------------------------------------
@@ -461,7 +529,7 @@ class TestToDocument:
         assert doc["symbol"] == "AAA"
         assert doc["snapshotDate"] == "2026-06-10"
         assert doc["source"] == "vnibb-fundamental-engine"
-        assert doc["schemaVersion"] == 2
+        assert doc["schemaVersion"] == 3
         assert doc["observedAt"] is not None
         assert doc["updatedAt"] is not None
         for key in (

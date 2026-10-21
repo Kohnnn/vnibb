@@ -11,7 +11,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useUnit } from '@/contexts/UnitContext';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { useBalanceSheet, useCashFlow, useFinancialRatios, useIncomeStatement, useProfile } from '@/lib/queries';
-import { describeUnavailableStatementRows, formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { describeUnavailableStatementRows, formatFinancialPeriodLabel, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { convertFinancialValueForUnit, formatNumber, formatPercent, formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { BalanceSheetData, CashFlowData, FinancialRatioData, IncomeStatementData } from '@/types/equity';
@@ -128,6 +128,8 @@ function readObjectNumber(source: Record<string, unknown> | null | undefined, ke
 
 function readEntryNumber(entry: Record<string, unknown> | null | undefined, directKeys: string[], rawKeys: string[] = []): number | null {
     if (!entry) return null;
+    const metadata = entry.unit_metadata && typeof entry.unit_metadata === 'object' ? entry.unit_metadata : {};
+    if (isUnavailableStatementRow(entry) || Object.entries(metadata).some(([key, field]) => (directKeys.includes(key) || rawKeys.includes(key)) && field && typeof field === 'object' && 'unavailable_reason' in field && isUnavailableStatementRow(field))) return null;
 
     const direct = readObjectNumber(entry, directKeys);
     if (direct !== null) return direct;

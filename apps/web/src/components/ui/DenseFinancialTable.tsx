@@ -537,6 +537,7 @@ export function DenseFinancialTable({
                         <div className="text-[11px] text-[var(--text-muted)]">Need at least two reported periods to draw a trend.</div>
                       ) : (
                         <div className="h-[120px] w-full">
+                          {footerNote ? <div className="text-[10px] text-[var(--text-muted)]">{footerNote.split(' • ')[0]}</div> : null}
                           <ChartMountGuard className="h-full" minHeight={100} minWidth={120}>
                             <ResponsiveContainer width="100%" height="100%" minWidth={120} minHeight={80}>
                             <AreaChart data={inlineChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -548,7 +549,7 @@ export function DenseFinancialTable({
                                 interval={inlineChartData.length > 12 ? Math.max(1, Math.ceil(inlineChartData.length / 8)) - 1 : 0}
                                 minTickGap={12}
                               />
-                              <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} width={48} />
+                              <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} width={48} tickFormatter={(value) => valueFormatter ? valueFormatter(value, row, visibleColumns[0]?.key || '') : defaultFormatter(value)} />
                               <RechartsTooltip
                                 contentStyle={{
                                   background: 'var(--bg-secondary)',
@@ -556,7 +557,7 @@ export function DenseFinancialTable({
                                   borderRadius: '8px',
                                   fontSize: '11px',
                                 }}
-                                formatter={(value) => [defaultFormatter(Array.isArray(value) ? value[0] : value), row.label]}
+                                formatter={(value) => [valueFormatter ? valueFormatter(Array.isArray(value) ? value[0] : value, row, visibleColumns[0]?.key || '') : defaultFormatter(Array.isArray(value) ? value[0] : value), row.label]}
                               />
                               <Area type="monotone" dataKey="value" stroke="#38bdf8" strokeWidth={2} fill="rgba(56,189,248,0.18)" />
                             </AreaChart>

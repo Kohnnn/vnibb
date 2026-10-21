@@ -5,6 +5,7 @@ import { __resolveDashboardSlug as resolveDashboardSlug, useUrlSync } from '@/ho
 
 type UrlSyncHarnessProps = {
   ready: boolean;
+  dashboardCatalogueReady?: boolean;
   activeDashboardId: string | null;
   activeTabId: string | null;
   symbol: string;
@@ -20,6 +21,7 @@ type UrlSyncHarnessProps = {
 function UrlSyncHarness(props: UrlSyncHarnessProps) {
   useUrlSync({
     ready: props.ready,
+    dashboardCatalogueReady: props.dashboardCatalogueReady ?? false,
     activeDashboardId: props.activeDashboardId,
     activeTabId: props.activeTabId,
     symbol: props.symbol,
@@ -77,6 +79,85 @@ describe('useUrlSync deep-link restore', () => {
 
     expect(applyDashboard).toHaveBeenCalledWith('custom-dashboard', { programmatic: true });
     expect(applyTab).toHaveBeenCalledWith('custom-tab', { programmatic: true });
+  });
+
+  it('canonicalizes an unknown dashboard only after the catalogue finishes hydrating', () => {
+    window.history.replaceState(null, '', '/dashboard?dashboard=missing-dashboard&tab=missing-tab&symbol=HPG&view=compact#workspace');
+    const props: UrlSyncHarnessProps = {
+      ready: true,
+      dashboardCatalogueReady: false,
+      activeDashboardId: 'default-dashboard',
+      activeTabId: 'default-tab',
+      symbol: 'HPG',
+      dashboardIds: ['default-dashboard'],
+      tabIdsByDashboard: { 'default-dashboard': ['default-tab', 'settled-tab'] },
+      applyDashboard: jest.fn(),
+      applyTab: jest.fn(),
+      applySymbol: jest.fn(),
+    };
+
+    const { rerender } = render(<UrlSyncHarness {...props} />);
+    expect(new URLSearchParams(window.location.search).get('dashboard')).toBe('missing-dashboard');
+
+    rerender(<UrlSyncHarness {...props} activeTabId="settled-tab" />);
+    expect(new URLSearchParams(window.location.search).get('dashboard')).toBe('missing-dashboard');
+
+    rerender(<UrlSyncHarness {...props} activeTabId="settled-tab" dashboardCatalogueReady />);
+    expect(window.location.pathname + window.location.search + window.location.hash).toBe(
+      '/dashboard?dashboard=default-dashboard&tab=settled-tab&symbol=HPG&view=compact#workspace',
+    );
+    expect(props.applyDashboard).not.toHaveBeenCalled();
+    expect(props.applyTab).not.toHaveBeenCalled();
+  });
+
+  it('canonicalizes an unknown dashboard when the catalogue is already hydrated', () => {
+    window.history.replaceState(null, '', '/dashboard?dashboard=missing-dashboard&tab=missing-tab&symbol=HPG');
+    render(
+      <UrlSyncHarness
+        ready
+        dashboardCatalogueReady
+        activeDashboardId="default-dashboard"
+        activeTabId="default-tab"
+        symbol="HPG"
+        dashboardIds={['default-dashboard']}
+        tabIdsByDashboard={{ 'default-dashboard': ['default-tab'] }}
+        applyDashboard={jest.fn()}
+        applyTab={jest.fn()}
+        applySymbol={jest.fn()}
+      />,
+    );
+
+    expect(window.location.search).toBe('?dashboard=default-dashboard&tab=default-tab&symbol=HPG');
+  });
+
+  it('restores a published workspace arriving with the terminal catalogue signal', () => {
+    const props: UrlSyncHarnessProps = {
+      ready: true,
+      dashboardCatalogueReady: false,
+      activeDashboardId: 'default-dashboard',
+      activeTabId: 'default-tab',
+      symbol: 'HPG',
+      dashboardIds: ['default-dashboard'],
+      tabIdsByDashboard: { 'default-dashboard': ['default-tab'] },
+      applyDashboard: jest.fn(),
+      applyTab: jest.fn(),
+      applySymbol: jest.fn(),
+    };
+    const { rerender } = render(<UrlSyncHarness {...props} />);
+    expect(props.applyDashboard).not.toHaveBeenCalled();
+
+    rerender(
+      <UrlSyncHarness
+        {...props}
+        dashboardCatalogueReady
+        dashboardIds={['default-dashboard', 'custom-dashboard']}
+        tabIdsByDashboard={{ 'custom-dashboard': ['custom-tab'] }}
+      />,
+    );
+
+    expect(props.applyDashboard).toHaveBeenCalledWith('custom-dashboard', { programmatic: true });
+    expect(props.applyTab).toHaveBeenCalledWith('custom-tab', { programmatic: true });
+    expect(new URLSearchParams(window.location.search).get('dashboard')).toBe('custom-dashboard');
   });
 
   it('waits for a published tab to register even when its dashboard already exists', () => {
@@ -273,12 +354,13 @@ describe('useUrlSync deep-link restore', () => {
 });
 
 
-function ScopedUrlHarness() {
+function ScopedUrlHarness({ dashboardCatalogueReady = true }: { dashboardCatalogueReady?: boolean }) {
   const [dashboard, setDashboard] = useState('original');
   const [symbols, setSymbols] = useState({ original: 'VCB', imported: 'VCI' });
   const symbol = symbols[dashboard as keyof typeof symbols];
   useUrlSync({
     ready: true,
+    dashboardCatalogueReady,
     activeDashboardId: dashboard,
     activeTabId: `${dashboard}-tab`,
     symbol,
@@ -296,6 +378,20 @@ function ScopedUrlHarness() {
     <button onClick={() => setDashboard('original')}>Return to original</button>
   </>;
 }
+
+test('unknown dashboard recovery preserves the valid inbound symbol after catalogue completion', () => {
+  window.history.replaceState(null, '', '/dashboard?dashboard=missing-dashboard&tab=removed-tab&symbol=FPT');
+  const view = render(<ScopedUrlHarness dashboardCatalogueReady={false} />);
+  expect(screen.getByLabelText('Original ticker')).toHaveTextContent('VCB');
+  expect(new URLSearchParams(window.location.search).get('dashboard')).toBe('missing-dashboard');
+
+  view.rerender(<ScopedUrlHarness dashboardCatalogueReady />);
+
+  expect(screen.getByLabelText('Original ticker')).toHaveTextContent('FPT');
+  expect(screen.getByLabelText('Imported ticker')).toHaveTextContent('VCI');
+  expect(screen.getByLabelText('Active workspace')).toHaveTextContent('original');
+  expect(window.location.search).toBe('?dashboard=original&tab=original-tab&symbol=FPT');
+});
 
 test('deep links apply the ticker only after entering its workspace and preserve the departing ticker', () => {
   window.history.replaceState(null, '', '/dashboard?dashboard=imported&symbol=FPT');

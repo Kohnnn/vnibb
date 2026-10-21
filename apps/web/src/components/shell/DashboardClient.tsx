@@ -135,6 +135,7 @@ function DashboardContent() {
     const {
         state,
         localStateReady,
+        dashboardCatalogueReady,
         userNavigationSeq,
         activeDashboard,
         activeTab,
@@ -442,14 +443,21 @@ function DashboardContent() {
         }
 
         autoWalkthroughQueuedRef.current = true;
+        let opened = false;
+        let frameId: number | undefined;
 
         const timeoutId = window.setTimeout(() => {
-            window.requestAnimationFrame(() => {
+            frameId = window.requestAnimationFrame(() => {
+                opened = true;
                 openWalkthrough();
             });
         }, 240);
 
-        return () => window.clearTimeout(timeoutId);
+        return () => {
+            window.clearTimeout(timeoutId);
+            if (frameId !== undefined) window.cancelAnimationFrame(frameId);
+            if (!opened) autoWalkthroughQueuedRef.current = false;
+        };
     }, [activeDashboard, activeTab, mounted, openWalkthrough]);
 
     useEffect(() => {
@@ -537,6 +545,7 @@ function DashboardContent() {
     const dashboardIds = useMemo(() => state.dashboards.map((d) => d.id), [state.dashboards]);
     useUrlSync({
         ready: mounted && localStateReady,
+        dashboardCatalogueReady,
         activeDashboardId: activeDashboard?.id ?? null,
         activeTabId: activeTab?.id ?? null,
         symbol: stockGlobalSymbol,
@@ -1527,6 +1536,7 @@ function DashboardContent() {
                                                     title={widgetTitle}
                                                     widgetType={widgetType}
                                                     symbol={widgetSymbol}
+                                                    showTickerSelector={Boolean(widgetSymbol)}
                                                     tabId={activeTab.id}
                                                     dashboardId={activeDashboard.id}
                                                     widgetGroup={widget.widgetGroup}
@@ -1683,6 +1693,7 @@ function DashboardContent() {
                                         widgetContext={copilotWidgetContext}
                                         widgetContextData={copilotWidgetData}
                                         activeTabName={activeTab?.name}
+                                        workspaceContextKey={`${activeDashboard?.id || ''}:${activeTab?.id || ''}`}
                                         promptLibraryRequestId={copilotPromptLibraryRequestId}
                                         starterPrompt={copilotStarterPrompt}
                                         starterWorkflow={copilotStarterWorkflow}
@@ -1711,6 +1722,7 @@ function DashboardContent() {
                                 widgetContext={copilotWidgetContext}
                                 widgetContextData={copilotWidgetData}
                                 activeTabName={activeTab?.name}
+                                workspaceContextKey={`${activeDashboard?.id || ''}:${activeTab?.id || ''}`}
                                 promptLibraryRequestId={copilotPromptLibraryRequestId}
                                 starterPrompt={copilotStarterPrompt}
                                 starterWorkflow={copilotStarterWorkflow}

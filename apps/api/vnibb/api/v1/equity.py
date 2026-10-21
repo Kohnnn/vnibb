@@ -65,6 +65,7 @@ from vnibb.providers.vnstock.financials import (
     FinancialStatementData,
     StatementType,
     VnstockFinancialsFetcher,
+    admitted_interest_expense,
 )
 from vnibb.providers.vnstock.foreign_trading import (
     ForeignTradingData,
@@ -88,7 +89,7 @@ from vnibb.services.cache_manager import CacheManager
 from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_pipeline import CACHE_TTL_ORDERBOOK, CACHE_TTL_ORDERBOOK_DAILY
 from vnibb.services.data_quality import is_market_business_day
-from vnibb.services.financial_service import build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
+from vnibb.services.financial_service import admit_statement_rows, build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
 from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
@@ -312,15 +313,7 @@ async def _load_financial_statement_fallback(
     fallback_rows = [
         FinancialStatementData(
             symbol=row.symbol,
-            period=(
-                normalize_statement_period(
-                    row.period,
-                    fiscal_year=row.fiscal_year,
-                    fiscal_quarter=row.fiscal_quarter,
-                    period_type=row.period_type,
-                )
-                or row.period
-            ),
+            period=row.period,
             statement_type=statement_type,
             fiscal_year=row.fiscal_year,
             fiscal_quarter=row.fiscal_quarter,
@@ -395,7 +388,17 @@ async def _load_financial_statement_fallback(
         canonical = lineage.get("canonical_data")
         if isinstance(canonical, dict):
             restored = FinancialStatementData.model_validate(canonical)
-            restored.period = statement.period
+            stored_identity = (statement.period, statement.fiscal_year, statement.fiscal_quarter)
+            restored_identity = (restored.period, restored.fiscal_year, restored.fiscal_quarter)
+            if _financial_statement_identity(statement) != _financial_statement_identity(restored):
+                restored = admit_statement_rows([restored.model_copy(update={
+                    "period": stored_identity[0], "fiscal_year": restored_identity[1],
+                    "fiscal_quarter": restored_identity[2],
+                })], period)[0]
+                restored.unavailable_reason = "conflicting_fiscal_identity"
+                for name in FinancialStatementData.model_fields:
+                    if name not in {"fiscal_year", "fiscal_quarter"} and isinstance(getattr(restored, name), (int, float)):
+                        setattr(restored, name, None)
             restored.raw_data = raw
             fallback_rows[index] = restored
             statement = restored
@@ -403,6 +406,7 @@ async def _load_financial_statement_fallback(
             statement.source = getattr(row, "source", None)
             statement.unit_metadata = {"basis": {"unavailable_reason": "legacy_unit_basis_unconfirmed"}}
         statement.updated_at = getattr(row, "updated_at", None)
+    fallback_rows = admit_statement_rows(fallback_rows, "quarter" if period_upper == "TTM" else period)
 
     if period_upper == "TTM":
         return _build_ttm_financial_statement_rows(fallback_rows, statement_type=statement_type)
@@ -613,9 +617,9 @@ def _field_metric_rejected(item: FinancialStatementData, field_name: str) -> boo
 
 
 def _financial_statement_identity(item: FinancialStatementData) -> tuple[str, int, int]:
-    period_text = normalize_statement_period(getattr(item, "period", "")) or str(
-        getattr(item, "period", "") or ""
-    )
+    period_text = normalize_statement_period(
+        getattr(item, "period", ""), fiscal_year=item.fiscal_year, fiscal_quarter=item.fiscal_quarter,
+    ) or str(getattr(item, "period", "") or "")
     year_match = re.search(r"(20\d{2})", period_text.upper())
     quarter_match = re.search(r"Q([1-4])", period_text.upper())
     fiscal_year = getattr(item, "fiscal_year", None)
@@ -644,6 +648,23 @@ def _merge_financial_statement_rows(
         identity = _financial_statement_identity(item)
         seen.add(identity)
         fallback = fallback_lookup.get(identity)
+        if (identity == ("TTM", 0, 0)
+                and item.unavailable_reason in {"missing_quarterly_source_data", "ttm_calculation_failed"}
+                and not (item.source or item.value_unit or item.source_periods or item.raw_data or item.unit_metadata)):
+            candidates = [candidate for candidate in fallback_rows
+                if candidate.period.upper().startswith("TTM")
+                and (candidate.symbol.upper(), candidate.statement_type) == (item.symbol.upper(), item.statement_type)]
+            if len(candidates) == 1:
+                candidate = admit_statement_rows(candidates, "TTM")[0]
+                if candidate.unavailable_reason and candidate.source_periods and (candidate.raw_data or {}).get("source_rows"):
+                    for field_name in FinancialStatementData.model_fields:
+                        if field_name not in {"fiscal_year", "fiscal_quarter"} and isinstance(getattr(candidate, field_name), (int, float)):
+                            setattr(candidate, field_name, None)
+                    merged.append(candidate)
+                    seen.add(_financial_statement_identity(candidate))
+                    continue
+                if not candidate.unavailable_reason:
+                    fallback = candidate
         if fallback is None:
             merged.append(item)
             continue
@@ -665,7 +686,17 @@ def _merge_financial_statement_rows(
             )
         ):
             merged.append(fallback)
+            seen.add(_financial_statement_identity(fallback))
             continue
+        snapshot_merge = (item.period.upper().startswith("TTM")
+            and item.statement_type in {"balance", "balance_sheet"}
+            and item.aggregation_basis == "latest_quarter_snapshot")
+        if snapshot_merge:
+            item, fallback = admit_statement_rows([item, fallback], "TTM")
+            if (fallback.aggregation_basis != "latest_quarter_snapshot"
+                    or item.source_periods != fallback.source_periods or item.source != fallback.source):
+                merged.append(item)
+                continue
         if item.unavailable_reason or fallback.unavailable_reason:
             merged.append(item)
             continue
@@ -680,6 +711,26 @@ def _merge_financial_statement_rows(
         if item.value_unit != fallback.value_unit or primary_basis != fallback_basis:
             merged.append(item)
             continue
+        if snapshot_merge:
+            # Merge the admitted quarter evidence, not the derived snapshot scalars.
+            source = _merge_financial_statement_rows(
+                [FinancialStatementData.model_validate(item.raw_data["source_rows"][0])],
+                [FinancialStatementData.model_validate(fallback.raw_data["source_rows"][0])],
+            )[0]
+            merged.append(source.model_copy(update={
+                "period": item.period, "aggregation_basis": item.aggregation_basis,
+                "source_periods": item.source_periods, "raw_data": {
+                    "primary": item.raw_data, "fallback": fallback.raw_data,
+                    "source_rows": [source.model_dump(mode="json")],
+                },
+            }))
+            continue
+        item = item.model_copy(deep=True)
+        for field_name in FinancialStatementData.model_fields:
+            rejected = item if _field_metric_rejected(item, field_name) else fallback
+            if _field_metric_rejected(rejected, field_name):
+                setattr(item, field_name, None)
+                item.unit_metadata[field_name] = rejected.unit_metadata[field_name]
 
         payload = item.model_dump(mode="json")
         fallback_payload = fallback.model_dump(mode="json")
@@ -3403,7 +3454,7 @@ async def _enrich_missing_ratio_metrics(
                 _lookup_financial_metric(statement_row.raw_data or {}, "gross_profit", "grossProfit"),
             ),
             "eps": _coerce_optional_float(statement_row.eps),
-            "interest_expense": _coerce_optional_float(statement_row.interest_expense),
+            "interest_expense": admitted_interest_expense(statement_row),
             "ebitda": _coerce_optional_float(statement_row.ebitda),
             "tax_expense": _coerce_optional_float(statement_row.tax_expense),
             "raw_data": statement_row.raw_data or {},
@@ -3562,6 +3613,10 @@ async def _enrich_missing_ratio_metrics(
         )
         interest_expense = (
             None if income is None else _coerce_optional_float(income.get("interest_expense"))
+        )
+        item.interest_coverage = (
+            operating_income / abs(interest_expense)
+            if operating_income is not None and interest_expense not in (None, 0) else None
         )
         net_interest_income = (
             None if income is None else _coerce_optional_float(income.get("net_interest_income"))
@@ -3867,7 +3922,7 @@ async def _enrich_missing_ratio_metrics(
             ebitda_value = ebitda_reported
             if ebitda_value is None and operating_income is not None and depreciation is not None:
                 ebitda_value = operating_income + abs(depreciation)
-            if ebitda_value is None and net_income is not None:
+            if ebitda_value is None and net_income is not None and interest_expense is not None:
                 addbacks = 0.0
                 has_addback = False
                 if tax_expense is not None:
@@ -3884,7 +3939,7 @@ async def _enrich_missing_ratio_metrics(
             if ebitda_value is not None:
                 item.ebitda = ebitda_value
 
-        if item.debt_service_coverage is None and operating_income is not None:
+        if item.debt_service_coverage is None and operating_income is not None and interest_expense is not None:
             debt_service = 0.0
             if interest_expense is not None:
                 debt_service += abs(interest_expense)
@@ -3892,12 +3947,8 @@ async def _enrich_missing_ratio_metrics(
                 debt_service += abs(debt_repayment)
             if debt_service > 0:
                 item.debt_service_coverage = operating_income / debt_service
-        if (
-            item.debt_service_coverage is None
-            and operating_cash_flow is not None
-            and debt_repayment not in (None, 0)
-        ):
-            item.debt_service_coverage = operating_cash_flow / abs(debt_repayment)
+        if interest_expense is None:
+            item.debt_service_coverage = None
 
         if (
             item.ocf_debt is None
@@ -4686,7 +4737,7 @@ async def get_fundamental_analysis(
 
 
 @router.get("/{symbol}/financials", response_model=StandardResponse[List[FinancialStatementData]])
-@cached(ttl=86400, key_prefix="financials_v2_iq_acquired", exclude_args=[4])
+@cached(ttl=86400, key_prefix="financials_v4_fiscal_interest_admitted", exclude_args=[4])
 async def get_financials(
     symbol: str,
     statement_type: Literal["income", "balance", "cashflow"] = Query("income"),
@@ -4708,9 +4759,9 @@ async def get_financials(
     primary_error: Exception | None = None
     mongo_data: list[FinancialStatementData] = []
     try:
-        mongo_data = await _load_mongo_financial_statement_rows(
+        mongo_data = admit_statement_rows(await _load_mongo_financial_statement_rows(
             symbol=symbol, statement_type=statement_type, period=period, limit=limit,
-        )
+        ), period)
     except Exception as exc:
         primary_error = exc
         logger.warning("IQ statement read failed for %s: %s", symbol, exc)
@@ -4748,7 +4799,7 @@ async def get_financials(
                 mongo_data = _merge_financial_statement_rows(acquired, mongo_data)
         if mongo_data and all(row.source == "vietcap" for row in mongo_data):
             return StandardResponse(
-                data=mongo_data, meta=MetaData(count=len(mongo_data), last_data_date=last_data_date),
+                data=admit_statement_rows(mongo_data, period), meta=MetaData(count=len(mongo_data), last_data_date=last_data_date),
                 error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
             )
     except Exception as exc:
@@ -4761,6 +4812,7 @@ async def get_financials(
             period=period,
             limit=limit,
         )
+        data = admit_statement_rows(data, period)
         fallback_data = await _load_financial_statement_fallback(
             db=db,
             symbol=symbol,
@@ -4785,7 +4837,7 @@ async def get_financials(
                     rows=data,
                 )
             return StandardResponse(
-                data=data,
+                data=admit_statement_rows(data, period),
                 meta=MetaData(count=len(data), last_data_date=last_data_date),
                 error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
             )
@@ -4802,7 +4854,7 @@ async def get_financials(
                     rows=fallback_data,
                 )
             return StandardResponse(
-                data=fallback_data,
+                data=admit_statement_rows(fallback_data, period),
                 meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
                 error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
             )
@@ -4835,7 +4887,7 @@ async def get_financials(
                         rows=fallback_data,
                     )
                 return StandardResponse(
-                    data=fallback_data,
+                    data=admit_statement_rows(fallback_data, period),
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
                     error=f"IQ financial source unavailable: {primary_error}; VCI supplement unavailable: {e}" if primary_error else f"VCI supplement unavailable: {e}",
                 )
@@ -5014,7 +5066,7 @@ async def get_correlation_matrix(
 
 
 @router.get("/{symbol}/ttm", response_model=StandardResponse[dict[str, Any]])
-@cached(ttl=3600, key_prefix="equity_ttm")
+@cached(ttl=3600, key_prefix="equity_ttm_v2_interest_admitted")
 async def get_ttm_snapshot(
     symbol: str,
 ):
@@ -5036,6 +5088,9 @@ async def get_ttm_snapshot(
         period="TTM",
         limit=1,
     )
+    income_rows = admit_statement_rows(income_rows, "TTM")
+    balance_rows = admit_statement_rows(balance_rows, "TTM")
+    cashflow_rows = admit_statement_rows(cashflow_rows, "TTM")
 
     payload = {
         "symbol": symbol.upper(),
@@ -6292,7 +6347,7 @@ async def get_rating(symbol: str):
 @router.get("/{symbol}/financial-ratios", response_model=StandardResponse[List[FinancialRatioData]])
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
 # Keep prior scale-guessed responses out of the certified-unit serving path.
-@cached(ttl=86400, key_prefix="ratios_v8_explicit_units")
+@cached(ttl=86400, key_prefix="ratios_v9_interest_admitted")
 async def get_financial_ratios(
     symbol: str,
     period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",

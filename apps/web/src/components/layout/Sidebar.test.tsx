@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
 import { Sidebar } from '@/components/layout/Sidebar'
 import { useDashboard } from '@/contexts/DashboardContext'
@@ -84,6 +85,7 @@ function renderSidebarWithDashboards(
 
   mockUseDashboard.mockReturnValue({
     localStateReady: true,
+    dashboardCatalogueReady: true,
     userNavigationSeq: 0,
     state: {
       dashboards: [...dashboards],
@@ -150,6 +152,58 @@ describe('Sidebar context menu accessibility', () => {
       return 1
     }
     window.cancelAnimationFrame = jest.fn()
+  })
+
+  test('names the workspace and folder creation control for keyboard users', async () => {
+    const user = userEvent.setup()
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+
+    const create = screen.getByRole('button', { name: 'Create workspace or folder' })
+    create.focus()
+    await user.keyboard('{Enter}')
+
+    expect(screen.getByRole('button', { name: 'Create Dashboard' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'New Folder' })).toBeVisible()
+    expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
+  })
+
+  test.each(['{Enter}', ' '])('selects a workspace with native keyboard activation %s', async (key) => {
+    const user = userEvent.setup()
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+
+    const workspace = screen.getByRole('button', { name: 'Second Workspace' })
+    expect(workspace.tagName).toBe('BUTTON')
+    expect(workspace.querySelector('button, input, [role="button"]')).toBeNull()
+    workspace.focus()
+    await user.keyboard(key)
+
+    expect(mockUseDashboard().setActiveDashboard).toHaveBeenCalledTimes(1)
+    expect(mockUseDashboard().setActiveDashboard).toHaveBeenCalledWith('workspace-2')
+  })
+
+  test.each(['{Enter}', ' '])('tabs to separate workspace actions and opens them with %s', async (key) => {
+    const user = userEvent.setup()
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+
+    const workspace = screen.getByRole('button', { name: 'Second Workspace' })
+    const actions = screen.getByRole('button', { name: 'Workspace actions for Second Workspace' })
+    expect(actions.parentElement?.closest('button, [role="button"], a[href], [tabindex="0"]')).toBeNull()
+    workspace.focus()
+    await user.tab()
+    expect(actions).toHaveFocus()
+    await user.keyboard(key)
+
+    expect(screen.getByRole('menu', { name: 'Workspace actions' })).toBeVisible()
+    expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
   })
 
   test('opens backup restore without changing the active workspace', () => {

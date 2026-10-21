@@ -1,0 +1,201 @@
+# Production QA acceptance register — 21 October 2026
+
+Companion to [ordered repair plan](production-qa-remediation-20261021.md); preserves the supplied report's exact journey and financial-contract categories. Rows begin pending and are adjudicated only from recorded execution evidence, not source inspection. Existing contracts in `qa-improvement-spec.md` and ticket-specific original cases remain controlling.
+
+## Evidence contract
+
+For each case record: ID, prerequisite/authorization, build and component identity, ICT and UTC observation times, browser/version/viewport/zoom/profile role, exact action, expected/actual result, request URL/status/headers/body and matching UI, source/as-of versus fetched/cache clocks, screenshot/trace paths, verdict and remaining limits. Redact credentials/session/share identifiers. Classify **LIVE-BROWSER**, **HTTP-PROBE**, **SOURCE-ONLY**, **LOCAL-FIXTURE**, **HISTORICAL** separately. Screenshot absence or tool errors must not become fabricated evidence or HTTP failures.
+
+Maintain separate catalogue/navigation, per-widget delivery and financial-trust ledgers. PASS/FAIL/PARTIAL/BLOCKED/UNSUPPORTED/NOT TESTED are distinct; counts use their own units. Successful execution/HTTP 200/nonempty JSON is not financial correctness. Request budgets must be bounded, with no automatic retries or broad production fault injection.
+
+## A. Five findings: exact implementation and regression seams
+
+| Finding | Source entry points (repository-relative) | Required regression / native proof |
+|---|---|---|
+| QA-001 | `apps/api/vnibb/core/config.py:84-105,360-390`; `api/main.py:85-153,593-633`; `deployment/env.oracle.example:77-79`; `docker-compose.oracle.yml:8-30`; `deployment/Caddyfile:6-35` | Existing `test_rate_limit.py` API seam: current origin, approved aliases, unrelated denied origin, credentials/Vary, normal/validation/error/429 and preflight. Inspect effective runtime override; correcting defaults alone is insufficient. Browser fetch response/security trace, not just resource destination; no CORS/TLS bypass. |
+| QA-002 | `apps/web/src/components/widgets/OwnershipRatingSummaryWidget.tsx:36-85,106-145`; `src/lib/ownershipAnalytics.ts:54-135`; `src/lib/widgetRuntime.ts:48-92`; `WidgetWrapper.tsx:622-699` | Existing ownership helper tests plus rendered widget state-transition regression. Gate header, counts, runtime export and copilot sample with the same admission result. Distinguish successful-empty from failed; count only the received shareholder sample, not an asserted total issuer population. Source dates remain unknown if unavailable. |
+| QA-003 | `apps/api/vnibb/core/scheduler.py`; `services/sync_all_data.py:535-600`; `services/data_pipeline.py:1422-1784,2025-2056`; `services/cache_manager.py:208-303`; `api/v1/health.py:181-228`; `apps/web/src/components/widgets/ScreenerWidget.tsx:634-654,1072-1079` | Reuse screener snapshot-ownership/trade-date/sync-payload, scheduler state/lock and health tests. Mixed latest partial versus older certified partition must not appear current. UI currently supplies null observation date; map actual response `last_data_date` without substituting fetch time. Root-cause operational evidence precedes any sync. |
+| QA-004 | `apps/api/vnibb/api/v1/equity.py:269-405,615-704,4688-4838`; `services/financial_service.py:21-88,127-169,410-490`; `services/vietcap_financials.py:147-217` | Existing financial-service/IQ-serving/Vietcap tests and frontend `financialPeriods.test.ts`. Exercise provider, SQL, Mongo, empty-primary, exception and cached exits; reported year-only + Q4 duplicate shape; contradictory fiscal fields, revisions, FY/Q separation and missing/real-zero. Count means returned records, not certified quarters. |
+| QA-005 | `apps/api/vnibb/providers/vnstock/financials.py:950-992,1219-1253,1357-1376`; `api/v1/equity.py:312-405,605-612,3563-3565,3875-3892`; `services/comparison_service.py:170-220,338-345`; `services/fundamental_valuation.py:68,687-691` | Reuse financials-transform/lineage/financial-service/comparison/valuation tests. Include English/Vietnamese total-cost versus true-interest fields, either order, pivot/wide, explicit zero, conflict, unknown unit, restored canonical/SQL data and persisted derived consumers. Verify IncomeStatementWidget, FinancialSnapshotWidget, FinancialsWidget, derivations and MCP cannot revive rejected semantics. Official issuer or exchange filing must establish the two FPT annual rows; preserve the PDF403 limit until another legitimate original is obtained. |
+
+Paths beginning `api/`, `services/` in this table are under `apps/api/vnibb/`; frontend `src/` is under `apps/web/`. No runtime implementation equivalence is assumed from these source anchors.
+
+## B. Catalogue, navigation and all widget bodies
+
+- [ ] Discover current remote published catalogue and rendered inventory; retain the report's original 4 workspaces/17 tabs/107 instances as a separate baseline. If repaired remote retrieval reveals more tabs, test the entire current catalogue and explain the difference; do not cap at 17 or hardcode the fallback.
+- [ ] Each tab: real pointer click, exact deep link, warm reload and same-tab Back/Forward roundtrip with expected workspace/tab/symbol. Original gaps include 13 reload and 16 history cases. Record action method; DOM click fallback is not pointer proof.
+- [ ] No-tab/default/remembered tab, invalid/foreign/removed tab/dashboard, aliases, delayed template hydration and ticker history; canonicalize recovered URLs. Preserve personal state through fallback/remote arrival, migration/repeated reload and malformed storage.
+- [ ] Every instance: settled ready/error/unavailable/pending/unknown, actual endpoint association, source/coverage, retry/recovery where applicable and below-fold lazy bodies. Separate native, local and third-party content. After CORS recovery investigate residual failures by endpoint rather than assuming one cause for all 82.
+
+Reuse `apps/web/scripts/qa-live-smoke.mjs`, `useUrlSync.test.tsx`, `DashboardContext/navigation.test.ts`, `DashboardContext/index.test.tsx` and `NativeTickerNavigation.test.tsx`. Existing smoke has only one representative reload, Chromium, and fallback interaction methods; extend its manifest/coverage ledger minimally instead of introducing a second framework. Remote API: `/dashboard/system-layouts/published`.
+
+## C. All 22 investor journeys
+
+| Pending ID | Required end-to-end acceptance |
+|---|---|
+| [ ] NAV-01 | Fresh isolated guest first visit, onboarding/consent skip/finish and return visit; no accidental stored state from an owner's profile. |
+| [ ] NAV-02 | All-tab/header/link/reload/history and invalid-ID recovery from section B, with correct symbol and canonical URL. |
+| [ ] NAV-03 | Live FPT/VNM/VCB/MSR results with issuer/exchange, valid selection and destination context; invalid query, clear and stale-query behavior. Controlled fixtures separately prove consumer behavior, not live search availability. |
+| [ ] NAV-04 | Full command shortcuts, desktop collapse/restore, mobile navigation selection, Tab/Shift+Tab, focus visibility/return and Escape. |
+| [ ] WSP-01 | Authorized disposable create/rename workspace; tabs add/reorder/delete; template protection, duplicate prevention, reload persistence. |
+| [ ] WSP-02 | Widget category/search/no-match; add/duplicate/remove/settings exactly once; maximize/minimize/keyboard/focus; saved content remains intact. |
+| [ ] WSP-03 | Pointer and keyboard drag/resize, lock/unlock, exact settled x/y/w/h, global/local/A–D ticker groups, settings and reload; narrow reflow must not overwrite desktop geometry. |
+| [ ] WSP-04 | Backup export/preview/import-as-copy, fresh-context roundtrip, malformed/oversized/hostile content, stale reads and no overwrite/prototype pollution; isolated QA files only. |
+| [ ] FIN-01 | FPT/MSR/VNM Income/Balance/Cash/Ratios/Growth/TTM controls and tables/charts reconcile to admitted response rows; null/zero, units, revisions and source attribution. |
+| [ ] FIN-02 | Shared FY/Q/TTM plus explicit local override across symbol/reload; VND/USD/Auto table/axis/tooltip/EPS/BVPS, single conversion and ratio invariance. Disposable local settings required. |
+| [ ] FIN-03 | VCB bank versus nonbank applicability, ratio numerator/denominator and same-period basis; genuine zero versus unsupported bank metric, no inferred values. |
+| [ ] MKT-01 | Native candle/line, intervals/ranges, hover OHLCV, maximize, valid sessions and adjusted/unadjusted basis; external SPY embed does not certify native series. |
+| [ ] MKT-02 | Market overview/movers/breadth/heatmap/sector filters/time/exchange consistency, denominator and partial coverage; no zero-market assertion during errors. |
+| [ ] SCR-01 | Actual populated screener: filters/sort/reset/columns, empty versus failed, row click-through, observed source date/stale status; authorized saved screen/watchlist separately. |
+| [ ] ALT-01 | Authorized local holdings/watchlist/alerts/notes/saved views: validation, duplicates, persistence, scope and clear local-only/delivery limitations; no real trade/notification. |
+| [ ] QNT-01 | Native technical/ATR/momentum/signal input lineage, finite/session-contiguous windows and sample counts; uncertified data withholds signals, valid data matches formulas. |
+| [ ] QNT-02 | Backtest/sweep/correlation/comparison/peers: identical dates/data/strategy/fees/capital/benchmark/annualization and Sharpe convention; returns/drawdown checked independently. No run before valid inputs and execution approval. |
+| [ ] GLO-01 | Global chart/US/FX/crypto controls and units/source time; Treasury/VIX/blocked embeds and native prediction provider coverage/history; accessible unsupported states distinct from provider failure. |
+| [ ] NEWS-01 | Company/event/news/map/source filters, relevant issuer, genuine publish versus fetch clocks, deduplication, outbound links and surviving partial feeds. No content does not imply no events during failed retrieval. |
+| [ ] AI-01 | Drawer/prompts/context/focus; separately approved real send/stream/cancel/error and grounded citations/Matrix/artifacts/source links; no synthetic transcript as live proof. Paid execution/uploads remain separate approval. |
+| [ ] SYS-01 | Login/signup validation, authorized QA sign-in/out, OAuth/magic-link where configured, redirects/roles, owner-only sharing and settings/provider behavior; no actual credential values in evidence. |
+| [ ] SYS-02 | Controlled local/staging offline/slow/429/503/timeout/auth-expiry/retry/recovery with bounded terminal states, preserved independent content and accurate stale/error labels. Production fault injection requires separate approval. |
+
+## D. All ten financial-data contracts (original report categories)
+
+| Pending contract | Acceptance / issue mapping |
+|---|---|
+| [ ] Price units and sessions | #98: explicit row-linked units and price basis; finite OHLC and internally consistent quote arithmetic, trading calendar/continuity/adjustment, independent same-session reference and derived horizon. No scaling guesses or history pruning. |
+| [ ] FX and display currency | #100: single conversion; tables/chart axes/tooltips/basic/diluted EPS/BVPS; fiscal versus current FX and dimensionless invariance. |
+| [ ] Fiscal identity | #103/#121: exact FY/Q identity, scope/revision/aliases and chart/table selection; no invented year/quarter or numeric-only deduplication. |
+| [ ] TTM semantics | #101/#103/#106: four unique consecutive compatible standalone-quarter flows or certified YTD differences; stock measures are not summed, EPS not blindly summed; explicit unsupported state is safe but not coverage PASS. |
+| [ ] Zero versus unavailable | #103/#107 and QA-002: missing/null/blank/nonfinite/error distinct from reported zero throughout API/UI/export/runtime. Partial ownership cannot silently count as neutral evidence. |
+| [ ] Growth and ratios | #104/#106: negative-base/turnaround, cost versus earnings wording, bank applicability, exact denominator and period, percent metadata and dividend/payout components. |
+| [ ] Freshness and lineage | #105/#129: observation/report/publication versus acquisition/fetch/cache clocks; completed session, verified coverage, stale/partial unchanged by refresh. |
+| [ ] Cross-view reconciliation | #100/#106: match issuer, source observation, unit/scale, FY/Q/TTM, consolidation, revision and price basis across Statements/Metrics/Screener/Valuation/Peers/tooltips/export/MCP; legitimate differences explicitly labeled. Includes QA-005 interest versus finance costs. |
+| [ ] Quant analytics | #98/#106: certified inputs, same setup, returns/fees/benchmark/Sharpe/drawdown/annualization and valid sessions; no conclusion from unavailable series. |
+| [ ] Market/news coverage | #107: exchange/universe/time-window denominator, company association, actual sources, complete versus sampled flows, prediction/news coverage and failure versus empty. |
+
+Original #103 MSR FY2020/missing assets and #106 valuation-zero/VNM TTM/peer-average/backtest cases remain separate acceptance rows in their tickets; new FPT findings do not supersede them. Retained historical unknown-price units remain blocked until original row-linked evidence exists.
+
+## E. Responsive, accessibility, performance and resilience
+
+- [ ] Six CSS sizes: **360×800, 390×844, 768×1024, 1024×768, 1440×900, 1920×1080**; record actual viewport/DPR and settled reflow. All-tab narrow navigation plus representative populated financial tables/charts, screener, overlays, imports, notes, AI/Matrix and embeds; inner scroll as well as page overflow. Include previously recorded 320px footer-hint clipping as a distinct small-width observation, not an accepted blanket responsive pass.
+- [ ] Actual browser **125% and 200% zoom**, not CSS zoom or DPR simulation; saved desktop geometry unchanged. Reuse historical method in `docs/WORKSPACE_ACCEPTANCE_2026-09-27.md` if executable environment supports it; otherwise retain BLOCKED, never relabel a viewport as zoom.
+- [ ] **Chromium, Firefox, WebKit** representative critical journeys on identified release. Existing `apps/web/playwright.config.ts` is Chromium-only; use installed Playwright, not a new framework. WebKit automation is not a claim of exhaustive Safari-device coverage.
+- [ ] Keyboard-only completion, Tab/Shift+Tab/Enter/Space/Escape, focus containment/return/contrast, accessible name/selected/error states, semantic financial tables, screen-reader output and automated accessibility checks where available; no WCAG claim from a few focus tests.
+- [ ] Cold/warm browser metrics: LCP/CLS/usable-content timing, request count/size/latency and slow first-party sections; disclose device/network/release/sample count. Define applicable budgets before calling a result PASS; no invented historical timings. Separate third-party limits and tool timeouts from first-party HTTP failures.
+- [ ] Controlled offline/slow/429/503/auth expiry, cancellation, partial provider failure, embed failure and restored connectivity in local/staging; actual bounded recovery proof, not retry button presence. Production remains non-intrusive.
+
+## F. Authenticated MCP, Matrix and provenance tickets
+
+| Pending ticket | Required exact-release proof |
+|---|---|
+| [ ] #115 | Complete SQL fields, >20 rows, actual/declared count equality, deep envelopes/raw evidence and strict finite JSON; no truncation hidden by original counts. |
+| [ ] #116 | One-/two-sided date bounds, filter/sort either honored or explicitly rejected; exact FY/Q/unsupported TTM. |
+| [ ] #117 | Snapshot does not call its own sidecar recursively; exact requested selection and bounded local integration. No intrusive production recursion probe. |
+| [ ] #118 | Mongo timeout/failure/inspection-unavailable distinct from successful empty; preserve error provenance. |
+| [ ] #119 | Market/index/equity scope routes correctly to retained data with explicit store/source owner. |
+| [ ] #120 | Full-universe supplemental shareholders/officers/subsidiaries/news rotation, stable ranks 301–600 and tail/denominator; every symbol/dataset pair has independent last-attempted/last-succeeded receipts across restarted, skipped and partial cycles. No acquisition triggered merely to test reads. |
+| [ ] #121 | Exact symbol/dataset/fiscal/variant plus complete original envelope, source/unit/scale/flow/consolidation/revision evidence. |
+| [ ] #122 | Universe lookup failure versus no work, new symbols/old gaps and bounded resumable catch-up; historical repair ownership remains separate. |
+| [ ] #123 | Complete versus sampled tape/session totals, retained window, SQL/Mongo independent persistence and source-linked receipts. |
+
+Reuse `scripts/oracle/mcp_acceptance.py` and existing MCP/SQL/Matrix/research-sharing tests. Re-discover exact current tools/resources/prompts/pagination; historical 20-tool/340-call coverage is not current acceptance. Fresh genuine owner/recipient/outsider sessions and owned fixtures must prove share preview/content, expiry/revoke/logout, owner/other-owner/invalid Matrix selection, source-export denial and supplier-positive export only with genuine rights. Prior S7 users were deleted; history is not reusable credentials. #94 identity and #97 independent acquisition outcomes remain dependencies, not new duplicate tickets.
+
+## G. Execution order, prerequisites and commands
+
+**Current execution:** the user subsequently approved finishing this plan, evidenced app improvements, current-branch commit and redeployment. Implement local deterministic regressions first, minimum fixes, changed-path real runtime smoke and scoped review. Production configuration/rollout and namespaced disposable QA fixtures must remain bounded and attributable. Historical rewrites, broad backfills, provider changes, paid AI calls/uploads and access-policy changes are not implied. Never export full environments/admin keys to browser or public reports. Some financial GET handlers perform read-through acquisition/persistence; use isolated stored fixtures or explicitly approved live reads.
+
+Pending prerequisites: original raw QA bundle; fresh frontend/API/MCP/scheduler binding; effective CORS/active proxy; current scheduler receipts and expected exchange session/universe; legitimate issuer/row-linked historical evidence; authorized bounded acquisition if diagnosis requires it; genuine fresh QA sessions/owned fixtures and supplier-positive rights. Missing raw artifacts do not block safe admission repairs; missing issuer truth blocks numerical certification, not fail-closed serving.
+
+Commands below are reusable execution entry points, not evidence of completed checks:
+
+```bash
+# Inventory/self-check only; augment per-tab reload/history and real pointer proof.
+pnpm --filter frontend qa:live-smoke \
+  --base-url https://web.vnibb.xyz --reload-check --self-check \
+  --out <private-report.json>
+
+# Existing controlled local E2E, not live-provider acceptance.
+pnpm --filter frontend test:e2e:smoke
+
+# Target existing consumer/service seams; add only behavior regressions needed.
+pnpm --filter frontend exec jest --runInBand --runTestsByPath <affected-test-files>
+PYTHONPATH=apps/api apps/api/.venv/bin/python -m pytest <affected-test-files> -q
+pnpm --filter frontend exec tsc --noEmit
+
+# One final integrated run on frozen source; use the installed backend Python.
+PYTHON=apps/api/.venv/bin/python VNSTOCK_SOURCE=VCI VNSTOCK_RUNTIME_TIER=free pnpm run ci:gate
+```
+
+The report's original smoke restriction was specific to its browser environment; select the approved installed browser route for later execution. Do not claim script execution if only manual equivalents ran. The existing smoke's exit code is not an all-widget acceptance verdict.
+
+Final delivery requires one evidence index and ticket-specific before/after or legitimate investigation resolution. Keep safe-unavailable results separate from restored research coverage; mandatory blocked evidence prevents whole-product GO. No issue is closed solely because a source patch, a green integrated gate, or an automatic health watch passed.
+
+## H. Execution evidence — 22 October 2026 ICT
+
+**Research release remains NO-GO.** Source safety, controlled consumer behavior, live delivery and supplier truth are separate verdicts. The following observations precede the final immutable application rollout; they do not certify that rollout.
+
+### Bound runtimes and data limitations
+
+- Frontend baseline: `ff7bb6cb51307685a5b47daee68a4dc48c96b2f1`, deployment `dpl_6PP8VYDdFivSv3jHzUGCSp9VP9Lz`. Both aliases and 16 immutable assets match; rollback Git archive SHA-256 is `8699c5d1066d7cb76b41e22fdad42097c6d260272399308a85375db876eb9500`.
+- API/MCP/scheduler baseline: revision `626434af2b762737f7ec6183053d01dd3cf03d5d`, image `sha256:fd3503624173e1ee1a6a8bf3ae3fdc12e687d4237c89c3d26d275dee1c1028c7`. CORS-only cutover recreated API on the same image; the other seven protected container identities remained unchanged. Exact canonical origin, approved aliases and denied unrelated origin passed the 12-case live GET/OPTIONS/422 matrix; native FPT consumption and four-symbol search worked. FPT balance-sheet timeout remains a separate failure.
+- Current local catalogue is four workspaces, 20 tabs and 131 instances, not the historical 17 tabs/107 instances. Controlled catalogue navigation is not proof that all widget bodies or the remote catalogue deliver.
+- QA-003 acquisition is **FAIL/BLOCKED**: daily owner timed out at 7,200 seconds; 88 VCI ratio timeouts preceded zero screener updates. October 14 partition contains 1,614 rows versus 1,717 active symbols, with no certified-universe receipt. Four bounded actual FPT/VNM/VCB/MSR diagnostic requests timed out upstream; no payload reached admission and no SQL writes occurred. Health/UI reporting is repaired, but no source date was restamped, retry budget raised or freshness recovery claimed.
+- Genuine issuer documents are now readable: [FPT FY2025 audited consolidated statements](https://fpt.com/api/media/20260319_FPT_Audited_Consolidated_Financial_Statements_for_2025_dd62a35162.pdf), PDF page 12/printed page 9, and [original FY2024 annual report](https://fpt.com/api/media/fpt_annual_report_2024_63d63bc4cd.pdf), page 151. VND code 22 total financial expenses and code 23 interest expense are distinct. These documents establish their own rows, not the provenance of arbitrary retained SQL/Mongo observations; no historical rewrite occurred.
+
+### Journey adjudication
+
+| Journey | Observed result before final rollout | Remaining limit |
+|---|---|---|
+| NAV-01 | Controlled native skip, finish and return PASS after walkthrough timer repair; preferences persist. | Immutable-release replay remains separate. |
+| NAV-02 | All 20 local tabs have pointer, direct-link, reload and Back/Forward proof; 40 narrow header selections pass. | Invalid/foreign/alias rendered snapshots exist; final selected-state selector reconciliation is partial. Remote catalogue and per-widget delivery are separate. |
+| NAV-03 | Controlled four-symbol issuer/exchange results, selection, destination, invalid query and clear pass; live four-symbol palette search also passes after CORS repair. A held HPG response arrives after VNM without replacing VNM results. | Controlled ordering proof is distinct from live search completeness. |
+| NAV-04 | Palette/nested shortcuts modal focus, 320–360px bounds, Ctrl1–9/K/T and sidebar collapse/restore pass. Two Ctrl+W presses delete only the confirmed personal tab; Ctrl+Shift+T restores its identity/order/active URL, while system tabs stay protected. | Immutable-release replay remains separate. |
+| WSP-01 | Controlled lifecycle and repaired duplication PASS: tabs/configuration/geometry preserved, fresh identifiers, source unchanged and reload retained. | No cloud synchronization assertion. |
+| WSP-02 | Controlled library, add/remove/settings/maximize/template-protection cases PASS. | Supplier widget bodies are separately classified. |
+| WSP-03 | Controlled exact geometry, lock, narrow-state preservation and distinct A–D/global/local ticker broadcast PASS. | No remote-device persistence assertion. |
+| WSP-04 | Controlled backup preview/import-as-copy, malformed/hostile/race checks and persistence PASS. | Narrow import-overlay geometry remains unverified. |
+| FIN-01 | Populated FPT/MSR/VNM FY/Q/TTM/statement/growth consumers, zero/null and rejected-interest rendering exercised; quarterly unified/standalone reconciliation, TTM balance and source-period/aggregation/EPS-reason disclosures PASS in fixtures. | Real row-linked supplier reconciliation is not certified. |
+| FIN-02 | Shared/local period, per-symbol reload, fiscal FX single conversion, ratio invariance, basic/diluted EPS and repaired chart axis/tooltip scale PASS in fixtures. | Real FX source truth is not certified. |
+| FIN-03 | VCB/nonbank applicability, absent fields, genuine zero, full ten-metric bank panel and chart/collapse controls PASS in fixtures. | Independent real same-period numerator/denominator proof remains separate. |
+| MKT-01 | Native candle/line/area, ten ranges, maximize, raw/adjusted request controls, admitted OHLCV hover and unit/session/adjustment disclosures PASS in fixtures. Frozen production-build browser proof distinguishes Volume 0 from Volume Unknown, labels missing session/coverage Unknown and withholds all unmarked-unit rows. | Synthetic sessions do not certify exchange/corporate-action truth. |
+| MKT-02 | Populated market controls, denominators supplied by fixtures, zero/empty/503 and retry recovery pass. | Real exchange/universe/constituent and partial-coverage truth remain unverified. |
+| SCR-01 | Populated search/reset/sort/columns/row navigation and repaired column reset PASS; old observation date remains separate from fresh fetch. | Advanced server predicates and restored live universe freshness are not certified. |
+| ALT-01 | Local holdings/watchlist/notes/views and alert validation, duplicate denial, one-rule persistence, reload and delivery disclosure PASS in controlled browser. | No server/email/SMS notification or cloud-sync claim. |
+| QNT-01 | Certified versus unmarked input admission and populated technical consumers PARTIAL. | Independent real session-valid series and formulas remain required for numerical certification. |
+| QNT-02 | Controlled setup/results, invalid-input correction, explicit unsupported reasons, comparison/peers/correlation controls, local CSV delivery and settled 503/recovery exercised. | Full endpoint/session/setup equivalence and independently verified CSV/Excel correctness remain unproved. |
+| GLO-01 | Prediction coverage/history, crypto route/settings and opaque embed disclaimer/provider link pass in controlled browser; Treasury/VIX native catalogue searches have no matching capability. | Native Treasury/VIX unsupported, not provider failure; opaque embed/provider truth remains separate. |
+| NEWS-01 | Attributed records, publication/fetch separation, filter/link behavior, canonical deduplication and surviving partial feed pass; 429 retry recovers to 200. | Fixtures do not certify live deduplication or source completeness. |
+| AI-01 | Controlled SSE citation/Matrix-shaped artifacts preserve unavailable versus zero; safe source links open exact HTTP(S) destinations and reject unsafe schemes. Workspace/tab/ticker context and New Chat cancellation reject obsolete stream callbacks after repair. | No paid/live grounding or uploads certified. An initial unreliable interception produced an unplanned answer; its remote execution/payment cannot be determined because the endpoint receipt was lost. That attempt is excluded from acceptance. |
+| SYS-01 | Genuine issuer owner/recipient/outsider sessions verify share/Matrix access, expiry, revocation and logout. | Browser auth/preview, unconfigured OAuth paths and supplier-positive rights are not certified. Cloud sync is opt-in and was not established enabled. |
+| SYS-02 | Actual controlled offline/online, 401/429/503, bounded slow timeout, cancellation and retry recovery exercised; local 401 then 200 recovers without reload. | Genuine expired-session browser recovery remains unverified; no production fault injection. |
+
+### Financial contracts and authenticated boundaries
+
+All ten contracts in section D retain **PARTIAL consumer / BLOCKED supplier-truth** verdicts unless their exact independent evidence closes the boundary. Genuine zero, rejected interest, compatible fiscal identities, declared FX, bank applicability and unavailable TTM now have consumer evidence. Original historical price-unit lineage, real four-quarter compatibility, revision/consolidation equivalence, exchange/session/corporate-action references and full universe/source denominators remain explicit prerequisites, not inferred from nonempty fixtures.
+
+Fresh authenticated proof used three genuine disposable identities: 19 application HTTP calls, seven SDK attempts (six initialized; logout attempt denied before initialization), exact owner packet parity, recipient/outsider denial, other-owner isolation, duplicate rejection, source-export denial, share expiry/revoke and logout. Six exact owned fixture rows and all users were removed; an additional unused cloud-sync QA identity was also logged out/deleted without creating workspace rows. Supplier-positive export is BLOCKED without genuine rights. Sixteen additional bounded SDK reads cover date/filter/unsupported-period behavior. The separate exact-`626434af` baseline SDK run terminated at its 3,600-second deadline: 76 complete responses, including 40 tool calls across 11 tool IDs, four discovery calls, 25 resources and seven prompts. Checks: 15 PASS, 27 PARTIAL, one FAIL (MSR unknown/contradictory recent aggregate price units), one BLOCKED. Discovery found 20 tools, five resources, one template and seven prompts; later business calls were not executed. This is incomplete baseline coverage, not a current-release or 340-call PASS.
+
+### Evidence index and exercised checks
+
+Private evidence contains exact actions, response/UI captures, screenshots, clock/engine identities and limitations; no credentials or fixture identifiers are committed:
+
+- `~/.config/vnibb/qa001-cors-20261022/`: live CORS/native market/search, selected scheduler logs, provider-free replay and four-symbol bounded diagnostic.
+- `~/.config/vnibb/fullqa-20261021/admission-ui/case-ledger.json`: ownership header/runtime/downloaded JSON/agent and populated screener proof. Final retained-refresh proof reads the mounted current VniAgent composer context: all three warning strings match runtime/export while admitted grade 62/C and genuine zeros remain unchanged.
+- `~/.config/vnibb/qa-full-nav-wsp-alt-20261021/navigation-workspace-localapps-index.json`: all navigation/workspace/local-app cases, failed attempts and repair afterproof.
+- `~/.config/vnibb/fullqa-20261021/financial-market/evidence-index.json`: FIN/MKT/QNT and all ten contract verdicts; controlled samples are explicitly not supplier truth.
+- `~/.config/vnibb/fullqa-20261021/global-news-ai/acceptance-ledger.json`: global/news/AI/resilience response and UI evidence.
+- `~/.config/vnibb/fullqa-20261021/responsive/acceptance-ledger.json`: six populated viewports, actual Chromium 125%/200% zoom and Chromium/Firefox/WebKit representative runs. Default dark-token contrast violations fell from 86 to zero on the measured sample. Screen-reader speech was not captured. Local diagnostic CLS 0.43024 exceeds the 0.1 target; development timing is not production performance acceptance.
+- `~/.config/vnibb/qa-fullqa-20261021-authmcp/`: genuine auth/Matrix lifecycle, bounded SDK reads and official FPT document/page evidence.
+- `~/.config/vnibb/fullqa-20261021-release/`: independently verified frontend rollback metadata/archive/assets and later exact-release records.
+
+Exercised targeted checks: ownership 27 PASS; frontend consumer integration 80 PASS plus TypeScript; initial financial combined run 999 PASS/5 FAIL, followed by all 478 affected financial/health checks PASS after repairing certified-TTM precedence and replacing incidental all-column mirror tests with explicit value/null/deep-evidence cases; scheduler state/lock 24 PASS. A separate no-pytest actual ASGI smoke returned HTTP 200 for quarter/FY/TTM, withheld ambiguous/interest values, retained valid TTM revenue 400 and left stored interest 900 unchanged. Final integrated gate, independent reviews and immutable rollout evidence are recorded only after execution.
+
+Independent standards review identified six regressions: TTM balance identity, compatible SQL year-label quarters, incompatible-fallback rejection poisoning, YTD interest evidence loss, detached native ticker scope and nested shortcut-dialog focus. Each received a minimal repair. Parent checks after final financial fixes: 84 PASS; palette/trap/wrapper: 25 PASS; TabBar: four PASS; AI/DenseTable: 22 PASS plus TypeScript. Actual no-pytest HTTP smoke now serves valid TTM balance assets 400/equity 240 with Q4 proof, compatible SQL Q1 assets 400 and YTD interest 24; rejected interest stays null and stored interest 900 remains unchanged. The earlier standalone smoke exposed an identity-less provider placeholder masking retained TTM evidence; that defect was fixed rather than weakening the expected values. Local dotenv parse warnings remain environmental diagnostics, not a production result.
+
+The frozen scoped candidate excludes unrelated readability fixtures and repository artifacts. Its one full frontend run passed lint (four warnings, zero errors), TypeScript, generated changelog and production build; 175/176 suites and 1,302/1,303 tests passed. The failure was the external canvas mock missing `subscribeCrosshairMove`, not a production chart failure. Adding that library method left all existing behavioral expectations intact; the affected 22-test file passes. Backend changed-line Ruff and compile passed; the full suite ran once with 3,134 PASS, four skipped, four passing subtests and one failure: a fixture described as certified lacked true-interest field evidence. Supplying that explicit VND interest metadata preserved its 3.6 debt-service-coverage expectation; all 37 tests in that file pass. No all-green whole-gate rerun is claimed. Frozen built-UI chart boundary smoke passes all three real browser cases with no page errors.
+
+Frozen production-build consumer replay also passes native alerts, Ctrl1–9/T/W/Shift+T, held-response search ordering and invalid/alias/foreign canonical URL recovery. Settled ownership runtime/download/current mounted composer agree in all four states: failed/partial score null, admitted score 62 with no warnings, retained-refresh score 62 with three matching warnings. Screener date/filter/sort/columns/navigation replay completes without driver error. Earlier driver attempts captured pre-hydration clicks or stale React fibers and remain excluded, not presented as application defects.
+
+Read-only OCI rollback verification matches actual bytes and SHA-256 for both retained artifacts in `deployment/backups/20261021T033001Z/manifest.json`: PostgreSQL 212,822,968 bytes and MongoDB 478,645,612 bytes, observed age 14.09 hours. The manifest has no embedded application revision and no restore was attempted. The cutover helper repeats these checks before configuration mutation and retains fresh original serving configuration/container identities.
+
+Final built-UI replay on frozen tree `b7861fc6c248bbd793593fc9def1df03a6a45b0e` additionally verifies all-failed ownership runtime/download retrieval clocks are null rather than epoch 1970; warnings match the mounted composer in every state. The existing 11 ownership tests and TypeScript pass. Final frontend lint reports four existing warnings and zero errors; production build succeeds with the explicit approved API/websocket hosts. A preceding isolated build without those required public variables failed closed during page collection; it is not a passing build or an application regression. Both final review axes independently found the same remaining compatible TTM balance merge proof-loss defect; release remains held for its regression and repair.
+
+The final compatible-balance merge regression first failed all eight endpoint cases with `unverified_balance_snapshot_source`. The repair merges revalidated original quarter rows, retaining primary/fallback envelopes and field-level rejection evidence. The two affected backend files now pass all 92 tests; changed-line Ruff and compilation pass. A separate actual-app HTTP smoke returns 200 with assets 400/equity 240, preserves inventory zero, fills a missing inventory with 25, leaves two missing inventories null and keeps rejected cash null; all inputs remain unchanged. Both independent review axes confirm this bounded repair resolves the identified defect with no further substantiated findings in the inspected deltas. No whole-suite rerun or supplier-truth certification is claimed.

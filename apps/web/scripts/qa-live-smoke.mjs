@@ -257,7 +257,7 @@ async function captureRendered(page) {
         return rect.width >= 120 && rect.height >= 120;
       });
     const sidebar = document.querySelector('[data-tour="sidebar-workspaces"]');
-    const workspaceItems = sidebar ? Array.from(sidebar.querySelectorAll('div[role="button"][draggable="true"]')) : [];
+    const workspaceItems = sidebar ? Array.from(sidebar.querySelectorAll('div[draggable] > button:first-child')) : [];
     const workspaces = workspaceItems.map((el) => {
       const nameEl = el.querySelector('span.truncate');
       return { name: norm(nameEl ? nameEl.textContent : el.innerText) };
@@ -502,7 +502,7 @@ async function main() {
     httpErrors: httpErrors.slice(before.httpErrors.length),
   });
 
-  const workspaceLocator = page.locator('[data-tour="sidebar-workspaces"] div[role="button"][draggable="true"]');
+  const workspaceLocator = page.locator('[data-tour="sidebar-workspaces"] div[draggable] > button:first-child');
   const tabLocator = page.locator('[data-tour="tab-bar"] div[role="button"][aria-label]');
 
   const settle = async () => page.waitForTimeout(opts.settle);

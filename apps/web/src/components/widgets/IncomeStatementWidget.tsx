@@ -161,7 +161,16 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
     // valid partial row and stays (issue #103).
     const unavailableNote = useMemo(() => describeUnavailableStatementRows(periodItems), [periodItems]);
     const displayItems = useMemo(
-        () => periodItems.filter((item) => !isUnavailableStatementRow(item)),
+        () => periodItems.filter((item) => !isUnavailableStatementRow(item)).map((item) => {
+            const metadata = 'unit_metadata' in item && item.unit_metadata && typeof item.unit_metadata === 'object' ? item.unit_metadata : {};
+            const rejectedKeys = Object.entries(metadata).filter(([, field]) => field && typeof field === 'object' && 'unavailable_reason' in field && isUnavailableStatementRow(field)).map(([key]) => key);
+            if (rejectedKeys.includes('pre_tax_profit') || rejectedKeys.includes('profit_before_tax')) {
+                rejectedKeys.push('pre_tax_profit', 'profit_before_tax');
+            }
+            return rejectedKeys.length > 0
+                ? { ...item, ...Object.fromEntries(rejectedKeys.map((key) => [key, null])) }
+                : item;
+        }),
         [periodItems]
     );
     const duplicatePeriodNote = useMemo(() => {
@@ -426,7 +435,11 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             selectedColumnKey={selection?.kind === 'column' ? selection.key : null}
             onSelectionClear={clearSelection}
             storageKey={`income:${id}:${symbol}:${period}`}
-            footerNote={unitNote}
+            footerNote={unitNote + (period === 'TTM' ? displayItems.map((item) => {
+                const row = item as unknown as Record<string, unknown>;
+                const metadata = row.unit_metadata as Record<string, { unavailable_reason?: string | null }> | undefined;
+                return ` • TTM basis: ${typeof row.aggregation_basis === 'string' ? row.aggregation_basis : 'Unknown'}; Source periods: ${Array.isArray(row.source_periods) && row.source_periods.length ? row.source_periods.join(', ') : 'Unknown'}; EPS availability: ${metadata?.eps?.unavailable_reason || (row.eps == null ? 'Unknown' : 'Reported')}`;
+            }).join('') : '')}
             valueFormatter={(value, row) => {
                 if (row.id === 'eps' || row.id === 'eps_diluted') {
                     return formatNumber(value as number | null | undefined, { decimals: 2 });

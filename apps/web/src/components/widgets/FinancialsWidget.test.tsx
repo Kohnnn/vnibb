@@ -315,6 +315,24 @@ describe('FinancialsWidget', () => {
     expect(screen.queryByText(/loss widened/)).not.toBeInTheDocument();
   });
 
+  test('keeps rejected interest unavailable despite raw aliases while admitting revenue', () => {
+    const result = makeQueryResult({ symbol: 'FPT', count: 1, data: [{
+      period: '2025',
+      revenue: 120_000_000_000,
+      interest_expense: null,
+      unit_metadata: { interest_expense: { unavailable_reason: 'Interest expense unit is unverified' } },
+      raw_data: { interest_expense: 90_000_000_000, interestExpense: 90_000_000_000, chi_phi_lai_vay: 90_000_000_000 },
+    }] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>;
+    mockUseIncomeStatement.mockReturnValue(result);
+
+    renderWithProviders(<FinancialsWidget id="financial-rejected-interest" symbol="FPT" config={{ periodSyncGroup: null }} />);
+
+    const interestCells = screen.getByText('Interest Expense').closest('tr')!.querySelectorAll('td');
+    const revenueCells = screen.getByText('Revenue').closest('tr')!.querySelectorAll('td');
+    expect(interestCells[1]).toHaveTextContent(/^—$/);
+    expect(revenueCells[1]).toHaveTextContent('120.00');
+  });
+
   test('excludes conflicting fiscal rows instead of overwriting their values', async () => {
     // The fixture supplies only the fields consumed by the widget, not React Query internals.
     const result = makeQueryResult({ symbol: 'FPT', count: 3, data: [

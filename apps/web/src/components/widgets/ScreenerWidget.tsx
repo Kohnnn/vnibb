@@ -414,9 +414,8 @@ export function ScreenerWidget({
 
     useEffect(() => {
         if (!persistedColumns) return;
-        if (JSON.stringify(getActiveColumns()) === JSON.stringify(persistedColumns)) return;
         setColumns(persistedColumns);
-    }, [getActiveColumns, persistedColumns, setColumns]);
+    }, [persistedColumns, setColumns]);
 
     const activeColumnIds = getActiveColumns();
     const visibleColumns = useMemo(() => ALL_COLUMNS.filter((column) => activeColumnIds.includes(column.id)), [activeColumnIds]);
@@ -636,7 +635,7 @@ export function ScreenerWidget({
             apiGroup: '/screener',
             endpoint: '/api/v1/screener',
             sourceLabel: screenerData?.meta?.source ?? 'live',
-            lastDataDate: null,
+            lastDataDate: screenerData?.meta?.last_data_date ?? null,
             fetchedAt: dataUpdatedAt,
             stale: Boolean(screenerData?.meta?.stale),
             derived: Boolean(search.trim() || serializedFilters),
@@ -1070,7 +1069,7 @@ export function ScreenerWidget({
                         ) : null}
                     </div>
                     <WidgetMeta
-                        updatedAt={null}
+                        updatedAt={screenerData?.meta?.last_data_date}
                         fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={Boolean(screenerData?.meta?.cached) || isFallback}

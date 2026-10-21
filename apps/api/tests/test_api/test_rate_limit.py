@@ -107,6 +107,68 @@ async def test_enforced_429_preserves_cors_headers(rate_limit_settings):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "origin,allowed",
+    [
+        ("https://web.vnibb.xyz", True),
+        ("https://vnibb-web.vercel.app", True),
+        ("https://vnibb.vercel.app", True),
+        ("https://unrelated.example", False),
+    ],
+)
+async def test_release_cors_policy_reaches_normal_error_and_preflight(origin, allowed, rate_limit_settings):
+    from vnibb.api.main import CORSErrorMiddleware
+    from vnibb.core.config import Settings
+
+    policy = Settings(_env_file=None)
+    app = FastAPI()
+    app.add_middleware(CORSErrorMiddleware)
+    app.add_middleware(RateLimitMiddleware, redis=FakeRedis(), requests_per_minute=1)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=policy.cors_origins,
+        allow_origin_regex=policy.cors_origin_regex,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.get("/api/v1/market")
+    async def market():
+        return {"ok": True}
+
+    @app.get("/health/validation")
+    async def validation(limit: int):
+        return {"limit": limit}
+
+    @app.get("/health/error")
+    async def error():
+        raise RuntimeError("controlled provider failure")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Origin": origin}
+    ) as client:
+        responses = [
+            (await client.get("/api/v1/market"), 200),
+            (await client.get("/api/v1/market"), 429),
+            (await client.get("/health/validation?limit=invalid"), 422),
+            (await client.get("/health/error"), 500),
+            (await client.options("/api/v1/market", headers={
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "X-VNIBB-Client-ID,Authorization",
+            }), 200 if allowed else 400),
+        ]
+    for response, expected_status in responses:
+        assert response.status_code == expected_status
+        if allowed:
+            assert response.headers["access-control-allow-origin"] == origin
+            assert response.headers["access-control-allow-credentials"] == "true"
+            assert "origin" in response.headers["vary"].lower()
+        else:
+            assert "access-control-allow-origin" not in response.headers
+
+
+@pytest.mark.asyncio
 async def test_instances_share_redis_quota(rate_limit_settings):
     redis = FakeRedis()
     first = RateLimitMiddleware(SimpleNamespace(), redis=redis, requests_per_minute=1)

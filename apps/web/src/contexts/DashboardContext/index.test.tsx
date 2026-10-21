@@ -71,6 +71,14 @@ function DashboardStateProbe() {
   );
 }
 
+function DashboardCatalogueProbe() {
+  const { dashboardCatalogueReady, localStateReady } = useDashboard();
+  return <>
+    <output data-testid="catalogue-ready">{String(dashboardCatalogueReady)}</output>
+    <output data-testid="local-state-ready">{String(localStateReady)}</output>
+  </>;
+}
+
 // #102: enters a workspace from a layout effect — the same position as the
 // URL-restore effect, which runs before the provider's own passive state-ref
 // sync effect. The provider's ref therefore still holds the pre-hydration state
@@ -294,6 +302,51 @@ describe('DashboardProvider backend sync flag', () => {
     expect(screen.getByTestId('active-tab')).toHaveTextContent('saved-tab');
   });
 
+});
+
+describe('DashboardProvider catalogue readiness', () => {
+  const originalBackendSyncEnabled = config.backendSyncEnabled;
+  const mockBackendLoad = jest.mocked(useLoadFromBackend);
+  const mockPublishedTemplates = jest.mocked(getPublishedSystemDashboardTemplates);
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: jest.fn() });
+    Object.assign(config, { backendSyncEnabled: true });
+    mockBackendLoad.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    Object.assign(config, { backendSyncEnabled: originalBackendSyncEnabled });
+    mockBackendLoad.mockReset();
+    jest.clearAllMocks();
+  });
+
+  it('waits for published templates and backend snapshot after local restoration', async () => {
+    const { promise, resolve: finishPublished } = Promise.withResolvers<SystemDashboardTemplateListResponse>();
+    mockPublishedTemplates.mockReturnValue(promise);
+    const view = render(<DashboardProvider><DashboardCatalogueProbe /></DashboardProvider>);
+    expect(screen.getByTestId('local-state-ready')).toHaveTextContent('true');
+    expect(screen.getByTestId('catalogue-ready')).toHaveTextContent('false');
+
+    mockBackendLoad.mockReturnValue(true);
+    view.rerender(<DashboardProvider><DashboardCatalogueProbe /></DashboardProvider>);
+    expect(screen.getByTestId('catalogue-ready')).toHaveTextContent('false');
+
+    await act(async () => { finishPublished({ count: 0, data: [] }); });
+    expect(screen.getByTestId('catalogue-ready')).toHaveTextContent('true');
+  });
+
+  it.each(['empty', 'rejected'] as const)('settles after an %s published response with backend loading disabled', async scenario => {
+    Object.assign(config, { backendSyncEnabled: false });
+    mockBackendLoad.mockReturnValue(true);
+    if (scenario === 'empty') mockPublishedTemplates.mockResolvedValue({ count: 0, data: [] });
+    else mockPublishedTemplates.mockRejectedValue(new Error('unavailable'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    render(<DashboardProvider><DashboardCatalogueProbe /></DashboardProvider>);
+    await waitFor(() => expect(screen.getByTestId('catalogue-ready')).toHaveTextContent('true'));
+    warn.mockRestore();
+  });
 });
 
 describe('DashboardProvider published templates', () => {

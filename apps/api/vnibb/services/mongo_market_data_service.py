@@ -986,7 +986,13 @@ class MongoMarketDataService:
                 doc = row.get("doc")
                 if not isinstance(doc, dict):
                     continue
+                doc = dict(doc)
                 doc.pop("_id", None)
+                if doc.get("schemaVersion") != 3:
+                    doc = {**doc, "moatScore": None, "moat": None}
+                    factors = doc.get("moatFactors")
+                    if isinstance(factors, dict):
+                        doc["moatFactors"] = {key: value for key, value in factors.items() if key != "interest_coverage"}
                 symbol = str(doc.get("symbol") or "").upper()
                 if symbol:
                     results[symbol] = doc

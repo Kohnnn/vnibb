@@ -80,6 +80,13 @@ export function TTMSnapshotWidget({ id, symbol, onRemove, onDataChange }: TTMSna
           </div>
           <WidgetMeta updatedAt={null} fetchedAt={query.dataUpdatedAt} isFetching={query.isFetching && hasData} note={unitConfig.display === 'USD' ? 'TTM · USD display' : 'TTM · VND display'} health={ttmHealth} align="right" />
         </div>
+        {hasData && <div className="mb-2 text-[10px] text-[var(--text-secondary)]" aria-label="TTM source lineage">
+          {(['income', 'cash_flow', 'balance'] as const).map((statement) => {
+            const row = (payload?.[statement] || {}) as Record<string, unknown>;
+            const metadata = row.unit_metadata as Record<string, { unavailable_reason?: string | null }> | undefined;
+            return <div key={statement}>{statement} · TTM basis: {typeof row.aggregation_basis === 'string' ? row.aggregation_basis : 'Unknown'} · Source periods: {Array.isArray(row.source_periods) && row.source_periods.length ? row.source_periods.join(', ') : 'Unknown'}{statement === 'income' && <span> · EPS availability: {metadata?.eps?.unavailable_reason || (row.eps == null ? 'Unknown' : 'Reported')}</span>}</div>;
+          })}
+        </div>}
 
         {query.isLoading && !hasData ? (
           <WidgetSkeleton lines={8} />

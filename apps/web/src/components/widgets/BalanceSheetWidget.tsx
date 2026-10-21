@@ -305,7 +305,10 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
             maxYears={tableColumns.length || 1}
             initialScrollPosition="end"
             storageKey={`balance:${id}:${symbol}:${period}`}
-            footerNote={unitNote}
+            footerNote={unitNote + (period === 'TTM' ? displayItems.map((item) => {
+                const row = item as unknown as Record<string, unknown>;
+                return ` • TTM basis: ${typeof row.aggregation_basis === 'string' ? row.aggregation_basis : 'Unknown'}; Source periods: ${Array.isArray(row.source_periods) && row.source_periods.length ? row.source_periods.join(', ') : 'Unknown'}`;
+            }).join('') : '')}
             valueFormatter={(value) =>
                 formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig)
             }

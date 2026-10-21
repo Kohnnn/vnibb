@@ -3,6 +3,8 @@
 ## Goal
 Close demonstrated data-trust and usability gaps before adding features. Detailed contracts, ticket coverage and evidence: [qa-improvement-spec.md](qa-improvement-spec.md). Planning baseline: 18 October 2026; captured production timestamps are 17 October UTC. No application code or production data changed in this planning pass.
 
+**Current full production QA:** [21 October remediation plan](production-qa-remediation-20261021.md) and [complete acceptance register](production-qa-acceptance-20261021.md). The new report retains NO-GO for equity research; historical scoped releases below do not close native delivery, ownership admission, screener freshness, fiscal identity or expense-mapping gates. The user subsequently approved full implementation, evidenced app improvements, current-branch commit and redeployment; data-truth and operational safety boundaries remain controlling.
+
 ## Baseline
 The last full deployed MCP acceptance at `1520862` exercised 340 calls: 156 PASS, 151 PARTIAL, 3 FAIL, 2 BLOCKED, 2 UNSUPPORTED. Counts describe check outcomes, not calls or gates. The failures concern MSR/VNM/VCB historical SQL price-unit evidence; Matrix sessions remain blocked. This is historical acceptance, not a fresh run on current `f3ee893`.
 

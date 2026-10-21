@@ -6,7 +6,7 @@ import pytest
 from fastapi import BackgroundTasks
 from sqlalchemy import select
 from vnibb.api.v1 import data_sync, equity
-from vnibb.models.financials import IncomeStatement
+from vnibb.models.financials import BalanceSheet, IncomeStatement
 from vnibb.providers.vnstock.balance_sheet import BalanceSheetData
 from vnibb.providers.vnstock.cash_flow import CashFlowData
 from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
@@ -107,6 +107,207 @@ async def test_statement_endpoint_falls_back_on_empty_or_failed_iq(monkeypatch, 
     fallback.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_failed", [False, True])
+@pytest.mark.parametrize("transport", ["handler", "http"])
+async def test_quarter_handler_withholds_ambiguous_sql_identity_without_value_dedup(
+    test_db, client, monkeypatch, provider_failed, transport,
+):
+    retained = {"original_period": "2025", "original_quarter": None}
+    for index, (period, year, quarter) in enumerate([
+        ("2025", 2025, None), ("Q4-2025", 2025, 4),
+        ("Q1-2026", 2026, 1), ("Q2-2026", 2026, 2),
+    ], start=1):
+        test_db.add(IncomeStatement(
+            id=8000 + index, symbol="FPT", period=period, period_type="quarter",
+            fiscal_year=year, fiscal_quarter=quarter, revenue=100, net_income=10,
+            raw_data=retained if quarter is None else {},
+        ))
+    await test_db.flush()
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=[]))
+    monkeypatch.setattr(equity, "VietcapClient", lambda: SimpleNamespace(
+        get_company_details=Mock(side_effect=RuntimeError("IQ unavailable"))))
+    monkeypatch.setattr(equity, "get_financials_with_ttm", AsyncMock(
+        return_value=[], side_effect=RuntimeError("VCI unavailable") if provider_failed else None))
+
+    async def unchanged(**kwargs):
+        return kwargs["rows"]
+
+    monkeypatch.setattr(equity, "_cross_fill_income_statement_rows", unchanged)
+    if transport == "http":
+        response = await client.get("/api/v1/equity/FPT/financials?statement_type=income&period=quarter&limit=10")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["meta"]["count"] == 4
+        rows = [FinancialStatementData.model_validate(row) for row in payload["data"]]
+    else:
+        response = await equity.get_financials.__wrapped__("FPT", "income", "quarter", 10, db=test_db)
+        rows = response.data
+
+    by_period = {row.period: row for row in rows}
+    assert set(by_period) == {"2025", "Q4-2025", "Q1-2026", "Q2-2026"}
+    assert by_period["2025"].unavailable_reason == "ambiguous_quarterly_fiscal_identity"
+    assert by_period["2025"].revenue is None
+    assert by_period["2025"].fiscal_quarter is None
+    assert [by_period[p].revenue for p in ("Q4-2025", "Q1-2026", "Q2-2026")] == [100, 100, 100]
+    stored = (await test_db.execute(select(IncomeStatement).where(
+        IncomeStatement.symbol == "FPT", IncomeStatement.period == "2025"))).scalar_one()
+    assert (stored.revenue, stored.raw_data) == (100, retained)
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("canonical", [False, True])
+async def test_financial_http_withholds_legacy_interest_preserving_sql(client, test_db, monkeypatch, canonical):
+    raw = {"financial_expenses": 900, "unit": "VND"}
+    if canonical:
+        raw["_financial_lineage"] = {"canonical_data": FinancialStatementData(
+            symbol="FPT", period="2025", statement_type="income", interest_expense=900,
+            source="VCI", value_unit="VND", unit_metadata={"interest_expense": {
+                "label": "financial_expenses", "source_unit": "VND", "value_unit": "VND"}},
+        ).model_dump(mode="json")}
+    test_db.add(IncomeStatement(id=8500, symbol="FPT", period="2025", period_type="year",
+        fiscal_year=2025, interest_expense=900, revenue=1000, raw_data=raw))
+    await test_db.flush()
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=[]))
+    monkeypatch.setattr(equity, "VietcapClient", lambda: SimpleNamespace(
+        get_company_details=Mock(side_effect=RuntimeError("IQ unavailable"))))
+    monkeypatch.setattr(equity, "get_financials_with_ttm", AsyncMock(return_value=[]))
+    async def unchanged(**kwargs):
+        return kwargs["rows"]
+    monkeypatch.setattr(equity, "_cross_fill_income_statement_rows", unchanged)
+
+    response = await client.get("/api/v1/equity/FPT/financials?statement_type=income&period=FY")
+
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["interest_expense"] is None
+    assert row["unit_metadata"]["interest_expense"]["unavailable_reason"] == "interest_semantics_unverified"
+    stored = (await test_db.execute(select(IncomeStatement).where(IncomeStatement.id == 8500))).scalar_one()
+    assert (stored.interest_expense, stored.raw_data) == (900, raw)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("original_quarter", [4, 3])
+async def test_sql_balance_ttm_http_preserves_validated_source_snapshot(
+    client, test_db, monkeypatch, original_quarter,
+):
+    canonical = FinancialStatementData(symbol="FPT", period="Q4-2025", statement_type="balance",
+        fiscal_year=2025, fiscal_quarter=4, total_assets=400, total_equity=240,
+        source="VCI", value_unit="VND", consolidation_basis="consolidated",
+        unit_metadata={"total_assets": {"value_unit": "VND"}, "total_equity": {"value_unit": "VND"}})
+    raw = {"yearReport": 2025, "lengthReport": original_quarter,
+           "_financial_lineage": {"canonical_data": canonical.model_dump(mode="json")}}
+    test_db.add(BalanceSheet(id=8900, symbol="FPT", period="Q4-2025", period_type="quarter",
+        fiscal_year=2025, fiscal_quarter=4, total_assets=400, total_equity=240, raw_data=raw))
+    await test_db.flush()
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=[]))
+    monkeypatch.setattr(equity, "VietcapClient", lambda: SimpleNamespace(
+        get_company_details=Mock(side_effect=RuntimeError("controlled IQ unavailable"))))
+    monkeypatch.setattr(equity.VnstockFinancialsFetcher, "fetch", AsyncMock(return_value=[]))
+
+    response = await client.get("/api/v1/equity/FPT/financials?statement_type=balance&period=TTM")
+
+    assert response.status_code == 200
+    assert response.json()["meta"]["count"] == 1
+    row = response.json()["data"][0]
+    assert row["source_periods"] == ["Q4-2025"]
+    if original_quarter == 4:
+        assert (row["total_assets"], row["total_equity"]) == (400, 240)
+        assert row["aggregation_basis"] == "latest_quarter_snapshot"
+        assert row["unavailable_reason"] is None
+    else:
+        assert row["total_assets"] is None
+        assert row["unavailable_reason"] == "conflicting_fiscal_identity"
+    retained = (await test_db.execute(select(BalanceSheet).where(BalanceSheet.id == 8900))).scalar_one()
+    assert (retained.total_assets, retained.raw_data) == (400, raw)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inventory", [0, None])
+@pytest.mark.parametrize("proof", ["valid", "opaque", "different_quarter", "rejected"])
+async def test_balance_ttm_endpoint_preserves_merged_snapshot_proof(monkeypatch, inventory, proof):
+    primary_quarter = FinancialStatementData(
+        symbol="FPT", period="Q4-2025", statement_type="balance", fiscal_year=2025, fiscal_quarter=4,
+        source="VCI", value_unit="VND", consolidation_basis="consolidated", total_assets=400,
+        inventory=inventory, cash_and_equivalents=None,
+        unit_metadata={"total_assets": {"value_unit": "VND", "descriptor": "primary_assets"},
+            "inventory": {"value_unit": "VND", "descriptor": "primary_inventory"},
+            "cash_and_equivalents": {"unavailable_reason": "conflicting_metric_rows"}},
+        raw_data={"yearReport": 2025, "lengthReport": 4},
+    )
+    fallback_quarter = primary_quarter.model_copy(deep=True, update={
+        "total_assets": 410, "total_equity": 240, "inventory": 25, "cash_and_equivalents": 8,
+        "unit_metadata": {"total_equity": {"value_unit": "VND", "descriptor": "fallback_equity"},
+            "inventory": {"value_unit": "VND", "descriptor": "fallback_inventory"},
+            "cash_and_equivalents": {"value_unit": "VND", "descriptor": "fallback_cash"}},
+    })
+    primary = equity._build_ttm_financial_statement_rows([primary_quarter], statement_type="balance")[0]
+    fallback = equity._build_ttm_financial_statement_rows([fallback_quarter], statement_type="balance")[0]
+    if proof == "opaque":
+        fallback.raw_data = {"opaque": "not quarterly proof"}
+    elif proof == "different_quarter":
+        fallback.source_periods = ["Q3-2025"]
+        fallback.raw_data["source_rows"][0].update(period="Q3-2025", fiscal_quarter=3)
+        fallback.raw_data["source_rows"][0]["raw_data"]["lengthReport"] = 3
+    elif proof == "rejected":
+        fallback.raw_data["source_rows"][0]["unit_metadata"]["total_equity"]["unavailable_reason"] = "conflicting_metric_rows"
+    monkeypatch.setattr(equity, "_get_model_last_updated", AsyncMock(return_value=None))
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=[]))
+    monkeypatch.setattr(equity, "VietcapClient", lambda: SimpleNamespace(
+        get_company_details=Mock(side_effect=RuntimeError("controlled IQ unavailable"))))
+    monkeypatch.setattr(equity, "get_financials_with_ttm", AsyncMock(return_value=[primary]))
+    monkeypatch.setattr(equity, "_load_financial_statement_fallback", AsyncMock(return_value=[fallback]))
+
+    response = await equity.get_financials.__wrapped__("FPT", "balance", "TTM", 10, db=None)
+
+    row = response.data[0]
+    assert row.unavailable_reason is None
+    assert row.total_assets == 400
+    assert row.total_equity == (240 if proof == "valid" else None)
+    assert row.inventory == (25 if inventory is None and proof in {"valid", "rejected"} else inventory)
+    assert row.cash_and_equivalents is None
+    assert row.unit_metadata["cash_and_equivalents"]["unavailable_reason"] == "conflicting_metric_rows"
+    assert row.source_periods == ["Q4-2025"]
+    source = row.raw_data["source_rows"][0]
+    assert source["period"] == row.source_periods[0]
+    assert (source["total_assets"], source["total_equity"], source["inventory"]) == (
+        row.total_assets, row.total_equity, row.inventory)
+    if proof in {"valid", "rejected"}:
+        assert row.raw_data["primary"] == primary.raw_data
+        assert row.raw_data["fallback"] == fallback.raw_data
+        assert row.unit_metadata["inventory"]["descriptor"] == (
+            "fallback_inventory" if inventory is None else "primary_inventory")
+    if proof == "valid":
+        assert row.unit_metadata["total_equity"]["descriptor"] == "fallback_equity"
+    elif proof == "rejected":
+        assert row.unit_metadata["total_equity"]["unavailable_reason"] == "conflicting_metric_rows"
+
+
+
+@pytest.mark.asyncio
+async def test_sql_http_accepts_bare_year_with_compatible_explicit_canonical_quarter(client, test_db, monkeypatch):
+    canonical = FinancialStatementData(symbol="FPT", period="Q1-2025", statement_type="balance",
+        fiscal_year=2025, fiscal_quarter=1, total_assets=400, source="VCI", value_unit="VND",
+        consolidation_basis="consolidated", unit_metadata={"total_assets": {"value_unit": "VND"}})
+    raw = {"yearReport": 2025, "lengthReport": 1,
+           "_financial_lineage": {"canonical_data": canonical.model_dump(mode="json")}}
+    test_db.add(BalanceSheet(id=8901, symbol="FPT", period="2025", period_type="quarter",
+        fiscal_year=2025, fiscal_quarter=1, total_assets=400, raw_data=raw))
+    await test_db.flush()
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=[]))
+    monkeypatch.setattr(equity, "VietcapClient", lambda: SimpleNamespace(
+        get_company_details=Mock(side_effect=RuntimeError("controlled IQ unavailable"))))
+    monkeypatch.setattr(equity, "get_financials_with_ttm", AsyncMock(return_value=[]))
+
+    response = await client.get("/api/v1/equity/FPT/financials?statement_type=balance&period=quarter")
+
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert (row["period"], row["fiscal_quarter"], row["total_assets"]) == ("Q1-2025", 1, 400)
+    assert row["unavailable_reason"] is None
+    retained = (await test_db.execute(select(BalanceSheet).where(BalanceSheet.id == 8901))).scalar_one()
+    assert (retained.period, retained.raw_data) == ("2025", raw)
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stored_read_failure", [False, True])
 async def test_empty_store_financials_http_acquires_actual_iq_eps_before_vci(

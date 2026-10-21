@@ -16,7 +16,7 @@ import {
     BookmarkCheck
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { API_BASE_URL } from '@/lib/api';
+import { API_BASE_URL, APIError } from '@/lib/api';
 import { formatTimestamp } from '@/lib/format';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -127,7 +127,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
             params.append('limit', '40');
 
             const response = await fetch(`${API_BASE_URL}/news/feed?${params}`);
-            if (!response.ok) throw new Error('Failed to fetch news');
+            if (!response.ok) throw new APIError(`API Error: ${response.status} ${response.statusText}`, response.status, response.statusText);
             return response.json();
         },
         staleTime: 2 * 60 * 1000,
@@ -141,7 +141,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
         queryKey: ['market-sentiment'],
         queryFn: async () => {
             const response = await fetch(`${API_BASE_URL}/news/sentiment`);
-            if (!response.ok) throw new Error('Failed to fetch sentiment');
+            if (!response.ok) throw new APIError(`API Error: ${response.status} ${response.statusText}`, response.status, response.statusText);
             return response.json();
         },
         staleTime: 5 * 60 * 1000,

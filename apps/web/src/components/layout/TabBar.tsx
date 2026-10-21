@@ -137,7 +137,7 @@ export function TabBar(_props: TabBarProps) {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [activeDashboard, activeTab, recentlyClosedTabs.length, restoreLastClosedTab]);
+    }, [activeDashboard, activeTab, deleteConfirmTabId, recentlyClosedTabs.length, restoreLastClosedTab]);
 
     if (!activeDashboard) {
         return (

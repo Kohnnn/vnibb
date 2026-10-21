@@ -66,6 +66,15 @@ export function CopilotEvidencePanel({
 
   const selectedSource = orderedSources.find((source) => source.id === selectedSourceId) ?? orderedSources[0] ?? null;
   const intent = useMemo(() => (selectedSource ? getIntentFromSource(selectedSource) : null), [selectedSource]);
+  const sourceUrl = useMemo(() => {
+    if (!selectedSource?.url) return null;
+    try {
+      const url = new URL(selectedSource.url.trim());
+      return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+    } catch {
+      return null;
+    }
+  }, [selectedSource?.url]);
   const existingTarget = useMemo(
     () => (intent ? findMatchingWidgetTarget(state, intent) : null),
     [intent, state],
@@ -173,6 +182,17 @@ export function CopilotEvidencePanel({
             )}
             {selectedSource.kind && (
               <div className="mt-2 text-[11px] text-[var(--text-muted)]">Type: {selectedSource.kind}</div>
+            )}
+            {sourceUrl && (
+              <a
+                href={sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 inline-flex min-h-9 items-center gap-1 text-blue-400 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400"
+              >
+                <ExternalLink size={11} aria-hidden="true" />
+                Open source: {selectedSource.label || selectedSource.kind || selectedSource.id}
+              </a>
             )}
             {intent && showWorkflowActions && (
               <div className="mt-3 flex flex-wrap gap-2">

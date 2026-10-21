@@ -381,3 +381,61 @@ async def test_build_database_snapshot_falls_back_when_vnibb_mcp_fails(monkeypat
     snapshot = await service._build_database_snapshot("VNM", use_vnibb_mcp=True)
 
     assert snapshot == {"symbol": "VNM", "source": "postgres", "company": {"symbol": "VNM"}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("statement_type", ["income", "balance", "cashflow"])
+@pytest.mark.parametrize("rejection", [None, "ambiguous_quarter", "conflicting_identity", "field_rejected"])
+async def test_postgres_financial_context_withholds_rejected_scalars(
+    monkeypatch, test_db, statement_type, rejection
+):
+    from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+    from vnibb.services import ai_context_service
+
+    models = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow}
+    fields = {
+        "income": ("revenue", "net_income"),
+        "balance": ("total_assets", "total_equity"),
+        "cashflow": ("operating_cash_flow", "free_cash_flow"),
+    }
+    metric, independent = fields[statement_type]
+    canonical = {"period": "Q1-2024", "fiscal_year": 2024, "fiscal_quarter": 1}
+    if rejection == "conflicting_identity":
+        canonical["period"] = "Q2-2024"
+    if rejection == "field_rejected":
+        canonical["unit_metadata"] = {metric: {"unavailable_reason": "conflicting_metric_rows"}}
+    raw_data = {"_financial_lineage": {"canonical_data": canonical}}
+    row = models[statement_type](
+        id=995200,
+        symbol="VNM", period="2024" if rejection == "ambiguous_quarter" else "Q1-2024",
+        period_type="quarter", fiscal_year=2024,
+        fiscal_quarter=None if rejection == "ambiguous_quarter" else 1,
+        raw_data=raw_data, **{metric: 100.0, independent: 40.0},
+    )
+    test_db.add(row)
+    await test_db.flush()
+
+    class SessionContext:
+        async def __aenter__(self):
+            return test_db
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr(ai_context_service, "async_session_maker", SessionContext)
+
+    snapshot = await AIContextService()._build_postgres_snapshot("VNM")
+    section = snapshot[{"income": "income_statement", "balance": "balance_sheet", "cashflow": "cash_flow"}[statement_type]]
+
+    if rejection is None:
+        assert section[metric] == 100.0
+        assert section[independent] == 40.0
+        return
+    assert section[metric] is None
+    assert section["raw_observation"][metric] == 100.0
+    assert section["raw_data"] == raw_data
+    if rejection == "field_rejected":
+        assert section[independent] == 40.0
+    else:
+        assert section[independent] is None
+        assert section["unavailable_reason"]

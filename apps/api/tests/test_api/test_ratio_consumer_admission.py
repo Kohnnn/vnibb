@@ -227,3 +227,20 @@ async def test_cached_screener_yield_keeps_canonical_percent_without_rescaling(t
     enriched = await _enrich_screener_metrics([row], test_db)
 
     assert enriched[0].dividend_yield == expected
+
+
+@pytest.mark.asyncio
+async def test_ratio_enrichment_does_not_restore_unproven_interest_coverage(test_db, monkeypatch):
+    from vnibb.providers.vnstock.financials import FinancialStatementData
+
+    income = FinancialStatementData(symbol="FPT", period="2025", statement_type="income",
+        revenue=1000, operating_income=240, interest_expense=900, value_unit="VND",
+        unit_metadata={"interest_expense": {"label": "financial_expenses", "source_unit": "VND", "value_unit": "VND"}})
+    cash = FinancialStatementData(symbol="FPT", period="2025", statement_type="cashflow", debt_repayment=40)
+    ratio = FinancialRatioData(symbol="FPT", period="2025", pe=10, interest_coverage=8, debt_service_coverage=6)
+    rows = await equity._enrich_missing_ratio_metrics(
+        symbol="FPT", period="year", rows=[ratio], db=test_db,
+        income_support_rows=[income], balance_support_rows=[], cashflow_support_rows=[cash])
+    assert rows[0].interest_coverage is None
+    assert rows[0].debt_service_coverage is None
+    assert rows[0].pe == 10

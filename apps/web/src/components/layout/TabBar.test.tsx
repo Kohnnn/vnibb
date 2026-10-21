@@ -27,6 +27,7 @@ function TabBarWorkspace({ count = 3 }: { count?: number }) {
         activeDashboard: dashboard,
         activeTab: tabs.find(tab => tab.id === activeTabId) ?? null,
         setActiveTab: setActiveTabId,
+        deleteTab: (_dashboardId: string, tabId: string) => setTabs(current => current.filter(tab => tab.id !== tabId)),
         reorderTabs: (_dashboardId: string, reordered: DashboardTab[]) => setTabs(reordered),
         recentlyClosedTabs: [],
         restoreLastClosedTab: () => null,
@@ -64,6 +65,25 @@ describe('TabBar', () => {
         fireEvent.click(first);
         expect(first).toHaveAttribute('aria-current', 'page');
         expect(third).not.toHaveAttribute('aria-current');
+    });
+
+    it('closes the selected tab only on the second Ctrl W and selects the surviving adjacent tab', () => {
+        render(<TabBarWorkspace />);
+        fireEvent.keyDown(window, { key: 'w', ctrlKey: true });
+        expect(tabButtons()).toHaveLength(3);
+        expect(screen.getByTitle('Click again to confirm delete')).toBeInTheDocument();
+
+        fireEvent.keyDown(window, { key: 'w', ctrlKey: true });
+        expect(tabButtons()).toHaveLength(2);
+        expect(screen.queryByRole('button', { name: /Research 1 tab/ })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Research 2 tab/ })).toHaveAttribute('aria-current', 'page');
+
+        fireEvent.keyDown(window, { key: 'w', ctrlKey: true });
+        fireEvent.keyDown(window, { key: 'w', ctrlKey: true });
+        expect(tabButtons()).toHaveLength(1);
+        fireEvent.keyDown(window, { key: 'w', ctrlKey: true });
+        fireEvent.keyDown(window, { key: 'w', ctrlKey: true });
+        expect(tabButtons()).toHaveLength(1);
     });
 
     it('uses the same twelve-tab ceiling in the bar and Manage Tabs', () => {

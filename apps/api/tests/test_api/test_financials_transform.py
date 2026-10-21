@@ -1,3 +1,4 @@
+import pytest
 from vnibb.providers.vnstock.financials import (
     FinancialsQueryParams,
     StatementType,
@@ -226,6 +227,51 @@ def test_transform_data_maps_vietnamese_bank_income_aliases():
     assert data[0].interest_expense == -38_249_106_000_000
     assert data[0].net_income == 33_831_386_000_000
     assert data[0].eps == 5571
+
+
+@pytest.mark.parametrize("pivot", [False, True])
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("interest", [0, 42])
+def test_interest_is_not_total_finance_cost_in_either_alias_order(pivot, reverse, interest):
+    params = FinancialsQueryParams(symbol="FPT", statement_type=StatementType.INCOME, period="year")
+    fields = [("interest_expense", interest), ("financial_expenses", 900)]
+    if reverse:
+        fields.reverse()
+    rows = ([{"item_id": key, "2025": value, "_value_unit": "VND"} for key, value in fields]
+            if pivot else [{"period": "2025", "_value_unit": "VND", **dict(fields)}])
+    statement = VnstockFinancialsFetcher.transform_data(params, rows)[0]
+    assert statement.interest_expense == interest
+    assert statement.unit_metadata["interest_expense"]["label"] == "interest_expense"
+
+
+@pytest.mark.parametrize("label", ["financial_expenses", "Chi phí tài chính"])
+def test_total_finance_cost_alone_cannot_become_interest(label):
+    params = FinancialsQueryParams(symbol="FPT", statement_type=StatementType.INCOME, period="year")
+    statement = VnstockFinancialsFetcher.transform_data(params, [{"period": "2025", label: 900, "_value_unit": "VND"}])[0]
+    assert statement.interest_expense is None
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_conflicting_true_interest_aliases_are_unavailable(reverse):
+    params = FinancialsQueryParams(symbol="FPT", statement_type=StatementType.INCOME, period="year")
+    fields = [("interest_expense", 42), ("interest_expenses", 99)]
+    if reverse:
+        fields.reverse()
+    statement = VnstockFinancialsFetcher.transform_data(params, [{"period": "2025", "_value_unit": "VND", **dict(fields)}])[0]
+    assert statement.interest_expense is None
+    assert statement.unit_metadata["interest_expense"]["unavailable_reason"] == "conflicting_metric_rows"
+
+
+def test_canonical_provider_rows_cannot_bypass_interest_semantics():
+    params = FinancialsQueryParams(symbol="FPT", statement_type=StatementType.INCOME, period="year")
+    row = {"symbol": "FPT", "statement_type": "income", "period": "2025", "interest_expense": 900,
+           "revenue": 1000, "value_unit": "VND", "unit_metadata": {"interest_expense": {
+               "label": "financial_expenses", "source_unit": "VND", "value_unit": "VND"}}}
+    result = VnstockFinancialsFetcher.transform_data(params, [row])[0]
+    assert result.interest_expense is None
+    assert result.unit_metadata["interest_expense"]["unavailable_reason"] == "interest_semantics_unverified"
+    assert result.revenue == 1000
+    assert row["interest_expense"] == 900
 
 
 def test_transform_data_maps_bank_customer_deposits_aliases():

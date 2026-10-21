@@ -429,7 +429,10 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
             storageKey={`cash-flow:${id}:${symbol}:${period}`}
             selectedColumnKey={selection?.kind === 'column' ? selection.key : null}
             onSelectionClear={clearSelection}
-            footerNote={unitNote}
+            footerNote={unitNote + (period === 'TTM' ? displayItems.map((item) => {
+                const row = item as unknown as Record<string, unknown>;
+                return ` • TTM basis: ${typeof row.aggregation_basis === 'string' ? row.aggregation_basis : 'Unknown'}; Source periods: ${Array.isArray(row.source_periods) && row.source_periods.length ? row.source_periods.join(', ') : 'Unknown'}`;
+            }).join('') : '')}
             valueFormatter={(value) =>
                 formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig)
             }

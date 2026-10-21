@@ -105,6 +105,7 @@ export interface DashboardMigrationNotice {
 export interface DashboardContextValue {
     state: DashboardState;
     localStateReady: boolean;
+    dashboardCatalogueReady: boolean;
     // #102: increments only when a *user* selects a workspace or tab. Lets the
     // URL-sync hook tell a real navigation apart from bundled seeding or a late
     // backend snapshot moving the active workspace on its own.

@@ -462,6 +462,7 @@ async def test_enrich_missing_ratio_metrics_computes_certified_statement_metrics
                     value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
                     revenue=1200.0, operating_income=180.0, net_income=150.0,
                     cost_of_revenue=700.0, interest_expense=20.0, eps=5.0,
+                    unit_metadata={"interest_expense": {"label": "interest_expense", "source_unit": "VND", "value_unit": "VND"}},
                 ).model_dump(mode="json")}},
             ),
             IncomeStatement(

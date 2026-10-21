@@ -1,4 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
+import { formatAbsoluteTimestamp } from '@/lib/format';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { ScreenerResponse } from '@/types/screener';
 import { useScreenerData } from '@/lib/queries';
@@ -32,7 +34,7 @@ jest.mock('@/contexts/DashboardContext', () => ({
 }));
 jest.mock('@/hooks/useWidgetSymbolLink', () => ({ useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }) }));
 jest.mock('@/components/ui/WidgetContainer', () => ({ WidgetContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
-jest.mock('@/components/ui/WidgetMeta', () => ({ WidgetMeta: () => null }));
+jest.mock('@/components/ui/WidgetMeta', () => jest.requireActual('@/components/ui/WidgetMeta'));
 jest.mock('@/components/ui/VirtualizedTable', () => ({ VirtualizedTable: () => <div>Stocks table</div> }));
 
 const mockUseScreenerData = jest.mocked(useScreenerData);
@@ -41,7 +43,7 @@ beforeEach(() => {
   widgetConfig = {};
   widgets.length = 0;
   widgets.push({ id: 'screener-1', type: 'screener', config: widgetConfig });
-  updateWidget.mockClear();
+  updateWidget.mockReset();
   mockUseScreenerData.mockReturnValue({
     data: { data: [] },
     isLoading: false,
@@ -50,6 +52,46 @@ beforeEach(() => {
     dataUpdatedAt: 0,
     refetch: jest.fn(),
   } as unknown as UseQueryResult<ScreenerResponse>);
+});
+
+test('shows the observation date separately from fetch time after a fresh request', () => {
+  const observationDate = '2026-10-19';
+  const fetchedAt = Date.parse('2026-10-21T10:00:00Z');
+  mockUseScreenerData.mockReturnValue({
+    data: { data: [], meta: { last_data_date: observationDate } },
+    isLoading: false,
+    isFetching: false,
+    error: null,
+    dataUpdatedAt: fetchedAt,
+    refetch: jest.fn(),
+  } as unknown as UseQueryResult<ScreenerResponse>);
+
+  render(<ScreenerWidget id="screener-1" config={widgetConfig} />);
+
+  expect(screen.getByText(`As of ${formatAbsoluteTimestamp(new Date(observationDate))}`)).toBeInTheDocument();
+  expect(screen.getByText(`Fetched ${formatAbsoluteTimestamp(new Date(fetchedAt))}`)).toBeInTheDocument();
+});
+
+test('resetting columns persists the selection without restoring the previous columns', () => {
+  function PersistedScreener() {
+    const [config, setConfig] = useState<Record<string, unknown>>({ activeColumns: ['ticker', 'price', 'change_1d', 'market_cap', 'pe', 'dividend_yield'] });
+    widgets[0].config = config;
+    updateWidget.mockImplementation((_dashboardId, _tabId, _widgetId, updates) => {
+      setConfig(updates.config);
+    });
+    return <ScreenerWidget id="screener-1" config={config} />;
+  }
+
+  const view = render(<PersistedScreener />);
+  fireEvent.click(screen.getByTitle('Customize Columns'));
+  fireEvent.click(screen.getByRole('button', { name: 'Reset to Default' }));
+
+  expect(screen.getByLabelText('Filter screener results')).toBeInTheDocument();
+  const requestedColumns = mockUseScreenerData.mock.calls.at(-1)?.[0]?.columns?.split(',');
+  expect(requestedColumns).toContain('pb');
+  expect(widgets[0].config.activeColumns).toEqual(requestedColumns);
+  view.unmount();
+  updateWidget.mockReset();
 });
 
 

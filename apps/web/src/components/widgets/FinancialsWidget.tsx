@@ -22,6 +22,7 @@ import {
     FUNDAMENTAL_PERIOD_OPTIONS,
     FUNDAMENTAL_PERIOD_SYNC_GROUP,
     isCanonicalQuarterPeriod,
+    isUnavailableStatementRow,
     matchesFinancialQuarterSelection,
     normalizeFinancialPeriod,
     periodSortKey,
@@ -187,6 +188,7 @@ function buildMetricLookup(source: unknown): Map<string, unknown> {
 
 function readMetricValue(row: Record<string, any>, key: string): any {
     const aliases = STATEMENT_METRIC_ALIASES[key] || [key];
+    if (isUnavailableStatementRow(row) || aliases.some((alias) => isUnavailableStatementRow(row.unit_metadata?.[alias]))) return null;
     const rowLookup = buildMetricLookup(row);
     for (const alias of aliases) {
         const value = rowLookup.get(alias) ?? rowLookup.get(normalizeMetricKey(alias));
@@ -272,6 +274,8 @@ function readRatioValue(row: Record<string, unknown>, key: string): number | nul
         if (!units || typeof units !== 'object' || !('dividend_yield' in units) || units.dividend_yield !== 'percent') return null;
     }
     const aliases = RATIO_METRIC_ALIASES[key] || [key];
+    const metadata = row.unit_metadata && typeof row.unit_metadata === 'object' ? row.unit_metadata : {};
+    if (isUnavailableStatementRow(row) || Object.entries(metadata).some(([field, value]) => aliases.includes(field) && value && typeof value === 'object' && 'unavailable_reason' in value && isUnavailableStatementRow(value))) return null;
     const zeroIsAbsent = ZERO_IS_ABSENT_RATIO_KEYS[key] === true;
     const numericValue = (value: unknown): number | null => {
         if (typeof value !== 'number' && typeof value !== 'string') return null;
@@ -365,6 +369,18 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
             case 'ratios': return ratiosQuery;
         }
     }, [activeTab, incomeQuery, balanceQuery, cashFlowQuery, ratiosQuery]);
+
+    const exportData = useMemo(() => (activeQuery.data?.data || []).map((row) => {
+        const record = row as unknown as Record<string, unknown>;
+        const keys = activeTab === 'ratios'
+            ? Object.keys(record).filter((key) => typeof record[key] === 'number')
+            : STATEMENT_METRIC_KEYS[activeTab];
+        const metadata = record.unit_metadata && typeof record.unit_metadata === 'object' ? record.unit_metadata : {};
+        const rejectedValues = keys.filter((key) => isUnavailableStatementRow(record) || Object.entries(metadata).some(([field, value]) => (STATEMENT_METRIC_ALIASES[key] || [key]).includes(field) && value && typeof value === 'object' && 'unavailable_reason' in value && isUnavailableStatementRow(value)));
+        return rejectedValues.length > 0
+            ? { ...record, ...Object.fromEntries(rejectedValues.map((key) => [key, null])) }
+            : record;
+    }), [activeQuery.data?.data, activeTab]);
 
     const tableData = useMemo(() => {
         if (!activeQuery?.data || (activeTab === 'ratios' && period === 'TTM')) return null;
@@ -636,7 +652,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
             noPadding
             widgetId={id}
             hideHeader={hideHeader}
-            exportData={activeQuery.data?.data || []}
+            exportData={exportData}
             exportFilename={`financials_${symbol}_${activeTab}_${period}`}
         >
             <div className="h-full flex flex-col bg-secondary text-primary font-sans select-none overflow-hidden">
@@ -706,6 +722,14 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                             {tableData.unavailableNote}
                         </div>
                     )}
+                    {period === 'TTM' && activeTab !== 'ratios' && activeQuery.data?.data?.map((item, index) => {
+                        const row = item as unknown as Record<string, unknown>;
+                        const metadata = row.unit_metadata as Record<string, { unavailable_reason?: string | null }> | undefined;
+                        return <div key={index} className="px-2 py-1 text-[10px] text-[var(--text-secondary)]" aria-label="TTM source lineage">
+                            TTM basis: {typeof row.aggregation_basis === 'string' ? row.aggregation_basis : 'Unknown'} · Source periods: {Array.isArray(row.source_periods) && row.source_periods.length ? row.source_periods.join(', ') : 'Unknown'}
+                            {activeTab === 'income_statement' && <span> · EPS availability: {metadata?.eps?.unavailable_reason || (row.eps == null ? 'Unknown' : 'Reported')}</span>}
+                        </div>;
+                    })}
                     {activeTab === 'ratios' && period === 'TTM' ? (
                         <WidgetEmpty
                             message="TTM ratios are not supported"

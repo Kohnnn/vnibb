@@ -7,32 +7,32 @@ interface ForeignTradingRow {
 }
 
 export interface OwnershipSummary {
-  score: number
-  grade: 'A' | 'B' | 'C' | 'D'
-  stance: string
+  score: number | null
+  grade: 'A' | 'B' | 'C' | 'D' | null
+  stance: string | null
   top3Pct: number | null
   top10Pct: number | null
-  holderCount: number
-  institutionalCount: number
-  foreignCount: number
-  insiderCount: number
+  holderCount: number | null
+  institutionalCount: number | null
+  foreignCount: number | null
+  insiderCount: number | null
   foreignNetVolume: number | null
   insiderNetValue: number | null
+  availableSources: number
+  coverage: 'complete' | 'partial' | 'unknown'
 }
 
-function normalizeOwnershipPct(value: number | null | undefined, treatAsRatio: boolean): number | null {
-  if (value == null || !Number.isFinite(value)) return null
-  return treatAsRatio ? value * 100 : value
+function normalizeOwnershipPct(holder: ShareholderData): number | null {
+  const value = readOwnershipPct(holder)
+  return value !== null && value >= 0 && value <= 100 ? value : null
 }
 
 function readOwnershipPct(holder: ShareholderData): number | null {
   const row = holder as ShareholderData & {
-    ownership?: number | null
-    pct?: number | null
     percent?: number | null
     percentage?: number | null
   }
-  const value = row.ownership_pct ?? row.ownership ?? row.pct ?? row.percent ?? row.percentage
+  const value = row.ownership_pct ?? row.percent ?? row.percentage
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
@@ -52,40 +52,43 @@ function gradeFromScore(score: number): OwnershipSummary['grade'] {
 }
 
 export function buildOwnershipSummary(
-  shareholders: ShareholderData[],
-  foreignTrading: ForeignTradingRow[],
+  shareholders: ShareholderData[] | null | undefined,
+  foreignTrading: ForeignTradingRow[] | null | undefined,
   insiderSentiment: InsiderSentiment | null | undefined,
 ): OwnershipSummary {
-  const ownershipValues = shareholders
-    .map(readOwnershipPct)
-    .filter((value): value is number => value !== null)
-  const treatAsRatio = ownershipValues.length > 0 && ownershipValues.every((value) => Math.abs(value) <= 1)
-  const normalizedOwnership = shareholders
-    .map((holder) => normalizeOwnershipPct(readOwnershipPct(holder), treatAsRatio))
+  const holders = shareholders ?? []
+  const normalizedOwnership = holders
+    .map(normalizeOwnershipPct)
     .filter((value): value is number => value !== null)
     .sort((left, right) => right - left)
+  const hasConcentration = holders.length > 0 && normalizedOwnership.length === holders.length
 
-  const top3Pct = normalizedOwnership.length ? normalizedOwnership.slice(0, 3).reduce((sum, value) => sum + value, 0) : null
-  const top10Pct = normalizedOwnership.length ? normalizedOwnership.slice(0, 10).reduce((sum, value) => sum + value, 0) : null
+  const top3Pct = hasConcentration ? normalizedOwnership.slice(0, 3).reduce((sum, value) => sum + value, 0) : null
+  const top10Pct = hasConcentration ? normalizedOwnership.slice(0, 10).reduce((sum, value) => sum + value, 0) : null
 
   let institutionalCount = 0
   let foreignCount = 0
   let insiderCount = 0
-  shareholders.forEach((holder) => {
+  holders.forEach((holder) => {
     const bucket = classifyHolderType(holder.shareholder_type)
     if (bucket === 'institutional') institutionalCount += 1
     if (bucket === 'foreign') foreignCount += 1
     if (bucket === 'insider') insiderCount += 1
   })
 
-  const foreignNetVolume = foreignTrading.length
-    ? foreignTrading.reduce((sum, row) => sum + (row.buy_volume || 0) - (row.sell_volume || 0), 0)
+  const usableForeignRows = foreignTrading?.length && foreignTrading.every((row) =>
+    typeof row.buy_volume === 'number' && Number.isFinite(row.buy_volume)
+    && typeof row.sell_volume === 'number' && Number.isFinite(row.sell_volume))
+  const foreignNetVolume = usableForeignRows
+    ? foreignTrading!.reduce((sum, row) => sum + row.buy_volume! - row.sell_volume!, 0)
     : null
-  // The sentiment aggregate only ships money when its own windowed unit evidence
-  // is VND; an undeclared unit (older payloads) must not feed the score.
   const insiderNetValue = insiderSentiment?.value_unit === 'VND'
-    ? insiderSentiment.net_value ?? null
+    && typeof insiderSentiment.net_value === 'number' && Number.isFinite(insiderSentiment.net_value)
+    ? insiderSentiment.net_value
     : null
+  const hasShareholders = holders.length > 0
+  const availableSources = [hasShareholders, foreignNetVolume !== null, insiderNetValue !== null].filter(Boolean).length
+  const complete = hasConcentration && foreignNetVolume !== null && insiderNetValue !== null
 
   let score = 50
   if (top3Pct !== null) {
@@ -116,16 +119,18 @@ export function buildOwnershipSummary(
   else if (grade === 'D') stance = 'Fragile or concentrated base'
 
   return {
-    score,
-    grade,
-    stance,
+    score: complete ? score : null,
+    grade: complete ? grade : null,
+    stance: complete ? stance : null,
     top3Pct,
     top10Pct,
-    holderCount: shareholders.length,
-    institutionalCount,
-    foreignCount,
-    insiderCount,
+    holderCount: shareholders ? holders.length : null,
+    institutionalCount: shareholders ? institutionalCount : null,
+    foreignCount: shareholders ? foreignCount : null,
+    insiderCount: shareholders ? insiderCount : null,
     foreignNetVolume,
     insiderNetValue,
+    availableSources,
+    coverage: complete ? 'complete' : availableSources > 0 ? 'partial' : 'unknown',
   }
 }

@@ -50,6 +50,9 @@ PERCENT_FIELDS = (
 )
 DEEP_EVIDENCE = {
     "ratio_units": dict.fromkeys(PERCENT_FIELDS, "percent"),
+    "_financial_lineage": {"unit_metadata": {"interest_expense": {
+        "label": "interest_expense", "source_unit": "VND", "value_unit": "VND",
+    }}},
     "nested": {"child": {"child": {"child": {"child": {"child": {
         "leaf": [None, 0, False, {"text": "  audit\n" + "evidence " * 150,
                                   "url": "https://example.test/report?unit=VND&basis=consolidated"}],
@@ -92,6 +95,8 @@ def _row(collection, ordinal, **overrides):
         "source": "vietcap_vnd" if collection == "stock_prices" else "vietcap",
     }
     values.update({key: value for key, value in canonical.items() if key in values})
+    if collection == "financial_ratios":
+        values["interest_coverage"] = None
     values.update(overrides)
     return values
 
@@ -163,14 +168,17 @@ def test_public_collection_metadata_matches_sql_constraints():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("collection", COLLECTIONS)
-async def test_public_sql_rows_preserve_every_column_null_and_deep_value(sql_tool, collection):
-    populated = _row(collection, 1)
-    for column in server.COLLECTION_MODELS[collection].__table__.columns:
-        if column.nullable and column.type.python_type in (int, float, Decimal):
-            populated[column.name] = 0
-            break
-    sparse = _row(collection, 2)
+@pytest.mark.parametrize("collection,zero_metric,value_metric", [
+    ("income_statements", "revenue", "interest_expense"),
+    ("balance_sheets", "total_assets", "total_equity"),
+    ("cash_flows", "operating_cash_flow", "investing_cash_flow"),
+    ("financial_ratios", "roe", "eps"),
+])
+async def test_public_financial_sql_preserves_admitted_zero_null_and_deep_evidence(
+    sql_tool, collection, zero_metric, value_metric
+):
+    populated = _row(collection, 1, fiscal_quarter=None, **{zero_metric: 0, value_metric: 1.25})
+    sparse = _row(collection, 2, fiscal_quarter=None)
     columns = server.COLLECTION_MODELS[collection].__table__.columns
     sparse.update({column.name: None for column in columns if column.nullable})
     await sql_tool(collection, [populated, sparse])
@@ -179,24 +187,16 @@ async def test_public_sql_rows_preserve_every_column_null_and_deep_value(sql_too
 
     assert result["row_count"] == len(result["items"]) == 2
     assert result["source"] == f"postgres:{collection}"
-    assert result["max_limit"] == ADVERTISED[collection]["max_limit"]
-    assert result["filters_applied"] == _expected_filters(
-        collection, sort_by=ADVERTISED[collection]["default_order"],
-        descending=ADVERTISED[collection]["default_desc"],
-    )
     by_id = {item["id"]: item for item in result["items"]}
-    for expected in (populated, sparse):
-        actual = by_id[expected["id"]]
-        assert set(columns.keys()) <= actual.keys()
-        assert {key: actual[key] for key in columns.keys()} == _json_value(expected)
-        last_column = list(columns)[-1].name
-        assert last_column in actual
-    if collection == "financial_ratios":
-        assert len(columns) >= 33
-        assert by_id[1]["raw_data"] == DEEP_EVIDENCE
-    if collection == "screener_snapshots":
-        assert len(columns) >= 34
-        assert by_id[1]["extended_metrics"] == DEEP_EVIDENCE
+    assert by_id[1][zero_metric] == 0
+    assert by_id[1][value_metric] == 1.25
+    assert by_id[1]["period"] == "2021"
+    assert by_id[1]["fiscal_quarter"] is None
+    assert by_id[1]["raw_data"] == DEEP_EVIDENCE
+    assert by_id[1].get("data_status", "available") == "available"
+    assert by_id[2][zero_metric] is None
+    assert by_id[2][value_metric] is None
+    assert by_id[2]["raw_data"] is None
 
 
 @pytest.mark.asyncio

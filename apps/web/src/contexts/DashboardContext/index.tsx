@@ -501,6 +501,7 @@ interface DashboardProviderProps {
 export function DashboardProvider({ children }: DashboardProviderProps) {
     const [state, dispatch] = useReducer(dashboardReducer, undefined, createInitialState);
     const [localStateReady, setLocalStateReady] = useState(false);
+    const [publishedTemplatesReady, setPublishedTemplatesReady] = useState(false);
     const [migrationNotice, setMigrationNotice] = useState<DashboardMigrationNotice | null>(null);
     const [backendSyncStatus, setBackendSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'local' | 'error'>('idle');
     const [userNavigationSeq, setUserNavigationSeq] = useState(0);
@@ -545,7 +546,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         let cancelled = false;
 
         const loadPublishedTemplates = async () => {
-            if (typeof fetch !== 'function') return;
+            if (typeof fetch !== 'function') {
+                setPublishedTemplatesReady(true);
+                return;
+            }
             let published: unknown[] = [];
             try {
                 const response = await getPublishedSystemDashboardTemplates();
@@ -565,6 +569,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             }
             // Empty must stay a no-op: sync init already seeded system dashboards.
             // Dispatching LOAD_STATE here would overwrite the user's saved workspace.
+            setPublishedTemplatesReady(true);
         };
 
         try {
@@ -831,6 +836,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 },
             });
             setLocalStateReady(true);
+            setPublishedTemplatesReady(true);
         }
 
         return () => {
@@ -938,7 +944,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
     // The backend snapshot is authoritative for cloud IDs; imported and personal
     // browser-only workspaces remain local even when absent from the response.
-    useLoadFromBackend((loadedDashboards) => {
+    const backendCatalogueReady = useLoadFromBackend((loadedDashboards) => {
         const current = stateRef.current;
         const cloudIds = new Set(loadedDashboards.map((dashboard) => dashboard.id));
         const dashboards = [
@@ -1274,6 +1280,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const contextValue: DashboardContextValue = {
         state,
         localStateReady,
+        dashboardCatalogueReady: localStateReady && publishedTemplatesReady && backendCatalogueReady,
         userNavigationSeq,
         exportWorkspace,
         restoreWorkspace,

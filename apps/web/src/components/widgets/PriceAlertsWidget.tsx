@@ -390,10 +390,16 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
         setShowAdd(true);
     };
 
+    const duplicateAlert = alerts.some(alert =>
+        normalizeTickerSymbol(alert.symbol) === normalizeTickerSymbol(newAlert.symbol)
+        && alert.condition === newAlert.condition
+        && alert.threshold === Number(newAlert.threshold)
+    );
+
     // Add new alert
     const addAlert = () => {
         const symbol = normalizeTickerSymbol(newAlert.symbol);
-        if (!symbol || !isValidAlertThreshold(newAlert.threshold)) return;
+        if (!symbol || !isValidAlertThreshold(newAlert.threshold) || duplicateAlert) return;
 
         const alert: PriceAlert = {
             id: `alert_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -405,7 +411,11 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
             notificationSent: false,
         };
 
-        setAlerts(prev => [...prev, alert]);
+        setAlerts(prev => prev.some(existing =>
+            normalizeTickerSymbol(existing.symbol) === symbol
+            && existing.condition === alert.condition
+            && existing.threshold === alert.threshold
+        ) ? prev : [...prev, alert]);
         setNewAlert({ symbol: '', condition: 'above', threshold: '' });
         setShowAdd(false);
     };
@@ -482,6 +492,9 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                     </button>
                 </div>
             </div>
+            <p className="px-2 py-1.5 text-[10px] text-[var(--text-muted)]">
+                Browser-local alert checks. Rules are saved in this dashboard. Checks run only while this page is open and market data is available. Browser notifications require permission; not server, email, or SMS delivery.
+            </p>
 
             {/* Notification Permission Banner */}
             {notificationPermission === 'default' && (
@@ -535,12 +548,13 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                         <button
                             type="button"
                             onClick={addAlert}
-                            disabled={!normalizeTickerSymbol(newAlert.symbol) || !isValidAlertThreshold(newAlert.threshold)}
+                            disabled={!normalizeTickerSymbol(newAlert.symbol) || !isValidAlertThreshold(newAlert.threshold) || duplicateAlert}
                             className="min-h-11 rounded bg-yellow-600 px-3 text-xs font-medium text-white transition-colors hover:bg-yellow-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)]"
                         >
                             Add
                         </button>
                     </div>
+                    {duplicateAlert && <p role="status" className="text-xs text-amber-400">This alert already exists. Resume or delete the existing rule instead.</p>}
                 </div>
             )}
 

@@ -35,6 +35,7 @@ import { useDashboard } from '@/contexts/DashboardContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import { cn } from '@/lib/utils';
+import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 
 interface CommandPaletteProps {
   open: boolean;
@@ -103,6 +104,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: open, onClose: () => onOpenChange(false) });
+  const shortcutsDialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: open && showShortcutHelp, onClose: () => setShowShortcutHelp(false) });
   const listboxId = useId();
   const shortcutModifier = getShortcutModifierLabel();
   const {
@@ -123,17 +126,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   useEffect(() => {
     if (!open) return;
-    const previousFocus = document.activeElement;
     setRecentSearches(readCommandPaletteRecents());
     setSearch('');
     setSelectedIndex(0);
     const frame = requestAnimationFrame(() => inputRef.current?.focus());
-    return () => {
-      cancelAnimationFrame(frame);
-      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
-        previousFocus.focus();
-      }
-    };
+    return () => cancelAnimationFrame(frame);
   }, [open]);
 
   const trimmedSearch = search.trim();
@@ -481,15 +478,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   }, [flatItems]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || showShortcutHelp) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onOpenChange(false);
-        return;
-      }
-
       if (event.key === 'ArrowDown') {
         event.preventDefault();
         setSelectedIndex(flatItems.length ? (activeIndex + 1) % flatItems.length : 0);
@@ -512,7 +503,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
     document.addEventListener('keydown', handleKeyDown, true);
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [activeIndex, flatItems, open]);
+  }, [activeIndex, flatItems, open, showShortcutHelp]);
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -616,11 +607,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       <button
         type="button"
         aria-label="Close command palette backdrop"
+        tabIndex={-1}
         className="absolute inset-0 cursor-default"
         onClick={() => onOpenChange(false)}
       />
 
-      <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] shadow-2xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Command palette" tabIndex={-1} className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] shadow-2xl">
         <div className="flex items-center gap-3 border-b border-[var(--border-default)] px-4 py-3">
           <CommandIcon className="h-5 w-5 text-[var(--text-muted)]" />
           <input
@@ -677,8 +669,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           )}
         </div>
 
-        <div className="flex items-center justify-between border-t border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-4 py-2 text-[10px] text-[var(--text-muted)]">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-4 py-2 text-[10px] text-[var(--text-muted)]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <ShortcutPill label={`${shortcutModifier}+K`} hint="Open" />
             <ShortcutPill label="↑↓" hint="Navigate" />
             <ShortcutPill label="Enter" hint="Select" />
@@ -695,7 +687,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
       {showShortcutHelp ? (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-[rgba(2,6,23,0.64)] p-4">
-          <div className="w-full max-w-md rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-2xl">
+          <div ref={shortcutsDialogRef} role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" tabIndex={-1} className="w-full max-w-md rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm font-bold text-[var(--text-primary)]">
                 <HelpCircle className="h-4 w-4 text-sky-300" />

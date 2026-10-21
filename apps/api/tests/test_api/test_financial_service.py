@@ -10,6 +10,7 @@ from vnibb.services.financial_service import (
     calculate_ttm,
     get_financials_with_ttm,
     normalize_statement_period,
+    admit_statement_rows,
 )
 
 
@@ -167,6 +168,50 @@ def test_merge_financial_statement_rows_dedupes_mixed_quarter_formats():
     assert merged[0].gross_profit == 90.0
 
 
+
+def test_merge_cannot_keep_interest_rejected_by_other_observation():
+    primary = FinancialStatementData(symbol="FPT", period="2025", statement_type="income",
+        interest_expense=900, revenue=1000, source="VCI", value_unit="VND",
+        unit_metadata={"interest_expense": {"label": "financial_expenses", "source_unit": "VND", "value_unit": "VND"}})
+    fallback = primary.model_copy(deep=True)
+    fallback.interest_expense = None
+    fallback.unit_metadata["interest_expense"]["unavailable_reason"] = "interest_semantics_unverified"
+    for first, second in ((primary, fallback), (fallback, primary)):
+        row = _merge_financial_statement_rows([first], [second])[0]
+        assert row.interest_expense is None
+        assert row.revenue == 1000
+        assert row.unit_metadata["interest_expense"]["unavailable_reason"] == "interest_semantics_unverified"
+
+
+@pytest.mark.parametrize("fallback_scope,fallback_unit,expected", [
+    ("separate", "VND", 100), ("consolidated", None, 100), ("consolidated", "VND", None),
+])
+def test_merge_rejection_only_applies_to_compatible_statement_basis(fallback_scope, fallback_unit, expected):
+    primary = FinancialStatementData(symbol="FPT", period="2025", statement_type="income",
+        source="VCI", value_unit="VND", consolidation_basis="consolidated", revenue=100,
+        unit_metadata={"revenue": {"value_unit": "VND"}})
+    fallback = primary.model_copy(deep=True, update={"consolidation_basis": fallback_scope,
+        "value_unit": fallback_unit, "revenue": None})
+    fallback.unit_metadata["revenue"]["unavailable_reason"] = "conflicting_metric_rows"
+    result = _merge_financial_statement_rows([primary], [fallback])[0]
+    assert result.revenue == expected
+    assert primary.revenue == 100
+
+
+@pytest.mark.parametrize("interest", [0, 12])
+def test_derived_ytd_interest_keeps_original_component_evidence_at_final_admission(interest):
+    quarters = [FinancialStatementData(symbol="FPT", period=f"Q{quarter}-2026", statement_type="income",
+        source="VCI", value_unit="VND", consolidation_basis="consolidated", flow_basis="single_quarter",
+        revenue=100, interest_expense=interest, unit_metadata={"interest_expense": {
+            "label": "interest_expense", "source_unit": "VND", "value_unit": "VND"}})
+        for quarter in (2, 1)]
+    ytd = _build_ytd_snapshot("FPT", "income", 2026, quarters)
+    result = admit_statement_rows([ytd], "FY")[0]
+    assert (result.revenue, result.interest_expense) == (200, 2 * interest)
+    assert result.unit_metadata["interest_expense"]["components"] == [
+        row.unit_metadata["interest_expense"] for row in quarters]
+    assert result.raw_data["source_rows"][0]["period"] == "Q2-2026"
+
 def test_merge_and_enrichment_do_not_restore_provider_rejected_metric():
     primary = [
         FinancialStatementData(
@@ -245,6 +290,33 @@ def test_normalize_statement_period_prefers_quarter_metadata_over_bare_year():
     )
 
 
+def test_admission_uses_explicit_quarter_and_preserves_fy_separately():
+    row = FinancialStatementData(symbol="FPT", period="2025", statement_type="income",
+        fiscal_year=2025, fiscal_quarter=1, revenue=100)
+    quarterly = admit_statement_rows([row], "quarter")[0]
+    annual = admit_statement_rows([row.model_copy(update={"fiscal_quarter": None})], "FY")[0]
+    assert (quarterly.period, quarterly.revenue, quarterly.unavailable_reason) == ("Q1-2025", 100, None)
+    assert (annual.period, annual.revenue, annual.unavailable_reason) == ("2025", 100, None)
+
+
+@pytest.mark.parametrize("value", [0, 42])
+def test_interest_admission_preserves_certified_true_label_including_zero(value):
+    row = FinancialStatementData(symbol="FPT", period="2025", statement_type="income",
+        interest_expense=value, unit_metadata={"interest_expense": {
+            "label": "interest_expense", "source_unit": "VND", "value_unit": "VND"}})
+    assert admit_statement_rows([row], "FY")[0].interest_expense == value
+
+
+
+@pytest.mark.parametrize("raw", [{"yearReport": 2024, "lengthReport": 2}, {"yearReport": 2025, "lengthReport": 5}])
+def test_quarter_admission_rejects_disagreeing_original_fiscal_evidence(raw):
+    row = FinancialStatementData(symbol="FPT", period="Q1-2025", statement_type="income",
+        fiscal_year=2025, fiscal_quarter=1, revenue=100, raw_data=raw)
+    result = admit_statement_rows([row], "quarter")[0]
+    assert result.revenue is None
+    assert result.unavailable_reason == "conflicting_fiscal_identity"
+    assert result.raw_data == raw
+
 @pytest.mark.asyncio
 async def test_get_financials_with_ttm_filters_specific_quarter_after_normalization(monkeypatch):
     async def fake_fetch(params, credentials=None):
@@ -310,7 +382,8 @@ def test_ttm_latest_balance_snapshot_preserves_missing_inventory():
     assert result.inventory is None
     assert result.aggregation_basis == "latest_quarter_snapshot"
     assert result.source_periods == ["Q2-2026"]
-    assert result.raw_data == rows[1].raw_data
+    assert result.raw_data["source_rows"][0]["period"] == "Q2-2026"
+    assert result.raw_data["source_rows"][0]["raw_data"] == rows[1].raw_data
 
 
 def test_ttm_flows_require_every_quarter_and_do_not_sum_eps():

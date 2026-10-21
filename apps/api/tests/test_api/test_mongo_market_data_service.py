@@ -611,3 +611,35 @@ def test_vietcap_financial_sync_propagates_provider_failure(failed_section):
         "finance.income_statement", "finance.balance_sheet", "finance.cash_flow", "finance.ratio",
     }
     assert all(record["symbol"] == "VNM" and record["providerSource"] == "vietcap" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_fundamental_reader_withholds_legacy_interest_score_preserving_independent_facts(monkeypatch):
+    documents = [
+        {"symbol": symbol, "schemaVersion": version, "moatScore": 95.0,
+         "moatFactors": {"interest_coverage": 8.0, "gross_margin_avg": 42.0},
+         "roe": 18.0, "netMargin": 15.0, "moat": "wide"}
+        for symbol, version in (("OLD", 2), ("NEW", 3))
+    ]
+
+    class FundamentalCollection:
+        def aggregate(self, _pipeline):
+            return [{"doc": dict(document)} for document in documents]
+
+    service = MongoMarketDataService()
+    monkeypatch.setattr(service, "_get_collection", lambda _: FundamentalCollection())
+
+    snapshots = await service.get_latest_fundamental_snapshots(["OLD", "NEW"])
+
+    assert snapshots["OLD"].get("moatScore") is None
+    assert "interest_coverage" not in snapshots["OLD"]["moatFactors"]
+    assert snapshots["OLD"]["moatFactors"]["gross_margin_avg"] == 42.0
+    assert snapshots["OLD"]["roe"] == 18.0
+    assert snapshots["OLD"]["netMargin"] == 15.0
+    assert snapshots["OLD"]["moat"] is None
+    assert snapshots["NEW"]["moatScore"] == 95.0
+    assert snapshots["NEW"]["moatFactors"]["interest_coverage"] == 8.0
+    assert snapshots["NEW"]["moat"] == "wide"
+    assert documents[0]["moatFactors"]["interest_coverage"] == 8.0
+    assert documents[0]["moatScore"] == 95.0
+    assert documents[0]["moat"] == "wide"

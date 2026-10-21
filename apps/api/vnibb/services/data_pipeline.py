@@ -78,8 +78,10 @@ from vnibb.providers.vnstock.financials import (
     FinancialsQueryParams,
     StatementType,
     VnstockFinancialsFetcher,
+    admitted_interest_expense,
 )
 from vnibb.services.data_quality import is_market_business_day
+from vnibb.services.financial_service import admit_statement_rows
 from vnibb.services.prediction_market_retention import retention as prediction_market_retention
 from vnibb.services.realtime_pipeline import is_vietnam_market_open
 
@@ -3023,7 +3025,7 @@ class DataPipeline:
                     rejected_updates: List[str] = []
                     committed_periods = {}
                     async with async_session_maker() as session:
-                        for entry in items:
+                        for entry in admit_statement_rows(items, normalized_period):
                             payload = entry.model_dump(mode="json")
                             raw_payload = dict(entry.raw_data or {})
                             canonical = {
@@ -3578,6 +3580,7 @@ class DataPipeline:
                         IncomeStatement.net_income,
                         IncomeStatement.cost_of_revenue,
                         IncomeStatement.interest_expense,
+                        IncomeStatement.raw_data,
                     )
                     .where(
                         IncomeStatement.symbol == symbol_value,
@@ -3640,6 +3643,7 @@ class DataPipeline:
                 net_income,
                 cogs,
                 interest_expense,
+                raw_data,
             ) in income_rows:
                 if year is None:
                     continue
@@ -3649,7 +3653,7 @@ class DataPipeline:
                     "operating_income": _coerce_float(op_income),
                     "net_income": _coerce_float(net_income),
                     "cost_of_revenue": _coerce_float(cogs),
-                    "interest_expense": _coerce_float(interest_expense),
+                    "interest_expense": admitted_interest_expense({"interest_expense": interest_expense, "raw_data": raw_data}),
                 }
                 income_lookup[period_key] = row_value
                 income_annual.setdefault(int(year), row_value)
@@ -3884,7 +3888,7 @@ class DataPipeline:
                         denominator += abs(interest_expense)
                     if debt_repayment is not None:
                         denominator += abs(debt_repayment)
-                    if operating_income is not None and denominator > 0:
+                    if operating_income is not None and interest_expense is not None and denominator > 0:
                         raw_payload["debt_service_coverage"] = round(
                             operating_income / denominator,
                             4,

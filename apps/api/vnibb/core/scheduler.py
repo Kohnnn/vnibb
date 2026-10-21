@@ -937,10 +937,9 @@ def start_scheduler():
 
 
 def _maybe_populate_prediction_markets_on_startup() -> None:
-    """Run a one-shot prediction-market populate if the scheduler is starting
-    up and the snapshot tables are still empty. Schedules itself via
-    APScheduler so it doesn't block the boot loop.
-    """
+    """Optionally enqueue restart-only population without changing recurring jobs."""
+    if not settings.prediction_market_populate_on_startup:
+        return
     scheduler = get_scheduler()
 
     async def _populate_now() -> None:

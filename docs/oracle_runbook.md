@@ -89,6 +89,16 @@ After the approved Mongo recreation, confirm `docker inspect --format '{{.HostCo
 
 New Vietnamese ingestion uses Vietcap IQ/Trading as primary and free vnstock VCI as the only supplementary provider. Do not enable historical premium mounts, KBS or TCBS routing. Preserve historical release evidence below; its old premium runtime instructions are not the new provider policy.
 
+### Exact frontend origin and screener freshness gates
+
+`CORS_ORIGINS` in the private serving `deployment/env.oracle` overrides source defaults. Preserve the effective approved list and append `https://web.vnibb.xyz` exactly; do not broaden the regex, add a wildcard, or duplicate CORS in Caddy. Save the environment, Compose files, proxy configuration and immutable container identities privately before an approved configuration-only rollout. Recreate only the API with its existing digest and `--no-deps --no-build --pull never`; keep MCP, scheduler, Auth, PostgreSQL, MongoDB, Redis and Caddy unchanged. Roll back using the saved environment and the same API-only command if the gate fails.
+
+Verify the exact FPT income-statement GET and OPTIONS separately for the current origin, both approved Vercel aliases and an unrelated denied origin. Include validation responses and native browser response consumption. Successful CORS transport does not certify financial values or freshness.
+
+Detailed health uses the consumer's certified screener Universe partition and its oldest actual constituent trade date, not independent global maxima. A missing receipt or trade date remains degraded. `screener_expected_session` uses the configured ICT close and `MARKET_HOLIDAY_DATES`; its calendar limitation is explicit, not official exchange-calendar certification. Before declaring recovery, compare the completed exchange session, active Universe membership, successful full-run receipt and every constituent trade date. Keep acquisition failures and stale disclosure visible; do not restamp dates, relax thresholds, fabricate completion markers or rewrite history.
+
+For the QA release, set `PREDICTION_MARKET_POPULATE_ON_STARTUP=false` in the private serving environment before replacing the scheduler. This disables only the immediate restart-population task; normal daily and recurring prediction ingestion remain scheduled. The application default remains `true` for existing installations. Preserve the explicit release setting during rollback so a restart does not introduce an unrequested acquisition.
+
 ### Historical pre-release observation (13 October 2026)
 
 Trusted public TLS and authorized read-only MCP were available on 13 October 2026 at `https://129.150.58.64.sslip.io`; `/mcp-health` and API health reported production revision `2c57654277ef5546662afc3cc7ed4a4e355e441e`. Production still reported source `KBS`, so readiness is not proof that the current IQ/free-VCI source policy is deployed. Strict known-host public SSH timed out and Tailscale reported `NeedsLogin`; host deployment, production migration and current backup inspection were not established.

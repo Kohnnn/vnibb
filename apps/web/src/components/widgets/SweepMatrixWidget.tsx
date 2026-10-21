@@ -107,7 +107,7 @@ export function SweepMatrixWidget({ symbol, onDataChange }: SweepMatrixWidgetPro
   }
 
   if (!hasData) {
-    return <WidgetEmpty message={`No sweep data for ${upperSymbol}`} icon={<Grid3X3 size={18} />} />;
+    return <WidgetEmpty message={data?.error || `No sweep data for ${upperSymbol}`} icon={<Grid3X3 size={18} />} />;
   }
 
   return (

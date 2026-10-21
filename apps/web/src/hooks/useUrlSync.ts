@@ -38,6 +38,7 @@ import { normalizeTickerSymbol } from '@/lib/defaultTicker';
 interface UseUrlSyncParams {
   /** Whether the host has mounted + context state has been restored. */
   ready: boolean;
+  dashboardCatalogueReady: boolean;
   activeDashboardId: string | null;
   activeTabId: string | null;
   symbol: string;
@@ -92,6 +93,7 @@ export const __resolveDashboardSlug = resolveDashboardSlug;
 
 export function useUrlSync({
   ready,
+  dashboardCatalogueReady,
   activeDashboardId,
   activeTabId,
   symbol,
@@ -256,6 +258,13 @@ export function useUrlSync({
       : null;
     const dashboardReady = !urlDashboard || resolvedDashboard !== null;
 
+    if (!dashboardReady && dashboardCatalogueReady) {
+      requestedRef.current = null;
+      hasRestoredRef.current = true;
+      applyFromSearchRef.current(window.location.search);
+      return;
+    }
+
     if (requestedRef.current) {
       // A request is pending. The user wins only if they actually navigated
       // since we captured the sequence — hydration churn does not bump it.
@@ -277,7 +286,7 @@ export function useUrlSync({
       deferredTabRef.current = { dashboardId: resolvedDashboard, slug: urlTab, capturedSeq: userNavigationSeq };
     }
     applyFromSearchRef.current(window.location.search);
-  }, [ready, dashboardIds, resolveTabId, userNavigationSeq]);
+  }, [ready, dashboardCatalogueReady, dashboardIds, resolveTabId, userNavigationSeq]);
 
   // Apply a deep-linked tab that registered after its workspace did.
   useEffect(() => {
@@ -401,5 +410,5 @@ export function useUrlSync({
   useEffect(() => {
     if (!ready || !hasRestoredRef.current) return;
     writeStateToUrl();
-  }, [ready, writeStateToUrl]);
+  }, [ready, dashboardCatalogueReady, writeStateToUrl]);
 }

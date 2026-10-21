@@ -125,6 +125,7 @@ interface AICopilotProps {
     widgetContext?: string;
     widgetContextData?: Record<string, unknown>;
     activeTabName?: string;
+    workspaceContextKey?: string;
     promptLibraryRequestId?: number;
     starterPrompt?: 'analyze' | 'technical';
     starterPromptRequestId?: number;
@@ -454,6 +455,7 @@ export function AICopilot({
     widgetContext,
     widgetContextData,
     activeTabName,
+    workspaceContextKey,
     promptLibraryRequestId = 0,
     starterPrompt,
     starterPromptRequestId = 0,
@@ -565,8 +567,8 @@ export function AICopilot({
     }, [messages]);
     useEffect(() => {
         setSelectedWorkflow(null);
-        if (memoryOnlyRef.current) return;
         cancelActiveRequest();
+        if (memoryOnlyRef.current) return;
         if (typeof window === 'undefined') return;
         try {
             const raw = window.sessionStorage.getItem(sessionKey);
@@ -579,7 +581,7 @@ export function AICopilot({
         } catch {
             setMessages([]);
         }
-    }, [sessionKey, cancelActiveRequest]);
+    }, [sessionKey, workspaceContextKey, activeTabName, currentSymbol, widgetContext, cancelActiveRequest]);
 
 
 

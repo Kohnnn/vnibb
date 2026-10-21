@@ -27,6 +27,7 @@ from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.company import Company
 from vnibb.models.trading import FinancialRatio
+from vnibb.providers.vnstock.financials import admitted_interest_expense
 from vnibb.services.cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
@@ -197,7 +198,10 @@ def _build_statement_snapshot(
     if not ttm:
         latest = rows[0]
         return {
-            metric_key: _coerce_number(getattr(latest, metric_key, None))
+            metric_key: (
+                admitted_interest_expense(latest) if metric_key == "interest_expense"
+                else _coerce_number(getattr(latest, metric_key, None))
+            )
             for metric_key in metric_keys
         }
 
@@ -220,7 +224,11 @@ def _build_statement_snapshot(
 
     snapshot: dict[str, Optional[float]] = {}
     for metric_key in metric_keys:
-        values = [_coerce_number(getattr(row, metric_key, None)) for row in recent_rows]
+        values = [
+            admitted_interest_expense(row) if metric_key == "interest_expense"
+            else _coerce_number(getattr(row, metric_key, None))
+            for row in recent_rows
+        ]
         snapshot[metric_key] = sum(values) if all(value is not None for value in values) else None
 
     return snapshot
@@ -337,10 +345,8 @@ async def _build_comparison_backfill(
         backfill["debt_to_equity"] = total_liabilities / total_equity
     if operating_income is not None and interest_expense not in (None, 0):
         backfill["interest_coverage"] = operating_income / abs(interest_expense)
-    if operating_income is not None:
-        debt_service = 0.0
-        if interest_expense not in (None, 0):
-            debt_service += abs(interest_expense)
+    if operating_income is not None and interest_expense is not None:
+        debt_service = abs(interest_expense)
         if debt_repayment not in (None, 0):
             debt_service += abs(debt_repayment)
         if debt_service > 0:
@@ -610,7 +616,6 @@ class ComparisonService:
                 "current_ratio": _record_value(data, "current_ratio", "currentRatio"),
                 "quick_ratio": _record_value(data, "quick_ratio", "quickRatio"),
                 "asset_turnover": _record_value(data, "asset_turnover", "assetTurnover"),
-                "interest_coverage": _record_value(data, "interest_coverage", "interestCoverage"),
                 "fcf_yield": _record_value(data, "fcf_yield", "fcfYield"),
                 "ocf_sales": _record_value(data, "ocf_sales", "ocfSales"),
                 "eps": _record_value(data, "eps"),
@@ -674,7 +679,6 @@ class ComparisonService:
                     "current_ratio": ratio_row.current_ratio,
                     "quick_ratio": ratio_row.quick_ratio,
                     "asset_turnover": getattr(ratio_row, "asset_turnover", None),
-                    "interest_coverage": getattr(ratio_row, "interest_coverage", None),
                     "fcf_yield": _ratio_json_metric("fcf_yield", ratio_row.raw_data, "fcfYield"),
                     "ocf_sales": _ratio_json_metric("ocf_sales", ratio_row.raw_data, "ocfSales"),
                     "eps": ratio_row.eps,
@@ -1718,18 +1722,8 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
                 ratio_snapshot.get("debt_assets"),
                 derived_metrics.get("debt_assets"),
             ),
-            "interest_coverage": _first_metric_value(
-                "interest_coverage",
-                stock_metrics.metrics.get("interest_coverage"),
-                ratio_snapshot.get("interest_coverage"),
-                derived_metrics.get("interest_coverage"),
-            ),
-            "debt_service_coverage": _first_metric_value(
-                "debt_service_coverage",
-                stock_metrics.metrics.get("debt_service_coverage"),
-                ratio_snapshot.get("debt_service_coverage"),
-                derived_metrics.get("debt_service_coverage"),
-            ),
+            "interest_coverage": derived_metrics.get("interest_coverage"),
+            "debt_service_coverage": derived_metrics.get("debt_service_coverage"),
             "ocf_debt": _first_metric_value(
                 "ocf_debt",
                 stock_metrics.metrics.get("ocf_debt"),

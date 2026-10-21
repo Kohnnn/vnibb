@@ -410,6 +410,23 @@ async def test_startup_populate_reports_snapshot_failures(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("startup_enabled", [False, True])
+async def test_restart_population_control_preserves_regular_ingestion(monkeypatch, startup_enabled):
+    scheduled = AsyncIOScheduler(timezone="UTC")
+    monkeypatch.setattr(scheduler, "_scheduler", scheduled)
+    configured = scheduler.settings.model_dump()
+    configured["prediction_market_populate_on_startup"] = startup_enabled
+    monkeypatch.setattr(scheduler, "settings", SimpleNamespace(**configured))
+
+    scheduler.configure_scheduler()
+    scheduler._maybe_populate_prediction_markets_on_startup()
+
+    assert scheduled.get_job("prediction_market_ingest") is not None
+    assert scheduled.get_job("daily_sync") is not None
+    assert (scheduled.get_job("populate_prediction_markets_on_startup") is not None) is startup_enabled
+
+
+@pytest.mark.asyncio
 async def test_prediction_retention_jobs_prune_sql_rows_after_fetch_failure(test_engine, monkeypatch):
     from sqlalchemy import select
     from vnibb.models.prediction_market import PredictionMarket

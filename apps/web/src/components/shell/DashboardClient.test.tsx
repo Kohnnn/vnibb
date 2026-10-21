@@ -3,6 +3,11 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import DashboardPage, { DashboardSyncStatusMessage } from './DashboardClient';
 import { consumeCopilotStream, openCopilotChatStream } from '@/lib/api';
 import type { ResearchStarter, StarterPromptKey } from '@/lib/researchStarters';
+import type { Dashboard, DashboardTab } from '@/types/dashboard';
+
+let mockWalkthroughEligible = false;
+let mockActiveDashboard: Dashboard | null = null;
+let mockActiveTab: DashboardTab | null = null;
 
 jest.mock('next/dynamic', () => {
   const React = jest.requireActual('react');
@@ -21,8 +26,9 @@ jest.mock('@/contexts/DashboardContext', () => ({
   useDashboard: () => ({
     state: { dashboards: [] },
     localStateReady: true,
-    activeDashboard: null,
-    activeTab: null,
+    dashboardCatalogueReady: true,
+    activeDashboard: mockActiveDashboard,
+    activeTab: mockActiveTab,
     backendSync: { enabled: false, status: 'idle' },
   }),
 }));
@@ -36,7 +42,7 @@ jest.mock('@/hooks/useResizeNudge', () => ({ useResizeNudge: jest.fn() }));
 jest.mock('@/hooks/usePeriodState', () => ({ usePeriodState: () => ({ period: 'FY', setPeriod: jest.fn() }) }));
 jest.mock('@/lib/userPreferences', () => ({
   ...jest.requireActual('@/lib/userPreferences'),
-  shouldShowDashboardWalkthrough: () => false,
+  shouldShowDashboardWalkthrough: () => mockWalkthroughEligible,
   dispatchOnboardingMeaningfulAction: jest.fn(),
 }));
 jest.mock('@/lib/analytics', () => ({ ANALYTICS_EVENTS: {}, captureAnalyticsEvent: jest.fn() }));
@@ -69,7 +75,9 @@ jest.mock('@/components/modals', () => ({
     onStarterPromptRequest: (prompt: StarterPromptKey, workflow: ResearchStarter['workflow']) => void;
   }) => open ? <button onClick={() => onStarterPromptRequest('analyze', { id: 'financial-summary', revision: 1 })}>Stage financial starter</button> : null,
 }));
-jest.mock('@/components/onboarding/OnboardingWalkthrough', () => ({ OnboardingWalkthrough: () => null }));
+jest.mock('@/components/onboarding/OnboardingWalkthrough', () => ({
+  OnboardingWalkthrough: ({ open }: { open: boolean }) => open ? <section role="dialog" aria-label="Dashboard walkthrough" /> : null,
+}));
 jest.mock('@/components/modals/PromptsLibrary', () => ({ PromptsLibrary: () => null }));
 jest.mock('@/components/ui/CopilotArtifactPanel', () => ({ CopilotArtifactPanel: () => null }));
 jest.mock('@/components/ui/CopilotActionPanel', () => ({ CopilotActionPanel: () => null }));
@@ -101,6 +109,37 @@ describe('DashboardSyncStatusMessage', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Saved on this device');
     expect(screen.queryByText('Cloud sync failed. Check your connection and refresh to try again.')).not.toBeInTheDocument();
+  });
+});
+
+describe('DashboardPage initial walkthrough hydration', () => {
+  afterEach(() => {
+    mockWalkthroughEligible = false;
+    mockActiveDashboard = null;
+    mockActiveTab = null;
+    jest.useRealTimers();
+  });
+
+  it('opens the first-visit walkthrough when hydration replaces the active view before its timer fires', async () => {
+    jest.useFakeTimers();
+    setViewport(1440);
+    mockWalkthroughEligible = true;
+    mockActiveTab = { id: 'hydrating-tab', name: 'Initial view', order: 0, widgets: [] };
+    mockActiveDashboard = {
+      id: 'hydrating-dashboard', name: 'Personal workspace', order: 0, isDefault: false,
+      isEditable: true, showGroupLabels: true, tabs: [mockActiveTab], syncGroups: [],
+      createdAt: '2026-10-21T00:00:00.000Z', updatedAt: '2026-10-21T00:00:00.000Z',
+    };
+    const view = render(<DashboardPage />);
+    await act(async () => { jest.advanceTimersByTime(100); });
+    expect(screen.queryByRole('dialog', { name: 'Dashboard walkthrough' })).not.toBeInTheDocument();
+
+    mockActiveTab = { ...mockActiveTab, name: 'Hydrated view' };
+    mockActiveDashboard = { ...mockActiveDashboard, tabs: [mockActiveTab] };
+    view.rerender(<DashboardPage />);
+    await act(async () => { jest.advanceTimersByTime(300); });
+
+    expect(await screen.findByRole('dialog', { name: 'Dashboard walkthrough' })).toBeInTheDocument();
   });
 });
 

@@ -476,7 +476,7 @@ function TradingViewNativeWidget({
       className={allowsOverflow ? 'overflow-visible' : undefined}
       bodyClassName={allowsOverflow ? 'overflow-visible' : undefined}
     >
-      <div className="relative h-full min-h-[180px] bg-[var(--bg-primary)]">
+      <div className="relative flex h-full min-h-[180px] flex-col bg-[var(--bg-primary)]">
         {isLoading ? (
           <div className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-center gap-3 bg-[var(--bg-primary)]/92">
             <WidgetSkeleton variant="chart" />
@@ -486,7 +486,20 @@ function TradingViewNativeWidget({
             </div>
           </div>
         ) : null}
-        <div ref={hostRef} className="tradingview-widget-container h-full w-full" />
+        <div ref={hostRef} className="tradingview-widget-container min-h-0 w-full flex-1" />
+        {metadata.format === 'iframe' ? (
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[var(--border-default)] px-3 py-2 text-[11px] text-[var(--text-muted)]">
+            <span>Third-party content · VNIBB cannot verify this embed. If blank or blocked, open the provider.</span>
+            <a
+              href={resolvedSymbol ? `https://www.tradingview.com/symbols/${encodeURIComponent(resolvedSymbol.replace(':', '-'))}/` : 'https://www.tradingview.com/'}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="font-semibold text-blue-400 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400"
+            >
+              Open in TradingView
+            </a>
+          </div>
+        ) : null}
       </div>
     </WidgetContainer>
   );

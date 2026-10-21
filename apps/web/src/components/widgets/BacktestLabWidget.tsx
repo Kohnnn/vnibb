@@ -74,26 +74,6 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
     return <WidgetEmpty message="Select a symbol to run a backtest" icon={<Activity size={18} />} />;
   }
 
-  if (invalidWindows) {
-    return <WidgetEmpty message="Fast MA must be smaller than slow MA" icon={<AlertTriangle size={18} />} />;
-  }
-
-  if (isLoading && !hasData) {
-    return <WidgetSkeleton lines={6} />;
-  }
-
-  if (error && !hasData) {
-    return <WidgetError title="Backtest unavailable" error={error as Error} onRetry={() => refetch()} />;
-  }
-
-  if (derivedWithheld) {
-    return <WidgetEmpty message={unavailableReason} icon={<AlertTriangle size={18} />} />;
-  }
-
-  if (!hasData) {
-    return <WidgetEmpty message={`No backtest data for ${upperSymbol}`} icon={<Activity size={18} />} />;
-  }
-
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <WidgetMeta updatedAt={payload?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note={`MA crossover backtest · ${payload?.adjustment_mode || 'adjusted'} history requested`} align="right" />
@@ -104,6 +84,18 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
         <NumberInput label="Fast MA" value={fastWindow} min={2} max={250} onChange={setFastWindow} />
         <NumberInput label="Slow MA" value={slowWindow} min={3} max={500} onChange={setSlowWindow} />
       </div>
+      {invalidWindows ? (
+        <WidgetEmpty message="Fast MA must be smaller than slow MA" icon={<AlertTriangle size={18} />} />
+      ) : isLoading && !hasData ? (
+        <WidgetSkeleton lines={6} />
+      ) : error && !hasData ? (
+        <WidgetError title="Backtest unavailable" error={error as Error} onRetry={() => refetch()} />
+      ) : derivedWithheld ? (
+        <WidgetEmpty message={unavailableReason} icon={<AlertTriangle size={18} />} />
+      ) : !hasData ? (
+        <WidgetEmpty message={data?.error || `No backtest data for ${upperSymbol}`} icon={<Activity size={18} />} />
+      ) : (
+        <>
 
       {displayWarnings.length > 0 && (
         <div className="mb-2 space-y-1">
@@ -144,6 +136,8 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
         <p className="mt-1 text-[9px] leading-3 text-[var(--text-muted)]">
           Basis: {basisNote}. Compare against the sweep only at identical parameters and sessions.
         </p>
+      )}
+        </>
       )}
     </div>
   );

@@ -10,6 +10,7 @@ from vnibb.providers.vnstock.financials import (
     FinancialStatementData,
     StatementType,
     VnstockFinancialsFetcher,
+    admitted_interest_expense,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,98 @@ def normalize_statement_period(
     return str(year)
 
 
+def admit_statement_rows(
+    rows: list[FinancialStatementData], period: str,
+) -> list[FinancialStatementData]:
+    quarterly = str(period).upper() in {"QUARTER", "Q", "Q1", "Q2", "Q3", "Q4"}
+    admitted = []
+    for row in rows:
+        snapshot_reason = None
+        if (str(row.period).upper().startswith("TTM") and row.statement_type in {"balance", "balance_sheet"}
+                and row.aggregation_basis == "latest_quarter_snapshot"):
+            sources = (row.raw_data or {}).get("source_rows")
+            source = None
+            if isinstance(sources, list) and len(sources) == 1:
+                try:
+                    source = FinancialStatementData.model_validate(sources[0])
+                except ValueError:
+                    pass
+            if source is not None and re.fullmatch(r"Q[1-4]-20\d{2}", normalize_statement_period(source.period) or ""):
+                source = admit_statement_rows([source], "quarter")[0]
+            else:
+                source = None
+            basis = ("symbol", "statement_type", "source", "value_unit", "consolidation_basis", "fiscal_year", "fiscal_quarter")
+            if (row.unavailable_reason or source is None or source.unavailable_reason or source.value_unit != "VND"
+                    or row.source_periods != [source.period]
+                    or any(getattr(row, key) != getattr(source, key) for key in basis)):
+                snapshot_reason = row.unavailable_reason or (source.unavailable_reason if source and source.unavailable_reason else "unverified_balance_snapshot_source")
+            else:
+                row = source.model_copy(update={"period": row.period,
+                    "aggregation_basis": row.aggregation_basis, "source_periods": row.source_periods,
+                    "raw_data": row.raw_data})
+        normalized = normalize_statement_period(row.period)
+        year = _extract_period_year(row.period)
+        quarter = _extract_period_quarter(row.period)
+        reason = snapshot_reason
+        if year and row.fiscal_year is not None and year != row.fiscal_year:
+            reason = "conflicting_fiscal_identity"
+        if quarter and row.fiscal_quarter is not None and quarter != row.fiscal_quarter:
+            reason = "conflicting_fiscal_identity"
+        if row.fiscal_quarter is not None and row.fiscal_quarter not in (1, 2, 3, 4):
+            reason = "conflicting_fiscal_identity"
+        raw = row.raw_data or {}
+        original = raw.get("raw") if isinstance(raw.get("raw"), dict) else raw
+        for key in ("yearReport", "fiscalYear", "fiscal_year"):
+            if original.get(key) is not None and original[key] not in (year or row.fiscal_year, str(year or row.fiscal_year)):
+                reason = "conflicting_fiscal_identity"
+        for key in ("quarter", "fiscalQuarter", "fiscal_quarter", "lengthReport", "length_report"):
+            if quarterly and original.get(key) is not None and original[key] not in (quarter or row.fiscal_quarter, str(quarter or row.fiscal_quarter)):
+                reason = "conflicting_fiscal_identity"
+        canonical = (raw.get("_financial_lineage") or {}).get("canonical_data") or {}
+        if canonical.get("period"):
+            sql_identity = normalize_statement_period(row.period, fiscal_year=row.fiscal_year,
+                fiscal_quarter=row.fiscal_quarter, period_type="quarter" if quarterly else None)
+            canonical_identity = normalize_statement_period(canonical["period"],
+                fiscal_year=canonical.get("fiscal_year"), fiscal_quarter=canonical.get("fiscal_quarter"),
+                period_type="quarter" if quarterly else None)
+            if sql_identity != canonical_identity:
+                reason = "conflicting_fiscal_identity"
+            canonical_year = _extract_period_year(canonical["period"])
+            canonical_quarter = _extract_period_quarter(canonical["period"])
+            if (canonical_year and canonical.get("fiscal_year") not in (None, canonical_year)) or (
+                canonical_quarter and canonical.get("fiscal_quarter") not in (None, canonical_quarter)
+            ):
+                reason = "conflicting_fiscal_identity"
+        if quarterly and not reason:
+            if not year or not (quarter or row.fiscal_quarter):
+                reason = "ambiguous_quarterly_fiscal_identity"
+            elif str(row.period).upper().startswith(("FY", "TTM")) or "YTD" in str(row.period).upper():
+                reason = "incompatible_quarterly_fiscal_identity"
+            else:
+                normalized = f"Q{quarter or row.fiscal_quarter}-{year}"
+        payload = row.model_dump()
+        metadata_sources = (row.unit_metadata, canonical.get("unit_metadata") or {},
+                            (raw.get("_financial_lineage") or {}).get("unit_metadata") or {})
+        for metadata in metadata_sources:
+            for name, evidence in metadata.items():
+                if name in FinancialStatementData.model_fields and isinstance(evidence, dict) and evidence.get("unavailable_reason"):
+                    payload[name] = None
+                    payload["unit_metadata"][name] = evidence
+        interest = admitted_interest_expense(row)
+        if row.interest_expense is not None and interest is None:
+            payload["interest_expense"] = None
+            payload["unit_metadata"].setdefault("interest_expense", {}).setdefault("unavailable_reason", "interest_semantics_unverified")
+        if reason:
+            for name in FinancialStatementData.model_fields:
+                if name not in {"fiscal_year", "fiscal_quarter"} and isinstance(payload.get(name), (int, float)):
+                    payload[name] = None
+            payload["unavailable_reason"] = reason
+        elif normalized:
+            payload["period"] = normalized
+        admitted.append(FinancialStatementData.model_validate(payload))
+    return admitted
+
+
 def _is_control_flow_exception(exc: BaseException) -> bool:
     return isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, GeneratorExit))
 
@@ -143,7 +236,7 @@ def _normalize_statement_rows(
 ) -> list[FinancialStatementData]:
     normalized_rows: dict[str, FinancialStatementData] = {}
 
-    for row in rows:
+    for row in admit_statement_rows(rows, period_type or "year"):
         normalized_period = normalize_statement_period(
             row.period,
             fiscal_year=getattr(row, "fiscal_year", None),
@@ -239,6 +332,11 @@ def _build_ytd_snapshot(
             total += value
         if complete:
             setattr(ytd_data, metric, total)
+        ytd_data.unit_metadata[metric] = {
+            "aggregation_basis": ytd_data.aggregation_basis, "source_periods": ytd_data.source_periods,
+            "components": [row.unit_metadata.get(metric) for row in quarters],
+            "unavailable_reason": None if complete else "missing_quarter_value",
+        }
 
     if statement_type == "income":
         ytd_data.profit_before_tax = ytd_data.pre_tax_profit
@@ -425,7 +523,7 @@ def build_ttm_statement_rows(
         return unavailable("unknown_source_unit")
     if statement_type in {"balance", "balance_sheet"}:
         return [latest.model_copy(update={"period": "TTM", "aggregation_basis": "latest_quarter_snapshot",
-                                          "source_periods": [latest.period]})]
+            "source_periods": [latest.period], "raw_data": {"source_rows": [latest.model_dump(mode="json")]}})]
     metrics = ("revenue", "cost_of_revenue", "gross_profit", "operating_income", "net_income", "ebitda",
                "pre_tax_profit", "tax_expense", "interest_expense", "depreciation", "selling_general_admin",
                "research_development", "other_income") if statement_type == "income" else (

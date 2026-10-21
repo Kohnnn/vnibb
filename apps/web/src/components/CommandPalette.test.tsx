@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { Dashboard } from '@/types/dashboard';
 import { CommandPalette } from './CommandPalette';
 import { useDashboard } from '@/contexts/DashboardContext';
@@ -155,4 +156,79 @@ test('Escape after an empty search returns focus to the palette opener', async (
   fireEvent.keyDown(search, { key: 'Escape' });
   expect(screen.queryByRole('combobox', { name: 'Command palette search' })).not.toBeInTheDocument();
   expect(trigger).toHaveFocus();
+});
+
+function PaletteKeyboardConsumer() {
+  const [open, setOpen] = useState(false);
+  return <>
+    <a href="#workspace">Skip to workspace</a>
+    <button onClick={() => setOpen(true)}>Open palette</button>
+    <CommandPalette open={open} onOpenChange={setOpen} />
+    <button>Workspace action</button>
+  </>;
+}
+
+test('an open command palette exposes a named modal dialog', async () => {
+  const user = userEvent.setup();
+  render(<PaletteKeyboardConsumer />);
+  await user.click(screen.getByRole('button', { name: 'Open palette' }));
+  const dialog = screen.getByRole('dialog', { name: 'Command palette' });
+  expect(dialog).toHaveAttribute('aria-modal', 'true');
+  expect(within(dialog).getByRole('combobox', { name: 'Command palette search' })).toBeInTheDocument();
+});
+
+test('Tab and Shift Tab stay inside the palette and Escape restores its opener', async () => {
+  const visible = jest.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => ({ length: 1 }) as DOMRectList);
+  try {
+    const user = userEvent.setup();
+    render(<PaletteKeyboardConsumer />);
+    const trigger = screen.getByRole('button', { name: 'Open palette' });
+    await user.click(trigger);
+    const search = screen.getByRole('combobox', { name: 'Command palette search' });
+    await waitFor(() => expect(search).toHaveFocus());
+    const palette = search.parentElement!.parentElement!;
+    for (let index = 0; index < 8; index += 1) {
+      await user.tab();
+      expect(palette).toContainElement(document.activeElement as HTMLElement);
+    }
+    search.focus();
+    await user.tab({ shift: true });
+    expect(palette).toContainElement(document.activeElement as HTMLElement);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('combobox', { name: 'Command palette search' })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  } finally {
+    visible.mockRestore();
+  }
+});
+
+test('keyboard shortcuts owns focus and Escape returns through the palette to its opener', async () => {
+  const visible = jest.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => ({ length: 1 }) as DOMRectList);
+  try {
+    const user = userEvent.setup();
+    render(<PaletteKeyboardConsumer />);
+    const trigger = screen.getByRole('button', { name: 'Open palette' });
+    await user.click(trigger);
+    const search = screen.getByRole('combobox', { name: 'Command palette search' });
+    await waitFor(() => expect(search).toHaveFocus());
+    await user.type(search, 'keyboard');
+    await user.click(screen.getByRole('option', { name: /Show Keyboard Shortcuts/i }));
+    const closeShortcuts = screen.getByRole('button', { name: 'Close keyboard shortcuts' });
+    await waitFor(() => expect(closeShortcuts).toHaveFocus());
+    const shortcuts = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    expect(shortcuts).toHaveAttribute('aria-modal', 'true');
+    await user.tab();
+    expect(closeShortcuts).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(closeShortcuts).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
+    await waitFor(() => expect(search).toHaveFocus());
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  } finally {
+    visible.mockRestore();
+  }
 });

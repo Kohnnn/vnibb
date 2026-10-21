@@ -19,8 +19,10 @@ from vnibb.models.market import MarketSector, SectorPerformance
 from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
+from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_quality import is_market_business_day
+from vnibb.services.financial_service import admit_statement_rows
 from vnibb.services.vnibb_mcp_client_service import vnibb_mcp_client_service
 
 logger = logging.getLogger(__name__)
@@ -1063,7 +1065,7 @@ class AIContextService:
         ratio_units = (getattr(ratio_row, "raw_data", None) or {}).get("ratio_units")
         ratio_source = getattr(ratio_row, "source", None)
 
-        return {
+        snapshot = {
             "symbol": symbol,
             "source": "postgres",
             "company": {
@@ -1246,6 +1248,33 @@ class AIContextService:
                 ]
             ),
         }
+        for key, row, statement_type in (
+            ("income_statement", income_row, "income"),
+            ("balance_sheet", balance_row, "balance"),
+            ("cash_flow", cash_row, "cashflow"),
+        ):
+            section = snapshot[key]
+            if section is None:
+                continue
+            raw_data = getattr(row, "raw_data", None) or {}
+            admitted = admit_statement_rows([
+                FinancialStatementData(**section, symbol=symbol, statement_type=statement_type, raw_data=raw_data)
+            ], section["period_type"] or "year")[0]
+            rejected = {
+                name: admitted.unavailable_reason or admitted.unit_metadata.get(name, {}).get("unavailable_reason")
+                for name, value in section.items()
+                if name in FinancialStatementData.model_fields
+                and name not in {"fiscal_year", "fiscal_quarter"}
+                and isinstance(value, (int, float)) and getattr(admitted, name) is None
+            }
+            if rejected:
+                section["raw_observation"] = dict(section)
+                section.update(dict.fromkeys(rejected))
+                section["raw_data"] = raw_data
+                section["unavailable_metrics"] = rejected
+                if admitted.unavailable_reason:
+                    section["unavailable_reason"] = admitted.unavailable_reason
+        return snapshot
 
     async def _build_postgres_market_snapshot(self) -> dict[str, Any] | None:
         async with async_session_maker() as session:
