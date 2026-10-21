@@ -57,6 +57,29 @@ it('requires explicit reviewed author-only preview before creation and supports 
     expect(await screen.findByText(/Revoked/)).toBeInTheDocument();
 });
 
+it.each(['empty', 'existing and overlapping'] as const)('retains created shares and existing history when the initial list resolves late (%s)', async (history) => {
+    const initialList = deferred<ResearchShareSummary[]>();
+    jest.mocked(listResearchShares).mockReturnValueOnce(initialList.promise);
+    render(<ResearchShareControls buildBundle={() => bundle} />);
+    await waitFor(() => expect(listResearchShares).toHaveBeenCalledTimes(1));
+
+    previewAndCreate(recipient);
+    expect(await screen.findByRole('link', { name: '/research-shares/share' })).toBeInTheDocument();
+    if (history !== 'empty') {
+        fireEvent.click(screen.getByRole('button', { name: 'Revoke access' }));
+        expect(await screen.findByText(/Revoked/)).toBeInTheDocument();
+    }
+
+    await act(async () => { initialList.resolve(history === 'empty' ? [] : [{ ...share, share_id: 'old-share' }, share]); });
+
+    const createdLink = screen.getByRole('link', { name: '/research-shares/share' });
+    expect(createdLink).toBeInTheDocument();
+    if (history !== 'empty') {
+        expect(screen.getByRole('link', { name: '/research-shares/old-share' })).toBeInTheDocument();
+        expect(createdLink.closest('li')).toHaveTextContent('Revoked');
+    }
+});
+
 it.each(['success', 'error'] as const)('discards stale create %s after switching accounts without clearing the new request', async (completion) => {
     const oldRequest = deferred<ResearchShareSummary>();
     const newRequest = deferred<ResearchShareSummary>();
