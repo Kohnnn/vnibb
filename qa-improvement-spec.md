@@ -190,4 +190,6 @@ Repair `39f18ea0de6356e72ac781928e54d6bd6b67b024` is deployed as `dpl_AYzvVVC69b
 
 The [research draft plan](app-research-drafts-batch.md) requires ticker-owned mounted-widget drafts for thesis fields, legacy notes and evidence changes. Dirty drafts survive ticker/config changes; untouched and saved tickers follow current persisted config. Save merges only the active ticker into the latest widget config without persisting other drafts. Reload/unmount durability and autosave are explicitly excluded; existing citation identity, read-only permissions and saved due-review behavior remain controlling.
 
+Repair `030048bf237ffc8e5c36ea56dab65f0672e8c191` is deployed as `dpl_7eHiyUcdWrEBEqwKdi1P6o8SZ295` on both canonical aliases. All three groups pass 18 native scenarios and 102 assertions across desktop/320/390px; loaded assets match the authenticated immutable inventory. The full gate passed 1,252 frontend and 3,060 backend tests; independent standards/spec reviews found no actionable issues. Exact metadata, health and unchanged backend identities pass; rollback retained. Detailed evidence and limitations remain in the [release record](qa-improvement-plan.md#research-draft-ownership--21-october-2026).
+
 
