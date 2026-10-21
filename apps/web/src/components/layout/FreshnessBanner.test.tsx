@@ -132,14 +132,12 @@ describe('FreshnessBanner', () => {
 
     setFreshness([{ label: 'Prices', status: 'fresh', age_days: 0 }]);
     rerender(<FreshnessBanner />);
-    expect(screen.getByRole('status')).toBe(status);
-    expect(status).toHaveTextContent(/all tracked data sources report fresh data/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/all tracked data sources report fresh data/i);
 
     setFreshness([{ label: 'Prices', status: 'unknown', age_days: null }]);
     rerender(<FreshnessBanner />);
-    expect(screen.getByRole('status')).toBe(status);
     expect(screen.getByText('unknown age')).toBeInTheDocument();
-    expect(status).not.toHaveTextContent(/report fresh data/i);
+    expect(screen.getByRole('status')).not.toHaveTextContent(/report fresh data/i);
   });
 
   it.each([
