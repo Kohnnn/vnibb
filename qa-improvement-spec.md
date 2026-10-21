@@ -186,3 +186,8 @@ The [backup/watchlist plan](app-backup-watchlist-batch.md) requires clean backup
 
 Repair `39f18ea0de6356e72ac781928e54d6bd6b67b024` is deployed as `dpl_AYzvVVC69bKEp6wjJSBFMP9vKgNR` on both canonical aliases. All three groups pass 14 desktop scenarios and four native mobile-entry surfaces at 320/390px; 24 loaded asset paths match the authenticated immutable inventory. The full gate passed 1,249 frontend and 3,060 backend tests; standards/spec reviews found no actionable issues. Exact metadata, health and unchanged backend identities pass; rollback retained. Detailed evidence and limitations remain in the [release record](qa-improvement-plan.md#workspace-backup-and-watchlist-consistency--21-october-2026).
 
+## Research draft ownership
+
+The [research draft plan](app-research-drafts-batch.md) requires ticker-owned mounted-widget drafts for thesis fields, legacy notes and evidence changes. Dirty drafts survive ticker/config changes; untouched and saved tickers follow current persisted config. Save merges only the active ticker into the latest widget config without persisting other drafts. Reload/unmount durability and autosave are explicitly excluded; existing citation identity, read-only permissions and saved due-review behavior remain controlling.
+
+
