@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -47,6 +47,10 @@ interface RenderItem extends CommandPaletteActionItem {
 
 const GLOBAL_MARKETS_DASHBOARD_NAME = 'Global Markets';
 const GLOBAL_MARKETS_TAB_NAME = 'Global Markets';
+
+function getOptionId(listboxId: string, item: CommandPaletteActionItem): string {
+  return `${listboxId}-${encodeURIComponent(`${item.type}:${item.id}`)}`;
+}
 
 function getShortcutModifierLabel(): string {
   if (typeof navigator === 'undefined') return 'Ctrl';
@@ -99,6 +103,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
   const shortcutModifier = getShortcutModifierLabel();
   const {
     state,
@@ -465,6 +470,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     () => sections.flatMap((section) => section.items.map((item) => ({ ...item, sectionKey: section.key }))),
     [sections],
   );
+  const activeIndex = flatItems.length ? Math.min(selectedIndex, flatItems.length - 1) : -1;
 
   useEffect(() => {
     if (!flatItems.length) {
@@ -486,18 +492,18 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
       if (event.key === 'ArrowDown') {
         event.preventDefault();
-        setSelectedIndex((current) => (flatItems.length ? (current + 1) % flatItems.length : 0));
+        setSelectedIndex(flatItems.length ? (activeIndex + 1) % flatItems.length : 0);
         return;
       }
 
       if (event.key === 'ArrowUp') {
         event.preventDefault();
-        setSelectedIndex((current) => (flatItems.length ? (current - 1 + flatItems.length) % flatItems.length : 0));
+        setSelectedIndex(flatItems.length ? (activeIndex - 1 + flatItems.length) % flatItems.length : 0);
         return;
       }
 
       if (event.key === 'Enter') {
-        const selected = flatItems[selectedIndex];
+        const selected = flatItems[activeIndex];
         if (!selected) return;
         event.preventDefault();
         handleSelect(selected);
@@ -506,13 +512,13 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
     document.addEventListener('keydown', handleKeyDown, true);
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [flatItems, open, selectedIndex]);
+  }, [activeIndex, flatItems, open]);
 
   useEffect(() => {
     if (!listRef.current) return;
-    const selected = listRef.current.querySelector<HTMLElement>(`[data-command-item-index="${selectedIndex}"]`);
+    const selected = listRef.current.querySelector<HTMLElement>(`[data-command-item-index="${activeIndex}"]`);
     selected?.scrollIntoView({ block: 'nearest' });
-  }, [selectedIndex]);
+  }, [activeIndex, flatItems]);
 
   const saveRecent = (item: SearchTickerResult) => {
     const next = saveRecentSearch(recentSearches, {
@@ -626,6 +632,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             }}
             placeholder="Search tickers, crypto, indices, or commands..."
             aria-label="Command palette search"
+            role="combobox"
+            aria-expanded={open}
+            aria-autocomplete="list"
+            aria-controls={listboxId}
+            aria-activedescendant={activeIndex >= 0 ? getOptionId(listboxId, flatItems[activeIndex]) : undefined}
             className="h-11 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
           />
           <button
@@ -638,7 +649,13 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           </button>
         </div>
 
-        <div ref={listRef} className="max-h-[480px] overflow-y-auto px-2 py-2 scrollbar-hide">
+        <div
+          ref={listRef}
+          id={listboxId}
+          role="listbox"
+          aria-label="Command palette results"
+          className="max-h-[480px] overflow-y-auto px-2 py-2 scrollbar-hide"
+        >
           {flatItems.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-[var(--text-muted)]">
               <Search className="h-8 w-8 opacity-30" />
@@ -648,9 +665,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             sections.map((section) => (
               <PaletteSection
                 key={section.key}
+                listboxId={listboxId}
                 query={trimmedSearch}
                 section={section}
-                selectedIndex={selectedIndex}
+                selectedIndex={activeIndex}
                 flatItems={flatItems}
                 onHover={setSelectedIndex}
                 onSelect={handleSelect}
@@ -716,6 +734,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 }
 
 function PaletteSection({
+  listboxId,
   query,
   section,
   selectedIndex,
@@ -723,6 +742,7 @@ function PaletteSection({
   onHover,
   onSelect,
 }: {
+  listboxId: string;
   query: string;
   section: CommandPaletteSection;
   selectedIndex: number;
@@ -731,8 +751,8 @@ function PaletteSection({
   onSelect: (item: RenderItem) => void;
 }) {
   return (
-    <div className="mb-2">
-      <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+    <div role="group" aria-labelledby={`${listboxId}-${section.key}`} className="mb-2">
+      <div id={`${listboxId}-${section.key}`} className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
         {section.label}
       </div>
       {section.items.map((item) => {
@@ -747,6 +767,11 @@ function PaletteSection({
           <button
             key={`${item.id}:${item.type}`}
             type="button"
+            id={getOptionId(listboxId, item)}
+            role="option"
+            aria-selected={active}
+            tabIndex={-1}
+            onMouseDown={(event) => event.preventDefault()}
             data-command-item-index={flatIndex}
             onMouseEnter={() => flatIndex >= 0 && onHover(flatIndex)}
             onClick={() => onSelect(item as RenderItem)}

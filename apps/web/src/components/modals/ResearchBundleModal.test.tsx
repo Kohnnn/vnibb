@@ -101,3 +101,90 @@ it.each(['resolve', 'reject'] as const)('imports only the latest research bundle
     }));
     expect(screen.getByRole('status')).toHaveTextContent('Imported 1 theses');
 });
+
+it('prunes disappeared thesis keys, frees the 50-item cap, and downloads only surviving selections', async () => {
+    const symbols = Array.from({ length: 51 }, (_, index) => `A${String(index).padStart(2, '0')}`);
+    const refresh = (available: string[], revision = 'Saved') => mockUseDashboard.mockReturnValue({
+        state: {
+            dashboards: [{
+                id: 'personal', name: 'Personal', tabs: [{
+                    id: 'research', name: 'Research', widgets: [{
+                        id: 'notes', type: 'notes', config: {
+                            notesBySymbol: Object.fromEntries(available.map((symbol) => [symbol, `${revision} ${symbol} notes`])),
+                            thesesBySymbol: Object.fromEntries(available.map((symbol) => [symbol, { thesis: `${revision} ${symbol} thesis` }])),
+                        },
+                    }],
+                }],
+            }],
+            folders: [], activeDashboardId: 'personal', activeTabId: 'research',
+        },
+        importResearchBundle: jest.fn(),
+    } as unknown as DashboardContextValue);
+    const createObjectURL = jest.fn((_blob: Blob) => 'blob:research-bundle');
+    const revokeObjectURL = jest.fn();
+    const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const originalRevokeObjectURL = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+    const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const user = userEvent.setup();
+    refresh(symbols);
+
+    try {
+        const { rerender } = render(<ResearchBundleModal onClose={jest.fn()} />);
+        const checkbox = (symbol: string) => screen.getByRole('checkbox', { name: `${symbol} · Personal / Research` });
+        const download = screen.getByRole('button', { name: 'Download Research Bundle JSON' });
+        for (const symbol of symbols.slice(0, 50)) await user.click(checkbox(symbol));
+        expect(checkbox('A50')).toBeDisabled();
+
+        refresh(symbols, 'Refreshed');
+        rerender(<ResearchBundleModal onClose={jest.fn()} />);
+        expect(screen.getAllByRole('checkbox').filter((input) => (input as HTMLInputElement).checked)).toHaveLength(50);
+
+        refresh([...symbols.slice(1), 'B00'], 'Refreshed');
+        rerender(<ResearchBundleModal onClose={jest.fn()} />);
+        expect(checkbox('A01')).toBeChecked();
+        expect(checkbox('A50')).toBeEnabled();
+        expect(checkbox('B00')).toBeEnabled();
+        await user.click(checkbox('B00'));
+        expect(checkbox('A50')).toBeDisabled();
+
+        refresh([...symbols, 'B00'], 'Refreshed');
+        rerender(<ResearchBundleModal onClose={jest.fn()} />);
+        expect(checkbox('A00')).not.toBeChecked();
+        expect(checkbox('A00')).toBeDisabled();
+        await user.click(download);
+        expect(click).toHaveBeenCalledTimes(1);
+        expect(createObjectURL).toHaveBeenCalledTimes(1);
+        const blob = createObjectURL.mock.calls[0][0] as Blob;
+        const raw = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsText(blob);
+        });
+        const bundle = JSON.parse(raw);
+        expect(blob.type).toBe('application/json');
+        expect(bundle.theses.map(({ symbol }: { symbol: string }) => symbol)).toEqual([...symbols.slice(1, 50), 'B00']);
+        expect(bundle.theses[0]).toEqual(expect.objectContaining({
+            symbol: 'A01', note: 'Refreshed A01 notes', thesis: expect.objectContaining({ thesis: 'Refreshed A01 thesis' }),
+        }));
+
+        refresh(['A00', 'A50']);
+        rerender(<ResearchBundleModal onClose={jest.fn()} />);
+        expect(download).toBeDisabled();
+        await user.click(download);
+        expect(createObjectURL).toHaveBeenCalledTimes(1);
+        refresh([...symbols, 'B00']);
+        rerender(<ResearchBundleModal onClose={jest.fn()} />);
+        expect(screen.getAllByRole('checkbox').every((input) => !(input as HTMLInputElement).checked)).toBe(true);
+        expect(download).toBeDisabled();
+        await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:research-bundle'), { timeout: 2000 });
+    } finally {
+        click.mockRestore();
+        if (originalCreateObjectURL) Object.defineProperty(URL, 'createObjectURL', originalCreateObjectURL);
+        else Reflect.deleteProperty(URL, 'createObjectURL');
+        if (originalRevokeObjectURL) Object.defineProperty(URL, 'revokeObjectURL', originalRevokeObjectURL);
+        else Reflect.deleteProperty(URL, 'revokeObjectURL');
+    }
+});

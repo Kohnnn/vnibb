@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Dashboard } from '@/types/dashboard';
 import { CommandPalette } from './CommandPalette';
 import { useDashboard } from '@/contexts/DashboardContext';
@@ -27,6 +27,7 @@ const destination: Dashboard = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  window.localStorage.clear();
   mockTickerResults = [{ symbol: 'NVDA', name: 'Nvidia', type: 'us_stock', tv_symbol: 'NASDAQ:NVDA' }];
   jest.mocked(useGlobalMarketsSymbol).mockReturnValue({
     globalMarketsSymbol: imported.globalMarketsSymbol!, appGlobalMarketsSymbol: 'AMEX:SPY',
@@ -44,7 +45,7 @@ beforeEach(() => {
 
 test('Add TradingView Chart Widget updates the Global Markets destination instead of imported source', () => {
   render(<CommandPalette open onOpenChange={jest.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: /Add TradingView Chart Widget/ }));
+  fireEvent.click(screen.getByRole('option', { name: /Add TradingView Chart Widget/ }));
 
   const symbols = jest.mocked(useGlobalMarketsSymbol).mock.results[0].value;
   expect(symbols.setGlobalMarketsSymbolForDashboard).toHaveBeenCalledWith('NASDAQ:AAPL', destination);
@@ -57,11 +58,81 @@ test('Add TradingView Chart Widget updates the Global Markets destination instea
 
 test('selecting a searched ticker updates the Global Markets destination instead of imported source', () => {
   render(<CommandPalette open onOpenChange={jest.fn()} />);
-  fireEvent.change(screen.getByRole('textbox', { name: 'Command palette search' }), { target: { value: 'NVDA' } });
-  fireEvent.click(screen.getByRole('button', { name: /NVDA/ }));
+  fireEvent.change(screen.getByRole('combobox', { name: 'Command palette search' }), { target: { value: 'NVDA' } });
+  fireEvent.click(screen.getByRole('option', { name: /NVDA/ }));
   const symbols = jest.mocked(useGlobalMarketsSymbol).mock.results[0].value;
   expect(symbols.setGlobalMarketsSymbolForDashboard).toHaveBeenCalledWith('NASDAQ:NVDA', destination);
   expect(symbols.setGlobalMarketsSymbol).not.toHaveBeenCalled();
+});
+
+test('keyboard and pointer navigation expose the highlighted result and Enter activates it', () => {
+  mockTickerResults = [
+    { symbol: 'NVDA', name: 'Nvidia', type: 'us_stock', tv_symbol: 'NASDAQ:NVDA' },
+    { symbol: 'NVDS', name: 'Nvidia Short ETF', type: 'us_stock', tv_symbol: 'NASDAQ:NVDS' },
+    { symbol: 'NVDY', name: 'Nvidia Income ETF', type: 'us_stock', tv_symbol: 'NASDAQ:NVDY' },
+  ];
+  const onOpenChange = jest.fn();
+  render(<CommandPalette open onOpenChange={onOpenChange} />);
+  const search = screen.getByRole('combobox', { name: 'Command palette search' });
+  fireEvent.change(search, { target: { value: 'NV' } });
+  const list = screen.getByRole('listbox');
+  const options = within(list).getAllByRole('option');
+  expect(search).toHaveAttribute('aria-expanded', 'true');
+  expect(search).toHaveAttribute('aria-autocomplete', 'list');
+  expect(search).toHaveAttribute('aria-controls', list.id);
+  const expectActive = (option: HTMLElement) => {
+    expect(option.id).not.toBe('');
+    expect(search).toHaveAttribute('aria-activedescendant', option.id);
+    expect(within(list).getAllByRole('option', { selected: true })).toEqual([option]);
+    expect(option).toHaveAttribute('tabindex', '-1');
+  };
+  expectActive(options[0]);
+  fireEvent.keyDown(search, { key: 'ArrowUp' });
+  expectActive(options[2]);
+  fireEvent.keyDown(search, { key: 'ArrowDown' });
+  expectActive(options[0]);
+  fireEvent.keyDown(search, { key: 'ArrowDown' });
+  expectActive(options[1]);
+  fireEvent.mouseEnter(options[2]);
+  expectActive(options[2]);
+  fireEvent.keyDown(search, { key: 'Enter' });
+  const symbols = jest.mocked(useGlobalMarketsSymbol).mock.results[0].value;
+  expect(symbols.setGlobalMarketsSymbolForDashboard).toHaveBeenCalledWith('NASDAQ:NVDY', destination);
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+});
+
+test('refreshed and empty results keep the active descendant attached to a live option', () => {
+  mockTickerResults = [
+    { symbol: 'NVDA', name: 'Nvidia', type: 'us_stock', tv_symbol: 'NASDAQ:NVDA' },
+    { symbol: 'NVDS', name: 'Nvidia Short ETF', type: 'us_stock', tv_symbol: 'NASDAQ:NVDS' },
+    { symbol: 'NVDY', name: 'Nvidia Income ETF', type: 'us_stock', tv_symbol: 'NASDAQ:NVDY' },
+  ];
+  const onOpenChange = jest.fn();
+  const { rerender } = render(<CommandPalette open onOpenChange={onOpenChange} />);
+  const search = screen.getByRole('combobox', { name: 'Command palette search' });
+  fireEvent.change(search, { target: { value: 'NV' } });
+  const lastOption = screen.getAllByRole('option')[2];
+  const lastOptionId = lastOption.id;
+  fireEvent.mouseEnter(lastOption);
+  mockTickerResults = mockTickerResults.slice(2);
+  rerender(<CommandPalette open onOpenChange={onOpenChange} />);
+  const survivingOption = screen.getByRole('option', { selected: true });
+  expect(survivingOption).toHaveAttribute('id', lastOptionId);
+  expect(search).toHaveAttribute('aria-activedescendant', survivingOption.id);
+
+  mockTickerResults = [];
+  rerender(<CommandPalette open onOpenChange={onOpenChange} />);
+  expect(screen.queryByRole('option')).not.toBeInTheDocument();
+  expect(search).not.toHaveAttribute('aria-activedescendant');
+  fireEvent.keyDown(search, { key: 'ArrowDown' });
+  fireEvent.keyDown(search, { key: 'ArrowUp' });
+  fireEvent.keyDown(search, { key: 'Enter' });
+  expect(search).not.toHaveAttribute('aria-activedescendant');
+  expect(onOpenChange).not.toHaveBeenCalled();
+
+  mockTickerResults = [{ symbol: 'NVDA', name: 'Nvidia', type: 'us_stock', tv_symbol: 'NASDAQ:NVDA' }];
+  rerender(<CommandPalette open onOpenChange={onOpenChange} />);
+  expect(search).toHaveAttribute('aria-activedescendant', screen.getByRole('option', { selected: true }).id);
 });
 
 test('Escape after an empty search returns focus to the palette opener', async () => {
@@ -77,11 +148,11 @@ test('Escape after an empty search returns focus to the palette opener', async (
   const trigger = screen.getByRole('button', { name: 'Open palette' });
   trigger.focus();
   fireEvent.click(trigger);
-  const search = screen.getByRole('textbox', { name: 'Command palette search' });
+  const search = screen.getByRole('combobox', { name: 'Command palette search' });
   await waitFor(() => expect(search).toHaveFocus());
   fireEvent.change(search, { target: { value: 'ZZZZNOTAREALTICKER' } });
   expect(screen.getByText(/No results found/)).toBeInTheDocument();
   fireEvent.keyDown(search, { key: 'Escape' });
-  expect(screen.queryByRole('textbox', { name: 'Command palette search' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('combobox', { name: 'Command palette search' })).not.toBeInTheDocument();
   expect(trigger).toHaveFocus();
 });

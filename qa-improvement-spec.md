@@ -192,4 +192,9 @@ The [research draft plan](app-research-drafts-batch.md) requires ticker-owned mo
 
 Repair `030048bf237ffc8e5c36ea56dab65f0672e8c191` is deployed as `dpl_7eHiyUcdWrEBEqwKdi1P6o8SZ295` on both canonical aliases. All three groups pass 18 native scenarios and 102 assertions across desktop/320/390px; loaded assets match the authenticated immutable inventory. The full gate passed 1,252 frontend and 3,060 backend tests; independent standards/spec reviews found no actionable issues. Exact metadata, health and unchanged backend identities pass; rollback retained. Detailed evidence and limitations remain in the [release record](qa-improvement-plan.md#research-draft-ownership--21-october-2026).
 
+## Command search and research transfer
+
+The [search/transfer plan](app-search-transfer-batch.md) requires combobox/listbox/option semantics synchronized with keyboard/pointer highlighting and live active-result IDs, while retaining command/ticker routing and Escape restoration. Transfer selection is reconciled with existing saved keys: survivors remain, vanished keys free capacity and cannot silently reselect if restored. Checkbox, export and share consume the same live selection. Existing import guards and sharing policy remain controlling; no notebook search/filter feature is included.
+
+
 

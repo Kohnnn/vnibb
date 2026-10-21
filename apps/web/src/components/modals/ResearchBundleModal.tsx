@@ -35,11 +35,18 @@ export function ResearchBundleModal({ onClose }: { onClose: () => void }) {
         }
         return records;
     }, [state.dashboards]);
+    const liveSelection = useMemo(() => available.filter(({ key }) => selected.includes(key)), [available, selected]);
+    useEffect(() => {
+        setSelected((current) => {
+            const remaining = current.filter((key) => available.some((record) => record.key === key));
+            return remaining.length === current.length ? current : remaining;
+        });
+    }, [available]);
 
     const handleExport = () => {
         setError('');
         try {
-            const chosen = available.filter(({ key }) => selected.includes(key)).map(({ value }) => value);
+            const chosen = liveSelection.map(({ value }) => value);
             const bundle = createResearchBundle(chosen, readNotebookItems());
             const url = URL.createObjectURL(new Blob([JSON.stringify(bundle)], { type: 'application/json' }));
             const anchor = document.createElement('a');
@@ -87,13 +94,13 @@ export function ResearchBundleModal({ onClose }: { onClose: () => void }) {
             <div className="flex items-center justify-between"><h2 id="research-bundle-title" className="text-base font-semibold">Transfer Thesis &amp; Evidence</h2><button type="button" aria-label="Close research transfer" onClick={onClose} className="rounded p-2 hover:bg-[var(--bg-tertiary)] focus-visible:ring-2 focus-visible:ring-blue-500"><X size={18} aria-hidden="true" /></button></div>
             <p className="mt-3 text-xs leading-5 text-amber-300">Sensitive research: the JSON contains selected thesis text, notes and full linked notebook originals, including sources and URLs. Review before sharing. This is separate from workspace configuration backup; holdings are not included.</p>
             <fieldset className="mt-4 space-y-1"><legend className="text-sm font-semibold">Select theses to export (up to 50)</legend>
-                {available.length ? available.map(({ key, label }) => <label key={key} className="flex min-h-9 items-center gap-2 text-xs"><input type="checkbox" checked={selected.includes(key)} disabled={!selected.includes(key) && selected.length >= 50} onChange={() => setSelected((current) => current.includes(key) ? current.filter((entry) => entry !== key) : [...current, key])} />{label}</label>) : <p className="text-xs">No saved Investment Theses in personal workspaces.</p>}
+                {available.length ? available.map(({ key, label }) => <label key={key} className="flex min-h-9 items-center gap-2 text-xs"><input type="checkbox" checked={liveSelection.some((record) => record.key === key)} disabled={!liveSelection.some((record) => record.key === key) && liveSelection.length >= 50} onChange={() => setSelected((current) => current.includes(key) ? current.filter((entry) => entry !== key) : [...current, key])} />{label}</label>) : <p className="text-xs">No saved Investment Theses in personal workspaces.</p>}
             </fieldset>
-            <button type="button" onClick={handleExport} disabled={!selected.length} className="mt-2 rounded border border-emerald-500 px-3 py-2 text-xs hover:bg-emerald-500/20 focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-40">Download Research Bundle JSON</button>
+            <button type="button" onClick={handleExport} disabled={!liveSelection.length} className="mt-2 rounded border border-emerald-500 px-3 py-2 text-xs hover:bg-emerald-500/20 focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-40">Download Research Bundle JSON</button>
             <div className="mt-5 border-t border-[var(--border-color)] pt-3"><label className="text-sm font-semibold">Import research bundle JSON (up to 5 MB)<input type="file" accept="application/json,.json" onChange={handleFile} className="mt-2 block w-full text-xs" /></label>
                 {incoming && <div className="mt-2 text-xs">Ready to import {incoming.theses.length} theses and {incoming.items.length} originals as new local records. References without originals stay citation-only. Existing research will not be overwritten.<button type="button" onClick={handleImport} className="mt-2 block rounded border border-blue-500 px-3 py-2 hover:bg-blue-500/20 focus-visible:ring-2 focus-visible:ring-blue-400">Import Into New Research Dashboard</button></div>}
             </div>
-            <ResearchShareControls buildBundle={() => createResearchBundle(available.filter(({ key }) => selected.includes(key)).map(({ value }) => value), readNotebookItems())} />
+            <ResearchShareControls buildBundle={() => createResearchBundle(liveSelection.map(({ value }) => value), readNotebookItems())} />
             {error && <p role="alert" className="mt-3 text-xs text-red-300">{error}</p>}
             {message && <p role="status" className="mt-3 text-xs text-emerald-300">{message}</p>}
         </section>

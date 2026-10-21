@@ -54,6 +54,8 @@ The entries below describe source changes, not deployment or full-population acc
   from the server source.
 
 ### Fixed
+- Command search exposes its highlighted result through combobox/listbox selection semantics for keyboard and pointer navigation; refreshed and empty results retain valid active-result relationships.
+- Research transfer reconciles selected theses when saved records disappear, freeing the existing selection cap and keeping download/sharing aligned with surviving records without silently reselecting restored keys.
 - Investment Thesis keeps unsaved per-ticker notes, thesis fields and evidence edits across ticker navigation and configuration refreshes while mounted. Explicit Save updates only the active ticker using the latest widget configuration; drafts are not autosaved or retained across reloads.
 - Workspace backup dialogs start a clean session after dismissal; abandoned file reads cannot restore old previews or errors in a reopened dialog.
 - Watchlist additions use the same ticker syntax validation as saved configuration, with an accessible correction message instead of persisting malformed symbols that disappear after reload. Valid symbols do not require catalogue coverage.
