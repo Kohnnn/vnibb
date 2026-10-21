@@ -37,16 +37,21 @@ const LOCKED_GRID_WIDTH = 1086; // 1124px workspace minus chrome, at lg column g
 // react-grid-layout: left = round((colWidth + margin) * x), colWidth = (grid - margin * (cols - 1)) / cols.
 const lgTranslate = (x: number, y: number) => `translate(${Math.round(((LOCKED_GRID_WIDTH - 6 * 23) / 24 + 6) * x)}px,${(40 + 6) * y}px)`;
 
-async function resizeGridTo(width: number) {
+async function resizeGridTo(width: number, height = 900) {
   await act(async () => {
-    resizeObservers.forEach(callback => callback([{ contentRect: { width, height: 900 } }]));
+    resizeObservers.forEach(callback => callback([{ contentRect: { width, height } }]));
     const debounceElapsed = Promise.withResolvers<void>();
     setTimeout(debounceElapsed.resolve, 150); // the grid debounces container measurements by 100ms
     await debounceElapsed.promise;
   });
 }
 
-beforeEach(() => { resizeObservers.clear(); });
+beforeEach(() => {
+  resizeObservers.clear();
+  jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 1200, 900));
+});
+
+afterEach(() => { jest.restoreAllMocks(); });
 
 test('the real grid retains deliberate vertical gaps through edit and view transitions', () => {
   const { rerender } = render(<AuthoredGrid editing />);
@@ -107,4 +112,17 @@ test('editability flips on the same width boundary the grid derives its breakpoi
   // breakpoint with `width > threshold`, so the grid is already view-only `md` there.
   await resizeGridTo(1024);
   expect(grid()).toHaveAttribute('data-grid-editable', 'false');
+});
+
+test('an initially hidden grid waits for real width without persisting its responsive projection', async () => {
+  jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 0, 0));
+  const onLayoutChange = jest.fn();
+  render(<AuthoredGrid editing onLayoutChange={onLayoutChange} />);
+  expect(screen.queryByTestId('chart-cell')).not.toBeInTheDocument();
+
+  await resizeGridTo(374, 0);
+  const chart = screen.getByTestId('chart-cell');
+  expect(chart.style.width).toBe('374px');
+  expect(screen.getByTestId('table-cell').style.width).toBe('374px');
+  expect(onLayoutChange).not.toHaveBeenCalled();
 });

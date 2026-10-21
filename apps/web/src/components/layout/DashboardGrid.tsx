@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import { GridLayout, noCompactor, getBreakpointFromWidth } from 'react-grid-layout';
 import type { Layout, GridLayoutProps } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
@@ -55,7 +55,7 @@ const GRID_GAP = { lg: 6, md: 6, sm: 8, xs: 6 } as const;
 const COLLISION_SAFE_COMPACTOR = { ...noCompactor, preventCollision: true };
 
 interface DashboardGridProps {
-    children: any;
+    children: GridLayoutProps['children'];
     layouts: LayoutItem[];
     onLayoutChange?: (layout: LayoutItem[]) => void;
     onEditableChange?: (canEdit: boolean) => void;
@@ -73,10 +73,10 @@ export function DashboardGrid({
     rowHeight = 40,
 }: DashboardGridProps) {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [width, setWidth] = useState(1200);
+    const [width, setWidth] = useState(0);
 
-    // Measure container width with debounce to prevent excessive re-renders during animations
-    useEffect(() => {
+    // Measure before mounting widgets; later resize animations remain debounced.
+    useLayoutEffect(() => {
         let timeoutId: number | undefined;
 
         const updateWidth = (nextWidth?: number) => {
@@ -102,8 +102,8 @@ export function DashboardGrid({
             const entry = entries[0];
             if (!entry) return;
 
-            const { width: nextWidth, height: nextHeight } = entry.contentRect;
-            if (nextWidth <= 0 || nextHeight <= 0) {
+            const { width: nextWidth } = entry.contentRect;
+            if (nextWidth <= 0) {
                 return;
             }
 
@@ -264,9 +264,11 @@ export function DashboardGrid({
 
     return (
         <div ref={containerRef} data-grid-editable={canEdit} className="dashboard-grid w-full">
-            <GridLayout {...gridProps}>
-                {children as any}
-            </GridLayout>
+            {width > 0 && (
+                <GridLayout {...gridProps}>
+                    {children}
+                </GridLayout>
+            )}
         </div>
     );
 }
