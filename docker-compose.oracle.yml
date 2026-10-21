@@ -220,6 +220,7 @@ services:
       GOTRUE_DB_NAMESPACE: auth
       GOTRUE_SITE_URL: ${GOTRUE_SITE_URL:-https://vnibb-web.vercel.app}
       GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST:-https://vnibb-web.vercel.app/**}
+      GOTRUE_CORS_ALLOWED_HEADERS: ${GOTRUE_CORS_ALLOWED_HEADERS:-apikey}
       GOTRUE_DISABLE_SIGNUP: ${GOTRUE_DISABLE_SIGNUP:-false}
       GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET:?Set SUPABASE_JWT_SECRET in deployment/env.oracle}
       GOTRUE_JWT_ISSUER: ${SUPABASE_URL:?Set SUPABASE_URL in deployment/env.oracle}/auth/v1

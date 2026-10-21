@@ -565,12 +565,12 @@ export function Header({
             <span>{marketStatus.isOpen ? 'HOSE Open' : 'HOSE Closed'}</span>
           </div>
 
-          {!authBypassEnabled && (
+          {(!authBypassEnabled || user) && (
            <DropdownMenu>
              <DropdownMenuTrigger asChild>
                <button
                  type="button"
-                 className="hidden items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] sm:flex"
+                 className="flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                  title="Account menu"
                  aria-label="Open account menu"
                >

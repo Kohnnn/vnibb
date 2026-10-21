@@ -15,10 +15,9 @@
  *  - On first mount, reads params and applies them once (deep-link restore).
  *    This runs after the context has restored its own persisted state, and
  *    only overrides when the URL actually specifies something valid.
- *  - On subsequent state changes, writes params with `replaceState` only (never
- *    pushState). This keeps the URL shareable without creating extra history
- *    entries that the Next App Router cannot reconcile (which caused a blank
- *    screen on browser Back — DEF-15).
+ *  - Genuine workspace/tab selections push an entry. Hydration, URL repair and
+ *    symbol-only changes replace the current entry. Both preserve the router's
+ *    history state so Next App Router can reconcile Back/Forward.
  *  - An inbound URL (deep link or Back/Forward) wins until the state it asked
  *    for is actually on screen (#102). State updates are committed
  *    asynchronously, so without that hold the write effect published the
@@ -105,6 +104,7 @@ export function useUrlSync({
   applySymbol,
 }: UseUrlSyncParams) {
   const hasRestoredRef = useRef(false);
+  const writtenNavigationSeqRef = useRef(userNavigationSeq);
   const pendingSymbolRef = useRef<{ dashboardId: string | null; symbol: string; applied: boolean } | null>(null);
   // #102: the inbound URL that was applied but whose state has not landed yet.
   // The write effect publishes the live state into the address bar and the
@@ -317,8 +317,7 @@ export function useUrlSync({
     }
   }, [ready, activeDashboardId, symbol, applySymbol]);
 
-  // Publish the live state into the URL. Used by the write effect below and by a
-  // Back/Forward that landed on a URL we could not apply.
+  // Publish the live view after any inbound workspace, tab and symbol have landed.
   const writeStateToUrl = useCallback(() => {
     if (!ready || typeof window === 'undefined') return;
 
@@ -337,6 +336,9 @@ export function useUrlSync({
     // have; publishing now would replace it with the departing ticker.
     const pending = pendingSymbolRef.current;
     if (pending && activeDashboardId === pending.dashboardId) return;
+
+    const userNavigated = writtenNavigationSeqRef.current !== userNavigationSeq;
+    writtenNavigationSeqRef.current = userNavigationSeq;
 
     const params = new URLSearchParams(window.location.search);
 
@@ -360,26 +362,17 @@ export function useUrlSync({
     const next = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
     const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (next !== current) {
-      // IMPORTANT: only ever `replaceState`, never `pushState`.
-      //
-      // Next.js App Router owns the History API + the popstate event. Pushing
-      // our own entries created phantom history that Next could not reconcile,
-      // so a browser Back triggered a full route re-render with a multi-second
-      // blank screen (DEF-15). replaceState updates the URL of the *current*
-      // entry only — keeping deep-links shareable/bookmarkable — without adding
-      // navigations that confuse the router. Browser Back/Forward then behaves
-      // as normal document navigation.
-      //
-      // #102: reusing `window.history.state` verbatim left the App Router's
-      // cached `url` pointing at the previous search string, so a later router
-      // action restored `?dashboard=default-fundamental&tab=overview` in the
-      // address bar while React state (and the rendered widgets) stayed on the
-      // workspace the user chose. Carry the router's state forward but point its
-      // url at what we actually wrote, so the URL and state cannot diverge.
+      // Carry Next App Router's tree and unrelated state into every entry, and
+      // keep its cached URL aligned with the dashboard view (DEF-15 / #102).
       const rawState: unknown = window.history.state;
       const previousState: Record<string, unknown> =
         typeof rawState === 'object' && rawState !== null ? { ...rawState } : {};
-      window.history.replaceState({ ...previousState, url: next, as: next }, '', next);
+      const historyState = { ...previousState, url: next, as: next };
+      if (userNavigated) {
+        window.history.pushState(historyState, '', next);
+      } else {
+        window.history.replaceState(historyState, '', next);
+      }
     }
   }, [ready, activeDashboardId, activeTabId, symbol, userNavigationSeq]);
 
@@ -394,17 +387,16 @@ export function useUrlSync({
       // `SET_ACTIVE_TAB` (the slug belongs to the workspace the user left).
       requestedRef.current = null;
       deferredTabRef.current = null;
+      intentRef.current = null;
+      writtenNavigationSeqRef.current = userNavigationSeq;
       hasRestoredRef.current =true;
       if (!applyFromSearchRef.current(window.location.search)) {
-        // The entry could not be applied (unknown workspace, removed tab).
-        // Publish the live state so the address bar never describes a view that
-        // is not on screen.
         writeStateToUrl();
       }
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [ready, writeStateToUrl]);
+  }, [ready, userNavigationSeq, writeStateToUrl]);
 
   // Write current state into the URL when it changes.
   useEffect(() => {
