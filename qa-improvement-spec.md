@@ -196,5 +196,8 @@ Repair `030048bf237ffc8e5c36ea56dab65f0672e8c191` is deployed as `dpl_7eHiyUcdWr
 
 The [search/transfer plan](app-search-transfer-batch.md) requires combobox/listbox/option semantics synchronized with keyboard/pointer highlighting and live active-result IDs, while retaining command/ticker routing and Escape restoration. Transfer selection is reconciled with existing saved keys: survivors remain, vanished keys free capacity and cannot silently reselect if restored. Checkbox, export and share consume the same live selection. Existing import guards and sharing policy remain controlling; no notebook search/filter feature is included.
 
+Repair `ff7bb6cb51307685a5b47daee68a4dc48c96b2f1` is deployed as `dpl_6PP8VYDdFivSv3jHzUGCSp9VP9Lz` on both canonical aliases. The full gate passed 1,255 frontend and 3,060 backend tests; standards/spec reviews each found no issues. Production acceptance passes 12 scenarios and 108 grouped behavior checks across 1440/320/390px with 411 matching immutable asset responses, six healthy probes and unchanged backend/environment identities. Rollback retained. Controlled fixtures, unexercised signed-in sharing and the out-of-scope 320px footer-hint clipping are recorded in the [release evidence](qa-improvement-plan.md#command-search-and-research-transfer--21-october-2026).
+
+
 
 
