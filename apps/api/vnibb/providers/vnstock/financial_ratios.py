@@ -252,7 +252,10 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 ) from e
 
         try:
-            return await run_financial_provider(_fetch_sync, settings.vnstock_timeout)
+            return await run_financial_provider(
+                _fetch_sync, settings.vnstock_timeout,
+                key=("financial_ratios", settings.vnstock_source, tuple(sorted(query.items()))),
+            )
         except TimeoutError as exc:
             raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout) from exc
 

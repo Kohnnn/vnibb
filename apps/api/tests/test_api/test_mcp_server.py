@@ -768,15 +768,24 @@ async def test_sql_statement_consumers_admit_observations_without_rewriting_evid
     from vnibb.services import ai_context_service
 
     raw_data = {label: 900, "provider_rows": [{"label": label, "value": 900}]}
+    unit_metadata = {"revenue": {"source_unit": "VND", "value_unit": "VND"}}
+    raw_data["_financial_lineage"] = {
+        "symbol": "FPT", "statement_type": "income", "source": "VCI",
+        "period": period, "fiscal_year": 2025, "fiscal_quarter": quarter,
+        "currency": "VND", "value_unit": "VND", "consolidation_basis": "consolidated",
+        "flow_basis": "annual" if period_type == "year" else "single_quarter",
+        "aggregation_basis": "reported_annual" if period_type == "year" else "reported_quarter",
+        "source_periods": [period], "unit_metadata": unit_metadata,
+    }
     if canonical:
-        raw_data["_financial_lineage"] = {"canonical_data": {
+        raw_data["_financial_lineage"]["canonical_data"] = {
             "symbol": "FPT", "statement_type": "income", "period": period,
             "fiscal_year": 2025, "fiscal_quarter": quarter, "source": "VCI",
             "value_unit": "VND", "interest_expense": 900, "revenue": 1000,
-            "unit_metadata": {"interest_expense": {
+            "unit_metadata": {**unit_metadata, "interest_expense": {
                 "label": label, "source_unit": "VND", "value_unit": "VND",
             }},
-        }}
+        }
     stored = server.IncomeStatement(
         id=1, symbol="FPT", period=period, period_type=period_type, fiscal_year=2025,
         fiscal_quarter=quarter, source="VCI", interest_expense=900, revenue=1000, raw_data=raw_data,
@@ -829,6 +838,7 @@ async def test_public_sql_tool_preserves_fetched_rows_and_deep_evidence(
     from datetime import date, timedelta
 
     evidence = "  audit\n" + "evidence " * 100 + "https://example.test/report?unit=VND&basis=consolidated"
+    canonical_data = {"zero": 0, "missing": None, "flag": False}
     test_db.add(server.Stock(id=1, symbol="VNM", exchange="HOSE"))
     await test_db.flush()
     test_db.add_all(server.StockPrice(
@@ -838,11 +848,18 @@ async def test_public_sql_tool_preserves_fetched_rows_and_deep_evidence(
     test_db.add(server.BalanceSheet(
         id=1, symbol="VNM", period="2025", period_type="year", fiscal_year=2025,
         source="vietcap", total_equity=0,
-        raw_data={"_financial_lineage": {"unit_metadata": {"revenue": {
-            "provider_value": 0, "source_unit": "VND", "raw_value": None,
-            "raw_unit": "VND", "normalization_multiplier": 1, "validated": True,
-        }}, "canonical_data": {"zero": 0, "missing": None, "flag": False},
-        "source_report": {"evidence": evidence}}},
+        raw_data={"_financial_lineage": {
+            "symbol": "VNM", "statement_type": "balance", "source": "vietcap",
+            "period": "2025", "fiscal_year": 2025, "fiscal_quarter": None,
+            "currency": "VND", "value_unit": "VND", "consolidation_basis": "consolidated",
+            "flow_basis": "instantaneous", "aggregation_basis": "reported_annual",
+            "source_periods": ["2025"], "unit_metadata": {
+                "total_equity": {
+                    "provider_value": 0, "source_unit": "VND", "value_unit": "VND", "raw_value": None,
+                    "raw_unit": "VND", "normalization_multiplier": 1, "validated": True,
+                },
+            }, "canonical_data": canonical_data,
+            "source_report": {"evidence": evidence}}},
     ))
     await test_db.commit()
     monkeypatch.setattr(server, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
@@ -855,7 +872,7 @@ async def test_public_sql_tool_preserves_fetched_rows_and_deep_evidence(
     latest = await server.get_latest_financial_statement("VNM", "balance_sheet", "YEAR")
     assert latest["item"]["total_equity"] == 0
     assert latest["item"]["raw_data"]["_financial_lineage"]["source_report"]["evidence"] == evidence
-    assert latest["item"]["raw_data"]["_financial_lineage"]["canonical_data"] == {"zero": 0, "missing": None, "flag": False}
+    assert latest["item"]["raw_data"]["_financial_lineage"]["canonical_data"] == canonical_data
 
 
 @pytest.mark.asyncio

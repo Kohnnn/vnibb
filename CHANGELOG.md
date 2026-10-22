@@ -51,6 +51,8 @@ The entries below describe source changes, not supplier certification or full-po
   from the server source.
 
 ### Fixed
+- WebSocket subscribers receive admitted stored equity/index observations independently of stalled live providers. Replay retains observation clocks, units, source and staleness; shared acquisition and bounded client queues prevent duplicate work and slow-client blocking.
+- PostgreSQL statement, lock and idle-transaction safeguards survive rollback and pooled reuse through connection startup parameters. Stored-first history/events/dividends/ratios and bounded market acquisition preserve borrowed transactions and explicit unavailable outcomes; valuation widgets expose provider failures without discarding retained data.
 - Annual statement values require compatible fiscal identity, currency, source-linked field units, consolidation and flow evidence across provider, SQL, Mongo and cached exits. Tables, charts, derived values and exports share that admission; original raw observations remain retained.
 - Payout ratios require explicit percentage-point or fraction evidence and normalize once. Unknown or conflicting units withhold both value and growth; certified zero and large percentages remain valid.
 - Ownership tables and summaries use the same explicitly admitted shareholder cohort. Top 3/10 concentration no longer guesses percentage scale; unsupported composite grades remain unavailable.

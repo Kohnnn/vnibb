@@ -16,7 +16,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 
-from sqlalchemy import create_engine, MetaData, event, text
+from sqlalchemy import create_engine, MetaData, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,16 @@ _ALEMBIC_RUNNING = os.environ.get("ALEMBIC_RUNNING", "false").lower() == "true"
 # Only import async components if NOT running Alembic
 if not _ALEMBIC_RUNNING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
     from vnibb.core.config import settings
+
+    def _server_timeouts() -> dict[str, str]:
+        return {
+            "statement_timeout": str(int(settings.db_statement_timeout_ms)),
+            "lock_timeout": str(int(settings.db_lock_timeout_ms)),
+            "idle_in_transaction_session_timeout": str(int(settings.db_idle_in_tx_timeout_ms)),
+        }
+
 
     def _build_connect_args() -> dict:
         """
@@ -72,34 +81,12 @@ if not _ALEMBIC_RUNNING:
         # PgBouncer compatibility: disable prepared statement cache
         if settings.database_url.startswith("postgresql"):
             connect_args["statement_cache_size"] = 0
+            # Startup parameters survive rollback and pooled connection reuse.
+            connect_args["server_settings"] = _server_timeouts()
 
         return connect_args
 
 
-    def _apply_server_timeouts_on_connect(dbapi_connection, connection_record):
-        """SQLAlbic ``connect`` event: enforce server-side timeouts per session.
-
-        asyncpg ignores server-timeout ``connect_args``; the canonical way is to
-        ``SET`` them once per new DBAPI connection. Bound to the same async +
-        sync engines below.
-        """
-        try:
-            cursor = dbapi_connection.cursor()
-            try:
-                cursor.execute(
-                    f"SET statement_timeout = {int(settings.db_statement_timeout_ms)}"
-                )
-                cursor.execute(
-                    f"SET lock_timeout = {int(settings.db_lock_timeout_ms)}"
-                )
-                cursor.execute(
-                    f"SET idle_in_transaction_session_timeout = "
-                    f"{int(settings.db_idle_in_tx_timeout_ms)}"
-                )
-            finally:
-                cursor.close()
-        except Exception as exc:  # pragma: no cover - driver specific
-            logger.warning("Failed to apply server-side timeouts: %s", exc)
 
 
     async_engine_kwargs = {
@@ -124,14 +111,6 @@ if not _ALEMBIC_RUNNING:
         **async_engine_kwargs,
     )
 
-    # Enforce statement/lock/idle-in-tx timeouts on every new DBAPI connection
-    # made by the async engine too. SQLAlchemy exposes the underlying sync
-    # engine via .sync_engine; the same ``connect`` listener applies there.
-    if not settings.database_url.startswith("sqlite"):
-        event.listen(engine.sync_engine, "connect", _apply_server_timeouts_on_connect)
-
-    # Enforce statement/lock/idle-in-tx timeouts on every new DBAPI connection
-    # via the sync engine defined below. (Applied in the post-sync_engine block.)
 
 
     # Async session factory
@@ -149,7 +128,11 @@ if not _ALEMBIC_RUNNING:
 
     def _build_sync_connect_args() -> dict:
         """Build connection arguments for psycopg2 (sync driver)."""
-        connect_args = {}
+        if settings.sync_database_url.startswith("sqlite"):
+            return {}
+        connect_args = {
+            "options": " ".join(f"-c {key}={value}" for key, value in _server_timeouts().items())
+        }
         
         if settings.is_production or settings.database_ssl_mode in ("require", "verify-ca", "verify-full"):
             if settings.database_ssl_mode != "disable":
@@ -175,10 +158,6 @@ if not _ALEMBIC_RUNNING:
         **sync_engine_kwargs,
     )
 
-    # Enforce statement/lock/idle-in-tx timeouts on every new DBAPI connection
-    # (skipped for SQLite since it has no equivalent settings).
-    if not settings.sync_database_url.startswith("sqlite"):
-        event.listen(sync_engine, "connect", _apply_server_timeouts_on_connect)
 
     # Sync session factory (for migrations and scripts)
     sync_session_factory = sessionmaker(

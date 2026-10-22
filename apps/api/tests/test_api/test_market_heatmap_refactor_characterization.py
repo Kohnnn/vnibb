@@ -5,6 +5,7 @@ These tests pin the production logic BEFORE any refactor so that
 subsequent changes can be verified for behavioural preservation.
 """
 
+import asyncio
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -507,11 +508,177 @@ async def test_unverified_screener_rows_cannot_supply_market_heatmap_or_breadth(
     monkeypatch.setattr("vnibb.api.v1.market._load_stock_metadata", lambda _syms: _async({}))
     monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", lambda _syms: _async({}))
     heatmap = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&use_cache=false")
-    assert heatmap.status_code == 200
-    assert heatmap.json()["count"] == 0
-    assert heatmap.json()["partial"] is True
+    assert heatmap.status_code == 503
+    assert heatmap.json()["error"] == "http_error"
+    assert heatmap.json()["details"]["status_code"] == 503
 
     breadth = await client.get("/api/v1/market/breadth")
     assert breadth.status_code == 200
     assert breadth.json()["data"] == []
     assert breadth.json()["error"] == "Verified screener Universe unavailable"
+
+
+@pytest.mark.asyncio
+async def test_heatmap_slow_provider_is_bounded_and_shared(client, monkeypatch):
+    from vnibb.api.v1 import market
+
+    release = asyncio.Event()
+    finished = asyncio.Event()
+    calls = 0
+
+    async def slow_provider(_params):
+        nonlocal calls
+        calls += 1
+        try:
+            await release.wait()
+            return []
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(market, "HEATMAP_FETCH_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
+    monkeypatch.setattr(market.VnstockScreenerFetcher, "fetch", slow_provider)
+    try:
+        async with asyncio.timeout(0.75):
+            responses = await asyncio.gather(*(
+                client.get("/api/v1/market/heatmap?exchange=HOSE&limit=500&use_cache=false")
+                for _ in range(20)
+            ))
+            retry = await client.get(
+                "/api/v1/market/heatmap?exchange=HOSE&limit=500&use_cache=false"
+            )
+        for response in [*responses, retry]:
+            assert response.status_code == 503
+            assert response.json()["error"] == "http_error"
+            assert response.json()["details"]["status_code"] == 503
+        assert calls == 1
+    finally:
+        release.set()
+        await finished.wait()
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_heatmap_cache_lookup_obeys_whole_route_deadline(client, monkeypatch):
+    from vnibb.api.v1 import market
+
+    async def slow_cache(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(market, "MARKET_ROUTE_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(market.CacheManager, "get_screener_data", slow_cache)
+    async with asyncio.timeout(0.75):
+        response = await client.get(
+            "/api/v1/market/heatmap?exchange=HOSE&limit=500&use_cache=true"
+        )
+    assert response.status_code == 503
+    assert response.json()["error"] == "http_error"
+    assert response.json()["details"]["status_code"] == 503
+
+
+@pytest.mark.asyncio
+async def test_heatmap_reuses_executor_work_after_provider_deadline(client, monkeypatch):
+    from concurrent.futures import Future
+
+    from vnibb.api.v1 import market
+    from vnibb.providers.vnstock import equity_screener
+
+    work = Future()
+    submissions = []
+
+    class HeldExecutor:
+        def submit(self, func, *args, **kwargs):
+            submissions.append(func)
+            return work
+
+    monkeypatch.setattr(equity_screener, "_executor", HeldExecutor())
+    monkeypatch.setattr(market.settings, "vnstock_timeout", 0.02)
+    monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
+    try:
+        async with asyncio.timeout(0.75):
+            for _ in range(3):
+                response = await client.get(
+                    "/api/v1/market/heatmap?exchange=HOSE&limit=500&use_cache=false"
+                )
+                assert response.status_code == 503
+                await asyncio.sleep(0)
+        assert len(submissions) == 1
+        assert not work.cancelled()
+    finally:
+        work.set_result([])
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(client, monkeypatch):
+    from concurrent.futures import Future, ThreadPoolExecutor
+    from types import SimpleNamespace
+
+    import pandas as pd
+    from vnibb.api.v1 import market
+    from vnibb.providers.vnstock import equity_screener, runtime
+
+    pool = ThreadPoolExecutor(max_workers=2)
+    running = Future()
+    running.set_running_or_notify_cancel()
+    queued = Future()
+    batches = []
+    completions = []
+    children = []
+
+    class ControlledExecutor:
+        def submit(self, func, *args, **kwargs):
+            if func.__name__ == "_fetch_sync":
+                batches.append(func)
+                future = pool.submit(func, *args, **kwargs)
+                completions.append(future)
+                return future
+            children.append(args[0])
+            if len(batches) == 1:
+                return running if len(children) == 1 else queued
+            done = Future()
+            done.set_result({
+                "ticker": args[0], "exchange": "HOSE", "price": 100.0,
+                "price_unit": "VND", "market_cap": 150_000_000_000.0,
+            })
+            return done
+
+    class Listing:
+        def __init__(self, **kwargs):
+            pass
+
+        def all_symbols(self, **kwargs):
+            return pd.DataFrame({"symbol": ["VNM", "FPT"]})
+
+    monkeypatch.setattr(equity_screener, "_executor", ControlledExecutor())
+    monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace())
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(market.settings, "vnstock_timeout", 0.02)
+    monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
+    monkeypatch.setattr(market, "_load_stock_metadata", lambda _s: _async({}))
+    monkeypatch.setattr(market, "_load_change_pct_map", lambda _s: _async({}))
+    monkeypatch.setattr(market, "_load_latest_price_time", lambda _s: _async(None))
+    url = "/api/v1/market/heatmap?exchange=HOSE&limit=500&use_cache=false"
+    try:
+        async with asyncio.timeout(0.75):
+            for _ in range(3):
+                response = await client.get(url)
+                assert response.status_code == 503
+                await asyncio.sleep(0)
+        assert len(batches) == 1
+        assert children == ["VNM", "FPT"]
+        assert queued.cancelled()
+        running.set_result(None)
+        await asyncio.wrap_future(completions[0])
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        monkeypatch.setattr(market.settings, "vnstock_timeout", 6)
+        async with asyncio.timeout(0.75):
+            response = await client.get(url)
+        assert response.status_code == 200
+        assert len(batches) == 2
+    finally:
+        if not running.done():
+            running.set_result(None)
+        pool.shutdown(wait=True)

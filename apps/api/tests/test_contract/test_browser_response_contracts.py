@@ -202,6 +202,7 @@ async def test_browser_historical_envelope_keeps_legacy_meta(client, monkeypatch
 
     monkeypatch.setattr(equity, "_load_historical_from_mongo", no_rows)
     monkeypatch.setattr(equity, "_load_historical_from_recent_cache", no_rows)
+    monkeypatch.setattr(equity, "_load_historical_from_db", no_rows)
     monkeypatch.setattr(equity.CacheManager, "get_historical_prices", no_cache)
     monkeypatch.setattr(equity.VnstockEquityHistoricalFetcher, "fetch", fetch)
 

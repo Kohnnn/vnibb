@@ -595,26 +595,21 @@ async def test_dividends_endpoint_falls_back_to_cached_rows(
     assert payload["data"][0]["type"] == "cash"
     assert payload["data"][0]["annual_dps"] == 4300.0
     assert payload["data"][0]["dividend_yield"] == pytest.approx(6.8146, rel=1e-4)
-    if provider_fails:
-        assert "VCI dividends unavailable" in payload["error"]
-        assert "VCI events unavailable" in payload["error"]
-    else:
-        assert payload["error"] is None
+    assert payload["error"] is None
 
 
 @pytest.mark.asyncio
-async def test_dividends_endpoint_propagates_provider_cancellation(monkeypatch):
+async def test_dividends_endpoint_propagates_provider_cancellation(test_db, monkeypatch):
     from vnibb.api.v1 import equity
 
     fetch = AsyncMock(side_effect=asyncio.CancelledError())
-    db = AsyncMock()
     monkeypatch.setattr(equity.VnstockDividendsFetcher, "fetch", fetch)
 
     with pytest.raises(asyncio.CancelledError):
-        await equity.get_dividends(symbol="VNM", limit=5, db=db)
+        await equity.get_dividends.__wrapped__(symbol="VNM", limit=5, db=test_db)
 
     fetch.assert_awaited_once_with(symbol="VNM")
-    db.execute.assert_not_awaited()
+    assert not test_db.in_transaction()
 
 
 @pytest.mark.asyncio
@@ -1950,6 +1945,110 @@ async def test_orderbook_endpoint_empty_latest_batch_beats_older_priced_snapshot
     assert data["current_depth"] == empty_receipt
     assert data["latest_session_status"] == "empty"
     assert data["is_stale"] is True
+
+
+@pytest.mark.asyncio
+async def test_market_indices_slow_provider_settles_for_concurrent_users(client, monkeypatch):
+    from vnibb.api.v1 import market
+
+    release = asyncio.Event()
+    finished = asyncio.Event()
+    calls = 0
+    observed_at = "2026-03-20T00:00:00"
+
+    async def stored_rows(_db):
+        return [{"index_name": "VNINDEX", "current_value": 1340.0, "time": observed_at}]
+
+    async def slow_provider(_params):
+        nonlocal calls
+        calls += 1
+        try:
+            await release.wait()
+            return []
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(market, "MARKET_PROVIDER_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(market, "_load_latest_market_indices_from_db", stored_rows)
+    monkeypatch.setattr(market, "_fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[]))
+    monkeypatch.setattr(market.VnstockMarketOverviewFetcher, "fetch", slow_provider)
+    try:
+        async with asyncio.timeout(0.75):
+            responses = await asyncio.gather(*(
+                client.get("/api/v1/market/indices?limit=2") for _ in range(20)
+            ))
+            retry = await client.get("/api/v1/market/indices?limit=2")
+        for response in [*responses, retry]:
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["source"] == "db_fallback"
+            assert payload["data"][0]["current_value"] == 1340.0
+            assert payload["updated_at"] == observed_at
+            assert "timed out" in payload["error"].lower()
+        assert calls == 1
+    finally:
+        release.set()
+        await finished.wait()
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_market_indices_complete_storage_skips_cold_providers(client, monkeypatch):
+    from vnibb.api.v1 import market
+
+    async def stored_rows(_db):
+        return [{
+            "index_name": "VNINDEX", "current_value": 1340.0,
+            "time": "2026-03-20T00:00:00",
+        }]
+
+    async def must_not_acquire(*_args):
+        pytest.fail("Complete stored indices must not wait for upstream acquisition")
+
+    monkeypatch.setattr(market, "_load_latest_market_indices_from_db", stored_rows)
+    monkeypatch.setattr(market, "_fetch_yahoo_market_indices", must_not_acquire)
+    monkeypatch.setattr(market.VnstockMarketOverviewFetcher, "fetch", must_not_acquire)
+    async with asyncio.timeout(0.75):
+        response = await client.get("/api/v1/market/indices?limit=1")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "db_fallback"
+    assert payload["updated_at"] == "2026-03-20T00:00:00"
+    assert payload["data"][0]["current_value"] == 1340.0
+
+
+@pytest.mark.asyncio
+async def test_market_indices_preserves_borrowed_pending_rows(client, test_db, monkeypatch):
+    from vnibb.api.v1 import market
+
+    test_db.add(StockIndex(
+        id=9191, index_code="VNINDEX", time=date(2026, 3, 20),
+        open=1330.0, high=1345.0, low=1325.0, close=1340.0, volume=1_000_000,
+    ))
+    monkeypatch.setattr(market, "_fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[]))
+    monkeypatch.setattr(
+        market.VnstockMarketOverviewFetcher, "fetch", lambda _p: asyncio.sleep(0, result=[])
+    )
+    for _ in range(2):
+        response = await client.get("/api/v1/market/indices?limit=1")
+        assert response.status_code == 200
+        assert response.json()["data"][0]["current_value"] == 1340.0
+
+
+@pytest.mark.asyncio
+async def test_market_indices_database_deadline_is_explicit_unavailability(client, monkeypatch):
+    from vnibb.api.v1 import market
+
+    async def stalled_database(_db):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(market, "MARKET_ROUTE_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(market, "_load_latest_market_indices_from_db", stalled_database)
+    async with asyncio.timeout(0.75):
+        response = await client.get("/api/v1/market/indices")
+    assert response.status_code == 503
+    assert response.json()["error"] == "http_error"
+    assert response.json()["details"]["status_code"] == 503
 
 
 @pytest.mark.asyncio

@@ -237,7 +237,11 @@ export function useRatioHistory(
     const period = options?.period || 'year';
     return useQuery({
         queryKey: equityQueryKeys.ratioHistory(symbol, period, ratios, options?.limit),
-        queryFn: () => api.getRatioHistory(symbol, { ratios, period, limit: options?.limit }),
+        queryFn: async () => {
+            const response = await api.getRatioHistory(symbol, { ratios, period, limit: options?.limit });
+            if (response.error) throw new Error(response.error);
+            return response;
+        },
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 60 * 60 * 1000,
     });

@@ -4,7 +4,7 @@ from datetime import date, datetime
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from vnibb.models.company import Company
@@ -85,3 +85,50 @@ async def test_postgres_release_contract_uses_migrated_tables_and_api_routes(cli
     assert detailed.json()["components"]["database"]["status"] == "healthy"
     assert data_health.status_code == 200
     assert data_health.json()["data_quality"]["last_successful_run"]["run_id"] == "postgres-contract:2026-07-16"
+
+
+@pytest.mark.postgres_contract
+@pytest.mark.asyncio
+async def test_session_timeouts_survive_rollback_commit_and_pool_reuse():
+    from vnibb.core import database
+    from vnibb.core.config import settings
+
+    expected = {
+        "statement_timeout": settings.db_statement_timeout_ms,
+        "lock_timeout": settings.db_lock_timeout_ms,
+        "idle_in_transaction_session_timeout": settings.db_idle_in_tx_timeout_ms,
+    }
+    assert all(value > 0 for value in expected.values()), "Contract requires nonzero timeouts"
+    timeout_query = text(
+        "SELECT name, setting::integer FROM pg_settings WHERE name IN "
+        "('statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout')"
+    )
+    pid_query = text("SELECT pg_backend_pid()")
+
+    await database.engine.dispose()
+    database.sync_engine.dispose()
+    try:
+        async with database.async_session_factory() as session:
+            async_pid = (await session.execute(pid_query)).scalar_one()
+            assert dict((await session.execute(timeout_query)).all()) == expected
+            await session.rollback()
+            assert dict((await session.execute(timeout_query)).all()) == expected
+            await session.commit()
+            assert dict((await session.execute(timeout_query)).all()) == expected
+        async with database.async_session_factory() as session:
+            assert (await session.execute(pid_query)).scalar_one() == async_pid
+            assert dict((await session.execute(timeout_query)).all()) == expected
+
+        with database.sync_session_factory() as session:
+            sync_pid = session.execute(pid_query).scalar_one()
+            assert dict(session.execute(timeout_query).all()) == expected
+            session.rollback()
+            assert dict(session.execute(timeout_query).all()) == expected
+            session.commit()
+            assert dict(session.execute(timeout_query).all()) == expected
+        with database.sync_session_factory() as session:
+            assert session.execute(pid_query).scalar_one() == sync_pid
+            assert dict(session.execute(timeout_query).all()) == expected
+    finally:
+        await database.engine.dispose()
+        database.sync_engine.dispose()

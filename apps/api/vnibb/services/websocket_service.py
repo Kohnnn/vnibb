@@ -34,6 +34,7 @@ class PriceUpdate(BaseModel):
     price_unit: str
     source: str
     timestamp_timezone: str = "Asia/Ho_Chi_Minh"
+    stale: bool = False
 
     def delivery_payload(self) -> dict:
         observed = datetime.fromisoformat(self.timestamp.replace("Z", "+00:00"))
@@ -41,7 +42,7 @@ class PriceUpdate(BaseModel):
             observed = pytz.timezone(self.timestamp_timezone).localize(observed)
         age = (datetime.now(VN_TZ) - observed).total_seconds()
         return {**self.model_dump(), "as_of": observed.isoformat(),
-                "observation_age_seconds": max(0, age), "stale": age > 60}
+                "observation_age_seconds": max(0, age), "stale": self.stale or age > 60}
 
 
 class ConnectionManager:
@@ -139,8 +140,13 @@ class ConnectionManager:
         if symbol not in self.get_all_subscribed_symbols():
             return
         previous = self._price_cache.get(symbol)
-        if previous and datetime.fromisoformat(payload["as_of"]) < datetime.fromisoformat(previous.delivery_payload()["as_of"]):
-            return
+        if previous:
+            observed = datetime.fromisoformat(payload["as_of"])
+            previous_observed = datetime.fromisoformat(previous.delivery_payload()["as_of"])
+            if observed < previous_observed or (
+                observed == previous_observed and price_data.stale and not previous.stale
+            ):
+                return
         self._price_cache[symbol] = price_data
         clients = [
             websocket

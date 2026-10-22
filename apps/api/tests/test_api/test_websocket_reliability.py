@@ -8,13 +8,16 @@ from vnibb.services.websocket_service import ConnectionManager, PriceUpdate
 
 
 class FakeWebSocket:
-    def __init__(self, messages=(), fail_send=False, block_send=False):
+    def __init__(self, messages=(), fail_send=False, block_send=False, keep_open=False):
         self.headers = {}
         self.messages = iter(messages)
         self.sent = []
         self.fail_send = fail_send
         self.block_send = block_send
         self.closed_code = None
+        self.keep_open = keep_open
+        self.waiting = asyncio.Event()
+        self.received_update = asyncio.Event()
 
     async def accept(self):
         pass
@@ -26,6 +29,9 @@ class FakeWebSocket:
         try:
             return next(self.messages)
         except StopIteration as exc:
+            if self.keep_open:
+                self.waiting.set()
+                await asyncio.Event().wait()
             raise WebSocketDisconnect() from exc
 
     async def send_json(self, payload):
@@ -34,6 +40,23 @@ class FakeWebSocket:
         if self.block_send:
             await asyncio.Event().wait()
         self.sent.append(payload)
+        if "symbol" in payload:
+            self.received_update.set()
+
+
+@pytest.fixture(autouse=True)
+def isolated_price_jobs(monkeypatch):
+    async def no_stored_quote(_symbol):
+        return None, None
+
+    monkeypatch.setattr(websocket_api, "_load_stored_quote", no_stored_quote)
+    monkeypatch.setattr(websocket_api, "is_market_open", lambda: True)
+    monkeypatch.setattr(websocket_api, "_equity_jobs", {})
+    monkeypatch.setattr(websocket_api, "_equity_slots", None)
+    monkeypatch.setattr(websocket_api, "_snapshot_jobs", {})
+    monkeypatch.setattr(websocket_api, "_snapshot_slots", None)
+    monkeypatch.setattr(websocket_api, "_index_job", None)
+    monkeypatch.setattr(websocket_api, "_index_snapshot_job", None)
 
 
 @pytest.fixture
@@ -134,6 +157,7 @@ async def test_equity_fetches_respect_concurrency_cap(monkeypatch):
     assert peak == 2
     release.set()
     await task
+    await asyncio.gather(*list(websocket_api._equity_jobs.values()))
 
 
 @pytest.mark.asyncio
@@ -314,9 +338,12 @@ async def test_blocked_sync_worker_keeps_slot_and_does_not_duplicate(monkeypatch
 
     from vnibb.providers.vnstock.stock_quote import StockQuoteData
     release = threading.Event()
+    started = asyncio.Event()
+    loop = asyncio.get_running_loop()
     calls = []
     def blocking_fetch(symbol):
         calls.append(symbol)
+        loop.call_soon_threadsafe(started.set)
         release.wait()
     async def fetch(symbol, _source):
         await asyncio.to_thread(blocking_fetch, symbol)
@@ -326,9 +353,217 @@ async def test_blocked_sync_worker_keeps_slot_and_does_not_duplicate(monkeypatch
     monkeypatch.setattr(websocket_api, "_equity_slots", asyncio.Semaphore(1))
     try:
         await websocket_api._run_price_cycle({"VNM"}, True)
+        await asyncio.wait_for(started.wait(), 0.5)
         await websocket_api._run_price_cycle({"VNM", "FPT"}, True)
         assert calls == ["VNM"]
         assert len(websocket_api._equity_jobs) == 2
     finally:
         release.set()
         await asyncio.gather(*list(websocket_api._equity_jobs.values()))
+
+
+@pytest.mark.asyncio
+async def test_closed_market_subscriber_receives_stored_observation(monkeypatch):
+    from datetime import datetime
+
+    from vnibb.providers.vnstock.stock_quote import StockQuoteData
+
+    manager = ConnectionManager()
+    websocket = FakeWebSocket()
+    manager.active_connections[websocket] = {"FPT"}
+
+    async def stored(symbol):
+        return StockQuoteData(
+            symbol=symbol, price=57400, price_unit="VND",
+            updated_at=datetime.fromisoformat("2026-10-22T00:00:00+07:00"),
+        ), "postgres:stored_quote"
+
+    async def provider(*args, **kwargs):
+        pytest.fail("A closed-market snapshot must not acquire provider data")
+
+    monkeypatch.setattr(websocket_api, "manager", manager)
+    monkeypatch.setattr(websocket_api, "_load_stored_quote", stored, raising=False)
+    monkeypatch.setattr(websocket_api.VnstockStockQuoteFetcher, "fetch", provider)
+    await websocket_api._run_price_cycle({"FPT"}, False)
+
+    assert len(websocket.sent) == 1
+    assert websocket.sent[0]["price"] == 57400
+    assert websocket.sent[0]["as_of"] == "2026-10-22T00:00:00+07:00"
+    assert websocket.sent[0]["source"] == "postgres:stored_quote"
+    assert websocket.sent[0]["stale"] is True
+    assert websocket.sent[0]["change_pct"] is None
+
+
+@pytest.mark.asyncio
+async def test_public_closed_socket_shares_stored_equity_and_index(monkeypatch):
+    from contextlib import asynccontextmanager
+    from datetime import date, datetime
+
+    from vnibb.providers.vnstock.stock_quote import StockQuoteData
+
+    manager = ConnectionManager()
+    calls = {"equity": 0, "index": 0}
+    release = asyncio.Event()
+
+    async def stored(symbol):
+        calls["equity"] += 1
+        await release.wait()
+        return StockQuoteData(
+            symbol=symbol, price=57400, price_unit="VND",
+            updated_at=datetime.fromisoformat("2026-10-22T00:00:00+07:00"),
+        ), "postgres:stored_quote"
+
+    @asynccontextmanager
+    async def session():
+        yield object()
+
+    async def indices(_db):
+        calls["index"] += 1
+        await release.wait()
+        return [{"index_name": "VNINDEX", "current_value": 1760.63,
+                 "time": date(2026, 10, 22)}]
+
+    async def provider(*args, **kwargs):
+        pytest.fail("Closed sockets must not acquire provider data")
+
+    monkeypatch.setattr(websocket_api, "manager", manager)
+    monkeypatch.setattr(websocket_api, "get_market_status", lambda: {
+        "phase": "after-close", "is_open": False,
+    })
+    monkeypatch.setattr(websocket_api, "_load_stored_quote", stored)
+    monkeypatch.setattr(websocket_api, "async_session_factory", session)
+    monkeypatch.setattr(websocket_api, "_load_latest_market_indices_from_db", indices)
+    monkeypatch.setattr(websocket_api, "_fetch_yahoo_market_indices", provider)
+    monkeypatch.setattr(websocket_api.VnstockStockQuoteFetcher, "fetch", provider)
+    monkeypatch.setattr(websocket_api.VnstockMarketOverviewFetcher, "fetch", provider)
+    sockets = [FakeWebSocket(
+        [json.dumps({"action": "subscribe", "symbols": ["FPT", "VNINDEX"]})],
+        keep_open=True,
+    ) for _ in range(2)]
+    endpoints = [asyncio.create_task(websocket_api.websocket_prices(ws)) for ws in sockets]
+    broadcaster = asyncio.create_task(websocket_api.fetch_and_broadcast_prices())
+    try:
+        await asyncio.wait_for(asyncio.gather(*(ws.waiting.wait() for ws in sockets)), 0.5)
+        release.set()
+        await asyncio.wait_for(asyncio.gather(*(ws.received_update.wait() for ws in sockets)), 0.5)
+        await asyncio.wait_for(asyncio.gather(
+            *list(websocket_api._snapshot_jobs.values()), websocket_api._index_snapshot_job
+        ), 0.5)
+        assert calls == {"equity": 1, "index": 1}
+        for ws in sockets:
+            updates = {row["symbol"]: row for row in ws.sent if "symbol" in row}
+            assert updates["FPT"]["price"] == 57400
+            assert updates["FPT"]["source"] == "postgres:stored_quote"
+            assert updates["FPT"]["as_of"] == "2026-10-22T00:00:00+07:00"
+            assert updates["FPT"]["stale"] is True
+            assert updates["VNINDEX"]["price"] == 1760.63
+            assert updates["VNINDEX"]["source"] == "database:stock_indices"
+            assert updates["VNINDEX"]["as_of"] == "2026-10-22T00:00:00+07:00"
+            assert updates["VNINDEX"]["stale"] is True
+    finally:
+        release.set()
+        for task in [broadcaster, *endpoints]:
+            task.cancel()
+        await asyncio.gather(broadcaster, *endpoints, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_public_new_subscribers_receive_snapshot_while_provider_stalls(monkeypatch):
+    from datetime import datetime
+
+    from vnibb.providers.vnstock.stock_quote import StockQuoteData
+
+    manager = ConnectionManager()
+    provider_started, release_provider = asyncio.Event(), asyncio.Event()
+    calls = {"provider": 0, "stored": 0}
+    observation = {"price": 57400}
+
+    async def provider(symbol, _source):
+        calls["provider"] += 1
+        provider_started.set()
+        await release_provider.wait()
+        return StockQuoteData(symbol=symbol), False
+
+    async def stored(symbol):
+        calls["stored"] += 1
+        return StockQuoteData(
+            symbol=symbol, price=observation["price"], price_unit="VND",
+            updated_at=datetime.fromisoformat("2026-10-22T00:00:00+07:00"),
+        ), "postgres:stored_quote"
+
+    monkeypatch.setattr(websocket_api, "manager", manager)
+    monkeypatch.setattr(websocket_api, "get_market_status", lambda: {
+        "phase": "morning", "is_open": True,
+    })
+    monkeypatch.setattr(websocket_api, "_load_stored_quote", stored)
+    monkeypatch.setattr(websocket_api.VnstockStockQuoteFetcher, "fetch", provider)
+    monkeypatch.setattr(websocket_api, "_equity_slots", asyncio.Semaphore(1))
+    await websocket_api._run_price_cycle({"VNM"}, True)
+    await asyncio.wait_for(provider_started.wait(), 0.5)
+    calls["stored"] = 0
+    sockets = [FakeWebSocket(
+        [json.dumps({"action": "subscribe", "symbols": ["FPT"]})], keep_open=True,
+    ) for _ in range(2)]
+    endpoints = [asyncio.create_task(websocket_api.websocket_prices(ws)) for ws in sockets]
+    broadcaster = asyncio.create_task(websocket_api.fetch_and_broadcast_prices())
+    try:
+        await asyncio.wait_for(asyncio.gather(*(ws.received_update.wait() for ws in sockets)), 0.5)
+        assert calls == {"provider": 1, "stored": 1}
+        assert all(ws.sent[-1]["price"] == 57400 for ws in sockets)
+        await asyncio.gather(*list(websocket_api._snapshot_jobs.values()))
+        sockets[0].received_update.clear()
+        observation["price"] = 57600
+        await websocket_api._run_price_cycle({"FPT"}, True)
+        await asyncio.wait_for(sockets[0].received_update.wait(), 0.5)
+        assert calls["provider"] == 1
+        assert all(ws.sent[-1]["price"] == 57600 for ws in sockets)
+    finally:
+        release_provider.set()
+        for task in [broadcaster, *endpoints]:
+            task.cancel()
+        await asyncio.gather(broadcaster, *endpoints, return_exceptions=True)
+        await asyncio.gather(*list(websocket_api._equity_jobs.values()))
+
+
+@pytest.mark.asyncio
+async def test_equal_time_stored_replay_does_not_downgrade_live_quote(connection_manager):
+    from datetime import UTC, datetime
+
+    websocket = FakeWebSocket()
+    connection_manager.active_connections[websocket] = {"VNM"}
+    live = price_update().model_copy(update={
+        "timestamp": datetime.now(UTC).isoformat(), "source": "provider:live",
+    })
+    stored = live.model_copy(update={"source": "database:stored", "stale": True})
+
+    await connection_manager.broadcast_price("VNM", live, 0.1)
+    await connection_manager.broadcast_price("VNM", stored, 0.1)
+
+    assert connection_manager._price_cache["VNM"] is live
+    assert len(websocket.sent) == 1
+    assert websocket.sent[0]["source"] == "provider:live"
+    assert websocket.sent[0]["stale"] is False
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_snapshots_without_releasing_provider_slot(monkeypatch):
+    release = asyncio.Event()
+    snapshot = asyncio.create_task(asyncio.Event().wait())
+    index_snapshot = asyncio.create_task(asyncio.Event().wait())
+    provider = asyncio.create_task(release.wait())
+    monkeypatch.setattr(websocket_api, "_background_task", None)
+    websocket_api._snapshot_jobs["FPT"] = snapshot
+    websocket_api._equity_jobs["VNM"] = provider
+    monkeypatch.setattr(websocket_api, "_index_snapshot_job", index_snapshot)
+    try:
+        await websocket_api.stop_background_fetcher()
+
+        assert snapshot.cancelled()
+        assert index_snapshot.cancelled()
+        assert websocket_api._snapshot_jobs == {}
+        assert websocket_api._index_snapshot_job is None
+        assert websocket_api._equity_jobs["VNM"] is provider
+        assert not provider.done()
+    finally:
+        release.set()
+        await provider

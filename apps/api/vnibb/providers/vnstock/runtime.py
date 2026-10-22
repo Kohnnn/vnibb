@@ -100,17 +100,46 @@ def finance_method_kwargs(method, period: str) -> dict:
 _financial_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vnstock-financial")
 _financial_lock = Lock()
 _financial_future = None
+_financial_key: tuple | None = None
+_reference_jobs: dict[tuple, asyncio.Future] = {}
 
 
-async def run_financial_provider(operation: Callable, timeout: float):
-    """Do not enqueue more calls behind a timed-out, still-running provider thread."""
-    global _financial_future
+async def run_reference_provider(operation: Callable, timeout: float, *, key: tuple):
+    """Share occupied executor work even after a caller deadline expires."""
+    loop = asyncio.get_running_loop()
+    job_key = (loop, key)
+    future = _reference_jobs.get(job_key)
+    if future is None:
+        if len(_reference_jobs) >= 32:
+            raise RuntimeError("Reference provider acquisition capacity reached")
+        future = loop.run_in_executor(None, operation)
+        _reference_jobs[job_key] = future
+
+        def finished(done):
+            if _reference_jobs.get(job_key) is done:
+                _reference_jobs.pop(job_key, None)
+            if not done.cancelled():
+                done.exception()
+
+        future.add_done_callback(finished)
+    return await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+
+
+async def run_financial_provider(operation: Callable, timeout: float, *, key: tuple | None = None):
+    """Share identical work; never queue behind a still-running financial call."""
+    global _financial_future, _financial_key
     with _financial_lock:
         if _financial_future is not None and not _financial_future.done():
-            raise RuntimeError("Previous financial provider call is still running")
-        _financial_future = _financial_executor.submit(operation)
+            if key is None or key != _financial_key:
+                raise RuntimeError("Previous financial provider call is still running")
+        else:
+            _financial_future = _financial_executor.submit(operation)
+            _financial_key = key
+            _financial_future.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
         future = _financial_future
-    return await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(future)), timeout=timeout)
+    wrapped = asyncio.wrap_future(future)
+    wrapped.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
+    return await asyncio.wait_for(asyncio.shield(wrapped), timeout=timeout)
 
 
 def financial_provider_busy() -> bool:

@@ -532,3 +532,41 @@ def test_quant_price_unit_warning_names_unresolved_sessions():
     assert "derived analytics withheld" in warning
     assert quant._build_price_unit_warning({"unresolved_excluded_dates":[]}) is None
     assert quant._build_price_unit_warning(None) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("row_trade_date, trade_date, expected", [
+    (None, None, "2026-10-23T00:00:00+07:00"),
+    (None, "2026-10-20", "2026-10-20T00:00:00+07:00"),
+    (date(2026, 10, 22), "2026-10-20", "2026-10-22T00:00:00+07:00"),
+])
+async def test_stored_snapshot_uses_observation_date_not_later_ingestion(
+    monkeypatch, row_trade_date, trade_date, expected
+):
+    from contextlib import asynccontextmanager
+    from datetime import datetime
+
+    snapshot = SimpleNamespace(
+        symbol="FPT", price=57400, volume=123, snapshot_date=date(2026, 10, 23),
+        trade_date=row_trade_date,
+        created_at=datetime.fromisoformat("2026-10-24T12:00:00+00:00"),
+        extended_metrics={"price_unit": "VND", "trade_date": trade_date,
+                          "updated_at": "2026-10-24T12:00:00+00:00"},
+    )
+    db = SimpleNamespace(execute=AsyncMock(side_effect=[
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [])),
+        SimpleNamespace(scalar_one_or_none=lambda: snapshot),
+    ]), rollback=AsyncMock())
+
+    @asynccontextmanager
+    async def session():
+        yield db
+
+    monkeypatch.setattr(equity, "async_session_factory", session)
+    monkeypatch.setattr(equity, "_load_quote_from_price_cache", AsyncMock(return_value=None))
+    quote, source = await equity._load_stored_quote("FPT")
+
+    assert source == "postgres:stored_quote"
+    assert quote.price == 57400
+    assert quote.updated_at.isoformat() == expected
+    assert equity._build_quote_from_screener_snapshot(snapshot).updated_at == snapshot.created_at

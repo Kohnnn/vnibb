@@ -139,6 +139,51 @@ async def test_timed_out_provider_never_queues_duplicate_thread(monkeypatch):
         await asyncio.wrap_future(runtime._financial_future)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("financial", [False, True])
+async def test_identical_provider_retries_share_real_executor_until_completion(monkeypatch, financial):
+    release = Event()
+    entered = Event()
+    calls = []
+    key = ("financial_ratios" if financial else "historical", "VNM", "VCI", "year")
+    runner = runtime.run_financial_provider if financial else runtime.run_reference_provider
+    executor = runtime._financial_executor if financial else asyncio.get_running_loop()
+    method = "submit" if financial else "run_in_executor"
+    submit = getattr(executor, method)
+    submissions = []
+
+    def counted_submit(*args, **kwargs):
+        submissions.append(1)
+        return submit(*args, **kwargs)
+
+    def blocked():
+        calls.append(1)
+        entered.set()
+        release.wait(2)
+        return [12]
+
+    monkeypatch.setattr(executor, method, counted_submit)
+    try:
+        for _ in range(2):
+            with pytest.raises(TimeoutError):
+                await runner(blocked, 0.01, key=key)
+        assert entered.is_set()
+        assert len(submissions) == len(calls) == 1
+        recovery = asyncio.create_task(runner(blocked, 1, key=key))
+        await asyncio.sleep(0)
+        release.set()
+        assert await recovery == [12]
+        assert len(submissions) == len(calls) == 1
+        assert await runner(lambda: [13], 1, key=key) == [13]
+        assert len(submissions) == 2
+    finally:
+        release.set()
+        if financial and runtime._financial_future is not None:
+            await asyncio.wrap_future(runtime._financial_future)
+        elif not financial:
+            await asyncio.gather(*list(runtime._reference_jobs.values()), return_exceptions=True)
+
+
 def test_configured_closures_are_not_missing_price_gaps(monkeypatch):
     monkeypatch.setattr(scheduler.settings, "market_holiday_dates", ["2026-03-17"])
     pipeline = DataPipeline()

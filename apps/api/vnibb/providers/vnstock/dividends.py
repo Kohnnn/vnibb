@@ -5,7 +5,6 @@ Provides access to dividend payment history.
 Uses vnstock company.dividends() method.
 """
 
-import asyncio
 import logging
 import math
 from typing import List, Optional
@@ -14,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
+from vnibb.providers.vnstock.runtime import run_reference_provider
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +135,10 @@ class VnstockDividendsFetcher:
 
                 return []
 
-            loop = asyncio.get_event_loop()
-            records = await loop.run_in_executor(None, _fetch)
+            records = await run_reference_provider(
+                _fetch, settings.vnstock_timeout,
+                key=("dividends", symbol.upper(), settings.vnstock_source),
+            )
 
             result = []
             for r in records:

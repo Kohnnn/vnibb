@@ -11,6 +11,7 @@ import asyncio
 import logging
 import re
 import unicodedata
+from functools import wraps
 from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Literal, Optional
 from collections import defaultdict
@@ -402,7 +403,11 @@ RSS_FEED_URLS: dict[str, list[str]] = {
 }
 
 WORLD_INDEX_FALLBACK_TIMEOUT_SECONDS = 5
-HEATMAP_FETCH_TIMEOUT_SECONDS = 20
+HEATMAP_FETCH_TIMEOUT_SECONDS = 8
+MARKET_PROVIDER_TIMEOUT_SECONDS = 8
+MARKET_ROUTE_TIMEOUT_SECONDS = 12
+MARKET_YAHOO_TIMEOUT_SECONDS = 2
+_market_provider_jobs: dict[tuple, asyncio.Task] = {}
 TOP_MOVER_TYPES = {"gainer", "loser", "volume", "value"}
 MARKET_INDEX_ORDER = ("VNINDEX", "VN30", "HNX", "UPCOM")
 MARKET_INDEX_ALIASES = {
@@ -650,6 +655,51 @@ def _map_text_to_sector_name(value: Optional[str]) -> Optional[str]:
 
     sector_config = VN_SECTORS.get(sector_id)
     return sector_config.name if sector_config else None
+
+
+def _market_deadline(func):
+    @wraps(func)
+    async def bounded(*args, **kwargs):
+        try:
+            async with asyncio.timeout(MARKET_ROUTE_TIMEOUT_SECONDS):
+                return await func(*args, **kwargs)
+        except TimeoutError as exc:
+            raise HTTPException(status_code=503, detail="Market data deadline exceeded") from exc
+
+    return bounded
+
+
+async def _await_market_provider(key: tuple, loader, timeout: float):
+    task = _market_provider_jobs.get(key)
+    if task is None:
+        if len(_market_provider_jobs) >= 12:
+            raise ProviderError(message="Market acquisition capacity reached", provider="vnstock")
+        task = asyncio.create_task(loader())
+        _market_provider_jobs[key] = task
+
+        def finished(done):
+            if _market_provider_jobs.get(key) is done:
+                _market_provider_jobs.pop(key, None)
+            if not done.cancelled():
+                done.exception()
+
+        task.add_done_callback(finished)
+    # A caller deadline must not permit duplicate acquisition while worker threads run.
+    return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+
+
+async def _fetch_heatmap_screener(params: StockScreenerParams):
+    try:
+        rows = await _await_market_provider(
+            ("heatmap", params.source, params.exchange, params.limit),
+            lambda: VnstockScreenerFetcher.fetch(params),
+            HEATMAP_FETCH_TIMEOUT_SECONDS,
+        )
+        if not rows:
+            raise ProviderError(message="Heatmap screener data unavailable", provider="vnstock")
+        return rows
+    except TimeoutError as exc:
+        raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
 
 
 def _normalize_market_index_code(value: Any) -> str:
@@ -2287,7 +2337,8 @@ def _clean_rss_description(raw_description: Optional[str]) -> Optional[str]:
     summary="Get Market Heatmap Data",
     description="Get aggregated market data for treemap visualization. Supports grouping by sector/industry.",
 )
-@cached(ttl=120, key_prefix="market_heatmap")
+@cached(ttl=120, key_prefix="market_heatmap_v2")
+@_market_deadline
 async def get_heatmap_data(
     group_by: str = Query(
         default="sector",
@@ -2411,13 +2462,7 @@ async def get_heatmap_data(
                 logger.info("Heatmap served from verified screener partition (%d rows)", len(db_rows))
 
         if not screener_data:
-            try:
-                screener_data = await asyncio.wait_for(
-                    VnstockScreenerFetcher.fetch(params),
-                    timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError as exc:
-                raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
+            screener_data = await _fetch_heatmap_screener(params)
             logger.info(f"Fetched {len(screener_data)} stocks from API for heatmap")
 
         # Step 2: Normalize input rows and enrich missing metadata/returns from DB snapshots.
@@ -2463,13 +2508,7 @@ async def get_heatmap_data(
         # fall back to a fresh provider fetch once before returning empty data.
         if cached and not groups:
             logger.info("Cached screener data produced empty heatmap; retrying with fresh fetch")
-            try:
-                screener_data = await asyncio.wait_for(
-                    VnstockScreenerFetcher.fetch(params),
-                    timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError as exc:
-                raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
+            screener_data = await _fetch_heatmap_screener(params)
 
             refreshed_rows = normalize_heatmap_rows(
                 screener_data,
@@ -2545,25 +2584,11 @@ async def get_heatmap_data(
         )
 
     except ProviderTimeoutError as e:
-        logger.warning("Heatmap provider timeout, returning empty payload: %s", e.message)
-        return HeatmapResponse(
-            count=0,
-            group_by=group_by,
-            color_metric=color_metric,
-            size_metric=size_metric,
-            sectors=[],
-            cached=False,
-        )
+        logger.warning("Heatmap provider timeout: %s", e.message)
+        raise HTTPException(status_code=503, detail=e.message) from e
     except ProviderError as e:
-        logger.warning("Heatmap provider error, returning empty payload: %s", e.message)
-        return HeatmapResponse(
-            count=0,
-            group_by=group_by,
-            color_metric=color_metric,
-            size_metric=size_metric,
-            sectors=[],
-            cached=False,
-        )
+        logger.warning("Heatmap provider unavailable: %s", e.message)
+        raise HTTPException(status_code=503, detail=e.message) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -2722,20 +2747,42 @@ async def get_foreign_flow_leaderboard(
 
 
 @router.get("/indices", response_model=MarketIndicesResponse)
-@cached(key_prefix="market_indices")
+@cached(key_prefix="market_indices_v2")
+@_market_deadline
 async def get_market_indices(
     limit: int = Query(default=10, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
 ) -> MarketIndicesResponse:
     db_rows: list[dict[str, Any]] = []
+    owns_read_transaction = not db.in_transaction() and not (db.new or db.dirty or db.deleted)
     try:
         db_rows = await _load_latest_market_indices_from_db(db)
     except Exception as db_error:
+        if not owns_read_transaction:
+            raise
         logger.warning(f"Market indices DB fallback failed: {db_error}")
+    finally:
+        if owns_read_transaction and db.in_transaction():
+            await db.rollback()
+
+    required_codes = MARKET_INDEX_ORDER[: min(limit, len(MARKET_INDEX_ORDER))]
+    stored_codes = {_normalize_market_index_code(row.get("index_name")) for row in db_rows}
+    if all(code in stored_codes for code in required_codes):
+        rows = db_rows[:limit]
+        return MarketIndicesResponse(
+            count=len(rows),
+            data=rows,
+            updated_at=_latest_timestamp([row.get("time") for row in rows]),
+            source="db_fallback",
+        )
 
     try:
-        yahoo_rows = await _fetch_yahoo_market_indices()
-        required_codes = MARKET_INDEX_ORDER[: min(limit, len(MARKET_INDEX_ORDER))]
+        try:
+            yahoo_rows = await _await_market_provider(
+                ("indices", "yahoo"), _fetch_yahoo_market_indices, MARKET_YAHOO_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
+            yahoo_rows = []
         yahoo_codes = {
             code
             for code in (
@@ -2747,10 +2794,14 @@ async def get_market_indices(
 
         provider_rows: list[dict[str, Any]] = []
         if any(code not in yahoo_codes for code in required_codes):
-            indices = await asyncio.wait_for(
-                VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
-                timeout=30,
-            )
+            try:
+                indices = await _await_market_provider(
+                    ("indices", "vnstock"),
+                    lambda: VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
+                    MARKET_PROVIDER_TIMEOUT_SECONDS,
+                )
+            except TimeoutError as exc:
+                raise ProviderTimeoutError("vnstock", MARKET_PROVIDER_TIMEOUT_SECONDS) from exc
             provider_rows = [
                 item.model_dump(mode="json", by_alias=False)
                 if hasattr(item, "model_dump")

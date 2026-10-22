@@ -140,7 +140,7 @@ async def test_provider_history_admits_each_percent_cell(test_db, monkeypatch):
         return list(reversed(rows))
 
     monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", provider_rows)
-    ratios = await equity.get_ratio_history.__wrapped__(symbol="VNM", ratios="roe,pe", period="year", limit=20)
+    ratios = await equity.get_ratio_history.__wrapped__(symbol="VNM", ratios="roe,pe", period="year", limit=20, db=test_db)
     metrics = await equity.get_metrics_history.__wrapped__(
         symbol="VNM", days=30, metrics="roe,pe_ratio", period="year", db=test_db,
     )

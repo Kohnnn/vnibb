@@ -85,6 +85,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
   const activeSeries = SERIES.filter((series) => visibleSeries[series.key] !== false)
 
   useEffect(() => {
+    if (error && !hasData) return;
     onDataChange?.(buildWidgetRuntime({
       empty: !hasData,
       apiGroup: '/equity',
@@ -99,7 +100,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
         focusRecent,
       },
     }));
-  }, [activeSeries.length, dataUpdatedAt, focusRecent, hasData, isFallback, onDataChange, rows, rows.length, symbol]);
+  }, [activeSeries.length, dataUpdatedAt, error, focusRecent, hasData, isFallback, onDataChange, rows, rows.length, symbol]);
 
   const toggleSeries = (key: string) => {
     setVisibleSeries((current) => ({
@@ -175,6 +176,12 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
           </div>
         </div>
         <div className="flex-1 px-2 py-2">
+          {isFallback && (
+            <div role="alert" className="mb-2 text-[10px] text-amber-300">
+              {error?.message} Showing previously received ratio history.{' '}
+              <button type="button" onClick={() => refetch()}>Retry</button>
+            </div>
+          )}
           {isLoading && !hasData ? (
             <WidgetSkeleton variant="chart" />
           ) : error && !hasData ? (

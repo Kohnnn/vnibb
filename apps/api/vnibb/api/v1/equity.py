@@ -11,6 +11,7 @@ import unicodedata
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Literal, Optional
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -22,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.core.cache import build_cache_key, cached, redis_client
 from vnibb.core.config import settings
-from vnibb.core.database import get_db
+from vnibb.core.database import async_session_factory, get_db
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
 from vnibb.core.ratio_units import admitted_ratio_value
@@ -2277,6 +2278,7 @@ def _build_quote_from_screener_snapshot(
     snapshot_row: ScreenerSnapshot,
     latest_row: Optional[StockPrice] = None,
     previous_row: Optional[StockPrice] = None,
+    *, observation_clock: bool = False,
 ) -> Optional[StockQuoteData]:
     if snapshot_row.price is None:
         return None
@@ -2307,6 +2309,14 @@ def _build_quote_from_screener_snapshot(
         or getattr(snapshot_row, "created_at", None)
         or datetime.combine(snapshot_row.snapshot_date, datetime.min.time())
     )
+    if observation_clock:
+        snapshot_updated_at = (
+            _coerce_meta_datetime(getattr(snapshot_row, "trade_date", None))
+            or _coerce_meta_datetime(snapshot_metrics.get("trade_date"))
+            or datetime.combine(snapshot_row.snapshot_date, datetime.min.time())
+        )
+        if snapshot_updated_at.tzinfo is None:
+            snapshot_updated_at = snapshot_updated_at.replace(tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
     latest_row_is_current = bool(
         latest_row and latest.get("price_unit") == snapshot["price_unit"]
         and latest_row.time is not None and latest_row.time >= snapshot_row.snapshot_date
@@ -3944,7 +3954,7 @@ async def _enrich_missing_ratio_metrics(
 
 
 @router.get("/historical", response_model=StandardResponse[list[EquityHistoricalData]])
-@cached(key_prefix="historical_v5_source_lineage")
+@cached(key_prefix="historical_v6_stored_first")
 async def get_historical_prices(
     symbol: str = Query(..., min_length=1, max_length=10),
     start_date: date = Query(default_factory=lambda: date.today() - timedelta(days=365)),
@@ -3955,6 +3965,10 @@ async def get_historical_prices(
     db: AsyncSession = Depends(get_db),
 ):
     symbol_upper = symbol.upper()
+    release_read = (
+        isinstance(db, AsyncSession) and not db.in_transaction()
+        and not (db.new or db.dirty or db.deleted)
+    )
     cache_manager = CacheManager(db=db)
     corporate_actions = (
         await _load_corporate_actions_for_adjustment(
@@ -4004,6 +4018,20 @@ async def get_historical_prices(
         source_rows.append(("recent_cache", recent_cache_data))
         merged, _ = _merge_historical_rows(source_rows)
 
+    if not _historical_rows_cover_request(merged, start_date, end_date, interval):
+        fallback_data = await _load_historical_from_db(
+            db=db,
+            symbol=symbol_upper,
+            start_date=start_date,
+            end_date=end_date,
+            interval=interval,
+            adjustment_mode=adjustment_mode,
+        )
+        source_rows.append(("db", fallback_data))
+        merged, _ = _merge_historical_rows(source_rows)
+
+    if release_read and db.in_transaction():
+        await db.rollback()
     provider_error: Exception | None = None
     if not _historical_rows_cover_request(merged, start_date, end_date, interval):
         try:
@@ -4014,7 +4042,10 @@ async def get_historical_prices(
                 interval=interval,
                 source=source,
             )
-            provider_data = await VnstockEquityHistoricalFetcher.fetch(params)
+            provider_data = await asyncio.wait_for(
+                VnstockEquityHistoricalFetcher.fetch(params),
+                timeout=min(10, _provider_timeout_budget()),
+            )
             source_rows.append(
                 (
                     "provider",
@@ -4035,17 +4066,6 @@ async def get_historical_prices(
             )
         merged, _ = _merge_historical_rows(source_rows)
 
-    if not _historical_rows_cover_request(merged, start_date, end_date, interval):
-        fallback_data = await _load_historical_from_db(
-            db=db,
-            symbol=symbol_upper,
-            start_date=start_date,
-            end_date=end_date,
-            interval=interval,
-            adjustment_mode=adjustment_mode,
-        )
-        source_rows.append(("db", fallback_data))
-        merged, _ = _merge_historical_rows(source_rows)
 
     expected_unit = "index_points" if is_index_symbol(symbol_upper) else "VND"
     excluded_count = sum(row.price_unit != expected_unit for _, rows in source_rows for row in rows)
@@ -4092,6 +4112,101 @@ async def get_historical_prices(
 
 
 
+async def _load_quote_from_mongo(symbol_upper: str) -> StockQuoteData | None:
+    try:
+        mongo = get_mongo_market_data_service()
+        if not mongo.enabled:
+            return None
+        docs = await mongo.get_latest_eod_prices(symbol_upper, limit=2)
+    except Exception as error:
+        logger.warning("Quote Mongo fallback failed for %s: %s", symbol_upper, error)
+        return None
+    if not docs:
+        return None
+    latest = normalize_price_record(docs[-1], symbol=symbol_upper)
+    if latest["price_unit"] == "unknown":
+        return None
+    previous = normalize_price_record(docs[-2], symbol=symbol_upper) if len(docs) > 1 else None
+    if previous and previous["price_unit"] != latest["price_unit"]:
+        previous = None
+    close = _coerce_optional_float(latest.get("close"))
+    if close is None:
+        return None
+    prev_close = _coerce_optional_float(previous.get("close")) if previous else None
+    change = close - prev_close if prev_close is not None else None
+    return StockQuoteData(
+        symbol=symbol_upper, price_unit=latest["price_unit"], price=close,
+        open=_coerce_optional_float(latest.get("open")),
+        high=_coerce_optional_float(latest.get("high")),
+        low=_coerce_optional_float(latest.get("low")), prev_close=prev_close, change=change,
+        change_pct=round(change / prev_close * 100, 2) if change is not None and prev_close else None,
+        volume=_coerce_optional_int(latest.get("volume")),
+        updated_at=_coerce_meta_datetime(latest.get("tradeDate")),
+    )
+
+
+async def _load_quote_from_database(
+    db: AsyncSession, symbol_upper: str, *, observation_clock: bool = False
+) -> StockQuoteData | None:
+    price_rows = (await db.execute(
+        select(StockPrice).where(StockPrice.symbol == symbol_upper)
+        .order_by(StockPrice.time.desc()).limit(2)
+    )).scalars().all()
+    snapshot = (await db.execute(
+        select(ScreenerSnapshot).where(ScreenerSnapshot.symbol == symbol_upper)
+        .order_by(ScreenerSnapshot.snapshot_date.desc()).limit(1)
+    )).scalar_one_or_none()
+    latest_row = price_rows[0] if price_rows else None
+    previous_row = price_rows[1] if len(price_rows) > 1 else None
+    latest = persisted_price_record(latest_row) if latest_row else {}
+    previous = persisted_price_record(previous_row) if previous_row else {}
+    close = latest.get("close") if latest.get("price_unit") in {"VND", "index_points"} else None
+    prev_close = previous.get("close") if close is not None and previous.get("price_unit") == latest.get("price_unit") else None
+    if (snapshot is not None and snapshot.price is not None and snapshot.snapshot_date is not None
+            and (latest_row is None or latest_row.time is None or snapshot.snapshot_date > latest_row.time)):
+        quote = _build_quote_from_screener_snapshot(
+            snapshot, latest_row, previous_row, observation_clock=observation_clock
+        )
+        if quote is not None:
+            return quote
+    if latest_row is not None and close is not None:
+        change = close - prev_close if prev_close is not None else None
+        return StockQuoteData(
+            symbol=symbol_upper, price_unit=latest["price_unit"], price=close,
+            open=latest.get("open"), high=latest.get("high"), low=latest.get("low"),
+            prev_close=prev_close, change=change,
+            change_pct=round(change / prev_close * 100, 2) if change is not None and prev_close else None,
+            volume=int(latest_row.volume) if latest_row.volume is not None else None,
+            updated_at=datetime.combine(latest_row.time, datetime.min.time()) if latest_row.time else None,
+        )
+    return (_build_quote_from_screener_snapshot(snapshot, observation_clock=observation_clock)
+            if snapshot is not None and snapshot.price is not None else None)
+
+
+async def _load_stored_quote(symbol: str) -> tuple[StockQuoteData | None, str | None]:
+    symbol = symbol.strip().upper()
+    if is_index_symbol(symbol):
+        return None, None
+    cached_quote = await _load_quote_from_price_cache(symbol)
+    if cached_quote is not None and cached_quote.price_unit == "VND":
+        return cached_quote, "redis:price_snapshot"
+    try:
+        async with async_session_factory() as db:
+            try:
+                quote = await _load_quote_from_database(db, symbol, observation_clock=True)
+            except Exception:
+                await db.rollback()
+                raise
+        if quote is not None and quote.price_unit == "VND":
+            return quote, "postgres:stored_quote"
+    except Exception as error:
+        logger.warning("Stored quote SQL read failed for %s: %s", symbol, error)
+    quote = await _load_quote_from_mongo(symbol)
+    if quote is not None and quote.price_unit == "VND":
+        return quote, "mongo:market_prices_eod"
+    return None, None
+
+
 @router.get("/{symbol}/quote", response_model=StandardResponse[Optional[StockQuoteData]])
 @cached(ttl=30, key_prefix="quote_v2_vnd")
 async def get_quote(
@@ -4110,143 +4225,12 @@ async def get_quote(
         )
 
 
-    async def _get_mongo_quote() -> StockQuoteData | None:
-        """Build a quote from the canonical Mongo `market_prices_eod` corpus.
-
-        Mongo only carries settled EOD bars, so this is used as a fallback when
-        Postgres `StockPrice` is empty/unavailable and as a last resort before
-        returning an unavailable quote. The caller decides freshness; this
-        returns the latest two-bar-derived quote if Mongo has data.
-        """
+    async def _get_db_quote() -> StockQuoteData | None:
         try:
-            mongo = get_mongo_market_data_service()
-            if not mongo.enabled:
-                return None
-            docs = await mongo.get_latest_eod_prices(symbol_upper, limit=2)
-        except Exception as mongo_err:  # pragma: no cover - defensive
-            logger.warning("Quote Mongo fallback failed for %s: %s", symbol_upper, mongo_err)
+            return await _load_quote_from_database(db, symbol_upper)
+        except Exception as error:
+            logger.warning("Quote DB fallback failed for %s: %s", symbol_upper, error)
             return None
-
-        if not docs:
-            return None
-
-        # get_eod_prices sorts ascending by tradeDate, so the last element is newest.
-        latest = normalize_price_record(docs[-1], symbol=symbol_upper)
-        if latest["price_unit"] == "unknown":
-            return None
-        previous = normalize_price_record(docs[-2], symbol=symbol_upper) if len(docs) > 1 else None
-        if previous and previous["price_unit"] != latest["price_unit"]:
-            previous = None
-        latest_close = _coerce_optional_float(latest.get("close"))
-        if latest_close is None:
-            return None
-        prev_close = _coerce_optional_float(previous.get("close")) if previous else None
-        change = (
-            latest_close - prev_close
-            if latest_close is not None and prev_close is not None
-            else None
-        )
-        change_pct = (
-            (change / prev_close) * 100
-            if change is not None and prev_close not in (None, 0)
-            else None
-        )
-        trade_date = latest.get("tradeDate")
-        updated_at = _coerce_meta_datetime(trade_date)
-        return StockQuoteData(
-            symbol=symbol_upper,
-            price_unit=latest["price_unit"],
-            price=latest_close,
-            open=_coerce_optional_float(latest.get("open")),
-            high=_coerce_optional_float(latest.get("high")),
-            low=_coerce_optional_float(latest.get("low")),
-            prev_close=prev_close,
-            change=change,
-            change_pct=round(change_pct, 2) if change_pct is not None else None,
-            volume=_coerce_optional_int(latest.get("volume")),
-            updated_at=updated_at,
-        )
-
-    async def _get_db_quote() -> Optional[StockQuoteData]:
-        try:
-            price_stmt = (
-                select(StockPrice)
-                .where(StockPrice.symbol == symbol_upper)
-                .order_by(StockPrice.time.desc())
-                .limit(2)
-            )
-            price_rows = (await db.execute(price_stmt)).scalars().all()
-
-            snapshot_stmt = (
-                select(ScreenerSnapshot)
-                .where(ScreenerSnapshot.symbol == symbol_upper)
-                .order_by(ScreenerSnapshot.snapshot_date.desc())
-                .limit(1)
-            )
-            snapshot_row = (await db.execute(snapshot_stmt)).scalar_one_or_none()
-
-            latest_row = price_rows[0] if price_rows else None
-            previous_row = price_rows[1] if len(price_rows) > 1 else None
-            latest = persisted_price_record(latest_row) if latest_row else {}
-            previous = persisted_price_record(previous_row) if previous_row else {}
-
-            latest_close = (
-                latest.get("close") if latest.get("price_unit") in {"VND", "index_points"} else None
-            )
-            prev_close = (
-                previous.get("close")
-                if previous.get("price_unit") == latest.get("price_unit") and latest_close is not None
-                else None
-            )
-            db_change = (
-                latest_close - prev_close
-                if latest_close is not None and prev_close is not None
-                else None
-            )
-            db_change_pct = (
-                (db_change / prev_close) * 100
-                if db_change is not None and prev_close not in (None, 0)
-                else None
-            )
-
-            latest_price_date = latest_row.time if latest_row else None
-            snapshot_date = snapshot_row.snapshot_date if snapshot_row else None
-            snapshot_is_fresher = bool(
-                snapshot_row
-                and snapshot_row.price is not None
-                and snapshot_date is not None
-                and (latest_price_date is None or snapshot_date > latest_price_date)
-            )
-
-            if snapshot_is_fresher and snapshot_row and snapshot_row.price is not None:
-                snapshot_quote = _build_quote_from_screener_snapshot(snapshot_row, latest_row, previous_row)
-                if snapshot_quote is not None:
-                    return snapshot_quote
-
-            if latest_row and latest_close is not None:
-                return StockQuoteData(
-                    symbol=symbol_upper,
-                    price_unit=latest["price_unit"],
-                    price=latest_close,
-                    open=latest.get("open"),
-                    high=latest.get("high"),
-                    low=latest.get("low"),
-                    prev_close=prev_close,
-                    change=db_change,
-                    change_pct=round(db_change_pct, 2) if db_change_pct is not None else None,
-                    volume=int(latest_row.volume) if latest_row.volume is not None else None,
-                    updated_at=(
-                        datetime.combine(latest_row.time, datetime.min.time())
-                        if latest_row.time
-                        else None
-                    ),
-                )
-
-            if snapshot_row and snapshot_row.price is not None:
-                return _build_quote_from_screener_snapshot(snapshot_row)
-        except Exception as db_err:
-            logger.warning(f"Quote DB fallback failed for {symbol_upper}: {db_err}")
-        return None
 
     screener_snapshot_quote: Optional[StockQuoteData] = None
 
@@ -4269,7 +4253,7 @@ async def get_quote(
         # symbol (e.g. outside the curated/active universe). Settled bars only,
         # so it sits below the Postgres/intraday path but above live vnstock,
         # which can time out and blank the quote widgets.
-        mongo_quote = await _get_mongo_quote()
+        mongo_quote = await _load_quote_from_mongo(symbol_upper)
         if mongo_quote:
             return StandardResponse(data=mongo_quote, meta=MetaData(count=1))
 
@@ -4294,7 +4278,7 @@ async def get_quote(
                 error="Live quote unavailable; showing stored price.",
             )
 
-        mongo_fallback = await _get_mongo_quote()
+        mongo_fallback = await _load_quote_from_mongo(symbol_upper)
         if mongo_fallback:
             return StandardResponse(
                 data=mongo_fallback,
@@ -5264,12 +5248,7 @@ def _build_event_row_from_db(item: CompanyEvent) -> dict[str, Any]:
 async def _load_company_events_fallback(
     db: AsyncSession, symbol: str, limit: int
 ) -> List[dict[str, Any]]:
-    """DB-backed fallback when the live provider returns nothing.
-
-    Reads from `company_events` and, if still empty, synthesises rows from
-    `dividends` so the Events Calendar widget never blocks empty when the
-    Corporate Actions panel has data.
-    """
+    """Read persisted events, using dividends when no event rows exist."""
     rows: List[dict[str, Any]] = []
     events = (
         (
@@ -5328,46 +5307,44 @@ async def _load_company_events_fallback(
 
 
 @router.get("/{symbol}/events", response_model=StandardResponse[List[Any]])
-@cached(ttl=3600, key_prefix="company_events_v28")
+@cached(ttl=3600, key_prefix="company_events_v29_stored_first")
 async def get_company_events(
     symbol: str,
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     symbol_upper = symbol.upper()
-    provider_error: Optional[str] = None
+    release_read = (
+        isinstance(db, AsyncSession) and not db.in_transaction()
+        and not (db.new or db.dirty or db.deleted)
+    )
     try:
-        data = await VnstockCompanyEventsFetcher.fetch(
-            CompanyEventsQueryParams(symbol=symbol_upper, limit=limit)
-        )
-        if data:
-            return StandardResponse(data=data, meta=MetaData(count=len(data)))
-
-        # Provider returned empty (success path) — fall through to the DB
-        # fallback so the Events Calendar widget never blanks out when
-        # stored corporate-action rows already exist for the symbol.
-        # (QA-v2 F6)
-    except Exception as e:
-        provider_error = str(e)
-        logger.warning(
-            "Company events provider failed (symbol=%s): %s", symbol_upper, e
-        )
-
-    # DB fallback — runs whether the provider raised OR returned empty.
-    try:
-        fallback_rows = await _load_company_events_fallback(
+        stored_rows = await _load_company_events_fallback(
             db=db, symbol=symbol_upper, limit=limit
         )
-        if fallback_rows:
-            return StandardResponse(
-                data=fallback_rows, meta=MetaData(count=len(fallback_rows))
-            )
-    except Exception as fb_err:  # pragma: no cover - defensive
-        logger.warning(
-            "Company events fallback failed (symbol=%s): %s", symbol_upper, fb_err
-        )
+    except Exception as exc:
+        if not release_read:
+            raise
+        logger.warning("Stored company events unavailable for %s: %s", symbol_upper, exc)
+        stored_rows = []
+    finally:
+        if release_read and db.in_transaction():
+            await db.rollback()
+    if stored_rows:
+        return StandardResponse(data=stored_rows, meta=MetaData(count=len(stored_rows)))
 
-    return StandardResponse(data=[], error=provider_error)
+    try:
+        data = await asyncio.wait_for(
+            VnstockCompanyEventsFetcher.fetch(
+                CompanyEventsQueryParams(symbol=symbol_upper, limit=limit)
+            ),
+            timeout=min(10, _provider_timeout_budget()),
+        )
+        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+    except Exception as exc:
+        error = "Company events provider deadline exceeded" if isinstance(exc, TimeoutError) else str(exc)
+        logger.warning("Company events provider failed (symbol=%s): %s", symbol_upper, error)
+        return StandardResponse(data=[], error=error)
 
 
 @router.get("/{symbol}/calendar", response_model=StandardResponse[dict[str, Any]])
@@ -6507,31 +6484,54 @@ async def get_financial_ratios(
 
 
 @router.get("/{symbol}/ratios/history", response_model=StandardResponse[List[dict[str, Any]]])
-@cached(ttl=86400, key_prefix="ratios_history_v4_explicit_units")
+@cached(ttl=86400, key_prefix="ratios_history_v5_stored_fiscal")
 async def get_ratio_history(
     symbol: str,
     ratios: str = Query("pe,pb,ps", description="Comma-separated ratio keys"),
     period: Literal["year", "quarter"] = Query("year"),
     limit: int = Query(20, ge=1, le=60),
+    db: AsyncSession = Depends(get_db),
 ):
     ratio_list = [r.strip() for r in ratios.split(",") if r.strip()]
     if not ratio_list:
         ratio_list = ["pe", "pb", "ps"]
 
-    def period_sort_key(value: str) -> int:
-        if not value:
-            return 0
-        upper = value.upper()
-        year_match = re.search(r"(20\d{2})", upper)
-        year = int(year_match.group(1)) if year_match else 0
-        quarter_match = re.search(r"Q([1-4])", upper)
-        quarter = int(quarter_match.group(1)) if quarter_match else 0
-        return year * 10 + quarter
-
     try:
-        data = await VnstockFinancialRatiosFetcher.fetch(
-            FinancialRatiosQueryParams(symbol=symbol, period=period)
+        data = await _load_mongo_financial_ratio_rows(symbol.upper(), period, limit=limit)
+    except Exception as exc:
+        logger.warning("Stored Mongo ratio history unavailable for %s: %s", symbol.upper(), exc)
+        data = []
+    if not data:
+        release_read = (
+            not db.in_transaction() and not (db.new or db.dirty or db.deleted)
         )
+        try:
+            stored = (await db.execute(
+                select(FinancialRatio)
+                .where(FinancialRatio.symbol == symbol.upper(), FinancialRatio.period_type == period)
+                .order_by(desc(FinancialRatio.fiscal_year), desc(FinancialRatio.fiscal_quarter))
+                .limit(limit)
+            )).scalars().all()
+            data = _filter_ratio_rows_for_period(
+                _dedupe_ratio_rows([_to_ratio_data(item) for item in stored]), period
+            )
+        except Exception as exc:
+            if not release_read:
+                raise
+            logger.warning("Stored SQL ratio history unavailable for %s: %s", symbol.upper(), exc)
+        finally:
+            if release_read and db.in_transaction():
+                await db.rollback()
+    try:
+        if not data:
+            data = await asyncio.wait_for(
+                VnstockFinancialRatiosFetcher.fetch(
+                    FinancialRatiosQueryParams(symbol=symbol.upper(), period=period)
+                ),
+                timeout=min(10, _provider_timeout_budget()),
+            )
+        if not data:
+            return StandardResponse(data=[], error="Financial ratio history unavailable")
         rows: List[dict[str, Any]] = []
         for item in data:
             row: dict[str, Any] = {"period": item.period or ""}
@@ -6539,10 +6539,11 @@ async def get_ratio_history(
                 row[key] = admitted_ratio_value(getattr(item, key, None), key, ratio_units=getattr(item, "ratio_units", None))
             rows.append(row)
 
-        rows = sorted(rows, key=lambda r: period_sort_key(str(r.get("period", ""))))
+        rows = sorted(rows, key=lambda r: _ratio_period_sort_key(str(r.get("period", ""))))
         return StandardResponse(data=rows[:limit], meta=MetaData(count=min(len(rows), limit)))
-    except Exception as e:
-        return StandardResponse(data=[], error=str(e))
+    except Exception as exc:
+        error = "Financial ratio history provider deadline exceeded" if isinstance(exc, TimeoutError) else str(exc)
+        return StandardResponse(data=[], error=error)
 
 
 @router.get("/{symbol}/metrics/history", response_model=MetricsHistoryResponse)
@@ -6854,7 +6855,7 @@ async def get_cash_flow(
 
 
 @router.get("/{symbol}/dividends", response_model=StandardResponse[List[Any]])
-@cached(ttl=86400, key_prefix="dividends")
+@cached(ttl=86400, key_prefix="dividends_v2_stored_first")
 async def get_dividends(
     symbol: str,
     limit: int = Query(50, ge=1, le=200),
@@ -6863,20 +6864,13 @@ async def get_dividends(
     try:
         symbol_upper = symbol.upper()
         provider_error: str | None = None
-        try:
-            raw_items = await VnstockDividendsFetcher.fetch(symbol=symbol_upper)
-        except Exception as exc:
-            provider_error = f"VCI dividends unavailable: {exc}"
-            logger.warning("Dividends provider failed for %s: %s", symbol_upper, exc)
-            raw_items = []
+        release_read = (
+            isinstance(db, AsyncSession) and not db.in_transaction()
+            and not (db.new or db.dirty or db.deleted)
+        )
         latest_price = await _get_latest_price(db, symbol_upper)
 
         rows: list[dict[str, Any]] = []
-        for item in raw_items:
-            payload = item.model_dump(mode="json", by_alias=False)
-            row = _build_dividend_row_from_payload(symbol_upper, payload)
-            if row:
-                rows.append(row)
 
         if not rows:
             fallback_dividends = (
@@ -6945,6 +6939,24 @@ async def get_dividends(
                 )
                 if row:
                     rows.append(row)
+
+        if release_read and db.in_transaction():
+            await db.rollback()
+        if not rows:
+            try:
+                raw_items = await asyncio.wait_for(
+                    VnstockDividendsFetcher.fetch(symbol=symbol_upper),
+                    timeout=min(10, _provider_timeout_budget()),
+                )
+                for item in raw_items:
+                    payload = item.model_dump(mode="json", by_alias=False)
+                    row = _build_dividend_row_from_payload(symbol_upper, payload)
+                    if row:
+                        rows.append(row)
+            except Exception as exc:
+                reason = "provider deadline exceeded" if isinstance(exc, TimeoutError) else str(exc)
+                provider_error = f"VCI dividends unavailable: {reason}"
+                logger.warning("Dividends provider failed for %s: %s", symbol_upper, reason)
 
         rows.sort(
             key=lambda row: row.get("ex_date")

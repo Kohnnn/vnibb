@@ -41,6 +41,7 @@ logging.getLogger("vnstock.core.utils.field.mapper").setLevel(logging.WARNING)
 
 # Shared thread pool for parallel fetching across requests
 _executor = ThreadPoolExecutor(max_workers=12)
+_screener_jobs: dict[tuple, asyncio.Future] = {}
 
 
 def _is_rate_limit_error(error: Exception) -> bool:
@@ -780,10 +781,8 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                     return None
 
                 results = []
-                # Use shared executor to avoid blocking on shutdown
-                max_workers = min(len(symbols), 20)
 
-                from concurrent.futures import as_completed, TimeoutError
+                from concurrent.futures import as_completed, wait, TimeoutError
 
                 future_to_symbol = {_executor.submit(_fetch_single_stock, s): s for s in symbols}
                 try:
@@ -802,6 +801,9 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                                 break
                 except TimeoutError:
                     logger.warning(f"Parallel screener fetch timed out after {batch_timeout}s")
+                finally:
+                    running = [future for future in future_to_symbol if not future.cancel()]
+                    wait(running)
 
                 logger.info("Fetched ratio data for %d/%d stocks", len(results), len(symbols))
                 return results
@@ -822,12 +824,23 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                     details={"query": query},
                 )
 
+        key = tuple(sorted(query.items()))
+        future = _screener_jobs.get(key)
+        if future is None:
+            if len(_screener_jobs) >= 12:
+                raise ProviderError(message="Screener acquisition capacity reached", provider="vnstock")
+            future = loop.run_in_executor(_executor, _fetch_sync)
+            _screener_jobs[key] = future
+
+            def finished(done):
+                if _screener_jobs.get(key) is done:
+                    _screener_jobs.pop(key, None)
+                if not done.cancelled():
+                    done.exception()
+
+            future.add_done_callback(finished)
         try:
-            # Use shared executor to avoid "Executor shutdown" errors and blocking on timeout
-            return await asyncio.wait_for(
-                loop.run_in_executor(_executor, _fetch_sync),
-                timeout=settings.vnstock_timeout,
-            )
+            return await asyncio.wait_for(asyncio.shield(future), timeout=settings.vnstock_timeout)
         except asyncio.TimeoutError:
             raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
 

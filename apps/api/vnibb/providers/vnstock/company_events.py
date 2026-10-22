@@ -17,6 +17,7 @@ from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.providers.vnstock.reference_fields import identity, supplied
+from vnibb.providers.vnstock.runtime import run_reference_provider
 
 logger = logging.getLogger(__name__)
 RATIO_PATTERN = re.compile(r"(\d+(?:[\.,]\d+)?)\s*[:/]\s*(\d+(?:[\.,]\d+)?)")
@@ -189,7 +190,6 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
         credentials: Optional[dict[str, str]] = None,
     ) -> List[dict[str, Any]]:
         """Fetch company events from vnstock."""
-        loop = asyncio.get_event_loop()
 
         def _fetch_sync() -> List[dict]:
             try:
@@ -260,9 +260,9 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                 )
 
         try:
-            data = await asyncio.wait_for(
-                loop.run_in_executor(None, _fetch_sync),
-                timeout=settings.vnstock_timeout,
+            data = await run_reference_provider(
+                _fetch_sync, settings.vnstock_timeout,
+                key=("company_events", settings.vnstock_source, tuple(sorted(query.items()))),
             )
 
             if data:
