@@ -7,7 +7,7 @@ from typing import Any
 
 PERCENT_RATIO_FIELDS = frozenset({
     "roe", "roa", "roic", "gross_margin", "net_margin", "operating_margin",
-    "revenue_growth", "earnings_growth", "debt_assets", "dividend_yield",
+    "revenue_growth", "earnings_growth", "debt_assets", "dividend_yield", "payout_ratio",
 })
 _ALIASES = {
     "roe": {"roe"}, "roa": {"roa"}, "roic": {"roic"},
@@ -18,6 +18,7 @@ _ALIASES = {
     "earnings_growth": {"earnings_growth", "earningsgrowth", "net_profit_growth", "netprofitgrowth"},
     "debt_assets": {"debt_assets", "debt_to_assets", "debt_to_asset", "debt_on_assets", "debt_on_asset", "debtonassets", "debtonasset", "debtassets", "debttoassets", "debttoasset"},
     "dividend_yield": {"dividend_yield", "dividendyield", "dividend"},
+    "payout_ratio": {"payout_ratio", "payoutratio", "dividend_payout_ratio", "dividendpayoutratio", "dividend_payout", "dividendpayout"},
 }
 
 def admitted_ratio_value(

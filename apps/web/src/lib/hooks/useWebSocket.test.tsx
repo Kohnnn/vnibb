@@ -34,12 +34,17 @@ class MockWebSocket {
     }
 }
 
+const admittedPrice = (symbol: string, price: number) => ({
+    symbol, price, price_unit: 'VND', source: 'fixture',
+    as_of: '2026-10-22T10:00:00+07:00', stale: false,
+});
+
 function WebSocketHarness({ symbols, onUpdate }: { symbols: string[]; onUpdate?: (price: number) => void }) {
-    const { isConnected, prices } = useWebSocket({
+    const { isConnected, isReceiving, protocolError, prices } = useWebSocket({
         symbols,
         onUpdate: (update) => onUpdate?.(update.price),
     });
-    return <output>{`${isConnected}:${prices.get(symbols[0])?.price ?? 'none'}`}</output>;
+    return <><output>{`${isConnected}:${prices.get(symbols[0])?.price ?? 'none'}`}</output><output>{`${isReceiving}:${protocolError ?? 'ok'}`}</output></>;
 }
 
 function exhaustReconnects() {
@@ -72,7 +77,7 @@ describe('useWebSocket recovery', () => {
 
         act(() => socket.open());
         rerender(<WebSocketHarness symbols={['VCI']} onUpdate={second} />);
-        act(() => socket.message({ symbol: 'VCI', price: 42 }));
+        act(() => socket.message(admittedPrice('VCI', 42)));
 
         expect(MockWebSocket.instances).toHaveLength(1);
         expect(first).not.toHaveBeenCalled();
@@ -87,6 +92,7 @@ describe('useWebSocket recovery', () => {
         rerender(<WebSocketHarness symbols={['HPG', 'FPT']} />);
 
         expect(MockWebSocket.instances).toHaveLength(1);
+        expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ action: 'unsubscribe', symbols: ['VCI'] }));
         expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ action: 'subscribe', symbols: ['HPG', 'FPT'] }));
     });
 
@@ -96,7 +102,7 @@ describe('useWebSocket recovery', () => {
 
         act(() => {
             socket.open();
-            socket.message({ symbol: 'VCI', price: 42 });
+            socket.message(admittedPrice('VCI', 42));
             socket.close();
         });
 
@@ -146,5 +152,18 @@ describe('useWebSocket recovery', () => {
 
         expect(socket.close).toHaveBeenCalledTimes(1);
         expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it('degrades rejected and stalled sockets without treating transport as delivery', () => {
+        render(<WebSocketHarness symbols={['VCI']} />);
+        const socket = MockWebSocket.instances[0];
+        act(() => socket.open());
+        expect(screen.getByText('false:ok')).toBeInTheDocument();
+        act(() => socket.message({ type: 'error', error: 'subscription_limit' }));
+        expect(screen.getByText('false:subscription_limit')).toBeInTheDocument();
+        act(() => socket.message(admittedPrice('VCI', 42)));
+        expect(screen.getByText('true:ok')).toBeInTheDocument();
+        act(() => jest.advanceTimersByTime(20_000));
+        expect(screen.getByText('false:ok')).toBeInTheDocument();
     });
 });

@@ -9,7 +9,7 @@ jest.mock('@/lib/queries', () => ({
 }));
 
 jest.mock('@/components/ui/WidgetContainer', () => ({
-  WidgetContainer: ({ children, headerActions }: { children: React.ReactNode; headerActions?: React.ReactNode }) => <div>{headerActions}{children}</div>,
+  WidgetContainer: ({ children, headerActions, exportData }: { children: React.ReactNode; headerActions?: React.ReactNode; exportData?: unknown }) => <div>{headerActions}{children}<output data-testid="financial-export">{JSON.stringify(exportData)}</output></div>,
 }));
 
 jest.mock('@/components/ui/WidgetMeta', () => ({
@@ -147,6 +147,31 @@ describe('FinancialRatiosWidget period columns', () => {
     mockUseIncomeStatement.mockReturnValue(queryResult(undefined));
     renderWidget();
     expect(screen.queryByText('Dividend Yield')).not.toBeInTheDocument();
+    expect(screen.queryByText('25.00%')).not.toBeInTheDocument();
+  });
+
+  test.each([
+    ['percent', 0.25, '0.25%'],
+    ['percent', 0, '0.00%'],
+    ['percent', 632.57, '632.57%'],
+    ['fraction', 0.25, null],
+    ['unknown', 0.25, null],
+    [undefined, 0.25, null],
+  ])('admits payout only as canonical percent (%s, %s)', (unit, value, expected) => {
+    mockUseFinancialRatios.mockReturnValue(queryResult({ data: [{ period: '2025', pe: 14.64,
+      payout_ratio: value, ratio_units: unit === undefined ? {} : { payout_ratio: unit } }] }));
+    mockUseIncomeStatement.mockReturnValue(queryResult(undefined));
+    const onDataChange = jest.fn();
+    renderWidget(onDataChange);
+    if (expected === null) {
+      expect(screen.queryByText('Payout Ratio')).not.toBeInTheDocument();
+      expect(JSON.parse(screen.getByTestId('financial-export').textContent!)[0].payout_ratio).toBeNull();
+      expect(onDataChange.mock.calls.at(-1)?.[0].data[0].payout_ratio).toBeNull();
+    } else {
+      expect(rowValues(screen.getByText('Payout Ratio'))).toContain(expected);
+      expect(JSON.parse(screen.getByTestId('financial-export').textContent!)[0].payout_ratio).toBe(value);
+      expect(onDataChange.mock.calls.at(-1)?.[0].data[0].payout_ratio).toBe(value);
+    }
     expect(screen.queryByText('25.00%')).not.toBeInTheDocument();
   });
 

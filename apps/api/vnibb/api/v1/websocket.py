@@ -17,7 +17,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from vnibb.api.v1.market import _fetch_yahoo_market_indices, _merge_market_index_rows
 from vnibb.core.config import settings
-from vnibb.providers.vnstock.equity_screener import StockScreenerParams, VnstockScreenerFetcher
+from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
 from vnibb.providers.vnstock.market_overview import (
     MarketOverviewQueryParams,
     VnstockMarketOverviewFetcher,
@@ -181,15 +181,20 @@ async def _fetch_index_updates(index_codes: set[str]) -> list[PriceUpdate]:
             if price in (None, 0.0):
                 continue
 
-            timestamp = row.get("time") or row.get("updated_at") or datetime.now(VN_TZ).isoformat()
+            timestamp = row.get("time") or row.get("updated_at")
+            if not timestamp:
+                continue
             updates.append(
                 PriceUpdate(
                     symbol=symbol,
                     price=price,
-                    change=_to_float(row.get("change")) or 0.0,
-                    change_pct=_to_float(row.get("change_pct")) or 0.0,
+                    change=_to_float(row.get("change")),
+                    change_pct=_to_float(row.get("change_pct")),
                     volume=_to_int(row.get("volume")),
                     timestamp=str(timestamp),
+                    price_unit="index_points",
+                    source=str(row.get("source") or f"vnstock:{settings.vnstock_source}:market_overview"),
+                    timestamp_timezone="UTC" if row.get("source") == "yahoo_finance" else "Asia/Ho_Chi_Minh",
                 )
             )
 
@@ -201,30 +206,40 @@ async def _fetch_index_updates(index_codes: set[str]) -> list[PriceUpdate]:
         return []
 
 
+_equity_jobs: dict[str, asyncio.Task] = {}
+_equity_slots: asyncio.Semaphore | None = None
+_index_job: asyncio.Task | None = None
+
+
 async def _fetch_and_broadcast_equity(symbol: str, semaphore: asyncio.Semaphore):
     async with semaphore:
         try:
-            params = StockScreenerParams(symbol=symbol, limit=1, source=settings.vnstock_source)
-            results = await VnstockScreenerFetcher.fetch(params)
-            if not results:
+            stock, _ = await VnstockStockQuoteFetcher.fetch(symbol, settings.vnstock_source)
+            if stock.price is None or stock.price_unit != "VND" or stock.updated_at is None:
                 return
-            stock = results[0]
             await manager.broadcast_price(
                 symbol,
                 PriceUpdate(
                     symbol=symbol,
-                    price=float(stock.price) if stock.price else 0.0,
-                    change=0.0,
-                    change_pct=0.0,
-                    volume=int(stock.volume) if stock.volume else 0,
-                    timestamp=datetime.now(VN_TZ).isoformat(),
+                    price=stock.price,
+                    change=stock.change,
+                    change_pct=stock.change_pct,
+                    volume=stock.volume,
+                    timestamp=stock.updated_at.isoformat(),
+                    price_unit=stock.price_unit,
+                    source=f"vnstock:{settings.vnstock_source}:quote.history",
                 ),
                 settings.websocket_send_timeout_seconds,
             )
-        except BaseException as e:
-            if isinstance(e, (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError)):
-                raise
-            logger.debug("Price fetch failed for %s: %s", symbol, e)
+        except Exception as error:
+            logger.debug("Price fetch failed for %s: %s", symbol, error)
+
+
+def _finish_equity_job(symbol: str, task: asyncio.Task):
+    if _equity_jobs.get(symbol) is task:
+        del _equity_jobs[symbol]
+    if not task.cancelled():
+        task.exception()
 
 
 async def _fetch_and_broadcast_cycle(symbols: set[str], market_open: bool):
@@ -235,8 +250,20 @@ async def _fetch_and_broadcast_cycle(symbols: set[str], market_open: bool):
     }
     equity_symbols = {symbol for symbol in symbols if _normalize_index_symbol(symbol) is None}
 
+    if market_open and equity_symbols:
+        global _equity_slots
+        if _equity_slots is None:
+            _equity_slots = asyncio.Semaphore(settings.websocket_fetch_concurrency)
+        for symbol in equity_symbols:
+            if symbol not in _equity_jobs and len(_equity_jobs) < settings.websocket_max_active_symbols:
+                task = asyncio.create_task(_fetch_and_broadcast_equity(symbol, _equity_slots))
+                _equity_jobs[symbol] = task
+                task.add_done_callback(lambda done, code=symbol: _finish_equity_job(code, done))
     if market_open and index_symbols:
-        index_updates = await _fetch_index_updates(index_symbols)
+        global _index_job
+        if _index_job is None or _index_job.done():
+            _index_job = asyncio.create_task(_fetch_index_updates(index_symbols))
+        index_updates = await asyncio.shield(_index_job)
         for update in index_updates:
             for subscribed_symbol in symbols:
                 if _normalize_index_symbol(subscribed_symbol) == update.symbol:
@@ -249,15 +276,17 @@ async def _fetch_and_broadcast_cycle(symbols: set[str], market_open: bool):
                             change_pct=update.change_pct,
                             volume=update.volume,
                             timestamp=update.timestamp,
+                            price_unit=update.price_unit,
+                            source=update.source,
+                            timestamp_timezone=update.timestamp_timezone,
                         ),
                         settings.websocket_send_timeout_seconds,
                     )
 
     if market_open and equity_symbols:
-        semaphore = asyncio.Semaphore(settings.websocket_fetch_concurrency)
-        await asyncio.gather(
-            *(_fetch_and_broadcast_equity(symbol, semaphore) for symbol in equity_symbols)
-        )
+        # Cycle deadlines must not release slots while synchronous provider work is still running.
+        await asyncio.gather(*(asyncio.shield(_equity_jobs[symbol]) for symbol in equity_symbols
+                               if symbol in _equity_jobs))
 
 
 async def _run_price_cycle(symbols: set[str], market_open: bool):
@@ -274,19 +303,28 @@ async def _run_price_cycle(symbols: set[str], market_open: bool):
 
 
 async def fetch_and_broadcast_prices():
-    """Background task to fetch and broadcast prices."""
+    """Poll once per subscribed symbol and publish session transitions."""
+    last_phase = None
     while True:
         try:
-            if manager.active_connection_count() == 0 or manager.total_subscription_count() == 0:
-                await asyncio.sleep(IDLE_SLEEP_SECONDS)
-                continue
-            market_open = is_market_open()
-            await _run_price_cycle(manager.get_all_subscribed_symbols(), market_open)
-            await asyncio.sleep(ACTIVE_MARKET_SLEEP_SECONDS if market_open else IDLE_SLEEP_SECONDS)
-        except BaseException as e:
-            if isinstance(e, (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError)):
-                raise
-            logger.error(f"Price broadcast error: {e}")
+            manager.subscriptions_changed.clear()
+            status = get_market_status()
+            if manager.active_connection_count() and status["phase"] != last_phase:
+                await manager._broadcast(list(manager.active_connections),
+                                         {"type": "market_status", **status},
+                                         settings.websocket_send_timeout_seconds)
+            last_phase = status["phase"]
+            if manager.total_subscription_count():
+                await _run_price_cycle(manager.get_all_subscribed_symbols(), status["is_open"])
+            delay = ACTIVE_MARKET_SLEEP_SECONDS if status["is_open"] else IDLE_SLEEP_SECONDS
+            try:
+                await asyncio.wait_for(manager.subscriptions_changed.wait(), timeout=delay)
+            except TimeoutError:
+                pass
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.error("Price broadcast error: %s", error)
             await asyncio.sleep(ACTIVE_MARKET_SLEEP_SECONDS)
 
 
@@ -332,13 +370,13 @@ async def websocket_prices(websocket: WebSocket):
 
             if action == "subscribe":
                 if invalid_symbols:
-                    await websocket.send_json(
+                    await manager.send_json(websocket,
                         {
                             "type": "error",
                             "error": "invalid_symbols",
                             "message": "Symbols must be valid stock or index symbols",
                             "symbols": invalid_symbols,
-                        }
+                        }, settings.websocket_send_timeout_seconds
                     )
                     continue
                 error = manager.subscribe(
@@ -348,8 +386,9 @@ async def websocket_prices(websocket: WebSocket):
                     settings.websocket_max_active_symbols,
                 )
                 if error:
-                    await websocket.send_json(
-                        {"type": "error", "error": "subscription_limit", "message": error}
+                    await manager.send_json(websocket,
+                        {"type": "error", "error": "subscription_limit", "message": error},
+                        settings.websocket_send_timeout_seconds,
                     )
                     continue
                 for symbol in symbols:

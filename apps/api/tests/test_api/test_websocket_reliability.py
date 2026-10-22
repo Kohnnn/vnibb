@@ -49,6 +49,8 @@ def price_update():
         change_pct=0.0,
         volume=0,
         timestamp="2026-01-01T00:00:00+07:00",
+        price_unit="VND",
+        source="fixture",
     )
 
 
@@ -111,7 +113,7 @@ async def test_equity_fetches_respect_concurrency_cap(monkeypatch):
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def fake_fetch(_):
+    async def fake_fetch(*_):
         nonlocal current, peak
         current += 1
         peak = max(peak, current)
@@ -119,9 +121,10 @@ async def test_equity_fetches_respect_concurrency_cap(monkeypatch):
             started.set()
         await release.wait()
         current -= 1
-        return []
+        from vnibb.providers.vnstock.stock_quote import StockQuoteData
+        return StockQuoteData(symbol="VNM"), False
 
-    monkeypatch.setattr(websocket_api.VnstockScreenerFetcher, "fetch", fake_fetch)
+    monkeypatch.setattr(websocket_api.VnstockStockQuoteFetcher, "fetch", fake_fetch)
     monkeypatch.setattr(websocket_api.settings, "websocket_fetch_concurrency", 2)
     task = asyncio.create_task(
         websocket_api._fetch_and_broadcast_cycle({"VNM", "FPT", "HPG"}, True)
@@ -216,3 +219,116 @@ async def test_websocket_endpoint_reraises_cancellation(monkeypatch):
     websocket.receive_text = cancelled_receive
     with pytest.raises(asyncio.CancelledError):
         await websocket_api.websocket_prices(websocket)
+
+
+@pytest.mark.asyncio
+async def test_slow_clients_do_not_delay_healthy_clients(monkeypatch, connection_manager):
+    monkeypatch.setattr(websocket_api.settings, "websocket_broadcast_concurrency", 1)
+    slow = FakeWebSocket(block_send=True)
+    healthy = FakeWebSocket()
+    connection_manager.active_connections = {slow: {"VNM"}, healthy: {"VNM"}}
+    task = asyncio.create_task(connection_manager.broadcast_price("VNM", price_update(), 0.2))
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert healthy.sent[0]["price"] == 1.0
+    assert not task.done()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_equity_deadlines_reuse_outstanding_job(monkeypatch):
+    from vnibb.providers.vnstock.stock_quote import StockQuoteData
+    release = asyncio.Event()
+    calls = []
+    async def fetch(*args):
+        calls.append(args)
+        await release.wait()
+        return StockQuoteData(symbol="VNM"), False
+    monkeypatch.setattr(websocket_api.VnstockStockQuoteFetcher, "fetch", fetch)
+    monkeypatch.setattr(websocket_api.settings, "websocket_cycle_timeout_seconds", 0.01)
+    await websocket_api._run_price_cycle({"VNM"}, True)
+    await websocket_api._run_price_cycle({"VNM"}, True)
+    assert len(calls) == 1
+    release.set()
+    await asyncio.gather(*websocket_api._equity_jobs.values())
+
+
+@pytest.mark.asyncio
+async def test_cached_delivery_preserves_observation_clock(connection_manager):
+    update = price_update()
+    websocket = FakeWebSocket()
+    await connection_manager.send_update(websocket, update, 0.1)
+    assert websocket.sent[0]["as_of"] == update.timestamp
+    assert websocket.sent[0]["price_unit"] == "VND"
+    assert websocket.sent[0]["stale"] is True
+
+
+@pytest.mark.asyncio
+async def test_subscription_wakes_idle_broadcaster(connection_manager):
+    websocket = FakeWebSocket()
+    connection_manager.active_connections[websocket] = set()
+    connection_manager.subscribe(websocket, {"VNM"}, 10, 20)
+    assert connection_manager.subscriptions_changed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_existing_symbol_demand_does_not_wake_another_cycle(connection_manager):
+    first, second = FakeWebSocket(), FakeWebSocket()
+    connection_manager.active_connections = {first: set(), second: set()}
+    connection_manager.subscribe(first, {"VNM"}, 10, 20)
+    connection_manager.subscriptions_changed.clear()
+    connection_manager.subscribe(second, {"VNM"}, 10, 20)
+    assert not connection_manager.subscriptions_changed.is_set()
+    assert connection_manager.active_connections[second] == {"VNM"}
+
+
+@pytest.mark.asyncio
+async def test_existing_socket_receives_session_transition(monkeypatch):
+    manager = ConnectionManager()
+    websocket = FakeWebSocket()
+    manager.active_connections[websocket] = set()
+    phase = {"value": "morning"}
+    monkeypatch.setattr(websocket_api, "manager", manager)
+    monkeypatch.setattr(websocket_api, "get_market_status", lambda: {
+        "phase": phase["value"], "is_open": phase["value"] == "morning",
+    })
+    task = asyncio.create_task(websocket_api.fetch_and_broadcast_prices())
+    try:
+        for _ in range(10):
+            await asyncio.sleep(0)
+        assert websocket.sent[-1]["phase"] == "morning"
+        phase["value"] = "lunch"
+        manager.subscriptions_changed.set()
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert websocket.sent[-1] == {"type": "market_status", "phase": "lunch", "is_open": False}
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
+async def test_blocked_sync_worker_keeps_slot_and_does_not_duplicate(monkeypatch):
+    import threading
+
+    from vnibb.providers.vnstock.stock_quote import StockQuoteData
+    release = threading.Event()
+    calls = []
+    def blocking_fetch(symbol):
+        calls.append(symbol)
+        release.wait()
+    async def fetch(symbol, _source):
+        await asyncio.to_thread(blocking_fetch, symbol)
+        return StockQuoteData(symbol=symbol), False
+    monkeypatch.setattr(websocket_api.VnstockStockQuoteFetcher, "fetch", fetch)
+    monkeypatch.setattr(websocket_api.settings, "websocket_cycle_timeout_seconds", 0.01)
+    monkeypatch.setattr(websocket_api, "_equity_slots", asyncio.Semaphore(1))
+    try:
+        await websocket_api._run_price_cycle({"VNM"}, True)
+        await websocket_api._run_price_cycle({"VNM", "FPT"}, True)
+        assert calls == ["VNM"]
+        assert len(websocket_api._equity_jobs) == 2
+    finally:
+        release.set()
+        await asyncio.gather(*list(websocket_api._equity_jobs.values()))

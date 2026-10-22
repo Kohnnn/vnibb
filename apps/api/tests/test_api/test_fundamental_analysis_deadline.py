@@ -192,3 +192,76 @@ async def test_fundamental_analysis_discards_failed_session_before_dependency_co
         assert response.json()["error"] == "Partial data unavailable"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_fundamental_analysis_runs_independent_sections_while_database_is_blocked(
+    monkeypatch, fundamental_app,
+):
+    independent_completed = asyncio.Event()
+    profile_active = False
+    database_active = False
+    independent_saw_profile = []
+
+    async def profile(**kwargs):
+        nonlocal profile_active, database_active
+        assert not database_active
+        database_active = profile_active = True
+        try:
+            await independent_completed.wait()
+            return StandardResponse(data={"company_name": "FPT Corp"})
+        finally:
+            database_active = profile_active = False
+
+    async def database_section(**kwargs):
+        nonlocal database_active
+        assert not database_active
+        database_active = True
+        try:
+            await asyncio.sleep(0)
+            return StandardResponse(data=[])
+        finally:
+            database_active = False
+
+    async def officers(**kwargs):
+        independent_saw_profile.append(profile_active)
+        independent_completed.set()
+        return StandardResponse(data=[{"name": "Independent officer"}])
+
+    monkeypatch.setattr(equity, "get_profile", profile)
+    monkeypatch.setattr(equity, "get_officers", officers)
+    for name in ("get_financial_ratios", "get_financials", "get_shareholders", "get_company_events"):
+        monkeypatch.setattr(equity, name, database_section)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=fundamental_app), base_url="http://test",
+    ) as client:
+        response = await client.get("/equity/FPT/fundamental-analysis")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert independent_saw_profile == [True]
+    assert data["profile"]["company_name"] == "FPT Corp"
+    assert data["officers"] == [{"name": "Independent officer"}]
+    assert "profile" not in data["section_errors"]
+
+
+@pytest.mark.asyncio
+async def test_fundamental_analysis_cancels_and_awaits_independent_sections(monkeypatch, fundamental_app):
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def officers(**kwargs):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            stopped.set()
+
+    monkeypatch.setattr(equity, "get_officers", officers)
+    request = asyncio.create_task(equity.get_fundamental_analysis("FPT", db=None))
+    await started.wait()
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+    assert stopped.is_set()

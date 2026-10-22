@@ -241,14 +241,12 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
         alerts.filter(a => a.isActive && !a.triggeredAt).map(a => a.symbol)
     )];
 
-    // Real-time price updates via the shared useWebSocket hook (subscribe + market
-    // status + exponential-backoff reconnect live in the hook). The polling effect
-    // below remains as the degraded-mode fallback, keyed off `wsConnected`.
-    const { isConnected: wsConnected } = useWebSocket({
+    // Only fresh admitted observations suppress the existing HTTP fallback.
+    const { isReceiving: wsConnected } = useWebSocket({
         symbols: activeSymbols,
         enabled: activeSymbols.length > 0,
         onUpdate: (update) => {
-            if (update.symbol && typeof update.price === 'number') {
+            if (!update.stale && update.symbol && typeof update.price === 'number') {
                 handlePriceUpdateRef.current(update.symbol, update.price);
             }
         },
@@ -281,7 +279,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                         staleTime: 30 * 1000,
                     });
 
-                    if (quote.price !== null) {
+                    if (quote.price !== null && quote.price_unit === 'VND') {
                         handlePriceUpdate(symbol, quote.price);
                     }
                 } catch (error) {

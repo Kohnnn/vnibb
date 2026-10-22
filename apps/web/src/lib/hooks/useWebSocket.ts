@@ -16,6 +16,11 @@ export interface PriceUpdate {
     change_pct?: number;
     volume?: number;
     timestamp?: string;
+    price_unit?: 'VND' | 'index_points';
+    source?: string;
+    as_of?: string;
+    stale?: boolean;
+    observation_age_seconds?: number;
 }
 
 export interface PriceWithDirection extends PriceUpdate {
@@ -41,6 +46,8 @@ export interface UseWebSocketReturn {
     prices: Map<string, PriceWithDirection>;
     lastUpdate: Date | null;
     marketStatus: MarketStatus | null;
+    isReceiving: boolean;
+    protocolError: string | null;
     reconnect: () => void;
 }
 
@@ -53,6 +60,11 @@ export function useWebSocket({
     const [prices, setPrices] = useState<Map<string, PriceWithDirection>>(new Map());
     const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
     const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
+    const [isReceiving, setIsReceiving] = useState(false);
+    const [protocolError, setProtocolError] = useState<string | null>(null);
+    const subscribedRef = useRef<string[]>([]);
+    const receiptsRef = useRef<Map<string, number>>(new Map());
+    const observationTimesRef = useRef<Map<string, number>>(new Map());
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimeoutRef = useRef<ReconnectTimer | null>(null);
     const reconnectAttemptRef = useRef(0);
@@ -75,6 +87,7 @@ export function useWebSocket({
     const closeCurrentSocket = useCallback(() => {
         const ws = wsRef.current;
         wsRef.current = null;
+        subscribedRef.current = [];
         if (!ws) return;
         ws.onopen = null;
         ws.onmessage = null;
@@ -98,12 +111,22 @@ export function useWebSocket({
                 if (wsRef.current !== ws) return;
                 reconnectAttemptRef.current = 0;
                 if (mountedRef.current) setIsConnected(true);
+                setIsReceiving(false);
+                receiptsRef.current.clear();
+                setProtocolError(null);
+                subscribedRef.current = [...symbolsRef.current];
                 ws.send(JSON.stringify({ action: 'subscribe', symbols: symbolsRef.current }));
             };
 
             ws.onmessage = (event) => {
                 try {
+                    if (wsRef.current !== ws) return;
                     const data = JSON.parse(event.data);
+                    if (data.type === 'error') {
+                        setProtocolError(data.message || data.error || 'Subscription rejected');
+                        setIsReceiving(false);
+                        return;
+                    }
                     if (data.type === 'market_status') {
                         if (mountedRef.current) {
                             setMarketStatus({
@@ -115,7 +138,18 @@ export function useWebSocket({
                         }
                         return;
                     }
-                    if (!data.symbol || data.price === undefined) return;
+                    if (!symbolsRef.current.includes(data.symbol) || !Number.isFinite(data.price)
+                        || data.price <= 0 || !['VND', 'index_points'].includes(data.price_unit)
+                        || !data.source || !data.as_of || typeof data.stale !== 'boolean'
+                        || !Number.isFinite(Date.parse(data.as_of))) return;
+                    const observedAt = Date.parse(data.as_of);
+                    if (observedAt < (observationTimesRef.current.get(data.symbol) ?? -Infinity)) return;
+                    observationTimesRef.current.set(data.symbol, observedAt);
+                    if (!data.stale) receiptsRef.current.set(data.symbol, Date.now());
+                    else receiptsRef.current.delete(data.symbol);
+                    setIsReceiving(symbolsRef.current.every(symbol =>
+                        Date.now() - (receiptsRef.current.get(symbol) ?? 0) <= 15_000));
+                    setProtocolError(null);
 
                     const priceUpdate = data as PriceUpdate;
                     const previousPrice = previousPricesRef.current.get(priceUpdate.symbol);
@@ -140,6 +174,7 @@ export function useWebSocket({
                 if (wsRef.current !== ws) return;
                 wsRef.current = null;
                 if (mountedRef.current) setIsConnected(false);
+                setIsReceiving(false);
                 if (!mountedRef.current || !shouldEnableRef.current || symbolsRef.current.length === 0) return;
                 if (reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS || reconnectTimeoutRef.current !== null) return;
 
@@ -175,6 +210,7 @@ export function useWebSocket({
         reconnectAttemptRef.current = 0;
         closeCurrentSocket();
         if (mountedRef.current) setIsConnected(false);
+        if (mountedRef.current) setIsReceiving(false);
     }, [clearReconnectTimer, closeCurrentSocket]);
 
     const reconnect = useCallback(() => {
@@ -207,7 +243,13 @@ export function useWebSocket({
             return;
         }
         if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ action: 'subscribe', symbols: symbolsRef.current }));
+            const removed = subscribedRef.current.filter(symbol => !symbolsRef.current.includes(symbol));
+            const added = symbolsRef.current.filter(symbol => !subscribedRef.current.includes(symbol));
+            if (removed.length) wsRef.current.send(JSON.stringify({ action: 'unsubscribe', symbols: removed }));
+            if (added.length) wsRef.current.send(JSON.stringify({ action: 'subscribe', symbols: added }));
+            subscribedRef.current = [...symbolsRef.current];
+            setIsReceiving(false);
+            setProtocolError(null);
             return;
         }
         connect();
@@ -233,7 +275,18 @@ export function useWebSocket({
         };
     }, [clearReconnectTimer, connect]);
 
-    return { isConnected, prices, lastUpdate, marketStatus, reconnect };
+    useEffect(() => {
+        const timer = setInterval(() => {
+            if (symbolsRef.current.some(symbol =>
+                Date.now() - (receiptsRef.current.get(symbol) ?? 0) > 15_000)) setIsReceiving(false);
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({ action: 'market_status' }));
+            }
+        }, 10_000);
+        return () => clearInterval(timer);
+    }, []);
+
+    return { isConnected, isReceiving, protocolError, prices, lastUpdate, marketStatus, reconnect };
 }
 
 export function usePriceStream(symbol: string, enabled = true) {

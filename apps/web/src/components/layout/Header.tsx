@@ -374,7 +374,7 @@ export function Header({
             ))}
           </div>
 
-          <div data-tour="header-search" className="relative min-w-[220px] flex-1">
+          <div data-tour="header-search" className="relative min-w-[220px] flex-1 xl:min-w-0">
             <button
               type="button"
               aria-label="Open symbol search and command palette"

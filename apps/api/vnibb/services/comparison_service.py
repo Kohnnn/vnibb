@@ -624,7 +624,7 @@ class ComparisonService:
                 "foreign_ownership": _record_value(data, "foreign_ownership", "foreignOwnership"),
             }
             ratio_units = _record_value(data, "ratio_units") or (_record_value(data, "extended_metrics") or {}).get("ratio_units", {})
-            for key in PERCENT_RATIO_FIELDS:
+            for key in PERCENT_RATIO_FIELDS.intersection(metrics_dict):
                 metrics_dict[key] = admitted_ratio_value(metrics_dict[key], key, ratio_units=ratio_units)
 
             async with async_session_maker() as session:

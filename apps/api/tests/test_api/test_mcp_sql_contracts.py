@@ -1,5 +1,6 @@
 """Public MCP contracts exercised against persisted SQL rows, not read stubs."""
 
+from copy import deepcopy
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -98,6 +99,22 @@ def _row(collection, ordinal, **overrides):
     if collection == "financial_ratios":
         values["interest_coverage"] = None
     values.update(overrides)
+    if collection in {"income_statements", "balance_sheets", "cash_flows"} and "raw_data" not in overrides:
+        statement_type = {"income_statements": "income", "balance_sheets": "balance", "cash_flows": "cashflow"}[collection]
+        raw = deepcopy(DEEP_EVIDENCE)
+        units = {
+            column.name: {"label": column.name, "unit": "VND/share" if column.name in {"eps", "eps_diluted", "book_value_per_share"} else "VND",
+                          "source_unit": "VND/share" if column.name in {"eps", "eps_diluted", "book_value_per_share"} else "VND"}
+            for column in model.__table__.columns if column.type.python_type in (float, Decimal)
+        }
+        raw["_financial_lineage"] = {"canonical_data": {
+            **{name: values[name] for name in ("symbol", "period", "fiscal_year", "fiscal_quarter", "source")},
+            "statement_type": statement_type, "currency": "VND", "value_unit": "VND",
+            "consolidation_basis": "consolidated",
+            "flow_basis": "single_quarter" if values["period_type"] == "quarter" else "annual",
+            "unit_metadata": units,
+        }}
+        values["raw_data"] = raw
     return values
 
 
@@ -192,11 +209,128 @@ async def test_public_financial_sql_preserves_admitted_zero_null_and_deep_eviden
     assert by_id[1][value_metric] == 1.25
     assert by_id[1]["period"] == "2021"
     assert by_id[1]["fiscal_quarter"] is None
-    assert by_id[1]["raw_data"] == DEEP_EVIDENCE
+    assert by_id[1]["raw_data"] == populated["raw_data"]
     assert by_id[1].get("data_status", "available") == "available"
     assert by_id[2][zero_metric] is None
     assert by_id[2][value_metric] is None
     assert by_id[2]["raw_data"] is None
+    if collection != "financial_ratios":
+        for column in columns:
+            if column.type.python_type in (float, Decimal):
+                assert by_id[1][column.name] == populated[column.name]
+        assert by_id[1]["currency"] == by_id[1]["value_unit"] == "VND"
+        assert by_id[1]["consolidation_basis"] == "consolidated"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("collection,metric", [
+    ("income_statements", "revenue"), ("balance_sheets", "total_assets"),
+    ("cash_flows", "operating_cash_flow"),
+])
+@pytest.mark.parametrize("rejection", [
+    "currency", "flow_basis", "unit_metadata", "inherited", "lineage_inherited",
+    "source", "symbol", "statement_type", "period", "metric_rejected",
+])
+async def test_statement_sql_projects_admission_without_replacing_identity_or_raw(
+    sql_tool, collection, metric, rejection,
+):
+    row = _row(collection, 1, symbol="FPT", fiscal_quarter=None, **{metric: 0})
+    raw = row["raw_data"]
+    canonical = raw["_financial_lineage"]["canonical_data"]
+    if rejection in {"currency", "flow_basis", "unit_metadata"}:
+        canonical[rejection] = {} if rejection == "unit_metadata" else None
+        if collection == "balance_sheets" and rejection == "flow_basis":
+            canonical["consolidation_basis"] = None
+    elif rejection == "inherited":
+        canonical["unavailable_reason"] = "retained_rejection"
+    elif rejection == "lineage_inherited":
+        raw["_financial_lineage"]["unavailable_reason"] = "retained_rejection"
+    elif rejection == "metric_rejected":
+        canonical["unit_metadata"][metric]["unavailable_reason"] = "retained_metric_rejection"
+    else:
+        canonical[rejection] = {"source": "KBS", "symbol": "MSR", "statement_type": "other", "period": "2024"}[rejection]
+    await sql_tool(collection, [row])
+
+    result = await server.query_database_collection(collection, symbol="FPT", period_type="annual", limit=1)
+
+    actual = result["items"][0]
+    assert actual[metric] is None
+    assert actual["raw_observation"][metric] == 0
+    assert actual["unavailable_metrics"][metric]
+    assert actual["raw_data"] == raw
+    assert (actual["symbol"], actual["period"], actual["fiscal_year"], actual["fiscal_quarter"], actual["source"]) == ("FPT", "2021", 2021, None, "vietcap")
+    if rejection not in {"unit_metadata", "metric_rejected"}:
+        for column in server.COLLECTION_MODELS[collection].__table__.columns:
+            if column.type.python_type in (float, Decimal):
+                assert actual[column.name] is None
+    if rejection in {"inherited", "lineage_inherited"}:
+        assert actual["unavailable_reason"] == "retained_rejection"
+        assert actual["value_unit"] == "VND"
+    if rejection == "metric_rejected":
+        assert actual["unavailable_metrics"][metric] == "retained_metric_rejection"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unit,expected", [("VND/share", 12.5), ("VND", None)])
+async def test_statement_sql_book_value_requires_explicit_per_share_unit(sql_tool, unit, expected):
+    row = _row("balance_sheets", 1, fiscal_quarter=None, book_value_per_share=12.5)
+    metadata = row["raw_data"]["_financial_lineage"]["canonical_data"]["unit_metadata"]
+    metadata["book_value_per_share"].update(unit=unit, source_unit=unit)
+    await sql_tool("balance_sheets", [row])
+
+    actual = (await server.query_database_collection("balance_sheets", limit=1))["items"][0]
+
+    assert actual["book_value_per_share"] == expected
+    assert actual["raw_data"] == row["raw_data"]
+    if expected is None:
+        assert actual["unavailable_metrics"]["book_value_per_share"] == "unverified_monetary_unit"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("evidence", [
+    {"unit": "VND", "source_unit": "VND", "unavailable_reason": "retained_alias_rejection"},
+    {"unit": "USD", "source_unit": "USD"},
+])
+async def test_statement_sql_alias_metadata_cannot_erase_canonical_rejection(sql_tool, evidence):
+    row = _row("income_statements", 1, fiscal_quarter=None, income_before_tax=25)
+    row["raw_data"]["_financial_lineage"]["canonical_data"]["unit_metadata"]["pre_tax_profit"] = evidence
+    await sql_tool("income_statements", [row])
+
+    actual = (await server.query_database_collection("income_statements", limit=1))["items"][0]
+
+    assert actual["income_before_tax"] is None
+    assert actual["unavailable_metrics"]["income_before_tax"]
+    assert actual["raw_observation"]["income_before_tax"] == 25
+    assert actual["raw_data"] == row["raw_data"]
+
+
+@pytest.mark.asyncio
+async def test_public_sql_preserves_more_than_twenty_nested_original_envelopes_and_counts(sql_tool):
+    original_response = {
+        "count": 25,
+        "data": {"records": [{"index": index, "value": None if index == 0 else index}
+                             for index in range(25)]},
+    }
+    rows = [
+        _row("income_statements", ordinal, period="2025", fiscal_year=2025,
+             fiscal_quarter=None, raw_data={**DEEP_EVIDENCE,
+                                           "original_response": original_response,
+                                           "record_index": ordinal})
+        for ordinal in range(1, 3)
+    ]
+    await sql_tool("income_statements", rows)
+
+    result = await server.query_database_collection(
+        "income_statements", limit=2, sort_by="fiscal_year", descending=False,
+    )
+
+    assert result["row_count"] == len(result["items"]) == len(rows) == 2
+    assert [item["id"] for item in result["items"]] == [1, 2]
+    for actual, expected in zip(result["items"], rows, strict=True):
+        assert actual["raw_data"] == expected["raw_data"]
+        envelope = actual["raw_data"]["original_response"]
+        assert envelope == original_response
+        assert envelope["count"] == len(envelope["data"]["records"]) == 25
 
 
 @pytest.mark.asyncio

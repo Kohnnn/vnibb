@@ -1257,8 +1257,29 @@ class AIContextService:
             if section is None:
                 continue
             raw_data = getattr(row, "raw_data", None) or {}
+            lineage = raw_data.get("_financial_lineage") or {}
+            canonical = lineage.get("canonical_data") or {}
+            metadata = {
+                name: canonical.get(name, lineage.get(name))
+                for name in (
+                    "currency", "value_unit", "unit_metadata", "consolidation_basis",
+                    "flow_basis", "aggregation_basis", "source_periods", "unavailable_reason",
+                )
+                if name in canonical or name in lineage
+            }
+            metadata["unavailable_reason"] = (
+                canonical.get("unavailable_reason") or lineage.get("unavailable_reason")
+            )
+            source = getattr(row, "source", None)
+            if any(
+                evidence.get(name) not in (None, expected)
+                for evidence in (canonical, lineage)
+                for name, expected in (("source", source), ("symbol", symbol), ("statement_type", statement_type))
+            ):
+                metadata["unavailable_reason"] = "conflicting_statement_source"
             admitted = admit_statement_rows([
-                FinancialStatementData(**section, symbol=symbol, statement_type=statement_type, raw_data=raw_data)
+                FinancialStatementData(**metadata, **section, source=source,
+                    symbol=symbol, statement_type=statement_type, raw_data=raw_data)
             ], section["period_type"] or "year")[0]
             rejected = {
                 name: admitted.unavailable_reason or admitted.unit_metadata.get(name, {}).get("unavailable_reason")

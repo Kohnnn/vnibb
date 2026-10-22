@@ -226,6 +226,7 @@ async def test_statement_ingestion_scoped_response_survives_sql_and_public_mcp(m
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("statement_basis", [True, False])
 @pytest.mark.parametrize("year,quarter,value,unit,scale,admitted", [
     (2025, None, 5216, None, None, True),
     (2026, 2, 1507, None, None, True),
@@ -236,7 +237,7 @@ async def test_statement_ingestion_scoped_response_survives_sql_and_public_mcp(m
     (2026, 2, 1507, "VND/share", 1_000_000, False),
 ])
 async def test_diluted_eps_decode_sql_public_mcp_preserves_per_share_evidence(
-    monkeypatch, test_engine, test_db, year, quarter, value, unit, scale, admitted
+    monkeypatch, test_engine, test_db, year, quarter, value, unit, scale, admitted, statement_basis
 ):
     from vnibb.services.vietcap_financials import load_vietcap_financial_rows
     from vnibb.services.vietcap_ingestion import upsert_statement_periods
@@ -254,10 +255,13 @@ async def test_diluted_eps_decode_sql_public_mcp_preserves_per_share_evidence(
         {"field": "reported_basic", "parent": None, "fullTitleEn": "EPS basic (VND)"},
         {"field": "reported_sales", "parent": None, "fullTitleEn": "Net sales"}]
     records = []
+    response = {"receivedAt": "2026-10-13T01:00:00Z"}
+    if statement_basis:
+        response.update(consolidationBasis="consolidated", flowBasis="single_quarter" if quarter else "annual")
     assert upsert_statement_periods(
         None, "FPT", "finance.income_statement", "INCOME_STATEMENT",
         {"quarters" if quarter else "years": [raw]}, com_type="CT", descriptors=descriptors,
-        source_response={"receivedAt": "2026-10-13T01:00:00Z"}, records=records, dry_run=True,
+        source_response=response, records=records, dry_run=True,
     ) == 1
     envelope = records[0]
     original = deepcopy(envelope)
@@ -275,8 +279,6 @@ async def test_diluted_eps_decode_sql_public_mcp_preserves_per_share_evidence(
         "FPT", "finance.income_statement", period_type, records=records,
     )
     assert rows[0].eps_diluted == (value if admitted else None)
-    assert rows[0].flow_basis is None
-    assert rows[0].value_unit is None
     assert await persist_vietcap_financials(records, cache_manager=CacheManager(db=test_db)) == 1
     stored = (await test_db.execute(select(IncomeStatement))).scalar_one()
     assert stored.eps_diluted == (value if admitted else None)
@@ -290,17 +292,22 @@ async def test_diluted_eps_decode_sql_public_mcp_preserves_per_share_evidence(
     result = await server.get_latest_financial_statement("FPT", statement="income_statement", period_type=period_type)
     assert result["found"] is True
     assert result["provider_source"] == "vietcap"
-    assert result["item"]["eps_diluted"] == (value if admitted else None)
+    assert result["item"]["eps_diluted"] == (value if admitted and statement_basis else None)
+    if admitted and not statement_basis:
+        assert result["item"]["unavailable_metrics"]["eps_diluted"] == "unverified_statement_basis"
+        assert result["item"]["raw_observation"]["eps_diluted"] == value
+    if statement_basis:
+        assert result["item"]["consolidation_basis"] == "consolidated"
+        assert result["item"]["flow_basis"] == ("single_quarter" if quarter else "annual")
     assert result["item"]["revenue"] is None
     stored_raw = result["item"]["raw_data"]
+    assert stored_raw == stored.raw_data
+    assert stored_raw["sourceResponse"] == response
     assert stored_raw["raw"] == raw
     assert stored_raw["descriptors"] == descriptors
     assert stored_raw["descriptorEvidence"] == envelope["descriptorEvidence"]
     assert stored_raw["structured"] == decoded
     lineage = stored_raw["_financial_lineage"]
     assert lineage["canonical_data"]["eps_diluted"] == (value if admitted else None)
-    assert lineage["canonical_data"]["value_unit"] is None
     assert lineage["unit_metadata"]["eps_diluted"] == evidence
-    assert lineage["flow_basis"] is None
-    assert lineage["consolidation_basis"] is None
     assert envelope == original

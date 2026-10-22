@@ -95,9 +95,11 @@ async def test_income_statement_endpoint_orders_oldest_first_and_enrichs_missing
                 operating_income=200.0,
                 net_income=150.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
-                    "symbol": "VNM", "period": "2024", "statement_type": "income", "source": "fixture", "value_unit": "VND",
-                    "consolidation_basis": "Consolidated", "flow_basis": "annual", "revenue": 1000, "operating_income": 200,
-                    "net_income": 150, "selling_general_admin": -100}}},
+                    "symbol": "VNM", "period": "2024", "fiscal_year": 2024, "statement_type": "income", "source": "fixture",
+                    "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                      ("revenue", "operating_income", "net_income", "selling_general_admin")},
+                    "revenue": 1000, "operating_income": 200, "net_income": 150, "selling_general_admin": -100}}},
             ),
             IncomeStatement(
                 id=101,
@@ -109,9 +111,11 @@ async def test_income_statement_endpoint_orders_oldest_first_and_enrichs_missing
                 operating_income=180.0,
                 net_income=130.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
-                    "symbol": "VNM", "period": "2023", "statement_type": "income", "source": "fixture", "value_unit": "VND",
-                    "consolidation_basis": "Consolidated", "flow_basis": "annual", "revenue": 900, "operating_income": 180,
-                    "net_income": 130, "selling_general_admin": -80}}},
+                    "symbol": "VNM", "period": "2023", "fiscal_year": 2023, "statement_type": "income", "source": "fixture",
+                    "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                      ("revenue", "operating_income", "net_income", "selling_general_admin")},
+                    "revenue": 900, "operating_income": 180, "net_income": 130, "selling_general_admin": -80}}},
             ),
             CashFlow(
                 id=100,
@@ -123,9 +127,11 @@ async def test_income_statement_endpoint_orders_oldest_first_and_enrichs_missing
                 operating_cash_flow=150.0,
                 capital_expenditure=-40.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
-                    "symbol": "VNM", "period": "2024", "statement_type": "cashflow", "source": "fixture", "value_unit": "VND",
-                    "consolidation_basis": "Consolidated", "flow_basis": "annual", "depreciation": 30,
-                    "operating_cash_flow": 150, "capex": -40}}},
+                    "symbol": "VNM", "period": "2024", "fiscal_year": 2024, "statement_type": "cashflow", "source": "fixture",
+                    "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                      ("depreciation", "operating_cash_flow", "capex")},
+                    "depreciation": 30, "operating_cash_flow": 150, "capex": -40}}},
             ),
             CashFlow(
                 id=101,
@@ -137,9 +143,11 @@ async def test_income_statement_endpoint_orders_oldest_first_and_enrichs_missing
                 operating_cash_flow=120.0,
                 capital_expenditure=-35.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
-                    "symbol": "VNM", "period": "2023", "statement_type": "cashflow", "source": "fixture", "value_unit": "VND",
-                    "consolidation_basis": "Consolidated", "flow_basis": "annual", "depreciation": 25,
-                    "operating_cash_flow": 120, "capex": -35}}},
+                    "symbol": "VNM", "period": "2023", "fiscal_year": 2023, "statement_type": "cashflow", "source": "fixture",
+                    "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                      ("depreciation", "operating_cash_flow", "capex")},
+                    "depreciation": 25, "operating_cash_flow": 120, "capex": -35}}},
             ),
         ]
     )
@@ -181,6 +189,13 @@ async def test_balance_and_cash_flow_endpoints_enrich_fields_and_order_oldest_fi
                     "n_1.short_term_trade_accounts_payable": 85.0,
                     "Good will (Bn. VND)": 12.0,
                     "n_3.intangible_fixed_assets": 18.0,
+                    "_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                        "symbol": "VNM", "period": "2024", "fiscal_year": 2024, "statement_type": "balance", "source": "fixture",
+                        "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "instant",
+                        "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                          ("total_assets", "total_liabilities", "total_equity", "accounts_payable", "goodwill", "intangible_assets")},
+                        "total_assets": 2000, "total_liabilities": 900, "total_equity": 1100,
+                        "accounts_payable": 85, "goodwill": 12, "intangible_assets": 18}},
                 },
             ),
             BalanceSheet(
@@ -194,6 +209,12 @@ async def test_balance_and_cash_flow_endpoints_enrich_fields_and_order_oldest_fi
                 total_equity=1000.0,
                 raw_data={
                     "n_1.short_term_trade_accounts_payable": 80.0,
+                    "_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                        "symbol": "VNM", "period": "2023", "fiscal_year": 2023, "statement_type": "balance", "source": "fixture",
+                        "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "instant",
+                        "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                          ("total_assets", "total_liabilities", "total_equity", "accounts_payable")},
+                        "total_assets": 1800, "total_liabilities": 800, "total_equity": 1000, "accounts_payable": 80}},
                 },
             ),
             CashFlow(
@@ -205,6 +226,12 @@ async def test_balance_and_cash_flow_endpoints_enrich_fields_and_order_oldest_fi
                 operating_cash_flow=200.0,
                 capital_expenditure=-50.0,
                 free_cash_flow=None,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    "symbol": "VNM", "period": "2024", "fiscal_year": 2024, "statement_type": "cashflow", "source": "fixture",
+                    "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                      ("operating_cash_flow", "capex")},
+                    "operating_cash_flow": 200, "capex": -50}}},
             ),
             CashFlow(
                 id=201,
@@ -215,6 +242,12 @@ async def test_balance_and_cash_flow_endpoints_enrich_fields_and_order_oldest_fi
                 operating_cash_flow=170.0,
                 capital_expenditure=-40.0,
                 free_cash_flow=None,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    "symbol": "VNM", "period": "2023", "fiscal_year": 2023, "statement_type": "cashflow", "source": "fixture",
+                    "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                      ("operating_cash_flow", "capex")},
+                    "operating_cash_flow": 170, "capex": -40}}},
             ),
         ]
     )
@@ -971,6 +1004,11 @@ async def test_income_statement_falls_back_to_db_on_timeout(client, test_db, mon
             net_income=320,
             source="vnstock",
             updated_at=datetime(2026, 3, 12, 8, 15, 0),
+            raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                "symbol": "VNM", "period": "2024", "fiscal_year": 2024, "statement_type": "income", "source": "fixture",
+                "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in ("revenue", "net_income")},
+                "revenue": 1500, "net_income": 320}}},
         )
     )
     await test_db.commit()
@@ -995,7 +1033,7 @@ async def test_income_statement_falls_back_to_db_on_timeout(client, test_db, mon
 
 
 @pytest.mark.asyncio
-async def test_shareholders_falls_back_to_db_on_timeout(client, test_db, monkeypatch):
+async def test_shareholders_falls_back_to_db_on_timeout_with_unverified_ownership(client, test_db, monkeypatch):
     test_db.add(
         Company(
             id=1,
@@ -1031,7 +1069,10 @@ async def test_shareholders_falls_back_to_db_on_timeout(client, test_db, monkeyp
     payload = response.json()
     assert payload["meta"]["count"] == 1
     assert payload["data"][0]["shareholder_name"] == "SCIC"
-    assert payload["data"][0]["ownership_pct"] == 36.0
+    assert payload["data"][0]["shares_owned"] == 725_000_000
+    assert payload["data"][0]["ownership_pct"] is None
+    assert payload["data"][0]["ownership_unit_status"] == "unverified"
+    assert payload["data"][0]["raw_data"]["ownership_pct"] == 36.0
     assert payload["error"] == "provider timed out"
 
 
@@ -1143,6 +1184,13 @@ async def test_income_statement_merges_db_values_when_provider_payload_missing(
             income_tax=-100,
             net_income=420,
             source="vnstock",
+            raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                "symbol": "VCI", "period": "2025", "fiscal_year": 2025, "statement_type": "income", "source": "fixture",
+                "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                  ("revenue", "cost_of_revenue", "operating_income", "pre_tax_profit", "tax_expense", "net_income")},
+                "revenue": 1500, "cost_of_revenue": -600, "operating_income": 500,
+                "pre_tax_profit": 520, "tax_expense": -100, "net_income": 420}}},
         )
     )
     await test_db.commit()
@@ -1156,6 +1204,8 @@ async def test_income_statement_merges_db_values_when_provider_payload_missing(
                 period="2025",
                 statement_type=statement_type,
                 fiscal_year=2025,
+                source="fixture", currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                unit_metadata={field: {"unit": "VND", "source_unit": "VND"} for field in ("revenue", "net_income")},
                 revenue=1500,
                 cost_of_revenue=None,
                 operating_income=None,
@@ -1198,9 +1248,11 @@ async def test_cash_flow_merges_db_values_when_provider_payload_missing(
             investing_cash_flow=-215,
             source="vnstock",
             raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
-                "symbol": "VCI", "period": "2025", "statement_type": "cashflow", "source": "fixture", "value_unit": "VND",
-                "consolidation_basis": "Consolidated", "flow_basis": "annual", "operating_cash_flow": -3550,
-                "capex": -238, "dividends_paid": 0, "depreciation": 38, "investing_cash_flow": -215}}},
+                "symbol": "VCI", "period": "2025", "fiscal_year": 2025, "statement_type": "cashflow", "source": "fixture",
+                "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                  ("operating_cash_flow", "capex", "dividends_paid", "depreciation", "investing_cash_flow")},
+                "operating_cash_flow": -3550, "capex": -238, "dividends_paid": 0, "depreciation": 38, "investing_cash_flow": -215}}},
         )
     )
     await test_db.commit()
@@ -1214,7 +1266,8 @@ async def test_cash_flow_merges_db_values_when_provider_payload_missing(
                 period="2025",
                 statement_type=statement_type,
                 fiscal_year=2025,
-                source="fixture", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                source="fixture", currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                unit_metadata={"investing_cash_flow": {"unit": "VND", "source_unit": "VND"}},
                 operating_cash_flow=None,
                 capital_expenditure=None,
                 dividends_paid=None,
@@ -3285,8 +3338,14 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
         assert symbol == "VCI"
         assert period == "quarter"
         _ = limit
-        basis = ({"source": "fixture", "value_unit": "VND", "consolidation_basis": "Consolidated",
-                  "flow_basis": "single_quarter", "fiscal_year": 2020, "fiscal_quarter": 1}
+        basis = ({"source": "fixture", "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated",
+                  "flow_basis": "instant" if statement_type == "balance" else "single_quarter",
+                  "fiscal_year": 2020, "fiscal_quarter": 1,
+                  "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in {
+                      "income": ("revenue", "operating_income", "net_income"),
+                      "balance": ("total_assets", "current_assets", "total_liabilities", "current_liabilities", "total_equity", "cash_and_equivalents"),
+                      "cashflow": ("operating_cash_flow", "free_cash_flow"),
+                  }[statement_type]}}
                  if certified else {})
         if statement_type == "income":
             return [
@@ -3372,8 +3431,11 @@ async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_d
                 revenue=100.0,
                 net_income=20.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
-                    "symbol": "VNM", "period": "Q1-2024", "statement_type": "income", "source": "fixture", "value_unit": "VND",
-                    "consolidation_basis": "Consolidated", "flow_basis": "single_quarter", "revenue": 100, "net_income": 20}}},
+                    "symbol": "VNM", "period": "Q1-2024", "fiscal_year": 2024, "fiscal_quarter": 1,
+                    "statement_type": "income", "source": "fixture", "currency": "VND", "value_unit": "VND",
+                    "consolidation_basis": "Consolidated", "flow_basis": "single_quarter",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in ("revenue", "net_income")},
+                    "revenue": 100, "net_income": 20}}},
             ),
             IncomeStatement(
                 id=901,
@@ -3385,8 +3447,11 @@ async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_d
                 revenue=120.0,
                 net_income=24.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
-                    "symbol": "VNM", "period": "Q2-2024", "statement_type": "income", "source": "fixture", "value_unit": "VND",
-                    "consolidation_basis": "Consolidated", "flow_basis": "single_quarter", "revenue": 120, "net_income": 24}}},
+                    "symbol": "VNM", "period": "Q2-2024", "fiscal_year": 2024, "fiscal_quarter": 2,
+                    "statement_type": "income", "source": "fixture", "currency": "VND", "value_unit": "VND",
+                    "consolidation_basis": "Consolidated", "flow_basis": "single_quarter",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in ("revenue", "net_income")},
+                    "revenue": 120, "net_income": 24}}},
             ),
             IncomeStatement(
                 id=902,
@@ -3398,8 +3463,11 @@ async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_d
                 revenue=140.0,
                 net_income=28.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
-                    "symbol": "VNM", "period": "Q3-2024", "statement_type": "income", "source": "fixture", "value_unit": "VND",
-                    "consolidation_basis": "Consolidated", "flow_basis": "single_quarter", "revenue": 140, "net_income": 28}}},
+                    "symbol": "VNM", "period": "Q3-2024", "fiscal_year": 2024, "fiscal_quarter": 3,
+                    "statement_type": "income", "source": "fixture", "currency": "VND", "value_unit": "VND",
+                    "consolidation_basis": "Consolidated", "flow_basis": "single_quarter",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in ("revenue", "net_income")},
+                    "revenue": 140, "net_income": 28}}},
             ),
             IncomeStatement(
                 id=903,
@@ -3411,8 +3479,11 @@ async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_d
                 revenue=160.0,
                 net_income=32.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
-                    "symbol": "VNM", "period": "Q4-2024", "statement_type": "income", "source": "fixture", "value_unit": "VND",
-                    "consolidation_basis": "Consolidated", "flow_basis": "single_quarter", "revenue": 160, "net_income": 32}}},
+                    "symbol": "VNM", "period": "Q4-2024", "fiscal_year": 2024, "fiscal_quarter": 4,
+                    "statement_type": "income", "source": "fixture", "currency": "VND", "value_unit": "VND",
+                    "consolidation_basis": "Consolidated", "flow_basis": "single_quarter",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in ("revenue", "net_income")},
+                    "revenue": 160, "net_income": 32}}},
             ),
         ]
     )

@@ -267,6 +267,26 @@ async def test_quote_rejects_unsupported_source_before_cache(monkeypatch):
         await VnstockStockQuoteFetcher.fetch("XYZ", source="KBS")
 
 
+@pytest.mark.asyncio
+async def test_quote_cache_churn_evicts_unrelated_expired_and_oldest_fresh_entries(monkeypatch):
+    from datetime import datetime, timedelta
+
+    from vnibb.providers.vnstock.stock_quote import QuoteCache, StockQuoteData
+
+    monkeypatch.setattr(QuoteCache, "_cache", {
+        "VCI:OLD": (StockQuoteData(symbol="OLD", price=1000, price_unit="VND"),
+                    datetime.utcnow() - timedelta(seconds=31)),
+    })
+    for index in range(51):
+        symbol = f"S{index:02}"
+        QuoteCache.set(f"VCI:{symbol}", StockQuoteData(symbol=symbol, price=42000, price_unit="VND"))
+    quote, cached = await VnstockStockQuoteFetcher.fetch("S50", source="VCI")
+    assert cached and quote.price == 42000
+    assert "VCI:OLD" not in QuoteCache._cache
+    assert "VCI:S00" not in QuoteCache._cache
+    assert len(QuoteCache._cache) == 50
+
+
 @pytest.mark.parametrize("source", ["KBS", "TCBS", "MSN", "FMP", "DNSE"])
 def test_historical_params_reject_unsupported_source(source):
     with pytest.raises(ValueError):

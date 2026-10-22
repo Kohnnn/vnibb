@@ -1,13 +1,21 @@
 import type { ReactNode } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { useQuery } from '@tanstack/react-query';
-import { useWebSocket } from '@/lib/hooks/useWebSocket';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider, useQuery, useQueries } from '@tanstack/react-query';
+import type * as ReactQuery from '@tanstack/react-query';
+import { useWebSocket, type UseWebSocketReturn } from '@/lib/hooks/useWebSocket';
 import { parseWatchlistSymbols, WatchlistWidget } from './WatchlistWidget';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
+import * as api from '@/lib/api';
+import type { QuoteResponse } from '@/lib/api';
 
-jest.mock('@tanstack/react-query', () => ({ useQuery: jest.fn() }));
+jest.mock('@tanstack/react-query', () => ({
+    ...jest.requireActual('@tanstack/react-query'), useQuery: jest.fn(), useQueries: jest.fn(),
+}));
 jest.mock('@/lib/hooks/useWebSocket', () => ({ useWebSocket: jest.fn() }));
+jest.mock('@/lib/api', () => ({
+    ...jest.requireActual('@/lib/api'), getSymbols: jest.fn(), getQuote: jest.fn(),
+}));
 
 const setLinkedSymbol = jest.fn();
 
@@ -23,7 +31,7 @@ jest.mock('@/components/ui/WidgetContainer', () => ({
 }));
 
 jest.mock('@/components/ui/WidgetMeta', () => ({
-    WidgetMeta: ({ updatedAt, fetchedAt, isCached, note }: { updatedAt?: Date | null; fetchedAt?: Date | null; isCached?: boolean; note?: string }) => <div>{`${note ?? ''}|${fetchedAt ? 'Received' : 'No receipt'}|${isCached ? 'Cached' : 'Current'}|${updatedAt ? 'Known as-of' : 'As-of unknown'}`}</div>,
+    WidgetMeta: ({ updatedAt, fetchedAt, isCached, note, sourceLabel }: { updatedAt?: Date | null; fetchedAt?: Date | null; isCached?: boolean; note?: string; sourceLabel?: string }) => <><div>{`${note ?? ''}|${fetchedAt ? 'Received' : 'No receipt'}|${isCached ? 'Cached' : 'Current'}|${updatedAt ? 'Known as-of' : 'As-of unknown'}`}</div><span>{sourceLabel}</span></>,
 }));
 
 jest.mock('@/components/ui/widget-states', () => ({
@@ -38,14 +46,16 @@ jest.mocked(useDashboardWidget).mockImplementation(() => dashboardWidget as neve
 const mockUseQuery = jest.mocked(useQuery);
 const mockUseWebSocket = jest.mocked(useWebSocket);
 
-function socketResult(prices = new Map(), isConnected = false, lastUpdate: Date | null = null) {
+function socketResult(prices = new Map(), isConnected = false, lastUpdate: Date | null = null): UseWebSocketReturn {
     return {
         prices,
         isConnected,
+        isReceiving: false,
+        protocolError: null,
         lastUpdate,
         marketStatus: null,
         reconnect: jest.fn(),
-    } as ReturnType<typeof useWebSocket>;
+    };
 }
 
 function renderWatchlist(symbols: string[]) {
@@ -57,6 +67,7 @@ describe('WatchlistWidget quotes', () => {
         jest.clearAllMocks();
         dashboardWidget.widget.config = { watchlistSymbols: ['VCI'] };
         mockUseQuery.mockReturnValue({ data: { data: [] } } as ReturnType<typeof useQuery>);
+        jest.mocked(useQueries).mockReturnValue([]);
         mockUseWebSocket.mockReturnValue(socketResult());
     });
 
@@ -82,7 +93,7 @@ describe('WatchlistWidget quotes', () => {
 
         expect(screen.getByText('42')).toBeInTheDocument();
         expect(screen.getByText('+2.38%')).toBeInTheDocument();
-        expect(screen.getByText('Live feed · Last quote received|Received|Current|As-of unknown')).toBeInTheDocument();
+        expect(screen.getByText('Connected · Stored or observed quote|Received|Current|As-of unknown')).toBeInTheDocument();
     });
 
     it('retains and labels the last observed quote after disconnect', () => {
@@ -94,6 +105,62 @@ describe('WatchlistWidget quotes', () => {
 
         expect(screen.getByText('42')).toBeInTheDocument();
         expect(screen.getByText('Disconnected · Cached quote receipt|Received|Cached|As-of unknown')).toBeInTheDocument();
+    });
+
+    it('seeds a closed-session watchlist from admitted stored quotes', () => {
+        jest.mocked(useQueries).mockReturnValue([{ data: {
+            symbol: 'VCI', price: 42000, price_unit: 'VND', change: null,
+            changePct: null, volume: null, updatedAt: '2026-10-21T00:00:00',
+        } }] as never);
+        renderWatchlist(['VCI']);
+        const priceCell = screen.getByRole('button', { name: 'View VCI' }).querySelectorAll('td')[1];
+        expect(Number(priceCell.textContent?.replace(/\D/g, ''))).toBe(42000);
+        expect(screen.getByText('Disconnected · Cached quote receipt|No receipt|Cached|Known as-of')).toBeInTheDocument();
+        expect(screen.getByText('HTTP quote')).toBeInTheDocument();
+    });
+
+    it('does not overlay an older stream observation on a newer stored quote', () => {
+        jest.mocked(useQueries).mockReturnValue([{ data: {
+            symbol: 'VCI', price: 43000, price_unit: 'VND', updatedAt: '2026-10-22T10:00:00+07:00',
+        } }] as never);
+        mockUseWebSocket.mockReturnValue(socketResult(new Map([['VCI', {
+            symbol: 'VCI', price: 42000, as_of: '2026-10-21T10:00:00+07:00', stale: true,
+        }]]), true));
+        renderWatchlist(['VCI']);
+        const priceCell = screen.getByRole('button', { name: 'View VCI' }).querySelectorAll('td')[1];
+        expect(Number(priceCell.textContent?.replace(/\D/g, ''))).toBe(43000);
+    });
+
+    it.each([false, true])('refreshes HTTP only while delivery is degraded (receiving=%s)', async (isReceiving) => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-10-22T10:00:00+07:00'));
+        const actualQuery = jest.requireActual<typeof ReactQuery>('@tanstack/react-query');
+        jest.mocked(useQuery).mockImplementation(actualQuery.useQuery);
+        jest.mocked(useQueries).mockImplementation(actualQuery.useQueries);
+        jest.mocked(api.getSymbols).mockResolvedValue({ count: 0, data: [] });
+        const response = (price: number): QuoteResponse => ({ data: {
+            symbol: 'VCI', price, price_unit: 'VND', updatedAt: '2026-10-22T10:00:00+07:00',
+            open: null, high: null, low: null, prevClose: null, change: null, changePct: null,
+            volume: null, value: null,
+        } });
+        const transport = jest.mocked(api.getQuote)
+            .mockResolvedValueOnce(response(42000)).mockResolvedValue(response(43000));
+        mockUseWebSocket.mockReturnValue({ ...socketResult(new Map(), true), isReceiving });
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+        const view = render(<QueryClientProvider client={client}><WatchlistWidget id="watchlist" config={{ watchlistSymbols: ['VCI'] }} /></QueryClientProvider>);
+        try {
+            await act(async () => { await jest.advanceTimersByTimeAsync(1); });
+            const priceCell = screen.getByRole('button', { name: 'View VCI' }).querySelectorAll('td')[1];
+            expect(Number(priceCell.textContent?.replace(/\D/g, ''))).toBe(42000);
+            await act(async () => { await jest.advanceTimersByTimeAsync(30_001); });
+            expect(Number(priceCell.textContent?.replace(/\D/g, ''))).toBe(isReceiving ? 42000 : 43000);
+            expect(transport).toHaveBeenCalledTimes(isReceiving ? 1 : 2);
+        } finally {
+            view.unmount();
+            client.clear();
+            jest.restoreAllMocks();
+            jest.useRealTimers();
+        }
     });
 
     it('sorts unavailable prices last in both directions', () => {

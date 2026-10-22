@@ -6,9 +6,9 @@ Fetches major shareholders/ownership data for Vietnam-listed companies.
 
 import asyncio
 import logging
+import math
 import numbers
-from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -52,18 +52,19 @@ OWNERSHIP_VALUE_KEYS = (
 )
 
 
-def _extract_ownership_raw(row: dict[str, Any]) -> Optional[float]:
+def _extract_ownership(row: dict[str, Any]) -> tuple[Optional[float], Optional[str]]:
     for key in OWNERSHIP_VALUE_KEYS:
-        parsed = _parse_number(row.get(key))
-        if parsed is not None:
-            return parsed
-    return None
-
-
-def _normalize_ownership_pct(parsed: Optional[float], assume_ratio: bool) -> Optional[float]:
-    if parsed is None:
-        return None
-    return parsed * 100 if assume_ratio else parsed
+        raw = row.get(key)
+        parsed = _parse_number(raw)
+        if parsed is None:
+            continue
+        unit = row.get("ownership_unit")
+        if isinstance(raw, str) and raw.strip().endswith("%"):
+            unit = "percent"
+        value = parsed * 100 if unit == "ratio" else parsed
+        admitted = unit in ("percent", "ratio") and math.isfinite(value) and 0 <= value <= 100
+        return (value if admitted else None), key
+    return None, None
 
 
 class ShareholdersQueryParams(BaseModel):
@@ -84,6 +85,11 @@ class ShareholderData(BaseModel):
     shareholder_name: Optional[str] = None
     shares_owned: Optional[float] = None
     ownership_pct: Optional[float] = None
+    ownership_unit: Optional[Literal["percent"]] = None
+    ownership_unit_status: Literal["explicit", "unverified"] = "unverified"
+    ownership_source_field: Optional[str] = None
+    ownership_source: Optional[str] = None
+    raw_data: Optional[dict[str, Any]] = None
     shareholder_type: Optional[str] = None  # Major, Insider, Foreign, etc.
 
     model_config = {
@@ -146,9 +152,7 @@ class VnstockShareholdersFetcher(BaseFetcher[ShareholdersQueryParams, Shareholde
         params: ShareholdersQueryParams,
         data: List[dict[str, Any]],
     ) -> List[ShareholderData]:
-        prepared_rows: list[tuple[dict[str, Any], Optional[float], Optional[float]]] = []
-        ownership_samples: list[float] = []
-
+        results = []
         for row in data:
             shares_owned = _parse_number(
                 row.get("shares")
@@ -165,21 +169,8 @@ class VnstockShareholdersFetcher(BaseFetcher[ShareholdersQueryParams, Shareholde
                 or row.get("numberOfShares")
                 or row.get("number_of_shares")
             )
-            ownership_raw = _extract_ownership_raw(row)
-            if ownership_raw is not None:
-                ownership_samples.append(abs(ownership_raw))
-            prepared_rows.append((row, shares_owned, ownership_raw))
-
-        # VCI often returns ratio values (0.36 = 36%), while KBS can return percentages
-        # directly (22.29 = 22.29%). Detect shape at dataset level to avoid 100x errors.
-        assume_ratio_ownership = bool(ownership_samples) and max(ownership_samples) <= 1
-
-        results = []
-        for row, shares_owned, ownership_raw in prepared_rows:
+            ownership_pct, ownership_source_field = _extract_ownership(row)
             try:
-                ownership_pct = _normalize_ownership_pct(
-                    ownership_raw, assume_ratio=assume_ratio_ownership
-                )
                 results.append(
                     ShareholderData(
                         symbol=params.symbol.upper(),
@@ -192,6 +183,11 @@ class VnstockShareholdersFetcher(BaseFetcher[ShareholdersQueryParams, Shareholde
                         or row.get("tenCoDonh"),
                         shares_owned=shares_owned,
                         ownership_pct=ownership_pct,
+                        ownership_unit="percent" if ownership_pct is not None else None,
+                        ownership_unit_status="explicit" if ownership_pct is not None else "unverified",
+                        ownership_source_field=ownership_source_field,
+                        ownership_source=f"vnstock:{settings.vnstock_source}",
+                        raw_data=row,
                         shareholder_type=row.get("type")
                         or row.get("shareholderType")
                         or row.get("owner_type")

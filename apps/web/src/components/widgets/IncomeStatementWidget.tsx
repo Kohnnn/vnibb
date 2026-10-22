@@ -31,6 +31,7 @@ import {
     getUnitLegend,
     resolveUnitScale,
     toFiniteNumber,
+    readCanonicalStatementValue,
 } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
@@ -128,7 +129,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
         dataUpdatedAt,
     } = useIncomeStatement(symbol, { period: apiPeriod, limit: visiblePeriodLimit });
 
-    const items = data?.data || [];
+    const items = useMemo(() => data?.data || [], [data?.data]);
     // Provider payloads can repeat a fiscal period or emit rows with no fiscal
     // identity at all. `canonicalPeriodRows` never picks between conflicting rows
     // (nothing in the payload proves which basis is authoritative) - it excludes
@@ -162,17 +163,21 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
     const unavailableNote = useMemo(() => describeUnavailableStatementRows(periodItems), [periodItems]);
     const displayItems = useMemo(
         () => periodItems.filter((item) => !isUnavailableStatementRow(item)).map((item) => {
-            const metadata = 'unit_metadata' in item && item.unit_metadata && typeof item.unit_metadata === 'object' ? item.unit_metadata : {};
-            const rejectedKeys = Object.entries(metadata).filter(([, field]) => field && typeof field === 'object' && 'unavailable_reason' in field && isUnavailableStatementRow(field)).map(([key]) => key);
-            if (rejectedKeys.includes('pre_tax_profit') || rejectedKeys.includes('profit_before_tax')) {
-                rejectedKeys.push('pre_tax_profit', 'profit_before_tax');
-            }
-            return rejectedKeys.length > 0
-                ? { ...item, ...Object.fromEntries(rejectedKeys.map((key) => [key, null])) }
-                : item;
+            const record = item as unknown as Record<string, unknown>;
+            return {
+                ...item,
+                raw_data: undefined,
+                ...Object.fromEntries([...Object.keys(labels), 'operating_expense'].map((key) => [key, readCanonicalStatementValue(record, key)])),
+            };
         }),
         [periodItems]
     );
+    const exportData = useMemo(() => displayItems.map((item) => ({
+        period: item.period,
+        ...Object.fromEntries(Object.keys(labels).map((key) => [key, convertFinancialValueForUnit(
+            (item as unknown as Record<string, number | null>)[key], unitConfig, item.period,
+        )])),
+    })), [displayItems, unitConfig]);
     const duplicatePeriodNote = useMemo(() => {
         const notes: string[] = [];
         const ambiguous = periodIssues.filter((issue) => issue.reason === 'ambiguous-basis');
@@ -297,6 +302,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 extra: hasData
                     ? {
                         periods: displayItems.length,
+                        data: exportData,
                         // Same channel the widget already publishes on; the
                         // selection rides along so the copilot can target it.
                         tableInsight: chartInsight,
@@ -304,7 +310,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                     : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length, chartInsight]);
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length, chartInsight, exportData]);
     const attachSelection = useCallback(
         (row: DenseTableRow): DenseTableRow => {
             // Only metrics this widget actually charts are selectable; the rest
@@ -604,7 +610,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             noPadding
             widgetId={id}
             showLinkToggle
-            exportData={displayItems}
+            exportData={exportData}
         >
             <div className="h-full flex flex-col px-2 py-1.5">
                 {/* The dashboard wraps widget children in a header-suppressing

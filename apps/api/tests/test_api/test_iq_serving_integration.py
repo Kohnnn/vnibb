@@ -79,7 +79,11 @@ async def test_iq_ratio_filter_preserves_certified_units(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_statement_endpoint_does_not_fetch_vci_when_iq_available(monkeypatch):
-    rows = [FinancialStatementData(symbol="VNM", period="2024", statement_type="income", revenue=100, source="vietcap")]
+    rows = [FinancialStatementData(
+        symbol="VNM", period="2024", statement_type="income", revenue=100, source="vietcap",
+        currency="VND", value_unit="VND", consolidation_basis="consolidated", flow_basis="annual",
+        unit_metadata={"revenue": {"source_unit": "VND", "value_unit": "VND"}},
+    )]
     monkeypatch.setattr(equity, "_get_model_last_updated", AsyncMock(return_value=None))
     monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=rows))
     fallback = AsyncMock(side_effect=AssertionError("VCI called before IQ exhausted"))
@@ -92,7 +96,11 @@ async def test_statement_endpoint_does_not_fetch_vci_when_iq_available(monkeypat
 @pytest.mark.asyncio
 @pytest.mark.parametrize("primary_failure", [False, True])
 async def test_statement_endpoint_falls_back_on_empty_or_failed_iq(monkeypatch, primary_failure):
-    row = FinancialStatementData(symbol="VNM", period="2024", statement_type="balance", total_assets=100, source="VCI")
+    row = FinancialStatementData(
+        symbol="VNM", period="2024", statement_type="balance", total_assets=100, source="VCI",
+        currency="VND", value_unit="VND", consolidation_basis="consolidated",
+        unit_metadata={"total_assets": {"source_unit": "VND", "value_unit": "VND"}},
+    )
     monkeypatch.setattr(equity, "_get_model_last_updated", AsyncMock(return_value=None))
     iq_client = SimpleNamespace(get_company_details=Mock(side_effect=RuntimeError("IQ unavailable")))
     monkeypatch.setattr(equity, "VietcapClient", lambda: iq_client)
@@ -118,10 +126,22 @@ async def test_quarter_handler_withholds_ambiguous_sql_identity_without_value_de
         ("2025", 2025, None), ("Q4-2025", 2025, 4),
         ("Q1-2026", 2026, 1), ("Q2-2026", 2026, 2),
     ], start=1):
+        evidence = FinancialStatementData(
+            symbol="FPT", period=period, statement_type="income", fiscal_year=year, fiscal_quarter=quarter,
+            source="VCI", currency="VND", value_unit="VND", consolidation_basis="consolidated",
+            flow_basis="single_quarter", revenue=100, net_income=10,
+            unit_metadata={
+                "revenue": {"source_unit": "VND", "value_unit": "VND"},
+                "net_income": {"source_unit": "VND", "value_unit": "VND"},
+            },
+        )
         test_db.add(IncomeStatement(
             id=8000 + index, symbol="FPT", period=period, period_type="quarter",
             fiscal_year=year, fiscal_quarter=quarter, revenue=100, net_income=10,
-            raw_data=retained if quarter is None else {},
+            raw_data=(
+                {"_financial_lineage": {"canonical_data": evidence.model_dump(mode="json")}}
+                if quarter is not None else retained
+            ),
         ))
     await test_db.flush()
     monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=[]))
@@ -188,14 +208,96 @@ async def test_financial_http_withholds_legacy_interest_preserving_sql(client, t
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [20, 40])
+@pytest.mark.parametrize("source_path", ["mongo", "provider", "sql"])
+@pytest.mark.parametrize("missing", ["currency", "value_unit", "consolidation_basis", "flow_basis", "source_unit", None])
+async def test_annual_financial_endpoint_requires_complete_monetary_evidence(
+    client, test_db, monkeypatch, limit, source_path, missing,
+):
+    metadata = {"label": "interest_expense", "source_unit": "VND", "value_unit": "VND"}
+    row = FinancialStatementData(
+        symbol="FPT", period="2025", statement_type="income", fiscal_year=2025,
+        source="vietcap" if source_path == "mongo" else "VCI", currency="VND", value_unit="VND",
+        consolidation_basis="consolidated", flow_basis="annual", interest_expense=0,
+        unit_metadata={"interest_expense": metadata}, raw_data={"interest_expense": 0},
+    )
+    if missing == "source_unit":
+        del row.unit_metadata["interest_expense"][missing]
+    elif missing:
+        setattr(row, missing, None)
+    original = row.model_dump(mode="json")
+    if source_path == "sql":
+        test_db.add(IncomeStatement(
+            id=8600, symbol="FPT", period="2025", period_type="year", fiscal_year=2025,
+            interest_expense=0, raw_data={"_financial_lineage": {"canonical_data": original}},
+        ))
+        await test_db.flush()
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(
+        return_value=[row] if source_path == "mongo" else []))
+    monkeypatch.setattr(equity, "VietcapClient", lambda: SimpleNamespace(
+        get_company_details=Mock(side_effect=RuntimeError("IQ unavailable"))))
+    monkeypatch.setattr(equity, "get_financials_with_ttm", AsyncMock(
+        return_value=[row] if source_path == "provider" else []))
+    async def unchanged(**kwargs):
+        return kwargs["rows"]
+    monkeypatch.setattr(equity, "_cross_fill_income_statement_rows", unchanged)
+
+    response = await client.get(f"/api/v1/equity/FPT/financials?statement_type=income&period=year&limit={limit}")
+
+    assert response.status_code == 200
+    result = response.json()["data"][0]
+    assert result["interest_expense"] == (0 if missing is None else None)
+    assert row.model_dump(mode="json") == original
+    if source_path == "sql":
+        stored = (await test_db.execute(select(IncomeStatement).where(IncomeStatement.id == 8600))).scalar_one()
+        assert stored.interest_expense == 0
+        assert stored.raw_data["_financial_lineage"]["canonical_data"] == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [20, 40])
+@pytest.mark.parametrize("certified", [False, True])
+async def test_annual_financial_cache_hit_matches_admitted_miss(client, monkeypatch, limit, certified):
+    from vnibb.core import cache
+
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: False)
+    cache._memory_cache.clear()
+    row = FinancialStatementData(symbol="FPT", period="2025", statement_type="income", fiscal_year=2025,
+        source="vietcap", currency="VND", value_unit="VND", consolidation_basis="consolidated",
+        flow_basis="annual", interest_expense=0, unit_metadata={"interest_expense": {
+            "label": "interest_expense", "value_unit": "VND", **({"source_unit": "VND"} if certified else {})}})
+    loader = AsyncMock(return_value=[row])
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", loader)
+    monkeypatch.setattr(equity, "_get_model_last_updated", AsyncMock(return_value=None))
+    url = f"/api/v1/equity/FPT/financials?statement_type=income&period=year&limit={limit}"
+    try:
+        miss = await client.get(url)
+        hit = await client.get(url)
+        assert miss.status_code == hit.status_code == 200
+        assert miss.json()["data"] == hit.json()["data"]
+        assert hit.json()["data"][0]["interest_expense"] == (0 if certified else None)
+        loader.assert_awaited_once()
+        cache._memory_cache.clear()
+        refreshed = await client.get(url)
+        assert refreshed.json()["data"] == hit.json()["data"]
+        assert loader.await_count == 2
+    finally:
+        cache._memory_cache.clear()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("original_quarter", [4, 3])
 async def test_sql_balance_ttm_http_preserves_validated_source_snapshot(
     client, test_db, monkeypatch, original_quarter,
 ):
     canonical = FinancialStatementData(symbol="FPT", period="Q4-2025", statement_type="balance",
         fiscal_year=2025, fiscal_quarter=4, total_assets=400, total_equity=240,
-        source="VCI", value_unit="VND", consolidation_basis="consolidated",
-        unit_metadata={"total_assets": {"value_unit": "VND"}, "total_equity": {"value_unit": "VND"}})
+        source="VCI", currency="VND", value_unit="VND", consolidation_basis="consolidated",
+        unit_metadata={
+            "total_assets": {"source_unit": "VND", "value_unit": "VND"},
+            "total_equity": {"source_unit": "VND", "value_unit": "VND"},
+        })
     raw = {"yearReport": 2025, "lengthReport": original_quarter,
            "_financial_lineage": {"canonical_data": canonical.model_dump(mode="json")}}
     test_db.add(BalanceSheet(id=8900, symbol="FPT", period="Q4-2025", period_type="quarter",
@@ -229,18 +331,23 @@ async def test_sql_balance_ttm_http_preserves_validated_source_snapshot(
 async def test_balance_ttm_endpoint_preserves_merged_snapshot_proof(monkeypatch, inventory, proof):
     primary_quarter = FinancialStatementData(
         symbol="FPT", period="Q4-2025", statement_type="balance", fiscal_year=2025, fiscal_quarter=4,
-        source="VCI", value_unit="VND", consolidation_basis="consolidated", total_assets=400,
+        source="VCI", currency="VND", value_unit="VND", consolidation_basis="consolidated", total_assets=400,
         inventory=inventory, cash_and_equivalents=None,
-        unit_metadata={"total_assets": {"value_unit": "VND", "descriptor": "primary_assets"},
-            "inventory": {"value_unit": "VND", "descriptor": "primary_inventory"},
-            "cash_and_equivalents": {"unavailable_reason": "conflicting_metric_rows"}},
+        unit_metadata={
+            "total_assets": {"source_unit": "VND", "value_unit": "VND", "descriptor": "primary_assets"},
+            "inventory": {"source_unit": "VND", "value_unit": "VND", "descriptor": "primary_inventory"},
+            "cash_and_equivalents": {"unavailable_reason": "conflicting_metric_rows"},
+        },
         raw_data={"yearReport": 2025, "lengthReport": 4},
     )
     fallback_quarter = primary_quarter.model_copy(deep=True, update={
         "total_assets": 410, "total_equity": 240, "inventory": 25, "cash_and_equivalents": 8,
-        "unit_metadata": {"total_equity": {"value_unit": "VND", "descriptor": "fallback_equity"},
-            "inventory": {"value_unit": "VND", "descriptor": "fallback_inventory"},
-            "cash_and_equivalents": {"value_unit": "VND", "descriptor": "fallback_cash"}},
+        "unit_metadata": {
+            "total_assets": {"source_unit": "VND", "value_unit": "VND", "descriptor": "fallback_assets"},
+            "total_equity": {"source_unit": "VND", "value_unit": "VND", "descriptor": "fallback_equity"},
+            "inventory": {"source_unit": "VND", "value_unit": "VND", "descriptor": "fallback_inventory"},
+            "cash_and_equivalents": {"source_unit": "VND", "value_unit": "VND", "descriptor": "fallback_cash"},
+        },
     })
     primary = equity._build_ttm_financial_statement_rows([primary_quarter], statement_type="balance")[0]
     fallback = equity._build_ttm_financial_statement_rows([fallback_quarter], statement_type="balance")[0]
@@ -288,8 +395,10 @@ async def test_balance_ttm_endpoint_preserves_merged_snapshot_proof(monkeypatch,
 @pytest.mark.asyncio
 async def test_sql_http_accepts_bare_year_with_compatible_explicit_canonical_quarter(client, test_db, monkeypatch):
     canonical = FinancialStatementData(symbol="FPT", period="Q1-2025", statement_type="balance",
-        fiscal_year=2025, fiscal_quarter=1, total_assets=400, source="VCI", value_unit="VND",
-        consolidation_basis="consolidated", unit_metadata={"total_assets": {"value_unit": "VND"}})
+        fiscal_year=2025, fiscal_quarter=1, total_assets=400, source="VCI", currency="VND", value_unit="VND",
+        consolidation_basis="consolidated", unit_metadata={
+            "total_assets": {"source_unit": "VND", "value_unit": "VND"},
+        })
     raw = {"yearReport": 2025, "lengthReport": 1,
            "_financial_lineage": {"canonical_data": canonical.model_dump(mode="json")}}
     test_db.add(BalanceSheet(id=8901, symbol="FPT", period="2025", period_type="quarter",
@@ -335,7 +444,7 @@ async def test_empty_store_financials_http_acquires_actual_iq_eps_before_vci(
             raise RuntimeError("balance unavailable")
         if section == "CASH_FLOW":
             return {"years": [{"yearReport": 2025, "lengthReport": 5, "opaque_cash": 25, "unit": "VND"}]}
-        return {"years": [{"yearReport": 2025, "lengthReport": 5, "opaque_eps": 4321, "opaque_revenue": 900}]}
+        return {"years": [{"yearReport": 2025, "lengthReport": 5, "opaque_eps": 4321, "opaque_revenue": 900, "consolidationBasis": "consolidated"}]}
 
     iq.get_financial_statement = Mock(side_effect=statement)
     precise = AsyncMock(side_effect=RuntimeError("Mongo unavailable") if stored_read_failure else None, return_value=[])

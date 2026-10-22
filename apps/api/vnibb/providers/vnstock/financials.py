@@ -269,6 +269,7 @@ class FinancialStatementData(BaseModel):
     revenue: float | None = Field(None, description="Total Revenue")
     gross_profit: float | None = Field(None, description="Gross Profit")
     operating_income: float | None = Field(None, description="Operating Income")
+    operating_expenses: float | None = Field(None, description="Operating Expenses")
     net_income: float | None = Field(None, description="Net Income")
     ebitda: float | None = Field(None, description="EBITDA")
     eps: float | None = Field(None, description="Earnings Per Share")
@@ -287,11 +288,13 @@ class FinancialStatementData(BaseModel):
     total_liabilities: float | None = Field(None, description="Total Liabilities")
     total_equity: float | None = Field(None, description="Total Equity")
     cash_and_equivalents: float | None = Field(None, description="Cash & Equivalents")
+    short_term_investments: float | None = Field(None, description="Short-term Investments")
     equity: float | None = Field(None, description="Equity")
     cash: float | None = Field(None, description="Cash")
     inventory: float | None = Field(None, description="Inventory")
     current_assets: float | None = Field(None, description="Current Assets")
     fixed_assets: float | None = Field(None, description="Fixed Assets")
+    non_current_assets: float | None = Field(None, description="Non-current Assets")
     current_liabilities: float | None = Field(None, description="Current Liabilities")
     long_term_liabilities: float | None = Field(None, description="Long-term Liabilities")
     retained_earnings: float | None = Field(None, description="Retained Earnings")
@@ -302,6 +305,7 @@ class FinancialStatementData(BaseModel):
     customer_deposits: float | None = Field(None, description="Customer Deposits")
     goodwill: float | None = Field(None, description="Goodwill")
     intangible_assets: float | None = Field(None, description="Intangible Assets")
+    book_value_per_share: float | None = Field(None, description="Book Value Per Share")
 
     # Cash Flow specific
     operating_cash_flow: float | None = Field(None, description="Operating Cash Flow")
@@ -890,6 +894,10 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                             result["flow_basis"] = "single_quarter"
                         elif str(head.get("PeriodBegin")) == f"{year.group(1)}01" and str(head.get("PeriodEnd")) == end:
                             result["flow_basis"] = "cumulative_ytd"
+                    elif (term in {"FY", "YEAR", "ANNUAL"}
+                          and str(head.get("PeriodBegin")) == f"{year.group(1)}01"
+                          and str(head.get("PeriodEnd")) == f"{year.group(1)}12"):
+                        result["flow_basis"] = "annual"
                     return result
             return {"consolidation_basis": row.get("consolidation_basis"), "flow_basis": row.get("flow_basis")}
 
@@ -904,9 +912,6 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                        "thousand vnd": 1000, "trieu dong": 1_000_000, "million vnd": 1_000_000,
                        "ty dong": 1_000_000_000, "bn. vnd": 1_000_000_000, "billion vnd": 1_000_000_000}
             source_factor = factors.get(descriptor)
-            if not source and not unit:
-                source_factor = 1
-                unit = "VND"
             metadata = {"source": source or None, "label": label, "source_unit": unit,
                         "provider_value": value, "provider_multiplier": provider_multiplier,
                         "value_unit": "VND/share" if metric in {"eps", "eps_diluted"} else "VND"}

@@ -33,6 +33,23 @@ def test_transform_dividend_yield_requires_declared_units(value, unit, expected,
     assert rows[0].provider_evidence == [raw]
 
 
+@pytest.mark.parametrize("value,unit,expected", [
+    (6.3257, None, None), (0.0287, None, None), (0.0395, None, None), (9.951, None, None),
+    (0.25, "fraction", 25.0), (0.25, "percent", 0.25), (0.0, "percent", 0.0),
+    (632.57, "percent", 632.57),
+])
+@pytest.mark.parametrize("shape", ["standard", "row_item"])
+def test_transform_payout_requires_explicit_units_without_magnitude_guessing(value, unit, expected, shape):
+    raw = ({"yearReport": 2025, "payoutRatio": value, "unit": unit} if shape == "standard"
+           else {"item_id": "payout_ratio", "2025": value, "unit": unit})
+    rows = VnstockFinancialRatiosFetcher.transform_data(
+        FinancialRatiosQueryParams(symbol="FPT", period="year"), [raw],
+    )
+    assert rows[0].payout_ratio == expected
+    assert rows[0].ratio_units["payout_ratio"] == ("percent" if expected is not None else "unknown")
+    assert rows[0].provider_evidence == [raw]
+
+
 def test_transform_data_row_based_maps_key_metrics():
     params = FinancialRatiosQueryParams(symbol="VNM", period="year")
     raw_rows = [

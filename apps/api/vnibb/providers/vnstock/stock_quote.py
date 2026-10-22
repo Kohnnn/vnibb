@@ -82,22 +82,28 @@ class QuoteCache:
     
     _cache: dict = {}
     _ttl_seconds: int = 30
+    _max_size: int = 50
+
+    @classmethod
+    def _prune_expired(cls, now: datetime) -> None:
+        for key, (_, timestamp) in list(cls._cache.items()):
+            if now - timestamp >= timedelta(seconds=cls._ttl_seconds):
+                del cls._cache[key]
     
     @classmethod
     def get(cls, symbol: str) -> Optional[tuple[StockQuoteData, datetime]]:
         """Get cached quote if not expired."""
-        if symbol in cls._cache:
-            data, timestamp = cls._cache[symbol]
-            if datetime.utcnow() - timestamp < timedelta(seconds=cls._ttl_seconds):
-                return data, timestamp
-            # Expired, remove from cache
-            del cls._cache[symbol]
-        return None
+        cls._prune_expired(datetime.utcnow())
+        return cls._cache.get(symbol)
     
     @classmethod
     def set(cls, symbol: str, data: StockQuoteData) -> None:
         """Store quote in cache."""
-        cls._cache[symbol] = (data, datetime.utcnow())
+        now = datetime.utcnow()
+        cls._prune_expired(now)
+        if symbol not in cls._cache and len(cls._cache) >= cls._max_size:
+            del cls._cache[next(iter(cls._cache))]
+        cls._cache[symbol] = (data, now)
     
     @classmethod
     def is_fresh(cls, symbol: str) -> bool:

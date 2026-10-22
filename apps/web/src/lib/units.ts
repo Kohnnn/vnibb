@@ -1,3 +1,5 @@
+import { normalizeFinancialPeriod } from './financialPeriods'
+
 export type UnitDisplay = 'auto' | 'raw' | 'K' | 'M' | 'B' | 'USD'
 
 export interface UnitConfig {
@@ -355,6 +357,55 @@ export function toFiniteNumber(value: unknown): number | null {
   }
   if (Array.isArray(value)) return value.length > 0 ? toFiniteNumber(value[0]) : null
   return null
+}
+
+function hasCanonicalFieldEvidence(value: unknown, unit: string): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const metadata = value as Record<string, unknown>
+  if (metadata.unavailable_reason) return false
+  const declaredUnits = [metadata.unit, metadata.value_unit].filter((entry) => entry !== undefined && entry !== null)
+  if (declaredUnits.some((entry) => entry !== unit)) return false
+  if (Array.isArray(metadata.components)) {
+    return metadata.components.length > 0 && metadata.components.every((component) => hasCanonicalFieldEvidence(component, unit))
+  }
+  if (declaredUnits.length === 0) return false
+  return (typeof metadata.source_unit === 'string' && metadata.source_unit.trim().length > 0)
+    || Boolean(metadata.unitEvidence && typeof metadata.unitEvidence === 'object' && Object.keys(metadata.unitEvidence).length > 0)
+}
+
+export function readCanonicalStatementValue(
+  row: Record<string, unknown>,
+  key: string,
+  flow = true,
+): number | null {
+  const period = normalizeFinancialPeriod(typeof row.period === 'string' ? row.period : null)
+  const isTtm = period === 'TTM' || Boolean(period?.startsWith('TTM-'))
+  if (!period || period === 'YTD' || row.unavailable_reason
+    || row.currency !== 'VND' || row.value_unit !== 'VND'
+    || !['consolidated', 'separate'].includes(String(row.consolidation_basis).toLowerCase())) return null
+  const expectedFlow = isTtm ? 'trailing_twelve_months'
+    : period.includes('YTD') ? 'cumulative_ytd'
+      : period.startsWith('Q') ? 'single_quarter' : 'annual'
+  if (flow && row.flow_basis !== expectedFlow) return null
+  if (isTtm) {
+    if (row.aggregation_basis !== (flow ? 'four_quarter_flow_sum' : 'latest_quarter_snapshot')) return null
+    if (!Array.isArray(row.source_periods) || row.source_periods.length !== (flow ? 4 : 1)) return null
+    const sourceQuarters = row.source_periods.map((sourcePeriod) => typeof sourcePeriod === 'string'
+      ? normalizeFinancialPeriod(sourcePeriod)?.match(/^Q([1-4])-(20\d{2})$/) : null)
+    if (sourceQuarters.some((quarter) => !quarter)) return null
+    const ordinals = sourceQuarters.map((quarter) => Number(quarter![2]) * 4 + Number(quarter![1]))
+    if (ordinals.some((ordinal, index) => ordinal !== ordinals[0] - index)) return null
+    if (flow) {
+      const metadata = row.unit_metadata as Record<string, unknown> | undefined
+      const field = metadata?.[key]
+      if (!field || typeof field !== 'object' || !('components' in field)
+        || !Array.isArray(field.components) || field.components.length !== 4) return null
+    }
+  }
+  const metadata = row.unit_metadata as Record<string, unknown> | undefined
+  const unit = key === 'eps' || key === 'eps_diluted' ? 'VND/share' : 'VND'
+  const value = row[key]
+  return hasCanonicalFieldEvidence(metadata?.[key], unit) && isFiniteNumber(value) ? value : null
 }
 
 export function clampPercentage(

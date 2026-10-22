@@ -1841,6 +1841,8 @@ class DataPipeline:
 
                 if count % batch_size == 0:
                     await session.commit()
+                    if progress is not None:
+                        progress["committed_count"] = count
                     for item in cache_batch:
                         cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
                         await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
@@ -2050,6 +2052,8 @@ class DataPipeline:
                     )
                 )
             await session.commit()
+            if progress is not None:
+                progress["committed_count"] = count
             for item in cache_batch:
                 cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
                 await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
@@ -2216,6 +2220,8 @@ class DataPipeline:
                         await session.commit()
                         symbol_synced += range_synced
                         total_synced += range_synced
+                        if progress is not None:
+                            progress["committed_count"] = total_synced
                         if conflicts:
                             logger.warning("Price acquisition retained IQ-owned rows for %s: %s", symbol, conflicts)
                             if progress is not None:
@@ -3945,8 +3951,6 @@ class DataPipeline:
                         raw_payload["dividend_yield"] = round(existing_yield, 4)
                         changed = True
 
-                payout_ratio_value = _pick_float(raw_payload.get("payout_ratio"))
-                eps_value = _pick_float(ratio_row.eps, raw_payload.get("eps"))
 
                 if (
                     ratio_row.bvps is None
@@ -4005,38 +4009,6 @@ class DataPipeline:
                     raw_payload["pb_ratio"] = ratio_row.pb_ratio
                     changed = True
 
-                if (
-                    payout_ratio_value is None
-                    and dps_value not in (None, 0)
-                    and eps_value not in (None, 0)
-                ):
-                    payout_ratio_value = (dps_value / eps_value) * 100
-                    raw_payload["payout_ratio"] = round(payout_ratio_value, 4)
-                    changed = True
-
-                if (
-                    ratio_row.dps is None
-                    and payout_ratio_value not in (None, 0)
-                    and eps_value not in (None, 0)
-                ):
-                    payout_ratio_base = payout_ratio_value
-                    while abs(payout_ratio_base) > 100:
-                        payout_ratio_base /= 100
-
-                    derived_dps = eps_value * (payout_ratio_base / 100)
-                    ratio_row.dps = round(derived_dps, 4)
-                    raw_payload["dps"] = ratio_row.dps
-                    dps_value = ratio_row.dps
-                    changed = True
-
-                if _pick_float(raw_payload.get("payout_ratio")) is None:
-                    if dividends_paid is not None and net_income not in (None, 0):
-                        if net_income > 0:
-                            raw_payload["payout_ratio"] = round(
-                                (abs(dividends_paid) / net_income) * 100,
-                                4,
-                            )
-                            changed = True
 
                 if ratio_row.peg_ratio is None:
                     pe_value = _pick_float(ratio_row.pe_ratio, raw_payload.get("pe"))

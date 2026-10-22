@@ -35,7 +35,7 @@ describe('PriceAlertsWidget', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     widgetLocation = undefined;
-    socket.mockReturnValue({ isConnected: false, prices: new Map(), lastUpdate: null, marketStatus: null, reconnect: jest.fn() });
+    socket.mockReturnValue({ isConnected: false, isReceiving: false, protocolError: null, prices: new Map(), lastUpdate: null, marketStatus: null, reconnect: jest.fn() });
     Object.defineProperty(window, 'Notification', { configurable: true, value: { permission: 'denied', requestPermission: jest.fn() } });
   });
 

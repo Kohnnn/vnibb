@@ -37,6 +37,7 @@ import {
     percentChangeDetail,
     resolveUnitScale,
     convertFinancialValueForUnit,
+    readCanonicalStatementValue,
 } from '@/lib/units';
 import type { ExtendedPeriod } from '@/components/ui/PeriodToggle';
 
@@ -186,21 +187,16 @@ function buildMetricLookup(source: unknown): Map<string, unknown> {
     return lookup;
 }
 
-function readMetricValue(row: Record<string, any>, key: string): any {
+function readMetricValue(row: Record<string, unknown>, key: string, flow: boolean): number | null {
     const aliases = STATEMENT_METRIC_ALIASES[key] || [key];
-    if (isUnavailableStatementRow(row) || aliases.some((alias) => isUnavailableStatementRow(row.unit_metadata?.[alias]))) return null;
-    const rowLookup = buildMetricLookup(row);
+    if (isUnavailableStatementRow(row) || aliases.some((alias) => {
+        const metadata = row.unit_metadata && typeof row.unit_metadata === 'object'
+            ? (row.unit_metadata as Record<string, unknown>)[alias] : undefined;
+        return metadata !== null && typeof metadata === 'object' && 'unavailable_reason' in metadata && isUnavailableStatementRow(metadata);
+    })) return null;
     for (const alias of aliases) {
-        const value = rowLookup.get(alias) ?? rowLookup.get(normalizeMetricKey(alias));
-        if (value !== null && value !== undefined && value !== '') return value;
-    }
-    const rawData = row.raw_data || row.rawData || row.raw;
-    const rawLookup = buildMetricLookup(rawData);
-    if (rawLookup.size > 0) {
-        for (const alias of aliases) {
-            const value = rawLookup.get(alias) ?? rawLookup.get(normalizeMetricKey(alias));
-            if (value !== null && value !== undefined && value !== '') return value;
-        }
+        const value = readCanonicalStatementValue(row, alias, flow);
+        if (value !== null) return value;
     }
     return null;
 }
@@ -269,10 +265,11 @@ const ZERO_IS_ABSENT_RATIO_KEYS: Record<string, true> = {
 };
 
 function readRatioValue(row: Record<string, unknown>, key: string): number | null {
-    if (key === 'dividend_yield') {
-        const units = row.ratio_units;
-        if (!units || typeof units !== 'object' || !('dividend_yield' in units) || units.dividend_yield !== 'percent') return null;
+    if (key === 'dividend_yield' || key === 'payout_ratio') {
+        const units = row.ratio_units as Record<string, unknown> | undefined;
+        if (!units || units[key] !== 'percent') return null;
     }
+    if (PER_SHARE_METRIC_KEYS.has(key) && (row.ratio_units as Record<string, unknown> | undefined)?.[key] !== 'VND/share') return null;
     const aliases = RATIO_METRIC_ALIASES[key] || [key];
     const metadata = row.unit_metadata && typeof row.unit_metadata === 'object' ? row.unit_metadata : {};
     if (isUnavailableStatementRow(row) || Object.entries(metadata).some(([field, value]) => aliases.includes(field) && value && typeof value === 'object' && 'unavailable_reason' in value && isUnavailableStatementRow(value))) return null;
@@ -287,14 +284,6 @@ function readRatioValue(row: Record<string, unknown>, key: string): number | nul
     for (const alias of aliases) {
         const value = numericValue(rowLookup.get(alias) ?? rowLookup.get(normalizeMetricKey(alias)));
         if (value !== null) return value;
-    }
-    const rawData = row.raw_data || row.rawData || row.raw;
-    const rawLookup = buildMetricLookup(rawData);
-    if (rawLookup.size > 0) {
-        for (const alias of aliases) {
-            const value = numericValue(rawLookup.get(alias) ?? rawLookup.get(normalizeMetricKey(alias)));
-            if (value !== null) return value;
-        }
     }
     return null;
 }
@@ -370,17 +359,6 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
         }
     }, [activeTab, incomeQuery, balanceQuery, cashFlowQuery, ratiosQuery]);
 
-    const exportData = useMemo(() => (activeQuery.data?.data || []).map((row) => {
-        const record = row as unknown as Record<string, unknown>;
-        const keys = activeTab === 'ratios'
-            ? Object.keys(record).filter((key) => typeof record[key] === 'number')
-            : STATEMENT_METRIC_KEYS[activeTab];
-        const metadata = record.unit_metadata && typeof record.unit_metadata === 'object' ? record.unit_metadata : {};
-        const rejectedValues = keys.filter((key) => isUnavailableStatementRow(record) || Object.entries(metadata).some(([field, value]) => (STATEMENT_METRIC_ALIASES[key] || [key]).includes(field) && value && typeof value === 'object' && 'unavailable_reason' in value && isUnavailableStatementRow(value)));
-        return rejectedValues.length > 0
-            ? { ...record, ...Object.fromEntries(rejectedValues.map((key) => [key, null])) }
-            : record;
-    }), [activeQuery.data?.data, activeTab]);
 
     const tableData = useMemo(() => {
         if (!activeQuery?.data || (activeTab === 'ratios' && period === 'TTM')) return null;
@@ -506,7 +484,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                     const currentVal = toFiniteNumber(
                         activeTab === 'ratios'
                             ? PER_SHARE_METRIC_KEYS.has(m.key) ? convertFinancialValueForUnit(readRatioValue(d, m.key), unitConfig, periodLabel) : readRatioValue(d, m.key)
-                            : convertFinancialValueForUnit(readMetricValue(d, m.key), unitConfig, periodLabel)
+                            : convertFinancialValueForUnit(readMetricValue(d, m.key, activeTab !== 'balance_sheet'), unitConfig, periodLabel)
                     );
                     const periodIndex = sortedPeriodIndex.get(periodLabel) ?? -1;
                     const prevRow: Record<string, unknown> | null = periodIndex > 0 ? comparisonRows[periodIndex - 1] : null;
@@ -514,7 +492,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                         activeTab === 'ratios'
                             ? prevRow ? PER_SHARE_METRIC_KEYS.has(m.key) ? convertFinancialValueForUnit(readRatioValue(prevRow, m.key), unitConfig, prevRow.__period as string | null) : readRatioValue(prevRow, m.key) : null
                             : convertFinancialValueForUnit(
-                                prevRow ? readMetricValue(prevRow, m.key) : null,
+                                prevRow ? readMetricValue(prevRow, m.key, activeTab !== 'balance_sheet') : null,
                                 unitConfig,
                                 comparisonRows[periodIndex - 1]?.__period,
                             )
@@ -538,6 +516,11 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
             unavailableNote: describeUnavailableStatementRows(displayRows),
         };
     }, [activeQuery?.data, ratiosReferenceQuery.data?.data, activeTab, periodMode, period, unitConfig]);
+
+    const exportData = useMemo(() => (tableData?.periods || []).map((period) => ({
+        period,
+        ...Object.fromEntries((tableData?.rows || []).map((row) => [row.metricKey, row.values[period]?.val ?? null])),
+    })), [tableData]);
 
     const hasData = Boolean(tableData && tableData.periods.length > 0);
     const isFallback = Boolean(activeQuery?.error && hasData);
@@ -581,10 +564,10 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                 lastDataDate: null,
                 fetchedAt: activeQuery?.dataUpdatedAt,
                 stale: isFallback,
-                extra: hasData ? { tab: activeTab, periods: tableData?.periods.length ?? 0 } : undefined,
+                extra: hasData ? { tab: activeTab, periods: tableData?.periods.length ?? 0, data: exportData } : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, activeQuery?.dataUpdatedAt, symbol, period, activeTab, sourceLabel, tableData?.periods.length]);
+    }, [onDataChange, hasData, isFallback, activeQuery?.dataUpdatedAt, symbol, period, activeTab, sourceLabel, tableData?.periods.length, exportData]);
 
     const tableScale = useMemo(() => {
         if (!tableData || activeTab === 'ratios') return resolveUnitScale([], unitConfig);
@@ -777,7 +760,9 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                                         ? null
                                         : typeof value === 'number' ? value : Number(value)
                                     if (meta?.isPct) {
-                                        return formatPct(Number.isFinite(numericValue) ? numericValue : null)
+                                        return row.id === 'payout_ratio'
+                                            ? formatPercent(Number.isFinite(numericValue) ? numericValue : null, { decimals: 2, input: 'percent' })
+                                            : formatPct(Number.isFinite(numericValue) ? numericValue : null)
                                     }
                                     if (activeTab === 'ratios') {
                                         return formatRatio(Number.isFinite(numericValue) ? numericValue : null)

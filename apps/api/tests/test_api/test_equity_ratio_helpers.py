@@ -23,10 +23,15 @@ from vnibb.providers.vnstock.financials import FinancialStatementData
     ({"roe": "unknown"}, None, None),
     ({"roe": "percent"}, 0.25, 0.25),
     ({}, 99.0, None),
+    ({}, None, 25.0),
+    ({"roe": "percent"}, 0.0, 0.0),
 ])
-async def test_ratio_endpoint_does_not_resurrect_rejected_merged_metrics(monkeypatch, test_db, preferred_units, preferred_roe, expected):
+async def test_ratio_endpoint_does_not_resurrect_rejected_merged_metrics(monkeypatch, test_db, client, preferred_units, preferred_roe, expected):
     from vnibb.api.v1 import equity
     from vnibb.models.trading import FinancialRatio
+    from vnibb.core import cache
+
+    monkeypatch.setattr(cache, "_memory_cache", {})
 
     test_db.add(FinancialRatio(id=901, symbol="VNM", period="2024", period_type="year", fiscal_year=2024, roe=25.0, pe_ratio=10.0, raw_data={"ratio_units": {"roe": "percent"}}))
     await test_db.commit()
@@ -43,9 +48,11 @@ async def test_ratio_endpoint_does_not_resurrect_rejected_merged_metrics(monkeyp
     monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", mongo_rows)
     monkeypatch.setattr(equity, "_get_latest_statement_period_key", latest_statement)
     monkeypatch.setattr(equity, "_enrich_missing_ratio_metrics", unchanged)
-    response = await equity.get_financial_ratios.__wrapped__(symbol="VNM", period="year", db=test_db)
-    assert response.data[0].roe == expected
-    assert response.data[0].pe == 10.0
+    response = await client.get("/api/v1/equity/VNM/ratios?period=year")
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["roe"] == expected
+    assert row["pe"] == 10.0
 
 
 @pytest.mark.asyncio
@@ -400,6 +407,10 @@ async def test_enrich_missing_ratio_metrics_requires_reported_gross_profit(
     statement = FinancialStatementData(
         symbol="VNM", period="2024", fiscal_year=2024, statement_type="income", source="fixture",
         value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+        currency="VND", unit_metadata={
+            name: {"source_unit": "VND", "value_unit": "VND"}
+            for name in ("revenue", "cost_of_revenue", "gross_profit", "operating_income")
+        },
         revenue=100.0, cost_of_revenue=cost_of_revenue, gross_profit=gross_profit,
         operating_income=20.0,
     )
@@ -458,11 +469,17 @@ async def test_enrich_missing_ratio_metrics_computes_certified_statement_metrics
                 interest_expense=20.0,
                 eps=5.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="VNM", period="2024", statement_type="income", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    symbol="VNM", period="2024", fiscal_year=2024, statement_type="income", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
                     revenue=1200.0, operating_income=180.0, net_income=150.0,
                     cost_of_revenue=700.0, interest_expense=20.0, eps=5.0,
-                    unit_metadata={"interest_expense": {"label": "interest_expense", "source_unit": "VND", "value_unit": "VND"}},
+                    unit_metadata={
+                        **{name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                            "revenue", "operating_income", "net_income", "cost_of_revenue", "interest_expense",
+                        )},
+                        "interest_expense": {"label": "interest_expense", "source_unit": "VND", "value_unit": "VND"},
+                        "eps": {"source_unit": "VND/share", "value_unit": "VND/share"},
+                    },
                 ).model_dump(mode="json")}},
             ),
             IncomeStatement(
@@ -475,8 +492,12 @@ async def test_enrich_missing_ratio_metrics_computes_certified_statement_metrics
                 net_income=120.0,
                 eps=4.2,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="VNM", period="2023", statement_type="income", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    symbol="VNM", period="2023", fiscal_year=2023, statement_type="income", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={
+                        **{name: {"source_unit": "VND", "value_unit": "VND"} for name in ("revenue", "net_income")},
+                        "eps": {"source_unit": "VND/share", "value_unit": "VND/share"},
+                    },
                     revenue=1000.0, net_income=120.0, eps=4.2,
                 ).model_dump(mode="json")}},
             ),
@@ -495,8 +516,12 @@ async def test_enrich_missing_ratio_metrics_computes_certified_statement_metrics
                 short_term_debt=50.0,
                 long_term_debt=200.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="VNM", period="2024", statement_type="balance", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    symbol="VNM", period="2024", fiscal_year=2024, statement_type="balance", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "total_assets", "total_liabilities", "total_equity", "cash_and_equivalents",
+                        "inventory", "accounts_receivable", "short_term_debt", "long_term_debt",
+                    )},
                     total_assets=2000.0, total_liabilities=800.0, total_equity=1200.0,
                     cash_and_equivalents=100.0, inventory=200.0, accounts_receivable=240.0,
                     short_term_debt=50.0, long_term_debt=200.0,
@@ -511,8 +536,11 @@ async def test_enrich_missing_ratio_metrics_computes_certified_statement_metrics
                 inventory=180.0,
                 accounts_receivable=220.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="VNM", period="2023", statement_type="balance", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    symbol="VNM", period="2023", fiscal_year=2023, statement_type="balance", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "inventory", "accounts_receivable",
+                    )},
                     inventory=180.0, accounts_receivable=220.0,
                 ).model_dump(mode="json")}},
             ),
@@ -528,8 +556,11 @@ async def test_enrich_missing_ratio_metrics_computes_certified_statement_metrics
                 dividends_paid=-40.0,
                 debt_repayment=-30.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="VNM", period="2024", statement_type="cashflow", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    symbol="VNM", period="2024", fiscal_year=2024, statement_type="cashflow", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "operating_cash_flow", "free_cash_flow", "capital_expenditure", "dividends_paid", "debt_repayment",
+                    )},
                     operating_cash_flow=210.0, free_cash_flow=130.0, capital_expenditure=-80.0,
                     dividends_paid=-40.0, debt_repayment=-30.0,
                 ).model_dump(mode="json")}},
@@ -606,8 +637,11 @@ async def test_enrich_missing_ratio_metrics_nulls_bank_only_metrics(test_db):
                 net_income=100.0,
                 interest_expense=15.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="TCB", period="2024", statement_type="income", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    symbol="TCB", period="2024", fiscal_year=2024, statement_type="income", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "revenue", "operating_income", "net_income", "interest_expense",
+                    )},
                     revenue=200.0, operating_income=120.0, net_income=100.0, interest_expense=15.0,
                 ).model_dump(mode="json")}},
             ),
@@ -620,8 +654,9 @@ async def test_enrich_missing_ratio_metrics_nulls_bank_only_metrics(test_db):
                 revenue=150.0,
                 net_income=80.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="TCB", period="2023", statement_type="income", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    symbol="TCB", period="2023", fiscal_year=2023, statement_type="income", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in ("revenue", "net_income")},
                     revenue=150.0, net_income=80.0,
                 ).model_dump(mode="json")}},
             ),
@@ -636,8 +671,11 @@ async def test_enrich_missing_ratio_metrics_nulls_bank_only_metrics(test_db):
                 total_equity=150.0,
                 cash_and_equivalents=100.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="TCB", period="2024", statement_type="balance", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    symbol="TCB", period="2024", fiscal_year=2024, statement_type="balance", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "total_assets", "total_liabilities", "total_equity", "cash_and_equivalents",
+                    )},
                     total_assets=1000.0, total_liabilities=850.0, total_equity=150.0,
                     cash_and_equivalents=100.0,
                 ).model_dump(mode="json")}},
@@ -653,8 +691,11 @@ async def test_enrich_missing_ratio_metrics_nulls_bank_only_metrics(test_db):
                 capital_expenditure=-10.0,
                 dividends_paid=-5.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="TCB", period="2024", statement_type="cashflow", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    symbol="TCB", period="2024", fiscal_year=2024, statement_type="cashflow", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "operating_cash_flow", "free_cash_flow", "capital_expenditure", "dividends_paid",
+                    )},
                     operating_cash_flow=90.0, free_cash_flow=80.0, capital_expenditure=-10.0,
                     dividends_paid=-5.0,
                 ).model_dump(mode="json")}},
@@ -713,8 +754,11 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
                 net_income=30.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
                     **FinancialStatementData(
-                        symbol="VCB", period="2024", statement_type="income", source="fixture",
-                        value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                        symbol="VCB", period="2024", fiscal_year=2024, statement_type="income", source="fixture",
+                        currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                        unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                            "revenue", "net_income", "net_interest_income", "provision_for_credit_losses",
+                        )},
                         revenue=120.0, net_income=30.0,
                     ).model_dump(mode="json"),
                     "net_interest_income": 80.0, "provision_for_credit_losses": -10.0,
@@ -730,8 +774,11 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
                 net_income=25.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
                     **FinancialStatementData(
-                        symbol="VCB", period="2023", statement_type="income", source="fixture",
-                        value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                        symbol="VCB", period="2023", fiscal_year=2023, statement_type="income", source="fixture",
+                        currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                        unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                            "revenue", "net_income", "net_interest_income", "provision_for_credit_losses",
+                        )},
                         revenue=100.0, net_income=25.0,
                     ).model_dump(mode="json"),
                     "net_interest_income": 70.0, "provision_for_credit_losses": -8.0,
@@ -749,13 +796,18 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
                 accounts_receivable=700.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
                     **FinancialStatementData(
-                        symbol="VCB", period="2024", statement_type="balance", source="fixture",
-                        value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                        symbol="VCB", period="2024", fiscal_year=2024, statement_type="balance", source="fixture",
+                        currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                        unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                            "total_assets", "total_liabilities", "total_equity", "accounts_receivable", "customer_deposits",
+                            "current_account_deposits", "placements_with_banks", "investment_securities_total", "loan_loss_reserve", "gross_loans",
+                        )},
                         total_assets=1000.0, total_liabilities=850.0, total_equity=150.0,
                         accounts_receivable=700.0, customer_deposits=500.0,
                     ).model_dump(mode="json"),
                     "current_account_deposits": 150.0, "placements_with_banks": 100.0,
                     "investment_securities_total": 200.0, "loan_loss_reserve": -50.0,
+                    "gross_loans": 700.0,
                 }}},
             ),
             BalanceSheet(
@@ -770,13 +822,18 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
                 accounts_receivable=630.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
                     **FinancialStatementData(
-                        symbol="VCB", period="2023", statement_type="balance", source="fixture",
-                        value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                        symbol="VCB", period="2023", fiscal_year=2023, statement_type="balance", source="fixture",
+                        currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                        unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                            "total_assets", "total_liabilities", "total_equity", "accounts_receivable", "customer_deposits",
+                            "current_account_deposits", "placements_with_banks", "investment_securities_total", "loan_loss_reserve", "gross_loans",
+                        )},
                         total_assets=900.0, total_liabilities=770.0, total_equity=130.0,
                         accounts_receivable=630.0, customer_deposits=400.0,
                     ).model_dump(mode="json"),
                     "current_account_deposits": 120.0, "placements_with_banks": 80.0,
                     "investment_securities_total": 150.0, "loan_loss_reserve": -45.0,
+                    "gross_loans": 630.0,
                 }}},
             ),
         ]
@@ -813,8 +870,9 @@ async def test_enrich_missing_ratio_metrics_backfills_certified_statement_period
                 revenue=120.0,
                 net_income=24.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="VNM", period="2022", statement_type="income", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    symbol="VNM", period="2022", fiscal_year=2022, statement_type="income", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in ("revenue", "net_income")},
                     revenue=120.0, net_income=24.0,
                 ).model_dump(mode="json")}},
             ),
@@ -827,8 +885,9 @@ async def test_enrich_missing_ratio_metrics_backfills_certified_statement_period
                 revenue=100.0,
                 net_income=20.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="VNM", period="2021", statement_type="income", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    symbol="VNM", period="2021", fiscal_year=2021, statement_type="income", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in ("revenue", "net_income")},
                     revenue=100.0, net_income=20.0,
                 ).model_dump(mode="json")}},
             ),
@@ -842,8 +901,11 @@ async def test_enrich_missing_ratio_metrics_backfills_certified_statement_period
                 total_liabilities=80.0,
                 total_equity=120.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="VNM", period="2022", statement_type="balance", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    symbol="VNM", period="2022", fiscal_year=2022, statement_type="balance", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "total_assets", "total_liabilities", "total_equity",
+                    )},
                     total_assets=200.0, total_liabilities=80.0, total_equity=120.0,
                 ).model_dump(mode="json")}},
             ),
@@ -857,8 +919,11 @@ async def test_enrich_missing_ratio_metrics_backfills_certified_statement_period
                 total_liabilities=70.0,
                 total_equity=110.0,
                 raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
-                    symbol="VNM", period="2021", statement_type="balance", source="fixture",
-                    value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    symbol="VNM", period="2021", fiscal_year=2021, statement_type="balance", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "total_assets", "total_liabilities", "total_equity",
+                    )},
                     total_assets=180.0, total_liabilities=70.0, total_equity=110.0,
                 ).model_dump(mode="json")}},
             ),

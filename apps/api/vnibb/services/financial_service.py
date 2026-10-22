@@ -92,6 +92,18 @@ def normalize_statement_period(
     return str(year)
 
 
+def _monetary_evidence_admitted(metadata: object, unit: str) -> bool:
+    if not isinstance(metadata, dict) or metadata.get("unavailable_reason"):
+        return False
+    if any(metadata.get(key) not in (None, unit) for key in ("unit", "value_unit")):
+        return False
+    components = metadata.get("components")
+    if isinstance(components, list) and components:
+        return all(_monetary_evidence_admitted(component, unit) for component in components)
+    return (metadata.get("unit", metadata.get("value_unit")) == unit
+            and bool(metadata.get("source_unit") or metadata.get("unitEvidence")))
+
+
 def admit_statement_rows(
     rows: list[FinancialStatementData], period: str,
 ) -> list[FinancialStatementData]:
@@ -124,7 +136,7 @@ def admit_statement_rows(
         normalized = normalize_statement_period(row.period)
         year = _extract_period_year(row.period)
         quarter = _extract_period_quarter(row.period)
-        reason = snapshot_reason
+        reason = row.unavailable_reason or snapshot_reason
         if year and row.fiscal_year is not None and year != row.fiscal_year:
             reason = "conflicting_fiscal_identity"
         if quarter and row.fiscal_quarter is not None and quarter != row.fiscal_quarter:
@@ -173,6 +185,40 @@ def admit_statement_rows(
         if row.interest_expense is not None and interest is None:
             payload["interest_expense"] = None
             payload["unit_metadata"].setdefault("interest_expense", {}).setdefault("unavailable_reason", "interest_semantics_unverified")
+        basis_reason = None
+        if row.currency != "VND" or row.value_unit != "VND":
+            basis_reason = "unverified_statement_currency_or_unit"
+        elif not row.source or str(row.consolidation_basis).lower() not in {"consolidated", "separate"}:
+            basis_reason = "unverified_statement_basis"
+        elif not (re.fullmatch(r"(?:FY)?20\d{2}|Q[1-4]-20\d{2}|20\d{2}-Q[1-4]|20\d{2} (?:\(YTD\)|YTD)|TTM(?:.*)?", str(row.period).upper())):
+            basis_reason = "unverified_statement_period"
+        elif row.statement_type not in {"balance", "balance_sheet"}:
+            if str(row.period).upper().startswith("TTM"):
+                if row.flow_basis != "trailing_twelve_months" or row.aggregation_basis != "four_quarter_flow_sum":
+                    basis_reason = "unknown_ttm_flow_basis"
+            elif "YTD" in str(row.period).upper():
+                if row.flow_basis != "cumulative_ytd":
+                    basis_reason = "unknown_ytd_flow_basis"
+            elif quarter or (quarterly and row.fiscal_quarter):
+                if row.flow_basis not in {"single_quarter", "cumulative_ytd"}:
+                    basis_reason = "unknown_quarterly_flow_basis"
+            elif not re.fullmatch(r"(?:FY)?20\d{2}", str(row.period).upper()) or row.flow_basis != "annual":
+                basis_reason = "unknown_annual_flow_basis"
+        aliases = {"profit_before_tax": "pre_tax_profit", "pre_tax_profit": "profit_before_tax",
+                   "cash": "cash_and_equivalents", "cash_and_equivalents": "cash",
+                   "equity": "total_equity", "total_equity": "equity",
+                   "net_cash_flow": "net_change_in_cash", "net_change_in_cash": "net_cash_flow",
+                   "capital_expenditure": "capex", "capex": "capital_expenditure"}
+        for name in FinancialStatementData.model_fields:
+            if name in {"fiscal_year", "fiscal_quarter"} or not isinstance(payload.get(name), (int, float)):
+                continue
+            metadata = payload["unit_metadata"].get(name) or payload["unit_metadata"].get(aliases.get(name))
+            unit = "VND/share" if name in {"eps", "eps_diluted", "book_value_per_share"} else "VND"
+            if basis_reason or not _monetary_evidence_admitted(metadata, unit):
+                payload[name] = None
+                payload["unit_metadata"].setdefault(name, {}).setdefault("unavailable_reason", basis_reason or "unverified_monetary_unit")
+            elif name not in payload["unit_metadata"]:
+                payload["unit_metadata"][name] = metadata
         if reason:
             for name in FinancialStatementData.model_fields:
                 if name not in {"fiscal_year", "fiscal_quarter"} and isinstance(payload.get(name), (int, float)):

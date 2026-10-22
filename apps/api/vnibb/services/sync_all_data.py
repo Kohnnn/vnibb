@@ -541,8 +541,9 @@ async def run_daily_market_sync(
     sync = FullMarketSync()
     results: dict[str, SyncResult] = {}
     sync_id = await data_pipeline._create_sync_record("daily_market", f"daily-market-{int(time.time())}", history_days)
-    metadata: dict = {"stages": {}}
+    metadata: dict = {"stages": {}, "active_stage": "symbols"}
     try:
+        await data_pipeline._update_sync_record(sync_id, additional_data=metadata)
         symbols = await sync._get_seeded_symbols()
         if not symbols:
             results["symbols"] = await sync.sync_all_symbols()
@@ -551,27 +552,66 @@ async def run_daily_market_sync(
             raise RuntimeError("Active Universe is empty")
         metadata.update(expected_symbols=symbols, expected_count=len(symbols))
 
-        async def record(name: str, operation: Callable[[], Awaitable[SyncResult]]) -> None:
-            results[name] = await operation()
-            metadata["stages"][name] = results[name].__dict__
+        async def record(
+            name: str,
+            operation: Callable[[], Awaitable[SyncResult]],
+            progress: dict | None = None,
+        ) -> None:
+            started = time.monotonic()
+            state = {"status": "running", "started_at": datetime.utcnow().isoformat()}
+            metadata["active_stage"] = name
+            metadata["stages"][name] = state
             await data_pipeline._update_sync_record(sync_id, additional_data=metadata)
+            try:
+                results[name] = await operation()
+            except BaseException as exc:
+                results[name] = SyncResult(
+                    False, int((progress or {}).get("committed_count", 0)),
+                    max(1, int((progress or {}).get("error_count", 0))),
+                    time.monotonic() - started, [f"{type(exc).__name__}: {exc}"],
+                    complete=False,
+                )
+                state.update(results[name].__dict__)
+                state["status"] = "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed"
+                if progress is not None:
+                    state["progress"] = jsonable_encoder(progress)
+                raise
+            state.update(results[name].__dict__)
+            state["status"] = ("completed" if results[name].complete else "partial") if results[name].success else "failed"
+            if progress is not None:
+                state["progress"] = jsonable_encoder(progress)
+            await data_pipeline._update_sync_record(
+                sync_id, success_count=sum(result.synced_count for result in results.values()),
+                error_count=sum(result.error_count for result in results.values()),
+                additional_data=metadata,
+            )
 
-        async def prices() -> SyncResult:
-            async def acquire() -> int:
-                price_progress: dict = {}
-                count = await data_pipeline.sync_daily_prices(symbols=symbols, days=history_days,
-                    fill_missing_gaps=True, cache_recent=False, progress=price_progress)
-                progress: dict = {}
-                screener_count = await data_pipeline.sync_screener_data(progress=progress)
-                if progress.get("error_count") or screener_count != len(symbols):
-                    raise RuntimeError("Screener did not acquire the complete active Universe")
-                count += screener_count
-                if price_progress.get("error_count"):
-                    raise RuntimeError("Daily price acquisition has failed symbols")
-                return count
-            return await sync._run_stage("prices", acquire)
+        async def acquire(name: str, operation: Callable[[], Awaitable[int]], progress: dict) -> SyncResult:
+            started = time.monotonic()
+            count = 0
+            errors = []
+            try:
+                count = int(await operation())
+                if progress.get("error_count") or (name == "screener" and count != len(symbols)):
+                    raise RuntimeError(f"{name} acquisition unavailable or incomplete")
+            except Exception as exc:
+                count = max(count, int(progress.get("committed_count", 0)))
+                errors.append(str(exc))
+                logger.exception("%s sync failed: %s", name, exc)
+            return SyncResult(
+                not errors, count, max(len(errors), int(progress.get("error_count", 0))),
+                time.monotonic() - started, errors, complete=not errors,
+            )
 
-        await record("prices", prices)
+        price_progress: dict = {}
+        await record("daily_prices", lambda: acquire("daily_prices", lambda: data_pipeline.sync_daily_prices(
+            symbols=symbols, days=history_days, fill_missing_gaps=True,
+            cache_recent=False, progress=price_progress,
+        ), price_progress), price_progress)
+        screener_progress: dict = {}
+        await record("screener", lambda: acquire("screener", lambda: data_pipeline.sync_screener_data(
+            progress=screener_progress,
+        ), screener_progress), screener_progress)
         await record("indices", sync.sync_all_indices)
 
         async def rs_ratings() -> SyncResult:
@@ -590,12 +630,19 @@ async def run_daily_market_sync(
         financial_budget = min(1200, max(0, 7080 - (time.monotonic() - daily_started)))
         await record("financials", lambda: sync.sync_daily_maintenance(symbols, budget_seconds=financial_budget))
         complete = all(result.success and result.complete for result in results.values())
+        metadata["active_stage"] = None
         await data_pipeline._update_sync_record(sync_id,
             status="completed" if complete else "partial",
             success_count=sum(result.synced_count for result in results.values()),
             error_count=sum(result.error_count for result in results.values()), additional_data=metadata)
-    except BaseException:
-        await data_pipeline._update_sync_record(sync_id, status="failed", additional_data=metadata)
+    except BaseException as exc:
+        metadata["error"] = f"{type(exc).__name__}: {exc}"
+        await data_pipeline._update_sync_record(
+            sync_id, status="failed",
+            success_count=sum(result.synced_count for result in results.values()),
+            error_count=max(1, sum(result.error_count for result in results.values())),
+            additional_data=metadata, errors={"message": metadata["error"]},
+        )
         raise
     return results
 

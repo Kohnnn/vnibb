@@ -23,7 +23,7 @@ interface OwnershipRatingSummaryWidgetProps {
 
 function formatPct(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return '—'
-  return `${value.toFixed(1)}%`
+  return `${value.toFixed(2)}%`
 }
 
 function formatCompact(value: number | null | undefined) {
@@ -43,24 +43,26 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
   const shareholders = shareholdersQuery.data?.data
   const foreignFlow = foreignQuery.data?.data
   const insider = insiderQuery.data
+  const shareholderError = useMemo(() => shareholdersQuery.error || (shareholdersQuery.data?.error ? new Error(shareholdersQuery.data.error) : null), [shareholdersQuery.error, shareholdersQuery.data?.error])
   const summary = useMemo(() => buildOwnershipSummary(shareholders, foreignFlow, insider), [shareholders, foreignFlow, insider])
   const hasData = summary.availableSources > 0
   const isLoading = (shareholdersQuery.isLoading || foreignQuery.isLoading || insiderQuery.isLoading) && !hasData
   const isFetching = shareholdersQuery.isFetching || foreignQuery.isFetching || insiderQuery.isFetching
-  const error = shareholdersQuery.error || foreignQuery.error || insiderQuery.error
+  const error = shareholderError || foreignQuery.error || insiderQuery.error
   const fetchedAt = Math.max(shareholdersQuery.dataUpdatedAt, foreignQuery.dataUpdatedAt, insiderQuery.dataUpdatedAt) || null
   const gradeTone = summary.grade === 'A' ? 'text-emerald-300' : summary.grade === 'B' ? 'text-cyan-300' : summary.grade === 'C' ? 'text-amber-300' : summary.grade === 'D' ? 'text-rose-300' : 'text-[var(--text-muted)]'
   const warnings = useMemo(() => {
     const inputs = [
-      ['Shareholders', shareholdersQuery, summary.holderCount !== null && summary.holderCount > 0],
+      ['Shareholders', { ...shareholdersQuery, error: shareholderError }, summary.holderCount !== null && summary.holderCount > 0],
       ['Foreign flow', foreignQuery, summary.foreignNetVolume !== null],
       ['Insider sentiment', insiderQuery, summary.insiderNetValue !== null],
     ] as const
     return inputs.flatMap(([name, query, usable]) => query.error
       ? [`${name}: ${usable ? 'refresh failed; retained data may be stale' : 'unavailable (request failed)'}.`]
       : !usable ? [`${name}: ${query.isLoading ? 'loading' : 'no usable observations'}.`] : [])
+      .concat(summary.holderCount && summary.ownershipUnitStatus !== 'explicit' ? ['Ownership percentages withheld: explicit source-unit evidence unavailable.'] : [])
       .concat(summary.score === null ? ['Composite withheld until all three inputs and ownership percentage units are usable.'] : [])
-  }, [shareholdersQuery.error, shareholdersQuery.isLoading, foreignQuery.error, foreignQuery.isLoading, insiderQuery.error, insiderQuery.isLoading, summary])
+  }, [shareholderError, shareholdersQuery.isLoading, foreignQuery.error, foreignQuery.isLoading, insiderQuery.error, insiderQuery.isLoading, summary])
   const ownershipHealth: WidgetHealthState | undefined = error && hasData
     ? { status: 'stale', label: 'Refresh failed', detail: warnings.join(' ') }
     : summary.coverage !== 'complete' && !isLoading

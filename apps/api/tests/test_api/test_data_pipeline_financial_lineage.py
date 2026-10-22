@@ -117,7 +117,9 @@ async def test_persistence_keeps_source_rows_and_full_canonical_lineage(
     financial_sync, statement_type, metric
 ):
     raw = {metric: 12.0, "provider_rows": [{"item": metric, "value": 12.0}]}
-    metadata = {metric: {"source_unit": "billion VND", "normalization_multiplier": 1e9}}
+    metadata = {metric: {
+        "source_unit": "billion VND", "value_unit": "VND", "normalization_multiplier": 1e9,
+    }}
     entry = statement(statement_type, raw_data=raw, unit_metadata=metadata, **{metric: 12e9})
     original = deepcopy(entry.model_dump(mode="json"))
 
@@ -167,8 +169,11 @@ async def test_unavailable_statement_never_persists_guessed_numbers(
 @pytest.mark.asyncio
 async def test_ingestion_withholds_broad_interest_alias_without_rewriting_source(financial_sync):
     entry = statement("income", interest_expense=900, revenue=1000,
-        raw_data={"financial_expenses": 900}, unit_metadata={"interest_expense": {
-            "label": "financial_expenses", "source_unit": "VND", "value_unit": "VND"}})
+        raw_data={"financial_expenses": 900}, unit_metadata={
+            "revenue": {"source_unit": "VND", "value_unit": "VND"},
+            "interest_expense": {
+                "label": "financial_expenses", "source_unit": "VND", "value_unit": "VND"},
+        })
     original = deepcopy(entry.model_dump(mode="json"))
     persisted, cached = await financial_sync([entry])
     assert persisted[0]["interest_expense"] is None
@@ -184,11 +189,16 @@ async def test_derived_fields_do_not_overwrite_provider_originals(financial_sync
     income = statement(
         "income", operating_income=100e9, depreciation=10e9,
         raw_data={"ebitda": 110.0, "depreciation": 10.0},
+        unit_metadata={field: {"source_unit": "billion VND", "value_unit": "VND"}
+                       for field in ("operating_income", "depreciation")},
     )
     cashflow = statement(
         "cashflow", operating_cash_flow=80e9, investing_cash_flow=-30e9,
         financing_cash_flow=-5e9, capital_expenditure=-20e9,
         raw_data={"free_cash_flow": 60.0, "depreciation": 10.0},
+        unit_metadata={field: {"source_unit": "billion VND", "value_unit": "VND"}
+                       for field in ("operating_cash_flow", "investing_cash_flow",
+                                     "financing_cash_flow", "capital_expenditure")},
     )
     original = deepcopy(income.model_dump(mode="json"))
     persisted, cached = await financial_sync([income, cashflow])
@@ -220,8 +230,11 @@ async def test_derived_fields_do_not_overwrite_provider_originals(financial_sync
     ],
 )
 async def test_depreciation_crossfill_requires_matching_period_and_basis(financial_sync, override):
-    income = statement("income", depreciation=10e9, **override)
-    cashflow = statement("cashflow", operating_cash_flow=80e9)
+    income = statement("income", depreciation=10e9,
+        unit_metadata={"depreciation": {"source_unit": "billion VND", "value_unit": "VND"}},
+        **override)
+    cashflow = statement("cashflow", operating_cash_flow=80e9,
+        unit_metadata={"operating_cash_flow": {"source_unit": "billion VND", "value_unit": "VND"}})
     persisted, _ = await financial_sync([income, cashflow])
 
     assert persisted[1]["depreciation"] is None
@@ -235,6 +248,8 @@ async def test_investing_flow_and_unsigned_capex_never_create_free_cash_flow(fin
         "cashflow", operating_cash_flow=80e9, investing_cash_flow=-30e9,
         capital_expenditure=capex,
         raw_data={"capital_expenditure": -20.0, "free_cash_flow": 60.0},
+        unit_metadata={field: {"source_unit": "billion VND", "value_unit": "VND"}
+                       for field in ("operating_cash_flow", "investing_cash_flow", "capital_expenditure")},
     )
     persisted, _ = await financial_sync([entry])
 
@@ -269,7 +284,11 @@ async def test_rejected_provider_metrics_are_not_derived_or_crossfilled(financia
         operating_income=100e9,
         depreciation=10e9,
         ebitda=None,
-        unit_metadata={"ebitda": dict(rejected)},
+        unit_metadata={
+            "ebitda": dict(rejected),
+            **{field: {"source_unit": "billion VND", "value_unit": "VND"}
+               for field in ("operating_income", "depreciation")},
+        },
     )
     cashflow = statement(
         "cashflow",
@@ -277,7 +296,11 @@ async def test_rejected_provider_metrics_are_not_derived_or_crossfilled(financia
         investing_cash_flow=-30e9,
         financing_cash_flow=-5e9,
         depreciation=None,
-        unit_metadata={"depreciation": dict(rejected)},
+        unit_metadata={
+            "depreciation": dict(rejected),
+            **{field: {"source_unit": "billion VND", "value_unit": "VND"}
+               for field in ("operating_cash_flow", "investing_cash_flow", "financing_cash_flow")},
+        },
     )
 
     persisted, cached = await financial_sync([income, cashflow])

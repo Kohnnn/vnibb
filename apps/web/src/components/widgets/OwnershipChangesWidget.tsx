@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Users } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -8,6 +8,8 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useShareholders } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import type { WidgetDataPayload } from '@/lib/widgetRuntime';
+import { readAdmittedOwnershipPct } from '@/lib/ownershipAnalytics';
 import { formatNumber } from '@/lib/formatters';
 
 interface OwnershipChangesWidgetProps {
@@ -17,32 +19,23 @@ interface OwnershipChangesWidgetProps {
   onDataChange?: (data: WidgetDataPayload) => void;
 }
 
-export function OwnershipChangesWidget({ id, symbol, onRemove, onDataChange }: OwnershipChangesWidgetProps) {
+export function OwnershipChangesWidget({ id, symbol: requestedSymbol, onRemove, onDataChange }: OwnershipChangesWidgetProps) {
+  const symbol = requestedSymbol?.toUpperCase() || '';
   const {
     data,
     isLoading,
-    error,
+    error: queryError,
     refetch,
     isFetching,
     dataUpdatedAt,
   } = useShareholders(symbol, Boolean(symbol));
+  const error = useMemo(() => queryError || (data?.error ? new Error(data.error) : null), [queryError, data?.error]);
 
-  const holders = (data?.data ?? []).slice(0, 6);
-  const ownershipValues = holders
-    .map((holder) => {
-      const row = holder as unknown as Record<string, number | null | undefined>
-      const value = holder.ownership_pct ?? row.ownership ?? row.share_own_percent
-      return typeof value === 'number' && Number.isFinite(value) ? value : null
-    })
-    .filter((value): value is number => value !== null)
-  const treatOwnershipAsRatio =
-    ownershipValues.length > 0 && ownershipValues.every((value) => Math.abs(value) <= 1)
-
-  const formatOwnershipPct = (value: number | null | undefined): string => {
-    if (value === null || value === undefined || Number.isNaN(value)) return '-'
-    const normalized = treatOwnershipAsRatio ? value * 100 : value
-    return `${normalized.toFixed(2)}%`
-  }
+  const holders = useMemo(() => (data?.data ?? []).slice(0, 6).map((holder) => ({
+    ...holder, ownership_pct: readAdmittedOwnershipPct(holder),
+  })), [data?.data]);
+  const formatOwnershipPct = (value: number | null | undefined): string =>
+    value == null ? '—' : `${value.toFixed(2)}%`;
 
   const hasData = holders.length > 0;
 
@@ -57,8 +50,13 @@ export function OwnershipChangesWidget({ id, symbol, onRemove, onDataChange }: O
       lastDataDate: null,
       fetchedAt: dataUpdatedAt,
       stale: Boolean(error && hasData),
+      cached: Boolean(error && hasData),
+      coverage: hasData ? 'partial' : 'unknown',
+      warnings: ['First six reported holders; latest snapshot, not ownership changes.'],
+      extra: { holders },
+      exportData: holders,
     }));
-  }, [dataUpdatedAt, error, hasData, holders.length, onDataChange, symbol]);
+  }, [dataUpdatedAt, error, hasData, holders, onDataChange, symbol]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view ownership" />;
@@ -73,6 +71,8 @@ export function OwnershipChangesWidget({ id, symbol, onRemove, onDataChange }: O
       isLoading={isLoading && !hasData}
       noPadding
       widgetId={id}
+      exportData={holders}
+      exportFilename={`ownership_snapshot_${symbol}`}
     >
       <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
         <div className="px-3 py-2 border-b border-[var(--border-color)]/70">
@@ -81,7 +81,7 @@ export function OwnershipChangesWidget({ id, symbol, onRemove, onDataChange }: O
             fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={Boolean(error && hasData)}
-            note="Latest ownership snapshot"
+            note="First six reported holders · latest snapshot"
             align="right"
           />
         </div>
@@ -101,10 +101,7 @@ export function OwnershipChangesWidget({ id, symbol, onRemove, onDataChange }: O
                   (holder.shareholder_name || row.name || row.share_holder || 'Shareholder') as string
                 const holderType =
                   (holder.shareholder_type || row.type || row.owner_type || '-') as string
-                const ownershipValue =
-                  holder.ownership_pct ??
-                  (typeof row.ownership === 'number' ? row.ownership : null) ??
-                  (typeof row.share_own_percent === 'number' ? row.share_own_percent : null)
+                const ownershipValue = holder.ownership_pct
                 const sharesOwned =
                   holder.shares_owned ??
                   (typeof row.shares === 'number' ? row.shares : null) ??

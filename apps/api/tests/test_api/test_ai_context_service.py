@@ -385,7 +385,10 @@ async def test_build_database_snapshot_falls_back_when_vnibb_mcp_fails(monkeypat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("statement_type", ["income", "balance", "cashflow"])
-@pytest.mark.parametrize("rejection", [None, "ambiguous_quarter", "conflicting_identity", "field_rejected"])
+@pytest.mark.parametrize("rejection", [
+    None, "ambiguous_quarter", "conflicting_identity", "field_rejected",
+    "unknown_currency", "unknown_source_unit", "conflicting_source", "statement_rejected",
+])
 async def test_postgres_financial_context_withholds_rejected_scalars(
     monkeypatch, test_db, statement_type, rejection
 ):
@@ -399,15 +402,35 @@ async def test_postgres_financial_context_withholds_rejected_scalars(
         "cashflow": ("operating_cash_flow", "free_cash_flow"),
     }
     metric, independent = fields[statement_type]
-    canonical = {"period": "Q1-2024", "fiscal_year": 2024, "fiscal_quarter": 1}
+    canonical = {
+        "period": "Q1-2024", "fiscal_year": 2024, "fiscal_quarter": 1,
+        "source": "KBS", "currency": "VND", "value_unit": "VND",
+        "consolidation_basis": "consolidated", "flow_basis": "single_quarter",
+        "aggregation_basis": "reported_quarter", "source_periods": ["Q1-2024"],
+        metric: 100.0, independent: 40.0,
+        "unit_metadata": {
+            field: {"source_unit": "VND", "value_unit": "VND"}
+            for field in (metric, independent)
+        },
+    }
     if rejection == "conflicting_identity":
         canonical["period"] = "Q2-2024"
     if rejection == "field_rejected":
-        canonical["unit_metadata"] = {metric: {"unavailable_reason": "conflicting_metric_rows"}}
+        canonical["unit_metadata"][metric]["unavailable_reason"] = "conflicting_metric_rows"
+    if rejection == "unknown_currency":
+        canonical["currency"] = None
+    if rejection == "unknown_source_unit":
+        for evidence in canonical["unit_metadata"].values():
+            evidence.pop("source_unit")
+    if rejection == "conflicting_source":
+        canonical["source"] = "VCI"
+    if rejection == "statement_rejected":
+        canonical["unavailable_reason"] = "unknown_source_unit"
     raw_data = {"_financial_lineage": {"canonical_data": canonical}}
     row = models[statement_type](
         id=995200,
-        symbol="VNM", period="2024" if rejection == "ambiguous_quarter" else "Q1-2024",
+        symbol="VNM", source="KBS",
+        period="2024" if rejection == "ambiguous_quarter" else "Q1-2024",
         period_type="quarter", fiscal_year=2024,
         fiscal_quarter=None if rejection == "ambiguous_quarter" else 1,
         raw_data=raw_data, **{metric: 100.0, independent: 40.0},
@@ -438,4 +461,12 @@ async def test_postgres_financial_context_withholds_rejected_scalars(
         assert section[independent] == 40.0
     else:
         assert section[independent] is None
-        assert section["unavailable_reason"]
+        if rejection in {"unknown_currency", "unknown_source_unit"}:
+            reason = (
+                "unverified_statement_currency_or_unit" if rejection == "unknown_currency"
+                else "unverified_monetary_unit"
+            )
+            assert section["unavailable_metrics"][metric] == reason
+            assert section["unavailable_metrics"][independent] == reason
+        else:
+            assert section["unavailable_reason"]

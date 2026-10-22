@@ -20,20 +20,17 @@ export interface OwnershipSummary {
   insiderNetValue: number | null
   availableSources: number
   coverage: 'complete' | 'partial' | 'unknown'
+  ownershipUnit: 'percent' | null
+  ownershipUnitStatus: 'explicit' | 'unverified'
+  ownershipSourceFields: string[]
+  ownershipSources: string[]
 }
 
-function normalizeOwnershipPct(holder: ShareholderData): number | null {
-  const value = readOwnershipPct(holder)
-  return value !== null && value >= 0 && value <= 100 ? value : null
-}
-
-function readOwnershipPct(holder: ShareholderData): number | null {
-  const row = holder as ShareholderData & {
-    percent?: number | null
-    percentage?: number | null
-  }
-  const value = row.ownership_pct ?? row.percent ?? row.percentage
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+export function readAdmittedOwnershipPct(holder: ShareholderData): number | null {
+  const value = holder.ownership_pct
+  return holder.ownership_unit === 'percent' && holder.ownership_unit_status === 'explicit'
+    && typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
+    ? value : null
 }
 
 function classifyHolderType(type: string | null | undefined): 'institutional' | 'foreign' | 'insider' | 'other' {
@@ -58,7 +55,7 @@ export function buildOwnershipSummary(
 ): OwnershipSummary {
   const holders = shareholders ?? []
   const normalizedOwnership = holders
-    .map(normalizeOwnershipPct)
+    .map(readAdmittedOwnershipPct)
     .filter((value): value is number => value !== null)
     .sort((left, right) => right - left)
   const hasConcentration = holders.length > 0 && normalizedOwnership.length === holders.length
@@ -132,5 +129,9 @@ export function buildOwnershipSummary(
     insiderNetValue,
     availableSources,
     coverage: complete ? 'complete' : availableSources > 0 ? 'partial' : 'unknown',
+    ownershipUnit: hasConcentration ? 'percent' : null,
+    ownershipUnitStatus: hasConcentration ? 'explicit' : 'unverified',
+    ownershipSourceFields: [...new Set(holders.flatMap((holder) => holder.ownership_source_field ? [holder.ownership_source_field] : []))],
+    ownershipSources: [...new Set(holders.flatMap((holder) => holder.ownership_source ? [holder.ownership_source] : []))],
   }
 }

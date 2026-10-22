@@ -22,6 +22,8 @@ from typing import Any, Awaitable, Callable, Optional, TypeVar, Union, Dict, Lis
 
 import redis.asyncio as redis
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from vnibb.core.config import settings
 from vnibb.core.cache_constants import (
@@ -160,8 +162,6 @@ def cached(
                     continue
                 # Skip FastAPI dependencies
                 from fastapi import Request, Response, BackgroundTasks
-                from sqlalchemy.orm import Session
-                from sqlalchemy.ext.asyncio import AsyncSession
 
                 if isinstance(v, (Request, Response, BackgroundTasks, Session, AsyncSession)):
                     continue
@@ -268,6 +268,12 @@ def cached(
                         logger.warning(f"Failed to set memory cache: {error}")
                         _record_cache_outcome(key_prefix, "store_error")
                 return result
+
+            # A request-owned session must not escape into a shielded task.
+            if any(isinstance(arg, (Session, AsyncSession)) for arg in args) or any(
+                isinstance(value, (Session, AsyncSession)) for value in kwargs.values()
+            ):
+                return await load_and_store()
 
             async with _inflight_cache_loads_lock:
                 task = _inflight_cache_loads.get(cache_key)
@@ -447,13 +453,16 @@ class RedisClient:
                 if isinstance(value, BaseModel):
                     value = value.model_dump(mode="json")
                 serialized[key] = json.dumps(value, default=str)
-            await self.client.mset(serialized)
-            if ttl_value:
-                for key in values.keys():
-                    await self.client.expire(key, ttl_value)
+            async with self.client.pipeline(transaction=True) as pipeline:
+                for key, value in serialized.items():
+                    if ttl_value < 0:
+                        pipeline.delete(key)
+                    else:
+                        pipeline.set(key, value, ex=ttl_value or None)
+                await pipeline.execute()
             return True
         except (redis.RedisError, RuntimeError) as e:
-            logger.warning(f"Redis MSET error: {e}")
+            logger.warning(f"Redis batch SET error: {e}")
             return False
 
     async def get_model(self, key: str, model_class: type[T]) -> Optional[T]:

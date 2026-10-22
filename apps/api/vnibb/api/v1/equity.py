@@ -2460,7 +2460,11 @@ async def _load_shareholders_fallback(
             symbol=row.symbol,
             shareholder_name=row.name,
             shares_owned=row.shares_held,
-            ownership_pct=row.ownership_pct,
+            ownership_pct=None,
+            ownership_unit=None,
+            ownership_unit_status="unverified",
+            ownership_source="sql",
+            raw_data={"ownership_pct": row.ownership_pct},
             shareholder_type=row.shareholder_type,
         )
         for row in rows
@@ -3332,7 +3336,7 @@ async def _enrich_missing_ratio_metrics(
             primary_sources = {_financial_statement_identity(item): item.source for item in supplied}
             retained = [item for item in retained if _financial_statement_identity(item) not in primary_sources
                         or primary_sources[_financial_statement_identity(item)] == item.source]
-        candidates = _merge_financial_statement_rows(supplied, retained) if supplied else retained
+        candidates = admit_statement_rows(_merge_financial_statement_rows(supplied, retained) if supplied else retained, normalized_period)
         admitted = []
         rejected = []
         for statement in candidates:
@@ -3341,9 +3345,8 @@ async def _enrich_missing_ratio_metrics(
                                or statement.fiscal_quarter not in (None, quarter)
                                or (normalized_period == "quarter") != (quarter is not None))
             if (fiscal_conflict or statement.symbol != symbol or statement.unavailable_reason or statement.value_unit != "VND"
-                or not statement.source or statement.consolidation_basis is None
-                or (normalized_period == "quarter" and statement_type != "balance"
-                    and statement.flow_basis != "single_quarter")):
+                or statement.currency != "VND" or not statement.source or statement.consolidation_basis is None
+                or (statement_type != "balance" and statement.flow_basis != ("single_quarter" if normalized_period == "quarter" else "annual"))):
                 rejected.append({"period": statement.period, "source": statement.source,
                                  "unavailable_reason": statement.unavailable_reason or "unverified_statement_basis"})
                 continue
@@ -3437,6 +3440,12 @@ async def _enrich_missing_ratio_metrics(
                 merged_metrics[metric_key] = metric_value
         return merged_metrics
 
+    def admitted_raw_metric(statement: FinancialStatementData, metric: str, *aliases: str, unit: str = "VND") -> float | None:
+        from vnibb.services.financial_service import _monetary_evidence_admitted
+        if not _monetary_evidence_admitted(statement.unit_metadata.get(metric), unit):
+            return None
+        return _lookup_financial_metric(statement.raw_data or {}, metric, *aliases)
+
     income_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
     for statement_row in income_support_rows or []:
         year, quarter = _extract_year_quarter(statement_row.period or "")
@@ -3449,25 +3458,14 @@ async def _enrich_missing_ratio_metrics(
             "operating_income": _coerce_optional_float(statement_row.operating_income),
             "net_income": _coerce_optional_float(statement_row.net_income),
             "cost_of_revenue": _coerce_optional_float(statement_row.cost_of_revenue),
-            "gross_profit": _pick_optional_float(
-                _coerce_optional_float(getattr(statement_row, "gross_profit", None)),
-                _lookup_financial_metric(statement_row.raw_data or {}, "gross_profit", "grossProfit"),
-            ),
+            "gross_profit": _coerce_optional_float(statement_row.gross_profit),
             "eps": _coerce_optional_float(statement_row.eps),
             "interest_expense": admitted_interest_expense(statement_row),
             "ebitda": _coerce_optional_float(statement_row.ebitda),
             "tax_expense": _coerce_optional_float(statement_row.tax_expense),
             "raw_data": statement_row.raw_data or {},
-            "net_interest_income": _pick_optional_float(
-                _lookup_financial_metric(statement_row.raw_data or {}, "net_interest_income")
-            ),
-            "provision_for_credit_losses": _pick_optional_float(
-                _lookup_financial_metric(
-                    statement_row.raw_data or {},
-                    "provision_for_credit_losses",
-                    "credit_loss_provision",
-                )
-            ),
+            "net_interest_income": admitted_raw_metric(statement_row, "net_interest_income"),
+            "provision_for_credit_losses": admitted_raw_metric(statement_row, "provision_for_credit_losses", "credit_loss_provision"),
         }
         income_lookup[key] = (
             _merge_metric_maps(income_lookup[key], support_metrics)
@@ -3508,49 +3506,15 @@ async def _enrich_missing_ratio_metrics(
                 _coerce_optional_float(statement_row.total_equity),
                 _coerce_optional_float(statement_row.equity),
             ),
-            "book_value_per_share": _coerce_optional_float(
-                statement_row.raw_data.get("book_value_per_share")
-            )
-            if isinstance(statement_row.raw_data, dict)
-            else None,
+            "book_value_per_share": admitted_raw_metric(statement_row, "book_value_per_share", unit="VND/share"),
             "inventory": _coerce_optional_float(statement_row.inventory),
             "accounts_receivable": _coerce_optional_float(statement_row.accounts_receivable),
             "customer_deposits": _coerce_optional_float(statement_row.customer_deposits),
-            "current_account_deposits": _pick_optional_float(
-                _lookup_financial_metric(
-                    statement_row.raw_data or {},
-                    "current_account_deposits",
-                    "current_accounts",
-                    "demand_deposits",
-                    "non_term_deposits",
-                    "casa",
-                )
-            ),
-            "gross_loans": _pick_optional_float(
-                _lookup_financial_metric(
-                    statement_row.raw_data or {}, "gross_loans", "loans_and_advances_to_customers"
-                ),
-                _coerce_optional_float(statement_row.accounts_receivable),
-            ),
-            "loan_loss_reserve": _pick_optional_float(
-                _lookup_financial_metric(
-                    statement_row.raw_data or {}, "loan_loss_reserve", "provision_for_loan_losses"
-                )
-            ),
-            "placements_with_banks": _pick_optional_float(
-                _lookup_financial_metric(
-                    statement_row.raw_data or {},
-                    "placements_with_banks",
-                    "placements_at_other_credit_institutions",
-                )
-            ),
-            "investment_securities_total": _pick_optional_float(
-                _lookup_financial_metric(
-                    statement_row.raw_data or {},
-                    "investment_securities_total",
-                    "investment_securities",
-                )
-            ),
+            "current_account_deposits": admitted_raw_metric(statement_row, "current_account_deposits", "current_accounts", "demand_deposits", "non_term_deposits", "casa"),
+            "gross_loans": admitted_raw_metric(statement_row, "gross_loans", "loans_and_advances_to_customers"),
+            "loan_loss_reserve": admitted_raw_metric(statement_row, "loan_loss_reserve", "provision_for_loan_losses"),
+            "placements_with_banks": admitted_raw_metric(statement_row, "placements_with_banks", "placements_at_other_credit_institutions"),
+            "investment_securities_total": admitted_raw_metric(statement_row, "investment_securities_total", "investment_securities"),
             "short_term_debt": _coerce_optional_float(statement_row.short_term_debt),
             "long_term_debt": _coerce_optional_float(statement_row.long_term_debt),
         }
@@ -3961,14 +3925,11 @@ async def _enrich_missing_ratio_metrics(
             item.ocf_sales = operating_cash_flow / revenue
 
 
-        if item.payout_ratio is None:
-            if dividends_paid is not None and net_income not in (None, 0) and net_income > 0:
-                item.payout_ratio = (abs(dividends_paid) / net_income) * 100
-            else:
-                dps = _coerce_optional_float(getattr(item, "dps", None))
-                eps = _coerce_optional_float(item.eps)
-                if dps is not None and eps not in (None, 0):
-                    item.payout_ratio = (dps / eps) * 100
+        if item.ratio_units.get("payout_ratio") != "percent":
+            item.payout_ratio = None
+        if item.payout_ratio is None and dividends_paid is not None and net_income not in (None, 0) and net_income > 0:
+            item.payout_ratio = (abs(dividends_paid) / net_income) * 100
+            item.ratio_units["payout_ratio"] = "percent"
 
         if item.peg_ratio is None:
             pe_value = _coerce_optional_float(item.pe)
@@ -4673,31 +4634,36 @@ async def get_fundamental_analysis(
                     logger.warning("Fundamental analysis session invalidation failed: %s", exc)
         return result
 
-    profile = await load_section(
-        "profile", get_profile, None, symbol=symbol_upper, refresh=False, db=db,
-    )
-    ratios = await load_section(
-        "ratios", get_financial_ratios, [], symbol=symbol_upper, period="year", db=db,
-    )
-    financials = {
-        statement_type: await load_section(
-            f"financials.{statement_type}", get_financials, [],
-            symbol=symbol_upper, statement_type=statement_type, period="year", limit=5, db=db,
+    async with asyncio.TaskGroup() as independent:
+        officers_task = independent.create_task(load_section("officers", get_officers, [], symbol=symbol_upper))
+        subsidiaries_task = independent.create_task(load_section("subsidiaries", get_subsidiaries, [], symbol=symbol_upper))
+        news_task = independent.create_task(load_section("news", get_company_news, [], symbol=symbol_upper, limit=10))
+        snapshot_task = independent.create_task(load_section(
+            "fundamental_snapshot", _load_latest_fundamental_snapshot, None, symbol=symbol_upper,
+        ))
+        profile = await load_section(
+            "profile", get_profile, None, symbol=symbol_upper, refresh=False, db=db,
         )
-        for statement_type in ("income", "balance", "cashflow")
-    }
-    shareholders = await load_section(
-        "shareholders", get_shareholders, [], symbol=symbol_upper, db=db,
-    )
-    officers = await load_section("officers", get_officers, [], symbol=symbol_upper)
-    subsidiaries = await load_section("subsidiaries", get_subsidiaries, [], symbol=symbol_upper)
-    news = await load_section("news", get_company_news, [], symbol=symbol_upper, limit=10)
-    events = await load_section(
-        "events", get_company_events, [], symbol=symbol_upper, limit=10, db=db,
-    )
-    fundamental_snapshot = await load_section(
-        "fundamental_snapshot", _load_latest_fundamental_snapshot, None, symbol=symbol_upper,
-    )
+        ratios = await load_section(
+            "ratios", get_financial_ratios, [], symbol=symbol_upper, period="year", db=db,
+        )
+        financials = {
+            statement_type: await load_section(
+                f"financials.{statement_type}", get_financials, [],
+                symbol=symbol_upper, statement_type=statement_type, period="year", limit=5, db=db,
+            )
+            for statement_type in ("income", "balance", "cashflow")
+        }
+        shareholders = await load_section(
+            "shareholders", get_shareholders, [], symbol=symbol_upper, db=db,
+        )
+        events = await load_section(
+            "events", get_company_events, [], symbol=symbol_upper, limit=10, db=db,
+        )
+    officers = officers_task.result()
+    subsidiaries = subsidiaries_task.result()
+    news = news_task.result()
+    fundamental_snapshot = snapshot_task.result()
     valuation = _build_fundamental_valuation_section(fundamental_snapshot)
     valuation_reason = fundamental_valuation_unavailable_reason(fundamental_snapshot)
     if valuation_reason:
@@ -4737,7 +4703,7 @@ async def get_fundamental_analysis(
 
 
 @router.get("/{symbol}/financials", response_model=StandardResponse[List[FinancialStatementData]])
-@cached(ttl=86400, key_prefix="financials_v4_fiscal_interest_admitted", exclude_args=[4])
+@cached(ttl=86400, key_prefix="financials_v5_monetary_admitted", exclude_args=[4])
 async def get_financials(
     symbol: str,
     statement_type: Literal["income", "balance", "cashflow"] = Query("income"),
@@ -6347,7 +6313,7 @@ async def get_rating(symbol: str):
 @router.get("/{symbol}/financial-ratios", response_model=StandardResponse[List[FinancialRatioData]])
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
 # Keep prior scale-guessed responses out of the certified-unit serving path.
-@cached(ttl=86400, key_prefix="ratios_v9_interest_admitted")
+@cached(ttl=86400, key_prefix="ratios_v10_payout_admitted")
 async def get_financial_ratios(
     symbol: str,
     period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
@@ -6381,6 +6347,13 @@ async def get_financial_ratios(
     mongo_ratio_rows: List[FinancialRatioData] = []
     try:
         mongo_ratio_rows = await _load_mongo_financial_ratio_rows(symbol_upper, period, limit=80)
+        from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
+        for item in mongo_ratio_rows:
+            for metric in PERCENT_RATIO_FIELDS:
+                if item.ratio_units.get(metric) != "percent":
+                    if getattr(item, metric) is not None:
+                        item.ratio_units[metric] = "unknown"
+                    setattr(item, metric, None)
         if mongo_ratio_rows and all(
             any(evidence.get("source") == "vietcap" for evidence in row.provider_evidence)
             and _ratio_has_metric_value(row) for row in mongo_ratio_rows
