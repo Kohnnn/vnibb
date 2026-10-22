@@ -570,3 +570,71 @@ async def test_stored_snapshot_uses_observation_date_not_later_ingestion(
     assert quote.price == 57400
     assert quote.updated_at.isoformat() == expected
     assert equity._build_quote_from_screener_snapshot(snapshot).updated_at == snapshot.created_at
+
+
+def test_snapshot_trade_session_controls_prior_close_and_ohlc():
+    snapshot = SimpleNamespace(
+        symbol="FPT", price=57400, volume=123, snapshot_date=date(2026, 10, 23),
+        trade_date=date(2026, 10, 22), created_at=None,
+        extended_metrics={"price_unit": "VND", "change_pct": 0},
+    )
+    latest = SimpleNamespace(**bar(time=date(2026, 10, 22), source="vnstock_vnd",
+                                  open=56000, high=58000, low=55000, close=57400))
+    previous = SimpleNamespace(**bar(time=date(2026, 10, 21), source="vnstock_vnd", close=56000))
+
+    quote = equity._build_quote_from_screener_snapshot(
+        snapshot, latest, previous, observation_clock=True
+    )
+
+    assert (quote.prev_close, quote.change, quote.change_pct) == (56000, 1400, 2.5)
+    assert (quote.open, quote.high, quote.low) == (56000, 58000, 55000)
+    assert quote.updated_at.isoformat() == "2026-10-22T00:00:00+07:00"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_trade_day, latest_day, expected_price, expected_prev_close, expected_change, expected_pct", [
+    (22, 22, 57400, 56000, 1400, 2.5),
+    (21, 22, 57400, 56000, 1400, 2.5),
+    (22, 21, 58000, 56000, 2000, 3.57),
+])
+async def test_stored_snapshot_competes_by_trade_session_with_settled_rows(
+    monkeypatch, snapshot_trade_day, latest_day, expected_price, expected_prev_close,
+    expected_change, expected_pct,
+):
+    from contextlib import asynccontextmanager
+    from datetime import datetime
+
+    snapshot = SimpleNamespace(
+        symbol="FPT", price=58000, volume=999, snapshot_date=date(2026, 10, 23),
+        trade_date=date(2026, 10, snapshot_trade_day),
+        created_at=datetime.fromisoformat("2026-10-24T12:00:00+00:00"),
+        extended_metrics={"price_unit": "VND", "change_pct": 0},
+    )
+    rows = [
+        SimpleNamespace(**bar(time=date(2026, 10, latest_day), source="vnstock_vnd",
+                              open=55000, high=59000, low=54000,
+                              close=57400 if latest_day == 22 else 56000)),
+        SimpleNamespace(**bar(time=date(2026, 10, latest_day - 1), source="vnstock_vnd", close=56000)),
+    ]
+    db = SimpleNamespace(execute=AsyncMock(side_effect=[
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: rows)),
+        SimpleNamespace(scalar_one_or_none=lambda: snapshot),
+    ]), rollback=AsyncMock())
+
+    @asynccontextmanager
+    async def session():
+        yield db
+
+    monkeypatch.setattr(equity, "async_session_factory", session)
+    monkeypatch.setattr(equity, "_load_quote_from_price_cache", AsyncMock(return_value=None))
+    quote, source = await equity._load_stored_quote("FPT")
+
+    assert source == "postgres:stored_quote"
+    assert quote.price == expected_price
+    assert (quote.prev_close, quote.change, quote.change_pct) == (
+        expected_prev_close, expected_change, expected_pct
+    )
+    assert (quote.open, quote.high, quote.low) == (
+        (55000, 59000, 54000) if latest_day == 22 else (None, None, None)
+    )
+    assert quote.updated_at.isoformat() == "2026-10-22T00:00:00+07:00"

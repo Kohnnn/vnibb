@@ -2274,6 +2274,16 @@ def _provider_timeout_budget(reserve_seconds: int = 5) -> float:
     return float(max(1, min(vnstock_timeout, request_timeout - reserve)))
 
 
+def _snapshot_observation_date(snapshot_row: ScreenerSnapshot) -> date:
+    metrics = snapshot_row.extended_metrics if isinstance(snapshot_row.extended_metrics, dict) else {}
+    observed_at = (
+        _coerce_meta_datetime(getattr(snapshot_row, "trade_date", None))
+        or _coerce_meta_datetime(metrics.get("trade_date"))
+    )
+    return observed_at.date() if observed_at is not None else snapshot_row.snapshot_date
+
+
+
 def _build_quote_from_screener_snapshot(
     snapshot_row: ScreenerSnapshot,
     latest_row: Optional[StockPrice] = None,
@@ -2292,6 +2302,7 @@ def _build_quote_from_screener_snapshot(
     snapshot_metrics = (
         snapshot_row.extended_metrics if isinstance(snapshot_row.extended_metrics, dict) else {}
     )
+    observation_date = _snapshot_observation_date(snapshot_row)
     snapshot_change_pct = _pick_optional_float(
         snapshot_metrics.get("change_1d"),
         snapshot_metrics.get("price_change_1d_pct"),
@@ -2310,19 +2321,15 @@ def _build_quote_from_screener_snapshot(
         or datetime.combine(snapshot_row.snapshot_date, datetime.min.time())
     )
     if observation_clock:
-        snapshot_updated_at = (
-            _coerce_meta_datetime(getattr(snapshot_row, "trade_date", None))
-            or _coerce_meta_datetime(snapshot_metrics.get("trade_date"))
-            or datetime.combine(snapshot_row.snapshot_date, datetime.min.time())
+        snapshot_updated_at = datetime.combine(
+            observation_date, datetime.min.time(), tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")
         )
-        if snapshot_updated_at.tzinfo is None:
-            snapshot_updated_at = snapshot_updated_at.replace(tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
     latest_row_is_current = bool(
         latest_row and latest.get("price_unit") == snapshot["price_unit"]
-        and latest_row.time is not None and latest_row.time >= snapshot_row.snapshot_date
+        and latest_row.time is not None and latest_row.time == observation_date
     )
 
-    prior_session = snapshot_row.snapshot_date - timedelta(days=1)
+    prior_session = observation_date - timedelta(days=1)
     while prior_session.weekday() >= 5:
         prior_session -= timedelta(days=1)
     settled_prev_close = next(
@@ -2340,9 +2347,7 @@ def _build_quote_from_screener_snapshot(
         snapshot_change = price - prev_close
         snapshot_change_pct = (snapshot_change / prev_close) * 100 if prev_close else None
 
-    # OPEN/HIGH/LOW are session-specific. Only surface them when the settled price row
-    # actually corresponds to (or is newer than) the snapshot session; otherwise leave
-    # them null rather than show stale OHLC that contradicts a fresher snapshot price.
+    # OHLC belongs only to the snapshot's observed trading session.
     return StockQuoteData(
         symbol=str(snapshot_row.symbol or "").upper(),
         price=price,
@@ -4162,8 +4167,9 @@ async def _load_quote_from_database(
     previous = persisted_price_record(previous_row) if previous_row else {}
     close = latest.get("close") if latest.get("price_unit") in {"VND", "index_points"} else None
     prev_close = previous.get("close") if close is not None and previous.get("price_unit") == latest.get("price_unit") else None
-    if (snapshot is not None and snapshot.price is not None and snapshot.snapshot_date is not None
-            and (latest_row is None or latest_row.time is None or snapshot.snapshot_date > latest_row.time)):
+    observation_date = _snapshot_observation_date(snapshot) if snapshot is not None else None
+    if (snapshot is not None and snapshot.price is not None and observation_date is not None
+            and (latest_row is None or latest_row.time is None or observation_date > latest_row.time)):
         quote = _build_quote_from_screener_snapshot(
             snapshot, latest_row, previous_row, observation_clock=observation_clock
         )
@@ -4177,7 +4183,10 @@ async def _load_quote_from_database(
             prev_close=prev_close, change=change,
             change_pct=round(change / prev_close * 100, 2) if change is not None and prev_close else None,
             volume=int(latest_row.volume) if latest_row.volume is not None else None,
-            updated_at=datetime.combine(latest_row.time, datetime.min.time()) if latest_row.time else None,
+            updated_at=datetime.combine(
+                latest_row.time, datetime.min.time(),
+                tzinfo=ZoneInfo("Asia/Ho_Chi_Minh") if observation_clock else None,
+            ) if latest_row.time else None,
         )
     return (_build_quote_from_screener_snapshot(snapshot, observation_clock=observation_clock)
             if snapshot is not None and snapshot.price is not None else None)
