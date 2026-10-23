@@ -221,9 +221,7 @@ def cached(
                     except Exception as redis_err:
                         redis_available = False
                         logger.warning(f"Redis error, falling back to memory: {redis_err}")
-                if not redis_available:
-                    return await get_mem_cache()
-                return None
+                return await get_mem_cache()
 
             try:
                 cached_data = await load_cached_value()

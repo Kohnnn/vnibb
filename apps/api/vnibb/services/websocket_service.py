@@ -107,15 +107,25 @@ class ConnectionManager:
                 del self._price_cache[symbol]
 
     async def send_json(self, websocket: WebSocket, payload: dict, timeout: float) -> bool:
+        if websocket not in self.active_connections:
+            return False
+        lock = self._send_locks.setdefault(websocket, asyncio.Lock())
         try:
-            lock = self._send_locks.setdefault(websocket, asyncio.Lock())
             async def send():
                 async with lock:
+                    if websocket not in self.active_connections:
+                        return False
                     await websocket.send_json(payload)
-            await asyncio.wait_for(send(), timeout=timeout)
-            return True
+                    return True
+            return await asyncio.wait_for(send(), timeout=timeout)
         except Exception as error:
             logger.debug("Failed to send WebSocket message: %s", error)
+            if websocket in self.active_connections:
+                self.disconnect(websocket)
+                try:
+                    await asyncio.wait_for(websocket.close(code=1013), timeout=timeout)
+                except Exception as close_error:
+                    logger.debug("Failed to close evicted WebSocket: %s", close_error)
             return False
 
     async def send_update(self, websocket: WebSocket, update: PriceUpdate, timeout: float) -> bool:
@@ -123,10 +133,7 @@ class ConnectionManager:
         return await self.send_json(websocket, update.delivery_payload(), timeout)
 
     async def _broadcast(self, clients: list[WebSocket], payload: dict, timeout: float) -> None:
-        sent = await asyncio.gather(*(self.send_json(ws, payload, timeout) for ws in clients))
-        for websocket, succeeded in zip(clients, sent, strict=False):
-            if not succeeded:
-                self.disconnect(websocket)
+        await asyncio.gather(*(self.send_json(ws, payload, timeout) for ws in clients))
 
     async def broadcast_price(self, symbol: str, price_data: PriceUpdate, send_timeout: float):
         """Broadcast price update to all subscribers."""

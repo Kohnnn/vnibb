@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -135,6 +136,87 @@ async def test_cached_error_result_is_not_cached(monkeypatch):
     assert await load("VNM") == {"symbol": "VNM", "error": "upstream"}
     assert await load("VNM") == {"symbol": "VNM", "error": "upstream"}
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_cached_reuses_memory_when_connected_redis_get_and_set_fail(monkeypatch):
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache.settings, "cache_backend", "redis")
+    monkeypatch.setattr(cache.settings, "redis_url", "redis://localhost:6379/0")
+    monkeypatch.setattr(cache, "_memory_cache", {})
+    monkeypatch.setattr(cache, "_inflight_cache_loads", {})
+    redis_connection = MagicMock()
+    redis_connection.get = AsyncMock(side_effect=cache.redis.ConnectionError("GET unavailable"))
+    redis_connection.setex = AsyncMock(side_effect=cache.redis.ConnectionError("SET unavailable"))
+    redis_client = RedisClient()
+    redis_client._client = redis_connection
+    monkeypatch.setattr(cache, "redis_client", redis_client)
+    now = datetime(2026, 10, 23, 12)
+
+    class Clock:
+        @staticmethod
+        def now():
+            return now
+
+    monkeypatch.setattr(cache, "datetime", Clock)
+    calls = 0
+
+    @cached(ttl=10, key_prefix="quote")
+    async def load(symbol):
+        nonlocal calls
+        calls += 1
+        return {"symbol": symbol, "price": 100 + calls}
+
+    assert await load("VNM") == {"symbol": "VNM", "price": 101}
+    assert await load("VNM") == {"symbol": "VNM", "price": 101}
+    assert calls == 1
+    assert redis_connection.setex.await_count == 1
+
+    now += timedelta(seconds=10)
+    assert await load("VNM") == {"symbol": "VNM", "price": 102}
+    assert calls == 2
+
+    redis_connection.get.side_effect = None
+    redis_connection.get.return_value = '{"symbol": "VNM", "price": 103}'
+    assert await load("VNM") == {"symbol": "VNM", "price": 103}
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("loader_error", ["response", "exception"])
+async def test_cached_does_not_cache_loader_errors_when_connected_redis_fails(
+    monkeypatch, loader_error
+):
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache.settings, "cache_backend", "redis")
+    monkeypatch.setattr(cache.settings, "redis_url", "redis://localhost:6379/0")
+    monkeypatch.setattr(cache, "_memory_cache", {})
+    monkeypatch.setattr(cache, "_inflight_cache_loads", {})
+    redis_connection = MagicMock()
+    redis_connection.get = AsyncMock(side_effect=cache.redis.ConnectionError("GET unavailable"))
+    redis_connection.setex = AsyncMock(side_effect=cache.redis.ConnectionError("SET unavailable"))
+    redis_client = RedisClient()
+    redis_client._client = redis_connection
+    monkeypatch.setattr(cache, "redis_client", redis_client)
+    calls = 0
+
+    @cached(ttl=10, key_prefix="quote")
+    async def load(symbol):
+        nonlocal calls
+        calls += 1
+        if loader_error == "exception":
+            raise ValueError("upstream unavailable")
+        return {"symbol": symbol, "error": "upstream unavailable"}
+
+    for _ in range(2):
+        if loader_error == "exception":
+            with pytest.raises(ValueError, match="upstream unavailable"):
+                await load("VNM")
+        else:
+            assert await load("VNM") == {"symbol": "VNM", "error": "upstream unavailable"}
+
+    assert calls == 2
+    redis_connection.setex.assert_not_awaited()
 
 
 @pytest.mark.asyncio

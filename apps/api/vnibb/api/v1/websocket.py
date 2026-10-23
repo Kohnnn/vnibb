@@ -404,15 +404,14 @@ async def websocket_prices(websocket: WebSocket):
     if not await manager.connect(websocket):
         return
 
-    if not await manager.send_json(
-        websocket,
-        {"type": "market_status", **get_market_status()},
-        settings.websocket_send_timeout_seconds,
-    ):
-        manager.disconnect(websocket)
-        return
-
     try:
+        if not await manager.send_json(
+            websocket,
+            {"type": "market_status", **get_market_status()},
+            settings.websocket_send_timeout_seconds,
+        ):
+            return
+
         while True:
             # Receive message from client
             data = await websocket.receive_text()
@@ -450,7 +449,6 @@ async def websocket_prices(websocket: WebSocket):
                         manager._price_cache[symbol],
                         settings.websocket_send_timeout_seconds,
                     ):
-                        manager.disconnect(websocket)
                         return
 
             elif action == "unsubscribe":
@@ -460,7 +458,6 @@ async def websocket_prices(websocket: WebSocket):
                 if not await manager.send_json(
                     websocket, {"action": "pong"}, settings.websocket_send_timeout_seconds
                 ):
-                    manager.disconnect(websocket)
                     return
 
             elif action == "market_status":
@@ -469,18 +466,17 @@ async def websocket_prices(websocket: WebSocket):
                     {"type": "market_status", **get_market_status()},
                     settings.websocket_send_timeout_seconds,
                 ):
-                    manager.disconnect(websocket)
                     return
 
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        pass
     except asyncio.CancelledError:
-        manager.disconnect(websocket)
         raise
     except BaseException as error:
         if isinstance(error, (KeyboardInterrupt, GeneratorExit)):
             raise
         logger.error(f"WebSocket error: {error}")
+    finally:
         manager.disconnect(websocket)
 
 
