@@ -38,11 +38,7 @@ async def test_concurrent_cold_quotes_share_stored_reads_after_caller_cancellati
     test_db.add(Stock(id=13501, symbol="FPT", exchange="HOSE", company_name="FPT"))
     test_db.add_all([
         StockPrice(id=13501, stock_id=13501, symbol="FPT", time=date(2026, 10, 21),
-<<<<<<< HEAD
                    open=55000, high=56500, low=54800, close=56000, volume=1250000,
-=======
-                   open=55000, high=57000, low=54000, close=56000, volume=123,
->>>>>>> codex/backend-reliability-integration-20261023
                    source="vnstock_vnd:VCI", interval="1D"),
         ScreenerSnapshot(symbol="FPT", snapshot_date=date(2026, 10, 23),
                          trade_date=date(2026, 10, 20), price=55000,
@@ -257,6 +253,26 @@ async def test_quote_rejects_unpriced_provider_response(client, monkeypatch):
     assert response.status_code == 200
     assert response.json()["data"] is None
     assert response.json()["error"]
+
+
+@pytest.mark.asyncio
+async def test_http_quote_keeps_refresh_error_when_unpriced_provider_uses_snapshot(
+    client, test_db, monkeypatch, cold_quote_cache,
+):
+    monkeypatch.setattr(equity.VnstockStockQuoteFetcher, "fetch", AsyncMock(return_value=(StockQuoteData(symbol="FPT"), False)))
+    test_db.add(ScreenerSnapshot(
+        symbol="FPT", snapshot_date=date(2025, 1, 9), trade_date=date(2025, 1, 9),
+        price=57000, extended_metrics={"price_unit": "VND"},
+    ))
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/FPT/quote?refresh=true")
+
+    payload = response.json()
+    assert payload["data"]["price"] == 57000
+    assert payload["error"] == "Live quote unavailable; showing stored price."
+    assert payload["meta"]["source"] == "postgres:stored_quote"
+    assert payload["meta"]["as_of"].startswith("2025-01-09T00:00:00")
 
 
 @pytest.mark.asyncio
