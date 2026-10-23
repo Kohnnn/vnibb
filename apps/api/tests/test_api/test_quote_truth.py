@@ -40,7 +40,8 @@ async def test_concurrent_cold_quotes_share_stored_reads_after_caller_cancellati
     test_db.add(Stock(id=13501, symbol="FPT", exchange="HOSE", company_name="FPT"))
     test_db.add_all([
         StockPrice(id=13501, stock_id=13501, symbol="FPT", time=date(2026, 10, 21),
-                   close=56000, source="vnstock_vnd:VCI", interval="1D"),
+                   open=55000, high=57000, low=54000, close=56000, volume=123,
+                   source="vnstock_vnd:VCI", interval="1D"),
         ScreenerSnapshot(symbol="FPT", snapshot_date=date(2026, 10, 23),
                          trade_date=date(2026, 10, 20), price=55000,
                          extended_metrics={"price_unit": "VND"}),
