@@ -28,9 +28,12 @@ interface WatchlistItem {
     change: number | null;
     changePercent: number | null;
     volume: number | null;
-    asOf?: string;
-    stale?: boolean;
+    asOf?: string | null;
+    stale?: boolean | null;
     delivery?: 'WebSocket' | 'HTTP quote';
+    source?: string | null;
+    upstreamSource?: string | null;
+    error?: string | null;
 }
 
 type SortField = 'symbol' | 'price' | 'changePercent' | 'volume';
@@ -129,7 +132,7 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
         return new Map(validSymbolsData.data.map(s => [s.symbol.toUpperCase(), s.organ_name]));
     }, [validSymbolsData]);
 
-    const { prices: livePrices, isConnected, isReceiving, lastUpdate } = useWebSocket({ symbols });
+    const { prices: livePrices, isConnected, isReceiving, lastUpdate, protocolError } = useWebSocket({ symbols });
     const storedQuotes = useQueries({ queries: symbols.map(symbol => ({
         queryKey: quoteQueryKey(symbol),
         queryFn: ({ signal }: { signal: AbortSignal }) => fetchStockQuote(symbol, signal),
@@ -176,7 +179,7 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
             const stored = storedQuotes[index]?.data;
             const admitted = stored?.price_unit === 'VND' ? stored : undefined;
             const streamTime = Date.parse(stream?.as_of || stream?.timestamp || '');
-            const storedTime = Date.parse(admitted?.updatedAt || '');
+            const storedTime = Date.parse(admitted?.asOf || '');
             const quoteData = stream && (!admitted || !Number.isFinite(storedTime) || streamTime >= storedTime)
                 ? stream : admitted ? { ...admitted, change_pct: admitted.changePct } : undefined;
             const quoteNumber = (value: number | null | undefined) => Number.isFinite(value) ? value ?? null : null;
@@ -188,9 +191,12 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                 change: quoteNumber(quoteData?.change),
                 changePercent: quoteNumber(quoteData?.change_pct),
                 volume: quoteNumber(quoteData?.volume),
-                asOf: stream && quoteData === stream ? stream.as_of : admitted?.updatedAt ?? undefined,
-                stale: stream && quoteData === stream ? stream.stale : true,
+                asOf: stream && quoteData === stream ? stream.as_of : admitted?.asOf,
+                stale: stream && quoteData === stream ? stream.stale : admitted?.stale,
                 delivery: quoteData ? stream && quoteData === stream ? 'WebSocket' : 'HTTP quote' : undefined,
+                source: stream && quoteData === stream ? stream.source : admitted?.source,
+                upstreamSource: stream && quoteData === stream ? null : admitted?.upstreamSource,
+                error: stored?.error || storedQuotes[index]?.error?.message,
             };
         });
     }, [symbols, livePrices, symbolNameMap, storedQuotes]);
@@ -216,32 +222,48 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
 
     const hasSymbols = symbols.length > 0;
     const hasObservedQuote = watchlist.some(item => item.price !== null);
-    const observedTimes = watchlist.map(item => Date.parse(item.asOf || '')).filter(Number.isFinite);
-    const observedAt = observedTimes.length ? new Date(Math.min(...observedTimes)) : null;
+    const observedQuotes = watchlist.filter(item => item.price !== null);
+    const observedTimes = observedQuotes.map(item => Date.parse(item.asOf || ''));
+    const observedAt = observedTimes.length && observedTimes.every(Number.isFinite)
+        ? new Date(Math.min(...observedTimes)) : null;
     const connectionNote = !hasSymbols
         ? 'Add symbols to begin'
         : isConnected
             ? hasObservedQuote ? 'Connected · Stored or observed quote' : 'Live feed · Awaiting quote'
             : hasObservedQuote ? 'Disconnected · Cached quote receipt' : 'Disconnected · Unavailable';
-    const showCached = hasObservedQuote && (!isConnected || watchlist.some(item => item.stale));
-    const deliverySources = new Set(watchlist.map(item => item.delivery).filter(Boolean));
-    const sourceLabel = deliverySources.size > 1 ? 'Mixed quote delivery'
-        : deliverySources.values().next().value ?? 'WebSocket';
+    const showCached = hasObservedQuote && (!isConnected || watchlist.some(item => item.delivery === 'HTTP quote' || item.stale));
+    const stale = observedQuotes.some(item => item.stale === true) ? true
+        : observedQuotes.length && observedQuotes.every(item => item.stale === false) ? false : undefined;
+    const deliverySources = new Set(observedQuotes.map(item =>
+        `${item.delivery} · ${item.source || 'Source unknown'} · ${item.upstreamSource ? `Lineage ${item.upstreamSource}` : 'Supplier unknown'}`));
+    const sourceLabel = [...deliverySources].join('; ') || 'Quote source unknown';
+    const warnings = [...new Set([
+        ...(protocolError ? [`WebSocket: ${protocolError}`] : []),
+        ...watchlist.flatMap(item => [
+            ...(item.error ? [`${item.symbol}: ${item.error}`] : []),
+            ...(item.price !== null && !Number.isFinite(Date.parse(item.asOf || ''))
+                ? [`${item.symbol}: Observation time unknown; freshness unknown.`] : []),
+        ]),
+    ])];
+    const warningsText = warnings.join('\n');
+    const usesHttpQuotes = watchlist.some(item => item.delivery === 'HTTP quote');
 
     useEffect(() => {
         onDataChange?.(
             buildWidgetRuntime({
                 empty: !hasSymbols,
-                apiGroup: '/ws',
-                endpoint: '/api/v1/ws/prices',
+                apiGroup: usesHttpQuotes ? '/equity' : '/ws',
+                endpoint: usesHttpQuotes ? '/api/v1/equity/{symbol}/quote' : '/api/v1/ws/prices',
                 sourceLabel,
                 lastDataDate: observedAt?.toISOString() ?? null,
                 fetchedAt: lastUpdate,
-                stale: showCached,
+                cached: showCached,
+                stale,
+                warnings: warningsText ? warningsText.split('\n') : [],
                 extra: hasSymbols ? { symbolCount: symbols.length } : undefined,
             }),
         );
-    }, [hasSymbols, lastUpdate, showCached, symbols.length, onDataChange, observedAt?.getTime(), sourceLabel]);
+    }, [hasSymbols, lastUpdate, showCached, stale, symbols.length, onDataChange, observedAt?.getTime(), sourceLabel, warningsText, usesHttpQuotes]);
 
     const handleAddSymbol = useCallback(() => {
         const symbolUpper = normalizeTickerSymbol(newSymbol);
@@ -332,10 +354,12 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                         updatedAt={observedAt}
                         fetchedAt={lastUpdate}
                         isCached={showCached}
+                        isStale={stale}
                         note={connectionNote}
                         sourceLabel={sourceLabel}
                         align="right"
                     />
+                    {warnings.map(warning => <p key={warning} role="status" className="mt-1 text-[10px] text-amber-400">{warning}</p>)}
                 </div>
 
                 {showClearConfirm && (

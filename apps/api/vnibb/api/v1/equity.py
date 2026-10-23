@@ -2020,6 +2020,8 @@ async def _load_quote_from_price_cache(symbol: str) -> Optional[StockQuoteData]:
         change_pct=round(change_pct, 2) if change_pct is not None else None,
         volume=_coerce_optional_int(latest_payload.get("volume")),
         updated_at=updated_at,
+        as_of=_coerce_meta_datetime(latest_payload.get("time") or latest_payload.get("tradeDate") or latest_payload.get("date")),
+        upstream_source=_pick_optional_text(latest_payload.get("source"), latest_payload.get("price_source")),
     )
 
 
@@ -2370,6 +2372,9 @@ def _build_quote_from_screener_snapshot(
         change_pct=round(snapshot_change_pct, 2) if snapshot_change_pct is not None else None,
         volume=int(snapshot_row.volume) if snapshot_row.volume is not None else None,
         updated_at=snapshot_updated_at,
+        as_of=datetime.combine(observation_date, datetime.min.time(), tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+        if observation_date else None,
+        upstream_source=_pick_optional_text(snapshot.get("source"), snapshot.get("price_source")),
     )
 
 
@@ -4150,6 +4155,8 @@ async def _load_quote_from_mongo(symbol_upper: str) -> StockQuoteData | None:
         change_pct=round(change / prev_close * 100, 2) if change is not None and prev_close else None,
         volume=_coerce_optional_int(latest.get("volume")),
         updated_at=_coerce_meta_datetime(latest.get("tradeDate")),
+        as_of=_coerce_meta_datetime(latest.get("tradeDate") or latest.get("time") or latest.get("date")),
+        upstream_source=_pick_optional_text(latest.get("source"), latest.get("price_source")),
     )
 
 
@@ -4193,6 +4200,9 @@ async def _load_quote_from_database(
                 latest_row.time, datetime.min.time(),
                 tzinfo=ZoneInfo("Asia/Ho_Chi_Minh") if observation_clock else None,
             ) if latest_row.time else None,
+            as_of=datetime.combine(latest_row.time, datetime.min.time(), tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+            if latest_row.time else None,
+            upstream_source=_pick_optional_text(latest.get("source"), latest.get("price_source")),
         )
     return (_build_quote_from_screener_snapshot(snapshot, observation_clock=observation_clock)
             if snapshot is not None and snapshot.price is not None else None)
@@ -4227,7 +4237,6 @@ async def get_quote(
     symbol: str,
     source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     refresh: bool = Query(default=False),
-    db: AsyncSession = Depends(get_db),
 ):
     symbol_upper = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{3}", symbol_upper):
@@ -4240,7 +4249,18 @@ async def get_quote(
     return await _load_quote_response(symbol_upper, source, refresh)
 
 
-@cached(ttl=30, key_prefix="quote_v2_vnd")
+def _quote_response_meta(quote: StockQuoteData, source: str) -> MetaData:
+    observed = quote.as_of
+    if observed is not None and observed.tzinfo is None:
+        observed = observed.replace(tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+    return MetaData(
+        count=1, source=source, upstream_source=quote.upstream_source,
+        as_of=observed.isoformat() if observed else None,
+        stale=(datetime.now(observed.tzinfo) - observed).total_seconds() > 60 if observed else None,
+    )
+
+
+@cached(ttl=30, key_prefix="quote_v3_delivery")
 async def _load_quote_response(symbol_upper: str, source: str, refresh: bool):
     async def _get_db_quote() -> StockQuoteData | None:
         try:
@@ -4262,11 +4282,11 @@ async def _load_quote_response(symbol_upper: str, source: str, refresh: bool):
     if not refresh:
         cached_price_quote = await _load_quote_from_price_cache(symbol_upper)
         if cached_price_quote:
-            return StandardResponse(data=cached_price_quote, meta=MetaData(count=1))
+            return StandardResponse(data=cached_price_quote, meta=_quote_response_meta(cached_price_quote, "redis:price_snapshot"))
 
         cached_quote = await _get_db_quote()
         if cached_quote:
-            return StandardResponse(data=cached_quote, meta=MetaData(count=1))
+            return StandardResponse(data=cached_quote, meta=_quote_response_meta(cached_quote, "postgres:stored_quote"))
 
         # Canonical Mongo EOD as a fallback when Postgres has no rows for this
         # symbol (e.g. outside the curated/active universe). Settled bars only,
@@ -4274,26 +4294,28 @@ async def _load_quote_response(symbol_upper: str, source: str, refresh: bool):
         # which can time out and blank the quote widgets.
         mongo_quote = await _load_quote_from_mongo(symbol_upper)
         if mongo_quote:
-            return StandardResponse(data=mongo_quote, meta=MetaData(count=1))
+            return StandardResponse(data=mongo_quote, meta=_quote_response_meta(mongo_quote, "mongo:market_prices_eod"))
 
     try:
         data, _ = await asyncio.wait_for(
             VnstockStockQuoteFetcher.fetch(symbol=symbol_upper, source=source),
             timeout=10,
         )
+        if data.price is None or data.price_unit == "unknown":
+            raise ValueError("Quote price or unit unavailable from provider")
+        delivery_source = "vnstock:quote.history"
         screener_quote = await _get_screener_snapshot_quote()
         if _should_prefer_screener_quote(data, screener_quote):
             data = screener_quote
-        if data.price is None or data.price_unit == "unknown":
-            raise ValueError("Quote price or unit unavailable from provider")
-        return StandardResponse(data=data, meta=MetaData(count=1))
+            delivery_source = "postgres:stored_quote"
+        return StandardResponse(data=data, meta=_quote_response_meta(data, delivery_source))
     except Exception:
         logger.warning("Live quote failed for %s", symbol_upper, exc_info=True)
         fallback = await _get_db_quote()
         if fallback:
             return StandardResponse(
                 data=fallback,
-                meta=MetaData(count=1),
+                meta=_quote_response_meta(fallback, "postgres:stored_quote"),
                 error="Live quote unavailable; showing stored price.",
             )
 
@@ -4301,7 +4323,7 @@ async def _load_quote_response(symbol_upper: str, source: str, refresh: bool):
         if mongo_fallback:
             return StandardResponse(
                 data=mongo_fallback,
-                meta=MetaData(count=1),
+                meta=_quote_response_meta(mongo_fallback, "mongo:market_prices_eod"),
                 error="Live quote unavailable; showing stored price.",
             )
 

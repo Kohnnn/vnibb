@@ -111,17 +111,19 @@ describe('WatchlistWidget quotes', () => {
         jest.mocked(useQueries).mockReturnValue([{ data: {
             symbol: 'VCI', price: 42000, price_unit: 'VND', change: null,
             changePct: null, volume: null, updatedAt: '2026-10-21T00:00:00',
+            asOf: '2026-10-21T00:00:00+07:00', stale: true, source: 'postgres:stored_quote',
         } }] as never);
         renderWatchlist(['VCI']);
         const priceCell = screen.getByRole('button', { name: 'View VCI' }).querySelectorAll('td')[1];
         expect(Number(priceCell.textContent?.replace(/\D/g, ''))).toBe(42000);
         expect(screen.getByText('Disconnected · Cached quote receipt|No receipt|Cached|Known as-of')).toBeInTheDocument();
-        expect(screen.getByText('HTTP quote')).toBeInTheDocument();
+        expect(screen.getByText('HTTP quote · postgres:stored_quote · Supplier unknown')).toBeInTheDocument();
     });
 
     it('does not overlay an older stream observation on a newer stored quote', () => {
         jest.mocked(useQueries).mockReturnValue([{ data: {
             symbol: 'VCI', price: 43000, price_unit: 'VND', updatedAt: '2026-10-22T10:00:00+07:00',
+            asOf: '2026-10-22T10:00:00+07:00',
         } }] as never);
         mockUseWebSocket.mockReturnValue(socketResult(new Map([['VCI', {
             symbol: 'VCI', price: 42000, as_of: '2026-10-21T10:00:00+07:00', stale: true,
@@ -129,6 +131,82 @@ describe('WatchlistWidget quotes', () => {
         renderWatchlist(['VCI']);
         const priceCell = screen.getByRole('button', { name: 'View VCI' }).querySelectorAll('td')[1];
         expect(Number(priceCell.textContent?.replace(/\D/g, ''))).toBe(43000);
+    });
+
+    it('retains HTTP values and exposes refresh failure with truthful provenance', async () => {
+        const actualQuery = jest.requireActual<typeof ReactQuery>('@tanstack/react-query');
+        jest.mocked(useQuery).mockImplementation(actualQuery.useQuery);
+        jest.mocked(useQueries).mockImplementation(actualQuery.useQueries);
+        jest.mocked(api.getSymbols).mockResolvedValue({ count: 0, data: [] });
+        jest.mocked(api.getQuote).mockResolvedValue({ data: {
+            symbol: 'VCI', price: 42000, price_unit: 'VND', updatedAt: '2026-10-23T12:30:00',
+            open: null, high: null, low: null, prevClose: null, change: null, changePct: null,
+            volume: null, value: null,
+        }, error: 'Live quote unavailable; showing stored price.', meta: {
+            source: 'postgres:stored_quote', upstream_source: 'vnstock_vnd:VCI',
+            as_of: '2025-01-09T00:00:00+07:00', stale: true,
+        } } as never);
+        mockUseWebSocket.mockReturnValue({ ...socketResult(new Map(), true), protocolError: 'subscription_limit' });
+        const onDataChange = jest.fn();
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+        const view = render(<QueryClientProvider client={client}><WatchlistWidget id="watchlist" config={{ watchlistSymbols: ['VCI'] }} onDataChange={onDataChange} /></QueryClientProvider>);
+        try {
+            expect(await screen.findByText('VCI: Live quote unavailable; showing stored price.')).toBeVisible();
+            const priceCell = screen.getByRole('button', { name: 'View VCI' }).querySelectorAll('td')[1];
+            expect(Number(priceCell.textContent?.replace(/\D/g, ''))).toBe(42000);
+            expect(screen.getByText(/postgres:stored_quote/)).toHaveTextContent('vnstock_vnd:VCI');
+            expect(screen.getByText('WebSocket: subscription_limit')).toBeVisible();
+            expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+                __widgetRuntime: expect.objectContaining({ provenance: expect.objectContaining({
+                    updatedAt: '2025-01-08T17:00:00.000Z', stale: true,
+                    warnings: expect.arrayContaining(['VCI: Live quote unavailable; showing stored price.', 'WebSocket: subscription_limit']),
+                }) }),
+            }));
+        } finally {
+            view.unmount();
+            client.clear();
+        }
+    });
+
+    it('does not infer HTTP staleness or as-of from receipt', () => {
+        jest.mocked(useQueries).mockReturnValue([{ data: {
+            symbol: 'VCI', price: 42000, price_unit: 'VND', updatedAt: '2026-10-23T12:30:00',
+            source: 'redis:price_snapshot', upstreamSource: null, asOf: null, stale: null,
+        } }] as never);
+        const onDataChange = jest.fn();
+        render(<WatchlistWidget id="watchlist" config={{ watchlistSymbols: ['VCI'] }} onDataChange={onDataChange} />);
+
+        expect(screen.getByText('HTTP quote · redis:price_snapshot · Supplier unknown')).toBeInTheDocument();
+        expect(screen.getByText('VCI: Observation time unknown; freshness unknown.')).toBeVisible();
+        expect(screen.getByText(/As-of unknown/)).toBeInTheDocument();
+        expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+            __widgetRuntime: expect.objectContaining({ provenance: expect.objectContaining({ updatedAt: null, stale: undefined }) }),
+        }));
+    });
+
+    it('does not mark known fresh HTTP delivery stale merely because WebSocket is disconnected', () => {
+        jest.mocked(useQueries).mockReturnValue([{ data: {
+            symbol: 'VCI', price: 42000, price_unit: 'VND',
+            source: 'redis:price_snapshot', upstreamSource: null, asOf: '2026-10-23T12:30:00+07:00', stale: false,
+        } }] as never);
+        const onDataChange = jest.fn();
+        render(<WatchlistWidget id="watchlist" config={{ watchlistSymbols: ['VCI'] }} onDataChange={onDataChange} />);
+
+        expect(screen.queryByText('VCI: Observation time unknown; freshness unknown.')).not.toBeInTheDocument();
+        expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+            __widgetRuntime: expect.objectContaining({ provenance: expect.objectContaining({ stale: false, cached: true }) }),
+        }));
+    });
+
+    it('preserves the selected stream source without claiming it is an upstream supplier', () => {
+        mockUseWebSocket.mockReturnValue(socketResult(new Map([['VCI', {
+            symbol: 'VCI', price: 42000, source: 'postgres:stored_quote',
+            as_of: '2025-01-09T00:00:00+07:00', stale: true,
+        }]]), true));
+
+        renderWatchlist(['VCI']);
+
+        expect(screen.getByText('WebSocket · postgres:stored_quote · Supplier unknown')).toBeInTheDocument();
     });
 
     it.each([false, true])('refreshes HTTP only while delivery is degraded (receiving=%s)', async (isReceiving) => {
