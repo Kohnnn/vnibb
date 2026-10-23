@@ -132,7 +132,7 @@ it('prunes disappeared thesis keys, frees the 50-item cap, and downloads only su
 
     try {
         const { rerender } = render(<ResearchBundleModal onClose={jest.fn()} />);
-        const checkbox = (symbol: string) => screen.getByRole('checkbox', { name: `${symbol} · Personal / Research` });
+        const checkbox = (symbol: string) => screen.getByLabelText(`${symbol} · Personal / Research`);
         const download = screen.getByRole('button', { name: 'Download Research Bundle JSON' });
         for (const symbol of symbols.slice(0, 50)) await user.click(checkbox(symbol));
         expect(checkbox('A50')).toBeDisabled();

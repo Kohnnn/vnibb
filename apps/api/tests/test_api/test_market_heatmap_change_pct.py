@@ -142,6 +142,46 @@ async def test_heatmap_preserves_change_1d_from_cached_snapshot(client, monkeypa
     ), f"Expected change_pct=4.5 but got {vnm_stock['change_pct']}"
 
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("size_metric", "expected_count"),
+    [("market_cap", 0), ("volume", 1), ("value_traded", 0)],
+)
+async def test_heatmap_quote_volume_cannot_become_missing_size_metric(
+    client, monkeypatch, size_metric, expected_count
+):
+    async def quote_only_provider(params):
+        return [ScreenerData(
+            symbol="VNM", exchange="HOSE", price=100_000.0,
+            price_unit="VND", volume=1_000_000,
+        )]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._load_latest_screener_rows_from_db",
+        lambda **kwargs: _async([]),
+    )
+    monkeypatch.setattr("vnibb.api.v1.market.VnstockScreenerFetcher.fetch", quote_only_provider)
+    monkeypatch.setattr("vnibb.api.v1.market._load_stock_metadata", lambda _syms: _async({}))
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", lambda _syms: _async({}))
+    monkeypatch.setattr("vnibb.api.v1.market._load_latest_price_time", lambda _syms: _async(None))
+
+    response = await client.get(
+        "/api/v1/market/heatmap?use_cache=false&limit=10&exchange=ALL"
+        f"&size_metric={size_metric}"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["size_metric"] == size_metric
+    assert payload["count"] == expected_count
+    if size_metric == "volume":
+        stock = _find_stock(payload, "VNM")
+        assert stock is not None
+        assert stock["market_cap"] == stock["volume"] == 1_000_000
+    else:
+        assert payload["sectors"] == []
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
