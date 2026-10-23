@@ -2063,6 +2063,11 @@ async def _build_last_session_top_movers(
     if mover_type not in {"gainer", "loser", "volume", "value"}:
         return []
 
+    vn30_symbols = {
+        symbol.upper()
+        for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
+    } if index == "VN30" else None
+
     async with async_session_maker() as session:
         # Find latest trade date that has meaningful coverage. We require
         # at least 10 distinct symbols (lowered from 30 in QA-v4 D.3 so a
@@ -2129,9 +2134,7 @@ async def _build_last_session_top_movers(
             elif row["rn"] == 2:
                 entry["prev"] = price
 
-        # Optional: filter by index / exchange. We resolve via the
-        # `stocks` table; if an index allow-list isn't available we let
-        # everything through.
+        # Exchange restrictions and VN30 membership are applied before ranking.
         exchange_allow = TOP_MOVER_INDEX_EXCHANGE.get(index)
         symbol_to_exchange: dict[str, str] = {}
         if exchange_allow:
@@ -2146,6 +2149,8 @@ async def _build_last_session_top_movers(
 
         rows: List[dict[str, Any]] = []
         for symbol, parts in per_symbol.items():
+            if vn30_symbols is not None and symbol not in vn30_symbols:
+                continue
             latest = parts.get("latest")
             prev = parts.get("prev")
             if not latest or latest["price_unit"] == "unknown":

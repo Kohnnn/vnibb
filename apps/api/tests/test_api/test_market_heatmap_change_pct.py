@@ -392,3 +392,69 @@ async def test_market_movers_keep_provider_error_when_retained_prices_are_unavai
     assert payload["error"] == "Primary provider unavailable"
     assert payload["is_last_session"] is False
     assert payload["session_label"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mover_type", ["volume", "value"])
+@pytest.mark.parametrize("membership_available", [True, False])
+async def test_market_retained_vn30_movers_exclude_higher_ranked_nonmembers(
+    client, test_engine, test_db, monkeypatch, mover_type, membership_available
+):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from vnibb.api.v1 import market
+    from vnibb.models.stock import Stock, StockPrice
+
+    for stock_index, symbol in enumerate(["VNM", *[f"X{i:02}" for i in range(9)]]):
+        test_db.add(Stock(
+            id=stock_index + 1, symbol=symbol,
+            exchange="HOSE" if stock_index % 2 == 0 else "HNX",
+        ))
+        volume = 100 if symbol == "VNM" else 1_000_000
+        for offset, (day, close) in enumerate([
+            (date(2026, 9, 1), 100_000.0),
+            (date(2026, 9, 2), 110_000.0),
+        ]):
+            test_db.add(StockPrice(
+                id=stock_index * 2 + offset + 1, symbol=symbol, stock_id=stock_index + 1,
+                time=day, interval="1D", source="vietcap_vnd",
+                open=close, high=close, low=close, close=close,
+                volume=volume, value=close * volume,
+            ))
+    await test_db.commit()
+
+    async def unavailable_provider(**kwargs):
+        raise RuntimeError("Primary provider unavailable")
+
+    monkeypatch.setattr(market.VnstockTopMoversFetcher, "fetch", unavailable_provider)
+    monkeypatch.setattr(
+        market, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False)
+    )
+    if not membership_available:
+        monkeypatch.delitem(market.VN_SECTORS, "vn30")
+    response = await client.get(
+        f"/api/v1/market/top-movers?type={mover_type}&index=VN30&limit=1"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["index"] == "VN30"
+    if not membership_available:
+        assert payload["data"] == []
+        assert payload["count"] == 0
+        assert payload["error"] == "Primary provider unavailable"
+        assert payload["is_last_session"] is False
+        return
+    assert payload["count"] == 1
+    assert [row["symbol"] for row in payload["data"]] == ["VNM"]
+    assert payload["data"][0]["volume"] == 100
+    assert payload["data"][0]["value"] == 11_000_000.0
+    assert payload["data"][0]["price_unit"] == "VND"
+    assert payload["is_last_session"] is True
+    assert payload["session_label"] == "2026-09-02"
+
+    broader = await client.get(
+        f"/api/v1/market/top-movers?type={mover_type}&index=VNINDEX&limit=1"
+    )
+    assert broader.status_code == 200
+    assert broader.json()["data"][0]["symbol"] != "VNM"
+    assert broader.json()["data"][0]["volume"] == 1_000_000
