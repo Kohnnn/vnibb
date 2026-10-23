@@ -259,6 +259,148 @@ async def test_slow_clients_do_not_delay_healthy_clients(monkeypatch, connection
     await task
 
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["timeout", "peer_failure"])
+async def test_public_stalled_socket_closes_and_can_reconnect(monkeypatch, failure):
+    from fastapi import FastAPI
+
+    manager = ConnectionManager()
+    monkeypatch.setattr(websocket_api, "manager", manager)
+    app = FastAPI()
+    app.include_router(websocket_api.router, prefix="/api/v1")
+    stalled = asyncio.Event()
+    send_cancelled = asyncio.Event()
+    peers = []
+
+    async def open_socket(stall_once=False):
+        incoming, outgoing = asyncio.Queue(), asyncio.Queue()
+        await incoming.put({"type": "websocket.connect"})
+
+        async def send(frame):
+            nonlocal stall_once
+            if (stall_once and frame["type"] == "websocket.send"
+                    and "symbol" in json.loads(frame["text"])):
+                stall_once = False
+                stalled.set()
+                if failure == "peer_failure":
+                    raise RuntimeError("One-shot transport send failure")
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    send_cancelled.set()
+            await outgoing.put(frame)
+
+        endpoint = asyncio.create_task(app({
+            "type": "websocket", "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "scheme": "ws", "path": "/api/v1/ws/prices", "raw_path": b"/api/v1/ws/prices",
+            "query_string": b"", "headers": [], "client": ("127.0.0.1", 1234),
+            "server": ("127.0.0.1", 8000), "subprotocols": [], "root_path": "",
+        }, incoming.get, send))
+        peers.append((incoming, outgoing, endpoint))
+        assert (await asyncio.wait_for(outgoing.get(), 0.5))["type"] == "websocket.accept"
+        status = await asyncio.wait_for(outgoing.get(), 0.5)
+        assert json.loads(status["text"])["type"] == "market_status"
+        await incoming.put({"type": "websocket.receive", "text": json.dumps({
+            "action": "subscribe", "symbols": ["VNM"],
+        })})
+        await incoming.put({"type": "websocket.receive", "text": '{"action":"ping"}'})
+        pong = await asyncio.wait_for(outgoing.get(), 0.5)
+        assert json.loads(pong["text"]) == {"action": "pong"}
+        return incoming, outgoing, endpoint
+
+    try:
+        slow_in, slow_out, slow_endpoint = await open_socket(stall_once=True)
+        healthy_in, healthy_out, healthy_endpoint = await open_socket()
+        broadcast = asyncio.create_task(manager.broadcast_price("VNM", price_update(), 0.2))
+        await asyncio.wait_for(stalled.wait(), 0.5)
+        healthy = json.loads((await asyncio.wait_for(healthy_out.get(), 0.1))["text"])
+        assert healthy["price"] == 1.0
+        assert healthy["price_unit"] == "VND"
+        assert healthy["source"] == "fixture"
+        assert healthy["as_of"] == "2026-01-01T00:00:00+07:00"
+        assert healthy["stale"] is True
+        if failure == "timeout":
+            assert not broadcast.done()
+        await asyncio.wait_for(broadcast, 0.5)
+        assert send_cancelled.is_set() is (failure == "timeout")
+        close = await asyncio.wait_for(slow_out.get(), 0.5)
+        assert close["type"] == "websocket.close"
+        assert close["code"] == 1013
+        await slow_in.put({"type": "websocket.disconnect", "code": 1013})
+        await asyncio.wait_for(slow_endpoint, 0.5)
+        assert slow_out.empty()
+        assert manager.active_connection_count() == 1
+        assert manager.total_subscription_count() == 1
+        assert set(manager._send_locks) == set(manager.active_connections)
+
+        await healthy_in.put({"type": "websocket.disconnect", "code": 1000})
+        await asyncio.wait_for(healthy_endpoint, 0.5)
+        assert manager.active_connection_count() == 0
+        assert manager.total_subscription_count() == 0
+        assert manager._send_locks == {}
+        assert manager._price_cache == {}
+
+        _, reconnected_out, _ = await open_socket()
+        await manager.broadcast_price("VNM", price_update(), 0.2)
+        replay = json.loads((await asyncio.wait_for(reconnected_out.get(), 0.5))["text"])
+        for field in ("symbol", "price", "price_unit", "source", "as_of", "stale"):
+            assert replay[field] == healthy[field]
+    finally:
+        for incoming, _, endpoint in peers:
+            await incoming.put({"type": "websocket.disconnect", "code": 1000})
+            if not endpoint.done():
+                endpoint.cancel()
+        await asyncio.gather(*(endpoint for _, _, endpoint in peers), return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_public_initial_send_cancellation_drains_connection(monkeypatch):
+    from fastapi import FastAPI
+
+    manager = ConnectionManager()
+    monkeypatch.setattr(websocket_api, "manager", manager)
+    app = FastAPI()
+    app.include_router(websocket_api.router, prefix="/api/v1")
+    incoming = asyncio.Queue()
+    await incoming.put({"type": "websocket.connect"})
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+
+    async def stalled_send(frame):
+        if frame["type"] == "websocket.send":
+            started.set()
+            try:
+                await release.wait()
+            finally:
+                cancelled.set()
+
+    endpoint = asyncio.create_task(app({
+        "type": "websocket", "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "scheme": "ws", "path": "/api/v1/ws/prices", "raw_path": b"/api/v1/ws/prices",
+        "query_string": b"", "headers": [], "client": ("127.0.0.1", 1234),
+        "server": ("127.0.0.1", 8000), "subprotocols": [], "root_path": "",
+    }, incoming.get, stalled_send))
+    try:
+        await asyncio.wait_for(started.wait(), 0.5)
+        endpoint.cancel()
+        done, _ = await asyncio.wait({endpoint}, timeout=0.5)
+        assert endpoint in done, "Endpoint ignored cancellation during its initial send"
+        with pytest.raises(asyncio.CancelledError):
+            await endpoint
+        assert cancelled.is_set()
+        assert manager.active_connection_count() == 0
+        assert manager.total_subscription_count() == 0
+        assert manager._send_locks == {}
+        assert manager._price_cache == {}
+    finally:
+        release.set()
+        await incoming.put({"type": "websocket.disconnect", "code": 1000})
+        endpoint.cancel()
+        await asyncio.wait({endpoint}, timeout=0.5)
+
+
 @pytest.mark.asyncio
 async def test_equity_deadlines_reuse_outstanding_job(monkeypatch):
     from vnibb.providers.vnstock.stock_quote import StockQuoteData
@@ -281,6 +423,7 @@ async def test_equity_deadlines_reuse_outstanding_job(monkeypatch):
 async def test_cached_delivery_preserves_observation_clock(connection_manager):
     update = price_update()
     websocket = FakeWebSocket()
+    await connection_manager.connect(websocket)
     await connection_manager.send_update(websocket, update, 0.1)
     assert websocket.sent[0]["as_of"] == update.timestamp
     assert websocket.sent[0]["price_unit"] == "VND"

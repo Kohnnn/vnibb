@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from vnibb.models.company import Company, Shareholder
 from vnibb.models.comparison import StockComparison
@@ -26,6 +27,13 @@ from vnibb.providers.vnstock.market_overview import MarketIndexData
 from vnibb.providers.vnstock.stock_quote import StockQuoteData
 from vnibb.providers.vnstock.trading_stats import TradingStatsData
 from vnibb.services.sector_service import SectorPerformance, StockBrief
+
+@pytest.fixture
+def quote_database(test_engine, monkeypatch):
+    monkeypatch.setattr("vnibb.api.v1.equity.async_session_factory", async_sessionmaker(
+        test_engine, expire_on_commit=False,
+    ))
+
 
 
 @pytest.mark.asyncio
@@ -627,7 +635,7 @@ async def test_dividends_endpoint_propagates_provider_cancellation(test_db, monk
 
 
 @pytest.mark.asyncio
-async def test_quote_smoke_returns_data(client, monkeypatch):
+async def test_quote_smoke_returns_data(client, monkeypatch, quote_database):
     async def fake_quote_fetch(*, symbol: str, source: str):
         quote = StockQuoteData(
             symbol=symbol,
@@ -659,7 +667,9 @@ async def test_quote_smoke_returns_data(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_stale(client, test_db):
+async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_stale(
+    client, test_db, quote_database,
+):
     test_db.add(Stock(id=1, symbol="FPT", exchange="HOSE", company_name="FPT"))
     test_db.add_all(
         [
@@ -745,7 +755,7 @@ def test_snapshot_daily_change_uses_its_prior_session(
 
 
 @pytest.mark.asyncio
-async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, test_db):
+async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, test_db, quote_database):
     """RC-3: PREV CLOSE must be populated from the prior settled close even when the
     snapshot carries no live change_pct (after-market-hours), instead of being null."""
     test_db.add(Stock(id=2, symbol="VCI", exchange="HOSE", company_name="VCI"))
