@@ -302,8 +302,8 @@ class MarketTopMoversResponse(BaseModel):
     error: Optional[str] = None
     is_last_session: bool = False
     session_label: Optional[str] = None
-    source: Optional[str] = None
-    is_stale: Optional[bool] = None
+    source: str | None = None
+    is_stale: bool | None = None
 
 
 class MarketSectorPerformanceResponse(BaseModel):
@@ -2049,7 +2049,7 @@ def _has_non_zero_top_mover_signal(payload: List[dict[str, Any]]) -> bool:
 
 
 @cached(ttl=120, key_prefix="market_retained_mover_inputs")
-async def _load_retained_mover_inputs() -> List[dict[str, Any]]:
+async def _load_retained_mover_inputs() -> list[dict[str, Any]]:
     async with async_session_maker() as session:
         # Coverage is market-wide; exchange and membership restrictions come later.
         latest_session = await session.execute(text("""

@@ -651,6 +651,7 @@ async def test_market_retained_inputs_share_sql_across_types_limits_and_aliases(
 
     from sqlalchemy import event
     from sqlalchemy.ext.asyncio import async_sessionmaker
+
     from vnibb.api.v1 import market
     from vnibb.core import cache
     from vnibb.models.stock import Stock, StockPrice
@@ -721,6 +722,7 @@ async def test_market_movers_share_occupied_raw_provider_after_cancellation_and_
     import threading
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
+
     from vnibb.api.v1 import market
     from vnibb.core import cache
     from vnibb.providers.vnstock import runtime as provider_runtime

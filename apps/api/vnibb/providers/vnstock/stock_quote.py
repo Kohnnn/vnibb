@@ -19,7 +19,7 @@ from vnibb.providers.vnstock.runtime import run_reference_provider, validate_sou
 logger = logging.getLogger(__name__)
 
 
-def _coerce_quote_timestamp(value: object, *, preserve_timezone: bool = False) -> Optional[datetime]:
+def _coerce_quote_timestamp(value: object, *, preserve_timezone: bool = False) -> datetime | None:
     if isinstance(value, datetime):
         return value
     if isinstance(value, date):
@@ -69,8 +69,8 @@ class StockQuoteData(BaseModel):
     # Metadata
     updated_at: Optional[datetime] = Field(None, description="Quote timestamp")
     price_unit: PriceUnit = Field(default="unknown", description="Canonical price unit")
-    as_of: Optional[datetime] = Field(None, description="Admitted source observation time, not receipt time")
-    upstream_source: Optional[str] = Field(None, description="Raw source lineage when supplied; not certified by serving storage")
+    as_of: datetime | None = Field(None, description="Admitted source observation time, not receipt time")
+    upstream_source: str | None = Field(None, description="Raw source lineage when supplied; not certified by serving storage")
     
     model_config = {"populate_by_name": True}
 
