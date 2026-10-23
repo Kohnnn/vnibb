@@ -127,6 +127,8 @@ class VnstockStockQuoteFetcher:
         symbol: str,
         source: str = "VCI",
         use_cache: bool = True,
+        *,
+        wait_for_completion: bool = False,
     ) -> tuple[StockQuoteData, bool]:
         """
         Fetch real-time quote for a single stock.
@@ -135,6 +137,7 @@ class VnstockStockQuoteFetcher:
             symbol: Stock ticker symbol (e.g., 'VNM', 'FPT')
             source: Free VCI data source
             use_cache: Whether to use 30-second cache
+            wait_for_completion: Retain background ownership until the sync worker finishes
         
         Returns:
             Tuple of (StockQuoteData, is_cached: bool)
@@ -186,7 +189,8 @@ class VnstockStockQuoteFetcher:
                 return latest, prev
             
             result = await run_reference_provider(
-                _fetch, settings.vnstock_timeout, key=("stock_quote", source, symbol)
+                _fetch, None if wait_for_completion else settings.vnstock_timeout,
+                key=("stock_quote", source, symbol),
             )
             
             if not result:

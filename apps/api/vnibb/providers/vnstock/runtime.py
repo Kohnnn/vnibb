@@ -104,7 +104,7 @@ _financial_key: tuple | None = None
 _reference_jobs: dict[tuple, asyncio.Future] = {}
 
 
-async def run_reference_provider(operation: Callable, timeout: float, *, key: tuple):
+async def run_reference_provider(operation: Callable, timeout: float | None, *, key: tuple):
     """Share occupied executor work even after a caller deadline expires."""
     loop = asyncio.get_running_loop()
     job_key = (loop, key)

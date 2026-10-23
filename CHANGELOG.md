@@ -51,7 +51,7 @@ The entries below describe source changes, not supplier certification or full-po
   from the server source.
 
 ### Fixed
-- HTTP quote refreshes and price sockets share the same normalized VCI/symbol acquisition until its synchronous worker finishes, including after caller deadlines. Cancellation propagates without discarding occupied work; completion permits a fresh acquisition.
+- HTTP quote refreshes and price sockets share the same normalized VCI/symbol acquisition until its synchronous worker finishes, including after caller deadlines. HTTP waits remain bounded; socket jobs retain their concurrency slot beyond the provider timeout and deliver admitted late completions without resubmitting. Cancellation propagates without discarding occupied work; completion permits a fresh acquisition.
 - WebSocket subscribers receive admitted stored equity/index observations independently of stalled live providers. Replay retains observation clocks, units, source and staleness; shared acquisition and bounded client queues prevent duplicate work and slow-client blocking.
 - PostgreSQL statement, lock and idle-transaction safeguards survive rollback and pooled reuse through connection startup parameters. Stored-first history/events/dividends/ratios and bounded market acquisition preserve borrowed transactions and explicit unavailable outcomes; valuation widgets expose provider failures without discarding retained data.
 - Annual statement values require compatible fiscal identity, currency, source-linked field units, consolidation and flow evidence across provider, SQL, Mongo and cached exits. Tables, charts, derived values and exports share that admission; original raw observations remain retained.

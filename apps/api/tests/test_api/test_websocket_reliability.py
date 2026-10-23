@@ -136,7 +136,7 @@ async def test_equity_fetches_respect_concurrency_cap(monkeypatch):
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def fake_fetch(*_):
+    async def fake_fetch(*_, **_kwargs):
         nonlocal current, peak
         current += 1
         peak = max(peak, current)
@@ -264,7 +264,7 @@ async def test_equity_deadlines_reuse_outstanding_job(monkeypatch):
     from vnibb.providers.vnstock.stock_quote import StockQuoteData
     release = asyncio.Event()
     calls = []
-    async def fetch(*args):
+    async def fetch(*args, **_kwargs):
         calls.append(args)
         await release.wait()
         return StockQuoteData(symbol="VNM"), False
@@ -345,7 +345,7 @@ async def test_blocked_sync_worker_keeps_slot_and_does_not_duplicate(monkeypatch
         calls.append(symbol)
         loop.call_soon_threadsafe(started.set)
         release.wait()
-    async def fetch(symbol, _source):
+    async def fetch(symbol, _source, **_kwargs):
         await asyncio.to_thread(blocking_fetch, symbol)
         return StockQuoteData(symbol=symbol), False
     monkeypatch.setattr(websocket_api.VnstockStockQuoteFetcher, "fetch", fetch)
@@ -478,7 +478,7 @@ async def test_public_new_subscribers_receive_snapshot_while_provider_stalls(mon
     calls = {"provider": 0, "stored": 0}
     observation = {"price": 57400}
 
-    async def provider(symbol, _source):
+    async def provider(symbol, _source, **_kwargs):
         calls["provider"] += 1
         provider_started.set()
         await release_provider.wait()
@@ -570,7 +570,7 @@ async def test_shutdown_cancels_snapshots_without_releasing_provider_slot(monkey
 
 
 @pytest.mark.asyncio
-async def test_public_quote_refresh_timeouts_and_socket_share_sync_worker(client, monkeypatch):
+async def test_public_quote_socket_owns_worker_past_provider_deadline(client, monkeypatch):
     import threading
     from datetime import datetime
     from types import SimpleNamespace
@@ -606,7 +606,9 @@ async def test_public_quote_refresh_timeouts_and_socket_share_sync_worker(client
     class Provider:
         def stock(self, **kwargs):
             calls.append(kwargs)
-            price = 57.4 if len(calls) == 1 else 57.6
+            price = 70.1
+            if kwargs["symbol"] == "FPT":
+                price = 57.4 if sum(call["symbol"] == "FPT" for call in calls) == 1 else 57.6
 
             def history(**_kwargs):
                 loop.call_soon_threadsafe(started.set)
@@ -626,6 +628,9 @@ async def test_public_quote_refresh_timeouts_and_socket_share_sync_worker(client
     socket = FakeWebSocket(
         [json.dumps({"action": "subscribe", "symbols": [" fpt "]})], keep_open=True,
     )
+    second_socket = FakeWebSocket(
+        [json.dumps({"action": "subscribe", "symbols": ["VNM"]})], keep_open=True,
+    )
     monkeypatch.setattr(loop, "run_in_executor", submit)
     monkeypatch.setattr(runtime, "get_vnstock_class", lambda: Provider)
     monkeypatch.setattr(runtime, "_reference_jobs", {})
@@ -639,7 +644,8 @@ async def test_public_quote_refresh_timeouts_and_socket_share_sync_worker(client
     monkeypatch.setattr(websocket_api, "get_market_status", lambda: {
         "phase": "morning", "is_open": True,
     })
-    monkeypatch.setattr(websocket_api.settings, "vnstock_timeout", 2)
+    monkeypatch.setattr(websocket_api.settings, "vnstock_timeout", 0.1)
+    monkeypatch.setattr(websocket_api.settings, "websocket_fetch_concurrency", 1)
     monkeypatch.setattr(websocket_api.settings, "vnstock_source", "VCI")
     first_http = asyncio.create_task(client.get("/api/v1/equity/fpt/quote?refresh=true"))
     tasks = [first_http]
@@ -649,6 +655,11 @@ async def test_public_quote_refresh_timeouts_and_socket_share_sync_worker(client
         broadcaster = asyncio.create_task(websocket_api.fetch_and_broadcast_prices())
         tasks.extend([endpoint, broadcaster])
         await asyncio.wait_for(socket.waiting.wait(), 0.5)
+        await websocket_api._run_price_cycle({"FPT"}, True)
+        assert websocket_api._equity_slots.locked()
+        second_endpoint = asyncio.create_task(websocket_api.websocket_prices(second_socket))
+        tasks.append(second_endpoint)
+        await asyncio.wait_for(second_socket.waiting.wait(), 0.5)
         responses = [await first_http]
         for _ in range(2):
             responses.append(await client.get("/api/v1/equity/FPT/quote?refresh=true"))
@@ -660,6 +671,9 @@ async def test_public_quote_refresh_timeouts_and_socket_share_sync_worker(client
         with pytest.raises(asyncio.CancelledError):
             await cancelled
 
+        # Keep the synchronous acquisition held beyond the provider's own deadline,
+        # not just the shorter HTTP/cycle deadline.
+        await asyncio.sleep(0.12)
         assert all(response.status_code == 200 for response in responses)
         assert all(response.json()["data"] is None for response in responses)
         assert all(response.json()["error"] == "Quote unavailable." for response in responses)
@@ -667,13 +681,19 @@ async def test_public_quote_refresh_timeouts_and_socket_share_sync_worker(client
         assert calls == [{"symbol": "FPT", "source": "VCI"}]
         assert not workers[0].done()
         assert not websocket_api._equity_jobs["FPT"].done()
+        assert "VNM" in websocket_api._equity_jobs
+        assert not second_socket.received_update.is_set()
 
         release.set()
         await asyncio.wait_for(socket.received_update.wait(), 0.5)
+        await asyncio.wait_for(second_socket.received_update.wait(), 0.5)
         await asyncio.gather(*list(websocket_api._equity_jobs.values()))
         assert socket.sent[-1]["symbol"] == "FPT"
         assert socket.sent[-1]["price"] == 57400
         assert socket.sent[-1]["source"] == "vnstock:VCI:quote.history"
+        assert second_socket.sent[-1]["price"] == 70100
+        assert len(submitted) == 2
+        assert calls == [{"symbol": "FPT", "source": "VCI"}, {"symbol": "VNM", "source": "VCI"}]
         assert workers[0].done()
         assert websocket_api._equity_jobs == {}
         assert runtime._reference_jobs == {}
@@ -681,8 +701,11 @@ async def test_public_quote_refresh_timeouts_and_socket_share_sync_worker(client
         response = await client.get("/api/v1/equity/fpt/quote?refresh=true")
         assert response.status_code == 200
         assert response.json()["data"]["price"] == 57600
-        assert len(submitted) == 2
-        assert calls == [{"symbol": "FPT", "source": "VCI"}] * 2
+        assert len(submitted) == 3
+        assert calls == [
+            {"symbol": "FPT", "source": "VCI"}, {"symbol": "VNM", "source": "VCI"},
+            {"symbol": "FPT", "source": "VCI"},
+        ]
         assert runtime._reference_jobs == {}
     finally:
         release.set()
