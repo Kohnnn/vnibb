@@ -334,8 +334,8 @@ async def test_last_session_movers_normalize_sources_and_exclude_unknown(test_en
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mover_type", ["gainer", "loser", "volume", "value"])
-@pytest.mark.parametrize("provider_state", ["empty", "delayed_empty", "error", "timeout"])
-async def test_market_movers_reach_typed_retained_prices_before_second_provider_call(
+@pytest.mark.parametrize("provider_state", ["held", "error", "timeout"])
+async def test_market_movers_serve_retained_without_starting_provider(
     client, test_engine, test_db, monkeypatch, mover_type, provider_state
 ):
     import asyncio
@@ -365,15 +365,13 @@ async def test_market_movers_reach_typed_retained_prices_before_second_provider_
 
     async def provider(*, type, index, limit):
         calls.append(type)
-        if len(calls) > 1:
+        if provider_state == "held":
             await asyncio.Event().wait()
         if provider_state == "error":
             raise RuntimeError("Primary provider unavailable")
         if provider_state == "timeout":
             raise asyncio.TimeoutError()
-        if provider_state == "delayed_empty":
-            await asyncio.sleep(0.02)
-        return []
+        raise AssertionError("Retained observations must not start a provider refresh")
 
     monkeypatch.setattr(market.VnstockTopMoversFetcher, "fetch", provider)
     async with asyncio.timeout(0.75):
@@ -382,20 +380,20 @@ async def test_market_movers_reach_typed_retained_prices_before_second_provider_
         )
 
     assert response.status_code == 200
-    assert calls == [mover_type]
+    assert calls == []
     payload = response.json()
     assert payload["count"] == 3
     assert payload["is_last_session"] is True
     assert payload["session_label"] == "2026-09-02"
     assert payload["updated_at"] == "2026-09-02T00:00:00"
-    assert "retained" in payload["error"]
-    if provider_state == "error":
-        assert "Primary provider unavailable" in payload["error"]
-    if provider_state == "timeout":
-        assert "TimeoutError" in payload["error"]
+    assert payload["error"] is None
+    assert payload["source"] == "vietcap_vnd"
+    assert payload["is_stale"] is True
     for row in payload["data"]:
         assert row["symbol"] != "T00"
         assert row["price_unit"] == "VND"
+        assert row["source"] == "vietcap_vnd"
+        assert row["is_stale"] is True
         assert row["last_price"] in {90_000.0, 110_000.0}
         assert row["price_change_pct"] == pytest.approx(10.0 if int(row["symbol"][1:]) % 2 else -10.0)
         assert row["is_last_session"] is True
@@ -582,7 +580,7 @@ async def test_market_retained_movers_require_finite_observed_rank_metric(
     rows = [{
         "symbol": symbol, "time": session_date, "close": 100_000.0,
         "source": "vietcap_vnd", "volume": 100, "value": 10_000_000.0,
-        "rn": 1, mover_type: missing_metric if symbol == "MISSING" else 0,
+        "exchange": "HOSE", mover_type: missing_metric if symbol == "MISSING" else 0,
     } for symbol in symbols]
 
     class StoredSession:
@@ -590,7 +588,6 @@ async def test_market_retained_movers_require_finite_observed_rank_metric(
             self.results = iter([
                 SimpleNamespace(scalar=lambda: session_date),
                 SimpleNamespace(mappings=lambda: rows),
-                SimpleNamespace(all=lambda: [(symbol, "HOSE") for symbol in symbols]),
             ])
 
         async def __aenter__(self):
@@ -684,3 +681,196 @@ async def test_market_movers_disclose_retained_storage_failure_after_empty_provi
         assert "Secondary provider unavailable" in payload["error"]
     assert payload["is_last_session"] is False
     assert payload["session_label"] is None
+
+
+@pytest.mark.asyncio
+async def test_market_retained_inputs_share_sql_across_types_limits_and_aliases(
+    client, test_engine, test_db, monkeypatch
+):
+    import asyncio
+
+    from sqlalchemy import event
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from vnibb.api.v1 import market
+    from vnibb.core import cache
+    from vnibb.models.stock import Stock, StockPrice
+
+    price_id = 1
+    for stock_index in range(10):
+        symbol = f"R{stock_index:02}"
+        test_db.add(Stock(id=stock_index + 1, symbol=symbol,
+                          exchange="HOSE" if stock_index < 5 else "HNX"))
+        history = [(date(2026, 1, day), 50_000.0) for day in range(1, 29)]
+        history += [(date(2026, 8, 1) if stock_index == 0 else date(2026, 9, 1), 100_000.0),
+                    (date(2026, 9, 2), 110_000.0 if stock_index % 2 else 90_000.0)]
+        if stock_index == 1:
+            history.append((date(2026, 9, 3), 999_000.0))
+        for day, close in history:
+            test_db.add(StockPrice(
+                id=price_id, symbol=symbol, stock_id=stock_index + 1,
+                time=day, interval="1D", source="vietcap_vnd",
+                open=close, high=close, low=close, close=close,
+                volume=stock_index * 10, value=close * stock_index * 10,
+            ))
+            price_id += 1
+    await test_db.commit()
+    monkeypatch.setattr(market, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: False)
+    monkeypatch.setattr(cache, "_memory_cache", {})
+    monkeypatch.setattr(cache, "_inflight_cache_loads", {})
+    statements = []
+
+    def record(_connection, _cursor, statement, _params, _context, _many):
+        if "stock_prices" in statement:
+            statements.append(statement)
+
+    async def held_provider(**_kwargs):
+        raise AssertionError("Admitted retained rows must not start live acquisition")
+
+    monkeypatch.setattr(market.VnstockTopMoversFetcher, "fetch", held_provider)
+    event.listen(test_engine.sync_engine, "before_cursor_execute", record)
+    try:
+        queries = ["type=gainer&limit=1", "type=gainers&limit=2", "mode=losers&limit=2",
+                   "type=volume&limit=4", "type=value&limit=3"]
+        async with asyncio.timeout(2):
+            responses = await asyncio.gather(*(
+                client.get(f"/api/v1/market/top-movers?index=VNINDEX&{query}")
+                for query in queries
+            ))
+            repeat = await client.get("/api/v1/market/top-movers?type=gainer&index=VNINDEX&limit=1")
+        for response in [*responses, repeat]:
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["error"] is None
+            assert payload["session_label"] == "2026-09-02"
+            assert all(row["symbol"] in {"R00", "R01", "R02", "R03", "R04"} for row in payload["data"])
+            assert all(abs(row["price_change_pct"]) == 10.0 for row in payload["data"])
+        assert responses[0].json()["data"][0]["symbol"] == "R01"
+        assert len(statements) == 2
+        assert all("ROW_NUMBER" not in statement.upper() for statement in statements)
+    finally:
+        event.remove(test_engine.sync_engine, "before_cursor_execute", record)
+
+
+@pytest.mark.asyncio
+async def test_market_movers_share_occupied_raw_provider_after_cancellation_and_deadline(
+    client, test_engine, monkeypatch
+):
+    import asyncio
+    import threading
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from vnibb.api.v1 import market
+    from vnibb.core import cache
+    from vnibb.providers.vnstock import runtime as provider_runtime
+
+    monkeypatch.setattr(market, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache.settings, "vnstock_timeout", 0.02)
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: False)
+    monkeypatch.setattr(cache, "_memory_cache", {})
+    monkeypatch.setattr(cache, "_inflight_cache_loads", {})
+    release = threading.Event()
+    provider_calls = []
+
+    class Listing:
+        def __init__(self, **_kwargs):
+            pass
+
+        def symbols_by_group(self, **_kwargs):
+            import pandas as pd
+
+            return pd.Series(["FPT"])
+
+    class Trading:
+        def __init__(self, **_kwargs):
+            pass
+
+        def price_board(self, **_kwargs):
+            provider_calls.append("price_board")
+            release.wait(timeout=5)
+            raise RuntimeError("Held provider unavailable")
+
+    monkeypatch.setattr(provider_runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(provider_runtime, "get_trading_class", lambda: Trading)
+    request = asyncio.create_task(client.get("/api/v1/market/top-movers?type=gainer&index=VNINDEX&limit=1"))
+    try:
+        async with asyncio.timeout(2):
+            while not provider_calls:
+                await asyncio.sleep(0.01)
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+            responses = await asyncio.gather(*(
+                client.get(f"/api/v1/market/top-movers?index=VNINDEX&type={kind}&limit={limit}")
+                for kind, limit in [("gainers", 2), ("loser", 3), ("volume", 4), ("value", 5)]
+                for _ in range(5)
+            ))
+            retry = await client.get("/api/v1/market/top-movers?type=gainer&index=VNINDEX&limit=1")
+        assert provider_calls == ["price_board"]
+        for response in [*responses, retry]:
+            assert response.status_code == 200
+            assert response.json()["data"] == []
+            assert "Timeout" in response.json()["error"]
+    finally:
+        release.set()
+        await asyncio.gather(request, return_exceptions=True)
+        await asyncio.sleep(0.05)
+    monkeypatch.setattr(cache.settings, "vnstock_timeout", 1)
+    response = await client.get("/api/v1/market/top-movers?type=value&index=VNINDEX&limit=5")
+    assert response.status_code == 200
+    assert "Held provider unavailable" in response.json()["error"]
+    assert provider_calls == ["price_board", "price_board"]
+
+
+@pytest.mark.asyncio
+async def test_market_movers_do_not_cache_failed_retained_reads_as_success(client, monkeypatch):
+    from types import SimpleNamespace
+
+    from vnibb.api.v1 import market
+    from vnibb.core import cache
+
+    attempts = 0
+
+    class RecoveringSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def execute(self, *_args, **_kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("Retained storage unavailable")
+            if attempts == 2:
+                return SimpleNamespace(scalar=lambda: date(2026, 9, 2))
+            return SimpleNamespace(mappings=lambda: [{
+                "symbol": "VNM", "time": date(2026, 9, 2), "exchange": "HOSE", "rn": 1,
+                "close": 110_000.0, "source": "vietcap_vnd", "volume": 0, "value": 0,
+                "previous_close": 100_000.0, "previous_source": "vietcap_vnd",
+            }], all=lambda: [("VNM", "HOSE")])
+
+    async def empty_provider(**_kwargs):
+        return []
+
+    monkeypatch.setattr(market, "async_session_maker", RecoveringSession)
+    monkeypatch.setattr(market.VnstockTopMoversFetcher, "fetch", empty_provider)
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: False)
+    monkeypatch.setattr(cache, "_memory_cache", {})
+    monkeypatch.setattr(cache, "_inflight_cache_loads", {})
+    url = "/api/v1/market/top-movers?type=volume&index=VNINDEX&limit=1"
+    failed = await client.get(url)
+    assert failed.status_code == 200
+    assert failed.json()["error"] == "Retained storage unavailable"
+    recovered = await client.get(url)
+    assert recovered.status_code == 200
+    assert recovered.json()["error"] is None
+    assert recovered.json()["data"][0]["volume"] == 0
+    assert recovered.json()["data"][0]["price_change_pct"] == 10.0
+    assert attempts == 3
