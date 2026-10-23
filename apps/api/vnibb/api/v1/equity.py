@@ -4597,7 +4597,8 @@ async def get_profile(
             raise
         logger.warning("Profile endpoint failed open for %s: %s", symbol_upper, e)
 
-        return StandardResponse(data=None, error=str(e))
+        error = "deadline exceeded" if isinstance(e, TimeoutError) else str(e) or type(e).__name__
+        return StandardResponse(data=None, error=f"Profile unavailable: {error}")
 
 
 @router.get("/{symbol}/fundamental-analysis", response_model=StandardResponse[dict[str, Any]])

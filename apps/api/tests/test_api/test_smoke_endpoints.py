@@ -466,6 +466,20 @@ async def test_profile_smoke_returns_data(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_profile_refresh_timeout_reports_explicit_unavailable(client, monkeypatch):
+    provider = AsyncMock(side_effect=TimeoutError())
+    monkeypatch.setattr("vnibb.api.v1.equity.VnstockEquityProfileFetcher.fetch", provider)
+
+    response = await client.get("/api/v1/equity/VCI/profile?refresh=true")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "data": None, "meta": None, "error": "Profile unavailable: deadline exceeded",
+    }
+    provider.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_profile_cache_backfills_sector_and_scales_market_cap(client, test_db):
     test_db.add(
         Stock(
