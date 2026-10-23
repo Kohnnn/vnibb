@@ -718,11 +718,12 @@ async def test_market_movers_share_occupied_raw_provider_after_cancellation_and_
     client, test_engine, monkeypatch
 ):
     import asyncio
-    from concurrent.futures import Future
+    import threading
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
     from vnibb.api.v1 import market
     from vnibb.core import cache
+    from vnibb.providers.vnstock import runtime as provider_runtime
 
     monkeypatch.setattr(market, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
     monkeypatch.setattr(cache.settings, "environment", "development")
@@ -730,28 +731,34 @@ async def test_market_movers_share_occupied_raw_provider_after_cancellation_and_
     monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: False)
     monkeypatch.setattr(cache, "_memory_cache", {})
     monkeypatch.setattr(cache, "_inflight_cache_loads", {})
-    loop = asyncio.get_running_loop()
-    original_submit = loop.run_in_executor
-    work = Future()
-    work.set_running_or_notify_cancel()
-    submitted = asyncio.Event()
-    submissions = []
-    wrapped = []
+    release = threading.Event()
+    provider_calls = []
 
-    def held_submit(executor, operation, *args):
-        if operation.__name__ != "_fetch":
-            return original_submit(executor, operation, *args)
-        submissions.append(operation)
-        future = asyncio.wrap_future(work)
-        wrapped.append(future)
-        submitted.set()
-        return future
+    class Listing:
+        def __init__(self, **_kwargs):
+            pass
 
-    monkeypatch.setattr(loop, "run_in_executor", held_submit)
+        def symbols_by_group(self, **_kwargs):
+            import pandas as pd
+
+            return pd.Series(["FPT"])
+
+    class Trading:
+        def __init__(self, **_kwargs):
+            pass
+
+        def price_board(self, **_kwargs):
+            provider_calls.append("price_board")
+            release.wait(timeout=5)
+            raise RuntimeError("Held provider unavailable")
+
+    monkeypatch.setattr(provider_runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(provider_runtime, "get_trading_class", lambda: Trading)
     request = asyncio.create_task(client.get("/api/v1/market/top-movers?type=gainer&index=VNINDEX&limit=1"))
     try:
         async with asyncio.timeout(2):
-            await submitted.wait()
+            while not provider_calls:
+                await asyncio.sleep(0.01)
             request.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await request
@@ -761,23 +768,20 @@ async def test_market_movers_share_occupied_raw_provider_after_cancellation_and_
                 for _ in range(5)
             ))
             retry = await client.get("/api/v1/market/top-movers?type=gainer&index=VNINDEX&limit=1")
-        assert len(submissions) == 1
-        assert not work.cancelled()
+        assert provider_calls == ["price_board"]
         for response in [*responses, retry]:
             assert response.status_code == 200
             assert response.json()["data"] == []
             assert "Timeout" in response.json()["error"]
     finally:
-        if not work.done():
-            work.set_exception(RuntimeError("Held provider unavailable"))
-        await asyncio.gather(*wrapped, return_exceptions=True)
-        await asyncio.sleep(0)
-        await asyncio.gather(*cache._inflight_cache_loads.values(), return_exceptions=True)
+        release.set()
+        await asyncio.gather(request, return_exceptions=True)
+        await asyncio.sleep(0.05)
     monkeypatch.setattr(cache.settings, "vnstock_timeout", 1)
     response = await client.get("/api/v1/market/top-movers?type=value&index=VNINDEX&limit=5")
     assert response.status_code == 200
     assert "Held provider unavailable" in response.json()["error"]
-    assert len(submissions) == 2
+    assert provider_calls == ["price_board", "price_board"]
 
 
 @pytest.mark.asyncio
