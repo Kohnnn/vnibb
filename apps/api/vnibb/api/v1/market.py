@@ -302,6 +302,8 @@ class MarketTopMoversResponse(BaseModel):
     error: Optional[str] = None
     is_last_session: bool = False
     session_label: Optional[str] = None
+    source: Optional[str] = None
+    is_stale: Optional[bool] = None
 
 
 class MarketSectorPerformanceResponse(BaseModel):
@@ -2046,165 +2048,89 @@ def _has_non_zero_top_mover_signal(payload: List[dict[str, Any]]) -> bool:
     return False
 
 
+@cached(ttl=120, key_prefix="market_retained_mover_inputs")
+async def _load_retained_mover_inputs() -> List[dict[str, Any]]:
+    async with async_session_maker() as session:
+        # Coverage is market-wide; exchange and membership restrictions come later.
+        latest_session = await session.execute(text("""
+            SELECT time FROM stock_prices
+            WHERE interval = '1D'
+            GROUP BY time
+            HAVING COUNT(DISTINCT symbol) >= 10
+            ORDER BY time DESC
+            LIMIT 1
+        """))
+        latest_date = latest_session.scalar()
+        if not latest_date:
+            return []
+
+        result = await session.execute(text("""
+            SELECT current.symbol, current.time, current.close, current.volume,
+                   current.value, current.source, stocks.exchange,
+                   previous.close AS previous_close, previous.source AS previous_source
+            FROM stock_prices AS current
+            LEFT JOIN stocks ON stocks.symbol = current.symbol
+            LEFT JOIN stock_prices AS previous ON previous.id = (
+                SELECT prior.id FROM stock_prices AS prior
+                WHERE prior.symbol = current.symbol AND prior.interval = '1D'
+                  AND prior.time < current.time
+                ORDER BY prior.time DESC
+                LIMIT 1
+            )
+            WHERE current.interval = '1D' AND current.time = :latest_date
+        """), {"latest_date": latest_date})
+        return [dict(row) for row in result.mappings()]
+
+
 async def _build_last_session_top_movers(
     index: str, mover_type: str, limit: int
 ) -> List[dict[str, Any]]:
-    """SQL-backed last-session top-movers fallback (QA-v2 T3).
-
-    The vnstock screener cache and the snapshot-derived path can both
-    produce empty payloads after market close (intraday-rank tables
-    roll over). We resolve this by querying the most recent session in
-    `stock_prices` that has at least 5 distinct symbols with a non-zero
-    close, then computing change% from the previous session's close
-    per symbol. Returned rows include `is_last_session=True` so the
-    UI can label the data as historical.
-    """
-
-    if mover_type not in {"gainer", "loser", "volume", "value"}:
+    if mover_type not in TOP_MOVER_TYPES:
         return []
 
     vn30_symbols = {
         symbol.upper()
         for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
     } if index == "VN30" else None
+    exchange_allow = TOP_MOVER_INDEX_EXCHANGE.get(index)
+    rows = []
+    for row in await _load_retained_mover_inputs():
+        symbol = str(row.get("symbol") or "").upper()
+        if not symbol or (vn30_symbols is not None and symbol not in vn30_symbols):
+            continue
+        if exchange_allow and str(row.get("exchange") or "").upper() not in exchange_allow:
+            continue
+        latest = persisted_price_record(row)
+        if latest["price_unit"] == "unknown":
+            continue
+        if mover_type in {"volume", "value"} and _to_float(latest.get(mover_type)) is None:
+            continue
 
-    async with async_session_maker() as session:
-        # Find latest trade date that has meaningful coverage. We require
-        # at least 10 distinct symbols (lowered from 30 in QA-v4 D.3 so a
-        # partially loaded post-holiday session still surfaces gainers
-        # rather than going empty).
-        latest_session_row = await session.execute(
-            text(
-                """
-                SELECT trade_date
-                FROM (
-                    SELECT time AS trade_date, COUNT(DISTINCT symbol) AS n
-                    FROM stock_prices
-                    WHERE interval = '1D'
-                    GROUP BY time
-                ) s
-                WHERE n >= 10
-                ORDER BY trade_date DESC
-                LIMIT 1
-                """
-            )
-        )
-        latest_date = latest_session_row.scalar()
-        if not latest_date:
-            return []
-
-        # Pull the latest two sessions for every symbol so we can
-        # compute change %.
-        rows_result = await session.execute(
-            text(
-                """
-                WITH ranked AS (
-                    SELECT
-                        symbol,
-                        time,
-                        close,
-                        volume,
-                        value,
-                        source,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY symbol
-                            ORDER BY time DESC
-                        ) AS rn
-                    FROM stock_prices
-                    WHERE interval = '1D'
-                      AND time <= :latest_date
-                )
-                SELECT symbol, time, close, volume, value, source, rn
-                FROM ranked
-                WHERE rn <= 2
-                """
-            ),
-            {"latest_date": latest_date},
-        )
-
-        per_symbol: dict[str, dict[str, Any]] = {}
-        for row in rows_result.mappings():
-            symbol = (row["symbol"] or "").upper()
-            if not symbol:
-                continue
-            price = persisted_price_record(row)
-            entry = per_symbol.setdefault(symbol, {"latest": None, "prev": None})
-            if row["rn"] == 1:
-                entry["latest"] = price
-            elif row["rn"] == 2:
-                entry["prev"] = price
-
-        # Exchange restrictions and VN30 membership are applied before ranking.
-        exchange_allow = TOP_MOVER_INDEX_EXCHANGE.get(index)
-        symbol_to_exchange: dict[str, str] = {}
-        if exchange_allow:
-            ex_rows = await session.execute(
-                select(Stock.symbol, Stock.exchange).where(
-                    Stock.symbol.in_(list(per_symbol.keys()))
-                )
-            )
-            for sym, ex in ex_rows.all():
-                if sym:
-                    symbol_to_exchange[sym.upper()] = (ex or "").upper()
-
-        rows: List[dict[str, Any]] = []
-        for symbol, parts in per_symbol.items():
-            if vn30_symbols is not None and symbol not in vn30_symbols:
-                continue
-            latest = parts.get("latest")
-            prev = parts.get("prev")
-            if (
-                not latest
-                or latest["price_unit"] == "unknown"
-                or _coerce_to_date(latest["time"]) != _coerce_to_date(latest_date)
-            ):
-                continue
-
-            if exchange_allow:
-                ex = symbol_to_exchange.get(symbol)
-                if ex not in exchange_allow:
-                    continue
-
-            if mover_type in {"volume", "value"} and _to_float(latest.get(mover_type)) is None:
-                continue
-
-            close = _to_float(latest["close"])
-            prev_close = _to_float(prev["close"]) if prev and prev["price_unit"] == latest["price_unit"] else None
-            change_pct = None
-            price_change = None
-            if (
-                close is not None
-                and prev_close is not None
-                and prev_close not in (None, 0)
-            ):
-                price_change = close - prev_close
-                change_pct = (price_change / prev_close) * 100.0
-
-            rows.append(
-                {
-                    "symbol": symbol,
-                    "index": index,
-                    "last_price": close,
-                    "price_unit": latest["price_unit"],
-                    "price_change": price_change,
-                    "price_change_pct": change_pct,
-                    "volume": _to_float(latest["volume"]),
-                    "value": _to_float(latest["value"]),
-                    "avg_volume_20d": None,
-                    "volume_spike_pct": None,
-                    "updated_at": latest["time"].isoformat()
-                    if hasattr(latest["time"], "isoformat")
-                    else str(latest["time"]),
-                    "is_last_session": True,
-                    "session_label": latest_date.isoformat()
-                    if hasattr(latest_date, "isoformat")
-                    else str(latest_date),
-                }
-            )
-
-    if not rows:
-        return []
-
+        previous = persisted_price_record({
+            "close": row.get("previous_close"), "source": row.get("previous_source"),
+        })
+        close = _to_float(latest.get("close"))
+        previous_close = _to_float(previous.get("close")) if previous["price_unit"] == latest["price_unit"] else None
+        price_change = change_pct = None
+        if close is not None and previous_close not in (None, 0):
+            price_change = _to_float(close - previous_close)
+            change_pct = _to_float((close - previous_close) / previous_close * 100.0)
+        if mover_type in {"gainer", "loser"} and change_pct is None:
+            continue
+        observed = latest["time"]
+        session_label = observed.isoformat() if hasattr(observed, "isoformat") else str(observed)
+        observed_date = _coerce_to_date(observed)
+        rows.append({
+            "symbol": symbol, "index": index,
+            "last_price": close, "price_unit": latest["price_unit"],
+            "price_source": latest.get("price_source"), "source": latest.get("source"),
+            "price_change": price_change, "price_change_pct": change_pct,
+            "volume": _to_float(latest.get("volume")), "value": _to_float(latest.get("value")),
+            "avg_volume_20d": None, "volume_spike_pct": None,
+            "updated_at": session_label, "is_last_session": True,
+            "session_label": session_label,
+            "is_stale": bool(observed_date and observed_date < _expected_latest_trading_day()),
+        })
     return _sort_top_movers(rows, mover_type=mover_type, limit=limit)
 
 
@@ -3683,6 +3609,23 @@ async def get_market_top_movers(
         provider_error = None
         retained_error = None
         try:
+            retained = await _build_last_session_top_movers(
+                index=index, mover_type=mover_type, limit=limit
+            )
+        except Exception as exc:
+            retained_error = str(exc) or exc.__class__.__name__
+            logger.warning("Market top movers retained read failed: %s", retained_error)
+            retained = []
+        if retained:
+            sources = {item.get("source") for item in retained}
+            return MarketTopMoversResponse(
+                type=mover_type, index=index, count=len(retained), data=retained,
+                updated_at=_latest_timestamp([item.get("updated_at") for item in retained]),
+                source=next(iter(sources)) if len(sources) == 1 else None,
+                is_stale=any(item.get("is_stale", False) for item in retained),
+                is_last_session=True, session_label=retained[0].get("session_label"),
+            )
+        try:
             movers = await asyncio.wait_for(
                 VnstockTopMoversFetcher.fetch(type=mover_type, index=index, limit=limit),
                 timeout=30,
@@ -3724,37 +3667,14 @@ async def get_market_top_movers(
             payload = _apply_snapshot_metrics_to_movers(payload, snapshot_metrics)
             payload = _sort_top_movers(payload, mover_type=mover_type, limit=limit)
 
-        if not payload:
-            try:
-                retained = await _build_last_session_top_movers(
-                    index=index, mover_type=mover_type, limit=limit
-                )
-            except Exception as exc:
-                logger.warning("Market top movers retained fallback failed: %s", exc)
-                retained_error = str(exc) or exc.__class__.__name__
-                retained = []
-            if retained:
-                return MarketTopMoversResponse(
-                    type=mover_type,
-                    index=index,
-                    count=len(retained),
-                    data=retained,
-                    updated_at=_latest_timestamp([item.get("updated_at") for item in retained]),
-                    error=(
-                        f"Requested '{mover_type}' movers unavailable, returned retained "
-                        f"last-session fallback: {provider_error or 'primary provider returned no rows'}"
-                    ),
-                    is_last_session=True,
-                    session_label=retained[0].get("session_label"),
-                )
-            if provider_error:
-                return MarketTopMoversResponse(
-                    type=mover_type, index=index, count=0, data=[],
-                    error=(
-                        f"{provider_error}; retained fallback failed: {retained_error}"
-                        if retained_error else provider_error
-                    ),
-                )
+        if not payload and provider_error:
+            return MarketTopMoversResponse(
+                type=mover_type, index=index, count=0, data=[],
+                error=(
+                    f"{provider_error}; retained fallback failed: {retained_error}"
+                    if retained_error else provider_error
+                ),
+            )
 
         if not payload and mover_type in {"gainer", "loser"}:
             # Graceful fallback: volume movers are generally the most stable upstream feed.
@@ -3797,7 +3717,9 @@ async def get_market_top_movers(
                     ),
                     error=(
                         f"Requested '{mover_type}' movers unavailable, returned snapshot-derived "
-                        "fallback"
+                        f"fallback; retained read failed: {retained_error}"
+                        if retained_error else
+                        f"Requested '{mover_type}' movers unavailable, returned snapshot-derived fallback"
                     ),
                     is_last_session=is_last_session_resp,
                     session_label=session_label,
@@ -3811,7 +3733,7 @@ async def get_market_top_movers(
             updated_at=_latest_timestamp(
                 [_first_non_none(item.get("updated_at"), item.get("time")) for item in payload]
             ),
-            error=retained_error if not payload else None,
+            error=retained_error,
         )
     except Exception as e:
         logger.warning(f"Market top movers fetch failed: {e}")
