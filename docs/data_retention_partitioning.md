@@ -153,6 +153,22 @@ removes only the matching archive batch. This guard changes no retention
 windows, enables no extra deletion and adds no archive-size quota. The existing
 1 GiB combined-snapshot budget and history windows are unchanged.
 
+Deployment evidence for [#146](https://github.com/Kohnnn/vnibb/issues/146) /
+[PR #147](https://github.com/Kohnnn/vnibb/pull/147): API, MCP and scheduler
+switched at `2026-10-23T16:52:56Z` to source
+`a5c3a0b443f6728a5789d7d69bc41b6c9f560569`, ARM64 image
+`sha256:dd3ac9b7652ee4bc47ce3ce513843fbcd1109d92a632d6318a0732725656dbd4`.
+The published image matched 511 committed API files and 111 pinned dependency
+versions. The full backend run passed 3,519 tests (21 skipped); six real
+PostgreSQL restore contracts and the published-image restore CLI passed.
+Public HTTPS health and retained-market reads returned 200; retained history
+returned 15 observations. Auth, PostgreSQL, MongoDB, Redis and Caddy containers
+were unchanged. No data migration or manual history deletion ran. Rollback
+source `cfc5efc82d8162f0cef777b95d754f08aa090278` remains protected by image
+retention. Mypy retains ten identical baseline errors. Prediction ingestion
+already reported `RuntimeError` before cutover; this rollout does not claim
+provider-ingestion recovery.
+
 ## Partitioning guidance (durable storage)
 
 Partitioning is recommended for the largest time-series tables. This reduces
