@@ -2,10 +2,12 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.services import prediction_market_service as service
 from vnibb.services.prediction_market_policy import snapshot_eligibility
@@ -243,6 +245,44 @@ async def test_physical_ceiling_blocks_updates_and_new_rows_without_partial_muta
         ])
     stored = (await test_db.execute(select(PredictionMarket))).scalars().all()
     assert [(row.source_id, row.question) for row in stored] == [("KXREAL-1", "Will the policy rate rise?")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("over_limit", [False, True])
+async def test_catalogue_capacity_reserve_accepts_exact_limit_and_refuses_one_byte_over(
+    test_db, monkeypatch, over_limit
+):
+    await service.persist_prediction_markets(test_db, [market("KXREAL-1")])
+    relation_bytes = service.MAX_CATALOGUE_RELATION_BYTES - 2 * 256 * 1024 + int(over_limit)
+    monkeypatch.setattr(service, "_catalogue_storage_bytes", AsyncMock(return_value=relation_bytes))
+    batch = [market("KXREAL-1", question="Refreshed"), market("KXREAL-2")]
+
+    if over_limit:
+        with pytest.raises(service.PredictionMarketAdmissionError, match="storage ceiling"):
+            await service.persist_prediction_markets(test_db, batch)
+    else:
+        assert await service.persist_prediction_markets(test_db, batch) == 2
+
+    rows = (await test_db.execute(select(PredictionMarket).order_by(PredictionMarket.source_id))).scalars().all()
+    assert [(row.source_id, row.question) for row in rows] == (
+        [("KXREAL-1", "Will the policy rate rise?")] if over_limit else
+        [("KXREAL-1", "Refreshed"), ("KXREAL-2", "Will the policy rate rise?")]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["unknown-provider", "Kalshi", " kalshi", "kalshi "])
+async def test_noncanonical_source_rejects_entire_batch_before_existing_refresh(test_db, source):
+    await service.persist_prediction_markets(test_db, [market("KXREAL-1")])
+    with pytest.raises(service.PredictionMarketAdmissionError, match="source"):
+        await service.persist_prediction_markets(test_db, [
+            market("KXREAL-1", question="Should not overwrite"),
+            market("KXUNSUPPORTED-1", source=source),
+        ])
+    rows = (await test_db.execute(select(PredictionMarket))).scalars().all()
+    assert [(row.source, row.source_id, row.question) for row in rows] == [
+        ("kalshi", "KXREAL-1", "Will the policy rate rise?")
+    ]
 
 
 @pytest.mark.asyncio
