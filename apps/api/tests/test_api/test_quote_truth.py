@@ -5,14 +5,29 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from vnibb.api.main import app
 from vnibb.api.v1 import equity
 from vnibb.core import cache
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.providers.vnstock.stock_quote import StockQuoteData, VnstockStockQuoteFetcher
+
+
+def counting_client(on_arrival):
+    async def count_request(scope, receive, send):
+        if scope["type"] == "http":
+            on_arrival()
+        await app(scope, receive, send)
+
+    return AsyncClient(
+        transport=ASGITransport(app=count_request),
+        base_url="http://test",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -73,24 +88,22 @@ async def test_concurrent_cold_quotes_share_stored_reads_after_caller_cancellati
 
     factory = async_sessionmaker(test_engine, class_=QuoteSession, expire_on_commit=False)
 
-    load_response = equity._load_quote_response
-
-    async def quote_request(*args, **kwargs):
+    def request_arrived():
         nonlocal request_count
         request_count += 1
         if request_count == 20:
             arrived.set()
-        return await load_response(*args, **kwargs)
 
     monkeypatch.setattr(equity, "async_session_factory", factory)
-    monkeypatch.setattr(equity, "_load_quote_response", quote_request)
     event.listen(test_engine.sync_engine, "checkout", checked_out)
     event.listen(test_engine.sync_engine, "checkin", checked_in)
-    tasks = [asyncio.create_task(client.get("/api/v1/equity/fpt/quote"))]
+    arrival_client = counting_client(request_arrived)
+    tasks = [asyncio.create_task(arrival_client.get("/api/v1/equity/fpt/quote"))]
     try:
         await asyncio.wait_for(started.wait(), 2)
         assert checkouts
-        tasks.extend(asyncio.create_task(client.get("/api/v1/equity/FPT/quote")) for _ in range(19))
+        tasks.extend(asyncio.create_task(arrival_client.get("/api/v1/equity/FPT/quote")) for _ in range(19))
+
         await asyncio.wait_for(arrived.wait(), 2)
         tasks[0].cancel()
         with suppress(asyncio.CancelledError):
@@ -111,6 +124,7 @@ async def test_concurrent_cold_quotes_share_stored_reads_after_caller_cancellati
     finally:
         release.set()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await arrival_client.aclose()
         event.remove(test_engine.sync_engine, "checkout", checked_out)
         event.remove(test_engine.sync_engine, "checkin", checked_in)
 
@@ -141,14 +155,11 @@ async def test_quote_closes_sql_before_remote_fallback_and_cancellation(
     factory = async_sessionmaker(test_engine, class_=QuoteSession, expire_on_commit=False)
     request_count = 0
 
-    load_response = equity._load_quote_response
-
-    async def quote_request(*args, **kwargs):
+    def request_arrived():
         nonlocal request_count
         request_count += 1
         if request_count == 2:
             survivor_arrived.set()
-        return await load_response(*args, **kwargs)
 
     async def mongo_rows(*args, **kwargs):
         at_mongo.append(len(checkouts))
@@ -167,14 +178,14 @@ async def test_quote_closes_sql_before_remote_fallback_and_cancellation(
         enabled=True, get_latest_eod_prices=mongo_rows,
     ))
     monkeypatch.setattr(equity.VnstockStockQuoteFetcher, "fetch", provider)
-    monkeypatch.setattr(equity, "_load_quote_response", quote_request)
     event.listen(test_engine.sync_engine, "checkout", checked_out)
     event.listen(test_engine.sync_engine, "checkin", checked_in)
-    first = asyncio.create_task(client.get("/api/v1/equity/ZZZ/quote"))
+    arrival_client = counting_client(request_arrived)
+    first = asyncio.create_task(arrival_client.get("/api/v1/equity/ZZZ/quote"))
     survivor = None
     try:
         await asyncio.wait_for(mongo_started.wait(), 2)
-        survivor = asyncio.create_task(client.get("/api/v1/equity/ZZZ/quote"))
+        survivor = asyncio.create_task(arrival_client.get("/api/v1/equity/ZZZ/quote"))
         await asyncio.wait_for(survivor_arrived.wait(), 2)
         first.cancel()
         with suppress(asyncio.CancelledError):
@@ -194,6 +205,7 @@ async def test_quote_closes_sql_before_remote_fallback_and_cancellation(
         mongo_release.set()
         provider_release.set()
         await asyncio.gather(first, *([survivor] if survivor is not None else []), return_exceptions=True)
+        await arrival_client.aclose()
         event.remove(test_engine.sync_engine, "checkout", checked_out)
         event.remove(test_engine.sync_engine, "checkin", checked_in)
 
@@ -365,6 +377,31 @@ async def test_http_quote_does_not_use_snapshot_write_clock_as_observation(
     assert payload["meta"]["source"] == "postgres:stored_quote"
     assert payload["meta"]["upstream_source"] is None
     assert payload["meta"]["stale"] is True
+
+
+@pytest.mark.asyncio
+async def test_http_quote_keeps_snapshot_observation_unknown_without_trade_date(
+    client, test_db, monkeypatch, cold_quote_cache,
+):
+    monkeypatch.setattr(equity.VnstockStockQuoteFetcher, "fetch", AsyncMock(side_effect=RuntimeError("offline")))
+    test_db.add(ScreenerSnapshot(
+        symbol="FPT", snapshot_date=date(2026, 10, 23), trade_date=None, price=57000,
+        extended_metrics={"price_unit": "VND", "source": "admitted-supplier-envelope",
+                          "updated_at": "2026-10-23T12:30:00"},
+    ))
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/FPT/quote?refresh=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["price"] == 57000
+    assert payload["data"]["price_unit"] == "VND"
+    assert payload["error"] == "Live quote unavailable; showing stored price."
+    assert payload["meta"]["source"] == "postgres:stored_quote"
+    assert payload["meta"]["upstream_source"] == "admitted-supplier-envelope"
+    assert payload["meta"]["as_of"] is None
+    assert payload["meta"]["stale"] is None
 
 
 @pytest.mark.asyncio

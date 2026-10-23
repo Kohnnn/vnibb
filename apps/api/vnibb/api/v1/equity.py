@@ -2305,6 +2305,7 @@ def _build_quote_from_screener_snapshot(
         snapshot_row.extended_metrics if isinstance(snapshot_row.extended_metrics, dict) else {}
     )
     observation_date = _snapshot_observation_date(snapshot_row)
+    trade_date = getattr(snapshot_row, "trade_date", None)
     snapshot_change_pct = _pick_optional_float(
         snapshot_metrics.get("change_1d"),
         snapshot_metrics.get("price_change_1d_pct"),
@@ -2372,8 +2373,8 @@ def _build_quote_from_screener_snapshot(
         change_pct=round(snapshot_change_pct, 2) if snapshot_change_pct is not None else None,
         volume=int(snapshot_row.volume) if snapshot_row.volume is not None else None,
         updated_at=snapshot_updated_at,
-        as_of=datetime.combine(observation_date, datetime.min.time(), tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
-        if observation_date else None,
+        as_of=datetime.combine(trade_date, datetime.min.time(), tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+        if trade_date else None,
         upstream_source=_pick_optional_text(snapshot.get("source"), snapshot.get("price_source")),
     )
 
