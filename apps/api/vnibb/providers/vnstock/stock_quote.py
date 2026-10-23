@@ -239,7 +239,7 @@ class VnstockStockQuoteFetcher:
                     latest.get("updated_at") or latest.get("time") or latest.get("date")
                 ),
                 as_of=_coerce_quote_timestamp(latest.get("time") or latest.get("date"), preserve_timezone=True),
-                upstream_source=latest.get("source") or latest.get("price_source"),
+                upstream_source=latest.get("source"),
             )
             
             # Store in cache
