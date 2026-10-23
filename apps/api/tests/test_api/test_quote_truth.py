@@ -8,10 +8,8 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from vnibb.api.main import app
 from vnibb.api.v1 import equity
 from vnibb.core import cache
-from vnibb.core.database import get_db
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.providers.vnstock.stock_quote import StockQuoteData, VnstockStockQuoteFetcher
@@ -40,7 +38,8 @@ async def test_concurrent_cold_quotes_share_stored_reads_after_caller_cancellati
     test_db.add(Stock(id=13501, symbol="FPT", exchange="HOSE", company_name="FPT"))
     test_db.add_all([
         StockPrice(id=13501, stock_id=13501, symbol="FPT", time=date(2026, 10, 21),
-                   close=56000, source="vnstock_vnd:VCI", interval="1D"),
+                   open=55000, high=56500, low=54800, close=56000, volume=1250000,
+                   source="vnstock_vnd:VCI", interval="1D"),
         ScreenerSnapshot(symbol="FPT", snapshot_date=date(2026, 10, 23),
                          trade_date=date(2026, 10, 20), price=55000,
                          extended_metrics={"price_unit": "VND"}),
@@ -60,6 +59,10 @@ async def test_concurrent_cold_quotes_share_stored_reads_after_caller_cancellati
         checkouts.discard(id(record))
 
     class QuoteSession(AsyncSession):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            sessions.append(self)
+
         async def execute(self, statement, *args, **kwargs):
             result = await super().execute(statement, *args, **kwargs)
             if "FROM stock_prices" in str(statement):
@@ -70,17 +73,17 @@ async def test_concurrent_cold_quotes_share_stored_reads_after_caller_cancellati
 
     factory = async_sessionmaker(test_engine, class_=QuoteSession, expire_on_commit=False)
 
-    async def request_session():
+    load_response = equity._load_quote_response
+
+    async def quote_request(*args, **kwargs):
         nonlocal request_count
-        async with factory() as session:
-            sessions.append(session)
-            request_count += 1
-            if request_count == 20:
-                arrived.set()
-            yield session
+        request_count += 1
+        if request_count == 20:
+            arrived.set()
+        return await load_response(*args, **kwargs)
 
     monkeypatch.setattr(equity, "async_session_factory", factory)
-    app.dependency_overrides[get_db] = request_session
+    monkeypatch.setattr(equity, "_load_quote_response", quote_request)
     event.listen(test_engine.sync_engine, "checkout", checked_out)
     event.listen(test_engine.sync_engine, "checkin", checked_in)
     tasks = [asyncio.create_task(client.get("/api/v1/equity/fpt/quote"))]
@@ -138,13 +141,14 @@ async def test_quote_closes_sql_before_remote_fallback_and_cancellation(
     factory = async_sessionmaker(test_engine, class_=QuoteSession, expire_on_commit=False)
     request_count = 0
 
-    async def request_session():
+    load_response = equity._load_quote_response
+
+    async def quote_request(*args, **kwargs):
         nonlocal request_count
-        async with factory() as session:
-            request_count += 1
-            if request_count == 2:
-                survivor_arrived.set()
-            yield session
+        request_count += 1
+        if request_count == 2:
+            survivor_arrived.set()
+        return await load_response(*args, **kwargs)
 
     async def mongo_rows(*args, **kwargs):
         at_mongo.append(len(checkouts))
@@ -163,7 +167,7 @@ async def test_quote_closes_sql_before_remote_fallback_and_cancellation(
         enabled=True, get_latest_eod_prices=mongo_rows,
     ))
     monkeypatch.setattr(equity.VnstockStockQuoteFetcher, "fetch", provider)
-    app.dependency_overrides[get_db] = request_session
+    monkeypatch.setattr(equity, "_load_quote_response", quote_request)
     event.listen(test_engine.sync_engine, "checkout", checked_out)
     event.listen(test_engine.sync_engine, "checkin", checked_in)
     first = asyncio.create_task(client.get("/api/v1/equity/ZZZ/quote"))
@@ -281,6 +285,88 @@ async def test_quote_uses_dated_stored_price_when_provider_is_down(client, test_
     assert response.json()["data"]["price"] == 42_000.0
     assert response.json()["data"]["price_unit"] == "VND"
     assert response.json()["data"]["updated_at"].startswith("2025-01-09T00:00:00")
+
+    payload = response.json()
+    assert payload["error"] == "Live quote unavailable; showing stored price."
+    assert payload["meta"]["source"] == "postgres:stored_quote"
+    assert payload["meta"]["upstream_source"] == "KBS"
+    assert payload["meta"]["as_of"].startswith("2025-01-09T00:00:00")
+    assert payload["meta"]["stale"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("observation", [None, "2025-01-09"], ids=["unknown", "known"])
+async def test_http_quote_keeps_cache_delivery_separate_from_unknown_supplier(
+    client, monkeypatch, cold_quote_cache, observation,
+):
+    async def price_cache(key):
+        if ":latest:" in key:
+            return {"symbol": "FPT", "close": 57000, "price_unit": "VND",
+                    "time": observation, "updated_at": "2026-10-23T12:30:00"}
+        return []
+
+    monkeypatch.setattr(equity.redis_client, "get_json", price_cache)
+    provider = AsyncMock()
+    monkeypatch.setattr(equity.VnstockStockQuoteFetcher, "fetch", provider)
+
+    response = await client.get("/api/v1/equity/FPT/quote")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["price"] == 57000
+    assert payload["data"]["price_unit"] == "VND"
+    assert payload["data"]["updated_at"].startswith("2026-10-23T12:30:00")
+    assert payload["meta"]["source"] == "redis:price_snapshot"
+    assert payload["meta"]["upstream_source"] is None
+    if observation:
+        assert payload["meta"]["as_of"].startswith(observation)
+        assert payload["meta"]["stale"] is True
+    else:
+        assert payload["meta"]["as_of"] is None
+        assert payload["meta"]["stale"] is None
+    provider.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_http_quote_does_not_use_snapshot_write_clock_as_observation(
+    client, test_db, monkeypatch, cold_quote_cache,
+):
+    test_db.add(ScreenerSnapshot(
+        symbol="FPT", snapshot_date=date(2026, 10, 23), trade_date=date(2025, 1, 9),
+        price=57000, extended_metrics={"price_unit": "VND", "updated_at": "2026-10-23T12:30:00"},
+    ))
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/FPT/quote")
+
+    payload = response.json()
+    assert payload["data"]["updated_at"].startswith("2026-10-23T12:30:00")
+    assert payload["meta"]["as_of"].startswith("2025-01-09T00:00:00")
+    assert payload["meta"]["source"] == "postgres:stored_quote"
+    assert payload["meta"]["upstream_source"] is None
+    assert payload["meta"]["stale"] is True
+
+
+@pytest.mark.asyncio
+async def test_http_quote_retains_mongo_value_and_raw_source_after_refresh_failure(
+    client, monkeypatch, cold_quote_cache,
+):
+    monkeypatch.setattr(equity.VnstockStockQuoteFetcher, "fetch", AsyncMock(side_effect=RuntimeError("offline")))
+    mongo = SimpleNamespace(enabled=True, get_latest_eod_prices=AsyncMock(return_value=[{
+        "symbol": "FPT", "close": 57000, "price_unit": "VND", "tradeDate": "2025-01-09",
+        "source": "admitted-supplier-envelope",
+    }]))
+    monkeypatch.setattr(equity, "get_mongo_market_data_service", lambda: mongo)
+
+    response = await client.get("/api/v1/equity/FPT/quote?refresh=true")
+
+    payload = response.json()
+    assert payload["data"]["price"] == 57000
+    assert payload["error"] == "Live quote unavailable; showing stored price."
+    assert payload["meta"]["source"] == "mongo:market_prices_eod"
+    assert payload["meta"]["upstream_source"] == "admitted-supplier-envelope"
+    assert payload["meta"]["as_of"].startswith("2025-01-09T00:00:00")
+    assert payload["meta"]["stale"] is True
 
 
 @pytest.mark.asyncio

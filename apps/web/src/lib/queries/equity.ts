@@ -410,6 +410,11 @@ export interface StockQuoteView {
     updatedAt: string | null;
     cached: boolean;
     price_unit?: 'VND' | 'index_points' | 'unknown';
+    error?: string | null;
+    source?: string | null;
+    upstreamSource?: string | null;
+    asOf?: string | null;
+    stale?: boolean | null;
 }
 
 export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Promise<StockQuoteView> {
@@ -441,6 +446,11 @@ export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Pro
         updatedAt: quoteData.updatedAt ?? quoteData.updated_at ?? null,
         cached: response.cached ?? false,
         price_unit: quoteData.price_unit ?? 'unknown',
+        error: response.error ?? null,
+        source: response.meta?.source ?? null,
+        upstreamSource: response.meta?.upstream_source ?? quoteData.upstream_source ?? null,
+        asOf: response.meta?.as_of ?? quoteData.as_of ?? null,
+        stale: response.meta?.stale ?? null,
     };
 }
 
