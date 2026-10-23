@@ -3681,13 +3681,14 @@ async def get_market_top_movers(
 
     try:
         provider_error = None
+        retained_error = None
         try:
             movers = await asyncio.wait_for(
                 VnstockTopMoversFetcher.fetch(type=mover_type, index=index, limit=limit),
                 timeout=30,
             )
         except Exception as exc:
-            provider_error = str(exc) or type(exc).__name__
+            provider_error = str(exc) or exc.__class__.__name__
             logger.warning("Market top movers provider failed: %s", provider_error)
             movers = []
         payload = [
@@ -3730,6 +3731,7 @@ async def get_market_top_movers(
                 )
             except Exception as exc:
                 logger.warning("Market top movers retained fallback failed: %s", exc)
+                retained_error = str(exc) or exc.__class__.__name__
                 retained = []
             if retained:
                 return MarketTopMoversResponse(
@@ -3747,7 +3749,11 @@ async def get_market_top_movers(
                 )
             if provider_error:
                 return MarketTopMoversResponse(
-                    type=mover_type, index=index, count=0, data=[], error=provider_error
+                    type=mover_type, index=index, count=0, data=[],
+                    error=(
+                        f"{provider_error}; retained fallback failed: {retained_error}"
+                        if retained_error else provider_error
+                    ),
                 )
 
         if not payload and mover_type in {"gainer", "loser"}:
@@ -3805,10 +3811,18 @@ async def get_market_top_movers(
             updated_at=_latest_timestamp(
                 [_first_non_none(item.get("updated_at"), item.get("time")) for item in payload]
             ),
+            error=retained_error if not payload else None,
         )
     except Exception as e:
         logger.warning(f"Market top movers fetch failed: {e}")
-        return MarketTopMoversResponse(type=mover_type, index=index, count=0, data=[], error=str(e))
+        errors = [provider_error]
+        if retained_error:
+            errors.append(f"retained fallback failed: {retained_error}")
+        errors.append(str(e) or e.__class__.__name__)
+        return MarketTopMoversResponse(
+            type=mover_type, index=index, count=0, data=[],
+            error="; ".join(error for error in errors if error),
+        )
 
 
 @router.get("/sector-performance", response_model=MarketSectorPerformanceResponse)

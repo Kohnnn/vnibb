@@ -294,7 +294,7 @@ async def test_last_session_movers_normalize_sources_and_exclude_unknown(test_en
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mover_type", ["gainer", "loser", "volume", "value"])
-@pytest.mark.parametrize("provider_state", ["empty", "delayed_empty", "error"])
+@pytest.mark.parametrize("provider_state", ["empty", "delayed_empty", "error", "timeout"])
 async def test_market_movers_reach_typed_retained_prices_before_second_provider_call(
     client, test_engine, test_db, monkeypatch, mover_type, provider_state
 ):
@@ -329,6 +329,8 @@ async def test_market_movers_reach_typed_retained_prices_before_second_provider_
             await asyncio.Event().wait()
         if provider_state == "error":
             raise RuntimeError("Primary provider unavailable")
+        if provider_state == "timeout":
+            raise asyncio.TimeoutError()
         if provider_state == "delayed_empty":
             await asyncio.sleep(0.02)
         return []
@@ -349,6 +351,8 @@ async def test_market_movers_reach_typed_retained_prices_before_second_provider_
     assert "retained" in payload["error"]
     if provider_state == "error":
         assert "Primary provider unavailable" in payload["error"]
+    if provider_state == "timeout":
+        assert "TimeoutError" in payload["error"]
     for row in payload["data"]:
         assert row["symbol"] != "T00"
         assert row["price_unit"] == "VND"
@@ -579,3 +583,64 @@ async def test_market_retained_movers_require_finite_observed_rank_metric(
     assert [row["symbol"] for row in payload["data"]] == ["ZERO"]
     assert payload["data"][0][mover_type] == 0
     assert payload["session_label"] == "2026-09-02"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mover_type", ["gainer", "loser", "volume", "value"])
+@pytest.mark.parametrize("storage_error", ["Retained storage unavailable", ""])
+@pytest.mark.parametrize("primary_failed", [False, True])
+@pytest.mark.parametrize("secondary_failed", [False, True])
+async def test_market_movers_disclose_retained_storage_failure_after_empty_provider(
+    client, monkeypatch, mover_type, storage_error, primary_failed, secondary_failed
+):
+    from vnibb.api.v1 import market
+
+    calls = []
+
+    async def empty_provider(**kwargs):
+        calls.append(kwargs["type"])
+        if len(calls) == 1 and primary_failed:
+            raise RuntimeError("Primary provider unavailable")
+        if len(calls) > 1 and secondary_failed:
+            raise RuntimeError("Secondary provider unavailable")
+        return []
+
+    class FailedStoredSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def execute(self, *args, **kwargs):
+            if not storage_error:
+                raise TimeoutError()
+            raise RuntimeError(storage_error)
+
+    async def empty_metrics(*args, **kwargs):
+        return {}
+
+    async def empty_snapshot(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(market.VnstockTopMoversFetcher, "fetch", empty_provider)
+    monkeypatch.setattr(market, "async_session_maker", FailedStoredSession)
+    monkeypatch.setattr(market, "_load_latest_snapshot_metrics", empty_metrics)
+    monkeypatch.setattr(market, "_build_snapshot_top_movers", empty_snapshot)
+    response = await client.get(
+        f"/api/v1/market/top-movers?type={mover_type}&index=VNINDEX&limit=1"
+    )
+
+    assert response.status_code == 200
+    uses_secondary = not primary_failed and mover_type in {"gainer", "loser"}
+    assert calls == ([mover_type, "volume"] if uses_secondary else [mover_type])
+    payload = response.json()
+    assert payload["data"] == []
+    assert payload["count"] == 0
+    assert (storage_error or "TimeoutError") in payload["error"]
+    if primary_failed:
+        assert "Primary provider unavailable" in payload["error"]
+    if uses_secondary and secondary_failed:
+        assert "Secondary provider unavailable" in payload["error"]
+    assert payload["is_last_session"] is False
+    assert payload["session_label"] is None
