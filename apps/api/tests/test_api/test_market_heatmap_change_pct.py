@@ -458,3 +458,124 @@ async def test_market_retained_vn30_movers_exclude_higher_ranked_nonmembers(
     assert broader.status_code == 200
     assert broader.json()["data"][0]["symbol"] != "VNM"
     assert broader.json()["data"][0]["volume"] == 1_000_000
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mover_type", ["volume", "value"])
+@pytest.mark.parametrize("selected_session_available", [True, False])
+async def test_market_retained_movers_do_not_relabel_older_ranked_observations(
+    client, test_engine, test_db, monkeypatch, mover_type, selected_session_available
+):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from vnibb.api.v1 import market
+    from vnibb.models.stock import Stock, StockPrice
+
+    price_id = 1
+    for stock_index, symbol in enumerate([*[f"H{i:02}" for i in range(10)], "OLD", "VNM"]):
+        test_db.add(Stock(
+            id=stock_index + 1, symbol=symbol,
+            exchange="HNX" if stock_index < 10 else "HOSE",
+        ))
+        if symbol == "VNM" and not selected_session_available:
+            continue
+        days = (
+            [date(2026, 8, 31), date(2026, 9, 1)]
+            if symbol == "OLD" else [date(2026, 9, 1), date(2026, 9, 2)]
+        )
+        volume = 1_000_000 if symbol == "OLD" else 100
+        for day, close in zip(days, [100_000.0, 110_000.0]):
+            test_db.add(StockPrice(
+                id=price_id, symbol=symbol, stock_id=stock_index + 1,
+                time=day, interval="1D", source="vietcap_vnd",
+                open=close, high=close, low=close, close=close,
+                volume=volume, value=close * volume,
+            ))
+            price_id += 1
+    await test_db.commit()
+
+    async def unavailable_provider(**kwargs):
+        raise RuntimeError("Primary provider unavailable")
+
+    monkeypatch.setattr(market.VnstockTopMoversFetcher, "fetch", unavailable_provider)
+    monkeypatch.setattr(
+        market, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False)
+    )
+    response = await client.get(
+        f"/api/v1/market/top-movers?type={mover_type}&index=VNINDEX&limit=1"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    if not selected_session_available:
+        assert payload["data"] == []
+        assert payload["count"] == 0
+        assert payload["error"] == "Primary provider unavailable"
+        assert payload["is_last_session"] is False
+        assert payload["session_label"] is None
+        return
+    assert payload["count"] == 1
+    assert [row["symbol"] for row in payload["data"]] == ["VNM"]
+    assert payload["data"][0]["volume"] == 100
+    assert payload["data"][0]["value"] == 11_000_000.0
+    assert payload["data"][0]["updated_at"] == "2026-09-02"
+    assert payload["data"][0]["session_label"] == "2026-09-02"
+    assert payload["session_label"] == "2026-09-02"
+    assert payload["updated_at"] == "2026-09-02T00:00:00"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mover_type", ["volume", "value"])
+@pytest.mark.parametrize("missing_metric", [None, float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("observed_zero_available", [True, False])
+async def test_market_retained_movers_require_finite_observed_rank_metric(
+    client, monkeypatch, mover_type, missing_metric, observed_zero_available
+):
+    from types import SimpleNamespace
+    from vnibb.api.v1 import market
+
+    session_date = date(2026, 9, 2)
+    symbols = ["MISSING", *(["ZERO"] if observed_zero_available else [])]
+    rows = [{
+        "symbol": symbol, "time": session_date, "close": 100_000.0,
+        "source": "vietcap_vnd", "volume": 100, "value": 10_000_000.0,
+        "rn": 1, mover_type: missing_metric if symbol == "MISSING" else 0,
+    } for symbol in symbols]
+
+    class StoredSession:
+        def __init__(self):
+            self.results = iter([
+                SimpleNamespace(scalar=lambda: session_date),
+                SimpleNamespace(mappings=lambda: rows),
+                SimpleNamespace(all=lambda: [(symbol, "HOSE") for symbol in symbols]),
+            ])
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def execute(self, *args, **kwargs):
+            return next(self.results)
+
+    async def unavailable_provider(**kwargs):
+        raise RuntimeError("Primary provider unavailable")
+
+    monkeypatch.setattr(market.VnstockTopMoversFetcher, "fetch", unavailable_provider)
+    monkeypatch.setattr(market, "async_session_maker", StoredSession)
+    response = await client.get(
+        f"/api/v1/market/top-movers?type={mover_type}&index=VNINDEX&limit=1"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    if not observed_zero_available:
+        assert payload["data"] == []
+        assert payload["count"] == 0
+        assert payload["error"] == "Primary provider unavailable"
+        assert payload["session_label"] is None
+        return
+    assert payload["count"] == 1
+    assert [row["symbol"] for row in payload["data"]] == ["ZERO"]
+    assert payload["data"][0][mover_type] == 0
+    assert payload["session_label"] == "2026-09-02"

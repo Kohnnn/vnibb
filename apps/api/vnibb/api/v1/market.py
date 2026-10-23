@@ -2153,13 +2153,20 @@ async def _build_last_session_top_movers(
                 continue
             latest = parts.get("latest")
             prev = parts.get("prev")
-            if not latest or latest["price_unit"] == "unknown":
+            if (
+                not latest
+                or latest["price_unit"] == "unknown"
+                or _coerce_to_date(latest["time"]) != _coerce_to_date(latest_date)
+            ):
                 continue
 
             if exchange_allow:
                 ex = symbol_to_exchange.get(symbol)
                 if ex not in exchange_allow:
                     continue
+
+            if mover_type in {"volume", "value"} and _to_float(latest.get(mover_type)) is None:
+                continue
 
             close = _to_float(latest["close"])
             prev_close = _to_float(prev["close"]) if prev and prev["price_unit"] == latest["price_unit"] else None
