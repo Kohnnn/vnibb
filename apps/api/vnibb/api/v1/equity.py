@@ -4301,13 +4301,13 @@ async def _load_quote_response(symbol_upper: str, source: str, refresh: bool):
             VnstockStockQuoteFetcher.fetch(symbol=symbol_upper, source=source),
             timeout=10,
         )
+        if data.price is None or data.price_unit == "unknown":
+            raise ValueError("Quote price or unit unavailable from provider")
         delivery_source = "vnstock:quote.history"
         screener_quote = await _get_screener_snapshot_quote()
         if _should_prefer_screener_quote(data, screener_quote):
             data = screener_quote
             delivery_source = "postgres:stored_quote"
-        if data.price is None or data.price_unit == "unknown":
-            raise ValueError("Quote price or unit unavailable from provider")
         return StandardResponse(data=data, meta=_quote_response_meta(data, delivery_source))
     except Exception:
         logger.warning("Live quote failed for %s", symbol_upper, exc_info=True)
