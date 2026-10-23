@@ -662,7 +662,7 @@ async def test_snapshot_selection_orders_observation_before_ingestion(test_db, l
     assert quote.change_pct == 2.5
 
 
-def test_stored_snapshot_preserves_only_same_session_intraday_clock():
+def test_stored_snapshot_never_promotes_same_session_ingestion_clock():
     snapshot = SimpleNamespace(
         symbol="FPT", price=57400, volume=123, snapshot_date=date(2026, 10, 23),
         trade_date=date(2026, 10, 22), created_at=None,
@@ -671,4 +671,4 @@ def test_stored_snapshot_preserves_only_same_session_intraday_clock():
 
     quote = equity._build_quote_from_screener_snapshot(snapshot, observation_clock=True)
 
-    assert quote.updated_at.isoformat() == "2026-10-22T14:00:00+07:00"
+    assert quote.updated_at.isoformat() == "2026-10-22T00:00:00+07:00"

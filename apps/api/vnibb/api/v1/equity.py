@@ -2316,14 +2316,8 @@ def _build_quote_from_screener_snapshot(
         or datetime.combine(snapshot_row.snapshot_date, datetime.min.time())
     )
     if observation_clock:
-        market_timezone = ZoneInfo("Asia/Ho_Chi_Minh")
-        observed_at = _coerce_meta_datetime(snapshot_metrics.get("updated_at"))
-        if observed_at is not None:
-            observed_at = (observed_at.astimezone(market_timezone) if observed_at.tzinfo
-                           else observed_at.replace(tzinfo=market_timezone))
-        snapshot_updated_at = (
-            observed_at if observed_at is not None and observed_at.date() == observation_date
-            else datetime.combine(observation_date, datetime.min.time(), tzinfo=market_timezone)
+        snapshot_updated_at = datetime.combine(
+            observation_date, datetime.min.time(), tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")
         )
     latest_row_is_current = bool(
         latest_row and latest.get("price_unit") == snapshot["price_unit"]
