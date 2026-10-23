@@ -4223,7 +4223,6 @@ async def _load_stored_quote(symbol: str) -> tuple[StockQuoteData | None, str | 
 
 
 @router.get("/{symbol}/quote", response_model=StandardResponse[Optional[StockQuoteData]])
-@cached(ttl=30, key_prefix="quote_v2_vnd")
 async def get_quote(
     symbol: str,
     source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
@@ -4238,11 +4237,15 @@ async def get_quote(
             meta=MetaData(count=0),
             error="Invalid symbol format. Expected a 3-character ticker.",
         )
+    return await _load_quote_response(symbol_upper, source, refresh)
 
 
+@cached(ttl=30, key_prefix="quote_v2_vnd")
+async def _load_quote_response(symbol_upper: str, source: str, refresh: bool):
     async def _get_db_quote() -> StockQuoteData | None:
         try:
-            return await _load_quote_from_database(db, symbol_upper)
+            async with async_session_factory() as db:
+                return await _load_quote_from_database(db, symbol_upper)
         except Exception as error:
             logger.warning("Quote DB fallback failed for %s: %s", symbol_upper, error)
             return None
@@ -4252,7 +4255,8 @@ async def get_quote(
     async def _get_screener_snapshot_quote() -> Optional[StockQuoteData]:
         nonlocal screener_snapshot_quote
         if screener_snapshot_quote is None:
-            screener_snapshot_quote = await _load_latest_screener_snapshot_quote(db, symbol_upper)
+            async with async_session_factory() as db:
+                screener_snapshot_quote = await _load_latest_screener_snapshot_quote(db, symbol_upper)
         return screener_snapshot_quote
 
     if not refresh:
