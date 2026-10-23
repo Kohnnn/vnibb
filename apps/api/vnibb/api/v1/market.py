@@ -3668,10 +3668,16 @@ async def get_market_top_movers(
     mover_type = _normalize_mover_type(mode or type)
 
     try:
-        movers = await asyncio.wait_for(
-            VnstockTopMoversFetcher.fetch(type=mover_type, index=index, limit=limit),
-            timeout=30,
-        )
+        provider_error = None
+        try:
+            movers = await asyncio.wait_for(
+                VnstockTopMoversFetcher.fetch(type=mover_type, index=index, limit=limit),
+                timeout=30,
+            )
+        except Exception as exc:
+            provider_error = str(exc) or type(exc).__name__
+            logger.warning("Market top movers provider failed: %s", provider_error)
+            movers = []
         payload = [
             item.model_dump(mode="json", by_alias=False) if hasattr(item, "model_dump") else item
             for item in movers
@@ -3705,6 +3711,33 @@ async def get_market_top_movers(
             payload = _apply_snapshot_metrics_to_movers(payload, snapshot_metrics)
             payload = _sort_top_movers(payload, mover_type=mover_type, limit=limit)
 
+        if not payload:
+            try:
+                retained = await _build_last_session_top_movers(
+                    index=index, mover_type=mover_type, limit=limit
+                )
+            except Exception as exc:
+                logger.warning("Market top movers retained fallback failed: %s", exc)
+                retained = []
+            if retained:
+                return MarketTopMoversResponse(
+                    type=mover_type,
+                    index=index,
+                    count=len(retained),
+                    data=retained,
+                    updated_at=_latest_timestamp([item.get("updated_at") for item in retained]),
+                    error=(
+                        f"Requested '{mover_type}' movers unavailable, returned retained "
+                        f"last-session fallback: {provider_error or 'primary provider returned no rows'}"
+                    ),
+                    is_last_session=True,
+                    session_label=retained[0].get("session_label"),
+                )
+            if provider_error:
+                return MarketTopMoversResponse(
+                    type=mover_type, index=index, count=0, data=[], error=provider_error
+                )
+
         if not payload and mover_type in {"gainer", "loser"}:
             # Graceful fallback: volume movers are generally the most stable upstream feed.
             fallback = await asyncio.wait_for(
@@ -3727,15 +3760,6 @@ async def get_market_top_movers(
 
             if not payload or not _has_non_zero_top_mover_signal(payload):
                 payload = await _build_snapshot_top_movers(
-                    index=index, mover_type=mover_type, limit=limit
-                )
-
-            if not payload or not _has_non_zero_top_mover_signal(payload):
-                # SQL-backed last-completed-session fallback. Without this
-                # branch the panel returns an empty list whenever the
-                # vnstock provider, snapshot cache, AND screener cache
-                # are all empty after market close (QA-v2 T3).
-                payload = await _build_last_session_top_movers(
                     index=index, mover_type=mover_type, limit=limit
                 )
 

@@ -290,3 +290,105 @@ async def test_last_session_movers_normalize_sources_and_exclude_unknown(test_en
     assert all(row["symbol"] != "T00" for row in result)
     assert all(row["last_price"] == 35_200.0 and row["price_unit"] == "VND" for row in result)
     assert all(row["price_change"] == 3_200.0 and row["price_change_pct"] == 10.0 for row in result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mover_type", ["gainer", "loser", "volume", "value"])
+@pytest.mark.parametrize("provider_state", ["empty", "delayed_empty", "error"])
+async def test_market_movers_reach_typed_retained_prices_before_second_provider_call(
+    client, test_engine, test_db, monkeypatch, mover_type, provider_state
+):
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from vnibb.api.v1 import market
+    from vnibb.models.stock import Stock, StockPrice
+
+    for index in range(10):
+        symbol = f"T{index:02}"
+        test_db.add(Stock(id=index + 1, symbol=symbol, exchange="HOSE"))
+        for offset, (day, close) in enumerate([
+            (date(2026, 9, 1), 100_000.0),
+            (date(2026, 9, 2), 110_000.0 if index % 2 else 90_000.0),
+        ]):
+            test_db.add(StockPrice(
+                id=index * 2 + offset + 1, symbol=symbol, stock_id=index + 1,
+                time=day, interval="1D", source="vietcap_vnd" if index else "vnstock",
+                open=close, high=close, low=close, close=close,
+                volume=100 + index, value=close * (100 + index),
+            ))
+    await test_db.commit()
+    monkeypatch.setattr(
+        market, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False)
+    )
+    calls = []
+
+    async def provider(*, type, index, limit):
+        calls.append(type)
+        if len(calls) > 1:
+            await asyncio.Event().wait()
+        if provider_state == "error":
+            raise RuntimeError("Primary provider unavailable")
+        if provider_state == "delayed_empty":
+            await asyncio.sleep(0.02)
+        return []
+
+    monkeypatch.setattr(market.VnstockTopMoversFetcher, "fetch", provider)
+    async with asyncio.timeout(0.75):
+        response = await client.get(
+            f"/api/v1/market/top-movers?type={mover_type}&index=VNINDEX&limit=3"
+        )
+
+    assert response.status_code == 200
+    assert calls == [mover_type]
+    payload = response.json()
+    assert payload["count"] == 3
+    assert payload["is_last_session"] is True
+    assert payload["session_label"] == "2026-09-02"
+    assert payload["updated_at"] == "2026-09-02T00:00:00"
+    assert "retained" in payload["error"]
+    if provider_state == "error":
+        assert "Primary provider unavailable" in payload["error"]
+    for row in payload["data"]:
+        assert row["symbol"] != "T00"
+        assert row["price_unit"] == "VND"
+        assert row["last_price"] in {90_000.0, 110_000.0}
+        assert row["price_change_pct"] == pytest.approx(10.0 if int(row["symbol"][1:]) % 2 else -10.0)
+        assert row["is_last_session"] is True
+        assert row["session_label"] == "2026-09-02"
+    if mover_type == "gainer":
+        assert all(row["price_change_pct"] > 0 for row in payload["data"])
+    elif mover_type == "loser":
+        assert all(row["price_change_pct"] < 0 for row in payload["data"])
+    else:
+        values = [row[mover_type] for row in payload["data"]]
+        assert values == sorted(values, reverse=True)
+
+
+@pytest.mark.asyncio
+async def test_market_movers_keep_provider_error_when_retained_prices_are_unavailable(
+    client, test_engine, monkeypatch
+):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from vnibb.api.v1 import market
+
+    calls = []
+
+    async def provider(**kwargs):
+        calls.append(kwargs["type"])
+        raise RuntimeError("Primary provider unavailable")
+
+    monkeypatch.setattr(market.VnstockTopMoversFetcher, "fetch", provider)
+    monkeypatch.setattr(
+        market, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False)
+    )
+    response = await client.get("/api/v1/market/top-movers?type=gainer&index=VNINDEX&limit=3")
+
+    assert response.status_code == 200
+    assert calls == ["gainer"]
+    payload = response.json()
+    assert payload["data"] == []
+    assert payload["count"] == 0
+    assert payload["error"] == "Primary provider unavailable"
+    assert payload["is_last_session"] is False
+    assert payload["session_label"] is None
