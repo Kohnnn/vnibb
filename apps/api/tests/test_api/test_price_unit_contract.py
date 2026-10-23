@@ -537,7 +537,7 @@ def test_quant_price_unit_warning_names_unresolved_sessions():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("row_trade_date, trade_date, expected", [
     (None, None, "2026-10-23T00:00:00+07:00"),
-    (None, "2026-10-20", "2026-10-20T00:00:00+07:00"),
+    (None, "2026-10-20", "2026-10-23T00:00:00+07:00"),
     (date(2026, 10, 22), "2026-10-20", "2026-10-22T00:00:00+07:00"),
 ])
 async def test_stored_snapshot_uses_observation_date_not_later_ingestion(
@@ -638,3 +638,37 @@ async def test_stored_snapshot_competes_by_trade_session_with_settled_rows(
         (55000, 59000, 54000) if latest_day == 22 else (None, None, None)
     )
     assert quote.updated_at.isoformat() == "2026-10-22T00:00:00+07:00"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("loader", ["_load_quote_from_database", "_load_latest_screener_snapshot_quote"])
+async def test_snapshot_selection_orders_observation_before_ingestion(test_db, loader):
+    from vnibb.models.screener import ScreenerSnapshot
+
+    test_db.add_all([
+        ScreenerSnapshot(symbol="FPT", snapshot_date=date(2026, 10, 23),
+                         trade_date=date(2026, 10, 20), price=55000,
+                         extended_metrics={"price_unit": "VND"}),
+        ScreenerSnapshot(symbol="FPT", snapshot_date=date(2026, 10, 22),
+                         trade_date=date(2026, 10, 22), price=57400,
+                         extended_metrics={"price_unit": "VND", "change_pct": 2.5}),
+    ])
+    await test_db.commit()
+
+    quote = await getattr(equity, loader)(test_db, "FPT")
+
+    assert quote.price == 57400
+    assert quote.prev_close == pytest.approx(56000)
+    assert quote.change_pct == 2.5
+
+
+def test_stored_snapshot_preserves_only_same_session_intraday_clock():
+    snapshot = SimpleNamespace(
+        symbol="FPT", price=57400, volume=123, snapshot_date=date(2026, 10, 23),
+        trade_date=date(2026, 10, 22), created_at=None,
+        extended_metrics={"price_unit": "VND", "updated_at": "2026-10-22T07:00:00+00:00"},
+    )
+
+    quote = equity._build_quote_from_screener_snapshot(snapshot, observation_clock=True)
+
+    assert quote.updated_at.isoformat() == "2026-10-22T14:00:00+07:00"

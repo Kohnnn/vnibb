@@ -2275,12 +2275,7 @@ def _provider_timeout_budget(reserve_seconds: int = 5) -> float:
 
 
 def _snapshot_observation_date(snapshot_row: ScreenerSnapshot) -> date:
-    metrics = snapshot_row.extended_metrics if isinstance(snapshot_row.extended_metrics, dict) else {}
-    observed_at = (
-        _coerce_meta_datetime(getattr(snapshot_row, "trade_date", None))
-        or _coerce_meta_datetime(metrics.get("trade_date"))
-    )
-    return observed_at.date() if observed_at is not None else snapshot_row.snapshot_date
+    return getattr(snapshot_row, "trade_date", None) or snapshot_row.snapshot_date
 
 
 
@@ -2321,8 +2316,14 @@ def _build_quote_from_screener_snapshot(
         or datetime.combine(snapshot_row.snapshot_date, datetime.min.time())
     )
     if observation_clock:
-        snapshot_updated_at = datetime.combine(
-            observation_date, datetime.min.time(), tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")
+        market_timezone = ZoneInfo("Asia/Ho_Chi_Minh")
+        observed_at = _coerce_meta_datetime(snapshot_metrics.get("updated_at"))
+        if observed_at is not None:
+            observed_at = (observed_at.astimezone(market_timezone) if observed_at.tzinfo
+                           else observed_at.replace(tzinfo=market_timezone))
+        snapshot_updated_at = (
+            observed_at if observed_at is not None and observed_at.date() == observation_date
+            else datetime.combine(observation_date, datetime.min.time(), tzinfo=market_timezone)
         )
     latest_row_is_current = bool(
         latest_row and latest.get("price_unit") == snapshot["price_unit"]
@@ -2380,7 +2381,10 @@ async def _load_latest_screener_snapshot_quote(
     snapshot_stmt = (
         select(ScreenerSnapshot)
         .where(ScreenerSnapshot.symbol == symbol)
-        .order_by(ScreenerSnapshot.snapshot_date.desc(), ScreenerSnapshot.created_at.desc())
+        .order_by(
+            func.coalesce(ScreenerSnapshot.trade_date, ScreenerSnapshot.snapshot_date).desc(),
+            ScreenerSnapshot.snapshot_date.desc(), ScreenerSnapshot.created_at.desc(),
+        )
         .limit(1)
     )
     snapshot_row = (await db.execute(snapshot_stmt)).scalar_one_or_none()
@@ -4159,7 +4163,10 @@ async def _load_quote_from_database(
     )).scalars().all()
     snapshot = (await db.execute(
         select(ScreenerSnapshot).where(ScreenerSnapshot.symbol == symbol_upper)
-        .order_by(ScreenerSnapshot.snapshot_date.desc()).limit(1)
+        .order_by(
+            func.coalesce(ScreenerSnapshot.trade_date, ScreenerSnapshot.snapshot_date).desc(),
+            ScreenerSnapshot.snapshot_date.desc(), ScreenerSnapshot.created_at.desc(),
+        ).limit(1)
     )).scalar_one_or_none()
     latest_row = price_rows[0] if price_rows else None
     previous_row = price_rows[1] if len(price_rows) > 1 else None
