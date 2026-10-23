@@ -26,6 +26,7 @@ from sqlalchemy import text
 
 from vnibb.core.database import async_session_maker
 from vnibb.models.prediction_market import PredictionMarket
+from vnibb.services.prediction_market_service import ensure_catalogue_write_capacity
 
 MAX_BATCH = 100
 RETENTION_DAYS = 365
@@ -168,6 +169,8 @@ async def retention(*, limit: int, apply: bool = False, backup_receipt: Path | N
 async def restore(path: Path) -> dict:
     document = json.loads(path.read_text())
     entries = document["entries"]
+    if not 1 <= len(entries) <= MAX_BATCH:
+        raise ValueError(f"archive count must be between 1 and {MAX_BATCH}")
     if len(entries) != document["count"] or hashlib.sha256(_json_bytes(entries)).hexdigest() != document["sha256"]:
         raise ValueError("archive manifest mismatch")
     if any(hashlib.sha256(_json_bytes(entry["payload"])).hexdigest() != entry["sha256"] for entry in entries):
@@ -185,6 +188,7 @@ async def restore(path: Path) -> dict:
             entry["payload"]["id"]: entry["sha256"] for entry in entries
         }:
             raise ValueError("database archive differs from manifest")
+        await ensure_catalogue_write_capacity(session, len(entries))
         for entry in entries:
             payload = entry["payload"].copy()
             for name in DATE_COLUMNS:
