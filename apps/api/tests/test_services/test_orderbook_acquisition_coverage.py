@@ -1,3 +1,4 @@
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -140,3 +141,46 @@ async def test_explicit_adapter_units_and_raw_lineage_survive_both_writes(depth_
     assert row["observedAt"] == "2026-10-13T02:30:00"
     assert row["raw"] == fetch.return_value.raw_levels[0]
     assert session.execute.await_args.args[1]["price_depth"]["price_unit"] == "VND"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dataset,symbol", [
+    ("equity.intraday", "FPT"), ("equity.price_depth", "VCB"),
+    ("equity.intraday", "VCB"),
+])
+@pytest.mark.parametrize("suffix", ["0", "latest-batch"])
+async def test_depth_upsert_preserves_colliding_observation(depth_stores, dataset, symbol, suffix):
+    _, collection, fetch, _ = depth_stores
+    original = {"dataset": dataset, "symbol": symbol, "recordKey": f"free-vci:depth:FPT:{suffix}",
+                "raw": {"price": 50000}, "source": "retained-provider"}
+    documents = [deepcopy(original)]
+    original_payload = fetch.return_value.model_dump(mode="json")
+
+    def replace(operations, *, ordered):
+        assert ordered is True
+        for operation in operations:
+            index = next((index for index, document in enumerate(documents)
+                          if all(document.get(key) == value for key, value in operation._filter.items())), None)
+            if index is None:
+                documents.append(deepcopy(operation._doc))
+            else:
+                documents[index] = deepcopy(operation._doc)
+
+    collection.bulk_write.side_effect = replace
+    for _ in range(2):
+        assert await data_pipeline.data_pipeline.sync_orderbook_snapshots(symbols=["FPT"]) == 1
+        assert documents[0] == original
+        assert len(documents) == 3
+
+    level, receipt = documents[1:]
+    assert (level["dataset"], level["symbol"], level["recordKey"]) == (
+        "equity.price_depth", "FPT", "free-vci:depth:FPT:0")
+    assert level["raw"] == {"price": 100000, "volume": 120, "buy_volume": 120}
+    assert level["source"] == "vnstock"
+    assert level["providerSource"] == "VCI"
+    assert (receipt["dataset"], receipt["symbol"], receipt["recordKey"]) == (
+        "equity.price_depth", "FPT", "free-vci:depth:FPT:latest-batch")
+    assert receipt["batchReceipt"] is True
+    assert receipt["raw"] == {}
+    assert receipt["rowCount"] == 1
+    assert fetch.return_value.model_dump(mode="json") == original_payload

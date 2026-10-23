@@ -1,10 +1,12 @@
 """Persistence regressions for atomic cache writer upserts."""
 
 from datetime import date, datetime
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import ProgrammingError
 from vnibb.models.company import Company
 from vnibb.models.stock import Stock
 from vnibb.services.cache_manager import CacheManager
@@ -102,3 +104,22 @@ async def test_profile_sparse_update_preserves_existing_fields_and_normalizes_va
     assert company.created_at == created_at
     await test_db.execute(Company.__table__.delete().where(Company.symbol == symbol))
     await test_db.commit()
+
+
+@pytest.mark.asyncio
+async def test_profile_rejected_upsert_rolls_back_and_reports_failure(test_db, monkeypatch):
+    execute = AsyncMock(side_effect=ProgrammingError(
+        "INSERT INTO companies", {},
+        RuntimeError("no unique or exclusion constraint matching the ON CONFLICT specification"),
+    ))
+    rollback = AsyncMock(wraps=test_db.rollback)
+    commit = AsyncMock(wraps=test_db.commit)
+    monkeypatch.setattr(test_db, "execute", execute)
+    monkeypatch.setattr(test_db, "rollback", rollback)
+    monkeypatch.setattr(test_db, "commit", commit)
+
+    assert await CacheManager(test_db).store_profile_data(
+        "VNM", {"company_name": "Vinamilk"}
+    ) is False
+    rollback.assert_awaited_once()
+    commit.assert_not_awaited()

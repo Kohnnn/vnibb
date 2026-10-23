@@ -260,7 +260,12 @@ async def _refresh_profile_cache(symbol: str) -> None:
         if not profile_data:
             logger.warning(f"Profile refresh returned empty data (symbol={symbol})")
             return
-        await cache_manager.store_profile_data(symbol, profile_data.model_dump(mode="json"))
+        stored = await cache_manager.store_profile_data(
+            symbol, profile_data.model_dump(mode="json")
+        )
+        if not stored:
+            logger.warning("Background profile cache write failed (symbol=%s)", symbol)
+            return
         logger.info(f"Background profile refresh complete (symbol={symbol})")
     except BaseException as e:
         if _is_control_flow_exception(e):
@@ -4570,14 +4575,18 @@ async def get_profile(
                 fallback_market_cap=profile_data.market_cap,
             )
 
-            await cache_manager.store_profile_data(
+            stored = await cache_manager.store_profile_data(
                 symbol_upper, profile_data.model_dump(mode="json")
             )
+            if not stored:
+                logger.warning("Profile cache write failed (symbol=%s)", symbol_upper)
             return StandardResponse(
                 data=profile_data,
                 meta=MetaData(
                     count=1,
                     last_data_date=await _get_profile_last_data_date(db, symbol_upper),
+                    cache_write_status="stored" if stored else "failed",
+                    warnings=[] if stored else ["profile_cache_write_failed"],
                 ),
             )
 
@@ -6300,7 +6309,7 @@ async def get_rating(symbol: str):
 @router.get("/{symbol}/financial-ratios", response_model=StandardResponse[List[FinancialRatioData]])
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
 # Keep prior scale-guessed responses out of the certified-unit serving path.
-@cached(ttl=86400, key_prefix="ratios_v10_payout_admitted")
+@cached(ttl=86400, key_prefix="ratios_v11_provider_deadline")
 async def get_financial_ratios(
     symbol: str,
     period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
@@ -6308,6 +6317,7 @@ async def get_financial_ratios(
 ):
     symbol_upper = symbol.upper()
     normalized_period = "year" if period in {"year", "FY"} else "quarter"
+    owns_read_transaction = not db.in_transaction() and not (db.new or db.dirty or db.deleted)
     latest_price_time = (
         await db.execute(
             select(func.max(StockPrice.time)).where(
@@ -6355,19 +6365,13 @@ async def get_financial_ratios(
     db_ratio_rows: List[FinancialRatioData] = []
     provider_ratio_rows: List[FinancialRatioData] = []
     provider_error: Exception | None = None
+    can_enrich = True
     support_rows = {
         StatementType.INCOME.value: [],
         StatementType.BALANCE.value: [],
         StatementType.CASHFLOW.value: [],
     }
 
-    if normalized_period == "quarter":
-        support_rows = await _load_ratio_statement_support(
-            db=db,
-            symbol=symbol_upper,
-            period=normalized_period,
-            limit=40,
-        )
 
     try:
         stmt = (
@@ -6394,28 +6398,45 @@ async def get_financial_ratios(
     latest_ratio_period_key = _latest_ratio_period_key(db_ratio_rows + mongo_ratio_rows)
     statements_are_newer = latest_statement_period_key > latest_ratio_period_key
 
-    if statements_are_newer and normalized_period == "year":
-        support_rows = await _load_ratio_statement_support(
-            db=db,
-            symbol=symbol_upper,
-            period=normalized_period,
-            limit=20,
-        )
 
     should_fetch_provider = (
         not db_ratio_rows
         or normalized_period == "quarter"
-        or str(period or "").strip().upper() == "TTM"
         or statements_are_newer
     )
     if should_fetch_provider:
         try:
-            provider_ratio_rows = await VnstockFinancialRatiosFetcher.fetch(
-                FinancialRatiosQueryParams(symbol=symbol_upper, period=normalized_period)
-            )
+            async with asyncio.timeout(min(10, _provider_timeout_budget())):
+                if normalized_period == "quarter" or statements_are_newer:
+                    support_rows = await _load_ratio_statement_support(
+                        db=db,
+                        symbol=symbol_upper,
+                        period=normalized_period,
+                        limit=40 if normalized_period == "quarter" else 20,
+                    )
+                provider_ratio_rows = await VnstockFinancialRatiosFetcher.fetch(
+                    FinancialRatiosQueryParams(symbol=symbol_upper, period=normalized_period)
+                )
         except Exception as exc:
             provider_error = exc
+            can_enrich = False
+            if owns_read_transaction and db.in_transaction():
+                try:
+                    await db.rollback()
+                    can_enrich = True
+                except Exception as rollback_error:
+                    logger.warning("Ratio read recovery failed for %s: %s", symbol_upper, rollback_error)
             logger.warning("Provider ratio fetch failed for %s: %s", symbol_upper, exc)
+
+    acquisition_error = None
+    if provider_error is not None:
+        acquisition_error = (
+            "Financial ratio provider deadline exceeded"
+            if isinstance(provider_error, (TimeoutError, ProviderTimeoutError))
+            else f"Financial ratio provider unavailable: {provider_error}"
+        )
+    elif primary_error is not None:
+        acquisition_error = f"IQ financial source unavailable: {primary_error}"
 
     data = _merge_ratio_row_collections(
         provider_ratio_rows,
@@ -6432,15 +6453,21 @@ async def get_financial_ratios(
         )
 
     if data:
-        data = await _enrich_missing_ratio_metrics(
-            symbol=symbol_upper,
-            period=normalized_period,
-            rows=data,
-            db=db,
-            income_support_rows=support_rows.get(StatementType.INCOME.value),
-            balance_support_rows=support_rows.get(StatementType.BALANCE.value),
-            cashflow_support_rows=support_rows.get(StatementType.CASHFLOW.value),
-        )
+        if can_enrich:
+            data = await _enrich_missing_ratio_metrics(
+                symbol=symbol_upper,
+                period=normalized_period,
+                rows=data,
+                db=db,
+                income_support_rows=support_rows.get(StatementType.INCOME.value),
+                balance_support_rows=support_rows.get(StatementType.BALANCE.value),
+                cashflow_support_rows=support_rows.get(StatementType.CASHFLOW.value),
+            )
+        else:
+            for item in data:
+                item.interest_coverage = None
+                # Classification cannot be read safely; withhold fields that may not apply.
+                _apply_bank_ratio_normalization(item)
         data = [item for item in data if VALID_RATIO_PERIOD_RE.match(str(item.period or ""))]
         data = _dedupe_ratio_rows(data)
         data = _filter_ratio_rows_for_period(data, period)
@@ -6482,7 +6509,7 @@ async def get_financial_ratios(
                     full_ratio_coverage_starts=coverage_starts,
                     **meta_kwargs,
                 ),
-                error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
+                error=acquisition_error,
             )
 
     await _schedule_critical_reinforcement(
@@ -6490,11 +6517,11 @@ async def get_financial_ratios(
         endpoint="equity.ratios",
         domains=["ratios"],
     )
-    return StandardResponse(data=[], error=str(provider_error or primary_error) if provider_error or primary_error else None)
+    return StandardResponse(data=[], error=acquisition_error)
 
 
 @router.get("/{symbol}/ratios/history", response_model=StandardResponse[List[dict[str, Any]]])
-@cached(ttl=86400, key_prefix="ratios_history_v5_stored_fiscal")
+@cached(ttl=86400, key_prefix="ratios_history_v6_provider_deadline")
 async def get_ratio_history(
     symbol: str,
     ratios: str = Query("pe,pb,ps", description="Comma-separated ratio keys"),
@@ -6505,10 +6532,12 @@ async def get_ratio_history(
     ratio_list = [r.strip() for r in ratios.split(",") if r.strip()]
     if not ratio_list:
         ratio_list = ["pe", "pb", "ps"]
+    stored_errors: list[str] = []
 
     try:
         data = await _load_mongo_financial_ratio_rows(symbol.upper(), period, limit=limit)
     except Exception as exc:
+        stored_errors.append(f"Mongo: {exc}")
         logger.warning("Stored Mongo ratio history unavailable for %s: %s", symbol.upper(), exc)
         data = []
     if not data:
@@ -6528,6 +6557,7 @@ async def get_ratio_history(
         except Exception as exc:
             if not release_read:
                 raise
+            stored_errors.append(f"SQL: {exc}")
             logger.warning("Stored SQL ratio history unavailable for %s: %s", symbol.upper(), exc)
         finally:
             if release_read and db.in_transaction():
@@ -6541,7 +6571,11 @@ async def get_ratio_history(
                 timeout=min(10, _provider_timeout_budget()),
             )
         if not data:
-            return StandardResponse(data=[], error="Financial ratio history unavailable")
+            return StandardResponse(
+                data=[], meta=MetaData(count=0),
+                error=("Financial ratio history stored source unavailable: " + "; ".join(stored_errors))
+                if stored_errors else None,
+            )
         rows: List[dict[str, Any]] = []
         for item in data:
             row: dict[str, Any] = {"period": item.period or ""}
@@ -6552,7 +6586,11 @@ async def get_ratio_history(
         rows = sorted(rows, key=lambda r: _ratio_period_sort_key(str(r.get("period", ""))))
         return StandardResponse(data=rows[:limit], meta=MetaData(count=min(len(rows), limit)))
     except Exception as exc:
-        error = "Financial ratio history provider deadline exceeded" if isinstance(exc, TimeoutError) else str(exc)
+        error = (
+            "Financial ratio history provider deadline exceeded"
+            if isinstance(exc, (TimeoutError, ProviderTimeoutError))
+            else f"Financial ratio history provider unavailable: {exc}"
+        )
         return StandardResponse(data=[], error=error)
 
 

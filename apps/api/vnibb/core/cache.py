@@ -307,6 +307,7 @@ class RedisClient:
     """
 
     SCAN_BATCH_SIZE = 100
+    POOL_WAIT_TIMEOUT_SECONDS = 1.0
 
     def __init__(
         self,
@@ -317,6 +318,7 @@ class RedisClient:
         self.max_connections = max_connections
         self._pool: Optional[redis.ConnectionPool] = None
         self._client: Optional[redis.Redis] = None
+        self._lifecycle_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         """Initialize Redis connection pool."""
@@ -331,26 +333,34 @@ class RedisClient:
             logger.warning("Redis URL is empty; skipping Redis connection")
             return
 
-        if self._pool is None:
-            self._pool = redis.ConnectionPool.from_url(
+        async with self._lifecycle_lock:
+            if self._client is not None:
+                return
+            pool = redis.BlockingConnectionPool.from_url(
                 self.url,
                 max_connections=self.max_connections,
+                timeout=self.POOL_WAIT_TIMEOUT_SECONDS,
                 decode_responses=True,
             )
-            self._client = redis.Redis(connection_pool=self._pool)
-            # Test connection
-            await self._client.ping()
+            client = redis.Redis(connection_pool=pool)
+            try:
+                await client.ping()
+            except BaseException:
+                await client.aclose(close_connection_pool=True)
+                raise
+            self._pool = pool
+            self._client = client
             logger.info("Redis connection established")
 
     async def disconnect(self) -> None:
         """Close Redis connection pool."""
-        if self._client:
-            await self._client.close()
+        async with self._lifecycle_lock:
+            client = self._client
             self._client = None
-        if self._pool:
-            await self._pool.disconnect()
             self._pool = None
-            logger.info("Redis connection closed")
+            if client is not None:
+                await client.aclose(close_connection_pool=True)
+                logger.info("Redis connection closed")
 
     @property
     def client(self) -> redis.Redis:

@@ -682,3 +682,103 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
         if not running.done():
             running.set_result(None)
         pool.shutdown(wait=True)
+
+
+@pytest.fixture
+def screener_supplier(monkeypatch):
+    from types import SimpleNamespace
+
+    import pandas as pd
+    from vnibb.api.v1 import market
+    from vnibb.providers.vnstock import equity_screener, runtime
+
+    calls = {"ratios": 0, "quotes": 0, "quote_state": "available"}
+
+    class Listing:
+        def __init__(self, **kwargs):
+            pass
+
+        def all_symbols(self, **kwargs):
+            return pd.DataFrame([{
+                "symbol": "VNM", "organ_name": "Vinamilk", "exchange": "HOSE",
+                "industry_name": "Food", "market_cap": 150_000_000_000.0,
+            }])
+
+    def ratios(**kwargs):
+        calls["ratios"] += 1
+        return pd.DataFrame([{"pe": 12.0, "pb": 2.0}])
+
+    def history(**kwargs):
+        calls["quotes"] += 1
+        if calls["quote_state"] == "unavailable":
+            raise RuntimeError("Quote supplier unavailable")
+        if calls["quote_state"] == "empty":
+            return pd.DataFrame()
+        return pd.DataFrame([{
+            "time": date.today().isoformat(), "close": 100_000.0,
+            "volume": 1_000_000, "price_unit": "VND",
+        }])
+
+    supplier = SimpleNamespace(
+        finance=SimpleNamespace(ratio=ratios), quote=SimpleNamespace(history=history),
+    )
+    monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace(stock=lambda **_kw: supplier))
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
+    monkeypatch.setattr(market, "_load_stock_metadata", lambda _s: _async({}))
+    monkeypatch.setattr(market, "_load_change_pct_map", lambda _s: _async({"VNM": 3.2}))
+    monkeypatch.setattr(market, "_load_latest_price_time", lambda _s: _async(None))
+    return calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("quote_state", ["available", "empty", "unavailable"])
+async def test_heatmap_acquires_quotes_without_financial_ratios(client, screener_supplier, quote_state):
+    screener_supplier["quote_state"] = quote_state
+    response = await client.get("/api/v1/market/heatmap?exchange=HOSE&limit=10&use_cache=false")
+
+    assert screener_supplier["ratios"] == 0
+    assert screener_supplier["quotes"] == 1
+    if quote_state != "available":
+        assert response.status_code == 503
+        assert response.json()["details"]["status_code"] == 503
+        return
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["partial"] is True
+    assert payload["cached"] is False
+    stock = _find_stock(payload, "VNM")
+    assert stock["price"] == 100_000.0
+    assert stock["market_cap"] == 150_000_000_000.0
+    assert stock["change_pct"] == 3.2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("symbol", [None, "VNM"])
+async def test_full_screener_keeps_financial_ratio_acquisition(screener_supplier, symbol):
+    from vnibb.providers.vnstock.equity_screener import StockScreenerParams, VnstockScreenerFetcher
+
+    rows = await VnstockScreenerFetcher.fetch(StockScreenerParams(symbol=symbol, limit=10))
+
+    assert screener_supplier["ratios"] == 1
+    assert screener_supplier["quotes"] == 1
+    assert len(rows) == 1
+    assert rows[0].symbol == "VNM"
+    assert rows[0].pe == 12.0
+    assert rows[0].pb == 2.0
+    assert rows[0].price == 100_000.0
+
+
+@pytest.mark.asyncio
+async def test_heatmap_valid_quotes_outside_selected_group_are_empty_not_unavailable(client, screener_supplier):
+    response = await client.get(
+        "/api/v1/market/heatmap?group_by=hnx30&exchange=HOSE&limit=10&use_cache=false"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 0
+    assert response.json()["sectors"] == []
+    assert response.json()["partial"] is True
+    assert screener_supplier["ratios"] == 0
+    assert screener_supplier["quotes"] == 1

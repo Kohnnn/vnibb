@@ -16,6 +16,28 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("POSTGRES_CONTRACT") != "1",
     reason="requires the PostgreSQL release-contract database",
 )
+
+
+@pytest.mark.postgres_contract
+@pytest.mark.asyncio
+async def test_companies_schema_supports_generated_ids_and_symbol_upserts(test_db):
+    assert test_db.bind.dialect.name == "postgresql"
+    id_generation = (await test_db.execute(text(
+        "SELECT a.attidentity, pg_get_expr(d.adbin, d.adrelid) AS default_expression "
+        "FROM pg_attribute a LEFT JOIN pg_attrdef d "
+        "ON d.adrelid=a.attrelid AND d.adnum=a.attnum "
+        "WHERE a.attrelid='companies'::regclass AND a.attname='id'"
+    ))).one()
+    assert id_generation.attidentity or id_generation.default_expression
+    assert (await test_db.execute(text(
+        "SELECT EXISTS (SELECT 1 FROM pg_index i JOIN pg_attribute a "
+        "ON a.attrelid=i.indrelid AND a.attnum=i.indkey[0] "
+        "WHERE i.indrelid='companies'::regclass AND a.attname='symbol' "
+        "AND i.indisunique AND i.indisvalid AND i.indisready AND i.indimmediate "
+        "AND i.indnkeyatts=1 AND i.indpred IS NULL AND i.indexprs IS NULL)"
+    ))).scalar_one(), "companies requires an immediate unique symbol index for ON CONFLICT"
+
+
 @pytest.mark.postgres_contract
 @pytest.mark.asyncio
 async def test_concurrent_first_cache_writes_are_atomic_and_persisted(test_db):

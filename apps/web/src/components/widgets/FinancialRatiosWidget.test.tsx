@@ -117,6 +117,29 @@ describe('FinancialRatiosWidget period columns', () => {
     }));
   });
 
+  test('discloses an HTTP timeout while retaining ratios and their original receipt time', async () => {
+    const message = 'Request timed out after 30 seconds. The server is slow or unavailable.';
+    const onDataChange = jest.fn();
+    mockUseFinancialRatios.mockReturnValue({
+      ...queryResult(ratiosResponse, new Error(message)),
+      dataUpdatedAt: 1792726551022,
+    });
+
+    renderWidget(onDataChange);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
+    expect(screen.getByText('Cached snapshot')).toBeInTheDocument();
+    await waitFor(() => expect(rowValues(screen.getByText(/^P\/E$/i))).toContain('18.40'));
+    expect(screen.queryByText('No ratio data for FPT')).not.toBeInTheDocument();
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      __widgetRuntime: expect.objectContaining({
+        provenance: expect.objectContaining({
+          updatedAt: null, fetchedAt: 1792726551022, stale: true, warnings: [message],
+        }),
+      }),
+    }));
+  });
+
   test('shows the response failure instead of an ordinary empty state when no ratios are usable', () => {
     const warning = 'Vietcap IQ ratios unavailable and no stored ratios exist.';
     mockUseFinancialRatios.mockReturnValue(queryResult({ data: [], error: warning }));

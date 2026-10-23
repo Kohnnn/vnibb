@@ -284,6 +284,38 @@ describe('MarketHeatmapWidget', () => {
     expect(screen.getByText(/Partial universe/)).toBeInTheDocument();
   });
 
+  it('discloses a failed refresh while retaining the heatmap and its observation dates', () => {
+    const message = 'Server error (503). Heatmap data unavailable.';
+    mockUseMarketHeatmap.mockReturnValue({
+      ...mockHeatmapData({
+        price_updated_at: '2026-10-22T00:00:00',
+        constituents_as_of: '2026-10-21',
+        cached: true,
+      }),
+      dataUpdatedAt: 1792726551022,
+      error: new Error(message),
+      isError: true,
+      isSuccess: false,
+      isRefetchError: true,
+      status: 'error',
+    } as HeatmapQueryResult);
+    const onDataChange = jest.fn();
+    render(<MarketHeatmapWidget id="market-heatmap" onDataChange={onDataChange} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
+    expect(screen.getByText('Banking')).toBeInTheDocument();
+    expect(screen.getByText(/As of 2026-10-22/)).toBeInTheDocument();
+    expect(screen.queryByText('Market data unavailable')).not.toBeInTheDocument();
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      __widgetRuntime: expect.objectContaining({
+        provenance: expect.objectContaining({
+          updatedAt: '2026-10-21', fetchedAt: 1792726551022,
+          cached: true, stale: true, warnings: [message],
+        }),
+      }),
+    }));
+  });
+
   it('reports unavailable coverage instead of a flat zero-stock market', () => {
     // A provider failure returns count=0/sectors=[] (market.py). Rendering that as a
     // treemap produced "0 Stocks • 0 Groups" and a fabricated neutral read (issue #107).

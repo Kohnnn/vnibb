@@ -2393,6 +2393,7 @@ async def get_heatmap_data(
             exchange=exchange,
             limit=limit,
             source=settings.vnstock_source,
+            include_ratios=False,
         )
 
         # Try cache first

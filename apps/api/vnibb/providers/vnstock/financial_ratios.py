@@ -162,6 +162,30 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
     def transform_query(params: FinancialRatiosQueryParams) -> dict[str, Any]:
         return {"symbol": params.symbol.upper(), "period": params.period}
 
+    @classmethod
+    async def fetch(
+        cls,
+        params: FinancialRatiosQueryParams,
+        credentials: dict[str, str] | None = None,
+    ) -> list[FinancialRatioData]:
+        try:
+            raw_data = await cls.extract_data(cls.transform_query(params), credentials)
+            if not raw_data:
+                return []
+            data = cls.transform_data(params, raw_data)
+            if not data:
+                raise ProviderError(
+                    message="Nonempty ratio response contains no admitted fiscal periods",
+                    provider="vnstock", details={"symbol": params.symbol},
+                )
+            return data
+        except ProviderError:
+            raise
+        except (Exception, SystemExit) as exc:
+            raise ProviderError(
+                message=str(exc), provider="vnstock", details={"symbol": params.symbol}
+            ) from exc
+
     @staticmethod
     async def extract_data(
         query: dict[str, Any],
@@ -245,7 +269,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 if last_error is not None:
                     raise last_error
                 return []
-            except Exception as e:
+            except (Exception, SystemExit) as e:
                 logger.error(f"vnstock ratios fetch error: {e}")
                 raise ProviderError(
                     message=str(e), provider="vnstock", details={"symbol": query["symbol"]}
@@ -258,6 +282,12 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
             )
         except TimeoutError as exc:
             raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout) from exc
+        except ProviderError:
+            raise
+        except (Exception, SystemExit) as exc:
+            raise ProviderError(
+                message=str(exc), provider="vnstock", details={"symbol": query["symbol"]}
+            ) from exc
 
     @staticmethod
     def transform_data(

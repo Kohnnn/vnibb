@@ -502,3 +502,71 @@ async def test_prediction_retention_jobs_prune_sql_rows_after_fetch_failure(test
     async with sessions() as session:
         for model in (PredictionMarketSnapshot, PredictionMarketIntradaySnapshot, PredictionMarket):
             assert (await session.scalars(select(model.source_id))).all() == ["recent"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("admission_blocked", [False, True])
+async def test_prediction_source_rejection_preserves_other_source_progress(
+    monkeypatch, caplog, admission_blocked,
+):
+    from vnibb.services import (
+        kalshi_service,
+        limitless_service,
+        manifold_service,
+        prediction_market_service,
+        predictit_service,
+    )
+    from vnibb.services.prediction_market_http import PredictionMarketFetchError
+
+    @asynccontextmanager
+    async def sessions():
+        yield object()
+
+    class UnavailableLock:
+        def __init__(self, *_):
+            pass
+
+        async def acquire(self):
+            return "unavailable"
+
+    monkeypatch.setattr(database, "async_session_maker", sessions)
+    monkeypatch.setattr(scheduler, "_scheduler", AsyncIOScheduler(timezone="UTC"))
+    monkeypatch.setattr(scheduler, "_job_guards", {})
+    monkeypatch.setattr(scheduler, "DistributedJobLock", UnavailableLock)
+    monkeypatch.setattr(scheduler.settings, "scheduler_lock_mode", "best_effort")
+    outcome = AsyncMock()
+    monkeypatch.setattr(scheduler, "_record_job_outcome", outcome)
+    predictit_error = PredictionMarketFetchError("predictit", 403, "Forbidden")
+    admission_error = prediction_market_service.PredictionMarketAdmissionError(
+        "Catalogue admission blocked for 2 new markets (storage/source cap); "
+        "refreshed 326 existing markets"
+    )
+    fetches = []
+    for module, name, count, error in (
+        (prediction_market_service, "ingest_polymarket_gamma_markets_with_default_client", 100, None),
+        (kalshi_service, "ingest_kalshi_markets_with_default_client", 400, None),
+        (predictit_service, "ingest_predictit_markets_with_default_client", None, predictit_error),
+        (limitless_service, "ingest_limitless_markets_with_default_client", 326,
+         admission_error if admission_blocked else None),
+        (manifold_service, "ingest_manifold_markets_with_default_client", 200, None),
+    ):
+        fetch = AsyncMock(return_value=count, side_effect=error)
+        fetches.append(fetch)
+        monkeypatch.setattr(module, name, fetch)
+
+    scheduler.configure_scheduler()
+    with caplog.at_level("INFO", logger="vnibb.core.scheduler"):
+        await scheduler.get_scheduler().get_job("prediction_market_ingest").func()
+
+    for fetch in fetches:
+        fetch.assert_awaited_once()
+    outcome.assert_awaited_once_with("prediction_market_ingest", "failed", "RuntimeError")
+    counts = {"polymarket": 100, "kalshi": 400}
+    if not admission_blocked:
+        counts["limitless"] = 326
+    counts["manifold"] = 200
+    failures = ["predictit", "limitless"] if admission_blocked else ["predictit"]
+    assert f"counts={counts} failed={failures}" in caplog.text
+    assert "predictit: Forbidden (status=403)" in caplog.text
+    if admission_blocked:
+        assert str(admission_error) in caplog.text

@@ -128,9 +128,9 @@ def persist_mongo_trades(symbol: str, rows: list[dict], coverage: dict) -> int:
         transaction = row.get("transaction_id")
         identity_key = f"id:{transaction}" if transaction is not None else f"{sha256(repr(identity).encode()).hexdigest()}:{occurrences[identity]}"
         key = f"matched-trade:{symbol}:{coverage['session_date']}:{identity_key}"
-        operations.append(ReplaceOne({"recordKey": key}, {**envelope, "recordKey": key, "observedAt": row["trade_time"], "raw": raw}, upsert=True))
+        operations.append(ReplaceOne({"dataset": "equity.intraday", "symbol": symbol, "recordKey": key}, {**envelope, "recordKey": key, "observedAt": row["trade_time"], "raw": raw}, upsert=True))
     # A batch receipt is not a trade. Empty latest access must suppress older ticks.
     key = f"matched-trade:{symbol}:latest-batch"
-    operations.append(ReplaceOne({"recordKey": key}, {**envelope, "recordKey": key, "batchReceipt": True, "observedAt": None, "raw": {}}, upsert=True))
+    operations.append(ReplaceOne({"dataset": "equity.intraday", "symbol": symbol, "recordKey": key}, {**envelope, "recordKey": key, "batchReceipt": True, "observedAt": None, "raw": {}}, upsert=True))
     collection.bulk_write(operations, ordered=True)
     return len(rows)

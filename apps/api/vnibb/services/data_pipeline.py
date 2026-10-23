@@ -6047,12 +6047,12 @@ class DataPipeline:
                     for index, raw in enumerate(raw_levels or []):
                         key = f"free-vci:depth:{symbol}:{index}"
                         operations.append(ReplaceOne(
-                            {"recordKey": key},
+                            {"dataset": "equity.price_depth", "symbol": symbol, "recordKey": key},
                             {**envelope, "recordKey": key, "raw": raw}, upsert=True,
                         ))
                     key = f"free-vci:depth:{symbol}:latest-batch"
                     operations.append(ReplaceOne(
-                        {"recordKey": key},
+                        {"dataset": "equity.price_depth", "symbol": symbol, "recordKey": key},
                         {**envelope, "recordKey": key, "raw": {}, "batchReceipt": True,
                          "rowCount": len(raw_levels or [])}, upsert=True,
                     ))

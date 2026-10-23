@@ -240,6 +240,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
 
     const hasData = ratios.length > 0;
     const responseWarning = period === 'TTM' ? null : data?.error || null;
+    const refreshWarning = error?.message || responseWarning;
     const isFallback = Boolean((error || responseWarning) && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
@@ -253,10 +254,11 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                 lastDataDate: null,
                 fetchedAt: dataUpdatedAt,
                 stale: isFallback,
+                warnings: refreshWarning ? [refreshWarning] : undefined,
                 extra: hasData ? { periods: ratios.length, data: exportData } : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, ratios.length, exportData]);
+    }, [onDataChange, hasData, isFallback, refreshWarning, dataUpdatedAt, symbol, apiPeriod, ratios.length, exportData]);
 
     const categoryMetrics = {
         valuation: ['pe', 'pb', 'ps', 'ev_sales', 'ev_ebitda', 'peg_ratio'],
@@ -448,9 +450,9 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                         align="right"
                     />
                 </div>
-                {responseWarning && hasData && (
+                {refreshWarning && hasData && (
                     <div role="alert" className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
-                        {responseWarning}
+                        {refreshWarning}
                     </div>
                 )}
                 {(canonicalRatios.issues.length > 0 || canonicalRatios.invalidPeriodCount > 0) && (

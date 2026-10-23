@@ -128,6 +128,10 @@ class StockScreenerParams(BaseModel):
         pattern=r"^VCI$",
         description="Data source: free VCI",
     )
+    include_ratios: bool = Field(
+        default=True,
+        description="Acquire financial ratios as well as listing metadata and quotes",
+    )
 
     @field_validator("symbol")
     @classmethod
@@ -488,6 +492,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
             "industry": params.industry,
             "limit": params.limit,
             "source": params.source,
+            "include_ratios": params.include_ratios,
         }
 
     @staticmethod
@@ -503,6 +508,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
         We also fetch price/volume from quote.history() and company name from Listing.
         """
         source = validate_source(query.get("source"))
+        include_ratios = query.get("include_ratios", True)
         loop = asyncio.get_running_loop()
 
         def _fetch_sync() -> List[dict[str, Any]]:
@@ -649,7 +655,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                 if query["symbol"]:
                     screener = stock.stock(symbol=query["symbol"], source=source)
 
-                    record = _extract_ratio_snapshot(screener)
+                    record = _extract_ratio_snapshot(screener) if include_ratios else {"ticker": query["symbol"]}
                     if record:
                         symbol_key = str(query["symbol"]).upper()
                         record["ticker"] = symbol_key
@@ -696,10 +702,12 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                         except Exception as e:
                             logger.debug(f"Failed to get quote for {query['symbol']}: {e}")
 
+                        if not include_ratios and record.get("price") is None:
+                            return []
                         return [record]
                     return []
 
-                # For full stock list, use Listing to get symbols, then fetch ratio_summary for each
+                # For full stock list, acquire the requested fields for each listed symbol.
                 exchange = query.get("exchange")
 
                 # Get all symbols for the exchange
@@ -716,7 +724,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                 symbols = symbols[:limit]  # Limit the number of symbols
 
                 logger.info(
-                    "Fetching screener ratios for %d symbols from %s (source: %s) in parallel",
+                    "Fetching screener data for %d symbols from %s (source: %s) in parallel",
                     len(symbols),
                     exchange or "ALL",
                     source,
@@ -726,7 +734,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                     """Fetch data for a single stock."""
                     try:
                         stock_obj = stock.stock(symbol=symbol, source=source)
-                        record = _extract_ratio_snapshot(stock_obj)
+                        record = _extract_ratio_snapshot(stock_obj) if include_ratios else {"ticker": symbol}
                         if record:
                             record["ticker"] = symbol
                             record["organ_name"] = name_map.get(symbol, "")
@@ -770,6 +778,8 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                             except Exception as e:
                                 logger.debug(f"Failed to get quote for {symbol}: {e}")
 
+                            if not include_ratios and record.get("price") is None:
+                                return None
                             return record
                     except Exception as e:
                         error_msg = str(e)
@@ -777,7 +787,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                             # Raise specific error to stop the whole executor if rate limited
                             logger.warning(f"Rate limit hit while fetching {symbol}")
                             raise e
-                        logger.debug("Failed to fetch screener ratio for %s: %s", symbol, e)
+                        logger.debug("Failed to fetch screener data for %s: %s", symbol, e)
                     return None
 
                 results = []
@@ -805,7 +815,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                     running = [future for future in future_to_symbol if not future.cancel()]
                     wait(running)
 
-                logger.info("Fetched ratio data for %d/%d stocks", len(results), len(symbols))
+                logger.info("Fetched screener data for %d/%d stocks", len(results), len(symbols))
                 return results
 
             except Exception as e:

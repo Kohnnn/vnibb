@@ -242,10 +242,11 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                 // instead of claiming the stored observation is stale (issue #107).
                 coverage: data?.partial ? 'partial' : undefined,
                 stale: isFallback || Boolean(data?.constituents_stale),
+                warnings: error ? [error.message] : undefined,
                 extra: hasData ? { groupBy, exchange, groupCount: data?.sectors?.length ?? 0, endpoint: heatmapEndpoint } : undefined,
             }),
         );
-    }, [hasData, constituentDate, dataUpdatedAt, data?.cached, data?.constituents_stale, data?.partial, isFallback, groupBy, exchange, data?.sectors?.length, onDataChange, heatmapEndpoint]);
+    }, [hasData, constituentDate, dataUpdatedAt, data?.cached, data?.constituents_stale, data?.partial, isFallback, error, groupBy, exchange, data?.sectors?.length, onDataChange, heatmapEndpoint]);
 
     return (
         <WidgetContainer
@@ -258,6 +259,11 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
             widgetId={id}
         >
             <div className="h-full flex flex-col bg-[var(--bg-primary)]">
+                {error && hasData && (
+                    <div role="alert" className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+                        {error.message}
+                    </div>
+                )}
                 <div className="flex-1 overflow-hidden relative">
                 {isLoading && !hasData ? (
                         <div className="mx-auto mt-6 max-h-[200px] max-w-[560px] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70">
