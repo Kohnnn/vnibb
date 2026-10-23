@@ -62,7 +62,10 @@ export function useWebSocket({
     const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
     const [isReceiving, setIsReceiving] = useState(false);
     const [protocolError, setProtocolError] = useState<string | null>(null);
-    const subscribedRef = useRef<string[]>([]);
+    // The protocol has no success acknowledgment; only an admitted price confirms a symbol.
+    const subscribedRef = useRef(new Set<string>());
+    const pendingRef = useRef(new Set<string>());
+    const sentSymbolsRef = useRef(new Set<string>());
     const receiptsRef = useRef<Map<string, number>>(new Map());
     const observationTimesRef = useRef<Map<string, number>>(new Map());
     const wsRef = useRef<WebSocket | null>(null);
@@ -87,7 +90,9 @@ export function useWebSocket({
     const closeCurrentSocket = useCallback(() => {
         const ws = wsRef.current;
         wsRef.current = null;
-        subscribedRef.current = [];
+        subscribedRef.current.clear();
+        pendingRef.current.clear();
+        sentSymbolsRef.current.clear();
         if (!ws) return;
         ws.onopen = null;
         ws.onmessage = null;
@@ -113,8 +118,9 @@ export function useWebSocket({
                 if (mountedRef.current) setIsConnected(true);
                 setIsReceiving(false);
                 receiptsRef.current.clear();
-                setProtocolError(null);
-                subscribedRef.current = [...symbolsRef.current];
+                subscribedRef.current.clear();
+                pendingRef.current = new Set(symbolsRef.current);
+                sentSymbolsRef.current = new Set(symbolsRef.current);
                 ws.send(JSON.stringify({ action: 'subscribe', symbols: symbolsRef.current }));
             };
 
@@ -125,6 +131,7 @@ export function useWebSocket({
                     if (data.type === 'error') {
                         setProtocolError(data.message || data.error || 'Subscription rejected');
                         setIsReceiving(false);
+                        pendingRef.current.clear();
                         return;
                     }
                     if (data.type === 'market_status') {
@@ -145,11 +152,14 @@ export function useWebSocket({
                     const observedAt = Date.parse(data.as_of);
                     if (observedAt < (observationTimesRef.current.get(data.symbol) ?? -Infinity)) return;
                     observationTimesRef.current.set(data.symbol, observedAt);
+                    subscribedRef.current.add(data.symbol);
+                    pendingRef.current.delete(data.symbol);
                     if (!data.stale) receiptsRef.current.set(data.symbol, Date.now());
                     else receiptsRef.current.delete(data.symbol);
-                    setIsReceiving(symbolsRef.current.every(symbol =>
-                        Date.now() - (receiptsRef.current.get(symbol) ?? 0) <= 15_000));
-                    setProtocolError(null);
+                    const receiving = symbolsRef.current.every(symbol => subscribedRef.current.has(symbol)
+                        && Date.now() - (receiptsRef.current.get(symbol) ?? 0) <= 15_000);
+                    setIsReceiving(receiving);
+                    if (receiving) setProtocolError(null);
 
                     const priceUpdate = data as PriceUpdate;
                     const previousPrice = previousPricesRef.current.get(priceUpdate.symbol);
@@ -243,13 +253,27 @@ export function useWebSocket({
             return;
         }
         if (wsRef.current?.readyState === WebSocket.OPEN) {
-            const removed = subscribedRef.current.filter(symbol => !symbolsRef.current.includes(symbol));
-            const added = symbolsRef.current.filter(symbol => !subscribedRef.current.includes(symbol));
-            if (removed.length) wsRef.current.send(JSON.stringify({ action: 'unsubscribe', symbols: removed }));
-            if (added.length) wsRef.current.send(JSON.stringify({ action: 'subscribe', symbols: added }));
-            subscribedRef.current = [...symbolsRef.current];
+            // Rejection is atomic, so unobserved earlier sends may still need unsubscribing.
+            const removed = [...sentSymbolsRef.current].filter(symbol => !symbolsRef.current.includes(symbol));
+            const added = symbolsRef.current.filter(symbol =>
+                !subscribedRef.current.has(symbol) && !pendingRef.current.has(symbol));
+            if (removed.length) {
+                wsRef.current.send(JSON.stringify({ action: 'unsubscribe', symbols: removed }));
+                removed.forEach(symbol => {
+                    sentSymbolsRef.current.delete(symbol);
+                    pendingRef.current.delete(symbol);
+                    subscribedRef.current.delete(symbol);
+                    receiptsRef.current.delete(symbol);
+                });
+            }
+            if (added.length) {
+                added.forEach(symbol => {
+                    sentSymbolsRef.current.add(symbol);
+                    pendingRef.current.add(symbol);
+                });
+                wsRef.current.send(JSON.stringify({ action: 'subscribe', symbols: added }));
+            }
             setIsReceiving(false);
-            setProtocolError(null);
             return;
         }
         connect();
