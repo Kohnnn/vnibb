@@ -567,3 +567,127 @@ async def test_shutdown_cancels_snapshots_without_releasing_provider_slot(monkey
     finally:
         release.set()
         await provider
+
+
+@pytest.mark.asyncio
+async def test_public_quote_refresh_timeouts_and_socket_share_sync_worker(client, monkeypatch):
+    import threading
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    from vnibb.api.v1 import equity
+    from vnibb.providers.vnstock import runtime
+    from vnibb.providers.vnstock.stock_quote import QuoteCache, VnstockStockQuoteFetcher
+
+    loop = asyncio.get_running_loop()
+    release = threading.Event()
+    started = asyncio.Event()
+    submitted = []
+    workers = []
+    calls = []
+    run_in_executor = loop.run_in_executor
+
+    def submit(executor, operation, *args):
+        future = run_in_executor(executor, operation, *args)
+        if getattr(operation, "__name__", None) == "_fetch":
+            submitted.append(operation)
+            workers.append(future)
+        return future
+
+    class History:
+        empty = False
+
+        def __init__(self, price):
+            self.price = price
+
+        def to_dict(self, orient):
+            return [{"time": datetime.now().isoformat(), "close": self.price, "volume": 123}]
+
+    class Provider:
+        def stock(self, **kwargs):
+            calls.append(kwargs)
+            price = 57.4 if len(calls) == 1 else 57.6
+
+            def history(**_kwargs):
+                loop.call_soon_threadsafe(started.set)
+                if not release.wait(5):
+                    raise TimeoutError("Test did not release quote worker")
+                return History(price)
+
+            return SimpleNamespace(quote=SimpleNamespace(history=history))
+
+    async def no_quote(*_args, **_kwargs):
+        return None
+
+    async def http_deadline(awaitable, timeout):
+        return await asyncio.wait_for(awaitable, timeout=min(timeout, 0.05))
+
+    manager = ConnectionManager()
+    socket = FakeWebSocket(
+        [json.dumps({"action": "subscribe", "symbols": [" fpt "]})], keep_open=True,
+    )
+    monkeypatch.setattr(loop, "run_in_executor", submit)
+    monkeypatch.setattr(runtime, "get_vnstock_class", lambda: Provider)
+    monkeypatch.setattr(runtime, "_reference_jobs", {})
+    monkeypatch.setattr(QuoteCache, "_cache", {})
+    monkeypatch.setattr(QuoteCache, "_ttl_seconds", 0)
+    monkeypatch.setattr(equity, "asyncio", SimpleNamespace(wait_for=http_deadline))
+    monkeypatch.setattr(equity, "_load_quote_from_database", no_quote)
+    monkeypatch.setattr(equity, "_load_quote_from_mongo", no_quote)
+    monkeypatch.setattr(equity, "_load_latest_screener_snapshot_quote", no_quote)
+    monkeypatch.setattr(websocket_api, "manager", manager)
+    monkeypatch.setattr(websocket_api, "get_market_status", lambda: {
+        "phase": "morning", "is_open": True,
+    })
+    monkeypatch.setattr(websocket_api.settings, "vnstock_timeout", 2)
+    monkeypatch.setattr(websocket_api.settings, "vnstock_source", "VCI")
+    first_http = asyncio.create_task(client.get("/api/v1/equity/fpt/quote?refresh=true"))
+    tasks = [first_http]
+    try:
+        await asyncio.wait_for(started.wait(), 0.5)
+        endpoint = asyncio.create_task(websocket_api.websocket_prices(socket))
+        broadcaster = asyncio.create_task(websocket_api.fetch_and_broadcast_prices())
+        tasks.extend([endpoint, broadcaster])
+        await asyncio.wait_for(socket.waiting.wait(), 0.5)
+        responses = [await first_http]
+        for _ in range(2):
+            responses.append(await client.get("/api/v1/equity/FPT/quote?refresh=true"))
+
+        cancelled = asyncio.create_task(VnstockStockQuoteFetcher.fetch(" fpt ", " vci "))
+        tasks.append(cancelled)
+        await asyncio.sleep(0)
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+
+        assert all(response.status_code == 200 for response in responses)
+        assert all(response.json()["data"] is None for response in responses)
+        assert all(response.json()["error"] == "Quote unavailable." for response in responses)
+        assert len(submitted) == 1
+        assert calls == [{"symbol": "FPT", "source": "VCI"}]
+        assert not workers[0].done()
+        assert not websocket_api._equity_jobs["FPT"].done()
+
+        release.set()
+        await asyncio.wait_for(socket.received_update.wait(), 0.5)
+        await asyncio.gather(*list(websocket_api._equity_jobs.values()))
+        assert socket.sent[-1]["symbol"] == "FPT"
+        assert socket.sent[-1]["price"] == 57400
+        assert socket.sent[-1]["source"] == "vnstock:VCI:quote.history"
+        assert workers[0].done()
+        assert websocket_api._equity_jobs == {}
+        assert runtime._reference_jobs == {}
+
+        response = await client.get("/api/v1/equity/fpt/quote?refresh=true")
+        assert response.status_code == 200
+        assert response.json()["data"]["price"] == 57600
+        assert len(submitted) == 2
+        assert calls == [{"symbol": "FPT", "source": "VCI"}] * 2
+        assert runtime._reference_jobs == {}
+    finally:
+        release.set()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*list(websocket_api._equity_jobs.values()), return_exceptions=True)
+        await asyncio.gather(*workers, return_exceptions=True)

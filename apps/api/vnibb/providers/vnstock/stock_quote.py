@@ -6,16 +6,15 @@ vnstock.quote.history() with today's date to get the latest trading data.
 Extracts: price, change, change_pct, volume, high, low
 """
 
-import asyncio
 import logging
 from datetime import date, datetime, timedelta
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from vnibb.core.exceptions import ProviderError
+from vnibb.core.config import settings
 from vnibb.core.price_units import PriceUnit, history_price_records
-from vnibb.providers.vnstock.runtime import validate_source
+from vnibb.providers.vnstock.runtime import run_reference_provider, validate_source
 
 logger = logging.getLogger(__name__)
 
@@ -186,8 +185,9 @@ class VnstockStockQuoteFetcher:
                 
                 return latest, prev
             
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, _fetch)
+            result = await run_reference_provider(
+                _fetch, settings.vnstock_timeout, key=("stock_quote", source, symbol)
+            )
             
             if not result:
                 return StockQuoteData(symbol=symbol), False
@@ -239,7 +239,7 @@ class VnstockStockQuoteFetcher:
             
             return quote_data, False
             
-        except BaseException as e:
+        except Exception as e:
             error_text = str(e).lower()
             if "invalid symbol" in error_text or "symbol format" in error_text:
                 logger.warning(f"Stock quote rejected for invalid symbol {symbol}: {e}")
