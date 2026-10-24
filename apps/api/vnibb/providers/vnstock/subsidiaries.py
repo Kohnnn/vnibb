@@ -37,8 +37,8 @@ class SubsidiaryData(BaseModel):
     ownership_pct: Optional[float] = None
     charter_capital: Optional[float] = None
     subsidiary_symbol: Optional[str] = None
-    relationship_type: Optional[str] = None
-    raw_data: Optional[dict[str, Any]] = None
+    relationship_type: str | None = None
+    raw_data: dict[str, Any] | None = None
     
     model_config = {
         "json_schema_extra": {
@@ -65,7 +65,7 @@ class VnstockSubsidiariesFetcher(BaseFetcher[SubsidiariesQueryParams, Subsidiary
     @staticmethod
     async def extract_data(
         query: dict[str, Any],
-        credentials: Optional[dict[str, str]] = None,
+        credentials: dict[str, str] | None = None,
     ) -> List[dict[str, Any]]:
         loop = asyncio.get_event_loop()
         

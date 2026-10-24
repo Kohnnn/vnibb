@@ -147,6 +147,8 @@ certify market prices, corporate-action adjustments or production deployment par
 
 Screener responses include `meta.availability`, `meta.screen_scope`, cache/fallback staleness and matched-count metadata. An unavailable provider without a verified fallback returns `data: []`, `meta.availability: "unavailable"` and an error; a successful zero-match screen remains available. Whole-Universe reads require a completed daily symbol-coverage record; symbol-specific reads may still return an unverified row.
 
+Daily screener publication assembles retained, source-certified VND quotes independently of annual ratio enrichment. A completion record requires the exact active symbol set and a positive, dated, unit-certified quote for every row, committed with that record; resumed runs revalidate the durable row set before publication. Missing ratios remain null (existing same-day metrics are retained), and failed optional enrichment has a separate partial `screener_ratio_enrichment` receipt. Quote trade dates are never replaced by materialization time: complete but old observations remain stale. Missing quote coverage withholds the Universe record; classification and capitalization remain unavailable unless supplied by their actual sources.
+
 ### Market
 - `GET /market/indices`
 - `GET /market/world-indices`

@@ -437,11 +437,12 @@ describe('DashboardProvider browser persistence', () => {
   it.each([
     ['an explicit local-period opt-out', { periodSyncGroup: null, defaultPeriod: 'Q' }, { periodSyncGroup: null, defaultPeriod: 'Q' }],
     ['an omitted period group', { defaultPeriod: 'Q' }, { defaultPeriod: 'Q' }],
+    ['an existing shared-period override', { periodSyncGroup: null, defaultPeriod: 'Q', hidePeriodToggle: false }, { periodSyncGroup: null, defaultPeriod: 'Q', hidePeriodToggle: false }],
   ])('preserves %s when widget settings are saved and reloaded', async (_label, advancedConfig, expectedConfig) => {
     const existing: Dashboard = {
       ...customDashboard,
       tabs: [{ id: 'saved-tab', name: 'Saved tab', order: 0, widgets: [{
-        id: 'local-income', type: 'income_statement', tabId: 'saved-tab', config: {},
+        id: 'local-income', type: 'income_statement', tabId: 'saved-tab', config: { periodSyncGroup: 'fundamental-core', defaultPeriod: 'FY', hidePeriodToggle: true },
         layout: { i: 'local-income', x: 0, y: 0, w: 12, h: 8 },
       }] }],
     };
@@ -463,6 +464,29 @@ describe('DashboardProvider browser persistence', () => {
     unmount();
     render(settings);
     await waitFor(() => expect(JSON.parse((screen.getByLabelText('Raw JSON') as HTMLTextAreaElement).value)).toEqual(expectedConfig));
+  });
+
+  it('keeps visible TradingView fields and refresh interval ahead of conflicting advanced JSON', async () => {
+    const existing: Dashboard = {
+      ...customDashboard,
+      tabs: [{ id: 'saved-tab', name: 'Saved tab', order: 0, widgets: [{
+        id: 'typed-chart', type: 'tradingview_chart', tabId: 'saved-tab',
+        config: { symbol: 'AMEX:SPY', useLinkedSymbol: false, interval: 'D', refreshInterval: 30 },
+        layout: { i: 'typed-chart', x: 0, y: 0, w: 12, h: 8 },
+      }] }],
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([existing]));
+    render(<DashboardProvider><GlobalMarketsSymbolProvider>
+      <WidgetSettingsModal isOpen onClose={() => {}} dashboardId={existing.id} tabId="saved-tab" widgetId="typed-chart" />
+    </GlobalMarketsSymbolProvider></DashboardProvider>);
+    const rawJson = await screen.findByLabelText('Raw JSON');
+    fireEvent.change(rawJson, { target: { value: JSON.stringify({ interval: 'W', refreshInterval: 999, customSetting: 'advanced' }) } });
+    fireEvent.change(screen.getByLabelText('Default Interval'), { target: { value: '60' } });
+    fireEvent.change(screen.getByLabelText('Auto-Refresh Interval (seconds)'), { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(storedDashboards().find((dashboard) => dashboard.id === existing.id)?.tabs[0].widgets[0].config).toEqual(
+      expect.objectContaining({ interval: '60', refreshInterval: 45, customSetting: 'advanced', symbol: 'AMEX:SPY', useLinkedSymbol: false }),
+    ));
   });
 
   it('reloads bottom-placed widgets without changing authored dashboard geometry or config', async () => {

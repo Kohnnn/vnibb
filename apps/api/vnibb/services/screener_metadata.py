@@ -1,6 +1,6 @@
 """Keep snapshot ratio evidence independent from retained quote provenance."""
 
-from sqlalchemy import JSON, case, cast, func, literal
+from sqlalchemy import JSON, String, case, cast, func, literal
 from sqlalchemy.dialects.postgresql import JSONB
 
 from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
@@ -22,16 +22,17 @@ def screener_metadata_updates(stmt, dialect_name, quote_missing):
         non_price = new.op("-")("price_unit").op("-")("price_source")
         new = case((quote_missing, non_price), else_=new)
         new = case(
-            (json_object(new["ratio_units"]).has_key("debt_assets"), new),
+            (json_object(new.op("->")("ratio_units")).has_key("debt_assets"), new),
             else_=new.op("-")("debt_to_asset"),
         )
-        units = json_object(old["ratio_units"]).op("||")(json_object(new["ratio_units"]))
+        units = json_object(old.op("->")("ratio_units")).op("||")(json_object(new.op("->")("ratio_units")))
         merged = old.op("||")(new).op("||")(func.jsonb_build_object("ratio_units", units))
         def has_marker(metric):
-            return json_object(new["ratio_units"]).has_key(metric)
+            return json_object(new.op("->")("ratio_units")).has_key(metric)
 
         def certified_value(metric):
-            return case((new["ratio_units"][metric].astext == "percent", incoming[metric]), else_=None)
+            unit = new.op("->")("ratio_units").op("->>", return_type=String)(metric)
+            return case((unit == "percent", incoming[metric]), else_=None)
         metadata = cast(merged, JSON)
     else:
         old = func.coalesce(func.nullif(existing.extended_metrics, "null"), "{}")

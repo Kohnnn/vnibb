@@ -1041,7 +1041,7 @@ Multi-dataset raw record store for fundamentals and company data.
 | `period` | string | `FY2025`, `2025-Q1` |
 | `periodType` | string | `YEAR`, `QUARTER` |
 | `fiscalYear`/`fiscalQuarter` | int | Period decomposition |
-| `observedAt` | datetime | Period anchor |
+| `observedAt` | datetime | Current Vietcap financial writers use `receivedAt` (response receipt time), not a fiscal-period or source-publication timestamp. `sourceDate` is parsed only from the provider's actual `raw.publicDate`; inspect retained writer/source evidence for legacy semantics. |
 | `raw` | object | Raw provider document (coded fields like `isa20`, `bsa53`) |
 | `schemaVersion` | int | `1` |
 

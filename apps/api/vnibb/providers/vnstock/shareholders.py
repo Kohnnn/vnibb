@@ -118,7 +118,7 @@ class VnstockShareholdersFetcher(BaseFetcher[ShareholdersQueryParams, Shareholde
     @staticmethod
     async def extract_data(
         query: dict[str, Any],
-        credentials: Optional[dict[str, str]] = None,
+        credentials: dict[str, str] | None = None,
     ) -> List[dict[str, Any]]:
         loop = asyncio.get_event_loop()
 

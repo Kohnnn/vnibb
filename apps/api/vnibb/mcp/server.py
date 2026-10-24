@@ -37,7 +37,7 @@ from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
-from vnibb.providers.vnstock.financials import FinancialStatementData, admitted_interest_expense
+from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.services.ai_context_service import AIContextService
 from vnibb.services.financial_service import admit_statement_rows
 from vnibb.services.matrix_service import require_matrix_export_rights, resolve_matrix_selection

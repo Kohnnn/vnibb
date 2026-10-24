@@ -640,17 +640,19 @@ async def test_screener_modular_quote_and_failed_rerun_preserve_certified_row(te
         certified = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).one()
         assert certified.status == "completed"
     assert quote_calls == ["VNM"]
-    writes_before = len(cache)
+    assert row.pe == 12
     available[0] = False
     progress = {}
     await pipeline.sync_screener_data(progress=progress)
     assert progress["error_count"] == 1
-    assert len(cache) == writes_before
     async with sessions() as session:
         row = (await session.scalars(select(ScreenerSnapshot).where(ScreenerSnapshot.symbol == "VNM"))).one()
         assert row.price == 123
-        certified = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).one()
-        assert certified.status == "completed"
+        assert row.pe == 12
+        certified = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+        assert len(certified) == 2
+        partial = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_ratio_enrichment"))).one()
+        assert partial.status == "partial" and partial.error_count == 1
 
 
 def test_live_wide_quarter_ratio_shape_keeps_canonical_duplicate_period():
@@ -661,3 +663,104 @@ def test_live_wide_quarter_ratio_shape_keeps_canonical_duplicate_period():
         FinancialRatiosQueryParams(symbol="VNM", period="quarter"), rows
     )
     assert [(row.period, row.pe) for row in data] == [("2026-Q2", 12), ("2026-Q1", 11), ("2025-Q4", 10)]
+
+
+@pytest.fixture
+def screener_base_pipeline(test_engine, monkeypatch):
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr("vnibb.services.data_pipeline.async_session_maker", sessions)
+
+    class Listing:
+        def __init__(self, **kwargs):
+            pass
+
+        def all_symbols(self):
+            return pd.DataFrame()
+
+        symbols_by_exchange = all_symbols
+        symbols_by_industries = all_symbols
+
+    class Finance:
+        def __init__(self, **kwargs):
+            pass
+
+        def ratio(self, **kwargs):
+            raise TimeoutError("annual ratios unavailable")
+
+    async def no_io(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    pipeline = DataPipeline()
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", no_io)
+    monkeypatch.setattr(pipeline, "_cache_set_json", no_io)
+    return pipeline, sessions
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_base", [False, True])
+async def test_screener_ratio_failure_publishes_only_complete_certified_base(screener_base_pipeline, missing_base):
+    from vnibb.models.screener import ScreenerSnapshot
+    from vnibb.models.stock import Stock, StockPrice
+
+    pipeline, sessions = screener_base_pipeline
+    trade_date = date(2026, 10, 14)
+    async with sessions.begin() as session:
+        session.add_all([Stock(id=1, symbol="FPT"), Stock(id=2, symbol="VNM")])
+        for index, symbol in enumerate(["FPT"] if missing_base else ["FPT", "VNM"], 1):
+            session.add(StockPrice(id=index, stock_id=index, symbol=symbol, time=trade_date,
+                                   open=100, high=100, low=100, close=100, volume=0,
+                                   source="vnstock_vnd:VCI", interval="1D"))
+    progress = {}
+    assert await pipeline.sync_screener_data(progress=progress) == (1 if missing_base else 2)
+    assert progress["stage_stats"]["screener"]["ratio_errors"] == 2
+    async with sessions() as session:
+        rows = (await session.scalars(select(ScreenerSnapshot))).all()
+        assert all(row.price == 100 and row.volume == 0 and row.trade_date == trade_date for row in rows)
+        assert all(row.pe is None and row.roe is None and row.market_cap is None for row in rows)
+        assert all(row.extended_metrics["price_unit"] == "VND" for row in rows)
+        assert all(row.extended_metrics["price_source"] == "vnstock_vnd:VCI" for row in rows)
+        markers = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+        assert len(markers) == (0 if missing_base else 1)
+        receipt = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_ratio_enrichment"))).one()
+        assert receipt.status == "partial" and receipt.error_count == 2
+
+
+@pytest.mark.asyncio
+async def test_screener_resumed_base_and_marker_commit_atomically(screener_base_pipeline, monkeypatch):
+    from datetime import datetime
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from vnibb.models.screener import ScreenerSnapshot
+    from vnibb.models.stock import Stock, StockPrice
+
+    pipeline, sessions = screener_base_pipeline
+    today = datetime.utcnow().date()
+    async with sessions.begin() as session:
+        session.add_all([Stock(id=1, symbol="FPT"), Stock(id=2, symbol="VNM")])
+        session.add(ScreenerSnapshot(symbol="FPT", snapshot_date=today, trade_date=today, price=100,
+                                    extended_metrics={"price_unit": "VND", "price_source": "vnstock_vnd:VCI"}))
+        session.add(StockPrice(id=2, stock_id=2, symbol="VNM", time=today, open=200, high=200,
+                               low=200, close=200, volume=0, source="vnstock_vnd:VCI", interval="1D"))
+    original_commit = AsyncSession.commit
+    interrupt = [True]
+
+    async def commit(session):
+        if interrupt[0] and any(isinstance(row, SyncStatus) and row.sync_type == "screener_universe" for row in session.new):
+            raise asyncio.CancelledError()
+        await original_commit(session)
+
+    monkeypatch.setattr(AsyncSession, "commit", commit)
+    progress = {"stage": "screener", "last_index": 0}
+    with pytest.raises(asyncio.CancelledError):
+        await pipeline.sync_screener_data(progress=progress, enrich_ratios=False)
+    async with sessions() as session:
+        assert list(await session.scalars(select(ScreenerSnapshot.symbol))) == ["FPT"]
+        assert not (await session.scalars(select(SyncStatus))).all()
+    interrupt[0] = False
+    assert await pipeline.sync_screener_data(progress=progress, enrich_ratios=False) == 1
+    async with sessions() as session:
+        marker = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).one()
+        assert marker.additional_data["expected_symbols"] == ["FPT", "VNM"]
+        assert marker.success_count == 2 and progress["base_count"] == 2

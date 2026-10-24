@@ -13,7 +13,6 @@ market.py is fixed.
 from datetime import date, datetime
 
 import pytest
-
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.providers.vnstock.equity_screener import ScreenerData
 from vnibb.services.cache_manager import CacheResult
@@ -248,6 +247,7 @@ async def test_daily_change_normalizes_each_persisted_source(test_engine, test_d
 @pytest.mark.asyncio
 async def test_breadth_range_and_sma_use_only_canonical_history(test_engine, test_db, monkeypatch):
     from datetime import timedelta
+
     from sqlalchemy.ext.asyncio import async_sessionmaker
     from vnibb.api.v1.market import _load_52_week_range_map, _load_latest_technical_indicator_map
     from vnibb.models.stock import Stock, StockPrice
@@ -370,7 +370,7 @@ async def test_market_movers_serve_retained_without_starting_provider(
         if provider_state == "error":
             raise RuntimeError("Primary provider unavailable")
         if provider_state == "timeout":
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
         raise AssertionError("Retained observations must not start a provider refresh")
 
     monkeypatch.setattr(market.VnstockTopMoversFetcher, "fetch", provider)
@@ -525,7 +525,7 @@ async def test_market_retained_movers_do_not_relabel_older_ranked_observations(
             if symbol == "OLD" else [date(2026, 9, 1), date(2026, 9, 2)]
         )
         volume = 1_000_000 if symbol == "OLD" else 100
-        for day, close in zip(days, [100_000.0, 110_000.0]):
+        for day, close in zip(days, [100_000.0, 110_000.0], strict=True):
             test_db.add(StockPrice(
                 id=price_id, symbol=symbol, stock_id=stock_index + 1,
                 time=day, interval="1D", source="vietcap_vnd",
@@ -573,6 +573,7 @@ async def test_market_retained_movers_require_finite_observed_rank_metric(
     client, monkeypatch, mover_type, missing_metric, observed_zero_available
 ):
     from types import SimpleNamespace
+
     from vnibb.api.v1 import market
 
     session_date = date(2026, 9, 2)
@@ -691,7 +692,6 @@ async def test_market_retained_inputs_share_sql_across_types_limits_and_aliases(
 
     from sqlalchemy import event
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.api.v1 import market
     from vnibb.core import cache
     from vnibb.models.stock import Stock, StockPrice
@@ -762,7 +762,6 @@ async def test_market_movers_share_occupied_raw_provider_after_cancellation_and_
     import threading
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.api.v1 import market
     from vnibb.core import cache
     from vnibb.providers.vnstock import runtime as provider_runtime

@@ -130,7 +130,8 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
         calls.append("seeded")
         return ["VNM", "FPT"]
 
-    async def fake_screener(*, progress):
+    async def fake_screener(*, progress, enrich_ratios):
+        assert enrich_ratios is False
         calls.append("screener_universe")
         return 2
 
@@ -234,7 +235,7 @@ async def test_daily_receipt_retains_prices_when_screener_fails(monkeypatch, dai
         progress.update(committed_count=20, success_count=2)
         return 20
 
-    async def screener(*, progress):
+    async def screener(*, progress, enrich_ratios):
         calls.append("screener")
         progress.update(committed_count=1, success_count=2, error_count=1,
                         errors=[{"symbol": "VNM", "error": "ratio unavailable"}])
@@ -283,7 +284,7 @@ async def test_daily_receipt_retains_active_stage_on_cancellation(monkeypatch, d
     async def prices(*, progress, **kwargs):
         return await acquire("daily_prices", progress, 20)
 
-    async def screener(*, progress):
+    async def screener(*, progress, enrich_ratios):
         return await acquire("screener", progress, 1)
 
     monkeypatch.setattr(data_pipeline, "sync_daily_prices", prices)
@@ -345,7 +346,7 @@ async def test_daily_receipt_cancellation_persists_to_sql(test_engine, monkeypat
     async def prices(*, progress, **kwargs):
         return await acquire("daily_prices", progress, 20)
 
-    async def screener(*, progress):
+    async def screener(*, progress, enrich_ratios):
         return await acquire("screener", progress, 1)
 
     monkeypatch.setattr(data_pipeline, "sync_daily_prices", prices)

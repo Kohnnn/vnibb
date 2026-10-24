@@ -103,10 +103,12 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
         sourceLabel: 'Quote + profile',
         lastDataDate: sourceUpdatedAt,
         fetchedAt: quoteUpdatedAt,
+        cached: Boolean(quote?.cached) || isFallback,
+        stale: Boolean(quote?.stale) || isFallback,
         extra: { quote, profile: profileData, screener: screenerRow },
       }),
     )
-  }, [onDataChange, profileData, quote, screenerRow, hasQuote, symbol, quoteUpdatedAt, sourceUpdatedAt])
+  }, [onDataChange, profileData, quote, screenerRow, hasQuote, isFallback, symbol, quoteUpdatedAt, sourceUpdatedAt])
 
   const handleRetry = () => {
     refetchQuote();

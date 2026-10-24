@@ -192,6 +192,10 @@ export interface FullTechnicalAnalysis {
         unit_status?: string;
         unresolved_session_count?: number;
         unresolved_excluded_dates?: string[];
+        source_mode?: string;
+        source_counts?: Record<string, number>;
+        completeness_status?: 'complete' | 'partial' | 'unknown';
+        stale?: boolean;
     };
     generated_at: string;
 }

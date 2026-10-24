@@ -592,7 +592,8 @@ async def run_daily_market_sync(
             errors = []
             try:
                 count = int(await operation())
-                if progress.get("error_count") or (name == "screener" and count != len(symbols)):
+                acquired = progress.get("base_count", count) if name == "screener" else count
+                if progress.get("error_count") or (name == "screener" and acquired != len(symbols)):
                     raise RuntimeError(f"{name} acquisition unavailable or incomplete")
             except Exception as exc:
                 count = max(count, int(progress.get("committed_count", 0)))
@@ -610,7 +611,7 @@ async def run_daily_market_sync(
         ), price_progress), price_progress)
         screener_progress: dict = {}
         await record("screener", lambda: acquire("screener", lambda: data_pipeline.sync_screener_data(
-            progress=screener_progress,
+            progress=screener_progress, enrich_ratios=False,
         ), screener_progress), screener_progress)
         await record("indices", sync.sync_all_indices)
 

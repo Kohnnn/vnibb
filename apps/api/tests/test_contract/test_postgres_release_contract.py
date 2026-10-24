@@ -154,3 +154,62 @@ async def test_session_timeouts_survive_rollback_commit_and_pool_reuse():
     finally:
         await database.engine.dispose()
         database.sync_engine.dispose()
+
+
+@pytest.mark.postgres_contract
+@pytest.mark.asyncio
+async def test_screener_quote_base_preserves_ratio_metadata_on_postgres(test_db, monkeypatch):
+    from vnibb.models.screener import ScreenerSnapshot
+    from vnibb.models.stock import StockPrice
+    from vnibb.providers.vnstock import runtime
+    from vnibb.services import data_pipeline as pipeline_module
+
+    symbol = f"S{uuid4().hex[:8]}".upper()
+    today = datetime.utcnow().date()
+    trade_date = date(2026, 10, 14)
+    sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
+    monkeypatch.setattr(pipeline_module, "async_session_maker", sessions)
+    monkeypatch.setattr(pipeline_module, "engine", test_db.bind)
+
+    class NoProvider:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("Retained quote assembly must not acquire provider data")
+
+    async def no_cache(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: NoProvider)
+    monkeypatch.setattr(runtime, "get_finance_class", lambda: NoProvider)
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: NoProvider)
+    pipeline = pipeline_module.DataPipeline()
+    monkeypatch.setattr(pipeline, "_cache_set_json", no_cache)
+    evidence = [{"source": "fixture", "observation_date": "2025-12-31"}]
+    try:
+        stock = Stock(symbol=symbol, is_active=1)
+        test_db.add(stock)
+        await test_db.flush()
+        test_db.add_all([
+            StockPrice(stock_id=stock.id, symbol=symbol, time=trade_date,
+                       open=100, high=100, low=100, close=100, volume=0,
+                       interval="1D", source="vnstock_vnd:VCI"),
+            ScreenerSnapshot(symbol=symbol, snapshot_date=today, trade_date=trade_date,
+                             price=90, pe=12, roe=15, extended_metrics={
+                                 "price_unit": "VND", "price_source": "vnstock_vnd:VCI",
+                                 "ratio_units": {"roe": "percent"}, "provider_evidence": evidence,
+                             }),
+        ])
+        await test_db.commit()
+        progress = {}
+        assert await pipeline.sync_screener_data(symbols=[symbol], progress=progress, enrich_ratios=False) == 1
+        async with sessions() as session:
+            row = (await session.scalars(select(ScreenerSnapshot).where(ScreenerSnapshot.symbol == symbol))).one()
+            assert row.price == 100 and row.volume == 0 and row.trade_date == trade_date
+            assert row.pe == 12 and row.roe == 15 and row.market_cap is None
+            assert row.extended_metrics["price_unit"] == "VND"
+            assert row.extended_metrics["ratio_units"] == {"roe": "percent"}
+            assert row.extended_metrics["provider_evidence"] == evidence
+    finally:
+        await test_db.execute(ScreenerSnapshot.__table__.delete().where(ScreenerSnapshot.symbol == symbol))
+        await test_db.execute(StockPrice.__table__.delete().where(StockPrice.symbol == symbol))
+        await test_db.execute(Stock.__table__.delete().where(Stock.symbol == symbol))
+        await test_db.commit()

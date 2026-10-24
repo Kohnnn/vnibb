@@ -1,7 +1,9 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
+import { useSyncExternalStore } from 'react';
 import { useHistoricalPrices, useProfile, useScreenerData, useStockQuote } from '@/lib/queries';
 import { useUnit } from '@/contexts/UnitContext';
 import { TickerInfoWidget } from './TickerInfoWidget';
+import { deriveWidgetHealth } from '@/lib/widgetHealth';
 
 jest.mock('@/lib/queries', () => ({
   useHistoricalPrices: jest.fn(), useProfile: jest.fn(), useScreenerData: jest.fn(),
@@ -296,5 +298,44 @@ describe('TickerInfoWidget freshness contract', () => {
     // become the source date.
     expect(provenance.updatedAt).toBeFalsy();
     expect(provenance.fetchedAt).toBe(QUOTE_RECEIPT);
+  });
+
+  test('keeps cached and stale health when refetch advances receipt time or fails with retained data', () => {
+    const onDataChange = jest.fn();
+    const quote = {
+      symbol: 'FPT', price: 57300, price_unit: 'VND',
+      updatedAt: QUOTE_OBSERVED_AT, cached: true, stale: true,
+    };
+    let snapshot = {
+      data: quote, isLoading: false, isFetching: false,
+      refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT, error: undefined as Error | undefined,
+    };
+    let notify: () => void = () => {};
+    mockStockQuote.mockImplementation(() => useSyncExternalStore(
+      (listener) => { notify = listener; return () => {}; },
+      () => snapshot,
+    ));
+    render(<TickerInfoWidget id="ticker-1" symbol="FPT" onDataChange={onDataChange} />);
+    const initial = onDataChange.mock.calls.at(-1)[0].__widgetRuntime.provenance;
+    expect(deriveWidgetHealth(initial)).toMatchObject({ status: 'stale', label: 'Stale' });
+    expect(deriveWidgetHealth(initial).detail).toContain('cached snapshot');
+
+    act(() => {
+      snapshot = { ...snapshot, dataUpdatedAt: QUOTE_RECEIPT + 60_000 };
+      notify();
+    });
+    const refreshed = onDataChange.mock.calls.at(-1)[0].__widgetRuntime.provenance;
+    expect(refreshed.updatedAt).toBe(QUOTE_OBSERVED_AT);
+    expect(refreshed.fetchedAt).toBe(QUOTE_RECEIPT + 60_000);
+    expect(deriveWidgetHealth(refreshed).status).toBe('stale');
+
+    act(() => {
+      snapshot = { ...snapshot, data: { ...quote, cached: false, stale: false }, error: new Error('Quote refetch unavailable') };
+      notify();
+    });
+    const fallback = onDataChange.mock.calls.at(-1)[0].__widgetRuntime.provenance;
+    expect(fallback).toMatchObject({ cached: true, stale: true, updatedAt: QUOTE_OBSERVED_AT });
+    expect(deriveWidgetHealth(fallback).detail).toContain('cached snapshot');
+    expect(screen.getByText('57,300.00')).toBeInTheDocument();
   });
 });

@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.services import prediction_market_service as service
 from vnibb.services.prediction_market_policy import snapshot_eligibility

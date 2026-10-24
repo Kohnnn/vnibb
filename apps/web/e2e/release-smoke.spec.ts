@@ -26,6 +26,10 @@ const screenerRows = [
 ];
 
 test.beforeEach(async ({ page }) => {
+  await page.addLocatorHandler(page.getByRole('dialog', { name: 'VNIBB walkthrough' }), async (dialog) => {
+    await dialog.getByRole('button', { name: 'Close walkthrough' }).click();
+  });
+
   await page.addInitScript(() => {
     localStorage.setItem('vnibb-dashboard-version', 'v74');
     localStorage.setItem('vnibb_migration_version', '23');
@@ -51,7 +55,6 @@ test.beforeEach(async ({ page }) => {
     localStorage.setItem('vnibb-user-preferences', JSON.stringify({
       defaultTicker: 'VCB',
       defaultTab: 'fundamentals',
-      onboarding: { dashboardWalkthroughVersion: 3, dashboardWalkthroughDismissedVersion: 3 },
     }));
   });
 
@@ -96,15 +99,17 @@ test('renders the dashboard and searches a ticker', async ({ page }) => {
   expect(readiness.ok()).toBeTruthy();
 
   await page.goto('/dashboard');
+  await page.getByRole('dialog', { name: "What's new" }).getByRole('button', { name: "Dismiss what's new" }).click();
 
   await expect(page.getByText('Start with a suggested layout')).toBeVisible();
   await page.getByRole('button', { name: 'Open symbol search and command palette' }).click();
-  await page.getByRole('textbox', { name: 'Command palette search' }).fill('VCB');
-  await expect(page.getByRole('button', { name: /VCB.*Vietcombank/i })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Command palette search' }).fill('VCB');
+  await expect(page.getByRole('option', { name: /VCB.*Vietcombank/i })).toBeVisible();
 });
 
 test('filters screener results', async ({ page }) => {
   await page.goto('/dashboard');
+  await page.getByRole('dialog', { name: "What's new" }).getByRole('button', { name: "Dismiss what's new" }).click();
   await page.getByRole('button', { name: 'VNIBB Screener' }).click();
 
   await expect(page.getByText('VNIBB Screener Pro', { exact: true })).toBeVisible();

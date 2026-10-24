@@ -32,9 +32,18 @@ class Collection:
         self.query = query
         if self.error:
             raise self.error
+        def matches(actual, expected):
+            values = actual if isinstance(actual, list) else [actual]
+            if not isinstance(expected, dict):
+                return actual == expected or expected in values
+            return (
+                ("$eq" not in expected or expected["$eq"] in values)
+                and (expected.get("$type") != "string" or any(isinstance(value, str) for value in values))
+            )
+
         selected = [
             row for row in self.rows
-            if all(row.get(key) == value for key, value in query.items() if not isinstance(value, dict))
+            if all(matches(row.get(key), value) for key, value in query.items())
         ]
         # Exercise the actual reader projection, not a projection-ignoring stub.
         projected = []
@@ -263,13 +272,25 @@ async def test_market_reader_public_tool_ignores_outer_symbol(monkeypatch, datas
 @pytest.mark.parametrize("store", ["market_company_profiles", "market_financial_metric_map"])
 async def test_reference_envelope_public_tool(monkeypatch, store):
     envelope = {"source": "vietcap", "symbol": "VNM", "schemaVersion": 3, "createdAt": datetime(2025, 1, 1), "descriptors": [{"field": None}, {"field": "a"}, {"field": "a"}], "descriptorEvidence": {"symbol": "VNM"}}
-    collection = Collection([envelope])
+    collection = Collection([
+        envelope,
+        {**envelope, "symbol": "FPT"},
+        {key: value for key, value in envelope.items() if key != "symbol"},
+        {**envelope, "symbol": 123},
+        {**envelope, "symbol": None},
+        {**envelope, "symbol": {"value": "VNM"}},
+        {**envelope, "symbol": ["FPT"]},
+        {**envelope, "symbol": ["VNM"]},
+    ])
     server = enable_public_reader(monkeypatch, collection)
     response = await server.get_reference_dataset("VNM", store)
-    assert set(response["items"][0]) == set(envelope)
-    assert response["items"][0]["descriptors"] == envelope["descriptors"]
-    if store == "market_financial_metric_map":
-        assert collection.query == {"source": "vietcap", "symbol": "VNM", "schemaVersion": 3}
+    serialized = {**envelope, "createdAt": "2025-01-01T00:00:00"}
+    assert {key: value for key, value in response.items() if key != "retrieved_at"} == {
+        "symbol": "VNM", "source": f"mongodb:{store}", "provider_source": "vietcap",
+        "row_count": 2, "items": [serialized, {**serialized, "symbol": ["VNM"]}],
+        "limit": 100, "data_status": "available", "provider_execution": False,
+        "freshness": "not_assessed; inspect source dates separately from ingestion",
+    }
 
 
 @pytest.mark.asyncio
@@ -334,7 +355,7 @@ async def test_migrated_objectid_lineage_reaches_public_reference_json(monkeypat
             if "migrationSource.documentId" in query:
                 return Cursor([row for row in self.rows if row.get("schemaVersion") == 3
                                and isinstance(row.get("migrationSource", {}).get("documentId"), ObjectId)])
-            if isinstance(query.get("symbol"), dict):
+            if query.get("symbol") == {"$exists": False}:
                 return Cursor([row for row in self.rows if "symbol" not in row])
             return super().find(query, projection or {})
 
@@ -552,6 +573,54 @@ async def test_native_depth_shapes_preserve_unknown_units(monkeypatch, raw, expe
     assert rows[0]["priceUnit"] == "unknown"
     if expected is not None:
         assert rows[0]["volume"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("empty_latest", [False, True])
+async def test_retained_wide_depth_reaches_public_mcp_without_unit_or_time_inference(monkeypatch, empty_latest):
+    retained_at = datetime(2026, 6, 8, 3, 52, 14, 17000)
+    raw = {
+        "bid_price_1": "39200.0", "bid_vol_1": 11200,
+        "bid_price_2": 39100, "bid_vol_2": 8200,
+        "bid_price_3": 39000, "bid_vol_3": 26300,
+        "ask_price_1": "39300.0", "ask_vol_1": 400,
+        "ask_price_2": 39400, "ask_vol_2": 9500,
+        "ask_price_3": 39500, "ask_vol_3": 13700,
+        "symbol": "MSR", "ticker": "MSR",
+    }
+    envelope = {
+        "dataset": "equity.price_depth", "symbol": "MSR",
+        "recordKey": "vnstock-data:equity.price_depth:MSR:d1ed10261e5feac7",
+        "source": "vnstock-data", "providerSource": "vnstock_data",
+        "observedAt": retained_at, "updatedAt": retained_at, "raw": raw,
+    }
+    records = [envelope]
+    if empty_latest:
+        records.insert(0, {
+            "dataset": "equity.price_depth", "symbol": "MSR", "batchReceipt": True,
+            "rowCount": 0, "updatedAt": datetime(2026, 10, 24),
+            "latestSessionStatus": "empty", "observedAt": None, "raw": {},
+        })
+    server = enable_public_reader(monkeypatch, Collection(records))
+    response = await server.get_price_depth("MSR")
+    assert response["coverage"] == "current_write_batch; not historical session replay"
+    assert response["row_count"] == (0 if empty_latest else 6)
+    assert response["latest_session_status"] == ("empty" if empty_latest else "unknown")
+    if empty_latest:
+        assert response["items"] == []
+        return
+    assert [(row["price"], row["buy_volume"], row["sell_volume"]) for row in response["items"]] == [
+        (39200, 11200, 0), (39300, 0, 400),
+        (39100, 8200, 0), (39400, 0, 9500),
+        (39000, 26300, 0), (39500, 0, 13700),
+    ]
+    for row in response["items"]:
+        assert row["raw"] == raw
+        assert row["source"] == "vnstock-data"
+        assert row["providerSource"] == "vnstock_data"
+        assert row["observedAt"] == retained_at.isoformat()
+        assert "priceUnit" not in row
+        assert "normalizationStatus" not in row
 
 
 class ReplaceCollection(Collection):

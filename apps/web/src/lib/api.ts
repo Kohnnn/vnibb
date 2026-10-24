@@ -206,9 +206,9 @@ export async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}):
 
     try {
         const response = await fetch(url, {
+            ...fetchOptions,
             headers,
             signal: requestSignal,
-            ...fetchOptions,
             body: requestBody,
         });
 

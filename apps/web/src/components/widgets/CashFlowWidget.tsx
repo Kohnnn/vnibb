@@ -202,7 +202,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
         const ambiguous = periodIssues.filter((issue) => issue.reason === 'ambiguous-basis');
         if (ambiguous.length > 0) {
             notes.push(
-                `Unavailable: ${ambiguous.map((issue) => issue.period).join(', ')} returned conflicting rows with no basis field, so no value is shown.`
+                `Unavailable: ${ambiguous.map((issue) => issue.period).join(', ')} returned conflicting rows without an authoritative basis/revision selection, so no value is shown.`
             );
         }
         if (invalidPeriodCount > 0) {

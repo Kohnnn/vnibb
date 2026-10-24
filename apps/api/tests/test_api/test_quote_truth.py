@@ -8,7 +8,6 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
 from vnibb.api.main import app
 from vnibb.api.v1 import equity
 from vnibb.core import cache

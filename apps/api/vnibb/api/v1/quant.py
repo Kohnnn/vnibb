@@ -956,14 +956,20 @@ def _build_moving_average_backtest(
         )
     min_points_required = strategy.slow_window + 2
     if len(data) < min_points_required:
+        diagnostics = frame.attrs.get("price_diagnostics", {})
+        unresolved_dates = diagnostics.get("unresolved_excluded_dates") or []
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "INSUFFICIENT_BACKTEST_DATA",
                 "message": (
-                    f"Expected at least {min_points_required} sessions for this strategy, "
-                    f"got {len(data)}."
+                    f"History withheld: {len(unresolved_dates)} session(s) have unconfirmed or incompatible price units."
+                    if unresolved_dates else
+                    f"Expected at least {min_points_required} sessions for this strategy, got {len(data)}."
                 ),
+                "required_session_count": min_points_required,
+                "available_session_count": len(data),
+                "price_diagnostics": diagnostics,
             },
         )
 

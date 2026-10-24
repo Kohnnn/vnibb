@@ -4,7 +4,6 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.api.v1 import market
 from vnibb.models.stock import Stock, StockPrice
 

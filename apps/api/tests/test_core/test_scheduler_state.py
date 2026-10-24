@@ -11,7 +11,6 @@ from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.api.v1 import data_sync
 from vnibb.core import database, scheduler
 from vnibb.models.scheduler_state import SchedulerWorkerState
@@ -228,7 +227,6 @@ async def test_scheduled_catalogue_cleanup_executes_guarded_runner(monkeypatch):
 @pytest.mark.parametrize("pending_rows", [0, 1])
 async def test_hourly_catalogue_cleanup_reports_remaining_backlog(test_engine, monkeypatch, pending_rows):
     from sqlalchemy import select
-
     from vnibb.models.prediction_market import PredictionMarket
     from vnibb.models.prediction_market_archive import PredictionMarketArchive
     from vnibb.models.prediction_market_snapshot import PredictionMarketSnapshot
@@ -431,7 +429,6 @@ async def test_restart_population_control_preserves_regular_ingestion(monkeypatc
 @pytest.mark.asyncio
 async def test_prediction_retention_jobs_prune_sql_rows_after_fetch_failure(test_engine, monkeypatch):
     from sqlalchemy import select
-
     from vnibb.models.prediction_market import PredictionMarket
     from vnibb.models.prediction_market_intraday_snapshot import PredictionMarketIntradaySnapshot
     from vnibb.models.prediction_market_snapshot import PredictionMarketSnapshot
@@ -513,7 +510,6 @@ async def test_prediction_ingest_persists_committed_progress_failures_and_recove
     test_engine, monkeypatch, startup,
 ):
     from sqlalchemy import select
-
     from vnibb.models.prediction_market import PredictionMarket
     from vnibb.services import (
         kalshi_service,

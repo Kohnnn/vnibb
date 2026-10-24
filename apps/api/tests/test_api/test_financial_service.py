@@ -3,14 +3,20 @@ from datetime import datetime
 
 import pytest
 
-from vnibb.api.v1.equity import _growth_detail, _growth_rate, _merge_financial_statement_rows, _build_ttm_financial_statement_rows, _enrich_financial_statement_rows
+from vnibb.api.v1.equity import (
+    _build_ttm_financial_statement_rows,
+    _enrich_financial_statement_rows,
+    _growth_detail,
+    _growth_rate,
+    _merge_financial_statement_rows,
+)
 from vnibb.providers.vnstock.financials import FinancialStatementData, StatementType
 from vnibb.services.financial_service import (
     _build_ytd_snapshot,
+    admit_statement_rows,
     calculate_ttm,
     get_financials_with_ttm,
     normalize_statement_period,
-    admit_statement_rows,
 )
 
 
@@ -234,6 +240,7 @@ def test_derived_ytd_interest_keeps_original_component_evidence_at_final_admissi
 @pytest.mark.parametrize("evidence,expected", [("certified", 0), ("unknown_flow", None), ("fiscal_conflict", None)])
 async def test_financial_endpoint_preserves_canonical_ytd_after_repeated_admission(monkeypatch, evidence, expected):
     from unittest.mock import AsyncMock
+
     from vnibb.api.v1 import equity
 
     quarters = [FinancialStatementData(
