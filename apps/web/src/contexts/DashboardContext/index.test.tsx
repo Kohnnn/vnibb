@@ -636,6 +636,69 @@ describe('DashboardProvider browser persistence', () => {
     expect(window.localStorage.getItem(DASHBOARD_RECOVERY_BACKUP_KEY)).toContain(customDashboard.id);
   });
 
+  it('quarantines malformed saved records without replacing valid personal workspaces on migration or reload', async () => {
+    const personal: Dashboard = {
+      ...customDashboard,
+      name: 'My retained research',
+      folderId: 'folder-initial',
+      syncGroups: [{ id: 1, name: 'Core tickers', color: '#3B82F6', currentSymbol: 'FPT' }],
+      tabs: [{ id: 'saved-tab', name: 'My thesis', order: 0, widgets: [
+        { id: 'linked-chart', type: 'price_chart', tabId: 'saved-tab', syncGroupId: 1, config: { timeframe: '3M', indicators: ['SMA20'] }, layout: { i: 'linked-chart', x: 2, y: 4, w: 12, h: 9, static: true } },
+        { id: 'detached-income', type: 'income_statement', tabId: 'saved-tab', config: { symbol: 'VNM', periodSyncGroup: null, defaultPeriod: 'Q' }, layout: { i: 'detached-income', x: 14, y: 4, w: 10, h: 9 } },
+      ] }],
+    };
+    const globalWorkspace: Dashboard = {
+      ...customDashboard,
+      id: 'import-global-research',
+      name: 'My global research',
+      globalMarketsSymbol: 'NASDAQ:AAPL',
+      tabs: [{ id: 'global-tab', name: 'Global', order: 0, widgets: [{ id: 'global-chart', type: 'tradingview_chart', tabId: 'global-tab', config: { symbol: 'FX:USDVND', timeframe: '12M' }, layout: { i: 'global-chart', x: 3, y: 2, w: 15, h: 10 } }] }],
+    };
+    const customizedSystem: Dashboard = {
+      ...personal,
+      id: 'default-technical',
+      name: 'My Technical customization',
+      isDefault: true,
+    };
+    const rawDashboards = JSON.stringify([
+      personal,
+      customizedSystem,
+      { ...customDashboard, id: 'malformed-tabs', tabs: null },
+      globalWorkspace,
+      { ...customDashboard, id: 'malformed-layout', tabs: [{ id: 'bad-tab', name: 'Bad', order: 0, widgets: [{ id: 'bad-widget', type: 'notes', tabId: 'bad-tab', config: {}, layout: { i: 'bad-widget', x: 0, y: 0, w: 'invalid', h: 6 } }] }] },
+    ]);
+    const validFolder = { id: 'folder-remote', name: 'Local folder', order: 1, isExpanded: true };
+    const rawFolders = JSON.stringify([validFolder, { id: 'folder-initial', name: 'Broken initial folder', order: 'invalid', isExpanded: true }, { id: 'malformed-folder', name: 'Broken', order: 'invalid', isExpanded: true }]);
+    window.localStorage.setItem(STORAGE_KEY, rawDashboards);
+    window.localStorage.setItem(FOLDERS_KEY, rawFolders);
+    window.localStorage.setItem(MIGRATION_VERSION_KEY, '26');
+    window.localStorage.setItem('unrelated-user-settings', '{"theme":"dark","ticker":"MSR"}');
+
+    const { unmount } = render(<DashboardProvider><DashboardStateProbe /></DashboardProvider>);
+
+    await waitFor(() => expect(screen.getByTestId('storage-notice')).toHaveTextContent('Some dashboard storage was corrupted; valid workspaces were preserved'));
+    expect(storedDashboards().find((dashboard) => dashboard.id === personal.id)).toEqual(personal);
+    expect(storedDashboards().find((dashboard) => dashboard.id === globalWorkspace.id)).toEqual(globalWorkspace);
+    expect(storedDashboards().find((dashboard) => dashboard.id === customizedSystem.id)).toEqual(customizedSystem);
+    expect(storedDashboards().some((dashboard) => dashboard.id.startsWith('malformed-'))).toBe(false);
+    expect(JSON.parse(window.localStorage.getItem(FOLDERS_KEY) ?? '[]')).toEqual(expect.arrayContaining([validFolder, { id: 'folder-initial', name: 'Initial', order: 0, isExpanded: true }]));
+    expect(window.localStorage.getItem(FOLDERS_KEY)).not.toContain('malformed-folder');
+    const recoveryBackup = window.localStorage.getItem(DASHBOARD_RECOVERY_BACKUP_KEY);
+    expect(JSON.parse(recoveryBackup ?? '{}')).toEqual(expect.objectContaining({ dashboards: rawDashboards, folders: rawFolders }));
+    expect(window.localStorage.getItem('unrelated-user-settings')).toBe('{"theme":"dark","ticker":"MSR"}');
+    expect(window.localStorage.getItem(MIGRATION_VERSION_KEY)).toBe('27');
+    const persisted = window.localStorage.getItem(STORAGE_KEY);
+
+    unmount();
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('dashboards')).toHaveTextContent('My retained research'));
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe(persisted);
+    expect(window.localStorage.getItem(DASHBOARD_RECOVERY_BACKUP_KEY)).toBe(recoveryBackup);
+    expect(window.localStorage.getItem('unrelated-user-settings')).toBe('{"theme":"dark","ticker":"MSR"}');
+    expect(screen.getByTestId('storage-notice')).toHaveTextContent('');
+  });
+
   it('restores dashboards containing registered widgets hidden from the library catalogue', async () => {
     const hiddenWidgetDashboard: Dashboard = {
       ...customDashboard,

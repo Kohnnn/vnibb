@@ -185,6 +185,51 @@ def test_public_collection_metadata_matches_sql_constraints():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("collection,null_field", [
+    ("stocks", "isin"), ("stock_prices", "value"), ("stock_indices", "value"),
+    ("income_statements", "fiscal_quarter"), ("balance_sheets", "fiscal_quarter"),
+    ("cash_flows", "fiscal_quarter"), ("financial_ratios", "fiscal_quarter"),
+    ("company_news", "summary"), ("company_events", "event_date"),
+    ("dividends", "exercise_date"), ("insider_deals", "deal_method"),
+    ("foreign_trading", "buy_volume"), ("order_flow_daily", "buy_volume"),
+    ("market_sectors", "sector_name_en"), ("sector_performance", "change_pct"),
+    ("screener_snapshots", "trade_date"), ("companies", "company_name"),
+    ("shareholders", "shareholder_type"), ("officers", "title"),
+    ("subsidiaries", "subsidiary_symbol"),
+])
+async def test_public_sql_preserves_complete_model_rows_after_early_null(sql_tool, collection, null_field):
+    row = _row(collection, 1, **{null_field: None})
+    await sql_tool(collection, [row])
+
+    result = await server.query_database_collection(collection=collection, limit=1)
+
+    assert result["collection"] == collection
+    assert result["source"] == f"postgres:{collection}"
+    assert result["row_count"] == len(result["items"]) == 1
+    actual = result["items"][0]
+    columns = set(server.COLLECTION_MODELS[collection].__table__.columns.keys())
+    annotations = set()
+    if collection == "stock_prices":
+        annotations = {"price_unit"}
+        assert actual["price_unit"] == "VND"
+    elif collection in {"income_statements", "balance_sheets", "cash_flows"}:
+        annotations = {
+            "currency", "value_unit", "unit_metadata", "consolidation_basis",
+            "flow_basis", "aggregation_basis", "source_periods", "unavailable_reason",
+        }
+        assert actual["currency"] == actual["value_unit"] == "VND"
+        assert actual["consolidation_basis"] == "consolidated"
+        assert actual["flow_basis"] == "annual"
+        assert actual["unavailable_reason"] is None
+    elif collection == "financial_ratios":
+        annotations = {"dividend_yield", "payout_ratio"}
+        assert actual["dividend_yield"] is actual["payout_ratio"] is None
+    assert set(actual) == columns | annotations
+    assert actual[null_field] is None
+    assert {key: actual[key] for key in columns} == _json_value(row)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("collection,zero_metric,value_metric", [
     ("income_statements", "revenue", "interest_expense"),
     ("balance_sheets", "total_assets", "total_equity"),
