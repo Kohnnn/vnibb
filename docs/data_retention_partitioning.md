@@ -113,6 +113,18 @@ successful ingest to reach cleanup:
   pending row mutation. Insufficient headroom fails closed. Legacy combo rows
   remain stored but do not consume non-combo admission slots. These limits do
   not delete the catalogue.
+- A source-cap refusal can commit accepted refreshes before rejecting other
+  rows. Its admission exception carries committed and rejected counts; a physical
+  or validation refusal reports zero committed rows. Recurring ingest keeps every
+  source's committed count in the durable scheduler receipt: `cap:N` means source
+  admission rejected N rows, `deny:N` means another admission refusal, `http403`
+  means an HTTP failure, and `error` means an unclassified failure. Unknown
+  rejection counts use `deny` without a count. Receipts contain fixed source names,
+  bounded counts and reason codes, never upstream messages or URLs. Any source
+  failure still marks the job failed and increments its failure counter; a later
+  complete success clears it. Restart-only population also retains committed
+  counts in health status and its failed receipt, using `error` source labels.
+  Quotas, retained-history windows, requests and retries are unchanged.
 - Snapshots select only real, active, nonclosed, unexpired markets refreshed
   within 24 hours. Missing a feed refresh does not falsely mark a market settled.
   Each 15-minute/day bucket holds at most 5,000 rows total and 1,000 per source.
