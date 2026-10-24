@@ -241,10 +241,10 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
         return resolveUnitScale(values, unitConfig);
     }, [displayItems, unitConfig]);
 
-    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
+    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig).replace(/^Values in/, 'Display units:'), [tableScale, unitConfig]);
     const unitNote = useMemo(
-        () => `Note: ${unitLegend}; per-share values (EPS) are ${unitConfig.display === 'USD' ? 'USD' : 'VND'} per share • Reporting Standard: VAS • First available period is the base period`,
-        [unitLegend, unitConfig.display]
+        () => `${unitLegend}; EPS is displayed per share without the table scale. Display settings do not verify source units or reporting standard. First available period is the base period.`,
+        [unitLegend]
     );
 
     const tableColumns = useMemo(
@@ -659,12 +659,17 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                         fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={statementNote ?? (period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right')}
+                        note={period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right'}
                         sourceLabel="Income statement"
                         align="right"
                     />
                 </div>
                 <div className="flex-1 overflow-auto scrollbar-hide pt-1">
+                    {statementNote && (
+                        <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+                            {statementNote}
+                        </div>
+                    )}
                     {timedOut && isLoading && !hasData ? (
                         <WidgetError
                             title="Loading timed out"
