@@ -40,10 +40,9 @@ if not SOURCE.is_file():
 SYMBOLS = ("MSR", "VNM", "VCB")
 STATEMENTS = {"income_statement": "income_statements", "balance_sheet": "balance_sheets", "cash_flow": "cash_flows"}
 MARKET_DATASETS = {"market.pe", "market.pb", "market.evaluation", "analytics.valuation.pe", "analytics.valuation.pb"}
-# Why a decoded row admitted no finite metric. These codes mean the record never
-# decoded, so nothing survived ingestion (hard failure). Any other reason means the
-# source was read and that metric was held back, which is withheld coverage.
-ADMISSION_FAILURE_REASONS = {"invalid_raw_row", "unsupported_dataset", "descriptor_scope_unverified"}
+# Decoder coverage codes apply only to named metrics, never arbitrary reason maps.
+WITHHOLDING_REASONS = {"value_unavailable", "descriptor_unavailable", "unit_unverified",
+                       "ambiguous_descriptor", "quarter_basis_unverified", "incompatible_quarter_basis"}
 GATES = {
     "1": "Finite complete OHLC, timestamp/window/order, session freshness, coherent units",
     "2": "Typed financial envelopes, exact statement/period, finite values, source/unit/scale/basis",
@@ -294,6 +293,39 @@ def unit_basis(item, period):
         raise Partial("IQ financial source scale unknown")
 
 
+def explicit_financial_withholding(item, fields, dataset):
+    evidence = item["raw_data"]
+    structured = evidence["structured"]
+    observation = item.get("raw_observation")
+    lineage = evidence.get("_financial_lineage")
+    canonical = lineage.get("canonical_data") if isinstance(lineage, dict) else None
+    require(isinstance(observation, dict) and isinstance(canonical, dict), "missing retained withholding evidence")
+    for key in ("id", "symbol", "source", "period", "period_type", "fiscal_year", "fiscal_quarter"):
+        require(key in observation and observation[key] == item.get(key), "withholding observation identity conflict")
+    for key in ("symbol", "source", "period", "fiscal_year", "fiscal_quarter"):
+        require(key in canonical and canonical[key] == item.get(key), "withholding canonical identity conflict")
+    statement = {"finance.income_statement": "income", "finance.balance_sheet": "balance", "finance.cash_flow": "cashflow"}
+    require(dataset in statement and canonical.get("statement_type") == statement[dataset], "withholding statement identity conflict")
+    require(evidence.get("symbol") == item["symbol"] and evidence.get("source") == item["source"]
+            and evidence.get("dataset") == dataset and evidence.get("datasetVariant") == f"{dataset}.{item['period_type']}"
+            and structured.get("source") == item["source"], "withholding source identity conflict")
+    require(item.get("data_status") == "partial_unavailable", "missing explicit financial withholding status")
+    reasons, metadata = item.get("unavailable_metrics"), item.get("unit_metadata")
+    require(isinstance(reasons, dict) and isinstance(metadata, dict), "missing per-field withholding evidence")
+    for key in ("currency", "value_unit"):
+        require(key in canonical and key in item and canonical[key] == item[key], "withholding statement unit conflict")
+    require(item["currency"] != "VND" or item["value_unit"] != "VND", "withholding reason contradicts statement units")
+    for field in fields:
+        record = metadata.get(field)
+        require(field in item and item[field] is None
+                and reasons.get(field) == "unverified_statement_currency_or_unit"
+                and isinstance(record, dict) and record.get("unavailable_reason") == reasons[field], "unexplained financial metric omission")
+        source_values = structured.get("values")
+        require(isinstance(source_values, dict) and finite_metric(source_values.get(field)), "missing retained structured metric")
+        require(finite_metric(observation.get(field)) and finite_metric(canonical.get(field))
+                and Decimal(str(observation[field])) == Decimal(str(canonical[field])) == Decimal(str(source_values[field])), "withholding retained metric conflict")
+
+
 def financial(payload, args, *, raw=False):
     require(isinstance(payload, dict), "financial envelope missing")
     strict_json(payload)
@@ -329,7 +361,10 @@ def financial(payload, args, *, raw=False):
         structured = evidence.get("structured") or {}
         require(isinstance(structured, dict), "invalid structured financial evidence")
         basis = structured.get("fiscalBasis") or evidence.get("fiscalBasis")
-        require(isinstance(basis, dict) and basis.get("periodType") == period, "wrong financial source fiscal identity")
+        require(isinstance(basis, dict) and type(basis.get("year")) is int
+                and basis.get("periodType") == period and basis.get("reason") in (None, ""), "wrong financial source fiscal identity")
+        if period == "quarter":
+            require(basis.get("quarter") in (1, 2, 3, 4), "missing source fiscal quarter")
         if not raw:
             require(basis.get("year") == item["fiscal_year"], "SQL/source fiscal year conflict")
             if period == "quarter":
@@ -337,24 +372,29 @@ def financial(payload, args, *, raw=False):
         values = structured.get("values") if raw else item
         require(isinstance(values, dict), "missing financial metric values")
         fields = financial_metrics(dataset)
+        if not raw:
+            source_values = structured.get("values", {})
+            require(isinstance(source_values, dict), "invalid retained financial metric values")
+            observation = item.get("raw_observation") or {}
+            lineage = evidence.get("_financial_lineage") or {}
+            require(isinstance(observation, dict) and isinstance(lineage, dict), "invalid retained financial evidence")
+            canonical = lineage.get("canonical_data") or {}
+            require(isinstance(canonical, dict), "invalid canonical financial evidence")
+            missing = {field for field in fields if not finite_metric(values.get(field))
+                       and any(finite_metric(record.get(field)) for record in (source_values, observation, canonical))}
+            if missing:
+                explicit_financial_withholding(item, missing, dataset)
+                deferred.append("explicit financial read withholding; retained metrics have unverified statement currency/unit")
+                if not any(finite_metric(values.get(field)) for field in fields):
+                    admitted_rows.append(item)
+                    continue
         if any(finite_metric(values.get(field)) for field in fields):
             admitted_rows.append(item)
             continue
-        if not raw:
-            # The writer only persists a row that admitted at least one value, so a
-            # SQL row with no expected metric while its retained source evidence
-            # holds one is lost data, not withholding.
-            source_values = structured.get("values")
-            if isinstance(source_values, dict) and any(finite_metric(source_values.get(field)) for field in fields):
-                raise Failure("SQL row dropped an admitted financial metric kept in source evidence")
-        # The decoded reader records a reason per withheld field, or one
-        # whole-record code when the row never decoded. A whole-record admission
-        # code means nothing survived ingestion (hard failure); any other populated
-        # map means the source was read and each metric was held back on unit/basis
-        # or coverage evidence, which `unit_basis` also treats as partial. An empty
-        # map means the record carries no evidence at all.
-        reasons = set((structured.get("unavailable") or {}).values())
-        if reasons - ADMISSION_FAILURE_REASONS:
+        require(raw, "no finite SQL financial metrics or proven read withholding")
+        reasons = structured.get("unavailable") or {}
+        require(isinstance(reasons, dict), "invalid financial withholding reasons")
+        if reasons and all(field in fields and reason in WITHHOLDING_REASONS for field, reason in reasons.items()):
             # Record the verdict but keep looping: a hard violation in any later row
             # must still fail the check rather than hide behind this withholding.
             deferred.append("no admitted finite financial metrics; source units/basis unverified")
@@ -731,6 +771,7 @@ class Runner:
         rows = objects(payload)
         if "symbol" in args:
             require(all(row.get("symbol") == args["symbol"] for row in rows), "wrong SQL row symbol")
+        deferred = []
         for row in rows:
             finite_tree(row)
             fields = self.catalog["collections"][args["collection"]].get("fields")
@@ -743,7 +784,12 @@ class Runner:
                 envelope = {"symbol": args["symbol"], "period_type": args["period_type"], "collection": args["collection"], "found": True, "item": row}
                 if statement:
                     envelope["statement"] = statement
-                financial(envelope, request)
+                try:
+                    financial(envelope, request)
+                except Partial as exc:
+                    deferred.append(str(exc))
+        if deferred:
+            raise Partial("; ".join(dict.fromkeys(deferred))[:400])
 
     def premium(self, payload, args, scope):
         require(payload.get("scope_type") == scope and payload.get("provider_execution") is False, "wrong scope/provider execution metadata")
