@@ -43,6 +43,18 @@ MARKET_DATASETS = {"market.pe", "market.pb", "market.evaluation", "analytics.val
 # Decoder coverage codes apply only to named metrics, never arbitrary reason maps.
 WITHHOLDING_REASONS = {"value_unavailable", "descriptor_unavailable", "unit_unverified",
                        "ambiguous_descriptor", "quarter_basis_unverified", "incompatible_quarter_basis"}
+# Same provider-to-column names persisted by CacheManager.store_financial_data.
+FINANCIAL_SQL_ALIASES = {
+    "operating_expense": "operating_expenses", "profit_before_tax": "income_before_tax",
+    "tax_expense": "income_tax", "equity": "total_equity", "cash": "cash_and_equivalents",
+    "receivables": "accounts_receivable", "long_term_liabilities": "non_current_liabilities",
+    "net_cash_flow": "net_change_in_cash", "pe": "pe_ratio", "pb": "pb_ratio", "ps": "ps_ratio",
+    "debt_equity": "debt_to_equity", "debt_assets": "debt_to_assets",
+}
+FINANCIAL_CANONICAL_ALIASES = {
+    **FINANCIAL_SQL_ALIASES, "profit_before_tax": "pre_tax_profit",
+    "tax_expense": "tax_expense", "long_term_liabilities": "long_term_liabilities",
+}
 GATES = {
     "1": "Finite complete OHLC, timestamp/window/order, session freshness, coherent units",
     "2": "Typed financial envelopes, exact statement/period, finite values, source/unit/scale/basis",
@@ -316,14 +328,16 @@ def explicit_financial_withholding(item, fields, dataset):
         require(key in canonical and key in item and canonical[key] == item[key], "withholding statement unit conflict")
     require(item["currency"] != "VND" or item["value_unit"] != "VND", "withholding reason contradicts statement units")
     for field in fields:
-        record = metadata.get(field)
-        require(field in item and item[field] is None
-                and reasons.get(field) == "unverified_statement_currency_or_unit"
-                and isinstance(record, dict) and record.get("unavailable_reason") == reasons[field], "unexplained financial metric omission")
+        column = FINANCIAL_SQL_ALIASES.get(field, field)
+        canonical_field = FINANCIAL_CANONICAL_ALIASES.get(field, field)
+        record = metadata.get(canonical_field) or metadata.get(field)
+        require(column in item and item[column] is None
+                and reasons.get(column) == "unverified_statement_currency_or_unit"
+                and isinstance(record, dict) and record.get("unavailable_reason") == reasons[column], "unexplained financial metric omission")
         source_values = structured.get("values")
         require(isinstance(source_values, dict) and finite_metric(source_values.get(field)), "missing retained structured metric")
-        require(finite_metric(observation.get(field)) and finite_metric(canonical.get(field))
-                and Decimal(str(observation[field])) == Decimal(str(canonical[field])) == Decimal(str(source_values[field])), "withholding retained metric conflict")
+        require(finite_metric(observation.get(column)) and finite_metric(canonical.get(canonical_field))
+                and Decimal(str(observation[column])) == Decimal(str(canonical[canonical_field])) == Decimal(str(source_values[field])), "withholding retained metric conflict")
 
 
 def financial(payload, args, *, raw=False):
@@ -373,6 +387,8 @@ def financial(payload, args, *, raw=False):
         require(isinstance(values, dict), "missing financial metric values")
         fields = financial_metrics(dataset)
         if not raw:
+            values = {field: item.get(FINANCIAL_SQL_ALIASES.get(field, field)) for field in fields}
+        if not raw:
             source_values = structured.get("values", {})
             require(isinstance(source_values, dict), "invalid retained financial metric values")
             observation = item.get("raw_observation") or {}
@@ -381,7 +397,9 @@ def financial(payload, args, *, raw=False):
             canonical = lineage.get("canonical_data") or {}
             require(isinstance(canonical, dict), "invalid canonical financial evidence")
             missing = {field for field in fields if not finite_metric(values.get(field))
-                       and any(finite_metric(record.get(field)) for record in (source_values, observation, canonical))}
+                       and (finite_metric(source_values.get(field))
+                            or finite_metric(observation.get(FINANCIAL_SQL_ALIASES.get(field, field)))
+                            or finite_metric(canonical.get(FINANCIAL_CANONICAL_ALIASES.get(field, field))))}
             if missing:
                 explicit_financial_withholding(item, missing, dataset)
                 deferred.append("explicit financial read withholding; retained metrics have unverified statement currency/unit")

@@ -3106,7 +3106,18 @@ async def get_industry_bubble(
     )
     if reference_row is None and fresh_rows is None:
         refreshed_rows = {row["symbol"]: row for row in await _fetch_fresh_rows()}
-        refreshed_rows.update({row["symbol"]: row for row in screener_rows})
+        for row in screener_rows:
+            size_value = _resolve_industry_bubble_metric(
+                row, ratio_map.get(row["symbol"], {}), revenue_map, size_metric
+            )
+            if size_value is not None and size_value > 0 and all(
+                _resolve_industry_bubble_metric(
+                    row, ratio_map.get(row["symbol"], {}), revenue_map, metric
+                ) is not None for metric in (x_metric, y_metric)
+            ):
+                refreshed_rows[row["symbol"]] = row
+            else:
+                refreshed_rows.setdefault(row["symbol"], row)
         screener_rows = list(refreshed_rows.values())
         symbols = [row["symbol"] for row in screener_rows]
         metadata_map = await _load_stock_metadata(symbols)

@@ -198,6 +198,102 @@ def test_public_financial_read_explicit_withholding_of_retained_metrics_is_parti
         qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": "income_statement"})
 
 
+SQL_FINANCIAL_ALIASES = [
+    ("income_statement", "operating_expense", "operating_expenses"),
+    ("income_statement", "profit_before_tax", "income_before_tax"),
+    ("income_statement", "tax_expense", "income_tax"),
+    ("balance_sheet", "equity", "total_equity"),
+    ("balance_sheet", "cash", "cash_and_equivalents"),
+    ("balance_sheet", "receivables", "accounts_receivable"),
+    ("balance_sheet", "long_term_liabilities", "non_current_liabilities"),
+    ("cash_flow", "net_cash_flow", "net_change_in_cash"),
+    ("ratio", "pe", "pe_ratio"), ("ratio", "pb", "pb_ratio"), ("ratio", "ps", "ps_ratio"),
+    ("ratio", "debt_equity", "debt_to_equity"), ("ratio", "debt_assets", "debt_to_assets"),
+]
+
+
+def aliased_financial_packet(statement, field, column, value):
+    packet = financial_packet()
+    packet["collection"] = qa.STATEMENTS.get(statement, "financial_ratios")
+    if statement == "ratio":
+        packet.pop("statement")
+    else:
+        packet["statement"] = statement
+    item = packet["item"]
+    item.pop("revenue")
+    item[column] = value
+    item["raw_data"].update(
+        raw={"reported_metric": value}, descriptors=[{"field": "reported_metric"}],
+        comTypeCode="CT", sourceDate="2026-01-01",
+    )
+    item["raw_data"]["structured"].update(
+        values={field: value},
+        fieldEvidence={field: {"unit": "VND", "unitEvidence": {"units": ["VND"], "scales": [1]}}},
+    )
+    item["raw_data"]["structured"]["fiscalBasis"]["consolidation"] = "consolidated"
+    return packet
+
+
+@pytest.mark.parametrize("statement,field,column", SQL_FINANCIAL_ALIASES)
+@pytest.mark.parametrize("value", [0.0, 12.0])
+def test_public_financial_admitted_sql_alias_is_not_an_omission(statement, field, column, value):
+    packet = aliased_financial_packet(statement, field, column, value)
+    args = {"symbol": "MSR", "period_type": "year"}
+    if statement != "ratio":
+        args["statement"] = statement
+    assert qa.financial(packet, args) == [packet["item"]]
+
+
+@pytest.mark.parametrize("statement,field,column", SQL_FINANCIAL_ALIASES)
+def test_public_financial_missing_sql_alias_remains_failure(statement, field, column):
+    packet = aliased_financial_packet(statement, field, column, 12.0)
+    packet["item"][column] = None
+    args = {"symbol": "MSR", "period_type": "year"}
+    if statement != "ratio":
+        args["statement"] = statement
+    with pytest.raises(qa.Failure) as caught:
+        qa.financial(packet, args)
+    assert type(caught.value) is qa.Failure
+
+
+@pytest.mark.parametrize("statement,field,column,canonical_field", [
+    ("income_statement", "operating_expense", "operating_expenses", "operating_expenses"),
+    ("income_statement", "profit_before_tax", "income_before_tax", "pre_tax_profit"),
+    ("income_statement", "tax_expense", "income_tax", "tax_expense"),
+    ("balance_sheet", "equity", "total_equity", "total_equity"),
+    ("balance_sheet", "cash", "cash_and_equivalents", "cash_and_equivalents"),
+    ("balance_sheet", "receivables", "accounts_receivable", "accounts_receivable"),
+    ("balance_sheet", "long_term_liabilities", "non_current_liabilities", "long_term_liabilities"),
+    ("cash_flow", "net_cash_flow", "net_change_in_cash", "net_change_in_cash"),
+])
+@pytest.mark.parametrize("wrong_reason_field", [False, True])
+def test_public_financial_sql_alias_withholding_uses_public_column_and_canonical_value(
+    statement, field, column, canonical_field, wrong_reason_field,
+):
+    packet = aliased_financial_packet(statement, field, column, 0.0)
+    item = packet["item"]
+    item.update(id=188122, fiscal_quarter=None, currency="VND", value_unit=None)
+    item["raw_observation"] = {key: item[key] for key in (
+        "id", "symbol", "source", "period", "period_type", "fiscal_year", "fiscal_quarter", column,
+    )}
+    canonical = {key: item[key] for key in (
+        "symbol", "source", "period", "fiscal_year", "fiscal_quarter", "currency", "value_unit",
+    )}
+    canonical.update(statement_type={"income_statement": "income", "balance_sheet": "balance", "cash_flow": "cashflow"}[statement])
+    canonical[canonical_field] = 0.0
+    item["raw_data"]["_financial_lineage"] = {"canonical_data": canonical}
+    item["raw_data"].update(symbol="MSR", source="vietcap", dataset=f"finance.{statement}", datasetVariant=f"finance.{statement}.year")
+    item["raw_data"]["structured"]["source"] = "vietcap"
+    item[column] = None
+    item["data_status"] = "partial_unavailable"
+    item["unavailable_metrics"] = {field if wrong_reason_field else column: "unverified_statement_currency_or_unit"}
+    item["unit_metadata"] = {canonical_field: {"unavailable_reason": "unverified_statement_currency_or_unit"}}
+    expected = qa.Failure if wrong_reason_field else qa.Partial
+    with pytest.raises(expected) as caught:
+        qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": statement})
+    assert type(caught.value) is expected
+
+
 @pytest.mark.parametrize("section,field,value", [
     ("unavailable_metrics", "eps", None),
     ("unavailable_metrics", "eps", "unit_unverified"),

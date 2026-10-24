@@ -202,18 +202,23 @@ async def test_industry_bubble_retained_points_do_not_wait_for_owned_provider(
 
 
 @pytest.mark.asyncio
-async def test_industry_bubble_reference_refresh_preserves_useful_retained_peer_values(
-    client, monkeypatch, bubble_inputs,
+@pytest.mark.parametrize(
+    "retained_cap,provider_cap,expected_date",
+    [(200.0, None, "2026-10-23"), (None, 200.0, "2026-10-24")],
+)
+async def test_industry_bubble_reference_refresh_selects_useful_peer_observation(
+    client, monkeypatch, bubble_inputs, retained_cap, provider_cap, expected_date,
 ):
     bubble_inputs.append({
-        "symbol": "CMG", "industry": "technology", "market_cap": 200.0,
+        "symbol": "CMG", "industry": "technology", "market_cap": retained_cap,
         "snapshot_date": "2026-10-23",
     })
 
     async def provider(_params):
         return [
             {"symbol": "FPT", "industry": "technology", "market_cap": 100.0},
-            {"symbol": "CMG", "industry": "technology", "market_cap": None},
+            {"symbol": "CMG", "industry": "technology", "market_cap": provider_cap,
+             "snapshot_date": "2026-10-24"},
         ]
 
     async def ratios(_symbols):
@@ -228,4 +233,4 @@ async def test_industry_bubble_reference_refresh_preserves_useful_retained_peer_
         "FPT": 100.0, "CMG": 200.0,
     }
     assert response.json()["sector_average"] == {"x": 3.0, "y": 30.0}
-    assert datetime.fromisoformat(response.json()["updated_at"]).date() == date(2026, 10, 23)
+    assert datetime.fromisoformat(response.json()["updated_at"]).date() == date.fromisoformat(expected_date)
