@@ -3003,6 +3003,7 @@ async def get_earnings_season(
 
 @router.get("/industry-bubble", response_model=IndustryBubbleResponse)
 @cached(ttl=300, key_prefix="industry_bubble_v2_certified")
+@_market_deadline
 async def get_industry_bubble(
     symbol: str = Query(..., description="Reference symbol used to determine sector"),
     x_metric: str = Query(
@@ -3025,8 +3026,10 @@ async def get_industry_bubble(
 
     cache_manager = CacheManager()
     screener_rows: List[dict[str, Any]] = []
+    fresh_rows: Optional[List[dict[str, Any]]] = None
 
     async def _fetch_fresh_rows() -> List[dict[str, Any]]:
+        nonlocal fresh_rows
         params = StockScreenerParams(
             symbol=None,
             exchange="ALL",
@@ -3034,13 +3037,23 @@ async def get_industry_bubble(
             source=settings.vnstock_source,
         )
         try:
-            screener_data = await asyncio.wait_for(
-                VnstockScreenerFetcher.fetch(params),
-                timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
+            screener_data = await _await_market_provider(
+                ("industry_bubble", tuple(sorted(params.model_dump().items()))),
+                lambda: VnstockScreenerFetcher.fetch(params),
+                HEATMAP_FETCH_TIMEOUT_SECONDS,
             )
-        except asyncio.TimeoutError as exc:
-            raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
-        return [_normalize_screener_row(item) for item in screener_data]
+        except TimeoutError as exc:
+            error = ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS)
+            raise HTTPException(status_code=503, detail=error.message) from exc
+        except ProviderError as exc:
+            raise HTTPException(status_code=503, detail=exc.message) from exc
+        fresh_rows = [_normalize_screener_row(item) for item in screener_data]
+        fresh_rows = [row for row in fresh_rows if row.get("symbol")]
+        if not fresh_rows:
+            raise HTTPException(
+                status_code=503, detail="Industry bubble screener data unavailable"
+            )
+        return fresh_rows
 
     try:
         cache_result = await cache_manager.get_screener_data(
@@ -3091,9 +3104,10 @@ async def get_industry_bubble(
     reference_row = next(
         (row for row in screener_rows if row.get("symbol") == reference_symbol), None
     )
-    if reference_row is None:
-        screener_rows = await _fetch_fresh_rows()
-        screener_rows = [row for row in screener_rows if row.get("symbol")]
+    if reference_row is None and fresh_rows is None:
+        refreshed_rows = {row["symbol"]: row for row in await _fetch_fresh_rows()}
+        refreshed_rows.update({row["symbol"]: row for row in screener_rows})
+        screener_rows = list(refreshed_rows.values())
         symbols = [row["symbol"] for row in screener_rows]
         metadata_map = await _load_stock_metadata(symbols)
         change_map = await _load_change_pct_map(symbols)
