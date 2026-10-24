@@ -12,9 +12,10 @@ import logging
 import re
 import unicodedata
 from functools import wraps
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time as market_time, timedelta
 from typing import Any, Dict, List, Literal, Optional
 from collections import defaultdict
+from zoneinfo import ZoneInfo
 
 import httpx
 import numpy as np
@@ -49,6 +50,7 @@ from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.services.cache_manager import CacheManager
+from vnibb.services.data_quality import latest_market_business_day
 from vnibb.services.sector_service import SectorService
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.providers.vnstock import get_stock
@@ -2093,6 +2095,14 @@ async def _build_last_session_top_movers(
         for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
     } if index == "VN30" else None
     exchange_allow = TOP_MOVER_INDEX_EXCHANGE.get(index)
+    now_ict = datetime.now(ZoneInfo(settings.vn_timezone))
+    close_time = market_time.fromisoformat(settings.intraday_market_close)
+    session_anchor = now_ict.date()
+    if now_ict.time() < close_time:
+        session_anchor -= timedelta(days=1)
+    expected_session = latest_market_business_day(
+        session_anchor, {date.fromisoformat(day) for day in settings.market_holiday_dates}
+    )
     rows = []
     for row in await _load_retained_mover_inputs():
         symbol = str(row.get("symbol") or "").upper()
@@ -2129,7 +2139,7 @@ async def _build_last_session_top_movers(
             "avg_volume_20d": None, "volume_spike_pct": None,
             "updated_at": session_label, "is_last_session": True,
             "session_label": session_label,
-            "is_stale": bool(observed_date and observed_date < _expected_latest_trading_day()),
+            "is_stale": bool(observed_date and observed_date < expected_session),
         })
     return _sort_top_movers(rows, mover_type=mover_type, limit=limit)
 

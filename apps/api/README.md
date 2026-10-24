@@ -221,6 +221,14 @@ VNStock alignment notes:
 
 **Full Docs:** `/docs` (Swagger UI)
 
+### Retained market mover freshness
+
+`GET /api/v1/market/top-movers` serves admitted retained daily-price rankings before provider acquisition. `is_stale` compares the original observation date with the latest completed market business day, using `VN_TIMEZONE`, `INTRADAY_MARKET_CLOSE` and `MARKET_HOLIDAY_DATES`, as detailed health does. The session date advances at the configured close, not at server midnight; before close, weekends and configured holidays retain the preceding completed session. The existing 120-second caches are unchanged.
+
+Freshness calculation does not restamp prices, units, source, `updated_at` or `session_label`, and unknown price-unit evidence remains excluded. The configured closure list is not a verified exchange calendar or proof of complete market coverage. The unrelated Mongo weekday staleness floor is unchanged.
+
+Issue #153 focused public-route regression: parent-owned network-isolated execution of `python -B -m pytest tests/test_api/test_retained_mover_session_freshness.py -q -p pytest_asyncio.plugin -p no:cacheprovider` from `apps/api` produced **24 failed / 12 passed** before the clock fix and **36 passed** after it. The permanent regression retains the **nine distinct clock cases**, verified again with **9 passed**, without repeating each clock for every ranking mode. The cases preserve source/session/unit assertions while covering preclose and exact-close boundaries, configured close/timezone and weekend/holiday transitions. A separate network-isolated stdlib smoke imported the actual market module and retained SQL loader against temporary SQLite observations: **32 route invocations passed** across eight clocks and all four modes with provider acquisition forbidden. These are application freshness checks, not source/calendar certification or production acceptance.
+
 Workspace docs:
 - `../../docs/API_REFERENCE.md`
 - `../../docs/v47_production_health.md`
