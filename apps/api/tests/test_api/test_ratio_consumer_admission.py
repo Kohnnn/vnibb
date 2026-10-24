@@ -56,6 +56,30 @@ async def test_comparison_debt_assets_requires_its_own_evidence(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("units,expected", [({}, None), ({"roe": "percent", "debt_assets": "percent"}, 0.25)])
+async def test_comparison_never_uses_source_name_as_percentage_unit_evidence(
+    test_engine, test_db, monkeypatch, units, expected,
+):
+    ratio = ratio_row("FPT", units, 0.25)
+    ratio.source = "vietcap"
+    test_db.add(ratio)
+    await test_db.commit()
+    service = comparison_service.ComparisonService()
+
+    async def cached_snapshot(*args, **kwargs):
+        return CacheResult(data=[ScreenerSnapshot(symbol="FPT", snapshot_date=date.today())],
+                           is_stale=False, cached_at=datetime.utcnow(), hit=True)
+
+    monkeypatch.setattr(service.cache_manager, "get_screener_data", cached_snapshot)
+    monkeypatch.setattr(comparison_service, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
+    response = await service.get_stock_metrics("FPT")
+
+    assert response.metrics.get("roe") == expected
+    assert response.metrics.get("debt_assets") == expected
+    assert response.metrics["pe"] == 10.0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("units,value,expected", CASES)
 @pytest.mark.parametrize("roe_source", ["snapshot", "ratio", "cache"])
 async def test_comparison_peer_roe_admits_snapshot_and_ratio_evidence(
@@ -116,7 +140,7 @@ async def test_provider_history_admits_each_percent_cell(test_db, monkeypatch):
         return list(reversed(rows))
 
     monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", provider_rows)
-    ratios = await equity.get_ratio_history.__wrapped__(symbol="VNM", ratios="roe,pe", period="year", limit=20)
+    ratios = await equity.get_ratio_history.__wrapped__(symbol="VNM", ratios="roe,pe", period="year", limit=20, db=test_db)
     metrics = await equity.get_metrics_history.__wrapped__(
         symbol="VNM", days=30, metrics="roe,pe_ratio", period="year", db=test_db,
     )
@@ -189,3 +213,79 @@ async def test_ai_postgres_context_withholds_uncertified_ratio_cells(test_engine
     response = await ai_context_service.AIContextService()._build_postgres_snapshot("VNM")
     assert {metric: response["ratios"][metric] for metric in metrics} == dict.fromkeys(metrics, expected)
     assert response["ratios"]["pe"] == response["ratios"]["pe_ratio"] == 10.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unit,expected", [("percent", 0.25), ("unknown", None)])
+async def test_cached_screener_yield_keeps_canonical_percent_without_rescaling(test_db, unit, expected):
+    from vnibb.api.v1.screener import _enrich_screener_metrics, _to_screener_data_row
+
+    row = _to_screener_data_row(ScreenerSnapshot(
+        symbol="FPT", snapshot_date=date.today(), dividend_yield=0.25,
+        extended_metrics={"ratio_units": {"dividend_yield": unit}},
+    ))
+    enriched = await _enrich_screener_metrics([row], test_db)
+
+    assert enriched[0].dividend_yield == expected
+
+
+@pytest.mark.asyncio
+async def test_ratio_enrichment_does_not_restore_unproven_interest_coverage(test_db, monkeypatch):
+    from vnibb.providers.vnstock.financials import FinancialStatementData
+
+    income = FinancialStatementData(symbol="FPT", period="2025", statement_type="income",
+        revenue=1000, operating_income=240, interest_expense=900, value_unit="VND",
+        unit_metadata={"interest_expense": {"label": "financial_expenses", "source_unit": "VND", "value_unit": "VND"}})
+    cash = FinancialStatementData(symbol="FPT", period="2025", statement_type="cashflow", debt_repayment=40)
+    ratio = FinancialRatioData(symbol="FPT", period="2025", pe=10, interest_coverage=8, debt_service_coverage=6)
+    rows = await equity._enrich_missing_ratio_metrics(
+        symbol="FPT", period="year", rows=[ratio], db=test_db,
+        income_support_rows=[income], balance_support_rows=[], cashflow_support_rows=[cash])
+    assert rows[0].interest_coverage is None
+    assert rows[0].debt_service_coverage is None
+    assert rows[0].pe == 10
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["mongo", "provider", "sql"])
+@pytest.mark.parametrize("unit,value,expected", [(None, 6.3257, None), ("unknown", 0.0287, None), ("percent", 0.0, 0.0), ("percent", 9.951, 9.951)])
+async def test_payout_endpoint_admits_canonical_percent_on_every_source(test_db, monkeypatch, source, unit, value, expected):
+    from unittest.mock import AsyncMock
+
+    units = {"payout_ratio": unit} if unit else {}
+    row = FinancialRatioData(symbol="FPT", period="2025", pe=10, payout_ratio=value,
+        ratio_units=units, provider_evidence=[{"source": "vietcap"}] if source == "mongo" else [])
+    if source == "sql":
+        test_db.add(FinancialRatio(id=8700, symbol="FPT", period="2025", period_type="year", fiscal_year=2025,
+            pe_ratio=10, raw_data={"payout_ratio": value, "ratio_units": units}))
+        await test_db.flush()
+    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(return_value=[row] if source == "mongo" else []))
+    monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", AsyncMock(return_value=[row] if source == "provider" else []))
+    monkeypatch.setattr(equity, "_get_latest_statement_period_key", AsyncMock(return_value=0))
+    async def unchanged(**kwargs):
+        return kwargs["rows"]
+    monkeypatch.setattr(equity, "_enrich_missing_ratio_metrics", unchanged)
+    response = await equity.get_financial_ratios.__wrapped__("FPT", "year", db=test_db)
+    assert response.data[0].payout_ratio == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cash_period,cash_scope,expected", [("2025", "consolidated", 25.0), ("2024", "consolidated", None), ("2025", "separate", None)])
+async def test_derived_payout_requires_compatible_admitted_statements(test_db, monkeypatch, cash_period, cash_scope, expected):
+    from unittest.mock import AsyncMock
+
+    from vnibb.providers.vnstock.financials import FinancialStatementData
+
+    def statement(kind, period, scope, metric, amount):
+        return FinancialStatementData(symbol="FPT", period=period, statement_type=kind,
+            source="VCI", currency="VND", value_unit="VND", consolidation_basis=scope, flow_basis="annual",
+            **{metric: amount}, unit_metadata={metric: {"source_unit": "VND", "value_unit": "VND"}})
+    income = statement("income", "2025", "consolidated", "net_income", 100)
+    cash = statement("cashflow", cash_period, cash_scope, "dividends_paid", -25)
+    monkeypatch.setattr(equity, "_load_financial_statement_fallback", AsyncMock(return_value=[]))
+    monkeypatch.setattr(equity, "_is_bank_like_symbol", AsyncMock(return_value=False))
+    rows = await equity._enrich_missing_ratio_metrics("FPT", "year", [FinancialRatioData(symbol="FPT", period="2025", pe=10)], test_db,
+        income_support_rows=[income], balance_support_rows=[], cashflow_support_rows=[cash])
+    result = next(row for row in rows if row.period == "2025")
+    assert result.payout_ratio == expected
+    assert (result.ratio_units.get("payout_ratio") == "percent") == (expected is not None)

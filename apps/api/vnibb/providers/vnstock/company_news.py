@@ -93,7 +93,7 @@ class VnstockCompanyNewsFetcher(BaseFetcher[CompanyNewsQueryParams, CompanyNewsD
     @staticmethod
     async def extract_data(
         query: dict[str, Any],
-        credentials: Optional[dict[str, str]] = None,
+        credentials: dict[str, str] | None = None,
     ) -> List[dict[str, Any]]:
         """Fetch company news from vnstock."""
         loop = asyncio.get_event_loop()

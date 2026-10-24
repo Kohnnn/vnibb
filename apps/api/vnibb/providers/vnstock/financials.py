@@ -81,6 +81,61 @@ _WIDE_ROW_ALIAS_METRICS: dict[str, tuple[str, ...]] = {
 }
 
 
+_INTEREST_LABELS = {
+    "interest_expense", "interest_expenses", "interestexpense", "interest_cost",
+    "interest_and_similar_expenses", "borrowing_costs", "chi_phi_lai_vay",
+    "chi_phi_tien_lai_vay", "chi_phi_lai_va_cac_khoan_tuong_tu",
+    "interest_expenses_losses_from_loans_and_receivables",
+}
+
+
+def _interest_evidence_admitted(metadata: Any) -> bool:
+    if not isinstance(metadata, dict) or metadata.get("unavailable_reason"):
+        return False
+    components = metadata.get("components")
+    if isinstance(components, list) and components:
+        return all(_interest_evidence_admitted(item) for item in components)
+    labels = [metadata.get("source_label"), metadata.get("label")]
+    descriptors = metadata.get("descriptors") or []
+    for descriptor in descriptors:
+        if isinstance(descriptor, dict):
+            labels.extend(descriptor.get(key) for key in ("fullTitleEn", "fullTitleVi", "titleEn", "titleVi"))
+    normalized = []
+    for label in labels:
+        if not label:
+            continue
+        text = unicodedata.normalize("NFKD", str(label).lower().replace("đ", "d"))
+        text = "".join(char for char in text if not unicodedata.combining(char))
+        text = re.sub(r"\s*\((?:vnd|dong|bn\.?\s*vnd)\)\s*$", "", text)
+        normalized.append(re.sub(r"[^a-z0-9]+", "_", text).strip("_"))
+    unit = metadata.get("unit") or metadata.get("value_unit")
+    original_unit = metadata.get("source_unit") or metadata.get("unitEvidence")
+    return bool(normalized) and all(label in _INTEREST_LABELS for label in normalized) and unit == "VND" and bool(original_unit)
+
+
+def admitted_interest_expense(row: Any) -> float | None:
+    """Read interest only when original field semantics and denomination are evidenced."""
+    def value(name: str, default=None):
+        return row.get(name, default) if isinstance(row, dict) else getattr(row, name, default)
+
+    raw = value("raw_data") or {}
+    lineage = raw.get("_financial_lineage") or {}
+    canonical = lineage.get("canonical_data") or {}
+    metadata = None
+    for fields in (value("unit_metadata") or {}, canonical.get("unit_metadata") or {}, lineage.get("unit_metadata") or {}):
+        if "interest_expense" in fields:
+            metadata = fields["interest_expense"]
+            break
+    number = value("interest_expense")
+    if number is None or not _interest_evidence_admitted(metadata):
+        return None
+    try:
+        number = float(number)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _detach_source_reports(row: dict[str, Any]) -> list[dict[str, Any]]:
     """Take captured provider reports off a row so raw lineage is kept once per statement."""
     attrs = row.get("_provider_attrs")
@@ -214,6 +269,7 @@ class FinancialStatementData(BaseModel):
     revenue: float | None = Field(None, description="Total Revenue")
     gross_profit: float | None = Field(None, description="Gross Profit")
     operating_income: float | None = Field(None, description="Operating Income")
+    operating_expenses: float | None = Field(None, description="Operating Expenses")
     net_income: float | None = Field(None, description="Net Income")
     ebitda: float | None = Field(None, description="EBITDA")
     eps: float | None = Field(None, description="Earnings Per Share")
@@ -232,11 +288,13 @@ class FinancialStatementData(BaseModel):
     total_liabilities: float | None = Field(None, description="Total Liabilities")
     total_equity: float | None = Field(None, description="Total Equity")
     cash_and_equivalents: float | None = Field(None, description="Cash & Equivalents")
+    short_term_investments: float | None = Field(None, description="Short-term Investments")
     equity: float | None = Field(None, description="Equity")
     cash: float | None = Field(None, description="Cash")
     inventory: float | None = Field(None, description="Inventory")
     current_assets: float | None = Field(None, description="Current Assets")
     fixed_assets: float | None = Field(None, description="Fixed Assets")
+    non_current_assets: float | None = Field(None, description="Non-current Assets")
     current_liabilities: float | None = Field(None, description="Current Liabilities")
     long_term_liabilities: float | None = Field(None, description="Long-term Liabilities")
     retained_earnings: float | None = Field(None, description="Retained Earnings")
@@ -247,6 +305,7 @@ class FinancialStatementData(BaseModel):
     customer_deposits: float | None = Field(None, description="Customer Deposits")
     goodwill: float | None = Field(None, description="Goodwill")
     intangible_assets: float | None = Field(None, description="Intangible Assets")
+    book_value_per_share: float | None = Field(None, description="Book Value Per Share")
 
     # Cash Flow specific
     operating_cash_flow: float | None = Field(None, description="Operating Cash Flow")
@@ -742,7 +801,9 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
         """Transform raw financial data to standardized format."""
         results: list[FinancialStatementData] = []
         if data and all(row.get("statement_type") and "unit_metadata" in row for row in data):
-            return [FinancialStatementData.model_validate(row) for row in data]
+            from vnibb.services.financial_service import admit_statement_rows
+
+            return admit_statement_rows([FinancialStatementData.model_validate(row) for row in data], params.period)
 
         def _coerce_number(value: Any) -> float | None:
             if value is None:
@@ -833,6 +894,10 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                             result["flow_basis"] = "single_quarter"
                         elif str(head.get("PeriodBegin")) == f"{year.group(1)}01" and str(head.get("PeriodEnd")) == end:
                             result["flow_basis"] = "cumulative_ytd"
+                    elif (term in {"FY", "YEAR", "ANNUAL"}
+                          and str(head.get("PeriodBegin")) == f"{year.group(1)}01"
+                          and str(head.get("PeriodEnd")) == f"{year.group(1)}12"):
+                        result["flow_basis"] = "annual"
                     return result
             return {"consolidation_basis": row.get("consolidation_basis"), "flow_basis": row.get("flow_basis")}
 
@@ -847,9 +912,6 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                        "thousand vnd": 1000, "trieu dong": 1_000_000, "million vnd": 1_000_000,
                        "ty dong": 1_000_000_000, "bn. vnd": 1_000_000_000, "billion vnd": 1_000_000_000}
             source_factor = factors.get(descriptor)
-            if not source and not unit:
-                source_factor = 1
-                unit = "VND"
             metadata = {"source": source or None, "label": label, "source_unit": unit,
                         "provider_value": value, "provider_multiplier": provider_multiplier,
                         "value_unit": "VND/share" if metric in {"eps", "eps_diluted"} else "VND"}
@@ -970,7 +1032,6 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "sales": "revenue",
                     "sales_deductions": "revenue",
                     "financial_income": "other_income",
-                    "financial_expenses": "interest_expense",
                     "general_and_admin_expenses": "selling_general_admin",
                     "other_income_expenses": "other_income",
                     "net_other_income_expenses": "other_income",
@@ -989,7 +1050,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "gia_von_hang_ban": "cost_of_revenue",
                     "lai_gop": "gross_profit",
                     "chi_phi_tien_lai_vay": "interest_expense",
-                    "chi_phi_tai_chinh": "interest_expense",
+                    "chi_phi_lai_vay": "interest_expense",
                     "chi_phi_ban_hang": "selling_general_admin",
                     "chi_phi_quan_ly_dn": "selling_general_admin",
                     "chi_phi_quan_ly_doanh_nghiep": "selling_general_admin",
@@ -1365,6 +1426,14 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     if not metric_key:
                         continue
                     numeric, metadata = _normalize_value(value, row, str(key), metric_key, str(row.get("period") or row.get("yearReport") or row.get("year") or ""))
+                    previous = lineage.get(metric_key)
+                    if previous and previous.get("unavailable_reason") == "conflicting_metric_rows":
+                        continue
+                    if previous and metric_key not in additive_metrics and previous.get("provider_value") != value:
+                        mapped_metrics.pop(metric_key, None)
+                        lineage[metric_key] = {"unavailable_reason": "conflicting_metric_rows",
+                                               "components": [previous, metadata]}
+                        continue
                     lineage[metric_key] = metadata
                     if numeric is None:
                         continue
@@ -1410,7 +1479,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 # alias. A metric already supplied by a mapped key keeps its value and
                 # lineage.
                 for alias_metric, alias_keys in _WIDE_ROW_ALIAS_METRICS.items():
-                    if alias_metric in mapped_metrics:
+                    if alias_metric in lineage:
                         continue
                     for alias_key in alias_keys:
                         alias_value = row.get(alias_key)

@@ -106,11 +106,11 @@ function insider(netValue: number | null, valueUnit: string | null): InsiderSent
 }
 
 describe('ownership analytics', () => {
-  it('normalizes ratio ownership fields and scores positive flows', () => {
+  it('scores canonical percentage ownership and positive admitted flows', () => {
     const summary = buildOwnershipSummary([
-      { symbol: 'FPT', shareholder_name: 'Fund A', shareholder_type: 'Institutional fund', ownership_pct: 0.3 },
-      { symbol: 'FPT', shareholder_name: 'Foreign B', shareholder_type: 'Foreign investor', ownership_pct: 0.2 },
-      { symbol: 'FPT', shareholder_name: 'Exec C', shareholder_type: 'Management insider', ownership_pct: 0.1 },
+      { symbol: 'FPT', shareholder_name: 'Fund A', shareholder_type: 'Institutional fund', ownership_pct: 30, ownership_unit: 'percent', ownership_unit_status: 'explicit' },
+      { symbol: 'FPT', shareholder_name: 'Foreign B', shareholder_type: 'Foreign investor', ownership_pct: 20, ownership_unit: 'percent', ownership_unit_status: 'explicit' },
+      { symbol: 'FPT', shareholder_name: 'Exec C', shareholder_type: 'Management insider', ownership_pct: 10, ownership_unit: 'percent', ownership_unit_status: 'explicit' },
     ], [{ buy_volume: 1000, sell_volume: 250 }], insider(500, 'VND'))
     expect(summary.top3Pct).toBe(60)
     expect(summary.foreignNetVolume).toBe(750)

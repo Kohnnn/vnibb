@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.api.v1.screener import _build_screener_meta
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.sync_status import SyncStatus
 from vnibb.providers.vnstock.equity_screener import (
     ScreenerData,
     StockScreenerParams,
@@ -151,8 +152,16 @@ async def test_full_sync_upsert_cannot_split_existing_price_and_trade_date(
 
 @pytest.mark.asyncio
 async def test_detailed_health_reports_trade_date_basis(
-    client: AsyncClient, test_db: AsyncSession
+    client: AsyncClient, test_db: AsyncSession, monkeypatch
 ):
+    from vnibb.api.v1 import health
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.combine(TODAY, cls.min.time(), tzinfo=tz)
+
+    monkeypatch.setattr(health, "datetime", FrozenDateTime)
     trade_date = TODAY - timedelta(days=2)
     test_db.add(
         ScreenerSnapshot(
@@ -163,6 +172,12 @@ async def test_detailed_health_reports_trade_date_basis(
             price=60.3,
         )
     )
+    test_db.add(SyncStatus(
+        sync_type="screener_universe", status="completed", error_count=0,
+        success_count=1, completed_at=datetime.utcnow(),
+        additional_data={"snapshot_date": TODAY.isoformat(),
+                         "expected_symbols": ["VNM"], "expected_count": 1},
+    ))
     await test_db.commit()
 
     response = await client.get("/api/v1/health/detailed")
@@ -170,7 +185,8 @@ async def test_detailed_health_reports_trade_date_basis(
     database = response.json()["components"]["database"]
     assert database["screener_trade_date"] == trade_date.isoformat()
     assert database["screener_snapshot_age_days"] == 2
-    assert database["screener_freshness_basis"] == "trade_date"
+    assert database["screener_verified_count"] == 1
+    assert database["screener_verified_universe"] is True
 
 
 def test_trade_date_migration_is_nullable_expansion():

@@ -38,6 +38,7 @@ from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
 )
 from vnibb.services.cache_manager import CacheManager
+from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.screener_filter_service import ScreenerFilterService
 
@@ -248,7 +249,6 @@ def _to_screener_data_row(row: object) -> ScreenerData:
         },
         ratio_units=ratio_units,
         provider_evidence=provider_evidence if isinstance(provider_evidence, list) else [],
-        dividend_yield=getattr(row, "dividend_yield", None),
         debt_to_equity=getattr(row, "debt_to_equity", None),
         debt_to_asset=_ratio_percent("debt_assets"),
         current_ratio=getattr(row, "current_ratio", None),
@@ -656,26 +656,6 @@ def _normalize_pct_metric(value: Any) -> Optional[float]:
     return normalized
 
 
-def _normalize_dividend_yield(value: Any) -> Optional[float]:
-    numeric = _coerce_float(value)
-    if numeric is None:
-        return None
-
-    normalized = numeric
-    if 0 < abs(normalized) < 1:
-        normalized *= 100
-
-    while abs(normalized) > 100:
-        normalized /= 100
-
-    if abs(normalized) > 50:
-        normalized = 50.0 if normalized > 0 else -50.0
-
-    return normalized
-
-
-
-
 async def _enrich_screener_metrics(
     rows: List[ScreenerData], db: AsyncSession
 ) -> List[ScreenerData]:
@@ -964,13 +944,8 @@ async def _enrich_screener_metrics(
         prev_income = income[1] if len(income) > 1 else {}
         balance = balance_by_symbol.get(symbol, {})
 
-        normalized_existing_dividend = _normalize_dividend_yield(row.dividend_yield)
-        if (
-            normalized_existing_dividend is not None
-            and row.dividend_yield is not None
-            and normalized_existing_dividend != row.dividend_yield
-        ):
-            updates["dividend_yield"] = normalized_existing_dividend
+        if row.dividend_yield is not None and row.ratio_units.get("dividend_yield") != "percent":
+            updates["dividend_yield"] = None
 
         if row.roic is None:
             roic = _certified_ratio("roic")
@@ -1072,26 +1047,7 @@ async def _enrich_screener_metrics(
                 updates["equity_on_total_asset"] = equity_on_total_asset
 
         if row.dividend_yield is None:
-            dividend_yield = _normalize_dividend_yield(
-                _pick_float(
-                    ratio_raw.get("dividend_yield"),
-                    ratio_raw.get("dividendYield"),
-                )
-            )
-            if dividend_yield is None:
-                dps = _pick_float(
-                    ratio_row.dps if ratio_row else None,
-                    ratio_raw.get("dps"),
-                    ratio_raw.get("dividend_per_share"),
-                )
-                if dps is None:
-                    dividends_paid = _coerce_float(dividends_by_symbol.get(symbol))
-                    shares = _coerce_float(shares_by_symbol.get(symbol))
-                    if dividends_paid is not None and shares not in (None, 0):
-                        dps = abs(dividends_paid) / (shares * _shares_multiplier(shares))
-                price_vnd = _coerce_float(row.price) if row.price_unit == "VND" else None
-                if dps is not None and price_vnd not in (None, 0):
-                    dividend_yield = _normalize_dividend_yield((dps / price_vnd) * 100)
+            dividend_yield = _certified_ratio("dividend_yield")
             if dividend_yield is not None:
                 updates["dividend_yield"] = dividend_yield
 
@@ -1430,7 +1386,17 @@ async def _apply_fundamental_enrichment(
             doc = docs.get((row.symbol or "").upper())
             if not isinstance(doc, dict):
                 continue
+            valuation_reason = fundamental_valuation_unavailable_reason(doc)
+            if valuation_reason:
+                row.provider_evidence.append({
+                    "dataset": "market_fundamental_screener",
+                    "snapshotDate": doc.get("snapshotDate"),
+                    "unavailable_reason": valuation_reason,
+                })
             for doc_key, attr in _FUNDAMENTAL_DOC_FIELD_MAP.items():
+                if valuation_reason and doc_key in {"intrinsicValue", "marginOfSafety", "valuationMethod"}:
+                    setattr(row, attr, None)
+                    continue
                 value = doc.get(doc_key)
                 if value is not None:
                     setattr(row, attr, value)

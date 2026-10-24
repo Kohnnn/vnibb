@@ -41,6 +41,7 @@ jest.mock('@/hooks/useLoadingTimeout', () => ({
 import type { UseQueryResult } from '@tanstack/react-query'
 import type { EquityProfileResponse } from '@/types/equity'
 import type { ScreenerResponse } from '@/types/screener'
+import type { DividendsResponse } from '@/lib/api'
 
 import {
   useProfile,
@@ -114,6 +115,36 @@ describe('TickerProfileWidget', () => {
     mockInsider.mockReset()
     mockScreener.mockReset()
     setupReturns()
+  })
+
+  test.each([0.25, 0, 388])('renders endpoint-computed dividend percent %s without scaling', dividendYield => {
+    mockProfile.mockReturnValue(queryResult<EquityProfileResponse>({
+      symbol: 'VNM', data: { symbol: 'VNM', company_name: 'Vietnam Dairy Products' },
+    }))
+    mockDividends.mockReturnValue(queryResult<DividendsResponse>({
+      data: [{ symbol: 'VNM', dividend_type: 'cash', cash_dividend: 1000, dividend_yield: dividendYield }],
+    }))
+
+    render(<TickerProfileWidget symbol="VNM" />)
+
+    expect(screen.getByText(`Cash • ${dividendYield.toFixed(2)}%`)).toBeInTheDocument()
+  })
+
+  test.each([
+    [0, 'stock', '10.00% stock'],
+    [1000, 'mixed', 'VND1,000 + 10.00% stock'],
+  ] as const)('renders reported stock payout with %s cash (%s)', (cashDividend, type, payout) => {
+    mockProfile.mockReturnValue(queryResult<EquityProfileResponse>({
+      symbol: 'VNM', data: { symbol: 'VNM', company_name: 'Vietnam Dairy Products' },
+    }))
+    mockDividends.mockReturnValue(queryResult<DividendsResponse>({
+      data: [{ cash_dividend: cashDividend, stock_dividend: 10, type }],
+    }))
+
+    render(<TickerProfileWidget symbol="VNM" />)
+
+    expect(screen.getByText(payout)).toBeInTheDocument()
+    expect(screen.queryByText('VND0')).not.toBeInTheDocument()
   })
 
   test('shows loading skeleton while initial profile loads', () => {

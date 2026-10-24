@@ -39,6 +39,34 @@ describe('ShareStatisticsWidget confirmed-unit market cap', () => {
     });
   });
 
+  test.each([
+    ['certified screener takes precedence', 'percent', 0.25, 'percent', '0.25%', 'Screener'],
+    ['certified zero remains zero', 'percent', 0, 'percent', '0.00%', 'Screener'],
+    ['unknown screener falls back to certified ratios', 'unknown', 0.25, 'percent', '0.75%', 'Ratios'],
+    ['missing screener units fall back to certified ratios', undefined, 0.25, 'percent', '0.75%', 'Ratios'],
+    ['unknown units are unavailable', 'unknown', 0.25, 'unknown', '-', undefined],
+    ['missing units are unavailable', undefined, 0.25, undefined, '-', undefined],
+  ] as const)('renders dividend yield when %s', (_name, screenerUnit, screenerYield, ratioUnit, expected, source) => {
+    mockScreener.mockReturnValue({
+      data: { data: [{ ticker: 'FPT', pe: 12.3, dividend_yield: screenerYield,
+        ratio_units: screenerUnit === undefined ? undefined : { dividend_yield: screenerUnit } }] },
+      isLoading: false, isFetching: false, error: null, refetch: jest.fn(), dataUpdatedAt: 0,
+    });
+    mockRatios.mockReturnValue({
+      data: { data: [{ symbol: 'FPT', period: '2025', dividend_yield: 0.75,
+        ratio_units: ratioUnit === undefined ? undefined : { dividend_yield: ratioUnit } }] },
+      isLoading: false, error: null, refetch: jest.fn(),
+    });
+
+    render(<ShareStatisticsWidget id="share-1" symbol="FPT" />);
+
+    const yieldRow = within(screen.getByText('Dividend Yield').parentElement!);
+    expect(yieldRow.getByText(expected)).toBeInTheDocument();
+    if (source) expect(yieldRow.getByText(source)).toBeInTheDocument();
+    expect(screen.queryByText('25.00%')).not.toBeInTheDocument();
+    expect(screen.queryByText('75.00%')).not.toBeInTheDocument();
+  });
+
   test.each(['index_points', 'unknown', undefined])(
     'does not derive market cap from a %s quote unit',
     (price_unit) => {

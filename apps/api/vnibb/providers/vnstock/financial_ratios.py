@@ -29,29 +29,6 @@ def _as_float(value: Any) -> Optional[float]:
         return None
 
 
-def _normalize_dividend_yield(value: Any) -> Optional[float]:
-    numeric = _as_float(value)
-    if numeric is None:
-        return None
-
-    normalized = numeric
-    if 0 < abs(normalized) < 1:
-        normalized *= 100
-
-    while abs(normalized) > 100:
-        normalized /= 100
-
-    # DQ remediation 2026-06-08: an equity dividend yield above ~40% is almost
-    # always a unit/denominator artifact (e.g. period-mismatched price, VND scale
-    # mismatch), as seen with VCI showing 100%/clamped-50%. Returning a fabricated
-    # clamped boundary (50/100) is misleading; prefer null so the UI shows "—"
-    # rather than a wrong number an analyst could act on.
-    if abs(normalized) > 40:
-        return None
-
-    return normalized
-
-
 def _period_sort_key(period: str) -> int:
     upper = str(period or "").upper()
     year_match = re.search(r"(20\d{2})", upper)
@@ -69,49 +46,34 @@ def _normalize_period_value(
     default_period: str = "year",
 ) -> Optional[str]:
     text = str(period_value or "").strip().upper()
-
     year_hint = _as_float(fiscal_year)
     quarter_hint = _as_float(fiscal_quarter)
+    if year_hint is not None and (not year_hint.is_integer() or not 1900 <= year_hint <= 2100):
+        return None
+    if quarter_hint is not None and (not quarter_hint.is_integer() or not 1 <= quarter_hint <= 4):
+        return None
     year = int(year_hint) if year_hint is not None else None
     quarter = int(quarter_hint) if quarter_hint is not None else None
-    if year is not None and not (1900 <= year <= 2100):
-        year = None
-    if quarter is not None and not (1 <= quarter <= 4):
-        quarter = None
-
-    if text:
-        if VALID_PERIOD_RE.match(text):
-            return text
-
-        year_match = re.search(r"(20\d{2})", text)
-        quarter_match = re.search(r"Q([1-4])", text)
-
-        if year_match and quarter_match:
-            return f"{year_match.group(1)}-Q{quarter_match.group(1)}"
-
-        alt_quarter = re.match(r"^([1-4])[\/_-](20\d{2})$", text)
-        if alt_quarter:
-            return f"{alt_quarter.group(2)}-Q{alt_quarter.group(1)}"
-
-        compact_quarter = re.match(r"^(20\d{2})[\/_-]?([1-4])$", text)
-        if compact_quarter and ("Q" in text or default_period == "quarter"):
-            return f"{compact_quarter.group(1)}-Q{compact_quarter.group(2)}"
-
-        if text.isdigit():
-            numeric = int(text)
-            if 1900 <= numeric <= 2100:
-                return str(numeric)
-            if 1 <= numeric <= 4 and year is not None:
-                return f"{year}-Q{numeric}"
-
-    if year is None:
+    year_match = re.search(r"(20\d{2})", text)
+    quarter_match = re.search(r"Q([1-4])", text)
+    alt_quarter = re.fullmatch(r"([1-4])[\/_-](20\d{2})", text)
+    compact_quarter = re.fullmatch(r"(20\d{2})[\/_-]?([1-4])", text)
+    text_year = int(year_match.group(1)) if year_match else None
+    text_quarter = int(quarter_match.group(1)) if quarter_match else None
+    if alt_quarter:
+        text_year, text_quarter = int(alt_quarter.group(2)), int(alt_quarter.group(1))
+    elif compact_quarter and default_period == "quarter":
+        text_year, text_quarter = int(compact_quarter.group(1)), int(compact_quarter.group(2))
+    elif text in {"1", "2", "3", "4"}:
+        text_quarter = int(text)
+    if (year is not None and text_year is not None and year != text_year
+        or quarter is not None and text_quarter is not None and quarter != text_quarter):
         return None
-
-    if quarter is not None or default_period == "quarter":
-        resolved_quarter = quarter if quarter is not None else 4
-        if 1 <= resolved_quarter <= 4:
-            return f"{year}-Q{resolved_quarter}"
-
+    year, quarter = text_year or year, text_quarter or quarter
+    if year is None or (default_period == "quarter" and quarter is None):
+        return None
+    if quarter is not None:
+        return f"{year}-Q{quarter}"
     return str(year)
 
 
@@ -200,6 +162,30 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
     def transform_query(params: FinancialRatiosQueryParams) -> dict[str, Any]:
         return {"symbol": params.symbol.upper(), "period": params.period}
 
+    @classmethod
+    async def fetch(
+        cls,
+        params: FinancialRatiosQueryParams,
+        credentials: dict[str, str] | None = None,
+    ) -> list[FinancialRatioData]:
+        try:
+            raw_data = await cls.extract_data(cls.transform_query(params), credentials)
+            if not raw_data:
+                return []
+            data = cls.transform_data(params, raw_data)
+            if not data:
+                raise ProviderError(
+                    message="Nonempty ratio response contains no admitted fiscal periods",
+                    provider="vnstock", details={"symbol": params.symbol},
+                )
+            return data
+        except ProviderError:
+            raise
+        except (Exception, SystemExit) as exc:
+            raise ProviderError(
+                message=str(exc), provider="vnstock", details={"symbol": params.symbol}
+            ) from exc
+
     @staticmethod
     async def extract_data(
         query: dict[str, Any],
@@ -283,16 +269,25 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 if last_error is not None:
                     raise last_error
                 return []
-            except Exception as e:
+            except (Exception, SystemExit) as e:
                 logger.error(f"vnstock ratios fetch error: {e}")
                 raise ProviderError(
                     message=str(e), provider="vnstock", details={"symbol": query["symbol"]}
                 ) from e
 
         try:
-            return await run_financial_provider(_fetch_sync, settings.vnstock_timeout)
+            return await run_financial_provider(
+                _fetch_sync, settings.vnstock_timeout,
+                key=("financial_ratios", settings.vnstock_source, tuple(sorted(query.items()))),
+            )
         except TimeoutError as exc:
             raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout) from exc
+        except ProviderError:
+            raise
+        except (Exception, SystemExit) as exc:
+            raise ProviderError(
+                message=str(exc), provider="vnstock", details={"symbol": query["symbol"]}
+            ) from exc
 
     @staticmethod
     def transform_data(
@@ -484,11 +479,9 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                                 _lookup(lookup, "dividends_per_share"),
                                 _lookup(lookup, "dps"),
                             ),
-                            dividend_yield=_normalize_dividend_yield(
-                                _pick_float(
-                                    _lookup(lookup, "dividend_yield"),
-                                    _lookup(lookup, "dividend_yield_percent"),
-                                )
+                            dividend_yield=_pick_float(
+                                _lookup(lookup, "dividend_yield"),
+                                _lookup(lookup, "dividend_yield_percent"),
                             ),
                             payout_ratio=_pick_float(_lookup(lookup, "payout_ratio")),
                             peg_ratio=_pick_float(_lookup(lookup, "peg_ratio")),
@@ -573,10 +566,6 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
             by_period: dict[str, dict[str, Any]] = {
                 period: {"symbol": params.symbol.upper(), "period": period} for period in periods
             }
-            liabilities_by_period: dict[str, float] = {}
-            equity_by_period: dict[str, float] = {}
-            enterprise_value_by_period: dict[str, float] = {}
-            revenue_by_period: dict[str, float] = {}
 
             for row in data:
                 item_id = row.get("item_id")
@@ -594,36 +583,6 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                         if by_period[period].get(field) is None:
                             by_period[period][field] = value
                         continue
-                    if item_id_lower == "liabilities":
-                        liabilities_by_period[period] = value
-                        continue
-                    if item_id_lower == "owners_equity":
-                        equity_by_period[period] = value
-                        continue
-                    if item_id_lower in {"enterprise_value", "ev"}:
-                        enterprise_value_by_period[period] = value
-                        continue
-                    if item_id_lower in {
-                        "revenue",
-                        "net_revenue",
-                        "total_revenue",
-                        "sales_revenue",
-                    }:
-                        revenue_by_period[period] = value
-
-            for period in periods:
-                if by_period[period].get("debt_equity") is None:
-                    liabilities = liabilities_by_period.get(period)
-                    equity = equity_by_period.get(period)
-                    if liabilities is not None and equity not in (None, 0):
-                        by_period[period]["debt_equity"] = liabilities / equity
-
-                if by_period[period].get("ev_sales") is None:
-                    enterprise_value = enterprise_value_by_period.get(period)
-                    revenue = revenue_by_period.get(period)
-                    if enterprise_value is not None and revenue not in (None, 0):
-                        by_period[period]["ev_sales"] = enterprise_value / revenue
-
             results = []
             for period in periods:
                 try:
@@ -635,21 +594,6 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
         results = []
         for row in data:
             try:
-                enterprise_value = _pick_float(
-                    row.get("enterpriseValue"),
-                    row.get("enterprise_value"),
-                    row.get("ev"),
-                )
-                revenue = _pick_float(
-                    row.get("revenue"),
-                    row.get("netRevenue"),
-                    row.get("totalRevenue"),
-                    row.get("salesRevenue"),
-                )
-                computed_ev_sales = None
-                if enterprise_value is not None and revenue not in (None, 0):
-                    computed_ev_sales = enterprise_value / revenue
-
                 period_value = _normalize_period_value(
                     row.get("yearReport")
                     or row.get("period")
@@ -667,19 +611,16 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                     _canonical_ratio([row],
                         symbol=params.symbol.upper(),
                         period=period_value,
-                        pe=row.get("priceToEarning") or row.get("pe"),
-                        pb=row.get("priceToBook") or row.get("pb"),
-                        ps=row.get("priceToSales") or row.get("ps"),
-                        ev_ebitda=row.get("evToEbitda")
-                        or row.get("evEbitda")
-                        or row.get("ev_ebitda"),
+                        pe=_pick_float(row.get("priceToEarning"), row.get("pe")),
+                        pb=_pick_float(row.get("priceToBook"), row.get("pb")),
+                        ps=_pick_float(row.get("priceToSales"), row.get("ps")),
+                        ev_ebitda=_pick_float(row.get("evToEbitda"), row.get("evEbitda"), row.get("ev_ebitda")),
                         ev_sales=_pick_float(
                             row.get("evToSales"),
                             row.get("evSales"),
                             row.get("ev_sales"),
                             row.get("enterpriseValueToSales"),
                             row.get("ev_to_sales"),
-                            computed_ev_sales,
                         ),
                         ebitda=_pick_float(
                             row.get("ebitda"),
@@ -688,13 +629,11 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                         ),
                         roe=row.get("roe"),
                         roa=row.get("roa"),
-                        roic=row.get("roic") or row.get("roicPercent"),
-                        eps=row.get("earningPerShare")
-                        or row.get("earningsPerShare")
-                        or row.get("eps"),
-                        bvps=row.get("bookValuePerShare") or row.get("bvps"),
-                        debt_equity=row.get("debtOnEquity") or row.get("de"),
-                        debt_assets=row.get("debtOnAssets") or row.get("debtAssets"),
+                        roic=_pick_float(row.get("roic"), row.get("roicPercent")),
+                        eps=_pick_float(row.get("earningPerShare"), row.get("earningsPerShare"), row.get("eps")),
+                        bvps=_pick_float(row.get("bookValuePerShare"), row.get("bvps")),
+                        debt_equity=_pick_float(row.get("debtOnEquity"), row.get("de")),
+                        debt_assets=_pick_float(row.get("debtOnAssets"), row.get("debtAssets")),
                         equity_multiplier=row.get("equityMultiplier"),
                         current_ratio=row.get("currentRatio"),
                         quick_ratio=row.get("quickRatio"),
@@ -702,22 +641,20 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                         asset_turnover=row.get("assetTurnover"),
                         inventory_turnover=row.get("inventoryTurnover"),
                         receivables_turnover=row.get("receivablesTurnover"),
-                        gross_margin=row.get("grossProfitMargin") or row.get("grossMargin"),
-                        net_margin=row.get("postTaxMargin") or row.get("netMargin"),
-                        operating_margin=row.get("operatingMargin") or row.get("opMargin"),
+                        gross_margin=_pick_float(row.get("grossProfitMargin"), row.get("grossMargin")),
+                        net_margin=_pick_float(row.get("postTaxMargin"), row.get("netMargin")),
+                        operating_margin=_pick_float(row.get("operatingMargin"), row.get("opMargin")),
                         interest_coverage=row.get("interestCoverage"),
                         debt_service_coverage=row.get("debtServiceCoverage"),
-                        ocf_debt=row.get("ocfToDebt") or row.get("ocfDebt"),
+                        ocf_debt=_pick_float(row.get("ocfToDebt"), row.get("ocfDebt")),
                         fcf_yield=row.get("fcfYield"),
                         ocf_sales=row.get("ocfSales"),
-                        revenue_growth=row.get("revenueGrowth") or row.get("revenue_growth"),
-                        earnings_growth=row.get("earningsGrowth") or row.get("earnings_growth"),
-                        dps=row.get("dividendPerShare") or row.get("dps"),
-                        dividend_yield=_normalize_dividend_yield(
-                            row.get("dividendYield") or row.get("dividend_yield")
-                        ),
-                        payout_ratio=row.get("payoutRatio") or row.get("payout_ratio"),
-                        peg_ratio=row.get("pegRatio") or row.get("peg_ratio"),
+                        revenue_growth=_pick_float(row.get("revenueGrowth"), row.get("revenue_growth")),
+                        earnings_growth=_pick_float(row.get("earningsGrowth"), row.get("earnings_growth")),
+                        dps=_pick_float(row.get("dividendPerShare"), row.get("dps")),
+                        dividend_yield=_pick_float(row.get("dividendYield"), row.get("dividend_yield")),
+                        payout_ratio=_pick_float(row.get("payoutRatio"), row.get("payout_ratio")),
+                        peg_ratio=_pick_float(row.get("pegRatio"), row.get("peg_ratio")),
                     )
                 )
             except Exception as e:

@@ -36,16 +36,21 @@ above do not disable them.
 - Kalshi fetches use `mve_filter=exclude` and reject multivariate/combo tickers
   and metadata defensively. Legacy combo catalogue rows are preserved but do
   not enter snapshots or consume normal-market admission slots.
+- The shared ingest writer accepts only canonical source IDs from
+  `SNAPSHOT_SOURCES`: `polymarket`, `kalshi`, `predictit`, `limitless`, `manifold`.
+  Unknown, mixed-case or whitespace-padded IDs reject the entire batch before
+  any catalogue mutation; they are not normalized into a supported source.
 - Each provider batch is limited to 1,000 records, with bounded response and
   stored field sizes. At most 10,000 fresh, real, open, unexpired non-combo
   markets per source count against the admission quota; older catalogue rows
   remain as history and are handled separately by bounded retention. The
   independent physical storage ceiling still limits the entire catalogue.
-- PostgreSQL catalogue mutations serialize under an advisory transaction lock.
-  A 4 GiB relation ceiling, including indexes/TOAST, reserves 256 KiB per
-  distinct mutation before either insert or update. Insufficient headroom fails
-  closed rather than continuing updates. This is a conservative application
-  guard, not a filesystem quota; archives, WAL, backups and unrelated data are outside it.
+- PostgreSQL catalogue ingestion and terminal restore serialize under the same
+  advisory transaction lock (`943416618`). A 4 GiB relation ceiling, including
+  indexes/TOAST, reserves 256 KiB per pending row mutation before either insert
+  or update. Insufficient headroom fails closed rather than continuing updates
+  or restoring a partial batch. This is a conservative application guard, not
+  a filesystem quota; archives, WAL, backups and unrelated data are outside it.
 - Only real, active, nonclosed, nonexpired markets refreshed within 24 hours
   are snapshot candidates. Missing provider refreshes do not imply settlement
   and never manufacture a closed-market status.
@@ -103,10 +108,23 @@ successful ingest to reach cleanup:
   combo records defensively. Each source admits at most 10,000 fresh, real,
   active, nonclosed, unexpired non-combo markets; older catalogue rows remain
   stored but do not consume fresh admission slots.
-- PostgreSQL catalogue mutations serialize with an advisory transaction lock.
-  At the 4 GiB relation ceiling, including a conservative per-mutation reserve,
-  all mutations fail closed. Legacy combo rows remain stored but do not consume
-  non-combo admission slots. These limits do not delete the catalogue.
+- PostgreSQL catalogue ingestion and terminal restore share the advisory
+  transaction lock and 4 GiB relation ceiling, including a 256 KiB reserve per
+  pending row mutation. Insufficient headroom fails closed. Legacy combo rows
+  remain stored but do not consume non-combo admission slots. These limits do
+  not delete the catalogue.
+- A source-cap refusal can commit accepted refreshes before rejecting other
+  rows. Its admission exception carries committed and rejected counts; a physical
+  or validation refusal reports zero committed rows. Recurring ingest keeps every
+  source's committed count in the durable scheduler receipt: `cap:N` means source
+  admission rejected N rows, `deny:N` means another admission refusal, `http403`
+  means an HTTP failure, and `error` means an unclassified failure. Unknown
+  rejection counts use `deny` without a count. Receipts contain fixed source names,
+  bounded counts and reason codes, never upstream messages or URLs. Any source
+  failure still marks the job failed and increments its failure counter; a later
+  complete success clears it. Restart-only population also retains committed
+  counts in health status and its failed receipt, using `error` source labels.
+  Quotas, retained-history windows, requests and retries are unchanged.
 - Snapshots select only real, active, nonclosed, unexpired markets refreshed
   within 24 hours. Missing a feed refresh does not falsely mark a market settled.
   Each 15-minute/day bucket holds at most 5,000 rows total and 1,000 per source.
@@ -136,6 +154,32 @@ the catalogue ceiling. Do not enable terminal archival as a storage workaround.
 General daily cleanup does **not** prune `prediction_markets`; the separate hourly catalogue job above removes only stale nonterminal debris. `python -m vnibb.services.prediction_market_retention --limit 100` reports an operator-only terminal dry-run batch. Eligibility is deliberately narrow: inactive and closed, end date older than 365 days, provider-certified resolved outcome present in the market's outcomes, and no nightly or intraday snapshot references. It skips markets already archived. Batch size is capped at 100; no scheduled terminal archival or mass deletion is enabled.
 
 Before applying, measure eligible rows by age/source/status on the serving PostgreSQL database and prove a recent database-matched backup with an actual isolated restore. An operator supplies a private JSON receipt with `backup_path`, its `sha256`, database name, and UTC `verified_at` from the last 24 hours, then chooses a unique protected archive file path. Only after these checks, run `python -m vnibb.services.prediction_market_retention --apply --limit 100 --backup-receipt /secure/verified-backup.json --archive-file /secure/batch.json --confirm-isolated-restore`. It writes and verifies each complete row in the archive table plus an exclusive local artifact before deleting only locked eligible rows; never discard either artifact. Restore a verified batch with `python -m vnibb.services.prediction_market_retention --restore /secure/batch.json`; an already re-ingested ID fails rather than being overwritten. The receipt is an operator assertion, not independent proof of the isolated restore. No production batch has been applied or sized in this release work.
+
+Restore remains PostgreSQL-only and accepts a verified manifest containing
+1–100 rows. Before any catalogue insert or archive removal, it acquires the
+same catalogue writer lock as ingestion and reserves capacity for the entire
+manifest. Restored terminal rows do not need fresh/live source-admission slots:
+their original IDs, fields and terminal history are preserved. A conflict or
+capacity refusal leaves both catalogue and database archive unchanged; success
+removes only the matching archive batch. This guard changes no retention
+windows, enables no extra deletion and adds no archive-size quota. The existing
+1 GiB combined-snapshot budget and history windows are unchanged.
+
+Deployment evidence for [#146](https://github.com/Kohnnn/vnibb/issues/146) /
+[PR #147](https://github.com/Kohnnn/vnibb/pull/147): API, MCP and scheduler
+switched at `2026-10-23T16:52:56Z` to source
+`a5c3a0b443f6728a5789d7d69bc41b6c9f560569`, ARM64 image
+`sha256:dd3ac9b7652ee4bc47ce3ce513843fbcd1109d92a632d6318a0732725656dbd4`.
+The published image matched 511 committed API files and 111 pinned dependency
+versions. The full backend run passed 3,519 tests (21 skipped); six real
+PostgreSQL restore contracts and the published-image restore CLI passed.
+Public HTTPS health and retained-market reads returned 200; retained history
+returned 15 observations. Auth, PostgreSQL, MongoDB, Redis and Caddy containers
+were unchanged. No data migration or manual history deletion ran. Rollback
+source `cfc5efc82d8162f0cef777b95d754f08aa090278` remains protected by image
+retention. Mypy retains ten identical baseline errors. Prediction ingestion
+already reported `RuntimeError` before cutover; this rollout does not claim
+provider-ingestion recovery.
 
 ## Partitioning guidance (durable storage)
 

@@ -92,6 +92,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:4000",
         "https://vnibb-web.vercel.app",
         "https://vnibb.vercel.app",
+        "https://web.vnibb.xyz",
         "https://script.google.com",
         "https://googleusercontent.com",
         "https://accounts.google.com",
@@ -169,6 +170,7 @@ class Settings(BaseSettings):
     scheduler_lock_mode: str = "best_effort"
     scheduler_lock_key_prefix: str = "vnibb:scheduler-lock"
     scheduler_lock_ttl_margin_seconds: int = Field(default=60, ge=1, le=3600)
+    prediction_market_populate_on_startup: bool = True
     realtime_streaming_lease_seconds: int = Field(default=8 * 60 * 60, ge=60, le=24 * 60 * 60)
     realtime_streaming_stop_timeout_seconds: int = Field(default=15, ge=1, le=300)
 

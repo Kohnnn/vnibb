@@ -78,8 +78,10 @@ from vnibb.providers.vnstock.financials import (
     FinancialsQueryParams,
     StatementType,
     VnstockFinancialsFetcher,
+    admitted_interest_expense,
 )
 from vnibb.services.data_quality import is_market_business_day
+from vnibb.services.financial_service import admit_statement_rows
 from vnibb.services.prediction_market_retention import retention as prediction_market_retention
 from vnibb.services.realtime_pipeline import is_vietnam_market_open
 
@@ -1106,8 +1108,9 @@ class DataPipeline:
         limit: Optional[int] = None,
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
+        enrich_ratios: bool = True,
     ) -> int:
-        """Sync comprehensive metrics for stocks using vnstock finance.ratio."""
+        """Materialize dated quote bases, with optional best-effort annual ratios."""
         from vnibb.providers.vnstock.runtime import (
             create_finance,
             finance_method_kwargs,
@@ -1330,8 +1333,9 @@ class DataPipeline:
                 }
 
         primary_source = (settings.vnstock_source or "VCI").upper()
-        listing_metadata = await loop.run_in_executor(
-            None, _extract_listing_metadata, primary_source
+        listing_metadata = (
+            await loop.run_in_executor(None, _extract_listing_metadata, primary_source)
+            if enrich_ratios else {}
         )
 
         start_index = 0
@@ -1343,40 +1347,43 @@ class DataPipeline:
             elif last_symbol and last_symbol in deduped_symbols:
                 start_index = deduped_symbols.index(last_symbol) + 1
 
-        ratio_sources = [primary_source]
+        ratio_sources = [primary_source] if enrich_ratios else []
         batch_size = 20
+        ratio_failed_symbols: List[str] = []
         cache_batch: List[Dict[str, Any]] = []
         today = datetime.utcnow().date()
 
         previous_snapshot_fallback: Dict[str, Dict[str, Any]] = {}
         latest_price_fallback: Dict[str, Dict[str, Any]] = {}
         async with async_session_maker() as session:
-            previous_date_result = await session.execute(
-                select(func.max(ScreenerSnapshot.snapshot_date)).where(
-                    ScreenerSnapshot.snapshot_date < today
+            latest_snapshot = (
+                select(
+                    ScreenerSnapshot.symbol.label("symbol"),
+                    func.max(ScreenerSnapshot.snapshot_date).label("snapshot_date"),
                 )
+                .where(ScreenerSnapshot.snapshot_date <= today, ScreenerSnapshot.symbol.in_(deduped_symbols))
+                .group_by(ScreenerSnapshot.symbol)
+                .subquery()
             )
-            previous_snapshot_date = previous_date_result.scalar()
-            if previous_snapshot_date:
-                previous_rows = await session.execute(
-                    select(ScreenerSnapshot).where(
-                        ScreenerSnapshot.snapshot_date == previous_snapshot_date,
-                        ScreenerSnapshot.symbol.in_(deduped_symbols),
-                    )
-                )
-                for row in previous_rows.scalars().all():
-                    normalized_price = screener_price_record(row)
-                    previous_snapshot_fallback[str(row.symbol).upper()] = {
-                        "company_name": row.company_name,
-                        "exchange": row.exchange,
-                        "industry": row.industry,
-                        "trade_date": row.trade_date,
-                        "price": normalized_price["price"],
-                        "price_unit": normalized_price["price_unit"],
-                        "price_source": normalized_price.get("price_source"),
-                        "volume": row.volume,
-                        "market_cap": row.market_cap,
-                    }
+            previous_rows = await session.execute(
+                select(ScreenerSnapshot).join(latest_snapshot, and_(
+                    ScreenerSnapshot.symbol == latest_snapshot.c.symbol,
+                    ScreenerSnapshot.snapshot_date == latest_snapshot.c.snapshot_date,
+                ))
+            )
+            for row in previous_rows.scalars().all():
+                normalized_price = screener_price_record(row)
+                previous_snapshot_fallback[str(row.symbol).upper()] = {
+                    "company_name": row.company_name,
+                    "exchange": row.exchange,
+                    "industry": row.industry,
+                    "trade_date": row.trade_date,
+                    "price": normalized_price["price"],
+                    "price_unit": normalized_price["price_unit"],
+                    "price_source": normalized_price.get("price_source"),
+                    "volume": row.volume,
+                    "market_cap": row.market_cap,
+                }
 
             latest_price_subquery = (
                 select(
@@ -1416,15 +1423,15 @@ class DataPipeline:
             progress["stage_index"] = STAGE_ORDER.index("screener")
             progress["stage_stats"].setdefault(
                 "screener",
-                {"success": 0, "errors": 0, "total": len(deduped_symbols)},
+                {"success": 0, "errors": 0, "ratio_errors": 0, "base_errors": 0, "total": len(deduped_symbols)},
             )
 
         async with async_session_maker() as session:
             count = 0
-            failed_symbols = 0
             for idx in range(start_index, len(deduped_symbols)):
                 symbol = deduped_symbols[idx]
-                await self._wait_for_rate_limit("screener")
+                if enrich_ratios:
+                    await self._wait_for_rate_limit("screener")
                 try:
                     ratio_df = None
                     for ratio_source in ratio_sources:
@@ -1560,76 +1567,57 @@ class DataPipeline:
                             )
 
                     row = ratio_df or {}
-                    if not ratio_df:
-                        failed_symbols += 1
+                    if enrich_ratios and not ratio_df:
+                        ratio_failed_symbols.append(symbol)
                         if progress is not None:
                             progress["error_count"] = progress.get("error_count", 0) + 1
-                            progress["stage_stats"]["screener"]["errors"] += 1
-                        # Preserve already-certified same-day row/cache on a failed rerun.
-                        continue
+                            stats = progress["stage_stats"]["screener"]
+                            stats["errors"] += 1
+                            stats["ratio_errors"] = stats.get("ratio_errors", 0) + 1
                     stock_row = stock_metadata.get(symbol, {})
                     company_row = company_metadata.get(symbol, {})
                     listing_row = listing_metadata.get(symbol, {})
                     previous_row = previous_snapshot_fallback.get(symbol, {})
                     latest_price_row = latest_price_fallback.get(symbol, {})
                     row = normalize_price_record(row, symbol=symbol)
-                    row_price = _parse_float(row.get("price"))
-                    row_trade_date = self._parse_date_value(
-                        row.get("trade_date")
-                        or row.get("tradeDate")
-                        or row.get("trading_date")
+                    row["trade_date"] = self._parse_date_value(
+                        row.get("trade_date") or row.get("tradeDate") or row.get("trading_date")
                     )
-                    row_volume = _parse_float(row.get("volume"))
-                    previous_price = _parse_float(previous_row.get("price"))
-                    previous_volume = _parse_float(previous_row.get("volume"))
-                    latest_price = _parse_float(latest_price_row.get("price"))
-                    certified_fallback = next(
+                    price_provenance = next(
                         (
                             candidate
-                            for candidate, candidate_price in (
-                                (latest_price_row, latest_price),
-                                (previous_row, previous_price),
-                            )
-                            if candidate_price is not None
-                            and candidate.get("price_unit") in ("VND", "index_points")
+                            for candidate in (row, latest_price_row, previous_row)
+                            if (candidate_price := _parse_float(candidate.get("price"))) is not None
+                            and math.isfinite(candidate_price) and candidate_price > 0
+                            and candidate.get("price_unit") == "VND"
+                            and candidate.get("price_source")
+                            and (candidate_date := self._parse_date_value(candidate.get("trade_date"))) is not None
+                            and candidate_date <= today
                         ),
-                        None,
+                        row,
                     )
-                    # Priority stays enrichment > latest > previous. A unit-unknown
-                    # enrichment row only wins when no certified row backs it.
-                    if (
-                        row_price is not None
-                        and row_trade_date is not None
-                        and (row["price_unit"] != "unknown" or certified_fallback is None)
+                    price_value = _parse_float(price_provenance.get("price"))
+                    volume_value = _parse_float(price_provenance.get("volume"))
+                    trade_date_value = self._parse_date_value(price_provenance.get("trade_date"))
+                    if not (
+                        price_value is not None
+                        and math.isfinite(price_value)
+                        and price_value > 0
+                        and trade_date_value is not None
+                        and trade_date_value <= today
+                        and price_provenance.get("price_unit") == "VND"
+                        and price_provenance.get("price_source")
                     ):
-                        price_value = row_price
-                        volume_value = row_volume
-                        trade_date_value = row_trade_date
-                        price_provenance = row
-                    elif latest_price is not None and (
-                        latest_price_row.get("price_unit") != "unknown"
-                        or certified_fallback is None
-                    ):
-                        price_value = latest_price
-                        volume_value = _parse_float(latest_price_row.get("volume"))
-                        trade_date_value = self._parse_date_value(latest_price_row.get("trade_date"))
-                        price_provenance = latest_price_row
-                    elif certified_fallback is not None:
-                        price_value = _parse_float(certified_fallback.get("price"))
-                        volume_value = _parse_float(certified_fallback.get("volume"))
-                        trade_date_value = self._parse_date_value(
-                            certified_fallback.get("trade_date")
-                        )
-                        price_provenance = certified_fallback
-                    else:
-                        price_value = previous_price
-                        volume_value = previous_volume
-                        trade_date_value = self._parse_date_value(previous_row.get("trade_date"))
-                        price_provenance = previous_row
+                        if progress is not None:
+                            progress["error_count"] = progress.get("error_count", 0) + 1
+                            stats = progress["stage_stats"]["screener"]
+                            stats["errors"] += 1
+                            stats["base_errors"] = stats.get("base_errors", 0) + 1
+                        if not ratio_df:
+                            continue
                     market_cap_value = (
                         _parse_float(row.get("market_cap"))
                         or _parse_float(row.get("marketCap"))
-                        or _parse_float(row.get("charter_capital"))
                         or _parse_float(listing_row.get("market_cap"))
                         or _parse_float(previous_row.get("market_cap"))
                     )
@@ -1765,7 +1753,7 @@ class DataPipeline:
                             row.get("foreign_ownership") or row.get("foreignOwnership")
                         ),
                         "extended_metrics": extended_metrics or None,
-                        "source": "vnstock_ratio",
+                        "source": "vnstock_ratio" if ratio_df else price_provenance.get("price_source"),
                         "created_at": datetime.utcnow(),
                     }
                     for metric in row.get("ratio_units", {}):
@@ -1775,13 +1763,20 @@ class DataPipeline:
                         ScreenerSnapshot,
                         ["symbol", "snapshot_date"],
                         values,
-                        preserve_existing_on_null={"trade_date"},
+                        preserve_existing_on_null={
+                            "trade_date", "market_cap", "pe", "pb", "ps", "ev_ebitda",
+                            "roe", "roa", "roic", "gross_margin", "net_margin", "operating_margin",
+                            "revenue_growth", "earnings_growth", "dividend_yield", "debt_to_equity",
+                            "current_ratio", "quick_ratio", "eps", "bvps", "foreign_ownership",
+                        },
                         preserve_columns_without=("trade_date", {"price", "volume"}),
                         update_overrides=lambda stmt: screener_metadata_updates(
                             stmt, engine.dialect.name, stmt.excluded.trade_date.is_(None)
                         ),
                     )
-                    await session.execute(stmt)
+                    stored = await session.execute(stmt.returning(*ScreenerSnapshot.__table__.c))
+                    values = dict(stored.mappings().one())
+                    extended_metrics = values["extended_metrics"] or {}
                     count += 1
 
                     previous_snapshot_fallback[symbol] = {
@@ -1827,18 +1822,21 @@ class DataPipeline:
                             "bvps": values.get("bvps"),
                         }
                     )
-                    if progress is not None and ratio_df:
+                    if progress is not None:
                         progress["success_count"] = progress.get("success_count", 0) + 1
                         progress["stage_stats"]["screener"]["success"] += 1
                 except Exception as ratio_error:
-                    failed_symbols += 1
-                    logger.debug(f"Ratio summary failed for {symbol}: {ratio_error}")
+                    logger.debug(f"Screener base assembly failed for {symbol}: {ratio_error}")
                     if progress is not None:
                         progress["error_count"] = progress.get("error_count", 0) + 1
                         progress["stage_stats"]["screener"]["errors"] += 1
+                        stats = progress["stage_stats"]["screener"]
+                        stats["base_errors"] = stats.get("base_errors", 0) + 1
 
                 if count % batch_size == 0:
                     await session.commit()
+                    if progress is not None:
+                        progress["committed_count"] = count
                     for item in cache_batch:
                         cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
                         await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
@@ -2024,13 +2022,29 @@ class DataPipeline:
             if backfilled_rows:
                 logger.info("Back-filled %d screener rows from financial ratios", backfilled_rows)
 
+            await session.flush()
+            snapshot_rows = (await session.scalars(
+                select(ScreenerSnapshot).where(ScreenerSnapshot.snapshot_date == today)
+            )).all()
+            expected_symbols = set(deduped_symbols)
+            valid_base_symbols = set()
+            for snapshot in snapshot_rows:
+                quote = screener_price_record(snapshot)
+                price = _parse_float(quote.get("price"))
+                if (
+                    price is not None and math.isfinite(price) and price > 0
+                    and snapshot.trade_date is not None and snapshot.trade_date <= today
+                    and quote["price_unit"] == "VND" and quote.get("price_source")
+                ):
+                    valid_base_symbols.add(snapshot.symbol)
+            if progress is not None:
+                progress["base_count"] = len(valid_base_symbols & expected_symbols)
             if (
                 symbols is None
                 and exchanges is None
                 and limit is None
-                and start_index == 0
-                and failed_symbols == 0
-                and count == len(set(deduped_symbols))
+                and {snapshot.symbol for snapshot in snapshot_rows} == expected_symbols
+                and valid_base_symbols == expected_symbols
             ):
                 session.add(
                     SyncStatus(
@@ -2038,16 +2052,32 @@ class DataPipeline:
                         status="completed",
                         started_at=datetime.utcnow(),
                         completed_at=datetime.utcnow(),
-                        success_count=count,
+                        success_count=len(expected_symbols),
                         error_count=0,
                         additional_data={
                             "snapshot_date": today.isoformat(),
                             "expected_symbols": sorted(set(deduped_symbols)),
-                            "expected_count": count,
+                            "expected_count": len(expected_symbols),
+                            "base_only": not enrich_ratios,
+                            "ratio_errors": len(ratio_failed_symbols),
                         },
                     )
                 )
+            if ratio_failed_symbols:
+                session.add(SyncStatus(
+                    sync_type="screener_ratio_enrichment", status="partial",
+                    started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
+                    success_count=len(deduped_symbols) - start_index - len(ratio_failed_symbols),
+                    error_count=len(ratio_failed_symbols),
+                    additional_data={
+                        "snapshot_date": today.isoformat(),
+                        "expected_symbols": sorted(expected_symbols),
+                        "failed_symbols": ratio_failed_symbols,
+                    },
+                ))
             await session.commit()
+            if progress is not None:
+                progress["committed_count"] = count
             for item in cache_batch:
                 cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
                 await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
@@ -2214,6 +2244,8 @@ class DataPipeline:
                         await session.commit()
                         symbol_synced += range_synced
                         total_synced += range_synced
+                        if progress is not None:
+                            progress["committed_count"] = total_synced
                         if conflicts:
                             logger.warning("Price acquisition retained IQ-owned rows for %s: %s", symbol, conflicts)
                             if progress is not None:
@@ -2999,7 +3031,10 @@ class DataPipeline:
                 symbol_persisted_rows = 0
                 cycle["outcomes"][symbol] = {}
                 income_depreciation_lookup: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
-                async def _acquire_statement(statement_type, model, cache_slug, outcome):
+                async def _acquire_statement(
+                    statement_type, model, cache_slug, outcome,
+                    *, income_depreciation_lookup=income_depreciation_lookup,
+                ):
                     params = FinancialsQueryParams(
                         symbol=symbol,
                         statement_type=statement_type,
@@ -3023,7 +3058,7 @@ class DataPipeline:
                     rejected_updates: List[str] = []
                     committed_periods = {}
                     async with async_session_maker() as session:
-                        for entry in items:
+                        for entry in admit_statement_rows(items, normalized_period):
                             payload = entry.model_dump(mode="json")
                             raw_payload = dict(entry.raw_data or {})
                             canonical = {
@@ -3578,6 +3613,7 @@ class DataPipeline:
                         IncomeStatement.net_income,
                         IncomeStatement.cost_of_revenue,
                         IncomeStatement.interest_expense,
+                        IncomeStatement.raw_data,
                     )
                     .where(
                         IncomeStatement.symbol == symbol_value,
@@ -3640,6 +3676,7 @@ class DataPipeline:
                 net_income,
                 cogs,
                 interest_expense,
+                raw_data,
             ) in income_rows:
                 if year is None:
                     continue
@@ -3649,7 +3686,7 @@ class DataPipeline:
                     "operating_income": _coerce_float(op_income),
                     "net_income": _coerce_float(net_income),
                     "cost_of_revenue": _coerce_float(cogs),
-                    "interest_expense": _coerce_float(interest_expense),
+                    "interest_expense": admitted_interest_expense({"interest_expense": interest_expense, "raw_data": raw_data}),
                 }
                 income_lookup[period_key] = row_value
                 income_annual.setdefault(int(year), row_value)
@@ -3884,7 +3921,7 @@ class DataPipeline:
                         denominator += abs(interest_expense)
                     if debt_repayment is not None:
                         denominator += abs(debt_repayment)
-                    if operating_income is not None and denominator > 0:
+                    if operating_income is not None and interest_expense is not None and denominator > 0:
                         raw_payload["debt_service_coverage"] = round(
                             operating_income / denominator,
                             4,
@@ -3941,8 +3978,6 @@ class DataPipeline:
                         raw_payload["dividend_yield"] = round(existing_yield, 4)
                         changed = True
 
-                payout_ratio_value = _pick_float(raw_payload.get("payout_ratio"))
-                eps_value = _pick_float(ratio_row.eps, raw_payload.get("eps"))
 
                 if (
                     ratio_row.bvps is None
@@ -4001,38 +4036,6 @@ class DataPipeline:
                     raw_payload["pb_ratio"] = ratio_row.pb_ratio
                     changed = True
 
-                if (
-                    payout_ratio_value is None
-                    and dps_value not in (None, 0)
-                    and eps_value not in (None, 0)
-                ):
-                    payout_ratio_value = (dps_value / eps_value) * 100
-                    raw_payload["payout_ratio"] = round(payout_ratio_value, 4)
-                    changed = True
-
-                if (
-                    ratio_row.dps is None
-                    and payout_ratio_value not in (None, 0)
-                    and eps_value not in (None, 0)
-                ):
-                    payout_ratio_base = payout_ratio_value
-                    while abs(payout_ratio_base) > 100:
-                        payout_ratio_base /= 100
-
-                    derived_dps = eps_value * (payout_ratio_base / 100)
-                    ratio_row.dps = round(derived_dps, 4)
-                    raw_payload["dps"] = ratio_row.dps
-                    dps_value = ratio_row.dps
-                    changed = True
-
-                if _pick_float(raw_payload.get("payout_ratio")) is None:
-                    if dividends_paid is not None and net_income not in (None, 0):
-                        if net_income > 0:
-                            raw_payload["payout_ratio"] = round(
-                                (abs(dividends_paid) / net_income) * 100,
-                                4,
-                            )
-                            changed = True
 
                 if ratio_row.peg_ratio is None:
                     pe_value = _pick_float(ratio_row.pe_ratio, raw_payload.get("pe"))
@@ -6071,12 +6074,12 @@ class DataPipeline:
                     for index, raw in enumerate(raw_levels or []):
                         key = f"free-vci:depth:{symbol}:{index}"
                         operations.append(ReplaceOne(
-                            {"recordKey": key},
+                            {"dataset": "equity.price_depth", "symbol": symbol, "recordKey": key},
                             {**envelope, "recordKey": key, "raw": raw}, upsert=True,
                         ))
                     key = f"free-vci:depth:{symbol}:latest-batch"
                     operations.append(ReplaceOne(
-                        {"recordKey": key},
+                        {"dataset": "equity.price_depth", "symbol": symbol, "recordKey": key},
                         {**envelope, "recordKey": key, "raw": {}, "batchReceipt": True,
                          "rowCount": len(raw_levels or [])}, upsert=True,
                     ))

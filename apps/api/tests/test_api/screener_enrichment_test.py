@@ -430,14 +430,14 @@ async def test_screener_performance_preserves_large_legitimate_split():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("unit", "expected"), [("VND", 10), ("unknown", None)])
-async def test_screener_dividend_yield_uses_only_canonical_vnd(unit, expected):
+@pytest.mark.parametrize("unit", ["VND", "unknown"])
+async def test_screener_current_price_cannot_certify_historical_dividend_yield(unit):
     rows = await _enrich_screener_metrics(
         [ScreenerData(symbol="FPT", price=80, price_unit=unit)],
         _PriceEnrichmentDB([], dps=8),
     )
 
-    assert rows[0].dividend_yield == expected
+    assert rows[0].dividend_yield is None
 
 
 def test_target_upside_preserves_low_canonical_vnd_price():

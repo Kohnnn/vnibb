@@ -240,6 +240,51 @@ class TechnicalAnalysisService:
     # NEW: Full Technical Analysis Methods
     # =========================================================================
 
+    async def _load_retained_ohlcv_frame(
+        self, symbol: str, start_date: date, end_date: date,
+    ) -> Optional[pd.DataFrame]:
+        from vnibb.api.v1.equity import (
+            _historical_resolution_meta,
+            _load_historical_from_db,
+            _load_historical_from_mongo,
+            _merge_historical_rows,
+        )
+        from vnibb.core.price_units import is_index_symbol
+
+        source_rows = []
+        try:
+            rows = await _load_historical_from_mongo(symbol, start_date, end_date, "1D")
+            source_rows.append(("mongo", rows))
+        except Exception as exc:
+            logger.warning("Technical retained Mongo read failed for %s: %s", symbol, exc)
+        try:
+            async with async_session_maker() as db:
+                rows = await _load_historical_from_db(db, symbol, start_date, end_date, "1D")
+                source_rows.append(("db", rows))
+        except Exception as exc:
+            logger.warning("Technical retained SQL read failed for %s: %s", symbol, exc)
+        if not any(rows for _, rows in source_rows):
+            return None
+
+        rows, source_counts = _merge_historical_rows(source_rows)
+        expected_unit = "index_points" if is_index_symbol(symbol) else "VND"
+        excluded = [row for _, items in source_rows for row in items if row.price_unit != expected_unit]
+        unresolved_dates = {row.time for row in excluded} - {row.time for row in rows}
+        if unresolved_dates:
+            frame = pd.DataFrame()
+            frame.attrs["unit_exclusion"] = {
+                "reason": "unresolved_price_units",
+                "excluded_count": len(unresolved_dates),
+                "unresolved_sources": sorted({row.price_source or "unknown" for row in excluded if row.time in unresolved_dates}),
+            }
+            return frame
+        frame = self._clean_ohlcv_frame(pd.DataFrame([row.model_dump() for row in rows]))
+        frame.attrs["history_resolution"] = _historical_resolution_meta(
+            rows, "raw", start_date=start_date, end_date=end_date, interval="1D",
+            source_counts=source_counts, mongo_docs=[], warnings=[],
+        ).model_dump()
+        return frame
+
     async def _load_ohlcv_frame(
         self,
         symbol: str,
@@ -268,9 +313,11 @@ class TechnicalAnalysisService:
                 (cached_frame["time"] >= start_timestamp) & (cached_frame["time"] < end_timestamp)
             ].reset_index(drop=True)
             window.attrs["unit_exclusion"] = cached_frame.attrs.get("unit_exclusion")
+            window.attrs["history_resolution"] = cached_frame.attrs.get("history_resolution", {})
             return window
 
-        import asyncio
+        from vnibb.api.v1.equity import _provider_timeout_budget
+        from vnibb.providers.vnstock.runtime import run_reference_provider
 
         def _fetch():
             try:
@@ -294,7 +341,14 @@ class TechnicalAnalysisService:
                 logger.error(f"Failed to fetch OHLCV for {symbol}: {e}")
                 return None
 
-        frame = await asyncio.to_thread(_fetch)
+        try:
+            frame = await run_reference_provider(
+                _fetch, timeout=_provider_timeout_budget(),
+                key=("technical_history", symbol, start_date, end_date, interval, settings.vnstock_source),
+            )
+        except (TimeoutError, RuntimeError) as exc:
+            logger.warning("Technical provider history unavailable for %s: %s", symbol, exc)
+            return None
         if frame is None:
             return None
         if frame.empty:
@@ -396,9 +450,8 @@ class TechnicalAnalysisService:
         if frame is None or frame.empty:
             return None
         if _full_analysis_frame.get(_missing_full_analysis_frame) is not _missing_full_analysis_frame:
-            # A shared full-analysis frame is active, so the entry point already
-            # performed the single latest-quote merge. Re-fetching the quote here
-            # would issue one provider call per indicator.
+            # Full-analysis callers share one resolved frame, including retained
+            # session data that must not be restamped by a live quote.
             return frame
         return await self._merge_latest_quote(frame, symbol)
 
@@ -455,13 +508,18 @@ class TechnicalAnalysisService:
             age_days = (date.today() - latest.date()).days
             if age_days > 10:
                 issues.append(f"Latest clean bar is {age_days} days old ({latest_date}).")
+        resolution = frame.attrs.get("history_resolution", {})
+        if resolution.get("completeness_status") == "partial":
+            issues.append("Retained history does not cover the full requested range.")
         return {
+            **resolution,
             "status": "ok" if not issues else "degraded",
             "bars": int(len(frame)),
             "latest_date": latest_date,
             "issues": issues,
             "unit_status": unit_status,
             "unresolved_session_count": 0,
+            "stale": bool(latest_date and age_days > 10),
         }
 
     async def get_moving_averages(
@@ -565,7 +623,10 @@ class TechnicalAnalysisService:
 
         df = await self.get_ohlcv_data(symbol, start_date, end_date)
         if df is None or len(df) < slow:
-            return {"macd": None, "signal_line": None, "histogram": None, "signal": "neutral"}
+            return {
+                "macd": None, "signal_line": None, "histogram": None, "signal": "unavailable",
+                "params": {"fast": fast, "slow": slow, "signal": signal_period},
+            }
 
         close = df["close"]
         ema_fast = close.ewm(span=fast, adjust=False).mean()
@@ -616,7 +677,10 @@ class TechnicalAnalysisService:
 
         df = await self.get_ohlcv_data(symbol, start_date, end_date)
         if df is None or len(df) < period:
-            return {"upper": None, "middle": None, "lower": None, "signal": "neutral"}
+            return {
+                "upper": None, "middle": None, "lower": None, "signal": "unavailable",
+                "params": {"period": period, "std_dev": std_dev},
+            }
 
         close = df["close"]
         current_price = float(close.iloc[-1])
@@ -668,7 +732,10 @@ class TechnicalAnalysisService:
 
         df = await self.get_ohlcv_data(symbol, start_date, end_date)
         if df is None or len(df) < k_period:
-            return {"k": None, "d": None, "signal": "neutral"}
+            return {
+                "k": None, "d": None, "signal": "unavailable",
+                "params": {"k_period": k_period, "d_period": d_period},
+            }
 
         high = df["high"]
         low = df["low"]
@@ -684,7 +751,10 @@ class TechnicalAnalysisService:
         d_val = float(d.iloc[-1]) if not pd.isna(d.iloc[-1]) else None
 
         if k_val is None:
-            return {"k": None, "d": None, "signal": "neutral"}
+            return {
+                "k": None, "d": None, "signal": "unavailable",
+                "params": {"k_period": k_period, "d_period": d_period},
+            }
 
         # Signal logic
         if k_val >= 80:
@@ -800,7 +870,7 @@ class TechnicalAnalysisService:
 
         df = await self.get_ohlcv_data(symbol, start_date, end_date)
         if df is None or len(df) < 10:
-            return {"levels": {}, "trend": "unknown"}
+            return {"levels": {}, "trend": "unknown", "lookback_days": lookback_days}
 
         high = df["high"]
         low = df["low"]
@@ -850,7 +920,10 @@ class TechnicalAnalysisService:
 
         df = await self.get_ohlcv_data(symbol, start_date, end_date)
         if df is None or len(df) < period * 2:
-            return {"adx": None, "plus_di": None, "minus_di": None, "trend_strength": "unknown"}
+            return {
+                "adx": None, "plus_di": None, "minus_di": None,
+                "trend_strength": "unknown", "signal": "unavailable",
+            }
 
         high = df["high"]
         low = df["low"]
@@ -924,7 +997,10 @@ class TechnicalAnalysisService:
 
         df = await self.get_ohlcv_data(symbol, start_date, end_date)
         if df is None or len(df) < period:
-            return {"volume": None, "volume_ma": None, "relative_volume": None, "signal": "neutral"}
+            return {
+                "volume": None, "volume_ma": None, "relative_volume": None,
+                "volume_desc": "unavailable", "signal": "unavailable", "params": {"period": period},
+            }
 
         volume = df["volume"]
         current_volume = float(volume.iloc[-1])
@@ -1341,15 +1417,19 @@ class TechnicalAnalysisService:
             lookback_days = lookback_days * 20  # ~16 years of monthly data
 
         end_date = date.today()
-        frame = await self._load_ohlcv_frame(
-            symbol,
-            end_date - timedelta(days=lookback_days + 26),
-            end_date,
-        )
-        if frame is not None and not frame.empty:
-            # Single latest-quote merge for the whole analysis; the indicator
-            # tasks below share this frame and must not re-fetch the quote.
-            frame = await self._merge_latest_quote(frame, symbol)
+        start_date = end_date - timedelta(days=lookback_days + 26)
+        frame = await self._load_retained_ohlcv_frame(symbol.upper(), start_date, end_date)
+        if frame is None:
+            from vnibb.api.v1.equity import _provider_timeout_budget
+
+            try:
+                async with asyncio.timeout(_provider_timeout_budget()):
+                    frame = await self._load_ohlcv_frame(symbol, start_date, end_date)
+                    if frame is not None and not frame.empty:
+                        frame = await self._merge_latest_quote(frame, symbol)
+            except TimeoutError:
+                logger.warning("Full technical provider deadline exceeded for %s", symbol)
+                frame = None
         token = _full_analysis_frame.set(frame)
         try:
             quality_task = self.get_data_quality_summary(symbol, lookback_days)

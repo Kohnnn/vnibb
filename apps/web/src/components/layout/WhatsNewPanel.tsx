@@ -83,7 +83,7 @@ function clearAcknowledgedVersion(): void {
  * Lightweight "What's new" panel that appears once per release version.
  *
  * Behavior contract:
- * - Auto-shows 1500ms after mount unless the user has already acknowledged
+ * - Auto-shows on mount unless the user has already acknowledged
  *   the current release.
  * - Auto-dismisses after 5 seconds. Hover or focus pauses the countdown so
  *   the user can read without the panel disappearing under them.
@@ -126,8 +126,7 @@ export function WhatsNewPanel() {
     if (!isBrowser()) return;
     const acknowledged = loadAcknowledgedVersion();
     if (acknowledged !== CURRENT_RELEASE) {
-      const timer = window.setTimeout(() => setOpen(true), 1500);
-      return () => window.clearTimeout(timer);
+      setOpen(true);
     }
   }, []);
 

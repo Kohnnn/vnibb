@@ -11,6 +11,8 @@ export const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';
 export const DASHBOARD_STORAGE_COMMIT_KEY = 'vnibb-dashboard-storage-commit';
 export const DASHBOARD_RECOVERY_BACKUP_KEY = 'vnibb_dashboards_recovery_backup_v1';
 
+export const MAX_TABS = 12;
+
 // Dashboard IDs
 export const LEGACY_MAIN_DASHBOARD_ID = 'main-default';
 export const MAIN_DASHBOARD_ID = 'default-fundamental';

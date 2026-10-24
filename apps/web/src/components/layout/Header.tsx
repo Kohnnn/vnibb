@@ -374,7 +374,7 @@ export function Header({
             ))}
           </div>
 
-          <div data-tour="header-search" className="relative min-w-[220px] flex-1">
+          <div data-tour="header-search" className="relative min-w-[220px] flex-1 xl:min-w-0">
             <button
               type="button"
               aria-label="Open symbol search and command palette"
@@ -545,9 +545,7 @@ export function Header({
             </DropdownMenu>
           )}
 
-          <div className="hidden sm:block">
-            <AlertNotificationPanel />
-          </div>
+          <AlertNotificationPanel />
 
           <div
             className={cn(
@@ -567,12 +565,12 @@ export function Header({
             <span>{marketStatus.isOpen ? 'HOSE Open' : 'HOSE Closed'}</span>
           </div>
 
-          {!authBypassEnabled && (
+          {(!authBypassEnabled || user) && (
            <DropdownMenu>
              <DropdownMenuTrigger asChild>
                <button
                  type="button"
-                 className="hidden items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] sm:flex"
+                 className="flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                  title="Account menu"
                  aria-label="Open account menu"
                >

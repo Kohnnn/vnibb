@@ -410,6 +410,23 @@ async def test_startup_populate_reports_snapshot_failures(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("startup_enabled", [False, True])
+async def test_restart_population_control_preserves_regular_ingestion(monkeypatch, startup_enabled):
+    scheduled = AsyncIOScheduler(timezone="UTC")
+    monkeypatch.setattr(scheduler, "_scheduler", scheduled)
+    configured = scheduler.settings.model_dump()
+    configured["prediction_market_populate_on_startup"] = startup_enabled
+    monkeypatch.setattr(scheduler, "settings", SimpleNamespace(**configured))
+
+    scheduler.configure_scheduler()
+    scheduler._maybe_populate_prediction_markets_on_startup()
+
+    assert scheduled.get_job("prediction_market_ingest") is not None
+    assert scheduled.get_job("daily_sync") is not None
+    assert (scheduled.get_job("populate_prediction_markets_on_startup") is not None) is startup_enabled
+
+
+@pytest.mark.asyncio
 async def test_prediction_retention_jobs_prune_sql_rows_after_fetch_failure(test_engine, monkeypatch):
     from sqlalchemy import select
     from vnibb.models.prediction_market import PredictionMarket
@@ -485,3 +502,187 @@ async def test_prediction_retention_jobs_prune_sql_rows_after_fetch_failure(test
     async with sessions() as session:
         for model in (PredictionMarketSnapshot, PredictionMarketIntradaySnapshot, PredictionMarket):
             assert (await session.scalars(select(model.source_id))).all() == ["recent"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("startup", [False, True], ids=["recurring", "startup"])
+async def test_prediction_ingest_persists_committed_progress_failures_and_recovery(
+    test_engine, monkeypatch, startup,
+):
+    from sqlalchemy import select
+    from vnibb.models.prediction_market import PredictionMarket
+    from vnibb.services import (
+        kalshi_service,
+        limitless_service,
+        manifold_service,
+        prediction_market_service,
+        predictit_service,
+    )
+    from vnibb.services.prediction_market_http import PredictionMarketFetchError
+
+    class UnavailableLock:
+        def __init__(self, *_):
+            pass
+
+        async def acquire(self):
+            return "unavailable"
+
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(database, "async_session_maker", sessions)
+    monkeypatch.setattr(scheduler, "async_session_factory", sessions)
+    monkeypatch.setattr(scheduler, "_scheduler", AsyncIOScheduler(timezone="UTC"))
+    monkeypatch.setattr(scheduler, "_job_guards", {})
+    monkeypatch.setattr(scheduler, "DistributedJobLock", UnavailableLock)
+    monkeypatch.setattr(scheduler.settings, "scheduler_lock_mode", "best_effort")
+    monkeypatch.setattr(prediction_market_service, "MAX_SOURCE_MARKETS", 1)
+    monkeypatch.setattr(scheduler, "_last_populate_at", None)
+    monkeypatch.setattr(scheduler, "_last_populate_counts", None)
+    async with sessions() as session:
+        await prediction_market_service.persist_prediction_markets(session, [
+            {"source": source, "source_id": source_id, "question": "Before refresh?",
+             "active": True, "closed": False, "is_synthetic": False}
+            for source, source_id in (("kalshi", "KXREAL-1"), ("limitless", "limitless-1"))
+        ])
+
+    kalshi_rows = [kalshi_service.KalshiMarketPayload(ticker=ticker, title="Refreshed Kalshi?")
+                   for ticker in ("KXREAL-1", "KXREAL-2")]
+    limitless_rows = [limitless_service.LimitlessMarketPayload(
+        id=source_id, title="Refreshed Limitless?", prices=[0.6, 0.4], status="FUNDED",
+    ) for source_id in ("limitless-1", "limitless-2", "limitless-3")]
+    fetches = {}
+    for source, module, name, rows in (
+        ("polymarket", prediction_market_service, "fetch_polymarket_gamma_markets", [
+            prediction_market_service.GammaMarketPayload(id="poly-1", question="Polymarket?")]),
+        ("kalshi", kalshi_service, "fetch_kalshi_markets", kalshi_rows),
+        ("limitless", limitless_service, "fetch_limitless_markets", limitless_rows),
+        ("manifold", manifold_service, "fetch_manifold_markets", [
+            manifold_service.ManifoldMarketPayload(id="manifold-1", question="Manifold?", probability=0.6)]),
+    ):
+        fetches[source] = AsyncMock(return_value=rows)
+        monkeypatch.setattr(module, name, fetches[source])
+    predictit_fetch = AsyncMock(side_effect=PredictionMarketFetchError(
+        "predictit", 403, "Forbidden https://provider.invalid/?token=private-token",
+    ))
+    monkeypatch.setattr(predictit_service, "fetch_predictit_markets", predictit_fetch)
+    scheduler.configure_scheduler()
+    job_id = "prediction_market_ingest"
+    if startup:
+        monkeypatch.setattr(scheduler.settings, "prediction_market_populate_on_startup", True)
+        scheduler._maybe_populate_prediction_markets_on_startup()
+        job_id = "populate_prediction_markets_on_startup"
+    job = scheduler.get_scheduler().get_job(job_id)
+
+    for expected_failures in (1, 2):
+        await job.func()
+        async with sessions() as session:
+            status = await scheduler.get_job_status(session)
+            rows = (await session.scalars(select(PredictionMarket))).all()
+        state = status["failing_jobs"][job_id]
+        assert state["last_outcome"] == "failed"
+        assert state["consecutive_failures"] == expected_failures
+        detail = state["last_detail"]
+        for source_receipt in (
+            "polymarket=1", "kalshi=1(error)" if startup else "kalshi=1(cap:1)",
+            "predictit=0(error)" if startup else "predictit=0(http403)",
+            "limitless=1(error)" if startup else "limitless=1(cap:2)", "manifold=1",
+        ):
+            assert source_receipt in detail
+        assert len(detail) <= 128
+        assert "private-token" not in detail and "provider.invalid" not in detail
+        assert {(row.source, row.source_id) for row in rows} == {
+            ("polymarket", "poly-1"), ("kalshi", "KXREAL-1"),
+            ("limitless", "limitless-1"), ("manifold", "manifold-1"),
+        }
+        assert {row.question for row in rows if row.source in {"kalshi", "limitless"}} == {
+            "Refreshed Kalshi?", "Refreshed Limitless?",
+        }
+        if startup:
+            counts = scheduler.get_predictions_status()["populate"]["counts"]
+            assert {source: counts[source] for source in fetches} == {
+                "polymarket": 1, "kalshi": 1, "limitless": 1, "manifold": 1,
+            }
+            assert counts["failed_sources"] == ["kalshi", "predictit", "limitless"]
+
+    fetches["kalshi"].return_value = kalshi_rows[:1]
+    fetches["limitless"].return_value = limitless_rows[:1]
+    predictit_fetch.side_effect = None
+    predictit_fetch.return_value = [predictit_service.PredictItMarketPayload(
+        id="predictit-1", name="PredictIt?", contracts=[predictit_service.PredictItContractPayload(
+            id="contract-1", status="open", last_trade_price=0.6,
+        )],
+    )]
+    await job.func()
+    async with sessions() as session:
+        status = await scheduler.get_job_status(session)
+        assert await session.scalar(select(PredictionMarket.id).where(
+            PredictionMarket.source == "predictit", PredictionMarket.source_id == "predictit-1",
+        )) is not None
+    state = next(row for row in status["jobs"] if row["id"] == job_id)
+    assert state["last_outcome"] == "ok"
+    assert state["consecutive_failures"] == 0
+    assert job_id not in status["failing_jobs"]
+
+    if not startup:
+        monkeypatch.setattr(prediction_market_service, "MAX_CATALOGUE_RELATION_BYTES", 1)
+        await job.func()
+        async with sessions() as session:
+            status = await scheduler.get_job_status(session)
+        state = status["failing_jobs"][job_id]
+        assert state["last_outcome"] == "failed"
+        assert state["consecutive_failures"] == 1
+        for source in ("polymarket", "kalshi", "predictit", "limitless", "manifold"):
+            assert f"{source}=0(deny:1)" in state["last_detail"]
+
+        fetches["polymarket"].side_effect = asyncio.CancelledError()
+        remaining_calls = {source: fetch.await_count for source, fetch in fetches.items() if source != "polymarket"}
+        predictit_calls = predictit_fetch.await_count
+        with pytest.raises(asyncio.CancelledError):
+            await job.func()
+        assert {source: fetch.await_count for source, fetch in fetches.items() if source != "polymarket"} == remaining_calls
+        assert predictit_fetch.await_count == predictit_calls
+        assert not scheduler._job_guards[job_id].locked()
+        async with sessions() as session:
+            status = await scheduler.get_job_status(session)
+        assert status["failing_jobs"][job_id]["last_detail"] == "worker cancelled"
+
+
+@pytest.mark.parametrize("source_cap", [False, True])
+def test_prediction_ingest_receipt_bounds_all_sources_without_leaking_input(source_cap):
+    from vnibb.services.prediction_market_policy import MAX_INGEST_MARKETS, SNAPSHOT_SOURCES
+    from vnibb.services.prediction_market_service import PredictionMarketAdmissionError
+
+    error = PredictionMarketAdmissionError(
+        "https://provider.invalid/?token=private-token", persisted_count=MAX_INGEST_MARKETS,
+        rejected_count=MAX_INGEST_MARKETS, source_cap=source_cap,
+    )
+    counts = dict.fromkeys(SNAPSHOT_SOURCES, MAX_INGEST_MARKETS)
+    counts["private-token"] = MAX_INGEST_MARKETS
+    receipt = str(scheduler.PredictionMarketIngestIncomplete(
+        counts, dict.fromkeys(counts, error),
+    ))
+    assert len(receipt) <= 128
+    reason = "cap" if source_cap else "deny"
+    assert receipt.split() == [
+        f"{source}={MAX_INGEST_MARKETS}({reason}:{MAX_INGEST_MARKETS})"
+        for source in SNAPSHOT_SOURCES
+    ]
+    assert "private-token" not in receipt and "provider.invalid" not in receipt
+
+
+def test_prediction_ingest_receipt_rejects_untrusted_status_counts_and_error_names():
+    from vnibb.services.prediction_market_http import PredictionMarketFetchError
+    from vnibb.services.prediction_market_service import PredictionMarketAdmissionError
+
+    untrusted = type("private-token-https://provider.invalid", (RuntimeError,), {})("private-token")
+    receipt = str(scheduler.PredictionMarketIngestIncomplete(
+        {"polymarket": -1, "kalshi": "private-token", "manifold": True},
+        {"polymarket": PredictionMarketFetchError("private-token", "403 private-token", "private-token"),
+         "kalshi": untrusted, "predictit": PredictionMarketFetchError("private-token", 403, "private-token"),
+         "limitless": PredictionMarketAdmissionError("private-token"),
+         "manifold": PredictionMarketFetchError("private-token", 999, "private-token")},
+    ))
+    assert receipt.split() == [
+        "polymarket=0(error)", "kalshi=0(error)", "predictit=0(http403)",
+        "limitless=0(deny)", "manifold=0(error)",
+    ]
+    assert "private-token" not in receipt and "provider.invalid" not in receipt

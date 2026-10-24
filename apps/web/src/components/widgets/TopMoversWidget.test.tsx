@@ -1,21 +1,19 @@
-import * as React from 'react';
 import { render, screen } from '@testing-library/react';
 import { useTopMovers } from '@/lib/queries';
-import { widgetRegistry } from './WidgetRegistry';
+import { TopMoversWidget } from './TopMoversWidget';
 
 jest.mock('@/lib/queries', () => ({ useTopMovers: jest.fn() }));
 jest.mock('@/hooks/useWidgetSymbolLink', () => ({
   useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }),
 }));
 const moversQuery = jest.mocked(useTopMovers);
-const TopMovers = widgetRegistry.get('top_movers')!.component;
 
 function showMovers(data: object | undefined, error: Error | null) {
   moversQuery.mockReturnValue({
     data, error, isLoading:false, isFetching:false, refetch: jest.fn(),
     dataUpdatedAt: 1750000000000,
   } as never);
-  render(<React.Suspense fallback={<span>Loading widget</span>}><TopMovers id="market-movers" /></React.Suspense>);
+  render(<TopMoversWidget />);
 }
 
 describe('top movers provenance', () => {

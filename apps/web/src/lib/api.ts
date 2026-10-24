@@ -206,9 +206,9 @@ export async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}):
 
     try {
         const response = await fetch(url, {
+            ...fetchOptions,
             headers,
             signal: requestSignal,
-            ...fetchOptions,
             body: requestBody,
         });
 
@@ -437,6 +437,8 @@ export interface QuoteData {
     updatedAt: string | null;
     updated_at?: string | null;
     price_unit?: 'VND' | 'index_points' | 'unknown';
+    as_of?: string | null;
+    upstream_source?: string | null;
 }
 
 export interface QuoteResponse {
@@ -444,6 +446,12 @@ export interface QuoteResponse {
     data: QuoteData | null;
     cached?: boolean;
     error?: string | null;
+    meta?: {
+        source?: string | null;
+        upstream_source?: string | null;
+        as_of?: string | null;
+        stale?: boolean | null;
+    } | null;
 }
 
 export async function getQuote(symbol: string, signal?: AbortSignal): Promise<QuoteResponse> {
@@ -1419,6 +1427,7 @@ export interface DividendRecord {
     issue_year?: number | null;
     year?: number | null;
     annual_dps?: number | null;
+    /** Canonical percent points, computed by the dividends endpoint as annual DPS / VND price * 100. */
     dividend_yield?: number | null;
     description?: string | null;
 }

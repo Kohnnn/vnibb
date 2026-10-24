@@ -1,6 +1,6 @@
 // Backend sync hooks for dashboard persistence
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { probeBackendReadiness } from '@/lib/backendHealth'
 import * as api from '@/lib/api';
 import { logClientError, logClientInfo } from '@/lib/clientLogger';
@@ -266,6 +266,7 @@ export function useLoadFromBackend(
     enabled = true
 ) {
     const loadedRef = useRef(false);
+    const [settled, setSettled] = useState(false);
 
     useEffect(() => {
         if (!enabled || loadedRef.current) return;
@@ -289,10 +290,14 @@ export function useLoadFromBackend(
                 }
             } catch (error) {
                 logClientError('[DashboardSync] Failed to load from backend:', error);
+            } finally {
+                setSettled(true);
             }
         }
 
         loadDashboards();
         loadedRef.current = true;
     }, [enabled, onLoad]);
+
+    return !enabled || settled;
 }

@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useLayoutEffect, useRef } from 'react';
 import { NotesWidget } from '@/components/widgets/NotesWidget';
+import { WidgetSettingsModal } from '@/components/modals/WidgetSettingsModal';
+import { GlobalMarketsSymbolProvider } from '@/contexts/GlobalMarketsSymbolContext';
 import type { Dashboard, SystemDashboardTemplateListResponse } from '@/types/dashboard';
 import {
   DashboardProvider,
@@ -67,6 +69,14 @@ function DashboardStateProbe() {
       <button onClick={() => { setActiveDashboard('42'); setActiveTab('removed-tab'); }}>open removed cloud tab</button>
     </>
   );
+}
+
+function DashboardCatalogueProbe() {
+  const { dashboardCatalogueReady, localStateReady } = useDashboard();
+  return <>
+    <output data-testid="catalogue-ready">{String(dashboardCatalogueReady)}</output>
+    <output data-testid="local-state-ready">{String(localStateReady)}</output>
+  </>;
 }
 
 // #102: enters a workspace from a layout effect — the same position as the
@@ -294,6 +304,51 @@ describe('DashboardProvider backend sync flag', () => {
 
 });
 
+describe('DashboardProvider catalogue readiness', () => {
+  const originalBackendSyncEnabled = config.backendSyncEnabled;
+  const mockBackendLoad = jest.mocked(useLoadFromBackend);
+  const mockPublishedTemplates = jest.mocked(getPublishedSystemDashboardTemplates);
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: jest.fn() });
+    Object.assign(config, { backendSyncEnabled: true });
+    mockBackendLoad.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    Object.assign(config, { backendSyncEnabled: originalBackendSyncEnabled });
+    mockBackendLoad.mockReset();
+    jest.clearAllMocks();
+  });
+
+  it('waits for published templates and backend snapshot after local restoration', async () => {
+    const { promise, resolve: finishPublished } = Promise.withResolvers<SystemDashboardTemplateListResponse>();
+    mockPublishedTemplates.mockReturnValue(promise);
+    const view = render(<DashboardProvider><DashboardCatalogueProbe /></DashboardProvider>);
+    expect(screen.getByTestId('local-state-ready')).toHaveTextContent('true');
+    expect(screen.getByTestId('catalogue-ready')).toHaveTextContent('false');
+
+    mockBackendLoad.mockReturnValue(true);
+    view.rerender(<DashboardProvider><DashboardCatalogueProbe /></DashboardProvider>);
+    expect(screen.getByTestId('catalogue-ready')).toHaveTextContent('false');
+
+    await act(async () => { finishPublished({ count: 0, data: [] }); });
+    expect(screen.getByTestId('catalogue-ready')).toHaveTextContent('true');
+  });
+
+  it.each(['empty', 'rejected'] as const)('settles after an %s published response with backend loading disabled', async scenario => {
+    Object.assign(config, { backendSyncEnabled: false });
+    mockBackendLoad.mockReturnValue(true);
+    if (scenario === 'empty') mockPublishedTemplates.mockResolvedValue({ count: 0, data: [] });
+    else mockPublishedTemplates.mockRejectedValue(new Error('unavailable'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    render(<DashboardProvider><DashboardCatalogueProbe /></DashboardProvider>);
+    await waitFor(() => expect(screen.getByTestId('catalogue-ready')).toHaveTextContent('true'));
+    warn.mockRestore();
+  });
+});
+
 describe('DashboardProvider published templates', () => {
   const mockGetPublishedSystemDashboardTemplates = jest.mocked(getPublishedSystemDashboardTemplates);
 
@@ -377,6 +432,61 @@ describe('DashboardProvider browser persistence', () => {
   afterEach(() => {
     jest.useRealTimers();
     jest.restoreAllMocks();
+  });
+
+  it.each([
+    ['an explicit local-period opt-out', { periodSyncGroup: null, defaultPeriod: 'Q' }, { periodSyncGroup: null, defaultPeriod: 'Q' }],
+    ['an omitted period group', { defaultPeriod: 'Q' }, { defaultPeriod: 'Q' }],
+    ['an existing shared-period override', { periodSyncGroup: null, defaultPeriod: 'Q', hidePeriodToggle: false }, { periodSyncGroup: null, defaultPeriod: 'Q', hidePeriodToggle: false }],
+  ])('preserves %s when widget settings are saved and reloaded', async (_label, advancedConfig, expectedConfig) => {
+    const existing: Dashboard = {
+      ...customDashboard,
+      tabs: [{ id: 'saved-tab', name: 'Saved tab', order: 0, widgets: [{
+        id: 'local-income', type: 'income_statement', tabId: 'saved-tab', config: { periodSyncGroup: 'fundamental-core', defaultPeriod: 'FY', hidePeriodToggle: true },
+        layout: { i: 'local-income', x: 0, y: 0, w: 12, h: 8 },
+      }] }],
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([existing]));
+
+    const settings = (
+      <DashboardProvider>
+        <GlobalMarketsSymbolProvider>
+          <WidgetSettingsModal isOpen onClose={() => {}} dashboardId={existing.id} tabId="saved-tab" widgetId="local-income" />
+        </GlobalMarketsSymbolProvider>
+      </DashboardProvider>
+    );
+    const { unmount } = render(settings);
+    const rawJson = await screen.findByLabelText('Raw JSON');
+    fireEvent.change(rawJson, { target: { value: JSON.stringify({ ...advancedConfig, unrelated: null }) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(storedDashboards().find((dashboard) => dashboard.id === existing.id)?.tabs[0].widgets[0].config).toEqual(expectedConfig));
+    unmount();
+    render(settings);
+    await waitFor(() => expect(JSON.parse((screen.getByLabelText('Raw JSON') as HTMLTextAreaElement).value)).toEqual(expectedConfig));
+  });
+
+  it('keeps visible TradingView fields and refresh interval ahead of conflicting advanced JSON', async () => {
+    const existing: Dashboard = {
+      ...customDashboard,
+      tabs: [{ id: 'saved-tab', name: 'Saved tab', order: 0, widgets: [{
+        id: 'typed-chart', type: 'tradingview_chart', tabId: 'saved-tab',
+        config: { symbol: 'AMEX:SPY', useLinkedSymbol: false, interval: 'D', refreshInterval: 30 },
+        layout: { i: 'typed-chart', x: 0, y: 0, w: 12, h: 8 },
+      }] }],
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([existing]));
+    render(<DashboardProvider><GlobalMarketsSymbolProvider>
+      <WidgetSettingsModal isOpen onClose={() => {}} dashboardId={existing.id} tabId="saved-tab" widgetId="typed-chart" />
+    </GlobalMarketsSymbolProvider></DashboardProvider>);
+    const rawJson = await screen.findByLabelText('Raw JSON');
+    fireEvent.change(rawJson, { target: { value: JSON.stringify({ interval: 'W', refreshInterval: 999, customSetting: 'advanced' }) } });
+    fireEvent.change(screen.getByLabelText('Default Interval'), { target: { value: '60' } });
+    fireEvent.change(screen.getByLabelText('Auto-Refresh Interval (seconds)'), { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(storedDashboards().find((dashboard) => dashboard.id === existing.id)?.tabs[0].widgets[0].config).toEqual(
+      expect.objectContaining({ interval: '60', refreshInterval: 45, customSetting: 'advanced', symbol: 'AMEX:SPY', useLinkedSymbol: false }),
+    ));
   });
 
   it('reloads bottom-placed widgets without changing authored dashboard geometry or config', async () => {
@@ -548,6 +658,69 @@ describe('DashboardProvider browser persistence', () => {
     expect(screen.getByTestId('dashboards')).not.toHaveTextContent(customDashboard.id);
     expect(screen.getByTestId('storage-notice')).toHaveTextContent('Dashboard storage was corrupted and has been reset');
     expect(window.localStorage.getItem(DASHBOARD_RECOVERY_BACKUP_KEY)).toContain(customDashboard.id);
+  });
+
+  it('quarantines malformed saved records without replacing valid personal workspaces on migration or reload', async () => {
+    const personal: Dashboard = {
+      ...customDashboard,
+      name: 'My retained research',
+      folderId: 'folder-initial',
+      syncGroups: [{ id: 1, name: 'Core tickers', color: '#3B82F6', currentSymbol: 'FPT' }],
+      tabs: [{ id: 'saved-tab', name: 'My thesis', order: 0, widgets: [
+        { id: 'linked-chart', type: 'price_chart', tabId: 'saved-tab', syncGroupId: 1, config: { timeframe: '3M', indicators: ['SMA20'] }, layout: { i: 'linked-chart', x: 2, y: 4, w: 12, h: 9, static: true } },
+        { id: 'detached-income', type: 'income_statement', tabId: 'saved-tab', config: { symbol: 'VNM', periodSyncGroup: null, defaultPeriod: 'Q' }, layout: { i: 'detached-income', x: 14, y: 4, w: 10, h: 9 } },
+      ] }],
+    };
+    const globalWorkspace: Dashboard = {
+      ...customDashboard,
+      id: 'import-global-research',
+      name: 'My global research',
+      globalMarketsSymbol: 'NASDAQ:AAPL',
+      tabs: [{ id: 'global-tab', name: 'Global', order: 0, widgets: [{ id: 'global-chart', type: 'tradingview_chart', tabId: 'global-tab', config: { symbol: 'FX:USDVND', timeframe: '12M' }, layout: { i: 'global-chart', x: 3, y: 2, w: 15, h: 10 } }] }],
+    };
+    const customizedSystem: Dashboard = {
+      ...personal,
+      id: 'default-technical',
+      name: 'My Technical customization',
+      isDefault: true,
+    };
+    const rawDashboards = JSON.stringify([
+      personal,
+      customizedSystem,
+      { ...customDashboard, id: 'malformed-tabs', tabs: null },
+      globalWorkspace,
+      { ...customDashboard, id: 'malformed-layout', tabs: [{ id: 'bad-tab', name: 'Bad', order: 0, widgets: [{ id: 'bad-widget', type: 'notes', tabId: 'bad-tab', config: {}, layout: { i: 'bad-widget', x: 0, y: 0, w: 'invalid', h: 6 } }] }] },
+    ]);
+    const validFolder = { id: 'folder-remote', name: 'Local folder', order: 1, isExpanded: true };
+    const rawFolders = JSON.stringify([validFolder, { id: 'folder-initial', name: 'Broken initial folder', order: 'invalid', isExpanded: true }, { id: 'malformed-folder', name: 'Broken', order: 'invalid', isExpanded: true }]);
+    window.localStorage.setItem(STORAGE_KEY, rawDashboards);
+    window.localStorage.setItem(FOLDERS_KEY, rawFolders);
+    window.localStorage.setItem(MIGRATION_VERSION_KEY, '26');
+    window.localStorage.setItem('unrelated-user-settings', '{"theme":"dark","ticker":"MSR"}');
+
+    const { unmount } = render(<DashboardProvider><DashboardStateProbe /></DashboardProvider>);
+
+    await waitFor(() => expect(screen.getByTestId('storage-notice')).toHaveTextContent('Some dashboard storage was corrupted; valid workspaces were preserved'));
+    expect(storedDashboards().find((dashboard) => dashboard.id === personal.id)).toEqual(personal);
+    expect(storedDashboards().find((dashboard) => dashboard.id === globalWorkspace.id)).toEqual(globalWorkspace);
+    expect(storedDashboards().find((dashboard) => dashboard.id === customizedSystem.id)).toEqual(customizedSystem);
+    expect(storedDashboards().some((dashboard) => dashboard.id.startsWith('malformed-'))).toBe(false);
+    expect(JSON.parse(window.localStorage.getItem(FOLDERS_KEY) ?? '[]')).toEqual(expect.arrayContaining([validFolder, { id: 'folder-initial', name: 'Initial', order: 0, isExpanded: true }]));
+    expect(window.localStorage.getItem(FOLDERS_KEY)).not.toContain('malformed-folder');
+    const recoveryBackup = window.localStorage.getItem(DASHBOARD_RECOVERY_BACKUP_KEY);
+    expect(JSON.parse(recoveryBackup ?? '{}')).toEqual(expect.objectContaining({ dashboards: rawDashboards, folders: rawFolders }));
+    expect(window.localStorage.getItem('unrelated-user-settings')).toBe('{"theme":"dark","ticker":"MSR"}');
+    expect(window.localStorage.getItem(MIGRATION_VERSION_KEY)).toBe('27');
+    const persisted = window.localStorage.getItem(STORAGE_KEY);
+
+    unmount();
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('dashboards')).toHaveTextContent('My retained research'));
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe(persisted);
+    expect(window.localStorage.getItem(DASHBOARD_RECOVERY_BACKUP_KEY)).toBe(recoveryBackup);
+    expect(window.localStorage.getItem('unrelated-user-settings')).toBe('{"theme":"dark","ticker":"MSR"}');
+    expect(screen.getByTestId('storage-notice')).toHaveTextContent('');
   });
 
   it('restores dashboards containing registered widgets hidden from the library catalogue', async () => {

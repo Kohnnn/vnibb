@@ -37,9 +37,12 @@ from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
+from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.services.ai_context_service import AIContextService
+from vnibb.services.financial_service import admit_statement_rows
 from vnibb.services.matrix_service import require_matrix_export_rights, resolve_matrix_selection
 from vnibb.services.mongo_market_data_service import MongoReadError, get_mongo_market_data_service
+from vnibb.services.vietcap_financials import decode_vietcap_financial_record
 
 logger = logging.getLogger(__name__)
 
@@ -623,8 +626,11 @@ Read-only contract:
   finance datasets require IQ envelopes. Empty is not permission for a fallback fetch.
 - Historical non-financial rows remain readable with actual source/date evidence;
   freshness is not inferred from ingestion time. `premium` in names is storage legacy.
-- Full-data tools preserve every fetched row/field/evidence string; Decimal and
-  unsafe JavaScript integers are exact decimal strings. Nonfinite values error.
+- Full-data tools preserve fetched evidence; Decimal and unsafe JavaScript integers
+  are exact decimal strings. Nonfinite values error. Financial observation fields
+  are admitted separately: unverified interest and ambiguous fiscal cells are null
+  with unavailable reasons. `raw_data` and rejected `raw_observation` are retained
+  evidence, not usable financial observations; PostgreSQL rows are never rewritten.
 - SQL dates are inclusive; either EOD bound selects an open-sided range. Limits
   support zero, reject negatives and cap at collection/dataset maxima.
 - Market datasets use market scope with no equity symbol; analytics valuations
@@ -780,10 +786,72 @@ def _normalize_row_value(value: Any) -> Any:
     return value
 
 
+def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
+    statement_types = {IncomeStatement: "income", BalanceSheet: "balance", CashFlow: "cashflow"}
+    statement_type = statement_types[model]
+    raw = payload.get("raw_data") or {}
+    lineage = raw.get("_financial_lineage") or {}
+    canonical = lineage.get("canonical_data") or {}
+    basis_fields = (
+        "currency", "value_unit", "unit_metadata", "consolidation_basis",
+        "flow_basis", "aggregation_basis", "source_periods", "unavailable_reason",
+    )
+    metadata = {
+        name: canonical.get(name, lineage.get(name))
+        for name in basis_fields if name in canonical or name in lineage
+    }
+    metadata["unavailable_reason"] = canonical.get("unavailable_reason") or lineage.get("unavailable_reason")
+    if any(
+        evidence.get(name) not in (None, payload.get(name) if name != "statement_type" else statement_type)
+        for evidence in (canonical, lineage)
+        for name in ("source", "symbol", "statement_type")
+    ):
+        metadata["unavailable_reason"] = "conflicting_statement_source"
+    aliases = {
+        "income_before_tax": "pre_tax_profit", "income_tax": "tax_expense",
+        "non_current_liabilities": "long_term_liabilities",
+    }
+    monetary = {
+        column.name: aliases.get(column.name, column.name)
+        for column in model.__table__.columns if column.type.python_type in (float, Decimal)
+    }
+    values = {name: payload.get(name) for name in ("symbol", "period", "fiscal_year", "fiscal_quarter", "source")}
+    units = dict(metadata.get("unit_metadata") or {})
+    for column, field in monetary.items():
+        if field in FinancialStatementData.model_fields:
+            values[field] = payload.get(column)
+            if column in units:
+                units[field] = ({"components": [units[field], units[column]]}
+                                if field != column and field in units else units[column])
+    metadata["unit_metadata"] = units
+    admitted = admit_statement_rows([
+        FinancialStatementData(**values, **metadata, statement_type=statement_type, raw_data=raw)
+    ], payload.get("period_type") or "year")[0]
+    unavailable = {}
+    for column, field in monetary.items():
+        if payload.get(column) is not None and getattr(admitted, field, None) is None:
+            unavailable[column] = (
+                admitted.unavailable_reason
+                or admitted.unit_metadata.get(field, {}).get("unavailable_reason")
+                or "unverified_monetary_unit"
+            )
+    if unavailable or admitted.unavailable_reason:
+        payload["raw_observation"] = dict(payload)
+        if admitted.unavailable_reason:
+            payload["unavailable_reason"] = admitted.unavailable_reason
+        payload.update(dict.fromkeys(unavailable))
+        payload["unavailable_metrics"] = unavailable
+        payload["data_status"] = "partial_unavailable"
+    payload.update({name: getattr(admitted, name) for name in basis_fields})
+    return payload
+
+
 def _serialize_row(row: Any, *, model: Any = None) -> dict[str, Any]:
     payload = dict(row)
     if model is StockPrice:
         payload = persisted_price_record(payload)
+    elif model in (IncomeStatement, BalanceSheet, CashFlow) and payload.get("period"):
+        payload = _admit_statement_row(payload, model)
     elif model is FinancialRatio:
         raw_data = payload.get("raw_data")
         ratio_units = raw_data.get("ratio_units") if isinstance(raw_data, dict) else None
@@ -798,6 +866,24 @@ def _serialize_row(row: Any, *, model: Any = None) -> dict[str, Any]:
             )
             if value is not None and payload[column] is None:
                 unavailable_metrics[column] = "Percentage unit evidence is missing or unsupported"
+        if payload.get("interest_coverage") is not None:
+            decoded = decode_vietcap_financial_record(raw_data) if isinstance(raw_data, dict) else {}
+            basis = decoded.get("fiscalBasis") or {}
+            certified = (
+                isinstance(raw_data, dict)
+                and payload.get("source") == "vietcap"
+                and raw_data.get("symbol") == payload.get("symbol")
+                and raw_data.get("dataset") == "finance.ratio"
+                and basis.get("periodType") == payload.get("period_type")
+                and decoded.get("values", {}).get("interest_coverage") == payload["interest_coverage"]
+                and basis.get("period") == payload.get("period")
+                and basis.get("year") == payload.get("fiscal_year")
+                and basis.get("quarter") == payload.get("fiscal_quarter")
+            )
+            if not certified:
+                payload["raw_observation"] = dict(row)
+                payload["interest_coverage"] = None
+                unavailable_metrics["interest_coverage"] = "interest_inputs_unverified"
         if unavailable_metrics:
             payload["unavailable_metrics"] = unavailable_metrics
             payload["data_status"] = "partial_unavailable"
@@ -1561,7 +1647,7 @@ async def get_latest_financial_statement(
         "source": f"postgres:{collection_id}",
         "retrieved_at": datetime.now(UTC).isoformat(),
         "provider_source": row.get("source") if row else None,
-        "data_status": "available" if row else "empty_no_admitted_source",
+        "data_status": row.get("data_status", "available") if row else "empty_no_admitted_source",
         "freshness": "not_assessed; inspect source dates and fiscal period",
     }
 

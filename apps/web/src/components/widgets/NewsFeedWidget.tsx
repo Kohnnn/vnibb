@@ -16,7 +16,7 @@ import {
     BookmarkCheck
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { API_BASE_URL } from '@/lib/api';
+import { API_BASE_URL, APIError } from '@/lib/api';
 import { formatTimestamp } from '@/lib/format';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -45,6 +45,21 @@ interface NewsArticle {
     ai_summary?: string;
     read_count: number;
     bookmarked: boolean;
+    relevance_score?: number | null;
+    matched_symbols?: string[];
+    match_reason?: string | null;
+    is_market_wide_fallback?: boolean;
+}
+
+function NewsAssociation({ article, symbol }: { article: NewsArticle; symbol: string }) {
+    const matched = article.matched_symbols ?? [];
+    const exact = matched.some(value => value.toUpperCase() === symbol.toUpperCase())
+        && ['exact_symbol_title', 'exact_symbol_body', 'exact_symbol_related'].includes(article.match_reason ?? '');
+    const label = article.is_market_wide_fallback
+        ? 'Market-wide fallback'
+        : exact ? `Symbol mention: ${symbol}` : 'Association unverified';
+    const detail = `Provider association metadata, not investment relevance. Reason: ${article.match_reason ?? 'unavailable'}; matched symbols: ${matched.join(', ') || 'none'}; score: ${article.relevance_score ?? 'unavailable'}.`;
+    return <span title={detail} className="text-[10px] text-[var(--text-muted)]">{label}</span>;
 }
 
 interface NewsFeedWidgetProps {
@@ -127,7 +142,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
             params.append('limit', '40');
 
             const response = await fetch(`${API_BASE_URL}/news/feed?${params}`);
-            if (!response.ok) throw new Error('Failed to fetch news');
+            if (!response.ok) throw new APIError(`API Error: ${response.status} ${response.statusText}`, response.status, response.statusText);
             return response.json();
         },
         staleTime: 2 * 60 * 1000,
@@ -141,7 +156,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
         queryKey: ['market-sentiment'],
         queryFn: async () => {
             const response = await fetch(`${API_BASE_URL}/news/sentiment`);
-            if (!response.ok) throw new Error('Failed to fetch sentiment');
+            if (!response.ok) throw new APIError(`API Error: ${response.status} ${response.statusText}`, response.status, response.statusText);
             return response.json();
         },
         staleTime: 5 * 60 * 1000,
@@ -423,11 +438,13 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                                                         score={item.sentiment_score}
                                                     />
                                                 )}
+                                                {symbol && <NewsAssociation article={item} symbol={symbol} />}
                                             </div>
 
                                             {/* Related symbols */}
                                             {item.related_symbols.length > 0 && (
                                                 <div className="flex items-center gap-1 mt-1 flex-wrap">
+                                                    <span className="text-[9px] text-[var(--text-muted)]">Source tags:</span>
                                                     {item.related_symbols.slice(0, 5).map(sym => (
                                                         <span
                                                             key={sym}

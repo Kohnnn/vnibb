@@ -7,6 +7,8 @@ Extracted from api/v1/websocket.py to avoid circular imports.
 
 import asyncio
 import logging
+import math
+from datetime import datetime
 
 import pytz
 from fastapi import WebSocket
@@ -25,10 +27,22 @@ class PriceUpdate(BaseModel):
 
     symbol: str
     price: float
-    change: float
-    change_pct: float
-    volume: int
+    change: float | None = None
+    change_pct: float | None = None
+    volume: int | None = None
     timestamp: str
+    price_unit: str
+    source: str
+    timestamp_timezone: str = "Asia/Ho_Chi_Minh"
+    stale: bool = False
+
+    def delivery_payload(self) -> dict:
+        observed = datetime.fromisoformat(self.timestamp.replace("Z", "+00:00"))
+        if observed.tzinfo is None:
+            observed = pytz.timezone(self.timestamp_timezone).localize(observed)
+        age = (datetime.now(VN_TZ) - observed).total_seconds()
+        return {**self.model_dump(), "as_of": observed.isoformat(),
+                "observation_age_seconds": max(0, age), "stale": self.stale or age > 60}
 
 
 class ConnectionManager:
@@ -37,7 +51,8 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: dict[WebSocket, set[str]] = {}
         self._price_cache: dict[str, PriceUpdate] = {}
-        self._update_task = None
+        self._send_locks: dict[WebSocket, asyncio.Lock] = {}
+        self.subscriptions_changed = asyncio.Event()
 
     async def connect(self, websocket: WebSocket) -> bool:
         """Accept a connection unless the process limit is reached."""
@@ -52,7 +67,9 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         """Remove connection."""
         if websocket in self.active_connections:
+            self._send_locks.pop(websocket, None)
             del self.active_connections[websocket]
+            self._prune_price_cache()
         logger.info(f"WebSocket disconnected: {len(self.active_connections)} active")
 
     def subscribe(
@@ -68,9 +85,12 @@ class ConnectionManager:
             return "Connection is not active"
         if len(current_symbols | symbols) > max_symbols_per_connection:
             return f"A connection may subscribe to at most {max_symbols_per_connection} symbols"
-        if len(self.get_all_subscribed_symbols() | symbols) > max_active_symbols:
+        active_symbols = self.get_all_subscribed_symbols()
+        if len(active_symbols | symbols) > max_active_symbols:
             return f"The server supports at most {max_active_symbols} active symbols"
         current_symbols.update(symbols)
+        if symbols - active_symbols:
+            self.subscriptions_changed.set()
         logger.info(f"Subscribed to {symbols}")
         return None
 
@@ -78,36 +98,69 @@ class ConnectionManager:
         """Unsubscribe connection from symbols."""
         if websocket in self.active_connections:
             self.active_connections[websocket] -= symbols
+            self._prune_price_cache()
+
+    def _prune_price_cache(self):
+        subscribed = self.get_all_subscribed_symbols()
+        for symbol in list(self._price_cache):
+            if symbol not in subscribed:
+                del self._price_cache[symbol]
 
     async def send_json(self, websocket: WebSocket, payload: dict, timeout: float) -> bool:
+        if websocket not in self.active_connections:
+            return False
+        lock = self._send_locks.setdefault(websocket, asyncio.Lock())
         try:
-            await asyncio.wait_for(websocket.send_json(payload), timeout=timeout)
-            return True
+            async def send():
+                async with lock:
+                    if websocket not in self.active_connections:
+                        return False
+                    await websocket.send_json(payload)
+                    return True
+            return await asyncio.wait_for(send(), timeout=timeout)
         except Exception as error:
             logger.debug("Failed to send WebSocket message: %s", error)
+            if websocket in self.active_connections:
+                self.disconnect(websocket)
+                try:
+                    await asyncio.wait_for(websocket.close(code=1013), timeout=timeout)
+                except Exception as close_error:
+                    logger.debug("Failed to close evicted WebSocket: %s", close_error)
             return False
 
     async def send_update(self, websocket: WebSocket, update: PriceUpdate, timeout: float) -> bool:
         """Send price update to a connection."""
-        return await self.send_json(websocket, update.model_dump(), timeout)
+        return await self.send_json(websocket, update.delivery_payload(), timeout)
 
     async def _broadcast(self, clients: list[WebSocket], payload: dict, timeout: float) -> None:
-        for start in range(0, len(clients), settings.websocket_broadcast_concurrency):
-            batch = clients[start : start + settings.websocket_broadcast_concurrency]
-            sent = await asyncio.gather(*(self.send_json(ws, payload, timeout) for ws in batch))
-            for websocket, succeeded in zip(batch, sent, strict=False):
-                if not succeeded:
-                    self.disconnect(websocket)
+        await asyncio.gather(*(self.send_json(ws, payload, timeout) for ws in clients))
 
     async def broadcast_price(self, symbol: str, price_data: PriceUpdate, send_timeout: float):
         """Broadcast price update to all subscribers."""
+        if (not math.isfinite(price_data.price) or price_data.price <= 0
+                or price_data.price_unit not in {"VND", "index_points"}):
+            return
+        try:
+            payload = price_data.delivery_payload()
+        except (ValueError, TypeError):
+            return
+        if symbol not in self.get_all_subscribed_symbols():
+            return
+        previous = self._price_cache.get(symbol)
+        if previous:
+            observed = datetime.fromisoformat(payload["as_of"])
+            previous_observed = datetime.fromisoformat(previous.delivery_payload()["as_of"])
+            if observed < previous_observed or (
+                observed == previous_observed and price_data.stale and not previous.stale
+            ):
+                return
         self._price_cache[symbol] = price_data
         clients = [
             websocket
             for websocket, symbols in self.active_connections.items()
             if symbol in symbols
         ]
-        await self._broadcast(clients, price_data.model_dump(), send_timeout)
+        await self._broadcast(clients, payload, send_timeout)
 
     def get_all_subscribed_symbols(self) -> set[str]:
         """Get all symbols with active subscribers."""

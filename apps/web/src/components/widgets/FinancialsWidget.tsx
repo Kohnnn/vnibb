@@ -22,6 +22,7 @@ import {
     FUNDAMENTAL_PERIOD_OPTIONS,
     FUNDAMENTAL_PERIOD_SYNC_GROUP,
     isCanonicalQuarterPeriod,
+    isUnavailableStatementRow,
     matchesFinancialQuarterSelection,
     normalizeFinancialPeriod,
     periodSortKey,
@@ -36,6 +37,7 @@ import {
     percentChangeDetail,
     resolveUnitScale,
     convertFinancialValueForUnit,
+    readCanonicalStatementValue,
 } from '@/lib/units';
 import type { ExtendedPeriod } from '@/components/ui/PeriodToggle';
 
@@ -185,20 +187,16 @@ function buildMetricLookup(source: unknown): Map<string, unknown> {
     return lookup;
 }
 
-function readMetricValue(row: Record<string, any>, key: string): any {
+function readMetricValue(row: Record<string, unknown>, key: string, flow: boolean): number | null {
     const aliases = STATEMENT_METRIC_ALIASES[key] || [key];
-    const rowLookup = buildMetricLookup(row);
+    if (isUnavailableStatementRow(row) || aliases.some((alias) => {
+        const metadata = row.unit_metadata && typeof row.unit_metadata === 'object'
+            ? (row.unit_metadata as Record<string, unknown>)[alias] : undefined;
+        return metadata !== null && typeof metadata === 'object' && 'unavailable_reason' in metadata && isUnavailableStatementRow(metadata);
+    })) return null;
     for (const alias of aliases) {
-        const value = rowLookup.get(alias) ?? rowLookup.get(normalizeMetricKey(alias));
-        if (value !== null && value !== undefined && value !== '') return value;
-    }
-    const rawData = row.raw_data || row.rawData || row.raw;
-    const rawLookup = buildMetricLookup(rawData);
-    if (rawLookup.size > 0) {
-        for (const alias of aliases) {
-            const value = rawLookup.get(alias) ?? rawLookup.get(normalizeMetricKey(alias));
-            if (value !== null && value !== undefined && value !== '') return value;
-        }
+        const value = readCanonicalStatementValue(row, alias, flow);
+        if (value !== null) return value;
     }
     return null;
 }
@@ -266,27 +264,26 @@ const ZERO_IS_ABSENT_RATIO_KEYS: Record<string, true> = {
     ev_ebitda: true,
 };
 
-function readRatioValue(row: Record<string, any>, key: string): any {
+function readRatioValue(row: Record<string, unknown>, key: string): number | null {
+    if (key === 'dividend_yield' || key === 'payout_ratio') {
+        const units = row.ratio_units as Record<string, unknown> | undefined;
+        if (!units || units[key] !== 'percent') return null;
+    }
+    if (PER_SHARE_METRIC_KEYS.has(key) && (row.ratio_units as Record<string, unknown> | undefined)?.[key] !== 'VND/share') return null;
     const aliases = RATIO_METRIC_ALIASES[key] || [key];
+    const metadata = row.unit_metadata && typeof row.unit_metadata === 'object' ? row.unit_metadata : {};
+    if (isUnavailableStatementRow(row) || Object.entries(metadata).some(([field, value]) => aliases.includes(field) && value && typeof value === 'object' && 'unavailable_reason' in value && isUnavailableStatementRow(value))) return null;
     const zeroIsAbsent = ZERO_IS_ABSENT_RATIO_KEYS[key] === true;
-    const usable = (value: unknown) => {
-        if (value === null || value === undefined || value === '') return false;
-        if (!zeroIsAbsent) return true;
+    const numericValue = (value: unknown): number | null => {
+        if (typeof value !== 'number' && typeof value !== 'string') return null;
+        if (typeof value === 'string' && !value.trim()) return null;
         const numeric = typeof value === 'number' ? value : Number(value);
-        return Number.isFinite(numeric) ? numeric !== 0 : true;
+        return Number.isFinite(numeric) && (!zeroIsAbsent || numeric !== 0) ? numeric : null;
     };
     const rowLookup = buildMetricLookup(row);
     for (const alias of aliases) {
-        const value = rowLookup.get(alias) ?? rowLookup.get(normalizeMetricKey(alias));
-        if (usable(value)) return value;
-    }
-    const rawData = row.raw_data || row.rawData || row.raw;
-    const rawLookup = buildMetricLookup(rawData);
-    if (rawLookup.size > 0) {
-        for (const alias of aliases) {
-            const value = rawLookup.get(alias) ?? rawLookup.get(normalizeMetricKey(alias));
-            if (usable(value)) return value;
-        }
+        const value = numericValue(rowLookup.get(alias) ?? rowLookup.get(normalizeMetricKey(alias)));
+        if (value !== null) return value;
     }
     return null;
 }
@@ -361,6 +358,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
             case 'ratios': return ratiosQuery;
         }
     }, [activeTab, incomeQuery, balanceQuery, cashFlowQuery, ratiosQuery]);
+
 
     const tableData = useMemo(() => {
         if (!activeQuery?.data || (activeTab === 'ratios' && period === 'TTM')) return null;
@@ -486,7 +484,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                     const currentVal = toFiniteNumber(
                         activeTab === 'ratios'
                             ? PER_SHARE_METRIC_KEYS.has(m.key) ? convertFinancialValueForUnit(readRatioValue(d, m.key), unitConfig, periodLabel) : readRatioValue(d, m.key)
-                            : convertFinancialValueForUnit(readMetricValue(d, m.key), unitConfig, periodLabel)
+                            : convertFinancialValueForUnit(readMetricValue(d, m.key, activeTab !== 'balance_sheet'), unitConfig, periodLabel)
                     );
                     const periodIndex = sortedPeriodIndex.get(periodLabel) ?? -1;
                     const prevRow: Record<string, unknown> | null = periodIndex > 0 ? comparisonRows[periodIndex - 1] : null;
@@ -494,18 +492,14 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                         activeTab === 'ratios'
                             ? prevRow ? PER_SHARE_METRIC_KEYS.has(m.key) ? convertFinancialValueForUnit(readRatioValue(prevRow, m.key), unitConfig, prevRow.__period as string | null) : readRatioValue(prevRow, m.key) : null
                             : convertFinancialValueForUnit(
-                                prevRow ? readMetricValue(prevRow, m.key) : null,
+                                prevRow ? readMetricValue(prevRow, m.key, activeTab !== 'balance_sheet') : null,
                                 unitConfig,
                                 comparisonRows[periodIndex - 1]?.__period,
                             )
                     );
-                    // One convention for the statement tables, the Growth Bridge and
-                    // the API's `_growth_rate`: divide by the ABSOLUTE prior value
-                    // (issue #104). A negative endpoint still makes the sign
-                    // unreadable as ordinary growth, so the pair is classified
-                    // (loss to profit / narrowed / widened) instead of calling every
-                    // negative pair a turnaround.
-                    const growthDetail = percentChangeDetail(currentVal, prevVal);
+                    // The table and Growth Bridge share absolute-prior arithmetic;
+                    // only identified earnings use profit/loss transition language.
+                    const growthDetail = percentChangeDetail(currentVal, prevVal, { metricKey: m.key });
 
                     values[periodLabel] = {
                         val: currentVal,
@@ -522,6 +516,11 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
             unavailableNote: describeUnavailableStatementRows(displayRows),
         };
     }, [activeQuery?.data, ratiosReferenceQuery.data?.data, activeTab, periodMode, period, unitConfig]);
+
+    const exportData = useMemo(() => (tableData?.periods || []).map((period) => ({
+        period,
+        ...Object.fromEntries((tableData?.rows || []).map((row) => [row.metricKey, row.values[period]?.val ?? null])),
+    })), [tableData]);
 
     const hasData = Boolean(tableData && tableData.periods.length > 0);
     const isFallback = Boolean(activeQuery?.error && hasData);
@@ -565,10 +564,10 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                 lastDataDate: null,
                 fetchedAt: activeQuery?.dataUpdatedAt,
                 stale: isFallback,
-                extra: hasData ? { tab: activeTab, periods: tableData?.periods.length ?? 0 } : undefined,
+                extra: hasData ? { tab: activeTab, periods: tableData?.periods.length ?? 0, data: exportData } : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, activeQuery?.dataUpdatedAt, symbol, period, activeTab, sourceLabel, tableData?.periods.length]);
+    }, [onDataChange, hasData, isFallback, activeQuery?.dataUpdatedAt, symbol, period, activeTab, sourceLabel, tableData?.periods.length, exportData]);
 
     const tableScale = useMemo(() => {
         if (!tableData || activeTab === 'ratios') return resolveUnitScale([], unitConfig);
@@ -581,7 +580,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
         return resolveUnitScale(values, unitConfig);
     }, [tableData, activeTab, unitConfig]);
 
-    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
+    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig).replace(/^Values in/, 'Display units:'), [tableScale, unitConfig]);
     const denseColumns = useMemo<DenseTableColumn[]>(() => {
         if (!tableData) return []
         return tableData.periods.map((periodLabel) => ({
@@ -593,15 +592,15 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
 
     const denseRows = useMemo<DenseTableRow[]>(() => {
         if (!tableData) return []
-        return tableData.rows.map((row, index) => ({
-            id: `${activeTab}-${index}`,
+        return tableData.rows.map((row) => ({
+            id: row.metricKey,
             label: row.label,
             values: tableData.periods.reduce<Record<string, number | null>>((acc, periodLabel) => {
                 acc[periodLabel] = row.values[periodLabel]?.val ?? null
                 return acc
             }, {}),
         }))
-    }, [activeTab, tableData])
+    }, [tableData])
     // Disclose the negative-base comparisons actually present, using the same
     // classification as the statement tables (issue #104).
     const negativeBaseLabels = useMemo(() => {
@@ -619,12 +618,12 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
     const denseRowMeta = useMemo(() => {
         if (!tableData) return new Map<string, { isPct?: boolean; isPerShare?: boolean }>()
         return new Map(
-            tableData.rows.map((row, index) => [
-                `${activeTab}-${index}`,
+            tableData.rows.map((row) => [
+                row.metricKey,
                 { isPct: row.isPct, isPerShare: PER_SHARE_METRIC_KEYS.has(String(row.metricKey || '')) },
             ])
         )
-    }, [activeTab, tableData])
+    }, [tableData])
 
     return (
         <WidgetContainer
@@ -636,7 +635,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
             noPadding
             widgetId={id}
             hideHeader={hideHeader}
-            exportData={activeQuery.data?.data || []}
+            exportData={exportData}
             exportFilename={`financials_${symbol}_${activeTab}_${period}`}
         >
             <div className="h-full flex flex-col bg-secondary text-primary font-sans select-none overflow-hidden">
@@ -706,6 +705,14 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                             {tableData.unavailableNote}
                         </div>
                     )}
+                    {period === 'TTM' && activeTab !== 'ratios' && activeQuery.data?.data?.map((item, index) => {
+                        const row = item as unknown as Record<string, unknown>;
+                        const metadata = row.unit_metadata as Record<string, { unavailable_reason?: string | null }> | undefined;
+                        return <div key={index} className="px-2 py-1 text-[10px] text-[var(--text-secondary)]" aria-label="TTM source lineage">
+                            TTM basis: {typeof row.aggregation_basis === 'string' ? row.aggregation_basis : 'Unknown'} · Source periods: {Array.isArray(row.source_periods) && row.source_periods.length ? row.source_periods.join(', ') : 'Unknown'}
+                            {activeTab === 'income_statement' && <span> · EPS availability: {metadata?.eps?.unavailable_reason || (row.eps == null ? 'Unknown' : 'Reported')}</span>}
+                        </div>;
+                    })}
                     {activeTab === 'ratios' && period === 'TTM' ? (
                         <WidgetEmpty
                             message="TTM ratios are not supported"
@@ -728,7 +735,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                             action={{ label: 'Refresh data', onClick: () => activeQuery.refetch() }}
                         />
                     ) : (
-                        <div className="min-w-max">
+                        <div className="min-w-0">
                             {isSparseData && (
                                 <div className="px-2 pb-1 text-[10px] text-amber-400">
                                     Partial dataset: some provider fields are still missing for this symbol.
@@ -743,8 +750,8 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                                 initialScrollPosition="end"
                                 storageKey={`financials:${symbol}:${activeTab}:${period}`}
                                 footerNote={activeTab !== 'ratios'
-                                    ? `Note: ${unitLegend}; per-share values (EPS/BVPS/DPS) are ${unitConfig.display === 'USD' ? 'USD' : 'VND'} per share • Reporting Standard: VAS${negativeBaseLabels.length > 0 ? ` • Growth divides by the absolute prior-period value; negative-base comparisons are labelled (${negativeBaseLabels.join(', ')}), not ordinary growth` : ''}`
-                                    : `Note: Ratio history by ${period}. EPS/BVPS/DPS are ${unitConfig.display === 'USD' ? 'USD' : 'VND'} per share; dimensionless ratios are not currency-converted. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
+                                    ? `${unitLegend}; per-share rows are displayed without the table scale. Display settings do not verify source units or reporting standard.${negativeBaseLabels.length > 0 ? ` • Growth divides by the absolute prior-period value; negative-base comparisons are labelled (${negativeBaseLabels.join(', ')}), not ordinary growth` : ''}`
+                                    : `Note: Ratio history by ${period}. Per-share display currency: ${unitConfig.display === 'USD' ? 'USD' : 'VND'}; dimensionless ratios are not currency-converted. Display settings do not verify source units. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
                                 valueFormatter={(value, row) => {
                                     const meta = denseRowMeta.get(row.id)
                                     // `null` must stay null. Number(null) is 0, and 0 is finite, so
@@ -753,7 +760,9 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                                         ? null
                                         : typeof value === 'number' ? value : Number(value)
                                     if (meta?.isPct) {
-                                        return formatPct(Number.isFinite(numericValue) ? numericValue : null)
+                                        return row.id === 'payout_ratio'
+                                            ? formatPercent(Number.isFinite(numericValue) ? numericValue : null, { decimals: 2, input: 'percent' })
+                                            : formatPct(Number.isFinite(numericValue) ? numericValue : null)
                                     }
                                     if (activeTab === 'ratios') {
                                         return formatRatio(Number.isFinite(numericValue) ? numericValue : null)
@@ -778,7 +787,7 @@ function formatRatio(value: number | null | undefined): string {
 }
 
 function formatPct(value: number | null | undefined): string {
-    return formatPercent(value, { decimals: 2, input: 'auto', clamp: 'margin' });
+    return formatPercent(value, { decimals: 2, input: 'percent', clamp: 'margin' });
 }
 
 export const FinancialsWidget = memo(FinancialsWidgetComponent);

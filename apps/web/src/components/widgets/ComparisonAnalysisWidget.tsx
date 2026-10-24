@@ -203,6 +203,8 @@ function ComparisonAnalysisWidgetComponent({
   onRemove,
   onDataChange,
 }: ComparisonAnalysisWidgetProps) {
+  const primarySymbol = symbol?.trim().toUpperCase() || ''
+  const [previousPrimarySymbol, setPreviousPrimarySymbol] = useState(primarySymbol)
   const [symbols, setSymbols] = useState<string[]>(() => {
     const seeded = [symbol, ...initialSymbols]
       .map((item) => item?.trim().toUpperCase())
@@ -213,6 +215,17 @@ function ComparisonAnalysisWidgetComponent({
   const [performancePeriod, setPerformancePeriod] = useState<PerformancePeriod>('1M')
   const [activeCategory, setActiveCategory] = useState('valuation')
   const [newSymbol, setNewSymbol] = useState('')
+  const [hasCustomizedSymbols, setHasCustomizedSymbols] = useState(false)
+
+  if (primarySymbol !== previousPrimarySymbol) {
+    setPreviousPrimarySymbol(primarySymbol)
+    if (primarySymbol) {
+      setSymbols((current) => [
+        primarySymbol,
+        ...current.filter((ticker) => ticker !== previousPrimarySymbol && ticker !== primarySymbol),
+      ].slice(0, MAX_SYMBOLS))
+    }
+  }
 
   const comparisonQuery = useQuery({
     queryKey: ['comparison-analysis', symbols.join(','), period],
@@ -240,15 +253,14 @@ function ComparisonAnalysisWidgetComponent({
   // primary symbol's sector, so the first peer is the right default
   // (e.g. for VCI it returns VIX/VND/HCM rather than FPT).
   useEffect(() => {
+    if (hasCustomizedSymbols) return
     const peerSymbols = (peersQuery.data?.peers || [])
       .map((peer: { symbol?: unknown }) => String(peer?.symbol || '').toUpperCase())
       .filter(Boolean)
     if (peerSymbols.length === 0) return
     const primary = symbols[0]
     if (!primary) return
-    // Only auto-seed when the user hasn't customised yet — i.e. the
-    // current `symbols` matches the initial seed of [primary, FPT] or
-    // is just the primary alone.
+    // Untouched selections must still match the initial fallback before auto-seeding.
     const isInitialSeed =
       symbols.length <= 1 ||
       (symbols.length === 2 && (symbols[1] === 'FPT' || symbols[1] === DEFAULT_TICKER))
@@ -256,7 +268,7 @@ function ComparisonAnalysisWidgetComponent({
     const next = Array.from(new Set([primary, ...peerSymbols])).slice(0, MAX_SYMBOLS)
     if (next.length === symbols.length && next.every((s, i) => s === symbols[i])) return
     setSymbols(next)
-  }, [peersQuery.data?.peers, symbols.join(',')])
+  }, [hasCustomizedSymbols, peersQuery.data?.peers, symbols.join(',')])
 
   const ratioGridQuery = useQuery({
     queryKey: ['comparison-ratio-grid', symbols.join(','), period],
@@ -365,17 +377,20 @@ function ComparisonAnalysisWidgetComponent({
   const addSymbol = () => {
     const cleaned = newSymbol.trim().toUpperCase()
     if (!cleaned || symbols.includes(cleaned) || symbols.length >= MAX_SYMBOLS) return
+    setHasCustomizedSymbols(true)
     setSymbols((prev) => [...prev, cleaned])
     setNewSymbol('')
   }
 
   const removeSymbol = (ticker: string) => {
-    if (symbols.length <= MIN_SYMBOLS) return
+    if (symbols.length <= MIN_SYMBOLS || !symbols.includes(ticker)) return
+    setHasCustomizedSymbols(true)
     setSymbols((prev) => prev.filter((item) => item !== ticker))
   }
 
   const addPeerSuggestion = (ticker: string) => {
     if (symbols.includes(ticker) || symbols.length >= MAX_SYMBOLS) return
+    setHasCustomizedSymbols(true)
     setSymbols((prev) => [...prev, ticker])
   }
 
@@ -620,12 +635,12 @@ function ComparisonAnalysisWidgetComponent({
               message="Comparison matrix requires 2-5 symbols."
               action={{
                 label: 'Add Peer',
-                onClick: () =>
-                  setSymbols((prev) => {
-                    const fallback = ['FPT', 'HPG', 'TCB', 'VNM'].find((ticker) => !prev.includes(ticker))
-                    if (!fallback || prev.length >= MAX_SYMBOLS) return prev
-                    return [...prev, fallback]
-                  }),
+                onClick: () => {
+                  const fallback = ['FPT', 'HPG', 'TCB', 'VNM'].find((ticker) => !symbols.includes(ticker))
+                  if (!fallback || symbols.length >= MAX_SYMBOLS) return
+                  setHasCustomizedSymbols(true)
+                  setSymbols((prev) => [...prev, fallback])
+                },
               }}
             />
           ) : comparisonTimedOut && comparisonQuery.isLoading && !hasData ? (

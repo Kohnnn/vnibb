@@ -11,9 +11,11 @@ import asyncio
 import logging
 import re
 import unicodedata
-from datetime import datetime, date, timedelta
+from functools import wraps
+from datetime import datetime, date, time as market_time, timedelta
 from typing import Any, Dict, List, Literal, Optional
 from collections import defaultdict
+from zoneinfo import ZoneInfo
 
 import httpx
 import numpy as np
@@ -48,6 +50,7 @@ from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.services.cache_manager import CacheManager
+from vnibb.services.data_quality import latest_market_business_day
 from vnibb.services.sector_service import SectorService
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.providers.vnstock import get_stock
@@ -301,6 +304,8 @@ class MarketTopMoversResponse(BaseModel):
     error: Optional[str] = None
     is_last_session: bool = False
     session_label: Optional[str] = None
+    source: str | None = None
+    is_stale: bool | None = None
 
 
 class MarketSectorPerformanceResponse(BaseModel):
@@ -402,7 +407,11 @@ RSS_FEED_URLS: dict[str, list[str]] = {
 }
 
 WORLD_INDEX_FALLBACK_TIMEOUT_SECONDS = 5
-HEATMAP_FETCH_TIMEOUT_SECONDS = 20
+HEATMAP_FETCH_TIMEOUT_SECONDS = 8
+MARKET_PROVIDER_TIMEOUT_SECONDS = 8
+MARKET_ROUTE_TIMEOUT_SECONDS = 12
+MARKET_YAHOO_TIMEOUT_SECONDS = 2
+_market_provider_jobs: dict[tuple, asyncio.Task] = {}
 TOP_MOVER_TYPES = {"gainer", "loser", "volume", "value"}
 MARKET_INDEX_ORDER = ("VNINDEX", "VN30", "HNX", "UPCOM")
 MARKET_INDEX_ALIASES = {
@@ -650,6 +659,51 @@ def _map_text_to_sector_name(value: Optional[str]) -> Optional[str]:
 
     sector_config = VN_SECTORS.get(sector_id)
     return sector_config.name if sector_config else None
+
+
+def _market_deadline(func):
+    @wraps(func)
+    async def bounded(*args, **kwargs):
+        try:
+            async with asyncio.timeout(MARKET_ROUTE_TIMEOUT_SECONDS):
+                return await func(*args, **kwargs)
+        except TimeoutError as exc:
+            raise HTTPException(status_code=503, detail="Market data deadline exceeded") from exc
+
+    return bounded
+
+
+async def _await_market_provider(key: tuple, loader, timeout: float):
+    task = _market_provider_jobs.get(key)
+    if task is None:
+        if len(_market_provider_jobs) >= 12:
+            raise ProviderError(message="Market acquisition capacity reached", provider="vnstock")
+        task = asyncio.create_task(loader())
+        _market_provider_jobs[key] = task
+
+        def finished(done):
+            if _market_provider_jobs.get(key) is done:
+                _market_provider_jobs.pop(key, None)
+            if not done.cancelled():
+                done.exception()
+
+        task.add_done_callback(finished)
+    # A caller deadline must not permit duplicate acquisition while worker threads run.
+    return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+
+
+async def _fetch_heatmap_screener(params: StockScreenerParams):
+    try:
+        rows = await _await_market_provider(
+            ("heatmap", params.source, params.exchange, params.limit),
+            lambda: VnstockScreenerFetcher.fetch(params),
+            HEATMAP_FETCH_TIMEOUT_SECONDS,
+        )
+        if not rows:
+            raise ProviderError(message="Heatmap screener data unavailable", provider="vnstock")
+        return rows
+    except TimeoutError as exc:
+        raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
 
 
 def _normalize_market_index_code(value: Any) -> str:
@@ -1996,153 +2050,97 @@ def _has_non_zero_top_mover_signal(payload: List[dict[str, Any]]) -> bool:
     return False
 
 
-async def _build_last_session_top_movers(
-    index: str, mover_type: str, limit: int
-) -> List[dict[str, Any]]:
-    """SQL-backed last-session top-movers fallback (QA-v2 T3).
-
-    The vnstock screener cache and the snapshot-derived path can both
-    produce empty payloads after market close (intraday-rank tables
-    roll over). We resolve this by querying the most recent session in
-    `stock_prices` that has at least 5 distinct symbols with a non-zero
-    close, then computing change% from the previous session's close
-    per symbol. Returned rows include `is_last_session=True` so the
-    UI can label the data as historical.
-    """
-
-    if mover_type not in {"gainer", "loser", "volume", "value"}:
-        return []
-
+@cached(ttl=120, key_prefix="market_retained_mover_inputs")
+async def _load_retained_mover_inputs() -> list[dict[str, Any]]:
     async with async_session_maker() as session:
-        # Find latest trade date that has meaningful coverage. We require
-        # at least 10 distinct symbols (lowered from 30 in QA-v4 D.3 so a
-        # partially loaded post-holiday session still surfaces gainers
-        # rather than going empty).
-        latest_session_row = await session.execute(
-            text(
-                """
-                SELECT trade_date
-                FROM (
-                    SELECT time AS trade_date, COUNT(DISTINCT symbol) AS n
-                    FROM stock_prices
-                    WHERE interval = '1D'
-                    GROUP BY time
-                ) s
-                WHERE n >= 10
-                ORDER BY trade_date DESC
-                LIMIT 1
-                """
-            )
-        )
-        latest_date = latest_session_row.scalar()
+        # Coverage is market-wide; exchange and membership restrictions come later.
+        latest_session = await session.execute(text("""
+            SELECT time FROM stock_prices
+            WHERE interval = '1D'
+            GROUP BY time
+            HAVING COUNT(DISTINCT symbol) >= 10
+            ORDER BY time DESC
+            LIMIT 1
+        """))
+        latest_date = latest_session.scalar()
         if not latest_date:
             return []
 
-        # Pull the latest two sessions for every symbol so we can
-        # compute change %.
-        rows_result = await session.execute(
-            text(
-                """
-                WITH ranked AS (
-                    SELECT
-                        symbol,
-                        time,
-                        close,
-                        volume,
-                        value,
-                        source,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY symbol
-                            ORDER BY time DESC
-                        ) AS rn
-                    FROM stock_prices
-                    WHERE interval = '1D'
-                      AND time <= :latest_date
-                )
-                SELECT symbol, time, close, volume, value, source, rn
-                FROM ranked
-                WHERE rn <= 2
-                """
-            ),
-            {"latest_date": latest_date},
-        )
-
-        per_symbol: dict[str, dict[str, Any]] = {}
-        for row in rows_result.mappings():
-            symbol = (row["symbol"] or "").upper()
-            if not symbol:
-                continue
-            price = persisted_price_record(row)
-            entry = per_symbol.setdefault(symbol, {"latest": None, "prev": None})
-            if row["rn"] == 1:
-                entry["latest"] = price
-            elif row["rn"] == 2:
-                entry["prev"] = price
-
-        # Optional: filter by index / exchange. We resolve via the
-        # `stocks` table; if an index allow-list isn't available we let
-        # everything through.
-        exchange_allow = TOP_MOVER_INDEX_EXCHANGE.get(index)
-        symbol_to_exchange: dict[str, str] = {}
-        if exchange_allow:
-            ex_rows = await session.execute(
-                select(Stock.symbol, Stock.exchange).where(
-                    Stock.symbol.in_(list(per_symbol.keys()))
-                )
+        result = await session.execute(text("""
+            SELECT current.symbol, current.time, current.close, current.volume,
+                   current.value, current.source, stocks.exchange,
+                   previous.close AS previous_close, previous.source AS previous_source
+            FROM stock_prices AS current
+            LEFT JOIN stocks ON stocks.symbol = current.symbol
+            LEFT JOIN stock_prices AS previous ON previous.id = (
+                SELECT prior.id FROM stock_prices AS prior
+                WHERE prior.symbol = current.symbol AND prior.interval = '1D'
+                  AND prior.time < current.time
+                ORDER BY prior.time DESC
+                LIMIT 1
             )
-            for sym, ex in ex_rows.all():
-                if sym:
-                    symbol_to_exchange[sym.upper()] = (ex or "").upper()
+            WHERE current.interval = '1D' AND current.time = :latest_date
+        """), {"latest_date": latest_date})
+        return [dict(row) for row in result.mappings()]
 
-        rows: List[dict[str, Any]] = []
-        for symbol, parts in per_symbol.items():
-            latest = parts.get("latest")
-            prev = parts.get("prev")
-            if not latest or latest["price_unit"] == "unknown":
-                continue
 
-            if exchange_allow:
-                ex = symbol_to_exchange.get(symbol)
-                if ex not in exchange_allow:
-                    continue
-
-            close = _to_float(latest["close"])
-            prev_close = _to_float(prev["close"]) if prev and prev["price_unit"] == latest["price_unit"] else None
-            change_pct = None
-            price_change = None
-            if (
-                close is not None
-                and prev_close is not None
-                and prev_close not in (None, 0)
-            ):
-                price_change = close - prev_close
-                change_pct = (price_change / prev_close) * 100.0
-
-            rows.append(
-                {
-                    "symbol": symbol,
-                    "index": index,
-                    "last_price": close,
-                    "price_unit": latest["price_unit"],
-                    "price_change": price_change,
-                    "price_change_pct": change_pct,
-                    "volume": _to_float(latest["volume"]),
-                    "value": _to_float(latest["value"]),
-                    "avg_volume_20d": None,
-                    "volume_spike_pct": None,
-                    "updated_at": latest["time"].isoformat()
-                    if hasattr(latest["time"], "isoformat")
-                    else str(latest["time"]),
-                    "is_last_session": True,
-                    "session_label": latest_date.isoformat()
-                    if hasattr(latest_date, "isoformat")
-                    else str(latest_date),
-                }
-            )
-
-    if not rows:
+async def _build_last_session_top_movers(
+    index: str, mover_type: str, limit: int
+) -> List[dict[str, Any]]:
+    if mover_type not in TOP_MOVER_TYPES:
         return []
 
+    vn30_symbols = {
+        symbol.upper()
+        for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
+    } if index == "VN30" else None
+    exchange_allow = TOP_MOVER_INDEX_EXCHANGE.get(index)
+    now_ict = datetime.now(ZoneInfo(settings.vn_timezone))
+    close_time = market_time.fromisoformat(settings.intraday_market_close)
+    session_anchor = now_ict.date()
+    if now_ict.time() < close_time:
+        session_anchor -= timedelta(days=1)
+    expected_session = latest_market_business_day(
+        session_anchor, {date.fromisoformat(day) for day in settings.market_holiday_dates}
+    )
+    rows = []
+    for row in await _load_retained_mover_inputs():
+        symbol = str(row.get("symbol") or "").upper()
+        if not symbol or (vn30_symbols is not None and symbol not in vn30_symbols):
+            continue
+        if exchange_allow and str(row.get("exchange") or "").upper() not in exchange_allow:
+            continue
+        latest = persisted_price_record(row)
+        if latest["price_unit"] == "unknown":
+            continue
+        if mover_type in {"volume", "value"} and _to_float(latest.get(mover_type)) is None:
+            continue
+
+        previous = persisted_price_record({
+            "close": row.get("previous_close"), "source": row.get("previous_source"),
+        })
+        close = _to_float(latest.get("close"))
+        previous_close = _to_float(previous.get("close")) if previous["price_unit"] == latest["price_unit"] else None
+        price_change = change_pct = None
+        if close is not None and previous_close not in (None, 0):
+            price_change = _to_float(close - previous_close)
+            change_pct = _to_float((close - previous_close) / previous_close * 100.0)
+        if mover_type in {"gainer", "loser"} and change_pct is None:
+            continue
+        observed = latest["time"]
+        session_label = observed.isoformat() if hasattr(observed, "isoformat") else str(observed)
+        observed_date = _coerce_to_date(observed)
+        rows.append({
+            "symbol": symbol, "index": index,
+            "last_price": close, "price_unit": latest["price_unit"],
+            "price_source": latest.get("price_source"), "source": latest.get("source"),
+            "price_change": price_change, "price_change_pct": change_pct,
+            "volume": _to_float(latest.get("volume")), "value": _to_float(latest.get("value")),
+            "avg_volume_20d": None, "volume_spike_pct": None,
+            "updated_at": session_label, "is_last_session": True,
+            "session_label": session_label,
+            "is_stale": bool(observed_date and observed_date < expected_session),
+        })
     return _sort_top_movers(rows, mover_type=mover_type, limit=limit)
 
 
@@ -2287,7 +2285,8 @@ def _clean_rss_description(raw_description: Optional[str]) -> Optional[str]:
     summary="Get Market Heatmap Data",
     description="Get aggregated market data for treemap visualization. Supports grouping by sector/industry.",
 )
-@cached(ttl=120, key_prefix="market_heatmap")
+@cached(ttl=120, key_prefix="market_heatmap_v2")
+@_market_deadline
 async def get_heatmap_data(
     group_by: str = Query(
         default="sector",
@@ -2342,6 +2341,7 @@ async def get_heatmap_data(
             exchange=exchange,
             limit=limit,
             source=settings.vnstock_source,
+            include_ratios=False,
         )
 
         # Try cache first
@@ -2411,13 +2411,7 @@ async def get_heatmap_data(
                 logger.info("Heatmap served from verified screener partition (%d rows)", len(db_rows))
 
         if not screener_data:
-            try:
-                screener_data = await asyncio.wait_for(
-                    VnstockScreenerFetcher.fetch(params),
-                    timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError as exc:
-                raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
+            screener_data = await _fetch_heatmap_screener(params)
             logger.info(f"Fetched {len(screener_data)} stocks from API for heatmap")
 
         # Step 2: Normalize input rows and enrich missing metadata/returns from DB snapshots.
@@ -2463,13 +2457,7 @@ async def get_heatmap_data(
         # fall back to a fresh provider fetch once before returning empty data.
         if cached and not groups:
             logger.info("Cached screener data produced empty heatmap; retrying with fresh fetch")
-            try:
-                screener_data = await asyncio.wait_for(
-                    VnstockScreenerFetcher.fetch(params),
-                    timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError as exc:
-                raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
+            screener_data = await _fetch_heatmap_screener(params)
 
             refreshed_rows = normalize_heatmap_rows(
                 screener_data,
@@ -2545,25 +2533,11 @@ async def get_heatmap_data(
         )
 
     except ProviderTimeoutError as e:
-        logger.warning("Heatmap provider timeout, returning empty payload: %s", e.message)
-        return HeatmapResponse(
-            count=0,
-            group_by=group_by,
-            color_metric=color_metric,
-            size_metric=size_metric,
-            sectors=[],
-            cached=False,
-        )
+        logger.warning("Heatmap provider timeout: %s", e.message)
+        raise HTTPException(status_code=503, detail=e.message) from e
     except ProviderError as e:
-        logger.warning("Heatmap provider error, returning empty payload: %s", e.message)
-        return HeatmapResponse(
-            count=0,
-            group_by=group_by,
-            color_metric=color_metric,
-            size_metric=size_metric,
-            sectors=[],
-            cached=False,
-        )
+        logger.warning("Heatmap provider unavailable: %s", e.message)
+        raise HTTPException(status_code=503, detail=e.message) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -2722,20 +2696,42 @@ async def get_foreign_flow_leaderboard(
 
 
 @router.get("/indices", response_model=MarketIndicesResponse)
-@cached(key_prefix="market_indices")
+@cached(key_prefix="market_indices_v2")
+@_market_deadline
 async def get_market_indices(
     limit: int = Query(default=10, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
 ) -> MarketIndicesResponse:
     db_rows: list[dict[str, Any]] = []
+    owns_read_transaction = not db.in_transaction() and not (db.new or db.dirty or db.deleted)
     try:
         db_rows = await _load_latest_market_indices_from_db(db)
     except Exception as db_error:
+        if not owns_read_transaction:
+            raise
         logger.warning(f"Market indices DB fallback failed: {db_error}")
+    finally:
+        if owns_read_transaction and db.in_transaction():
+            await db.rollback()
+
+    required_codes = MARKET_INDEX_ORDER[: min(limit, len(MARKET_INDEX_ORDER))]
+    stored_codes = {_normalize_market_index_code(row.get("index_name")) for row in db_rows}
+    if all(code in stored_codes for code in required_codes):
+        rows = db_rows[:limit]
+        return MarketIndicesResponse(
+            count=len(rows),
+            data=rows,
+            updated_at=_latest_timestamp([row.get("time") for row in rows]),
+            source="db_fallback",
+        )
 
     try:
-        yahoo_rows = await _fetch_yahoo_market_indices()
-        required_codes = MARKET_INDEX_ORDER[: min(limit, len(MARKET_INDEX_ORDER))]
+        try:
+            yahoo_rows = await _await_market_provider(
+                ("indices", "yahoo"), _fetch_yahoo_market_indices, MARKET_YAHOO_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
+            yahoo_rows = []
         yahoo_codes = {
             code
             for code in (
@@ -2747,10 +2743,14 @@ async def get_market_indices(
 
         provider_rows: list[dict[str, Any]] = []
         if any(code not in yahoo_codes for code in required_codes):
-            indices = await asyncio.wait_for(
-                VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
-                timeout=30,
-            )
+            try:
+                indices = await _await_market_provider(
+                    ("indices", "vnstock"),
+                    lambda: VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
+                    MARKET_PROVIDER_TIMEOUT_SECONDS,
+                )
+            except TimeoutError as exc:
+                raise ProviderTimeoutError("vnstock", MARKET_PROVIDER_TIMEOUT_SECONDS) from exc
             provider_rows = [
                 item.model_dump(mode="json", by_alias=False)
                 if hasattr(item, "model_dump")
@@ -3003,6 +3003,7 @@ async def get_earnings_season(
 
 @router.get("/industry-bubble", response_model=IndustryBubbleResponse)
 @cached(ttl=300, key_prefix="industry_bubble_v2_certified")
+@_market_deadline
 async def get_industry_bubble(
     symbol: str = Query(..., description="Reference symbol used to determine sector"),
     x_metric: str = Query(
@@ -3025,8 +3026,10 @@ async def get_industry_bubble(
 
     cache_manager = CacheManager()
     screener_rows: List[dict[str, Any]] = []
+    fresh_rows: list[dict[str, Any]] | None = None
 
     async def _fetch_fresh_rows() -> List[dict[str, Any]]:
+        nonlocal fresh_rows
         params = StockScreenerParams(
             symbol=None,
             exchange="ALL",
@@ -3034,13 +3037,23 @@ async def get_industry_bubble(
             source=settings.vnstock_source,
         )
         try:
-            screener_data = await asyncio.wait_for(
-                VnstockScreenerFetcher.fetch(params),
-                timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
+            screener_data = await _await_market_provider(
+                ("industry_bubble", tuple(sorted(params.model_dump().items()))),
+                lambda: VnstockScreenerFetcher.fetch(params),
+                HEATMAP_FETCH_TIMEOUT_SECONDS,
             )
-        except asyncio.TimeoutError as exc:
-            raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
-        return [_normalize_screener_row(item) for item in screener_data]
+        except TimeoutError as exc:
+            error = ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS)
+            raise HTTPException(status_code=503, detail=error.message) from exc
+        except ProviderError as exc:
+            raise HTTPException(status_code=503, detail=exc.message) from exc
+        fresh_rows = [_normalize_screener_row(item) for item in screener_data]
+        fresh_rows = [row for row in fresh_rows if row.get("symbol")]
+        if not fresh_rows:
+            raise HTTPException(
+                status_code=503, detail="Industry bubble screener data unavailable"
+            )
+        return fresh_rows
 
     try:
         cache_result = await cache_manager.get_screener_data(
@@ -3091,9 +3104,21 @@ async def get_industry_bubble(
     reference_row = next(
         (row for row in screener_rows if row.get("symbol") == reference_symbol), None
     )
-    if reference_row is None:
-        screener_rows = await _fetch_fresh_rows()
-        screener_rows = [row for row in screener_rows if row.get("symbol")]
+    if reference_row is None and fresh_rows is None:
+        refreshed_rows = {row["symbol"]: row for row in await _fetch_fresh_rows()}
+        for row in screener_rows:
+            size_value = _resolve_industry_bubble_metric(
+                row, ratio_map.get(row["symbol"], {}), revenue_map, size_metric
+            )
+            if size_value is not None and size_value > 0 and all(
+                _resolve_industry_bubble_metric(
+                    row, ratio_map.get(row["symbol"], {}), revenue_map, metric
+                ) is not None for metric in (x_metric, y_metric)
+            ):
+                refreshed_rows[row["symbol"]] = row
+            else:
+                refreshed_rows.setdefault(row["symbol"], row)
+        screener_rows = list(refreshed_rows.values())
         symbols = [row["symbol"] for row in screener_rows]
         metadata_map = await _load_stock_metadata(symbols)
         change_map = await _load_change_pct_map(symbols)
@@ -3616,10 +3641,34 @@ async def get_market_top_movers(
     mover_type = _normalize_mover_type(mode or type)
 
     try:
-        movers = await asyncio.wait_for(
-            VnstockTopMoversFetcher.fetch(type=mover_type, index=index, limit=limit),
-            timeout=30,
-        )
+        provider_error = None
+        retained_error = None
+        try:
+            retained = await _build_last_session_top_movers(
+                index=index, mover_type=mover_type, limit=limit
+            )
+        except Exception as exc:
+            retained_error = str(exc) or exc.__class__.__name__
+            logger.warning("Market top movers retained read failed: %s", retained_error)
+            retained = []
+        if retained:
+            sources = {item.get("source") for item in retained}
+            return MarketTopMoversResponse(
+                type=mover_type, index=index, count=len(retained), data=retained,
+                updated_at=_latest_timestamp([item.get("updated_at") for item in retained]),
+                source=next(iter(sources)) if len(sources) == 1 else None,
+                is_stale=any(item.get("is_stale", False) for item in retained),
+                is_last_session=True, session_label=retained[0].get("session_label"),
+            )
+        try:
+            movers = await asyncio.wait_for(
+                VnstockTopMoversFetcher.fetch(type=mover_type, index=index, limit=limit),
+                timeout=30,
+            )
+        except Exception as exc:
+            provider_error = str(exc) or exc.__class__.__name__
+            logger.warning("Market top movers provider failed: %s", provider_error)
+            movers = []
         payload = [
             item.model_dump(mode="json", by_alias=False) if hasattr(item, "model_dump") else item
             for item in movers
@@ -3653,6 +3702,15 @@ async def get_market_top_movers(
             payload = _apply_snapshot_metrics_to_movers(payload, snapshot_metrics)
             payload = _sort_top_movers(payload, mover_type=mover_type, limit=limit)
 
+        if not payload and provider_error:
+            return MarketTopMoversResponse(
+                type=mover_type, index=index, count=0, data=[],
+                error=(
+                    f"{provider_error}; retained fallback failed: {retained_error}"
+                    if retained_error else provider_error
+                ),
+            )
+
         if not payload and mover_type in {"gainer", "loser"}:
             # Graceful fallback: volume movers are generally the most stable upstream feed.
             fallback = await asyncio.wait_for(
@@ -3678,15 +3736,6 @@ async def get_market_top_movers(
                     index=index, mover_type=mover_type, limit=limit
                 )
 
-            if not payload or not _has_non_zero_top_mover_signal(payload):
-                # SQL-backed last-completed-session fallback. Without this
-                # branch the panel returns an empty list whenever the
-                # vnstock provider, snapshot cache, AND screener cache
-                # are all empty after market close (QA-v2 T3).
-                payload = await _build_last_session_top_movers(
-                    index=index, mover_type=mover_type, limit=limit
-                )
-
             if payload:
                 is_last_session_resp = bool(payload and payload[0].get("is_last_session"))
                 session_label = payload[0].get("session_label") if payload else None
@@ -3703,7 +3752,9 @@ async def get_market_top_movers(
                     ),
                     error=(
                         f"Requested '{mover_type}' movers unavailable, returned snapshot-derived "
-                        "fallback"
+                        f"fallback; retained read failed: {retained_error}"
+                        if retained_error else
+                        f"Requested '{mover_type}' movers unavailable, returned snapshot-derived fallback"
                     ),
                     is_last_session=is_last_session_resp,
                     session_label=session_label,
@@ -3717,10 +3768,18 @@ async def get_market_top_movers(
             updated_at=_latest_timestamp(
                 [_first_non_none(item.get("updated_at"), item.get("time")) for item in payload]
             ),
+            error=retained_error,
         )
     except Exception as e:
         logger.warning(f"Market top movers fetch failed: {e}")
-        return MarketTopMoversResponse(type=mover_type, index=index, count=0, data=[], error=str(e))
+        errors = [provider_error]
+        if retained_error:
+            errors.append(f"retained fallback failed: {retained_error}")
+        errors.append(str(e) or e.__class__.__name__)
+        return MarketTopMoversResponse(
+            type=mover_type, index=index, count=0, data=[],
+            error="; ".join(error for error in errors if error),
+        )
 
 
 @router.get("/sector-performance", response_model=MarketSectorPerformanceResponse)

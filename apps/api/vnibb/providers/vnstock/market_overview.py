@@ -19,6 +19,7 @@ from vnibb.providers.vnstock import get_vnstock
 from vnibb.providers.vnstock.runtime import validate_source
 
 logger = logging.getLogger(__name__)
+_index_jobs: dict[tuple[str, str], asyncio.Future] = {}
 
 MARKET_INDEX_MIN_EXPECTED_VALUE: dict[str, float] = {
     "VNINDEX": 100.0,
@@ -199,11 +200,23 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
             index_name: str, symbols: list[str], timeout: int = 12
         ) -> Optional[dict[str, Any]]:
             """Fetch a single index with timeout."""
-            try:
-                return await asyncio.wait_for(
-                    asyncio.to_thread(_fetch_single_index, index_name, symbols),
-                    timeout=timeout,
+            key = (source_candidates[0], index_name)
+            future = _index_jobs.get(key)
+            if future is None:
+                future = asyncio.get_running_loop().run_in_executor(
+                    None, _fetch_single_index, index_name, symbols
                 )
+                _index_jobs[key] = future
+
+                def finished(done):
+                    if _index_jobs.get(key) is done:
+                        _index_jobs.pop(key, None)
+                    if not done.cancelled():
+                        done.exception()
+
+                future.add_done_callback(finished)
+            try:
+                return await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
             except asyncio.TimeoutError:
                 logger.warning("Timeout fetching %s after %ss", index_name, timeout)
                 return None
@@ -229,14 +242,6 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                 if isinstance(result, dict):
                     indices.append(result)
 
-            if len(indices) < len(index_candidates):
-                fetched_codes = {str(item.get("index_name") or "").upper() for item in indices}
-                for index_name, symbols in index_candidates.items():
-                    if index_name in fetched_codes:
-                        continue
-                    fallback_row = await _fetch_index_async(index_name, symbols, timeout=18)
-                    if isinstance(fallback_row, dict):
-                        indices.append(fallback_row)
 
             return indices
         except asyncio.TimeoutError:

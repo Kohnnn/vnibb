@@ -125,6 +125,9 @@ async def fetch_json_with_retry(
                 "%s attempt %d/%d failed: %s",
                 source, attempt, attempts, exc,
             )
+            status = _response_status(exc)
+            if status is not None and 400 <= status < 500 and status not in (408, 429):
+                break
             if attempt < attempts:
                 await asyncio.sleep(backoff * attempt)
                 continue

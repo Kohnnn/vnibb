@@ -16,7 +16,7 @@ from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.core.price_units import PriceUnit, history_price_records, normalize_price_record
-from vnibb.providers.vnstock.runtime import validate_source
+from vnibb.providers.vnstock.runtime import run_reference_provider, validate_source
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,6 @@ class VnstockEquityHistoricalFetcher(
         to avoid blocking the async event loop.
         """
         source = validate_source(query.get("source"))
-        loop = asyncio.get_event_loop()
 
         def _fetch_sync() -> List[dict[str, Any]]:
             """Synchronous fetch wrapped for executor."""
@@ -216,9 +215,9 @@ class VnstockEquityHistoricalFetcher(
                 )
 
         try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(None, _fetch_sync),
-                timeout=settings.vnstock_timeout,
+            return await run_reference_provider(
+                _fetch_sync, settings.vnstock_timeout,
+                key=("historical", source, tuple(sorted(query.items()))),
             )
         except asyncio.TimeoutError:
             raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)

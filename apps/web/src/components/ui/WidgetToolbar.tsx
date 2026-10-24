@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Settings, Maximize2, Minimize2, X, RefreshCw, Sparkles, Move, Info, MoreHorizontal } from 'lucide-react';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
@@ -73,7 +73,7 @@ export function WidgetToolbar({
   const description = widgetType ? WIDGET_DESCRIPTIONS[widgetType] : undefined;
   const shouldHighlightSettings = Boolean(onSettings && (highlightSettings || isTradingViewWidget(widgetType)));
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const header = headerRef.current;
     if (!header || typeof ResizeObserver === 'undefined') return;
 

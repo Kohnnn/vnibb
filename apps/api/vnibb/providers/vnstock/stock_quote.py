@@ -6,21 +6,20 @@ vnstock.quote.history() with today's date to get the latest trading data.
 Extracts: price, change, change_pct, volume, high, low
 """
 
-import asyncio
 import logging
 from datetime import date, datetime, timedelta
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from vnibb.core.exceptions import ProviderError
+from vnibb.core.config import settings
 from vnibb.core.price_units import PriceUnit, history_price_records
-from vnibb.providers.vnstock.runtime import validate_source
+from vnibb.providers.vnstock.runtime import run_reference_provider, validate_source
 
 logger = logging.getLogger(__name__)
 
 
-def _coerce_quote_timestamp(value: object) -> Optional[datetime]:
+def _coerce_quote_timestamp(value: object, *, preserve_timezone: bool = False) -> datetime | None:
     if isinstance(value, datetime):
         return value
     if isinstance(value, date):
@@ -36,7 +35,8 @@ def _coerce_quote_timestamp(value: object) -> Optional[datetime]:
             lambda raw: datetime.strptime(raw, "%Y-%m-%d"),
         ):
             try:
-                return parser(text).replace(tzinfo=None)
+                parsed = parser(text)
+                return parsed if preserve_timezone else parsed.replace(tzinfo=None)
             except ValueError:
                 continue
     return None
@@ -69,6 +69,8 @@ class StockQuoteData(BaseModel):
     # Metadata
     updated_at: Optional[datetime] = Field(None, description="Quote timestamp")
     price_unit: PriceUnit = Field(default="unknown", description="Canonical price unit")
+    as_of: datetime | None = Field(None, description="Admitted source observation time, not receipt time")
+    upstream_source: str | None = Field(None, description="Raw source lineage when supplied; not certified by serving storage")
     
     model_config = {"populate_by_name": True}
 
@@ -82,22 +84,28 @@ class QuoteCache:
     
     _cache: dict = {}
     _ttl_seconds: int = 30
+    _max_size: int = 50
+
+    @classmethod
+    def _prune_expired(cls, now: datetime) -> None:
+        for key, (_, timestamp) in list(cls._cache.items()):
+            if now - timestamp >= timedelta(seconds=cls._ttl_seconds):
+                del cls._cache[key]
     
     @classmethod
     def get(cls, symbol: str) -> Optional[tuple[StockQuoteData, datetime]]:
         """Get cached quote if not expired."""
-        if symbol in cls._cache:
-            data, timestamp = cls._cache[symbol]
-            if datetime.utcnow() - timestamp < timedelta(seconds=cls._ttl_seconds):
-                return data, timestamp
-            # Expired, remove from cache
-            del cls._cache[symbol]
-        return None
+        cls._prune_expired(datetime.utcnow())
+        return cls._cache.get(symbol)
     
     @classmethod
     def set(cls, symbol: str, data: StockQuoteData) -> None:
         """Store quote in cache."""
-        cls._cache[symbol] = (data, datetime.utcnow())
+        now = datetime.utcnow()
+        cls._prune_expired(now)
+        if symbol not in cls._cache and len(cls._cache) >= cls._max_size:
+            del cls._cache[next(iter(cls._cache))]
+        cls._cache[symbol] = (data, now)
     
     @classmethod
     def is_fresh(cls, symbol: str) -> bool:
@@ -122,6 +130,8 @@ class VnstockStockQuoteFetcher:
         symbol: str,
         source: str = "VCI",
         use_cache: bool = True,
+        *,
+        wait_for_completion: bool = False,
     ) -> tuple[StockQuoteData, bool]:
         """
         Fetch real-time quote for a single stock.
@@ -130,6 +140,7 @@ class VnstockStockQuoteFetcher:
             symbol: Stock ticker symbol (e.g., 'VNM', 'FPT')
             source: Free VCI data source
             use_cache: Whether to use 30-second cache
+            wait_for_completion: Retain background ownership until the sync worker finishes
         
         Returns:
             Tuple of (StockQuoteData, is_cached: bool)
@@ -180,8 +191,10 @@ class VnstockStockQuoteFetcher:
                 
                 return latest, prev
             
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, _fetch)
+            result = await run_reference_provider(
+                _fetch, None if wait_for_completion else settings.vnstock_timeout,
+                key=("stock_quote", source, symbol),
+            )
             
             if not result:
                 return StockQuoteData(symbol=symbol), False
@@ -225,6 +238,8 @@ class VnstockStockQuoteFetcher:
                 updated_at=_coerce_quote_timestamp(
                     latest.get("updated_at") or latest.get("time") or latest.get("date")
                 ),
+                as_of=_coerce_quote_timestamp(latest.get("time") or latest.get("date"), preserve_timezone=True),
+                upstream_source=latest.get("source"),
             )
             
             # Store in cache
@@ -233,7 +248,7 @@ class VnstockStockQuoteFetcher:
             
             return quote_data, False
             
-        except BaseException as e:
+        except Exception as e:
             error_text = str(e).lower()
             if "invalid symbol" in error_text or "symbol format" in error_text:
                 logger.warning(f"Stock quote rejected for invalid symbol {symbol}: {e}")

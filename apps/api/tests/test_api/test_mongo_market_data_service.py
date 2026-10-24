@@ -297,7 +297,7 @@ def test_historical_metadata_reports_internal_gap_and_unit_status(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_partial_mongo_survives_provider_failure_and_fills_from_db(client, monkeypatch):
+async def test_partial_mongo_and_sql_cover_request_without_provider(client, monkeypatch):
     from vnibb.api.v1 import equity
 
     async def fake_mongo(*args, **kwargs):
@@ -312,14 +312,14 @@ async def test_partial_mongo_survives_provider_failure_and_fills_from_db(client,
     async def fake_db(*args, **kwargs):
         return [_bar(date(2026, 6, 9), 11.0), _bar(date(2026, 6, 10), 12.0)]
 
-    async def fail_provider(*args, **kwargs):
-        raise RuntimeError("provider down")
+    from unittest.mock import AsyncMock
+    provider = AsyncMock(side_effect=AssertionError("covered history must not request provider"))
 
     monkeypatch.setattr(equity, "_load_historical_from_mongo", fake_mongo)
     monkeypatch.setattr(equity.CacheManager, "get_historical_prices", fake_cache)
     monkeypatch.setattr(equity, "_load_historical_from_recent_cache", fake_recent)
     monkeypatch.setattr(equity, "_load_historical_from_db", fake_db)
-    monkeypatch.setattr(equity.VnstockEquityHistoricalFetcher, "fetch", fail_provider)
+    monkeypatch.setattr(equity.VnstockEquityHistoricalFetcher, "fetch", provider)
 
     response = await client.get(
         "/api/v1/equity/historical?symbol=VNM&start_date=2026-06-08&end_date=2026-06-10"
@@ -330,7 +330,8 @@ async def test_partial_mongo_survives_provider_failure_and_fills_from_db(client,
     assert [row["time"] for row in payload["data"]] == ["2026-06-08", "2026-06-09", "2026-06-10"]
     assert payload["meta"]["source_counts"] == {"mongo": 1, "db": 2}
     assert payload["meta"]["fallback_used"] is True
-    assert "provider resolution failed" in payload["meta"]["warnings"][0]
+    assert all(row["price_unit"] == "VND" for row in payload["data"])
+    provider.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -611,3 +612,35 @@ def test_vietcap_financial_sync_propagates_provider_failure(failed_section):
         "finance.income_statement", "finance.balance_sheet", "finance.cash_flow", "finance.ratio",
     }
     assert all(record["symbol"] == "VNM" and record["providerSource"] == "vietcap" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_fundamental_reader_withholds_legacy_interest_score_preserving_independent_facts(monkeypatch):
+    documents = [
+        {"symbol": symbol, "schemaVersion": version, "moatScore": 95.0,
+         "moatFactors": {"interest_coverage": 8.0, "gross_margin_avg": 42.0},
+         "roe": 18.0, "netMargin": 15.0, "moat": "wide"}
+        for symbol, version in (("OLD", 2), ("NEW", 3))
+    ]
+
+    class FundamentalCollection:
+        def aggregate(self, _pipeline):
+            return [{"doc": dict(document)} for document in documents]
+
+    service = MongoMarketDataService()
+    monkeypatch.setattr(service, "_get_collection", lambda _: FundamentalCollection())
+
+    snapshots = await service.get_latest_fundamental_snapshots(["OLD", "NEW"])
+
+    assert snapshots["OLD"].get("moatScore") is None
+    assert "interest_coverage" not in snapshots["OLD"]["moatFactors"]
+    assert snapshots["OLD"]["moatFactors"]["gross_margin_avg"] == 42.0
+    assert snapshots["OLD"]["roe"] == 18.0
+    assert snapshots["OLD"]["netMargin"] == 15.0
+    assert snapshots["OLD"]["moat"] is None
+    assert snapshots["NEW"]["moatScore"] == 95.0
+    assert snapshots["NEW"]["moatFactors"]["interest_coverage"] == 8.0
+    assert snapshots["NEW"]["moat"] == "wide"
+    assert documents[0]["moatFactors"]["interest_coverage"] == 8.0
+    assert documents[0]["moatScore"] == 95.0
+    assert documents[0]["moat"] == "wide"

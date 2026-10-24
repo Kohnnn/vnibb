@@ -205,7 +205,7 @@ services:
       retries: 12
 
   auth:
-    image: supabase/gotrue:v2.177.0
+    image: supabase/gotrue:v2.188.1@sha256:87db8c737af49a64236c461882ed3925f8b1e5c2c47176c64694dedc65153573
     container_name: vnibb-auth
     restart: unless-stopped
     depends_on:
@@ -220,8 +220,10 @@ services:
       GOTRUE_DB_NAMESPACE: auth
       GOTRUE_SITE_URL: ${GOTRUE_SITE_URL:-https://vnibb-web.vercel.app}
       GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST:-https://vnibb-web.vercel.app/**}
+      GOTRUE_CORS_ALLOWED_HEADERS: ${GOTRUE_CORS_ALLOWED_HEADERS:-apikey}
       GOTRUE_DISABLE_SIGNUP: ${GOTRUE_DISABLE_SIGNUP:-false}
       GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET:?Set SUPABASE_JWT_SECRET in deployment/env.oracle}
+      GOTRUE_JWT_ISSUER: ${SUPABASE_URL:?Set SUPABASE_URL in deployment/env.oracle}/auth/v1
       GOTRUE_JWT_EXP: ${GOTRUE_JWT_EXP:-3600}
       GOTRUE_JWT_ADMIN_ROLES: service_role
       GOTRUE_JWT_AUD: authenticated

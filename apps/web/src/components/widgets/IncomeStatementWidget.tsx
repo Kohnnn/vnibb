@@ -31,6 +31,7 @@ import {
     getUnitLegend,
     resolveUnitScale,
     toFiniteNumber,
+    readCanonicalStatementValue,
 } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
@@ -128,7 +129,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
         dataUpdatedAt,
     } = useIncomeStatement(symbol, { period: apiPeriod, limit: visiblePeriodLimit });
 
-    const items = data?.data || [];
+    const items = useMemo(() => data?.data || [], [data?.data]);
     // Provider payloads can repeat a fiscal period or emit rows with no fiscal
     // identity at all. `canonicalPeriodRows` never picks between conflicting rows
     // (nothing in the payload proves which basis is authoritative) - it excludes
@@ -161,15 +162,28 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
     // valid partial row and stays (issue #103).
     const unavailableNote = useMemo(() => describeUnavailableStatementRows(periodItems), [periodItems]);
     const displayItems = useMemo(
-        () => periodItems.filter((item) => !isUnavailableStatementRow(item)),
+        () => periodItems.filter((item) => !isUnavailableStatementRow(item)).map((item) => {
+            const record = item as unknown as Record<string, unknown>;
+            return {
+                ...item,
+                raw_data: undefined,
+                ...Object.fromEntries([...Object.keys(labels), 'operating_expense'].map((key) => [key, readCanonicalStatementValue(record, key)])),
+            };
+        }),
         [periodItems]
     );
+    const exportData = useMemo(() => displayItems.map((item) => ({
+        period: item.period,
+        ...Object.fromEntries(Object.keys(labels).map((key) => [key, convertFinancialValueForUnit(
+            (item as unknown as Record<string, number | null>)[key], unitConfig, item.period,
+        )])),
+    })), [displayItems, unitConfig]);
     const duplicatePeriodNote = useMemo(() => {
         const notes: string[] = [];
         const ambiguous = periodIssues.filter((issue) => issue.reason === 'ambiguous-basis');
         if (ambiguous.length > 0) {
             notes.push(
-                `Unavailable: ${ambiguous.map((issue) => issue.period).join(', ')} returned conflicting rows with no basis field, so no value is shown.`
+                `Unavailable: ${ambiguous.map((issue) => issue.period).join(', ')} returned conflicting rows without an authoritative basis/revision selection, so no value is shown.`
             );
         }
         if (invalidPeriodCount > 0) {
@@ -227,10 +241,10 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
         return resolveUnitScale(values, unitConfig);
     }, [displayItems, unitConfig]);
 
-    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
+    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig).replace(/^Values in/, 'Display units:'), [tableScale, unitConfig]);
     const unitNote = useMemo(
-        () => `Note: ${unitLegend}; per-share values (EPS) are ${unitConfig.display === 'USD' ? 'USD' : 'VND'} per share • Reporting Standard: VAS • First available period is the base period`,
-        [unitLegend, unitConfig.display]
+        () => `${unitLegend}; EPS is displayed per share without the table scale. Display settings do not verify source units or reporting standard. First available period is the base period.`,
+        [unitLegend]
     );
 
     const tableColumns = useMemo(
@@ -288,6 +302,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 extra: hasData
                     ? {
                         periods: displayItems.length,
+                        data: exportData,
                         // Same channel the widget already publishes on; the
                         // selection rides along so the copilot can target it.
                         tableInsight: chartInsight,
@@ -295,7 +310,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                     : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length, chartInsight]);
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length, chartInsight, exportData]);
     const attachSelection = useCallback(
         (row: DenseTableRow): DenseTableRow => {
             // Only metrics this widget actually charts are selectable; the rest
@@ -426,7 +441,11 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             selectedColumnKey={selection?.kind === 'column' ? selection.key : null}
             onSelectionClear={clearSelection}
             storageKey={`income:${id}:${symbol}:${period}`}
-            footerNote={unitNote}
+            footerNote={unitNote + (period === 'TTM' ? displayItems.map((item) => {
+                const row = item as unknown as Record<string, unknown>;
+                const metadata = row.unit_metadata as Record<string, { unavailable_reason?: string | null }> | undefined;
+                return ` • TTM basis: ${typeof row.aggregation_basis === 'string' ? row.aggregation_basis : 'Unknown'}; Source periods: ${Array.isArray(row.source_periods) && row.source_periods.length ? row.source_periods.join(', ') : 'Unknown'}; EPS availability: ${metadata?.eps?.unavailable_reason || (row.eps == null ? 'Unknown' : 'Reported')}`;
+            }).join('') : '')}
             valueFormatter={(value, row) => {
                 if (row.id === 'eps' || row.id === 'eps_diluted') {
                     return formatNumber(value as number | null | undefined, { decimals: 2 });
@@ -591,7 +610,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             noPadding
             widgetId={id}
             showLinkToggle
-            exportData={displayItems}
+            exportData={exportData}
         >
             <div className="h-full flex flex-col px-2 py-1.5">
                 {/* The dashboard wraps widget children in a header-suppressing
@@ -640,12 +659,17 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                         fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={statementNote ?? (period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right')}
+                        note={period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right'}
                         sourceLabel="Income statement"
                         align="right"
                     />
                 </div>
                 <div className="flex-1 overflow-auto scrollbar-hide pt-1">
+                    {statementNote && (
+                        <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+                            {statementNote}
+                        </div>
+                    )}
                     {timedOut && isLoading && !hasData ? (
                         <WidgetError
                             title="Loading timed out"

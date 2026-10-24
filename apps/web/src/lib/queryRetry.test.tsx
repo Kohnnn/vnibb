@@ -1,12 +1,12 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { APIError, RateLimitError } from './api';
 import { createQueryClient } from './QueryProvider';
 import { queryRetryDelay, shouldRetryQuery } from './queryRetry';
-import { queryKeys, useHistoricalPrices } from './queries';
-import { useHistoricalPrices as useModularHistoricalPrices } from './queries/equity';
-import type { EquityHistoricalResponse } from '@/types/equity';
+import { queryKeys, useHistoricalPrices, useRatioHistory } from './queries';
+import { useHistoricalPrices as useModularHistoricalPrices, useRatioHistory as useModularRatioHistory } from './queries/equity';
+import type { EquityHistoricalResponse, RatioHistoryResponse } from '@/types/equity';
 
 jest.mock('./env', () => ({ env: { apiUrl: 'https://api.example.test' } }));
 jest.mock('./supabase', () => ({ isSupabaseConfigured: false, supabase: null }));
@@ -130,6 +130,63 @@ describe.each([
         } finally {
             view.unmount();
             finishObsolete?.(response);
+            client.clear();
+            globalThis.fetch = originalFetch;
+        }
+    });
+});
+
+describe.each([
+    ['public', useRatioHistory],
+    ['modular', useModularRatioHistory],
+] as const)('%s ratio history provider outcome', (_name, useHistory) => {
+    it('distinguishes provider failure from empty success and retains data until recovery', async () => {
+        const client = createQueryClient();
+        const originalFetch = globalThis.fetch;
+        const reason = 'Financial ratio history provider deadline exceeded';
+        const history: RatioHistoryResponse = { data: [{ period: '2025', pe: 12 }] };
+        const recovered: RatioHistoryResponse = { data: [{ period: '2025', pe: 14 }] };
+        const outcomes: RatioHistoryResponse[] = [
+            { data: [], error: reason },
+            { data: [], error: null },
+            history,
+            { data: [], error: reason },
+            recovered,
+        ];
+        const fetchMock = jest.fn().mockImplementation(async () => ({
+            ok: true,
+            json: async () => outcomes.shift(),
+        } as Response));
+        globalThis.fetch = fetchMock;
+        const wrapper = ({ children }: { children: ReactNode }) =>
+            <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+        const view = renderHook(() => useHistory('VCB'), { wrapper });
+
+        try {
+            await waitFor(() => expect(view.result.current.isError).toBe(true));
+            expect(view.result.current.error?.message).toBe(reason);
+            expect(view.result.current.data).toBeUndefined();
+
+            await act(async () => { await view.result.current.refetch(); });
+            await waitFor(() => expect(view.result.current.isSuccess).toBe(true));
+            expect(view.result.current.data).toEqual({ data: [], error: null });
+            expect(view.result.current.error).toBeNull();
+
+            await act(async () => { await view.result.current.refetch(); });
+            await waitFor(() => expect(view.result.current.data).toEqual(history));
+
+            await act(async () => { await view.result.current.refetch(); });
+            await waitFor(() => expect(view.result.current.isError).toBe(true));
+            expect(view.result.current.data).toEqual(history);
+            expect(view.result.current.error?.message).toBe(reason);
+
+            await act(async () => { await view.result.current.refetch(); });
+            await waitFor(() => expect(view.result.current.isSuccess).toBe(true));
+            expect(view.result.current.data).toEqual(recovered);
+            expect(view.result.current.error).toBeNull();
+            expect(fetchMock).toHaveBeenCalledTimes(5);
+        } finally {
+            view.unmount();
             client.clear();
             globalThis.fetch = originalFetch;
         }

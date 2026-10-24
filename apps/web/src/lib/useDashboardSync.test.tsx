@@ -65,8 +65,11 @@ function SyncProbe({
 
 function LoadProbe({ enabled = true }: { enabled?: boolean }) {
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
-  useLoadFromBackend(setDashboards, enabled);
-  return <output data-testid="loaded-dashboards">{JSON.stringify(dashboards)}</output>;
+  const settled = useLoadFromBackend(setDashboards, enabled);
+  return <>
+    <output data-testid="loaded-dashboards">{JSON.stringify(dashboards)}</output>
+    <output data-testid="backend-load-settled">{String(settled)}</output>
+  </>;
 }
 
 function deferred<T>() {
@@ -76,6 +79,42 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+describe('useLoadFromBackend catalogue completion', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('reports disabled loading as settled without requesting the backend', () => {
+    render(<LoadProbe enabled={false} />);
+    expect(screen.getByTestId('backend-load-settled')).toHaveTextContent('true');
+    expect(mockProbeBackendReadiness).not.toHaveBeenCalled();
+  });
+
+  it('waits for the snapshot response and settles even when the catalogue is empty', async () => {
+    const snapshot = deferred<{ count: number; data: Dashboard[] }>();
+    mockProbeBackendReadiness.mockResolvedValue({ healthOk: true, dataOk: true });
+    mockGetDashboards.mockReturnValue(snapshot.promise);
+    render(<LoadProbe />);
+
+    await waitFor(() => expect(mockGetDashboards).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('backend-load-settled')).toHaveTextContent('false');
+    await act(async () => { snapshot.resolve({ count: 0, data: [] }); });
+    expect(screen.getByTestId('backend-load-settled')).toHaveTextContent('true');
+  });
+
+  it('settles when the backend is unavailable', async () => {
+    mockProbeBackendReadiness.mockResolvedValue({ healthOk: false, dataOk: false });
+    render(<LoadProbe />);
+    await waitFor(() => expect(screen.getByTestId('backend-load-settled')).toHaveTextContent('true'));
+    expect(mockGetDashboards).not.toHaveBeenCalled();
+  });
+
+  it('settles when the snapshot request rejects', async () => {
+    mockProbeBackendReadiness.mockResolvedValue({ healthOk: true, dataOk: true });
+    mockGetDashboards.mockRejectedValue(new Error('unavailable'));
+    render(<LoadProbe />);
+    await waitFor(() => expect(screen.getByTestId('backend-load-settled')).toHaveTextContent('true'));
+  });
+});
 
 describe('useDashboardSync', () => {
   beforeEach(() => {

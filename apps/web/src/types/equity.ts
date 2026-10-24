@@ -213,7 +213,12 @@ export interface ShareholderData {
   symbol: string;
   shareholder_name?: string;
   shares_owned?: number;
-  ownership_pct?: number;
+  ownership_pct?: number | null;
+  ownership_unit?: 'percent' | null;
+  ownership_unit_status?: 'explicit' | 'unverified';
+  ownership_source_field?: string | null;
+  ownership_source?: string | null;
+  raw_data?: Record<string, unknown> | null;
   shareholder_type?: string;
 }
 
@@ -221,6 +226,7 @@ export interface ShareholdersResponse {
   symbol: string;
   count: number;
   data: ShareholderData[];
+  error?: string | null;
 }
 
 export interface OfficerData {
@@ -295,6 +301,7 @@ export interface FinancialRatioData {
   earnings_growth?: number;
   dps?: number;
   dividend_yield?: number;
+  ratio_units?: Record<string, string | undefined> | null;
   payout_ratio?: number;
   peg_ratio?: number;
 }

@@ -1,13 +1,15 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect, memo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useCallback, useMemo, useEffect, useId, memo } from 'react';
+import { useQuery, useQueries } from '@tanstack/react-query';
 import { Plus, TrendingUp, TrendingDown, Minus, Star, Trash2 } from 'lucide-react';
 import { getSymbols } from '@/lib/api';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { useWebSocket } from '@/lib/hooks/useWebSocket';
+import { fetchStockQuote, quoteQueryKey } from '@/lib/queries';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
@@ -26,6 +28,12 @@ interface WatchlistItem {
     change: number | null;
     changePercent: number | null;
     volume: number | null;
+    asOf?: string | null;
+    stale?: boolean | null;
+    delivery?: 'WebSocket' | 'HTTP quote';
+    source?: string | null;
+    upstreamSource?: string | null;
+    error?: string | null;
 }
 
 type SortField = 'symbol' | 'price' | 'changePercent' | 'volume';
@@ -108,6 +116,8 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
     const [sortConfig, setSortConfig] = useState<SortConfig>(persistedSortConfig);
 
     const [newSymbol, setNewSymbol] = useState('');
+    const [symbolError, setSymbolError] = useState<string | null>(null);
+    const symbolErrorId = useId();
     const [showAddInput, setShowAddInput] = useState(false);
     const [showClearConfirm, setShowClearConfirm] = useState(false);
 
@@ -122,7 +132,15 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
         return new Map(validSymbolsData.data.map(s => [s.symbol.toUpperCase(), s.organ_name]));
     }, [validSymbolsData]);
 
-    const { prices: livePrices, isConnected, lastUpdate } = useWebSocket({ symbols });
+    const { prices: livePrices, isConnected, isReceiving, lastUpdate, protocolError } = useWebSocket({ symbols });
+    const storedQuotes = useQueries({ queries: symbols.map(symbol => ({
+        queryKey: quoteQueryKey(symbol),
+        queryFn: ({ signal }: { signal: AbortSignal }) => fetchStockQuote(symbol, signal),
+        staleTime: 30_000,
+        refetchInterval: isReceiving ? false : () => getAdaptiveRefetchInterval(POLLING_PRESETS.quotes),
+        refetchIntervalInBackground: false,
+        networkMode: 'online' as const,
+    })) });
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'watchlist' });
 
     useEffect(() => {
@@ -156,9 +174,15 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
     }, [id, sortConfig, symbols, updateWidget, widgetLocation]);
 
     const watchlist = useMemo<WatchlistItem[]>(() => {
-        return symbols.map((sym) => {
-            const quoteData = livePrices.get(sym);
-            const quoteNumber = (value: number | undefined) => Number.isFinite(value) ? value ?? null : null;
+        return symbols.map((sym, index) => {
+            const stream = livePrices.get(sym);
+            const stored = storedQuotes[index]?.data;
+            const admitted = stored?.price_unit === 'VND' ? stored : undefined;
+            const streamTime = Date.parse(stream?.as_of || stream?.timestamp || '');
+            const storedTime = Date.parse(admitted?.asOf || '');
+            const quoteData = stream && (!admitted || !Number.isFinite(storedTime) || streamTime >= storedTime)
+                ? stream : admitted ? { ...admitted, change_pct: admitted.changePct } : undefined;
+            const quoteNumber = (value: number | null | undefined) => Number.isFinite(value) ? value ?? null : null;
 
             return {
                 symbol: sym,
@@ -167,9 +191,15 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                 change: quoteNumber(quoteData?.change),
                 changePercent: quoteNumber(quoteData?.change_pct),
                 volume: quoteNumber(quoteData?.volume),
+                asOf: stream && quoteData === stream ? stream.as_of : admitted?.asOf,
+                stale: stream && quoteData === stream ? stream.stale : admitted?.stale,
+                delivery: quoteData ? stream && quoteData === stream ? 'WebSocket' : 'HTTP quote' : undefined,
+                source: stream && quoteData === stream ? stream.source : admitted?.source,
+                upstreamSource: stream && quoteData === stream ? null : admitted?.upstreamSource,
+                error: stored?.error || storedQuotes[index]?.error?.message,
             };
         });
-    }, [symbols, livePrices, symbolNameMap]);
+    }, [symbols, livePrices, symbolNameMap, storedQuotes]);
 
     const sortedWatchlist = useMemo(() => {
         const sorted = [...watchlist];
@@ -191,32 +221,57 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
     }, [watchlist, sortConfig]);
 
     const hasSymbols = symbols.length > 0;
-    const hasObservedQuote = lastUpdate !== null;
+    const hasObservedQuote = watchlist.some(item => item.price !== null);
+    const observedQuotes = watchlist.filter(item => item.price !== null);
+    const observedTimes = observedQuotes.map(item => Date.parse(item.asOf || ''));
+    const observedAt = observedTimes.length && observedTimes.every(Number.isFinite)
+        ? new Date(Math.min(...observedTimes)) : null;
     const connectionNote = !hasSymbols
         ? 'Add symbols to begin'
         : isConnected
-            ? hasObservedQuote ? 'Live feed · Last quote received' : 'Live feed · Awaiting quote'
+            ? hasObservedQuote ? 'Connected · Stored or observed quote' : 'Live feed · Awaiting quote'
             : hasObservedQuote ? 'Disconnected · Cached quote receipt' : 'Disconnected · Unavailable';
-    const showCached = hasSymbols && !isConnected && hasObservedQuote;
+    const showCached = hasObservedQuote && (!isConnected || watchlist.some(item => item.delivery === 'HTTP quote' || item.stale));
+    const stale = observedQuotes.some(item => item.stale === true) ? true
+        : observedQuotes.length && observedQuotes.every(item => item.stale === false) ? false : undefined;
+    const deliverySources = new Set(observedQuotes.map(item =>
+        `${item.delivery} · ${item.source || 'Source unknown'} · ${item.upstreamSource ? `Lineage ${item.upstreamSource}` : 'Supplier unknown'}`));
+    const sourceLabel = [...deliverySources].join('; ') || 'Quote source unknown';
+    const warnings = [...new Set([
+        ...(protocolError ? [`WebSocket: ${protocolError}`] : []),
+        ...watchlist.flatMap(item => [
+            ...(item.error ? [`${item.symbol}: ${item.error}`] : []),
+            ...(item.price !== null && !Number.isFinite(Date.parse(item.asOf || ''))
+                ? [`${item.symbol}: Observation time unknown; freshness unknown.`] : []),
+        ]),
+    ])];
+    const warningsText = warnings.join('\n');
+    const usesHttpQuotes = watchlist.some(item => item.delivery === 'HTTP quote');
 
     useEffect(() => {
         onDataChange?.(
             buildWidgetRuntime({
                 empty: !hasSymbols,
-                apiGroup: '/ws',
-                endpoint: '/api/v1/ws/prices',
-                sourceLabel: 'WebSocket',
-                lastDataDate: null,
+                apiGroup: usesHttpQuotes ? '/equity' : '/ws',
+                endpoint: usesHttpQuotes ? '/api/v1/equity/{symbol}/quote' : '/api/v1/ws/prices',
+                sourceLabel,
+                lastDataDate: observedAt?.toISOString() ?? null,
                 fetchedAt: lastUpdate,
-                stale: showCached,
+                cached: showCached,
+                stale,
+                warnings: warningsText ? warningsText.split('\n') : [],
                 extra: hasSymbols ? { symbolCount: symbols.length } : undefined,
             }),
         );
-    }, [hasSymbols, lastUpdate, showCached, symbols.length, onDataChange]);
+    }, [hasSymbols, lastUpdate, showCached, stale, symbols.length, onDataChange, observedAt?.getTime(), sourceLabel, warningsText, usesHttpQuotes]);
 
     const handleAddSymbol = useCallback(() => {
-        if (!newSymbol.trim()) return;
-        const symbolUpper = newSymbol.toUpperCase().trim();
+        const symbolUpper = normalizeTickerSymbol(newSymbol);
+        if (!symbolUpper) {
+            setSymbolError('Enter a three-character ticker using letters or numbers.');
+            return;
+        }
+        setSymbolError(null);
         if (symbols.includes(symbolUpper)) {
             setNewSymbol('');
             setShowAddInput(false);
@@ -296,13 +351,15 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
 
                 <div className="px-3 py-1.5 border-b border-[var(--border-color)]/70 bg-[var(--bg-primary)]">
                     <WidgetMeta
-                        updatedAt={null}
+                        updatedAt={observedAt}
                         fetchedAt={lastUpdate}
                         isCached={showCached}
+                        isStale={stale}
                         note={connectionNote}
-                        sourceLabel="WebSocket"
+                        sourceLabel={sourceLabel}
                         align="right"
                     />
+                    {warnings.map(warning => <p key={warning} role="status" className="mt-1 text-[10px] text-amber-400">{warning}</p>)}
                 </div>
 
                 {showClearConfirm && (
@@ -323,8 +380,10 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                             <input
                                 type="text"
                                 aria-label="Watchlist symbol"
+                                aria-invalid={Boolean(symbolError)}
+                                aria-describedby={symbolError ? symbolErrorId : undefined}
                                 value={newSymbol}
-                                onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+                                onChange={(e) => { setNewSymbol(e.target.value.toUpperCase()); setSymbolError(null); }}
                                 onKeyDown={(e) => e.key === 'Enter' && handleAddSymbol()}
                                 className="min-h-11 flex-1 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-2 py-1 text-xs text-[var(--text-primary)] uppercase font-bold focus-visible:ring-2 focus-visible:ring-blue-500/40 outline-none"
                                 placeholder="SYMBOL"
@@ -332,6 +391,7 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                             />
                             <button type="button" onClick={handleAddSymbol} className="min-h-11 rounded bg-blue-600 px-3 py-1 text-[10px] font-black uppercase tracking-tighter focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Add</button>
                         </div>
+                        {symbolError && <p id={symbolErrorId} role="alert" className="mt-2 text-xs text-red-400">{symbolError}</p>}
                     </div>
                 )}
 

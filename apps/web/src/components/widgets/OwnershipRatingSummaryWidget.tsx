@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { ShieldCheck, ShieldX, Users } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -12,6 +12,7 @@ import { buildOwnershipSummary } from '@/lib/ownershipAnalytics';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatNumber } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
+import type { WidgetDataPayload } from '@/lib/widgetRuntime';
 
 interface OwnershipRatingSummaryWidgetProps {
   id: string;
@@ -22,7 +23,7 @@ interface OwnershipRatingSummaryWidgetProps {
 
 function formatPct(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return '—'
-  return `${value.toFixed(1)}%`
+  return `${value.toFixed(2)}%`
 }
 
 function formatCompact(value: number | null | undefined) {
@@ -39,50 +40,52 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
   const foreignQuery = useForeignTrading(upperSymbol, { limit: 20, enabled: Boolean(upperSymbol) })
   const insiderQuery = useInsiderSentiment(upperSymbol, { days: 90, enabled: Boolean(upperSymbol) })
 
-  const shareholders = shareholdersQuery.data?.data || []
-  const foreignFlow = foreignQuery.data?.data || []
-  const insider = insiderQuery.data || null
-  const summary = buildOwnershipSummary(shareholders, foreignFlow, insider)
-  const hasData = shareholders.length > 0 || foreignFlow.length > 0 || Boolean(insider)
+  const shareholders = shareholdersQuery.data?.data
+  const foreignFlow = foreignQuery.data?.data
+  const insider = insiderQuery.data
+  const shareholderError = useMemo(() => shareholdersQuery.error || (shareholdersQuery.data?.error ? new Error(shareholdersQuery.data.error) : null), [shareholdersQuery.error, shareholdersQuery.data?.error])
+  const summary = useMemo(() => buildOwnershipSummary(shareholders, foreignFlow, insider), [shareholders, foreignFlow, insider])
+  const hasData = summary.availableSources > 0
   const isLoading = (shareholdersQuery.isLoading || foreignQuery.isLoading || insiderQuery.isLoading) && !hasData
   const isFetching = shareholdersQuery.isFetching || foreignQuery.isFetching || insiderQuery.isFetching
-  const error = shareholdersQuery.error || foreignQuery.error || insiderQuery.error
-  const fetchedAt = Math.max(shareholdersQuery.dataUpdatedAt, foreignQuery.dataUpdatedAt, insiderQuery.dataUpdatedAt)
-  const gradeTone = summary.grade === 'A' ? 'text-emerald-300' : summary.grade === 'B' ? 'text-cyan-300' : summary.grade === 'C' ? 'text-amber-300' : 'text-rose-300'
-  const availableSources = [shareholders.length > 0, foreignFlow.length > 0, Boolean(insider)].filter(Boolean).length
-  const ownershipHealth: WidgetHealthState | undefined = !hasData && !isLoading && !error
-    ? {
-        status: 'coverage_gap',
-        label: 'Coverage gap',
-        detail: `${upperSymbol} does not have shareholder, foreign-flow, or insider-sentiment rows in the current VNIBB database snapshot.`,
-      }
-    : hasData && availableSources < 3
-      ? {
-          status: 'limited',
-          label: 'Partial ownership view',
-          detail: `${availableSources} of 3 ownership inputs are available: shareholders, foreign flow, and insider sentiment.`,
-        }
+  const error = shareholderError || foreignQuery.error || insiderQuery.error
+  const fetchedAt = Math.max(shareholdersQuery.dataUpdatedAt, foreignQuery.dataUpdatedAt, insiderQuery.dataUpdatedAt) || null
+  const gradeTone = summary.grade === 'A' ? 'text-emerald-300' : summary.grade === 'B' ? 'text-cyan-300' : summary.grade === 'C' ? 'text-amber-300' : summary.grade === 'D' ? 'text-rose-300' : 'text-[var(--text-muted)]'
+  const warnings = useMemo(() => {
+    const inputs = [
+      ['Shareholders', { ...shareholdersQuery, error: shareholderError }, summary.holderCount !== null && summary.holderCount > 0],
+      ['Foreign flow', foreignQuery, summary.foreignNetVolume !== null],
+      ['Insider sentiment', insiderQuery, summary.insiderNetValue !== null],
+    ] as const
+    return inputs.flatMap(([name, query, usable]) => query.error
+      ? [`${name}: ${usable ? 'refresh failed; retained data may be stale' : 'unavailable (request failed)'}.`]
+      : !usable ? [`${name}: ${query.isLoading ? 'loading' : 'no usable observations'}.`] : [])
+      .concat(summary.holderCount && summary.ownershipUnitStatus !== 'explicit' ? ['Ownership percentages withheld: explicit source-unit evidence unavailable.'] : [])
+      .concat(summary.score === null ? ['Composite withheld until all three inputs and ownership percentage units are usable.'] : [])
+  }, [shareholderError, shareholdersQuery.isLoading, foreignQuery.error, foreignQuery.isLoading, insiderQuery.error, insiderQuery.isLoading, summary])
+  const ownershipHealth: WidgetHealthState | undefined = error && hasData
+    ? { status: 'stale', label: 'Refresh failed', detail: warnings.join(' ') }
+    : summary.coverage !== 'complete' && !isLoading
+      ? { status: hasData ? 'limited' : 'coverage_gap', label: hasData ? 'Partial ownership view' : 'Coverage gap', detail: warnings.join(' ') }
       : undefined
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
       empty: !hasData,
-      apiGroup: '/equity',
-      endpoint: `/api/v1/equity/${upperSymbol}/ownership-summary`,
+      apiGroup: '/equity + /insider',
+      endpoint: `/api/v1/equity/${upperSymbol}/shareholders; /api/v1/equity/${upperSymbol}/foreign-trading; /api/v1/insider/${upperSymbol}/sentiment`,
       sourceLabel: 'Shareholders + foreign flow + insider sentiment',
       derived: true,
-      // Ownership inputs expose no source observation date, so freshness stays
-      // unknown and the query receipts are reported separately.
       lastDataDate: null,
       fetchedAt,
+      coverage: summary.coverage,
       stale: Boolean(error && hasData),
-      extra: {
-        holderCount: summary.holderCount,
-        score: summary.score,
-        availableSources,
-      },
+      cached: Boolean(error && hasData),
+      warnings,
+      extra: { ...summary, warnings },
+      exportData: { ...summary, warnings },
     }))
-  }, [availableSources, error, fetchedAt, hasData, onDataChange, summary.holderCount, summary.score, upperSymbol])
+  }, [error, fetchedAt, hasData, onDataChange, summary, upperSymbol, warnings])
 
   const refresh = () => {
     void shareholdersQuery.refetch()
@@ -103,20 +106,21 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
       onClose={onRemove}
       onRefresh={refresh}
       noPadding
-      exportData={{ summary, insider, foreignFlow: foreignFlow.slice(0, 10) }}
+      exportData={{ ...summary, warnings }}
       exportFilename={`ownership_rating_summary_${upperSymbol}`}
     >
       <div className="flex h-full flex-col bg-[var(--bg-primary)] p-3">
         <div className="mb-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-3">
-            {summary.grade === 'A' || summary.grade === 'B' ? <ShieldCheck size={20} className="text-emerald-300" /> : <ShieldX size={20} className="text-rose-300" />}
+            {summary.grade && (summary.grade === 'A' || summary.grade === 'B' ? <ShieldCheck size={20} className="text-emerald-300" /> : <ShieldX size={20} className="text-rose-300" />)}
             <div>
-              <div className={`text-2xl font-black ${gradeTone}`}>{summary.grade}</div>
-              <div className="text-[11px] text-[var(--text-secondary)]">{summary.stance}</div>
+              <div className={`text-2xl font-black ${gradeTone}`}>{summary.grade ?? '—'}</div>
+              <div className="text-[11px] text-[var(--text-secondary)]">{summary.stance ?? 'Ownership rating unavailable'}</div>
             </div>
           </div>
-          <WidgetMeta updatedAt={null} fetchedAt={fetchedAt} isFetching={isFetching && hasData} note={`${summary.holderCount} holders`} health={ownershipHealth} align="right" />
+          <WidgetMeta updatedAt={null} fetchedAt={fetchedAt} isFetching={isFetching && hasData} note={summary.holderCount !== null ? `${summary.holderCount} reported holders` : 'Holder count unavailable'} health={ownershipHealth} align="right" />
         </div>
+        {hasData && warnings.length > 0 && <p role="status" className="mb-3 text-[11px] text-[var(--text-secondary)]">{warnings.join(' ')}</p>}
 
         {isLoading ? (
           <WidgetSkeleton lines={6} />
@@ -135,10 +139,10 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
             <MetricCard label="Top 10" value={formatPct(summary.top10Pct)} tone="text-blue-300" />
             <MetricCard label="Foreign Net 20D" value={formatCompact(summary.foreignNetVolume)} tone={summary.foreignNetVolume != null && summary.foreignNetVolume >= 0 ? 'text-emerald-300' : 'text-rose-300'} />
             <MetricCard label="Insider Net 90D" value={formatCompact(summary.insiderNetValue)} tone={summary.insiderNetValue != null && summary.insiderNetValue >= 0 ? 'text-emerald-300' : 'text-rose-300'} />
-            <MetricCard label="Institutional" value={String(summary.institutionalCount)} tone="text-[var(--text-primary)]" />
-            <MetricCard label="Foreign Holders" value={String(summary.foreignCount)} tone="text-[var(--text-primary)]" />
-            <MetricCard label="Insider Holders" value={String(summary.insiderCount)} tone="text-[var(--text-primary)]" />
-            <MetricCard label="Score" value={`${summary.score}/100`} tone={gradeTone} />
+            <MetricCard label="Reported Institutional" value={formatCompact(summary.institutionalCount)} tone="text-[var(--text-primary)]" />
+            <MetricCard label="Reported Foreign Holders" value={formatCompact(summary.foreignCount)} tone="text-[var(--text-primary)]" />
+            <MetricCard label="Reported Insider Holders" value={formatCompact(summary.insiderCount)} tone="text-[var(--text-primary)]" />
+            <MetricCard label="Score" value={summary.score !== null ? `${summary.score}/100` : '—'} tone={gradeTone} />
           </div>
         )}
       </div>

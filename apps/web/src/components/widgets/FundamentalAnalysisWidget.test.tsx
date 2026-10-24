@@ -48,4 +48,46 @@ describe('FundamentalAnalysisWidget monetary unit quality', () => {
     expect(screen.getByText('-100.0%')).toBeInTheDocument();
     expect(screen.getByText('stretched')).toBeInTheDocument();
   });
+
+  test('explains partial sections without hiding independent data or warning on complete empty results', () => {
+    const response = {
+      error: 'Partial data unavailable',
+      data: {
+        summary: 'Company thesis remains available.',
+        valuation: { intrinsic_value: 34289, price: 59700, inputs: { unitQuality: 'verified' } },
+        competitive_advantage: { moat: 'wide' },
+        section_errors: {
+          'financials.balance': 'Section deadline exceeded',
+          news: 'Provider exception: private upstream details',
+        },
+      },
+    };
+    const showResponse = (data: unknown) => mockAnalysis.mockReturnValue({
+      data, isLoading: false, error: null, refetch: jest.fn(), isFetching: false, dataUpdatedAt: 1,
+    });
+    showResponse(response);
+    const { rerender } = render(<FundamentalAnalysisWidget symbol="FPT" />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Partial data unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent('financials balance: Section deadline exceeded');
+    expect(screen.getByRole('alert')).toHaveTextContent('news: Unavailable');
+    expect(screen.queryByText(/private upstream details/)).not.toBeInTheDocument();
+    expect(screen.getByText('Company thesis remains available.')).toBeInTheDocument();
+    expect(screen.getByText('wide')).toBeInTheDocument();
+    expect(screen.getByText('34,289')).toBeInTheDocument();
+
+    showResponse({ data: response.data });
+    rerender(<FundamentalAnalysisWidget symbol="FPT" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('financials balance: Section deadline exceeded');
+
+    showResponse({ error: response.error, data: { summary: response.data.summary } });
+    rerender(<FundamentalAnalysisWidget symbol="FPT" />);
+    expect(screen.getByRole('alert')).toHaveTextContent(response.error);
+    expect(screen.getByText(response.data.summary)).toBeInTheDocument();
+
+    showResponse({ data: {} });
+    rerender(<FundamentalAnalysisWidget symbol="FPT" />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByText('No fundamental analysis available for FPT')).toBeInTheDocument();
+  });
 });

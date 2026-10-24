@@ -1,6 +1,8 @@
 import {
   canonicalPeriodRows,
+  describeUnavailableStatementRows,
   formatFinancialPeriodLabel,
+  isUnavailableStatementRow,
   latestByFinancialPeriod,
   normalizeFinancialPeriod,
   periodSortKey,
@@ -37,6 +39,44 @@ describe('financialPeriods', () => {
       expect(formatFinancialPeriodLabel('110')).toBe('110')
       expect(formatFinancialPeriodLabel(null)).toBe('-')
     })
+  })
+
+  it('groups nested reasons by their exact affected fields and periods without excluding partial rows', () => {
+    const monetaryFields = ['revenue', 'gross_profit', 'operating_income', 'net_income', 'cost_of_revenue', 'pre_tax_profit', 'tax_expense', 'other_income', 'profit_before_tax']
+    const unitReason = 'unverified_statement_currency_or_unit'
+    const rows = Array.from({ length: 8 }, (_, index) => ({
+      period: String(2018 + index),
+      unavailable_reason: null,
+      revenue: null,
+      eps: index < 2 ? null : 6016.83,
+      selling_general_admin: index === 7 ? 0 : -100,
+      interest_expense: null,
+      unit_metadata: index < 2
+        ? { eps: { unavailable_reason: unitReason } }
+        : {
+          basis: { unavailable_reason: 'legacy_unit_basis_unconfirmed' },
+          interest_expense: { unavailable_reason: 'interest_semantics_unverified' },
+          ...Object.fromEntries(monetaryFields.map((field) => [field, { unavailable_reason: unitReason }])),
+        },
+    }))
+    const note = describeUnavailableStatementRows([...rows, { ...rows[7], period: '2025FY' }])
+    const associations = Array.from(note!.matchAll(/([^:;]+) \[([^\]]+)\]/g), ([, fields, periods]) => ({
+      fields: fields.trim().split(', '),
+      periods: periods.split(', '),
+    }))
+
+    expect(note?.match(new RegExp(unitReason, 'g'))).toHaveLength(1)
+    expect(note?.match(/legacy_unit_basis_unconfirmed/g)).toHaveLength(1)
+    expect(note?.match(/interest_semantics_unverified/g)).toHaveLength(1)
+    expect(associations.find(({ fields }) => fields.includes('eps'))).toEqual({ fields: ['eps'], periods: ['2018', '2019'] })
+    expect(associations.find(({ fields }) => fields.includes('revenue'))).toEqual({
+      fields: monetaryFields.map((field) => field.replace(/_/g, ' ')),
+      periods: ['2020', '2021', '2022', '2023', '2024', '2025'],
+    })
+    expect(note).not.toContain('selling general admin')
+    expect(note!.length).toBeLessThan(1000)
+    expect(rows.filter((row) => !isUnavailableStatementRow(row))).toEqual(rows)
+    expect(rows[7]).toMatchObject({ revenue: null, eps: 6016.83, selling_general_admin: 0 })
   })
 
   describe('canonicalPeriodRows', () => {

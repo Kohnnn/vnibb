@@ -86,6 +86,14 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
     ? 'Signal summary unavailable: historical price units were not certified.'
     : data?.signals.data_quality?.note ?? 'Signal summary unavailable: source quality is unresolved.'
   const isFallback = Boolean(error && hasData)
+  const isStale = isFallback || Boolean(quality?.stale)
+  const sourceLabel = quality?.source_mode
+    ? `Signal summary (derived, retained ${Object.keys(quality.source_counts ?? {}).join(', ') || quality.source_mode})`
+    : 'Signal summary (derived)'
+  const historyNote = [
+    TIMEFRAME_OPTIONS.find((item) => item.value === timeframe)?.label,
+    quality?.completeness_status === 'partial' ? 'Partial retained history' : null,
+  ].filter(Boolean).join(' · ')
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   const derived = useMemo(() => {
@@ -125,15 +133,15 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
         empty: !hasData || derivedWithheld,
         apiGroup: '/technical',
         endpoint: `/analysis/ta/${upperSymbol}/full?timeframe=${timeframe}`,
-        sourceLabel: 'Signal summary (derived)',
+        sourceLabel,
         lastDataDate: data?.data_quality?.latest_date ?? null,
         fetchedAt: dataUpdatedAt,
-        stale: isFallback,
+        stale: isStale,
         derived: true,
         extra: !derivedWithheld && data?.signals?.overall_signal ? { overallSignal: data.signals.overall_signal, consensus: derived?.consensus } : undefined,
       }),
     )
-  }, [onDataChange, hasData, derivedWithheld, isFallback, data?.data_quality?.latest_date, dataUpdatedAt, upperSymbol, timeframe, data?.signals?.overall_signal, derived?.consensus])
+  }, [onDataChange, hasData, derivedWithheld, isStale, sourceLabel, data?.data_quality?.latest_date, dataUpdatedAt, upperSymbol, timeframe, data?.signals?.overall_signal, derived?.consensus])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view trade signals" icon={<ShieldAlert size={18} />} />
@@ -167,8 +175,8 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
             updatedAt={data?.data_quality?.latest_date ?? null}
             fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
-            isCached={isFallback}
-            note={TIMEFRAME_OPTIONS.find((item) => item.value === timeframe)?.label}
+            isCached={isStale || Boolean(quality?.source_mode)}
+            note={historyNote}
             align="right"
           />
         </div>

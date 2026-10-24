@@ -17,6 +17,7 @@ from vnibb.providers.vnstock.company_news import (
     VnstockCompanyNewsFetcher,
 )
 from vnibb.providers.vnstock.officers import OfficersQueryParams, VnstockOfficersFetcher
+from vnibb.providers.vnstock.shareholders import ShareholdersQueryParams, VnstockShareholdersFetcher
 from vnibb.providers.vnstock.subsidiaries import (
     SubsidiariesQueryParams,
     VnstockSubsidiariesFetcher,
@@ -195,6 +196,26 @@ def test_retained_canonical_names_and_zero_values_survive():
 def test_unitless_native_ownership_is_preserved_but_not_certified(dataset, fetcher, params_type, row, expected):
     item = fetcher.transform_data(params_type(symbol="VNM"), [row])[0]
     assert item.ownership_pct is None
+    assert item.raw_data == row
+
+
+@pytest.mark.parametrize("row,expected,source_field", [
+    ({"ratio": 0.3}, None, "ratio"),
+    ({"ownership_pct": 0.3}, None, "ownership_pct"),
+    ({"percent": "0.3%"}, 0.3, "percent"),
+    ({"ownership_pct": 0.3, "ownership_unit": "percent"}, 0.3, "ownership_pct"),
+    ({"ratio": 0.3, "ownership_unit": "ratio"}, 30, "ratio"),
+    ({"ratio": 0, "ownership_unit": "ratio"}, 0, "ratio"),
+    ({"ownership_pct": 101, "ownership_unit": "percent"}, None, "ownership_pct"),
+    ({"percent": "0%"}, 0, "percent"),
+    ({"ownership_pct": float("nan"), "ownership_unit": "percent"}, None, "ownership_pct"),
+])
+def test_shareholder_percent_requires_explicit_unit_evidence(row, expected, source_field):
+    item = VnstockShareholdersFetcher.transform_data(ShareholdersQueryParams(symbol="FPT"), [row])[0]
+    assert item.ownership_pct == expected
+    assert item.ownership_unit == ("percent" if expected is not None else None)
+    assert item.ownership_unit_status == ("explicit" if expected is not None else "unverified")
+    assert item.ownership_source_field == source_field
     assert item.raw_data == row
 
 

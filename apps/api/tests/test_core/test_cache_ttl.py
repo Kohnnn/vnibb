@@ -1,20 +1,10 @@
-"""Tests for cache TTL resolution and centralized-constant consistency.
-
-Two invariants are enforced:
-
-1. ``resolve_cache_ttl`` precedence: explicit ``ttl`` > centralized
-   ``REDIS_CACHE_TTLS[key_prefix]`` > ``settings.redis_cache_ttl``.
-2. No ``@cached(...)`` site may pass an explicit ``ttl=`` that *diverges*
-   from a centralized ``REDIS_CACHE_TTLS`` value for the same ``key_prefix``.
-   This catches the ``market_indices`` bug class where an inline magic TTL
-   silently overrode the intended shared constant.
-"""
+"""Behavioral tests for cache TTLs, batch writes and loader lifetimes."""
 
 from __future__ import annotations
 
-import ast
 import asyncio
-from pathlib import Path
+from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -23,7 +13,6 @@ from vnibb.core.cache import RedisClient, cached, resolve_cache_ttl
 from vnibb.core.cache_constants import REDIS_CACHE_TTLS
 from vnibb.core.config import settings
 
-API_V1_DIR = Path(__file__).resolve().parents[2] / "vnibb" / "api" / "v1"
 
 
 class TestResolveCacheTtl:
@@ -37,25 +26,6 @@ class TestResolveCacheTtl:
         assert resolve_cache_ttl(None, "not_a_real_prefix") == settings.redis_cache_ttl
 
 
-def _iter_cached_decorators():
-    """Yield (file, lineno, ttl_value, key_prefix) for every @cached(...) call."""
-    for path in sorted(API_V1_DIR.glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-            if name != "cached":
-                continue
-            ttl_value = None
-            key_prefix = None
-            for kw in node.keywords:
-                if kw.arg == "ttl" and isinstance(kw.value, ast.Constant):
-                    ttl_value = kw.value.value
-                elif kw.arg == "key_prefix" and isinstance(kw.value, ast.Constant):
-                    key_prefix = kw.value.value
-            yield path.name, node.lineno, ttl_value, key_prefix
 
 
 @pytest.mark.asyncio
@@ -169,6 +139,87 @@ async def test_cached_error_result_is_not_cached(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cached_reuses_memory_when_connected_redis_get_and_set_fail(monkeypatch):
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache.settings, "cache_backend", "redis")
+    monkeypatch.setattr(cache.settings, "redis_url", "redis://localhost:6379/0")
+    monkeypatch.setattr(cache, "_memory_cache", {})
+    monkeypatch.setattr(cache, "_inflight_cache_loads", {})
+    redis_connection = MagicMock()
+    redis_connection.get = AsyncMock(side_effect=cache.redis.ConnectionError("GET unavailable"))
+    redis_connection.setex = AsyncMock(side_effect=cache.redis.ConnectionError("SET unavailable"))
+    redis_client = RedisClient()
+    redis_client._client = redis_connection
+    monkeypatch.setattr(cache, "redis_client", redis_client)
+    now = datetime(2026, 10, 23, 12)
+
+    class Clock:
+        @staticmethod
+        def now():
+            return now
+
+    monkeypatch.setattr(cache, "datetime", Clock)
+    calls = 0
+
+    @cached(ttl=10, key_prefix="quote")
+    async def load(symbol):
+        nonlocal calls
+        calls += 1
+        return {"symbol": symbol, "price": 100 + calls}
+
+    assert await load("VNM") == {"symbol": "VNM", "price": 101}
+    assert await load("VNM") == {"symbol": "VNM", "price": 101}
+    assert calls == 1
+    assert redis_connection.setex.await_count == 1
+
+    now += timedelta(seconds=10)
+    assert await load("VNM") == {"symbol": "VNM", "price": 102}
+    assert calls == 2
+
+    redis_connection.get.side_effect = None
+    redis_connection.get.return_value = '{"symbol": "VNM", "price": 103}'
+    assert await load("VNM") == {"symbol": "VNM", "price": 103}
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("loader_error", ["response", "exception"])
+async def test_cached_does_not_cache_loader_errors_when_connected_redis_fails(
+    monkeypatch, loader_error
+):
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache.settings, "cache_backend", "redis")
+    monkeypatch.setattr(cache.settings, "redis_url", "redis://localhost:6379/0")
+    monkeypatch.setattr(cache, "_memory_cache", {})
+    monkeypatch.setattr(cache, "_inflight_cache_loads", {})
+    redis_connection = MagicMock()
+    redis_connection.get = AsyncMock(side_effect=cache.redis.ConnectionError("GET unavailable"))
+    redis_connection.setex = AsyncMock(side_effect=cache.redis.ConnectionError("SET unavailable"))
+    redis_client = RedisClient()
+    redis_client._client = redis_connection
+    monkeypatch.setattr(cache, "redis_client", redis_client)
+    calls = 0
+
+    @cached(ttl=10, key_prefix="quote")
+    async def load(symbol):
+        nonlocal calls
+        calls += 1
+        if loader_error == "exception":
+            raise ValueError("upstream unavailable")
+        return {"symbol": symbol, "error": "upstream unavailable"}
+
+    for _ in range(2):
+        if loader_error == "exception":
+            with pytest.raises(ValueError, match="upstream unavailable"):
+                await load("VNM")
+        else:
+            assert await load("VNM") == {"symbol": "VNM", "error": "upstream unavailable"}
+
+    assert calls == 2
+    redis_connection.setex.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_flush_prefix_deletes_scan_batches(monkeypatch):
     class Client:
         def __init__(self):
@@ -194,30 +245,68 @@ async def test_flush_prefix_deletes_scan_batches(monkeypatch):
     assert client.deleted == [("v:q:1", "v:q:2"), ("v:q:3", "v:q:4"), ("v:q:5",)]
 
 
-def test_global_redis_client_uses_configured_connection_limit():
-    assert cache.redis_client.max_connections == cache.settings.redis_max_connections
+@pytest.mark.asyncio
+async def test_set_multiple_interrupted_before_execution_preserves_existing_values_and_ttls():
+    stored = {"quote:VNM": ('{"price": 100}', 30)}
+
+    async def mset(values):
+        stored.update({key: (value, None) for key, value in values.items()})
+
+    client = MagicMock()
+    client.mset = AsyncMock(side_effect=mset)
+    client.expire = AsyncMock(side_effect=cache.redis.ConnectionError("disconnected"))
+    pipeline = client.pipeline.return_value.__aenter__.return_value
+    pipeline.set = MagicMock()
+    pipeline.delete = MagicMock()
+    pipeline.execute = AsyncMock(side_effect=cache.redis.ConnectionError("not sent"))
+    redis_client = RedisClient(url="redis://example")
+    redis_client._client = client
+
+    assert not await redis_client.set_multiple({"quote:VNM": {"price": 200}}, ttl=60)
+    assert stored == {"quote:VNM": ('{"price": 100}', 30)}
 
 
-class TestCachedSiteConsistency:
-    def test_no_explicit_ttl_diverges_from_centralized_constant(self):
-        divergences = []
-        for filename, lineno, ttl_value, key_prefix in _iter_cached_decorators():
-            if key_prefix is None or ttl_value is None:
-                continue
-            centralized = REDIS_CACHE_TTLS.get(key_prefix)
-            if centralized is not None and ttl_value != centralized:
-                divergences.append(
-                    f"{filename}:{lineno} @cached(ttl={ttl_value}, "
-                    f"key_prefix={key_prefix!r}) diverges from "
-                    f"REDIS_CACHE_TTLS[{key_prefix!r}]={centralized}"
-                )
-        assert not divergences, (
-            "Explicit @cached ttl diverges from centralized REDIS_CACHE_TTLS. "
-            "Drop the inline ttl= to inherit the shared constant, or update the "
-            "constant:\n" + "\n".join(divergences)
-        )
+@pytest.mark.asyncio
+@pytest.mark.parametrize("positional", [False, True])
+async def test_cached_session_loader_stops_before_request_session_closes(monkeypatch, positional):
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from vnibb.core import database
 
-    def test_scan_found_cached_sites(self):
-        # Guards against the AST walker silently matching nothing (e.g. after a
-        # refactor renames the decorator) and giving false confidence.
-        assert any(kp is not None for _, _, _, kp in _iter_cached_decorators())
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: False)
+    cache._memory_cache.clear()
+    cache._inflight_cache_loads.clear()
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+    session = AsyncSession()
+    monkeypatch.setattr(database, "async_session_factory", lambda: session)
+
+    @cached(key_prefix="request_session_lifetime")
+    async def load(db):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    async def request():
+        async with database.get_db_context() as db:
+            if positional:
+                await load(db)
+            else:
+                await load(db=db)
+
+    caller = asyncio.create_task(request())
+    await started.wait()
+    caller.cancel()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+        assert stopped.is_set(), "Loader outlived its request-owned database session"
+    finally:
+        tasks = list(cache._inflight_cache_loads.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+

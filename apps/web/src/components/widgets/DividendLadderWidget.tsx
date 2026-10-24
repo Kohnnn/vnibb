@@ -9,7 +9,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useDividends } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatTimestamp } from '@/lib/format';
-import { formatPercent, formatVND } from '@/lib/formatters';
+import { formatDividendPayout, formatDividendYield } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 
 const EMPTY_DIVIDENDS: DividendRecord[] = [];
@@ -28,22 +28,6 @@ interface DividendEvent {
   payoutLabel: string;
   payoutType: string;
   dividendYield: number | null | undefined;
-}
-
-function formatPayout(row: DividendRecord): string {
-  if (row.cash_dividend !== null && row.cash_dividend !== undefined) {
-    return formatVND(row.cash_dividend)
-  }
-  if (row.stock_dividend !== null && row.stock_dividend !== undefined) {
-    return `${row.stock_dividend.toFixed(2)}% stock`
-  }
-  if (row.dividend_ratio !== null && row.dividend_ratio !== undefined) {
-    return String(row.dividend_ratio)
-  }
-  if (row.value !== null && row.value !== undefined) {
-    return formatVND(row.value)
-  }
-  return '-'
 }
 
 function formatDividendType(type: string | null | undefined): string {
@@ -70,7 +54,7 @@ export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: Div
     const all: DividendEvent[] = [];
 
     dividends.forEach((dividend) => {
-      const payoutLabel = formatPayout(dividend)
+      const payoutLabel = formatDividendPayout(dividend)
       const payoutType = formatDividendType(dividend.dividend_type || dividend.type)
       const dividendYield = dividend.dividend_yield
 
@@ -185,7 +169,7 @@ export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: Div
                     <div className="text-[10px] text-[var(--text-muted)]">
                       {event.payoutType}
                       {event.dividendYield !== null && event.dividendYield !== undefined
-                        ? ` • ${formatPercent(event.dividendYield)}`
+                        ? ` • ${formatDividendYield(event.dividendYield)}`
                         : ''}
                     </div>
                   </div>

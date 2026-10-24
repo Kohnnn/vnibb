@@ -563,6 +563,7 @@ Widget library UX rules:
 - Widget headers measure available space. Narrow headers retain the title/maximize action and expose remaining controls in a keyboard-accessible panel; menus render outside card clipping and return focus to their trigger.
 - Desktop-only layout editing applies to both pointer and keyboard. Native Tab navigation reaches widget controls; arrow layout shortcuts apply only to the focused widget panel, never a nested control.
 - The Price Chart header and body use the same timeframe/mode domain and persist edits on personal dashboards. Supported modes are candles, line and area; legacy saved values are normalized when read.
+- Native chart crosshairs show admitted-row OHLCV for candle, line and area modes. Unit, selected adjustment mode and returned session/coverage metadata remain visible; absent metadata is Unknown and missing volume is not zero.
 
 ### Local Workspace Backup
 
@@ -589,13 +590,19 @@ A promoted widget carries `config.copilotArtifactProvenance` (`artifactId`, `res
 
 A widget's ticker either follows its group or is kept locally. The widget header states which, and switching groups never rewrites a local ticker; "Follow <Group>" returns the widget to the group and adopts the group's *current* ticker. Widgets whose provider links are fixed (the TradingView embeds) never adopt a new ticker on a group change. Ticker scope and period scope are separate channels.
 
+The header ticker picker updates a detached widget locally, including native widgets; linked widgets retain group broadcast behavior. It never changes peers when a local override is active.
+
 ### Table Selection
 
 Dense financial tables expose selectable metric rows and sortable period columns. A supported metric selection charts that series and shows its label in the chart header; clicking a period column continues sorting the table rather than claiming an unchartable period series. Selection is view state and is never persisted into widget config. The active metric selection is included in the widget's runtime payload so the copilot can target it.
 
+Expanded financial-series axes and tooltips use the table's selected currency and scale. TTM tables and snapshots disclose returned source periods, flow-versus-latest-quarter aggregation basis and unsupported EPS reasons; these labels do not certify supplier truth.
+
 ### Research Starters
 
 A starter binds one template to its VniAgent prompt. Applying a starter-bound template shows its purpose and how its widgets handle tickers, seeds the workspace, and primes the agent through the same channel the onboarding walkthrough uses. Templates remain the composition mechanism; there is no second gallery.
+
+Copilot evidence offers outbound links only for HTTP(S) source URLs. Changing workspace, tab, ticker or widget cancels the active stream and discards obsolete callbacks; New Chat also cancels it.
 
 ### Widget Chrome Placement
 

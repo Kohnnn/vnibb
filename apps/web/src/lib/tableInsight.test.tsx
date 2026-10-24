@@ -209,6 +209,13 @@ const mockUseCashFlow = jest.mocked(useCashFlow);
 const incomeRow = {
     symbol: 'FPT',
     period: '2025FY',
+    currency: 'VND',
+    value_unit: 'VND',
+    consolidation_basis: 'consolidated',
+    flow_basis: 'annual',
+    unit_metadata: Object.fromEntries(['revenue', 'gross_profit', 'operating_income', 'net_income', 'eps', 'eps_diluted'].map((key) => [key, {
+        source_unit: 'VND', value_unit: key.startsWith('eps') ? 'VND/share' : 'VND',
+    }])),
     revenue: 1000,
     gross_profit: 400,
     operating_income: 300,
@@ -264,6 +271,20 @@ describe('IncomeStatementWidget table selection', () => {
     function openTable() {
         fireEvent.click(screen.getByTitle('Table View'));
     }
+
+    it('withholds uncertified money from table chart and runtime without reviving raw values', () => {
+        const onDataChange = jest.fn();
+        mockUseIncomeStatement.mockReturnValue(queryResult({ data: [{ ...incomeRow, revenue: null,
+            unit_metadata: { ...incomeRow.unit_metadata, revenue: { unavailable_reason: 'Unverified source unit' } },
+            raw_data: { revenue: 900_000_000_000, financial_expenses: 90_000_000_000 },
+        }] }) as never);
+        render(<IncomeStatementWidget id="income-unverified" symbol="FPT" onDataChange={onDataChange} />);
+        expect(screen.getByText('Revenue').closest('tr')).toHaveTextContent('—');
+        openChart();
+        expect(JSON.parse(screen.getByTestId('charted-periods').getAttribute('data-periods')!)[0].revenue).toBeNull();
+        expect(onDataChange.mock.calls.at(-1)?.[0].data[0].revenue).toBeNull();
+        expect(JSON.stringify(onDataChange.mock.calls.at(-1)?.[0])).not.toContain('900000000000');
+    });
 
     it('charts the default revenue and net income series before any selection', () => {
         render(<IncomeStatementWidget id="income-1" symbol="FPT" />);
@@ -385,7 +406,10 @@ describe('IncomeStatementWidget table selection', () => {
     it('selects a metric from the keyboard and clears it with Escape', () => {
         render(<IncomeStatementWidget id="income-1" symbol="FPT" />);
         fireEvent.keyDown(screen.getByRole('button', { name: 'Chart Operating Income' }), { key: 'Enter' });
-        fireEvent.keyDown(screen.getByRole('listbox', { name: 'Financial statement rows' }), { key: 'Escape' });
+        openChart();
+        expect(screen.getByTestId('income-chart-focus')).toHaveTextContent('Operating Income');
+        openTable();
+        fireEvent.keyDown(screen.getByRole('region', { name: /Financial statement periods/ }), { key: 'Escape' });
         openChart();
 
         expect(screen.getByTestId('income-chart-focus')).toHaveTextContent('All metrics');

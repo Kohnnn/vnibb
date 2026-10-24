@@ -4,7 +4,7 @@ from datetime import date, datetime
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from vnibb.models.company import Company
@@ -16,6 +16,28 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("POSTGRES_CONTRACT") != "1",
     reason="requires the PostgreSQL release-contract database",
 )
+
+
+@pytest.mark.postgres_contract
+@pytest.mark.asyncio
+async def test_companies_schema_supports_generated_ids_and_symbol_upserts(test_db):
+    assert test_db.bind.dialect.name == "postgresql"
+    id_generation = (await test_db.execute(text(
+        "SELECT a.attidentity, pg_get_expr(d.adbin, d.adrelid) AS default_expression "
+        "FROM pg_attribute a LEFT JOIN pg_attrdef d "
+        "ON d.adrelid=a.attrelid AND d.adnum=a.attnum "
+        "WHERE a.attrelid='companies'::regclass AND a.attname='id'"
+    ))).one()
+    assert id_generation.attidentity or id_generation.default_expression
+    assert (await test_db.execute(text(
+        "SELECT EXISTS (SELECT 1 FROM pg_index i JOIN pg_attribute a "
+        "ON a.attrelid=i.indrelid AND a.attnum=i.indkey[0] "
+        "WHERE i.indrelid='companies'::regclass AND a.attname='symbol' "
+        "AND i.indisunique AND i.indisvalid AND i.indisready AND i.indimmediate "
+        "AND i.indnkeyatts=1 AND i.indpred IS NULL AND i.indexprs IS NULL)"
+    ))).scalar_one(), "companies requires an immediate unique symbol index for ON CONFLICT"
+
+
 @pytest.mark.postgres_contract
 @pytest.mark.asyncio
 async def test_concurrent_first_cache_writes_are_atomic_and_persisted(test_db):
@@ -85,3 +107,109 @@ async def test_postgres_release_contract_uses_migrated_tables_and_api_routes(cli
     assert detailed.json()["components"]["database"]["status"] == "healthy"
     assert data_health.status_code == 200
     assert data_health.json()["data_quality"]["last_successful_run"]["run_id"] == "postgres-contract:2026-07-16"
+
+
+@pytest.mark.postgres_contract
+@pytest.mark.asyncio
+async def test_session_timeouts_survive_rollback_commit_and_pool_reuse():
+    from vnibb.core import database
+    from vnibb.core.config import settings
+
+    expected = {
+        "statement_timeout": settings.db_statement_timeout_ms,
+        "lock_timeout": settings.db_lock_timeout_ms,
+        "idle_in_transaction_session_timeout": settings.db_idle_in_tx_timeout_ms,
+    }
+    assert all(value > 0 for value in expected.values()), "Contract requires nonzero timeouts"
+    timeout_query = text(
+        "SELECT name, setting::integer FROM pg_settings WHERE name IN "
+        "('statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout')"
+    )
+    pid_query = text("SELECT pg_backend_pid()")
+
+    await database.engine.dispose()
+    database.sync_engine.dispose()
+    try:
+        async with database.async_session_factory() as session:
+            async_pid = (await session.execute(pid_query)).scalar_one()
+            assert dict((await session.execute(timeout_query)).all()) == expected
+            await session.rollback()
+            assert dict((await session.execute(timeout_query)).all()) == expected
+            await session.commit()
+            assert dict((await session.execute(timeout_query)).all()) == expected
+        async with database.async_session_factory() as session:
+            assert (await session.execute(pid_query)).scalar_one() == async_pid
+            assert dict((await session.execute(timeout_query)).all()) == expected
+
+        with database.sync_session_factory() as session:
+            sync_pid = session.execute(pid_query).scalar_one()
+            assert dict(session.execute(timeout_query).all()) == expected
+            session.rollback()
+            assert dict(session.execute(timeout_query).all()) == expected
+            session.commit()
+            assert dict(session.execute(timeout_query).all()) == expected
+        with database.sync_session_factory() as session:
+            assert session.execute(pid_query).scalar_one() == sync_pid
+            assert dict(session.execute(timeout_query).all()) == expected
+    finally:
+        await database.engine.dispose()
+        database.sync_engine.dispose()
+
+
+@pytest.mark.postgres_contract
+@pytest.mark.asyncio
+async def test_screener_quote_base_preserves_ratio_metadata_on_postgres(test_db, monkeypatch):
+    from vnibb.models.screener import ScreenerSnapshot
+    from vnibb.models.stock import StockPrice
+    from vnibb.providers.vnstock import runtime
+    from vnibb.services import data_pipeline as pipeline_module
+
+    symbol = f"S{uuid4().hex[:8]}".upper()
+    today = datetime.utcnow().date()
+    trade_date = date(2026, 10, 14)
+    sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
+    monkeypatch.setattr(pipeline_module, "async_session_maker", sessions)
+    monkeypatch.setattr(pipeline_module, "engine", test_db.bind)
+
+    class NoProvider:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("Retained quote assembly must not acquire provider data")
+
+    async def no_cache(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: NoProvider)
+    monkeypatch.setattr(runtime, "get_finance_class", lambda: NoProvider)
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: NoProvider)
+    pipeline = pipeline_module.DataPipeline()
+    monkeypatch.setattr(pipeline, "_cache_set_json", no_cache)
+    evidence = [{"source": "fixture", "observation_date": "2025-12-31"}]
+    try:
+        stock = Stock(symbol=symbol, is_active=1)
+        test_db.add(stock)
+        await test_db.flush()
+        test_db.add_all([
+            StockPrice(stock_id=stock.id, symbol=symbol, time=trade_date,
+                       open=100, high=100, low=100, close=100, volume=0,
+                       interval="1D", source="vnstock_vnd:VCI"),
+            ScreenerSnapshot(symbol=symbol, snapshot_date=today, trade_date=trade_date,
+                             price=90, pe=12, roe=15, extended_metrics={
+                                 "price_unit": "VND", "price_source": "vnstock_vnd:VCI",
+                                 "ratio_units": {"roe": "percent"}, "provider_evidence": evidence,
+                             }),
+        ])
+        await test_db.commit()
+        progress = {}
+        assert await pipeline.sync_screener_data(symbols=[symbol], progress=progress, enrich_ratios=False) == 1
+        async with sessions() as session:
+            row = (await session.scalars(select(ScreenerSnapshot).where(ScreenerSnapshot.symbol == symbol))).one()
+            assert row.price == 100 and row.volume == 0 and row.trade_date == trade_date
+            assert row.pe == 12 and row.roe == 15 and row.market_cap is None
+            assert row.extended_metrics["price_unit"] == "VND"
+            assert row.extended_metrics["ratio_units"] == {"roe": "percent"}
+            assert row.extended_metrics["provider_evidence"] == evidence
+    finally:
+        await test_db.execute(ScreenerSnapshot.__table__.delete().where(ScreenerSnapshot.symbol == symbol))
+        await test_db.execute(StockPrice.__table__.delete().where(StockPrice.symbol == symbol))
+        await test_db.execute(Stock.__table__.delete().where(Stock.symbol == symbol))
+        await test_db.commit()

@@ -1,3 +1,4 @@
+import pytest
 from vnibb.providers.vnstock.financials import (
     FinancialsQueryParams,
     StatementType,
@@ -10,9 +11,9 @@ def test_transform_data_pivots_income_statement_rows():
         symbol="VNM", statement_type=StatementType.INCOME, period="year", limit=5
     )
     rows = [
-        {"item_id": "revenue", "2023": 1000.0, "2024": 1200.0},
-        {"item_id": "gross_profit", "2023": 420.0, "2024": 500.0},
-        {"item_id": "profit_after_tax", "2023": 180.0, "2024": 220.0},
+        {"item_id": "revenue", "_value_unit": "VND", "2023": 1000.0, "2024": 1200.0},
+        {"item_id": "gross_profit", "_value_unit": "VND", "2023": 420.0, "2024": 500.0},
+        {"item_id": "profit_after_tax", "_value_unit": "VND", "2023": 180.0, "2024": 220.0},
     ]
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
@@ -30,10 +31,10 @@ def test_transform_data_pivots_balance_sheet_and_sets_equity_aliases():
         symbol="VNM", statement_type=StatementType.BALANCE, period="year", limit=5
     )
     rows = [
-        {"item_id": "total_assets", "2024": 5500.0},
-        {"item_id": "total_liabilities", "2024": 1900.0},
-        {"item_id": "total_equity", "2024": 3600.0},
-        {"item_id": "cash_and_cash_equivalents", "2024": 480.0},
+        {"item_id": "total_assets", "_value_unit": "VND", "2024": 5500.0},
+        {"item_id": "total_liabilities", "_value_unit": "VND", "2024": 1900.0},
+        {"item_id": "total_equity", "_value_unit": "VND", "2024": 3600.0},
+        {"item_id": "cash_and_cash_equivalents", "_value_unit": "VND", "2024": 480.0},
     ]
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
@@ -52,10 +53,10 @@ def test_transform_data_pivots_cash_flow_rows():
         symbol="VNM", statement_type=StatementType.CASHFLOW, period="year", limit=5
     )
     rows = [
-        {"item_id": "operating_cash_flow", "2024": 800.0},
-        {"item_id": "investing_cash_flow", "2024": -300.0},
-        {"item_id": "financing_cash_flow", "2024": -450.0},
-        {"item_id": "free_cash_flow", "2024": 220.0},
+        {"item_id": "operating_cash_flow", "_value_unit": "VND", "2024": 800.0},
+        {"item_id": "investing_cash_flow", "_value_unit": "VND", "2024": -300.0},
+        {"item_id": "financing_cash_flow", "_value_unit": "VND", "2024": -450.0},
+        {"item_id": "free_cash_flow", "_value_unit": "VND", "2024": 220.0},
     ]
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
@@ -74,6 +75,7 @@ def test_transform_data_non_pivot_shape_maps_alias_fields():
     rows = [
         {
             "period": "2024",
+            "_value_unit": "VND",
             "netRevenue": 1500.0,
             "grossProfit": 620.0,
             "operatingProfit": 330.0,
@@ -97,7 +99,7 @@ def test_transform_data_non_pivot_maps_earning_per_share_alias():
     params = FinancialsQueryParams(
         symbol="VNM", statement_type=StatementType.INCOME, period="year", limit=5
     )
-    rows = [{"period": "2024", "netRevenue": 1500.0, "earningPerShare": 4100.0}]
+    rows = [{"period": "2024", "_value_unit": "VND", "netRevenue": 1500.0, "earningPerShare": 4100.0}]
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
 
@@ -110,7 +112,7 @@ def test_transform_data_applies_limit_on_pivot_periods():
         symbol="VNM", statement_type=StatementType.INCOME, period="year", limit=2
     )
     rows = [
-        {"item_id": "revenue", "2022": 900.0, "2023": 1000.0, "2024": 1200.0},
+        {"item_id": "revenue", "_value_unit": "VND", "2022": 900.0, "2023": 1000.0, "2024": 1200.0},
     ]
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
@@ -124,9 +126,9 @@ def test_transform_data_supports_year_quarter_column_format():
         symbol="VNM", statement_type=StatementType.INCOME, period="quarter", limit=4
     )
     rows = [
-        {"item_id": "revenue", "2025-Q1": 100.0, "2025-Q2": 120.0},
-        {"item_id": "gross_profit", "2025-Q1": 40.0, "2025-Q2": 46.0},
-        {"item_id": "profit_after_tax", "2025-Q1": 20.0, "2025-Q2": 23.0},
+        {"item_id": "revenue", "_value_unit": "VND", "2025-Q1": 100.0, "2025-Q2": 120.0},
+        {"item_id": "gross_profit", "_value_unit": "VND", "2025-Q1": 40.0, "2025-Q2": 46.0},
+        {"item_id": "profit_after_tax", "_value_unit": "VND", "2025-Q1": 20.0, "2025-Q2": 23.0},
     ]
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
@@ -145,13 +147,15 @@ def test_transform_data_maps_bank_specific_income_aliases():
     rows = [
         {
             "item_id": "interest_income_and_similar_income",
+            "_value_unit": "VND",
             "2024": 105_119_449_000_000,
         },
         {
             "item_id": "net_profit_atttributable_to_the_equity_holders_of_the_bank",
+            "_value_unit": "VND",
             "2024": 35_178_155_000_000,
         },
-        {"item_id": "earning_per_share_vnd", "2024": 4210},
+        {"item_id": "earning_per_share_vnd", "_value_unit": "VND", "2024": 4210},
     ]
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
@@ -170,6 +174,7 @@ def test_transform_data_non_pivot_maps_vietnamese_income_aliases():
     rows = [
         {
             "period": "2024",
+            "_value_unit": "VND",
             "Doanh thu thuần": 1500.0,
             "Chi phí lãi vay": 42.0,
             "Chi phí thuế TNDN hiện hành": 28.0,
@@ -191,6 +196,7 @@ def test_transform_data_non_pivot_maps_vietnamese_cashflow_aliases():
     rows = [
         {
             "period": "2024",
+            "_value_unit": "VND",
             "Lưu chuyển tiền tệ ròng từ các hoạt động SXKD": 620.0,
             "Lưu chuyển tiền thuần trong kỳ": -35.0,
             "Trả nợ gốc vay": -50.0,
@@ -210,13 +216,14 @@ def test_transform_data_maps_vietnamese_bank_income_aliases():
         symbol="VCB", statement_type=StatementType.INCOME, period="year", limit=2
     )
     rows = [
-        {"item_id": "thu_nhap_lai_thuan", "2024": 55_405_735_000_000},
-        {"item_id": "chi_phi_lai_va_cac_khoan_tuong_tu", "2024": -38_249_106_000_000},
+        {"item_id": "thu_nhap_lai_thuan", "_value_unit": "VND", "2024": 55_405_735_000_000},
+        {"item_id": "chi_phi_lai_va_cac_khoan_tuong_tu", "_value_unit": "VND", "2024": -38_249_106_000_000},
         {
             "item_id": "loi_nhuan_sau_thue_cua_co_dong_cong_ty_me_dong",
+            "_value_unit": "VND",
             "2024": 33_831_386_000_000,
         },
-        {"item_id": "lai_co_ban_tren_co_phieu", "2024": 5571},
+        {"item_id": "lai_co_ban_tren_co_phieu", "_value_unit": "VND", "2024": 5571},
     ]
 
     data = VnstockFinancialsFetcher.transform_data(params, rows)
@@ -226,6 +233,54 @@ def test_transform_data_maps_vietnamese_bank_income_aliases():
     assert data[0].interest_expense == -38_249_106_000_000
     assert data[0].net_income == 33_831_386_000_000
     assert data[0].eps == 5571
+
+
+@pytest.mark.parametrize("pivot", [False, True])
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("interest", [0, 42])
+def test_interest_is_not_total_finance_cost_in_either_alias_order(pivot, reverse, interest):
+    params = FinancialsQueryParams(symbol="FPT", statement_type=StatementType.INCOME, period="year")
+    fields = [("interest_expense", interest), ("financial_expenses", 900)]
+    if reverse:
+        fields.reverse()
+    rows = ([{"item_id": key, "2025": value, "_value_unit": "VND"} for key, value in fields]
+            if pivot else [{"period": "2025", "_value_unit": "VND", **dict(fields)}])
+    statement = VnstockFinancialsFetcher.transform_data(params, rows)[0]
+    assert statement.interest_expense == interest
+    assert statement.unit_metadata["interest_expense"]["label"] == "interest_expense"
+
+
+@pytest.mark.parametrize("label", ["financial_expenses", "Chi phí tài chính"])
+def test_total_finance_cost_alone_cannot_become_interest(label):
+    params = FinancialsQueryParams(symbol="FPT", statement_type=StatementType.INCOME, period="year")
+    statement = VnstockFinancialsFetcher.transform_data(params, [{"period": "2025", label: 900, "_value_unit": "VND"}])[0]
+    assert statement.interest_expense is None
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_conflicting_true_interest_aliases_are_unavailable(reverse):
+    params = FinancialsQueryParams(symbol="FPT", statement_type=StatementType.INCOME, period="year")
+    fields = [("interest_expense", 42), ("interest_expenses", 99)]
+    if reverse:
+        fields.reverse()
+    statement = VnstockFinancialsFetcher.transform_data(params, [{"period": "2025", "_value_unit": "VND", **dict(fields)}])[0]
+    assert statement.interest_expense is None
+    assert statement.unit_metadata["interest_expense"]["unavailable_reason"] == "conflicting_metric_rows"
+
+
+def test_canonical_provider_rows_cannot_bypass_interest_semantics():
+    params = FinancialsQueryParams(symbol="FPT", statement_type=StatementType.INCOME, period="year")
+    row = {"symbol": "FPT", "statement_type": "income", "period": "2025", "interest_expense": 900,
+           "revenue": 1000, "currency": "VND", "value_unit": "VND", "source": "fixture",
+           "consolidation_basis": "consolidated", "flow_basis": "annual",
+           "unit_metadata": {
+               "revenue": {"source_unit": "VND", "value_unit": "VND"},
+               "interest_expense": {"label": "financial_expenses", "source_unit": "VND", "value_unit": "VND"}}}
+    result = VnstockFinancialsFetcher.transform_data(params, [row])[0]
+    assert result.interest_expense is None
+    assert result.unit_metadata["interest_expense"]["unavailable_reason"] == "interest_semantics_unverified"
+    assert result.revenue == 1000
+    assert row["interest_expense"] == 900
 
 
 def test_transform_data_maps_bank_customer_deposits_aliases():
@@ -490,13 +545,16 @@ def test_wide_row_alias_requires_unit_evidence_and_converts_once():
     assert scaled.value_unit == "VND"
     assert scaled.unit_metadata["total_assets"]["normalization_multiplier"] == 1_000_000_000
 
-    # No source and no unit: unchanged contract, recorded rather than assumed.
+    # No source and no unit: raw values remain unavailable rather than assumed VND.
     unitless = VnstockFinancialsFetcher.transform_data(
         params, [{"period": "2025", "totalAssets": 53_312.37}]
     )[0]
-    assert unitless.total_assets == 53_312.37
-    assert unitless.value_unit == "VND"
-    assert unitless.unit_metadata["total_assets"]["source_unit"] == "VND"
+    assert unitless.total_assets is None
+    assert unitless.value_unit is None
+    assert unitless.unavailable_reason == "unknown_source_unit"
+    assert unitless.unit_metadata["total_assets"]["source_unit"] is None
+    assert unitless.unit_metadata["total_assets"]["unavailable_reason"] == "unknown_source_unit"
+    assert unitless.raw_data["totalAssets"] == 53_312.37
 
 
 def test_wide_row_alias_selection_is_independent_of_input_key_order():

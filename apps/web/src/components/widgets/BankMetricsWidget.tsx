@@ -65,11 +65,13 @@ const METRIC_GROUPS = [
   },
 ] as const;
 
-function formatMetricValue(metricKey: string, value: number | null | undefined) {
-  if (value === null || value === undefined || !Number.isFinite(value)) return 'N/A';
-  if (PERCENT_KEYS.has(metricKey)) return formatPercent(value, { decimals: 2, input: 'auto', clamp: 'margin' });
-  if (RATIO_KEYS.has(metricKey)) return formatNumber(value, { decimals: 2 });
-  return formatNumber(value, { decimals: 2 });
+function formatMetricValue(metricKey: string, value: number | string | null | undefined) {
+  if (value === null || value === undefined || (typeof value === 'string' && !value.trim())) return 'N/A';
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) return 'N/A';
+  if (PERCENT_KEYS.has(metricKey)) return formatPercent(numeric, { decimals: 2, input: 'percent' });
+  if (RATIO_KEYS.has(metricKey)) return formatNumber(numeric, { decimals: 2 });
+  return formatNumber(numeric, { decimals: 2 });
 }
 
 function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: BankMetricsWidgetProps) {
@@ -138,10 +140,13 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: Bank
           parentId: groupId,
           indent: 12,
           values: Object.fromEntries(
-            ratios.slice(-6).map((entry, index) => [
-              tableColumns[index]?.key ?? `period_${index}`,
-              entry[metricKey as keyof typeof entry],
-            ])
+            ratios.slice(-6).map((entry, index) => {
+              const value = entry[metricKey as keyof typeof entry];
+              return [
+                tableColumns[index]?.key ?? `period_${index}`,
+                typeof value === 'number' || typeof value === 'string' ? value : null,
+              ];
+            })
           ),
         });
       }
@@ -232,9 +237,7 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: Bank
                 showTrend={false}
                 initialScrollPosition="end"
                 storageKey={`bank-metrics:${id}:${symbol}`}
-                valueFormatter={(value, row) =>
-                  formatMetricValue(row.id, typeof value === 'number' ? value : Number(value))
-                }
+                valueFormatter={(value, row) => formatMetricValue(row.id, value)}
               />
             </div>
           )}

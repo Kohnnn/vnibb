@@ -2,7 +2,8 @@
 
 import asyncio
 import time
-from datetime import date, datetime
+from datetime import date, datetime, time as market_time, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
@@ -11,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.core.cache import redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
+from vnibb.services.cache_manager import CacheManager
+from vnibb.services.data_quality import latest_market_business_day
 
 router = APIRouter()
 
@@ -25,30 +28,10 @@ HEALTH_CACHE_HEADERS = {
     "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
 }
 
-# Calendar days after which the newest Screener Snapshot is reported as a
-# freshness breach. Three days clears a weekend plus a Vietnamese market
-# holiday, so this flags a genuinely stalled feed rather than a long weekend.
+# Retained calendar-age breach threshold; session coverage is reported separately.
 _SCREENER_FRESHNESS_BREACH_DAYS = 3
 
 
-def _coerce_snapshot_date(value: object) -> date | None:
-    """Normalize a `MAX(snapshot_date)` result to a `date`.
-
-    PostgreSQL hands back a `date` for a Date column; SQLite hands back the
-    stored ISO text. Accepting both keeps the probe portable across the test
-    and production drivers instead of raising on whichever one it did not
-    anticipate.
-    """
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    try:
-        return date.fromisoformat(str(value)[:10])
-    except ValueError:
-        return None
 
 
 @router.get("/", response_class=Response)
@@ -179,34 +162,26 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
         # Check basic connectivity
         await db.execute(text("SELECT 1"))
 
-        # Get counts, and the age of the newest snapshot. A row count alone
-        # cannot distinguish a healthy corpus from one that is being
-        # faithfully rewritten every day with the same stale provider
-        # response, so the trade date has to travel with the count. The
-        # scheduled data-quality job already detects this and records a
-        # `freshness_breach`, but that verdict lived only in
-        # `data_quality_runs`, where no operator watching `/health` would
-        # ever see it. Report the breach here so a degraded feed is visible
-        # from the endpoint operators actually poll.
+        # Freshness follows the same certified partition served to consumers.
+        # Global maxima can mix unrelated partial partitions and hide stale rows.
         db_rows = await db.execute(text("SELECT COUNT(*) FROM stocks"))
         screener_rows = await db.execute(text("SELECT COUNT(*) FROM screener_snapshots"))
-        # `MAX()` over a Date column is driver-dependent: PostgreSQL returns a
-        # `date`, SQLite returns the stored text. Coerce through `fromisoformat`
-        # so the probe cannot fail on the backend it happens to run against --
-        # a health check that throws is worse than one that omits a field.
-        raw_snapshot_date = (
-            await db.execute(text("SELECT MAX(snapshot_date) FROM screener_snapshots"))
-        ).scalar()
-        raw_trade_date = (
-            await db.execute(text("SELECT MAX(trade_date) FROM screener_snapshots"))
-        ).scalar()
-        snapshot_date = _coerce_snapshot_date(raw_snapshot_date)
-        trade_date = _coerce_snapshot_date(raw_trade_date)
-        freshness_date = trade_date or snapshot_date
+        verified = await CacheManager(db=db).get_screener_data(source=None)
+        snapshots = verified.data if verified.hit else []
+        snapshot_date = snapshots[0].snapshot_date if snapshots else None
+        actual_dates = [row.trade_date for row in snapshots if row.trade_date is not None]
+        trade_date = min(actual_dates) if actual_dates else None
+        missing_trade_dates = len(snapshots) - len(actual_dates)
+        now_ict = datetime.now(ZoneInfo(settings.vn_timezone))
+        close_time = market_time.fromisoformat(settings.intraday_market_close)
+        session_anchor = now_ict.date()
+        if now_ict.time() < close_time:
+            session_anchor -= timedelta(days=1)
+        expected_session = latest_market_business_day(
+            session_anchor, {date.fromisoformat(day) for day in settings.market_holiday_dates}
+        )
         snapshot_age_days = (
-            (datetime.utcnow().date() - freshness_date).days
-            if freshness_date is not None
-            else None
+            (now_ict.date() - trade_date).days if trade_date is not None else None
         )
 
         database_component = {
@@ -220,9 +195,27 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
                 trade_date.isoformat() if trade_date is not None else None
             ),
             "screener_snapshot_age_days": snapshot_age_days,
-            "screener_freshness_basis": "trade_date" if trade_date else "snapshot_date",
+            "screener_freshness_basis": "verified_universe_oldest_trade_date",
+            "screener_verified_universe": bool(snapshots),
+            "screener_verified_count": len(snapshots),
+            "screener_missing_trade_dates": missing_trade_dates,
+            "screener_expected_session": expected_session.isoformat(),
+            "screener_calendar": {
+                "holiday_source": "MARKET_HOLIDAY_DATES",
+                "exchange_calendar_verified": False,
+                "limitation": "Only configured exchange closures are excluded.",
+            },
         }
-        if snapshot_age_days is not None and snapshot_age_days > _SCREENER_FRESHNESS_BREACH_DAYS:
+        if not snapshots:
+            database_component["screener_freshness_reason"] = "verified_universe_unavailable"
+        elif missing_trade_dates:
+            database_component["screener_freshness_reason"] = "missing_constituent_trade_dates"
+        elif trade_date != expected_session:
+            database_component["screener_freshness_reason"] = "completed_session_not_covered"
+        if (
+            "screener_freshness_reason" in database_component
+            or (snapshot_age_days is not None and snapshot_age_days > _SCREENER_FRESHNESS_BREACH_DAYS)
+        ):
             database_component["freshness_breach"] = True
             health["status"] = "degraded"
         health["components"]["database"] = database_component

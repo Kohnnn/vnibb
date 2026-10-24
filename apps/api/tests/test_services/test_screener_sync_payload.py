@@ -182,6 +182,27 @@ async def test_quoteless_sync_updates_ratio_cells_and_evidence_atomically(test_d
     assert row.extended_metrics["debt_to_asset"] == 0.25
 
 
+@pytest.mark.asyncio
+async def test_screener_sync_persists_nonempty_payload_with_ratio_only_metadata(test_db, monkeypatch):
+    evidence = [{"payoutRatio": 6.3257, "unit": "percent"}]
+    count = await _run_sync(test_db, monkeypatch, [_item(
+        symbol="FPT", price=60300, price_unit="VND", price_source="vnstock_history:VCI",
+        roe=0, roa=None, payout_ratio=6.3257,
+        ratio_units={"roe": "percent", "payout_ratio": "percent"}, provider_evidence=evidence,
+    )])
+
+    assert count == 1
+    rows = (await test_db.execute(select(ScreenerSnapshot))).scalars().all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert (row.symbol, row.price, row.pe, row.market_cap, row.roe) == ("FPT", 60300, 14.2, 1.26e14, 0)
+    assert row.roa is None
+    assert row.net_margin is None
+    assert row.revenue_growth is None
+    assert row.extended_metrics["ratio_units"] == {"roe": "percent", "payout_ratio": "percent"}
+    assert row.extended_metrics["provider_evidence"] == evidence
+
+
 @pytest.mark.parametrize("unit,source,price,expected,expected_unit", [
     (None, "vnstock_history:KBS", 60.3, 60300, "VND"),
     ("VND", "vnstock_history:VCI", 60300, 60300, "VND"),

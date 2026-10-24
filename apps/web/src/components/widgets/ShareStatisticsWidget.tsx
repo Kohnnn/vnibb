@@ -7,7 +7,7 @@ import { useFinancialRatios, useProfile, useScreenerData, useStockQuote } from '
 import { latestByFinancialPeriod } from '@/lib/financialPeriods'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import { resolveMetric } from './utils'
-import { formatDividendYield, formatNumber, formatPercent, formatVND, normalizeDividendYield } from '@/lib/formatters'
+import { formatDividendYield, formatNumber, formatPercent, formatVND, readDividendYield } from '@/lib/formatters'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -131,8 +131,8 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
 
   const beta = resolveMetric([{ value: stock?.beta, source: 'Screener' }])
   const dividendYield = resolveMetric([
-    { value: normalizeDividendYield(stock?.dividend_yield), source: 'Screener' },
-    { value: normalizeDividendYield(latestRatio?.dividend_yield), source: 'Ratios' },
+    { value: readDividendYield(stock?.dividend_yield, stock?.ratio_units?.dividend_yield), source: 'Screener' },
+    { value: readDividendYield(latestRatio?.dividend_yield, latestRatio?.ratio_units?.dividend_yield), source: 'Ratios' },
   ])
 
   const exchange =

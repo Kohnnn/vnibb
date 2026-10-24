@@ -255,6 +255,53 @@ async def test_quant_backtest_returns_metrics_summary_and_trades(client, monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["backtest", "sweep"])
+async def test_quant_backtest_and_sweep_disclose_unresolved_price_sessions(
+    client, test_db, monkeypatch, endpoint
+):
+    original = _build_price_frame(60)
+    original["time"] = pd.bdate_range(end="2026-09-18", periods=60)
+    unresolved_date = date(2026, 8, 20)
+    test_db.add(Stock(id=1, symbol="VCI", exchange="HOSE", company_name="Vietcap"))
+    test_db.add_all(
+        [
+            StockPrice(
+                id=index + 1, stock_id=1, symbol="VCI", time=row.time.date(),
+                open=row.open, high=row.high, low=row.low, close=row.close,
+                volume=int(row.volume), interval="1D",
+                source="vnstock" if row.time.date() == unresolved_date else "vnstock_vnd:VCI",
+            )
+            for index, row in enumerate(original.itertuples(index=False))
+        ]
+    )
+    await test_db.commit()
+    monkeypatch.setattr(quant, "_load_historical_from_mongo", AsyncMock(return_value=[]))
+    monkeypatch.setattr(quant, "_load_historical_from_recent_cache", AsyncMock(return_value=[]))
+    monkeypatch.setattr(quant.VnstockEquityHistoricalFetcher, "fetch", AsyncMock(return_value=[]))
+    request = {"period": "5Y", "adjustment_mode": "raw"}
+    if endpoint == "backtest":
+        request["strategy"] = {"fast_window": 20, "slow_window": 50}
+    else:
+        request.update({"fast_windows": [20], "slow_windows": [50]})
+
+    response = await client.post(f"/api/v1/quant/VCI/{endpoint}", json=request)
+
+    assert response.status_code == 400
+    payload = response.json()
+    detail = payload.get("detail", payload)
+    assert detail["code"] == "INSUFFICIENT_BACKTEST_DATA"
+    assert detail["required_session_count"] == 52
+    assert detail["available_session_count"] == 0
+    diagnostics = detail["price_diagnostics"]
+    assert diagnostics["observed_session_count"] == 59
+    assert diagnostics["excluded_session_count"] == 1
+    assert diagnostics["unresolved_session_count"] == 1
+    assert diagnostics["unresolved_excluded_dates"] == ["2026-08-20"]
+    assert diagnostics["requested_start_date"]
+    assert diagnostics["requested_end_date"]
+
+
+@pytest.mark.asyncio
 async def test_quant_sweep_returns_cells_and_best_combo(client, monkeypatch):
     captured: dict = {}
 

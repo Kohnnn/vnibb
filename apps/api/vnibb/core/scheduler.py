@@ -145,6 +145,34 @@ class HistoricalCatchupIncomplete(RuntimeError):
         super().__init__("Mongo historical catch-up " + " ".join(f"{key}={int(summary.get(key, 0))}" for key in counters))
 
 
+class PredictionMarketIngestIncomplete(RuntimeError):
+    """Only fixed sources, bounded counters and reason codes enter the public receipt."""
+
+    def __init__(self, counts: dict[str, int], failures: dict[str, BaseException | None]):
+        from vnibb.services.prediction_market_http import _response_status
+        from vnibb.services.prediction_market_policy import MAX_INGEST_MARKETS, SNAPSHOT_SOURCES
+        from vnibb.services.prediction_market_service import PredictionMarketAdmissionError
+
+        receipts = []
+        for source in SNAPSHOT_SOURCES:
+            count = counts.get(source, 0)
+            count = min(MAX_INGEST_MARKETS, max(0, count)) if type(count) is int else 0
+            receipt = f"{source}={count}"
+            if source in failures:
+                error = failures[source]
+                if isinstance(error, PredictionMarketAdmissionError):
+                    rejected = error.rejected_count
+                    rejected = min(MAX_INGEST_MARKETS, max(0, rejected)) if type(rejected) is int else 0
+                    reason = "cap" if error.source_cap is True else "deny"
+                    reason += f":{rejected}" if rejected else ""
+                else:
+                    status = _response_status(error)
+                    reason = f"http{status}" if type(status) is int and 100 <= status <= 599 else "error"
+                receipt += f"({reason})"
+            receipts.append(receipt)
+        super().__init__(" ".join(receipts))
+
+
 DAILY_SYNC_TIMEOUT_SECONDS = 2 * 60 * 60
 DAILY_TRADING_TIMEOUT_SECONDS = 2 * 60 * 60
 SUPPLEMENTAL_SYNC_TIMEOUT_SECONDS = 90 * 60
@@ -312,7 +340,10 @@ async def _run_guarded_job(
             raise
         except Exception as exc:
             elapsed = (datetime.utcnow() - started_at).total_seconds()
-            detail = str(exc) if isinstance(exc, HistoricalCatchupIncomplete) else type(exc).__name__
+            detail = (
+                str(exc) if isinstance(exc, (HistoricalCatchupIncomplete, PredictionMarketIngestIncomplete))
+                else type(exc).__name__
+            )
             await _record_job_outcome(job_name, "failed", detail)
             logger.error(
                 "%s failed after %.1fs: %s",
@@ -602,6 +633,7 @@ def configure_scheduler():
             ingest_manifold_markets_with_default_client,
         )
         from vnibb.services.prediction_market_service import (
+            PredictionMarketAdmissionError,
             ingest_polymarket_gamma_markets_with_default_client,
         )
         from vnibb.services.predictit_service import (
@@ -610,7 +642,7 @@ def configure_scheduler():
 
         async def _run():
             counts: dict[str, int] = {}
-            failures: list[str] = []
+            failures: dict[str, BaseException | None] = {}
             for source, ingest in (
                 ("polymarket", ingest_polymarket_gamma_markets_with_default_client),
                 ("kalshi", ingest_kalshi_markets_with_default_client),
@@ -622,11 +654,12 @@ def configure_scheduler():
                     async with async_session_maker() as session:
                         counts[source] = await ingest(session)
                 except Exception as exc:
-                    failures.append(source)
-                    logger.warning("%s prediction-market ingest failed: %s", source, exc)
-            logger.info("prediction_market_ingest outcomes: counts=%s failed=%s", counts, failures)
+                    counts[source] = exc.persisted_count if isinstance(exc, PredictionMarketAdmissionError) else 0
+                    failures[source] = exc
+                    logger.warning("%s prediction-market ingest failed: %s", source, type(exc).__name__)
+            logger.info("prediction_market_ingest outcomes: counts=%s failed=%s", counts, list(failures))
             if failures:
-                raise RuntimeError("Prediction-market sources failed: " + ", ".join(failures))
+                raise PredictionMarketIngestIncomplete(counts, failures)
 
         await _run_guarded_job(
             "prediction_market_ingest",
@@ -937,10 +970,9 @@ def start_scheduler():
 
 
 def _maybe_populate_prediction_markets_on_startup() -> None:
-    """Run a one-shot prediction-market populate if the scheduler is starting
-    up and the snapshot tables are still empty. Schedules itself via
-    APScheduler so it doesn't block the boot loop.
-    """
+    """Optionally enqueue restart-only population without changing recurring jobs."""
+    if not settings.prediction_market_populate_on_startup:
+        return
     scheduler = get_scheduler()
 
     async def _populate_now() -> None:
@@ -956,9 +988,13 @@ def _maybe_populate_prediction_markets_on_startup() -> None:
                 counts = await populate_prediction_markets_now(session)
             _last_populate_at = datetime.utcnow()
             _last_populate_counts = counts
-            failed_steps = counts["failed_sources"] + counts["failed_snapshots"]
-            if failed_steps:
-                raise RuntimeError("Prediction-market population failed: " + ", ".join(failed_steps))
+            failed_sources = counts["failed_sources"]
+            assert isinstance(failed_sources, list)
+            if failed_sources:
+                source_counts = {source: count for source, count in counts.items() if isinstance(count, int)}
+                raise PredictionMarketIngestIncomplete(source_counts, dict.fromkeys(failed_sources))
+            if counts["failed_snapshots"]:
+                raise RuntimeError("Prediction-market population snapshots failed")
 
         await _run_guarded_job(
             "populate_prediction_markets_on_startup",

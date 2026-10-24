@@ -34,10 +34,15 @@ interface ForeignTradingWidgetProps {
 }
 
 function formatVolume(vol: number | null | undefined): string {
-    if (!vol) return '-';
+    if (vol == null) return '-';
     if (Math.abs(vol) >= 1e6) return `${(vol / 1e6).toFixed(2)}M`;
     if (Math.abs(vol) >= 1e3) return `${(vol / 1e3).toFixed(1)}K`;
     return vol.toLocaleString();
+}
+
+function getNetVolume(buy: number | null | undefined, sell: number | null | undefined): number | null {
+    if (buy == null || sell == null) return null;
+    return buy - sell;
 }
 
 function formatNetVolume(vol: number, signed = false): string {
@@ -65,13 +70,15 @@ export function parseForeignTradingSnapshotTime(value: string | null | undefined
     return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function getNetFlowLabel(net: number): string {
+function getNetFlowLabel(net: number | null): string {
+    if (net === null) return 'Unavailable';
     if (net > 0) return 'Net buy';
     if (net < 0) return 'Net sell';
     return 'Flat';
 }
 
-function getNetFlowClass(net: number): string {
+function getNetFlowClass(net: number | null): string {
+    if (net === null) return 'text-[var(--text-muted)]';
     if (net > 0) return 'text-green-400';
     if (net < 0) return 'text-red-400';
     return 'text-[var(--text-muted)]';
@@ -90,10 +97,15 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
         });
     }, [data]);
 
-    const totals = useMemo(() => {
-        const buy = trades.reduce((sum, t) => sum + (t.buy_volume || 0), 0);
-        const sell = trades.reduce((sum, t) => sum + (t.sell_volume || 0), 0);
-        return { buy, sell, net: buy - sell };
+    const windowNet = useMemo(() => {
+        if (trades.length === 0) return null;
+        let total = 0;
+        for (const trade of trades) {
+            const net = getNetVolume(trade.buy_volume, trade.sell_volume);
+            if (net === null) return null;
+            total += net;
+        }
+        return total;
     }, [trades]);
 
     const columns = useMemo((): VirtualizedColumn<any>[] => [
@@ -127,7 +139,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             id: 'net',
             header: 'Net',
             accessor: (row) => {
-                const net = (row.buy_volume || 0) - (row.sell_volume || 0);
+                const net = getNetVolume(row.buy_volume, row.sell_volume);
                 const netLabel = getNetFlowLabel(net);
                 return (
                     <span
@@ -136,8 +148,8 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                             getNetFlowClass(net)
                         )}
                     >
-                        {net > 0 ? <TrendingUp size={10} /> : net < 0 ? <TrendingDown size={10} /> : null}
-                        {netLabel} {formatNetVolume(net)}
+                        {net !== null && (net > 0 ? <TrendingUp size={10} /> : net < 0 ? <TrendingDown size={10} /> : null)}
+                        {netLabel}{net !== null ? ` ${formatNetVolume(net)}` : ''}
                     </span>
                 );
             },
@@ -316,14 +328,14 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                     <div
                         className={cn(
                             'text-xs font-black px-2 py-0.5 rounded',
-                            totals.net > 0
+                            windowNet !== null && windowNet > 0
                                 ? 'bg-green-500/10 text-green-400'
-                                : totals.net < 0
+                                : windowNet !== null && windowNet < 0
                                     ? 'bg-red-500/10 text-red-400'
                                     : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'
                         )}
                     >
-                        {getNetFlowLabel(totals.net)} {formatNetVolume(totals.net, true)}
+                        {getNetFlowLabel(windowNet)}{windowNet !== null ? ` ${formatNetVolume(windowNet, true)}` : ''}
                     </div>
                 </div>
 
@@ -339,8 +351,8 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                         />
                     ) : isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={6} />
-                    ) : error && !hasData ? (
-                        <WidgetError error={error as Error} onRetry={() => refetch()} />
+                    ) : (error || responseWarning) && !hasData ? (
+                        <WidgetError error={(error as Error) || new Error(responseWarning ?? undefined)} onRetry={() => refetch()} />
                     ) : !hasData ? (
                         <WidgetEmpty
                             message={`No data for ${symbol}`}

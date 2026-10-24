@@ -10,18 +10,18 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from sqlalchemy import select, and_, func
+from sqlalchemy import and_, func, select
 
 from vnibb.core.cache import build_cache_key
 from vnibb.core.cache_constants import PIPELINE_TTL_SCREENER
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
+from vnibb.core.price_units import normalize_screener_record
 from vnibb.core.retry import with_retry
 from vnibb.core.vn_sectors import resolve_sector_name
-from vnibb.models.stock import Stock, StockPrice
-from vnibb.core.price_units import normalize_screener_record
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock, StockPrice
 from vnibb.services.pipeline.base import BasePipeline, get_upsert_stmt
 
 logger = logging.getLogger(__name__)
@@ -88,8 +88,12 @@ class ScreenerPipeline(BasePipeline):
         sync_id: Optional[int] = None,
     ) -> int:
         """Sync comprehensive metrics for stocks using vnstock finance.ratio."""
-        from vnibb.providers.vnstock.runtime import create_finance, finance_method_kwargs, validate_source
         from vnibb.core.ratio_units import ratio_method_kwargs
+        from vnibb.providers.vnstock.runtime import (
+            create_finance,
+            finance_method_kwargs,
+            validate_source,
+        )
 
         source = validate_source(settings.vnstock_source)
 

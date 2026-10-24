@@ -10,10 +10,9 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import { Building2, Globe, Users, Calendar, MapPin, AlertTriangle } from 'lucide-react';
 import { formatTimestamp } from '@/lib/format';
-import { formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
+import { formatDividendPayout, formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
 import { formatLargeNumber } from '@/lib/units';
 import { normalizeInsiderAction } from '@/lib/insiderActions';
-import type { DividendRecord } from '@/lib/api';
 
 interface TickerProfileWidgetProps {
     symbol: string;
@@ -28,22 +27,6 @@ function formatDividendType(type: string | null | undefined): string {
     if (normalized === 'stock') return 'Stock';
     if (normalized === 'mixed') return 'Mixed';
     return 'Other';
-}
-
-function formatDividendValue(row: DividendRecord): string {
-    if (row.cash_dividend !== null && row.cash_dividend !== undefined) {
-        return formatVND(row.cash_dividend);
-    }
-    if (row.stock_dividend !== null && row.stock_dividend !== undefined) {
-        return `${row.stock_dividend.toFixed(2)}% stock`;
-    }
-    if (row.dividend_ratio !== null && row.dividend_ratio !== undefined) {
-        return String(row.dividend_ratio);
-    }
-    if (row.value !== null && row.value !== undefined) {
-        return formatVND(row.value);
-    }
-    return '-';
 }
 
 function cleanText(value: string | null | undefined): string | null {
@@ -315,7 +298,7 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                                                 className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
                                             >
                                                 <div>
-                                                    <div className="text-xs font-semibold text-[var(--text-primary)]">{formatDividendValue(dividend)}</div>
+                                                    <div className="text-xs font-semibold text-[var(--text-primary)]">{formatDividendPayout(dividend)}</div>
                                                     <div className="text-[10px] text-[var(--text-muted)]">
                                                         {formatDividendType(dividend.dividend_type || dividend.type)}
                                                         {dividend.dividend_yield !== null && dividend.dividend_yield !== undefined

@@ -319,9 +319,28 @@ export function Sidebar({
         if (!contextMenu || contextMenu.type !== 'dashboard') return;
         const dashboard = state.dashboards.find(d => d.id === contextMenu.id);
         if (dashboard && isDashboardEditable(dashboard)) {
-            createDashboard({
+            const copy = createDashboard({
                 name: withUniqueDashboardName(`${dashboard.name} (Copy)`),
                 folderId: dashboard.folderId,
+            });
+            const contents = structuredClone(dashboard);
+            updateDashboard(copy.id, {
+                description: contents.description,
+                globalMarketsSymbol: contents.globalMarketsSymbol,
+                showGroupLabels: contents.showGroupLabels,
+                syncGroups: contents.syncGroups,
+                widgetGroups: contents.widgetGroups,
+                tabs: contents.tabs.map((tab) => {
+                    const tabId = `tab-${crypto.randomUUID()}`;
+                    return {
+                        ...tab,
+                        id: tabId,
+                        widgets: tab.widgets.map((widget) => {
+                            const widgetId = `widget-${crypto.randomUUID()}`;
+                            return { ...widget, id: widgetId, tabId, layout: { ...widget.layout, i: widgetId } };
+                        }),
+                    };
+                }),
             });
             captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceDuplicated, {
                 dashboard_id: dashboard.id,
@@ -510,53 +529,55 @@ export function Sidebar({
                         ${isDragOver ? 'border-t border-blue-500' : ''}
                     `}
                     style={{ paddingLeft: `${6 + indent * 12}px` }}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            if (!isEditing) setActiveDashboard(dashboard.id);
-                        }
-                    }}
-                    onClick={() => !isEditing && setActiveDashboard(dashboard.id)}
-                    onDoubleClick={() => {
-                        if (!isEditableDashboard) return;
-                        setEditingId(dashboard.id);
-                        setEditingName(dashboard.name);
-                    }}
                     onContextMenu={(e) => {
                         if (!isEditableDashboard && !isDeletableDashboard) return;
                         handleContextMenu(e, dashboard.id, 'dashboard');
                     }}
                 >
-                    <FileText size={14} className="shrink-0" />
                     {isEditing ? (
-                        <input
-                            type="text"
-                            value={editingName}
-                            aria-label="Dashboard name"
-                            onChange={(e) => setEditingName(e.target.value)}
-                            onBlur={submitRename}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') submitRename();
-                                if (e.key === 'Escape') setEditingId(null);
-                            }}
-                            className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded px-1 py-0.5 text-[var(--text-primary)] text-sm focus:outline-none focus:border-blue-500"
-                            autoFocus
-                            onClick={(e) => e.stopPropagation()}
-                        />
+                        <>
+                            <FileText size={14} className="shrink-0" aria-hidden="true" />
+                            <input
+                                type="text"
+                                value={editingName}
+                                aria-label="Dashboard name"
+                                onChange={(e) => setEditingName(e.target.value)}
+                                onBlur={submitRename}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') submitRename();
+                                    if (e.key === 'Escape') setEditingId(null);
+                                }}
+                                className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded px-1 py-0.5 text-[var(--text-primary)] text-sm focus:outline-none focus:border-blue-500"
+                                autoFocus
+                                onClick={(e) => e.stopPropagation()}
+                            />
+                        </>
                     ) : (
                         <>
-                            <span className="flex-1 truncate">{dashboard.name}</span>
+                            <button
+                                type="button"
+                                className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                                onClick={() => setActiveDashboard(dashboard.id)}
+                                onDoubleClick={() => {
+                                    if (!isEditableDashboard) return;
+                                    setEditingId(dashboard.id);
+                                    setEditingName(dashboard.name);
+                                }}
+                            >
+                                <FileText size={14} className="shrink-0" aria-hidden="true" />
+                                <span className="flex-1 truncate">{dashboard.name}</span>
+                            </button>
                             {(isEditableDashboard || isDeletableDashboard) && (
                                 <button
-                                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
+                                    type="button"
+                                    className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-blue-400 p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
+                                    aria-label={`Workspace actions for ${dashboard.name}`}
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         handleContextMenu(e, dashboard.id, 'dashboard');
                                     }}
                                 >
-                                    <MoreVertical size={14} />
+                                    <MoreVertical size={14} aria-hidden="true" />
                                 </button>
                             )}
                         </>
@@ -624,6 +645,7 @@ export function Sidebar({
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
                         if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
                             if (!isEditing) toggleFolder(folder.id);
@@ -816,10 +838,13 @@ export function Sidebar({
                                     </h3>
                                     <div ref={createMenuRef} className="relative">
                                         <button
+                                            type="button"
+                                            aria-label="Create workspace or folder"
+                                            aria-expanded={showCreateMenu}
                                             onClick={() => setShowCreateMenu(!showCreateMenu)}
-                                            className="p-0.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                                            className="p-0.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors focus-visible:ring-2 focus-visible:ring-blue-400"
                                         >
-                                            <Plus size={14} />
+                                            <Plus size={14} aria-hidden="true" />
                                         </button>
                                         {showCreateMenu && (
                                             <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-[var(--border-color)] bg-[var(--bg-elevated)] py-1 shadow-xl">
@@ -934,7 +959,7 @@ export function Sidebar({
             </aside>
 
             <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
-            <WorkspaceBackupModal isOpen={workspaceBackupOpen} onClose={() => setWorkspaceBackupOpen(false)} />
+            {workspaceBackupOpen && <WorkspaceBackupModal isOpen onClose={() => setWorkspaceBackupOpen(false)} />}
             {researchBundleOpen && <ResearchBundleModal onClose={() => setResearchBundleOpen(false)} />}
 
 

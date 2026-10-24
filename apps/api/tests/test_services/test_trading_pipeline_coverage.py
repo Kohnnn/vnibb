@@ -126,11 +126,55 @@ class MongoStore:
         if self.fail:
             raise RuntimeError("Mongo ticks unavailable")
         for operation in operations:
-            self.documents[operation._filter["recordKey"]] = deepcopy(operation._doc)
+            key = next(
+                (key for key, document in self.documents.items()
+                 if all(document.get(field) == value for field, value in operation._filter.items())),
+                len(self.documents),
+            )
+            self.documents[key] = deepcopy(operation._doc)
 
     def trades(self, symbol):
         return [document for document in self.documents.values()
                 if document["symbol"] == symbol and not document.get("batchReceipt")]
+
+
+@pytest.mark.parametrize("dataset,symbol", [
+    ("equity.price_depth", "FPT"), ("equity.intraday", "VCB"),
+    ("equity.price_depth", "VCB"),
+])
+@pytest.mark.parametrize("suffix", ["2026-10-13:id:42", "latest-batch"])
+def test_trade_upsert_preserves_colliding_observation(monkeypatch, dataset, symbol, suffix):
+    mongo = MongoStore()
+    original = {"dataset": dataset, "symbol": symbol, "recordKey": f"matched-trade:FPT:{suffix}",
+                "raw": {"id": 99, "price": 50000}, "source": "retained-provider"}
+    mongo.documents[0] = deepcopy(original)
+    monkeypatch.setattr(mongo_market_data_service, "get_mongo_market_data_service", lambda: mongo)
+    rows = [{"trade_time": datetime(2026, 10, 13, 9), "price": 12500, "volume": 12,
+             "match_type": "BU", "transaction_id": 42}]
+    original_rows = deepcopy(rows)
+    coverage = {"provider": "vietcap:Trading", "session_date": "2026-10-13",
+                "requested_session_date": "2026-10-13", "status": "sampled"}
+    original_coverage = deepcopy(coverage)
+
+    for _ in range(2):
+        assert trading_acquisition.persist_mongo_trades("FPT", rows, coverage) == 1
+        assert mongo.documents[0] == original
+        assert len(mongo.documents) == 3
+
+    trade = mongo.trades("FPT")[-1]
+    assert trade["dataset"] == "equity.intraday"
+    assert trade["recordKey"] == "matched-trade:FPT:2026-10-13:id:42"
+    assert trade["raw"] == {"time": datetime(2026, 10, 13, 9), "price": 12500,
+                            "volume": 12, "match_type": "BU", "id": 42}
+    assert trade["source"] == "vietcap"
+    assert trade["providerSource"] == "vietcap:Trading"
+    receipt = next(doc for doc in mongo.documents.values() if doc.get("batchReceipt"))
+    assert (receipt["dataset"], receipt["symbol"], receipt["recordKey"]) == (
+        "equity.intraday", "FPT", "matched-trade:FPT:latest-batch")
+    assert receipt["raw"] == {}
+    assert receipt["rowCount"] == 1
+    assert rows == original_rows
+    assert coverage == original_coverage
 
 
 @pytest.fixture

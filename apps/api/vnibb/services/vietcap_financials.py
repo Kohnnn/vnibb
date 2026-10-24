@@ -66,8 +66,9 @@ _LABELS = {
     "operating_margin": ("operating margin",), "interest_coverage": ("interest coverage",),
     "revenue_growth": ("revenue growth",), "earnings_growth": ("earnings growth",),
     "dps": ("dividend per share",), "dividend_yield": ("dividend yield",),
+    "payout_ratio": ("dividend payout ratio", "payout ratio", "dividend payout"),
 }
-_PERCENT_FIELDS = PERCENT_RATIO_FIELDS | {"dividend_yield"}
+_PERCENT_FIELDS = PERCENT_RATIO_FIELDS
 _PER_SHARE_FIELDS = {"eps", "eps_diluted", "bvps", "dps"}
 
 
@@ -243,6 +244,8 @@ def _unit(record: Mapping[str, Any], descriptor: Mapping[str, Any], field: str) 
     if currency and {_label(value) for value in currency} != {"vnd"}:
         return None, None, evidence
     if field in _PERCENT_FIELDS:
+        if field == "payout_ratio" and unit in {"fraction", "decimal"} and not scales:
+            return 100.0, "percent", evidence
         return (1.0, "percent", evidence) if unit in {"percent", "%"} and not scales else (None, None, evidence)
     if record.get("dataset") == "finance.ratio" and field not in _PER_SHARE_FIELDS:
         return (1.0, "ratio", evidence) if unit in {"ratio", "times", "index"} and not scales else (None, None, evidence)
@@ -362,7 +365,7 @@ async def persist_vietcap_financials(records: Sequence[Mapping[str, Any]], *, ca
                 for field in decoded["values"]
             }
         if record["dataset"] in statement_types:
-            value_unit = "VND" if any(decoded["fieldEvidence"][field].get("unit") == "VND" for field in decoded["values"]) else None
+            value_unit = "VND" if any(decoded["fieldEvidence"][field].get("unit") in {"VND", "VND/share"} for field in decoded["values"]) else None
             canonical_values = dict(decoded["values"])
             canonical_values.update({
                 alias: canonical_values[field]
@@ -376,7 +379,7 @@ async def persist_vietcap_financials(records: Sequence[Mapping[str, Any]], *, ca
                 symbol=record["symbol"], period=basis["period"], statement_type=statement_types[record["dataset"]],
                 fiscal_year=basis["year"], fiscal_quarter=basis["quarter"], source="vietcap", currency="VND",
                 value_unit=value_unit, unit_metadata=decoded["fieldEvidence"],
-                flow_basis=basis["quarterBasis"] if basis["quarterBasis"] != "unknown" else None,
+                flow_basis="annual" if basis["periodType"] == "year" else basis["quarterBasis"] if basis["quarterBasis"] != "unknown" else None,
                 consolidation_basis=basis["consolidation"] if basis["consolidation"] != "unknown" else None,
                 aggregation_basis="reported_quarter" if basis["periodType"] == "quarter" else "reported_annual",
                 source_periods=[basis["period"]],
@@ -429,9 +432,9 @@ async def load_vietcap_financial_rows(symbol: str, dataset: str, period: str = "
             values["ratio_units"] = {field: evidence["unit"] for field, evidence in decoded["fieldEvidence"].items() if field in decoded["values"]}
             values["provider_evidence"] = [{"source": "vietcap", "receivedAt": record.get("receivedAt"), "fiscalBasis": basis, "fields": decoded["fieldEvidence"]}]
         else:
-            values.update(source="vietcap", raw_data={**record, "structured": decoded}, fiscal_year=basis["year"], fiscal_quarter=basis["quarter"], unit_metadata=decoded["fieldEvidence"],
-                          value_unit="VND" if any(item.get("unit") == "VND" for field, item in decoded["fieldEvidence"].items() if field in decoded["values"]) else None,
-                          flow_basis=basis["quarterBasis"] if basis["quarterBasis"] != "unknown" else None,
+            values.update(source="vietcap", currency="VND", raw_data={**record, "structured": decoded}, fiscal_year=basis["year"], fiscal_quarter=basis["quarter"], unit_metadata=decoded["fieldEvidence"],
+                          value_unit="VND" if any(item.get("unit") in {"VND", "VND/share"} for field, item in decoded["fieldEvidence"].items() if field in decoded["values"]) else None,
+                          flow_basis="annual" if basis["periodType"] == "year" else basis["quarterBasis"] if basis["quarterBasis"] != "unknown" else None,
                           consolidation_basis=basis["consolidation"] if basis["consolidation"] != "unknown" else None)
         rows.append(_MODELS[dataset](**values))
         seen.add(basis["period"])

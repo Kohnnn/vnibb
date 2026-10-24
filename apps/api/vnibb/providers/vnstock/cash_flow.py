@@ -47,6 +47,7 @@ class CashFlowData(BaseModel):
     fiscal_quarter: int | None = None
     unit_metadata: dict[str, Any] = Field(default_factory=dict)
     value_unit: str | None = None
+    currency: str | None = None
     flow_basis: str | None = None
     consolidation_basis: str | None = None
     

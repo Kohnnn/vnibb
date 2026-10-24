@@ -376,7 +376,7 @@ async def test_bounded_reader_retains_model_evidence(envelope, monkeypatch):
     assert rows[0].revenue == 12
     assert rows[0].raw_data["descriptors"] == envelope["descriptors"]
     assert rows[0].source == "vietcap"
-    assert rows[0].flow_basis is None
+    assert rows[0].flow_basis == "annual"
     assert rows[0].value_unit == "VND"
 
 
@@ -532,6 +532,19 @@ def test_ratio_requires_descriptor_and_explicit_numeric_unit(envelope):
     envelope["descriptors"][0].pop("unit")
     envelope["descriptors"][0]["fullTitleEn"] = "Return on equity (%)"
     assert "roe" not in decode_vietcap_financial_record(envelope)["values"]
+
+
+@pytest.mark.parametrize("value,unit,expected", [(0.25, "fraction", 25.0), (6.3257, "percent", 6.3257), (0, "percent", 0), (9.951, None, None)])
+def test_iq_payout_requires_explicit_period_matched_units(envelope, value, unit, expected):
+    envelope.update(dataset="finance.ratio", datasetVariant="finance.ratio.year")
+    envelope["raw"] = {"year": 2025, "quarter": 5, "ratioType": "RATIO_YEAR", "payout_cell": value}
+    envelope["descriptorEvidence"]["section"] = "RATIO"
+    envelope["descriptors"] = [{"field": "payout_cell", "parent": None, "fullTitleEn": "Dividend payout ratio", "unit": unit}]
+    decoded = decode_vietcap_financial_record(envelope)
+    assert decoded["values"].get("payout_ratio") == expected
+    if expected is not None:
+        assert decoded["fieldEvidence"]["payout_ratio"]["unit"] == "percent"
+        assert decoded["fieldEvidence"]["payout_ratio"]["fiscalBasis"]["period"] == "2025"
 
 
 @pytest.mark.asyncio

@@ -307,23 +307,54 @@ export function isUnavailableStatementRow(row: { unavailable_reason?: unknown } 
   return typeof reason === 'string' && reason.trim().length > 0
 }
 
-/** The visible note for reason-bearing rows, grouped by reason, or null when there are none. */
+/** Visible row- and field-level withholding reasons, deduplicated across periods. */
 export function describeUnavailableStatementRows(
-  rows: Array<{ period?: string | null; unavailable_reason?: unknown }> | null | undefined
+  rows: Array<{ period?: string | null; unavailable_reason?: unknown; unit_metadata?: unknown }> | null | undefined
 ): string | null {
-  const groups = new Map<string, string[]>()
+  const groups = new Map<string, { rowPeriods: Set<string>; fields: Map<string, Set<string>> }>()
+  const addReason = (reason: unknown, period: string, field?: string) => {
+    if (typeof reason !== 'string' || !reason.trim()) return
+    const key = reason.trim()
+    let group = groups.get(key)
+    if (!group) {
+      group = { rowPeriods: new Set(), fields: new Map() }
+      groups.set(key, group)
+    }
+    if (field === undefined) group.rowPeriods.add(period)
+    else {
+      const periods = group.fields.get(field) ?? new Set<string>()
+      periods.add(period)
+      group.fields.set(field, periods)
+    }
+  }
 
   for (const row of rows ?? []) {
-    const reason = row?.unavailable_reason
-    if (typeof reason !== 'string' || !reason.trim()) continue
     const normalized = normalizeFinancialPeriod(row.period)
     const label = normalized || String(row.period ?? '').trim() || 'unknown period'
-    groups.set(reason.trim(), [...(groups.get(reason.trim()) ??[]), label])
+    addReason(row.unavailable_reason, label)
+    if (!row.unit_metadata || typeof row.unit_metadata !== 'object' || Array.isArray(row.unit_metadata)) continue
+    for (const [field, metadata] of Object.entries(row.unit_metadata)) {
+      if (metadata && typeof metadata === 'object' && 'unavailable_reason' in metadata) {
+        addReason(metadata.unavailable_reason, label, field)
+      }
+    }
   }
 
   if (groups.size === 0) return null
 
-  return Array.from(groups)
-    .map(([reason, periods]) => `Unavailable: ${periods.join(', ')} returned no certified value (${reason}), so no value is shown.`)
-    .join(' ')
+  return Array.from(groups).map(([reason, group]) => {
+    const scopes: string[] = []
+    if (group.rowPeriods.size) {
+      scopes.push(`${Array.from(group.rowPeriods).join(', ')} returned no certified value`)
+    }
+    if (group.fields.size) {
+      const fieldsByPeriods = new Map<string, string[]>()
+      for (const [field, periods] of group.fields) {
+        const labels = Array.from(periods).sort((left, right) => periodSortKey(left) - periodSortKey(right) || left.localeCompare(right)).join(', ')
+        fieldsByPeriods.set(labels, [...(fieldsByPeriods.get(labels) ?? []), field.replace(/_/g, ' ')])
+      }
+      scopes.push(`withheld fields: ${Array.from(fieldsByPeriods).map(([periods, fields]) => `${fields.join(', ')} [${periods}]`).join('; ')}`)
+    }
+    return `Unavailable: ${scopes.join('; ')} (${reason}), ${group.fields.size ? 'so only affected values are withheld.' : 'so no value is shown.'}`
+  }).join(' ')
 }

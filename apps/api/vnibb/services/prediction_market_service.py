@@ -27,6 +27,7 @@ from vnibb.services.prediction_market_policy import (
     MAX_MARKET_PAYLOAD_BYTES,
     MAX_MARKET_TEXT_BYTES,
     MAX_SOURCE_MARKETS,
+    SNAPSHOT_SOURCES,
     is_kalshi_combo,
     snapshot_eligibility,
 )
@@ -35,7 +36,16 @@ logger = logging.getLogger(__name__)
 
 
 class PredictionMarketAdmissionError(RuntimeError):
-    """A provider batch cannot safely be admitted to the catalogue."""
+    """A refused batch, with counts for committed rows and known rejected rows."""
+
+    def __init__(
+        self, message: str, *, persisted_count: int = 0, rejected_count: int = 0,
+        source_cap: bool = False,
+    ) -> None:
+        self.persisted_count = persisted_count
+        self.rejected_count = rejected_count
+        self.source_cap = source_cap
+        super().__init__(message)
 
 
 def bounded_market_limit(limit: int) -> int:
@@ -85,6 +95,31 @@ async def _catalogue_storage_bytes(session: AsyncSession, dialect_name: str) -> 
     return pages * page_size
 
 
+async def ensure_catalogue_write_capacity(session: AsyncSession, market_count: int) -> None:
+    """Lock catalogue writers and reserve physical growth in the caller's transaction."""
+    dialect_name = session.get_bind().dialect.name
+    if dialect_name == "postgresql":
+        await session.execute(text("SELECT pg_advisory_xact_lock(943416618)"))
+    elif dialect_name == "sqlite":
+        try:
+            await session.execute(text("BEGIN IMMEDIATE"))
+        except OperationalError as exc:
+            if "cannot start a transaction within a transaction" not in str(exc):
+                raise
+            # Preserve the caller's transaction while taking its writer lock.
+            await session.execute(text("UPDATE prediction_markets SET id=id WHERE id=-1"))
+    else:
+        raise UnsupportedPredictionMarketDialectError(dialect_name)
+    relation_bytes = await _catalogue_storage_bytes(session, dialect_name)
+    reserve = market_count * 256 * 1024
+    if relation_bytes + reserve > MAX_CATALOGUE_RELATION_BYTES:
+        raise PredictionMarketAdmissionError(
+            f"Catalogue storage ceiling: relation {relation_bytes} bytes plus {reserve} byte reserve "
+            f"exceeds {MAX_CATALOGUE_RELATION_BYTES}; no markets mutated",
+            rejected_count=market_count,
+        )
+
+
 async def persist_prediction_markets(session: AsyncSession, values: list[PredictionMarketValues]) -> int:
     """Refresh IDs and admit new live IDs below each source's fresh-market cap.
 
@@ -93,7 +128,9 @@ async def persist_prediction_markets(session: AsyncSession, values: list[Predict
     A full relation refuses every mutation; a full source still refreshes IDs.
     """
     if len(values) > MAX_INGEST_MARKETS:
-        raise PredictionMarketAdmissionError("prediction market ingest batch exceeds limit")
+        raise PredictionMarketAdmissionError(
+            "prediction market ingest batch exceeds limit", rejected_count=len(values),
+        )
     if not values:
         return 0
     values = list({(row["source"], row["source_id"]): row for row in values}.values())
@@ -101,28 +138,21 @@ async def persist_prediction_markets(session: AsyncSession, values: list[Predict
     if dialect_name not in {"postgresql", "sqlite"}:
         raise UnsupportedPredictionMarketDialectError(dialect_name)
     for row in values:
-        if row["source"] == "kalshi" and is_kalshi_combo(row["source_id"], row.get("slug")):
-            raise PredictionMarketAdmissionError(f"Kalshi combo market {row['source_id']} is not admissible")
-        if not _valid_market_size(row):
-            raise PredictionMarketAdmissionError(f"{row.get('source')} market {row.get('source_id')} exceeds field size limit")
-    try:
-        if dialect_name == "postgresql":
-            await session.execute(text("SELECT pg_advisory_xact_lock(943416618)"))
-        else:
-            try:
-                await session.execute(text("BEGIN IMMEDIATE"))
-            except OperationalError as exc:
-                if "cannot start a transaction within a transaction" not in str(exc):
-                    raise
-                # Preserve the caller's transaction while taking its writer lock.
-                await session.execute(text("UPDATE prediction_markets SET id=id WHERE id=-1"))
-        relation_bytes = await _catalogue_storage_bytes(session, dialect_name)
-        reserve = len(values) * 256 * 1024
-        if relation_bytes + reserve > MAX_CATALOGUE_RELATION_BYTES:
+        if row["source"] not in SNAPSHOT_SOURCES:
             raise PredictionMarketAdmissionError(
-                f"Catalogue storage ceiling: relation {relation_bytes} bytes plus {reserve} byte reserve "
-                f"exceeds {MAX_CATALOGUE_RELATION_BYTES}; no markets mutated"
+                f"Unsupported prediction market source {row['source']!r}", rejected_count=len(values),
             )
+        if row["source"] == "kalshi" and is_kalshi_combo(row["source_id"], row.get("slug")):
+            raise PredictionMarketAdmissionError(
+                f"Kalshi combo market {row['source_id']} is not admissible", rejected_count=len(values),
+            )
+        if not _valid_market_size(row):
+            raise PredictionMarketAdmissionError(
+                f"{row.get('source')} market {row.get('source_id')} exceeds field size limit",
+                rejected_count=len(values),
+            )
+    try:
+        await ensure_catalogue_write_capacity(session, len(values))
 
         by_source: dict[str, set[str]] = {}
         for row in values:
@@ -201,7 +231,9 @@ async def persist_prediction_markets(session: AsyncSession, values: list[Predict
         if rejected:
             raise PredictionMarketAdmissionError(
                 f"Catalogue admission blocked for {rejected} {'markets' if rejected_promotions else 'new markets'} "
-                f"(storage/source cap); refreshed {len(accepted)} existing markets"
+                f"(storage/source cap); refreshed {len(accepted)} existing markets",
+                persisted_count=len(accepted), rejected_count=rejected,
+                source_cap=rejected == len(incoming_eligible - admitted),
             )
         return len(accepted)
     except BaseException:

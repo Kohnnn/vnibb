@@ -28,6 +28,7 @@ interface ChartPoint {
   low: number;
   close: number;
   volume: number;
+  volumeAvailable: boolean;
   priceUnit: 'VND' | 'index_points' | 'unknown';
   observedAt: number | null;
   adjustmentApplied: boolean;
@@ -192,6 +193,7 @@ function normalizePoints(rows: Array<Record<string, unknown>>): ChartPoint[] {
     byDate.set(time, {
       time, open, high, low, close,
       volume: safeNumber(row.volume) ?? 0,
+      volumeAvailable: safeNumber(row.volume) !== null,
       priceUnit,
       observedAt: rawTime.length > 10 ? timestamp : null,
       adjustmentApplied: row.adjustment_applied === true,
@@ -247,6 +249,7 @@ function mergeQuote(points: ChartPoint[], quote: QuoteData | null): ChartPoint[]
     low: safeNumber(quote.low) ?? (isSameDay ? Math.min(latest.low, quotePrice) : quotePrice),
     close: quotePrice,
     volume: safeNumber(quote.volume) ?? (isSameDay ? latest.volume : 0),
+    volumeAvailable: safeNumber(quote.volume) !== null || (isSameDay && latest.volumeAvailable),
     priceUnit,
     observedAt: quoteTime.getTime(),
     adjustmentApplied: false,
@@ -276,6 +279,9 @@ export function TradingViewAdvancedChart({
   const [error, setError] = useState<string | null>(null);
   const [excludedNotice, setExcludedNotice] = useState<string | null>(null);
   const [adjustmentMode, setAdjustmentMode] = useState<'raw' | 'adjusted'>('adjusted');
+  const [hoveredPoint, setHoveredPoint] = useState<ChartPoint | null>(null);
+  const [sessionBasis, setSessionBasis] = useState('Unknown');
+  const [adjustmentCoverage, setAdjustmentCoverage] = useState<number | null>(null);
 
   const dateRange = useMemo(() => resolveDateRange(timeframe), [timeframe]);
   const normalizedCompareSymbol = (compareSymbol || '').trim().toUpperCase();
@@ -315,6 +321,9 @@ export function TradingViewAdvancedChart({
             : Promise.resolve(null),
         ]);
 
+        setHoveredPoint(null);
+        setSessionBasis(historyResponse?.meta?.session_basis || 'Unknown');
+        setAdjustmentCoverage(historyResponse?.meta?.adjustment_coverage_pct ?? null);
         const normalized = normalizePoints(
           (historyResponse?.data || []) as unknown as Array<Record<string, unknown>>,
         );
@@ -651,6 +660,14 @@ export function TradingViewAdvancedChart({
           ))
         );
         volumeSeriesRef.current = volumeSeries;
+        const admittedPoints = new Map(points.filter(isRenderablePoint).map((point) => [point.time, point]));
+        chart.subscribeCrosshairMove((event) => {
+          const time = typeof event.time === 'string' ? event.time
+            : event.time && typeof event.time === 'object'
+              ? `${event.time.year}-${String(event.time.month).padStart(2, '0')}-${String(event.time.day).padStart(2, '0')}`
+              : null;
+          setHoveredPoint(time && event.point && event.seriesData.has(series) ? admittedPoints.get(time) ?? null : null);
+        });
 
         // Show the most recent ~120 bars (about 6 trading months) by
         // default. Calling fitContent() with a multi-year dataset
@@ -757,6 +774,12 @@ export function TradingViewAdvancedChart({
           </button>
         ))}
       </div>
+      {!isLoading && !error && points.some(isChartPoint) ? (
+        <div className="pointer-events-none absolute left-3 top-12 z-10 max-w-[calc(100%-24px)] rounded border border-[var(--border-default)] bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-[var(--text-primary)]" aria-label="Chart units and session basis">
+          <div>Price unit: {points.find(isChartPoint)?.priceUnit || 'Unknown'} · {adjustmentMode} · Session basis: {sessionBasis} · Adjustment coverage: {adjustmentCoverage === null ? 'Unknown' : `${adjustmentCoverage}%`}</div>
+          {hoveredPoint ? <div aria-label="OHLCV hover summary">{hoveredPoint.time} · O {hoveredPoint.open.toLocaleString()} · H {hoveredPoint.high.toLocaleString()} · L {hoveredPoint.low.toLocaleString()} · C {hoveredPoint.close.toLocaleString()} · Volume {hoveredPoint.volumeAvailable ? hoveredPoint.volume.toLocaleString() : 'Unknown'}</div> : <div>Hover a reported session for OHLCV.</div>}
+        </div>
+      ) : null}
 
       {eventMarkers.length > 0 ? (
         <div className="pointer-events-none absolute bottom-7 left-3 z-10 flex flex-wrap items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-[var(--text-muted)] backdrop-blur">

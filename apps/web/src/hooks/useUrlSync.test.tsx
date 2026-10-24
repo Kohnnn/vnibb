@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { __resolveDashboardSlug as resolveDashboardSlug, useUrlSync } from '@/hooks/useUrlSync';
 
 type UrlSyncHarnessProps = {
   ready: boolean;
+  dashboardCatalogueReady?: boolean;
   activeDashboardId: string | null;
   activeTabId: string | null;
   symbol: string;
@@ -20,6 +21,7 @@ type UrlSyncHarnessProps = {
 function UrlSyncHarness(props: UrlSyncHarnessProps) {
   useUrlSync({
     ready: props.ready,
+    dashboardCatalogueReady: props.dashboardCatalogueReady ?? false,
     activeDashboardId: props.activeDashboardId,
     activeTabId: props.activeTabId,
     symbol: props.symbol,
@@ -77,6 +79,85 @@ describe('useUrlSync deep-link restore', () => {
 
     expect(applyDashboard).toHaveBeenCalledWith('custom-dashboard', { programmatic: true });
     expect(applyTab).toHaveBeenCalledWith('custom-tab', { programmatic: true });
+  });
+
+  it('canonicalizes an unknown dashboard only after the catalogue finishes hydrating', () => {
+    window.history.replaceState(null, '', '/dashboard?dashboard=missing-dashboard&tab=missing-tab&symbol=HPG&view=compact#workspace');
+    const props: UrlSyncHarnessProps = {
+      ready: true,
+      dashboardCatalogueReady: false,
+      activeDashboardId: 'default-dashboard',
+      activeTabId: 'default-tab',
+      symbol: 'HPG',
+      dashboardIds: ['default-dashboard'],
+      tabIdsByDashboard: { 'default-dashboard': ['default-tab', 'settled-tab'] },
+      applyDashboard: jest.fn(),
+      applyTab: jest.fn(),
+      applySymbol: jest.fn(),
+    };
+
+    const { rerender } = render(<UrlSyncHarness {...props} />);
+    expect(new URLSearchParams(window.location.search).get('dashboard')).toBe('missing-dashboard');
+
+    rerender(<UrlSyncHarness {...props} activeTabId="settled-tab" />);
+    expect(new URLSearchParams(window.location.search).get('dashboard')).toBe('missing-dashboard');
+
+    rerender(<UrlSyncHarness {...props} activeTabId="settled-tab" dashboardCatalogueReady />);
+    expect(window.location.pathname + window.location.search + window.location.hash).toBe(
+      '/dashboard?dashboard=default-dashboard&tab=settled-tab&symbol=HPG&view=compact#workspace',
+    );
+    expect(props.applyDashboard).not.toHaveBeenCalled();
+    expect(props.applyTab).not.toHaveBeenCalled();
+  });
+
+  it('canonicalizes an unknown dashboard when the catalogue is already hydrated', () => {
+    window.history.replaceState(null, '', '/dashboard?dashboard=missing-dashboard&tab=missing-tab&symbol=HPG');
+    render(
+      <UrlSyncHarness
+        ready
+        dashboardCatalogueReady
+        activeDashboardId="default-dashboard"
+        activeTabId="default-tab"
+        symbol="HPG"
+        dashboardIds={['default-dashboard']}
+        tabIdsByDashboard={{ 'default-dashboard': ['default-tab'] }}
+        applyDashboard={jest.fn()}
+        applyTab={jest.fn()}
+        applySymbol={jest.fn()}
+      />,
+    );
+
+    expect(window.location.search).toBe('?dashboard=default-dashboard&tab=default-tab&symbol=HPG');
+  });
+
+  it('restores a published workspace arriving with the terminal catalogue signal', () => {
+    const props: UrlSyncHarnessProps = {
+      ready: true,
+      dashboardCatalogueReady: false,
+      activeDashboardId: 'default-dashboard',
+      activeTabId: 'default-tab',
+      symbol: 'HPG',
+      dashboardIds: ['default-dashboard'],
+      tabIdsByDashboard: { 'default-dashboard': ['default-tab'] },
+      applyDashboard: jest.fn(),
+      applyTab: jest.fn(),
+      applySymbol: jest.fn(),
+    };
+    const { rerender } = render(<UrlSyncHarness {...props} />);
+    expect(props.applyDashboard).not.toHaveBeenCalled();
+
+    rerender(
+      <UrlSyncHarness
+        {...props}
+        dashboardCatalogueReady
+        dashboardIds={['default-dashboard', 'custom-dashboard']}
+        tabIdsByDashboard={{ 'custom-dashboard': ['custom-tab'] }}
+      />,
+    );
+
+    expect(props.applyDashboard).toHaveBeenCalledWith('custom-dashboard', { programmatic: true });
+    expect(props.applyTab).toHaveBeenCalledWith('custom-tab', { programmatic: true });
+    expect(new URLSearchParams(window.location.search).get('dashboard')).toBe('custom-dashboard');
   });
 
   it('waits for a published tab to register even when its dashboard already exists', () => {
@@ -273,12 +354,13 @@ describe('useUrlSync deep-link restore', () => {
 });
 
 
-function ScopedUrlHarness() {
+function ScopedUrlHarness({ dashboardCatalogueReady = true }: { dashboardCatalogueReady?: boolean }) {
   const [dashboard, setDashboard] = useState('original');
   const [symbols, setSymbols] = useState({ original: 'VCB', imported: 'VCI' });
   const symbol = symbols[dashboard as keyof typeof symbols];
   useUrlSync({
     ready: true,
+    dashboardCatalogueReady,
     activeDashboardId: dashboard,
     activeTabId: `${dashboard}-tab`,
     symbol,
@@ -296,6 +378,20 @@ function ScopedUrlHarness() {
     <button onClick={() => setDashboard('original')}>Return to original</button>
   </>;
 }
+
+test('unknown dashboard recovery preserves the valid inbound symbol after catalogue completion', () => {
+  window.history.replaceState(null, '', '/dashboard?dashboard=missing-dashboard&tab=removed-tab&symbol=FPT');
+  const view = render(<ScopedUrlHarness dashboardCatalogueReady={false} />);
+  expect(screen.getByLabelText('Original ticker')).toHaveTextContent('VCB');
+  expect(new URLSearchParams(window.location.search).get('dashboard')).toBe('missing-dashboard');
+
+  view.rerender(<ScopedUrlHarness dashboardCatalogueReady />);
+
+  expect(screen.getByLabelText('Original ticker')).toHaveTextContent('FPT');
+  expect(screen.getByLabelText('Imported ticker')).toHaveTextContent('VCI');
+  expect(screen.getByLabelText('Active workspace')).toHaveTextContent('original');
+  expect(window.location.search).toBe('?dashboard=original&tab=original-tab&symbol=FPT');
+});
 
 test('deep links apply the ticker only after entering its workspace and preserve the departing ticker', () => {
   window.history.replaceState(null, '', '/dashboard?dashboard=imported&symbol=FPT');
@@ -329,6 +425,178 @@ test('deep links apply the ticker only after entering its workspace and preserve
   expect(screen.getByLabelText('Original ticker')).toHaveTextContent('ACB');
   expect(screen.getByLabelText('Imported ticker')).toHaveTextContent('MSN');
   expect(new URLSearchParams(window.location.search).get('symbol')).toBe('MSN');
+});
+
+test('pointer tab navigation creates entries that restore the workspace, tab and scoped symbol on Back/Forward', async () => {
+  const discovery = 'published-discovery-tab';
+  const fundamentals = 'published-fundamentals-tab';
+  const importedTab = 'published-imported-tab';
+  const routerState = { __NA: true, tree: ['dashboard'], unrelated: { retained: true } };
+  window.history.replaceState(routerState, '', `/dashboard?dashboard=original&tab=${discovery}&view=compact#workspace`);
+  const initialHistoryLength = window.history.length;
+
+  function PointerNavigationHarness() {
+    const [view, setView] = useState({
+      dashboard: 'original',
+      tabs: { original: discovery, imported: importedTab },
+      symbols: { original: 'VCB', imported: 'VCI' },
+      userNavigationSeq: 0,
+    });
+    const { dashboard, tabs, symbols, userNavigationSeq } = view;
+    const key = dashboard as keyof typeof tabs;
+    useUrlSync({
+      ready: true,
+      dashboardCatalogueReady: true,
+      activeDashboardId: dashboard,
+      activeTabId: tabs[key],
+      symbol: symbols[key],
+      dashboardIds: ['original', 'imported'],
+      resolveTabId: (id, slug) => (id === 'original' ? [discovery, fundamentals] : [importedTab]).includes(slug) ? slug : null,
+      userNavigationSeq,
+      applyDashboard: dashboard => setView(previous => ({ ...previous, dashboard })),
+      applyTab: id => setView(previous => ({ ...previous, tabs: { ...previous.tabs, [previous.dashboard]: id } })),
+      applySymbol: symbol => setView(previous => ({ ...previous, symbols: { ...previous.symbols, [dashboard]: symbol } })),
+    });
+    return <>
+      <output aria-label="Active view">{`${dashboard}/${tabs[key]}/${symbols[key]}`}</output>
+      <button onClick={() => {
+        setView(previous => ({ ...previous, tabs: { ...previous.tabs, original: fundamentals }, userNavigationSeq: previous.userNavigationSeq + 1 }));
+      }}>Fundamentals</button>
+      <button onClick={() => {
+        setView(previous => ({ ...previous, dashboard: 'imported', userNavigationSeq: previous.userNavigationSeq + 1 }));
+      }}>Imported workspace</button>
+    </>;
+  }
+
+  render(<PointerNavigationHarness />);
+  expect(window.history.length).toBe(initialHistoryLength);
+  expect(window.location.search).toContain('symbol=VCB');
+
+  fireEvent.pointerDown(screen.getByRole('button', { name: 'Fundamentals' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Fundamentals' }));
+  expect(screen.getByLabelText('Active view')).toHaveTextContent(`original/${fundamentals}/VCB`);
+  expect(window.history.length).toBe(initialHistoryLength + 1);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Imported workspace' }));
+  expect(screen.getByLabelText('Active view')).toHaveTextContent(`imported/${importedTab}/VCI`);
+  expect(window.history.length).toBe(initialHistoryLength + 2);
+  expect(window.history.state).toEqual(expect.objectContaining(routerState));
+
+  for (const [direction, expected] of [
+    ['back', `original/${fundamentals}/VCB`],
+    ['back', `original/${discovery}/VCB`],
+    ['forward', `original/${fundamentals}/VCB`],
+    ['forward', `imported/${importedTab}/VCI`],
+  ] as const) {
+    await act(async () => {
+      await new Promise<void>(resolve => {
+        window.addEventListener('popstate', () => resolve(), { once: true });
+        window.history[direction]();
+      });
+    });
+    await waitFor(() => expect(screen.getByLabelText('Active view')).toHaveTextContent(expected));
+    const [dashboard, tab, symbol] = expected.split('/');
+    const params = new URLSearchParams(window.location.search);
+    expect([params.get('dashboard'), params.get('tab'), params.get('symbol')]).toEqual([dashboard, tab, symbol]);
+    expect(params.get('view')).toBe('compact');
+    expect(window.location.hash).toBe('#workspace');
+    expect(window.history.length).toBe(initialHistoryLength + 2);
+    expect(window.history.state).toEqual(expect.objectContaining(routerState));
+  }
+});
+
+test.each(['tab', 'workspace'] as const)('Back repairs a removed inactive %s to the current view without appending history', async kind => {
+  const dashboardId = (id: string) => kind === 'workspace' ? `personal-${id}` : 'personal';
+  const viewUrl = (id: string) => `/dashboard?dashboard=${dashboardId(id)}&tab=tab-${id}&symbol=FPT&view=compact#workspace`;
+  window.history.replaceState({ __NA: true, retained: true }, '', viewUrl('A'));
+
+  function RemovedTargetHarness() {
+    const [active, setActive] = useState('A');
+    const [removed, setRemoved] = useState(false);
+    const [userNavigationSeq, setUserNavigationSeq] = useState(0);
+    const available = removed ? ['A', 'C'] : ['A', 'B', 'C'];
+    useUrlSync({
+      ready: true,
+      dashboardCatalogueReady: true,
+      activeDashboardId: dashboardId(active),
+      activeTabId: `tab-${active}`,
+      symbol: 'FPT',
+      dashboardIds: available.map(dashboardId),
+      resolveTabId: (dashboard, slug) => available.some(id => dashboardId(id) === dashboard && slug === `tab-${id}`) ? slug : null,
+      userNavigationSeq,
+      applyDashboard: id => { if (kind === 'workspace') setActive(id.replace('personal-', '')); },
+      applyTab: id => setActive(id.replace('tab-', '')),
+      applySymbol: () => {},
+    });
+    return <>
+      <output aria-label="Current view">{`${dashboardId(active)}/tab-${active}/FPT`}</output>
+      {['B', 'C'].map(id => <button key={id} onClick={() => {
+        setActive(id);
+        setUserNavigationSeq(previous => previous + 1);
+      }}>Select {id}</button>)}
+      <button onClick={() => setRemoved(true)}>Remove inactive B</button>
+    </>;
+  }
+
+  render(<RemovedTargetHarness />);
+  fireEvent.click(screen.getByRole('button', { name: 'Select B' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Select C' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove inactive B' }));
+  const historyLength = window.history.length;
+
+  await act(async () => {
+    await new Promise<void>(resolve => {
+      window.addEventListener('popstate', () => resolve(), { once: true });
+      window.history.back();
+    });
+  });
+
+  expect(screen.getByLabelText('Current view')).toHaveTextContent(`${dashboardId('C')}/tab-C/FPT`);
+  expect(window.location.pathname + window.location.search + window.location.hash).toBe(viewUrl('C'));
+  expect(window.history.length).toBe(historyLength);
+  expect(window.history.state).toEqual(expect.objectContaining({ __NA: true, retained: true }));
+});
+
+test.each(['workspace-alias', 'removed-tab'] as const)('Back canonicalizes a different workspace with a %s after its view lands', async kind => {
+  const targetDashboard = 'default-fundamental';
+  const targetTab = 'published-fundamentals';
+  const targetUrl = `/dashboard?dashboard=${kind === 'workspace-alias' ? 'fundamental' : targetDashboard}&tab=${kind === 'removed-tab' ? 'removed-tab' : targetTab}&symbol=FPT&view=compact#workspace`;
+  window.history.replaceState({ __NA: true, retained: true }, '', targetUrl);
+  window.history.pushState(window.history.state, '', '/dashboard?dashboard=personal-C&tab=tab-C&symbol=FPT&view=compact#workspace');
+  const historyLength = window.history.length;
+
+  function AppliedTargetHarness() {
+    const [view, setView] = useState({ dashboard: 'personal-C', tab: 'tab-C' });
+    useUrlSync({
+      ready: true,
+      dashboardCatalogueReady: true,
+      activeDashboardId: view.dashboard,
+      activeTabId: view.tab,
+      symbol: 'FPT',
+      dashboardIds: ['personal-C', targetDashboard],
+      resolveTabId: (dashboard, slug) => slug === (dashboard === targetDashboard ? targetTab : 'tab-C') ? slug : null,
+      userNavigationSeq: 0,
+      applyDashboard: dashboard => setView({ dashboard, tab: targetTab }),
+      applyTab: tab => setView(previous => ({ ...previous, tab })),
+      applySymbol: () => {},
+    });
+    return <output aria-label="Applied view">{`${view.dashboard}/${view.tab}/FPT`}</output>;
+  }
+
+  render(<AppliedTargetHarness />);
+  await act(async () => {
+    await new Promise<void>(resolve => {
+      window.addEventListener('popstate', () => resolve(), { once: true });
+      window.history.back();
+    });
+  });
+
+  expect(screen.getByLabelText('Applied view')).toHaveTextContent(`${targetDashboard}/${targetTab}/FPT`);
+  expect(window.location.pathname + window.location.search + window.location.hash).toBe(
+    `/dashboard?dashboard=${targetDashboard}&tab=${targetTab}&symbol=FPT&view=compact#workspace`,
+  );
+  expect(window.history.length).toBe(historyLength);
+  expect(window.history.state).toEqual(expect.objectContaining({ __NA: true, retained: true }));
 });
 
 describe('resolveDashboardSlug', () => {

@@ -6,11 +6,11 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Settings2, Plus, X, GripVertical } from 'lucide-react';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useDashboard } from '@/contexts/DashboardContext';
+import { MAX_TABS } from '@/contexts/DashboardContext/constants';
 import { ManageTabsModal } from '@/components/modals/ManageTabsModal';
 import { useTouchGestures } from '@/hooks/useTouchGestures';
 import type { DashboardTab } from '@/types/dashboard';
 
-const MAX_TABS = 12;
 const CREATE_TAB_LOCK_MS = 300;
 
 function getShortcutModifierLabel(): string {
@@ -137,7 +137,7 @@ export function TabBar(_props: TabBarProps) {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [activeDashboard, activeTab, recentlyClosedTabs.length, restoreLastClosedTab]);
+    }, [activeDashboard, activeTab, deleteConfirmTabId, recentlyClosedTabs.length, restoreLastClosedTab]);
 
     if (!activeDashboard) {
         return (
@@ -367,6 +367,7 @@ export function TabBar(_props: TabBarProps) {
                                     role="button"
                                     tabIndex={0}
                                     aria-label={dashboardEditable ? `${tab.name} tab. Press Alt plus arrow keys to reorder.` : `${tab.name} tab`}
+                                    aria-current={isActive ? 'page' : undefined}
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter' || e.key === ' ') {
                                             e.preventDefault();

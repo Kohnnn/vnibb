@@ -32,10 +32,11 @@ function formatRatio(value: number | null | undefined, decimals = 2): string {
 
 const CANONICAL_PERCENT_KEYS: Record<string, true> = {
     roe: true, roa: true, roic: true, gross_margin: true, net_margin: true,
-    operating_margin: true, revenue_growth: true, earnings_growth: true, debt_assets: true,
+    operating_margin: true, revenue_growth: true, earnings_growth: true, debt_assets: true, dividend_yield: true, payout_ratio: true,
 };
 
 function formatPct(metricKey: string, value: number | null | undefined): string {
+    if (metricKey === 'payout_ratio') return formatPercent(value, { decimals: 2, input: 'percent' });
     const clamp = metricKey === 'dividend_yield' || metricKey === 'fcf_yield'
         ? 'yield'
         : metricKey === 'revenue_growth' || metricKey === 'earnings_growth'
@@ -131,6 +132,13 @@ const RATIO_FIELD_ALIASES: Record<string, string[]> = {
 
 function readRatioMetric(entry: Record<string, unknown> | undefined, metricKey: string): number | null {
     if (!entry) return null;
+    const metadata = entry.unit_metadata as Record<string, { unavailable_reason?: unknown }> | undefined;
+    if (entry.unavailable_reason || metadata?.[metricKey]?.unavailable_reason) return null;
+    if (metricKey === 'dividend_yield' || metricKey === 'payout_ratio') {
+        const units = entry.ratio_units as Record<string, unknown> | undefined;
+        if (!units || units[metricKey] !== 'percent') return null;
+    }
+    if (['eps', 'bvps', 'dps'].includes(metricKey) && (entry.ratio_units as Record<string, unknown> | undefined)?.[metricKey] !== 'VND/share') return null;
     const keys = RATIO_FIELD_ALIASES[metricKey] ?? [metricKey];
     const zeroMeansUndefined = UNDEFINED_WHEN_ZERO_RATIO_KEYS[metricKey] === true;
     for (const key of keys) {
@@ -192,12 +200,24 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         limit: visiblePeriodLimit,
     });
 
-    const rawRatios = period === 'TTM' ? [] : data?.data || [];
+    const rawRatios = useMemo(() => period === 'TTM' ? [] : data?.data || [], [period, data?.data]);
     const canonicalRatios = useMemo(() => canonicalPeriodRows(rawRatios), [rawRatios]);
     const ratios = useMemo(() => canonicalRatios.rows
-        .map((entry) => ({ ...entry, period: normalizeRatioPeriod(entry.period)! }))
+        .map((entry) => ({ ...entry, period: normalizeRatioPeriod(entry.period)!,
+            payout_ratio: readRatioMetric(entry as unknown as Record<string, unknown>, 'payout_ratio'),
+            dividend_yield: readRatioMetric(entry as unknown as Record<string, unknown>, 'dividend_yield'),
+        }))
         .sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
         [canonicalRatios.rows]);
+    const exportData = useMemo(() => ratios.map((entry) => ({
+        period: entry.period,
+        ...Object.fromEntries(Object.keys(entry).filter((key) => typeof entry[key as keyof typeof entry] === 'number')
+            .concat(['payout_ratio', 'dividend_yield']).map((key) => [key,
+                ['eps', 'bvps', 'dps'].includes(key)
+                    ? convertFinancialValueForUnit(readRatioMetric(entry as unknown as Record<string, unknown>, key), unitConfig, entry.period)
+                    : readRatioMetric(entry as unknown as Record<string, unknown>, key),
+            ])),
+    })), [ratios, unitConfig]);
 
     // Columns are exactly the statement panels' window, so the same period selector shows
     // the same headings in every panel — including "2026 YTD", which the ratio feed cannot
@@ -220,6 +240,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
 
     const hasData = ratios.length > 0;
     const responseWarning = period === 'TTM' ? null : data?.error || null;
+    const refreshWarning = error?.message || responseWarning;
     const isFallback = Boolean((error || responseWarning) && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
@@ -233,10 +254,11 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                 lastDataDate: null,
                 fetchedAt: dataUpdatedAt,
                 stale: isFallback,
-                extra: hasData ? { periods: ratios.length } : undefined,
+                warnings: refreshWarning ? [refreshWarning] : undefined,
+                extra: hasData ? { periods: ratios.length, data: exportData } : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, ratios.length]);
+    }, [onDataChange, hasData, isFallback, refreshWarning, dataUpdatedAt, symbol, apiPeriod, ratios.length, exportData]);
 
     const categoryMetrics = {
         valuation: ['pe', 'pb', 'ps', 'ev_sales', 'ev_ebitda', 'peg_ratio'],
@@ -414,7 +436,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
             noPadding
             widgetId={id}
             showLinkToggle
-            exportData={ratios}
+            exportData={exportData}
             exportFilename={`ratios_${symbol}_${period}`}
         >
             <div className="h-full flex flex-col">
@@ -428,9 +450,9 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                         align="right"
                     />
                 </div>
-                {responseWarning && hasData && (
+                {refreshWarning && hasData && (
                     <div role="alert" className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
-                        {responseWarning}
+                        {refreshWarning}
                     </div>
                 )}
                 {(canonicalRatios.issues.length > 0 || canonicalRatios.invalidPeriodCount > 0) && (

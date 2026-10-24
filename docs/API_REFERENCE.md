@@ -60,6 +60,9 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 
 Operational Vietnamese provider requests use Vietcap IQ as the primary source and free VCI as the only secondary provider. Frontend source query options and settings accept `VCI` only; browser-saved selections from retired providers are replaced with `VCI`, while historical response source labels remain unchanged. An HTTP 200 financial-ratios fallback may include usable `data` alongside `error`; consumers retain the table, disclose that warning, and mark the served data as a fallback rather than normal success.
 
+Historical prices merge admitted SQL rows with Mongo/cache rows before requesting upstream gaps; raw/adjusted price and unit admissions remain unchanged. Events and dividends serve available persisted rows before provider requests. Ratio history reads existing certified fiscal Mongo/SQL rows with the same period mapping and per-cell unit admission as financial ratios. These provider fallbacks have a maximum ten-second deadline (or the shorter configured request budget); unavailable ratio history returns an `error`, not a fabricated empty success. Endpoint-owned read-only SQL transactions are released before slow upstream requests; caller-owned transactions are not rolled back.
+Provider deadlines do not stop already-running synchronous VNStock calls. Identical quote/history/event/dividend acquisitions retain and share their executor future until actual completion, with at most 32 occupied acquisition keys; completed entries are removed. HTTP quote waits remain bounded by the request/provider deadlines. Price-socket quote jobs wait for the shared worker's actual completion, keeping their `websocket_fetch_concurrency` slot even after `vnstock_timeout` expires; admitted late results retain their provider observation timestamp, VND unit and `vnstock:VCI:quote.history` source and are broadcast without another acquisition. Cancellation propagates without cancelling the shared worker. Ratio acquisitions reuse the existing single-worker financial executor, sharing identical keys and rejecting different work while occupied.
+
 Financial statement units and fiscal basis:
 - `/equity/{symbol}/financials` first reads verified IQ records. An empty or unavailable IQ corpus triggers symbol-scoped public IQ acquisition of financial rows and matching descriptors before free VCI supplementation; it does not backfill the market. Verified groups are persisted through the existing structured SQL bridge and remain usable if another dataset fails. Unknown monetary units remain null; descriptor-confirmed VND/share EPS may still be returned. Partial acquisition or persistence is disclosed in `error`, and degraded responses are not cached. Cancellation propagates to the caller; an already-running blocking provider request may finish in its worker thread.
 - IQ income `eps` and `eps_diluted` accept the exact descriptor titles `EPS basic (VND)` and `EPS diluted (VND)` as per-share evidence (`VND/share`). These values, including zero, are not monetary totals and are not multiplied by statement amount scales. Explicit unknown/conflicting units or scales still withhold the affected EPS field; unsupported monetary totals remain null. Scoped descriptors, raw values, fiscal identity and field-level unit evidence survive SQL and MCP serving.
@@ -67,12 +70,25 @@ Financial statement units and fiscal basis:
 - Unknown unit or conflicting observations produce null monetary fields and an explicit `unavailable_reason`; missing data is not zero. Persisted canonical values are read from `raw_data._financial_lineage`, not guessed from raw field magnitudes. Legacy annual values retain an unconfirmed-basis disclosure.
 - Accepted wide-row aliases pass through the same unit normalization as mapped metrics, retain selected-field lineage, and follow deterministic field precedence. Unit rejection cannot fall through to a lower-priority alias.
 - TTM balance sheets use the latest confirmed quarterly snapshot, not a sum. Income/cash flows require four consecutive quarters with matching units and consolidation. Explicit cumulative-YTD observations are differenced against the preceding quarter; unsupported EPS/share aggregation is unavailable. Incomplete or ambiguous TTM returns a null-valued row explaining the cause.
+- Final statement admission checks original fiscal evidence after fallbacks, merges and cache reads. A bare year with an explicit compatible quarter remains valid; ambiguous or contradictory quarters are unavailable. Derived TTM balance snapshots retain and revalidate their original quarterly source proof before relabeling.
+- True interest expense requires field-level evidence distinct from total financial expenses. Compatible YTD/TTM flows retain component evidence, including genuine zero; incompatible fallback units or consolidation cannot erase a valid primary observation. Retained raw records are not rewritten by serving admission.
 - `/equity/{symbol}/ratios?period=TTM` returns an empty `data` array and an explicit unsupported-period error. Quarterly EPS/DPS are not summed and inherited ratios are not relabelled as TTM; use FY or Q.
 - `/growth` uses `((current - previous) / abs(previous)) * 100`, with negative-base and sign-transition metadata separate. Zero/missing prior values are unavailable. Annual income statements and growth retain the same persisted earnings source; the historical `qoq` field compares the same quarter of the preceding year, not adjacent quarters. This is not a new convention for unrelated screener/Matrix metrics.
 - Statement payloads retain provider report `Head` and raw values once per statement in source reports, rather than repeating the entire report for every metric/row. Compact serialization does not certify otherwise unknown units or basis.
 - Comparison percentage values are not rescaled by magnitude. The stored `raw_data` keys `ocf_sales` and `fcf_yield` are explicitly fraction-valued in the local ratio writer and convert to percent once at that boundary. Loaded-peer means are not the API's industry-wide `sector_averages` cohort.
 
 Quote responses distinguish unavailable data from zero-valued prices. An invalid symbol or a provider failure without a stored quote returns `data: null` with an error; a stored fallback retains its market timestamp and reports the live-source failure. Consumers must not turn `null` into a fabricated zero trade.
+
+HTTP quote metadata separates serving provenance from raw upstream evidence:
+- `meta.source` identifies the selected serving path: `redis:price_snapshot`, `postgres:stored_quote`, `mongo:market_prices_eod`, or `vnstock:quote.history`. It does not certify the original supplier.
+- Optional `data.upstream_source` and `meta.upstream_source` retain supplied raw source lineage, or `null` when unknown. Storage or transport names do not fill missing supplier evidence.
+- Optional `data.as_of` and `meta.as_of` retain the admitted observation clock. `meta.as_of` is an ISO timestamp with timezone, or `null`; a date-only settled observation is represented at midnight in `Asia/Ho_Chi_Minh`, not as intraday precision. Receipt, fetch and write clocks never fill an unknown observation clock; existing `data.updated_at` remains separate.
+- `meta.stale` is computed from that admitted clock when constructing the response: age greater than 60 seconds is `true`; an unknown clock produces `null`, not a fabricated fresh or stale status.
+- `refresh=true` requests bounded provider acquisition. An unavailable price/unit or acquisition failure may return an admitted stored quote with a nonempty `error`; usable values and the failure disclosure coexist. Error-bearing responses bypass successful-response caching rather than clearing the error to gain cacheability.
+
+WebSocket quote `source` identifies delivery provenance, not independently certified upstream lineage. Watchlist distinguishes HTTP quote, WebSocket and mixed delivery, preserves HTTP refresh warnings alongside usable observations, and labels missing supplier evidence as unknown. A connected socket alone does not establish fresh data or successful provider acquisition.
+
+Pre-review integration limitation: source `37745d91f29face8393af0a16ce2d28faf613d5e` still substitutes the screener materialization partition when an actual `trade_date` is absent. Independent Spec review identified this as a blocker: that partition must not populate `as_of` or `stale`. The contract above is not a claim that this source has passed final review; resolution and exact-source evidence are recorded in `backend-reliability-20261023.md`.
 
 Quote and historical rows expose `price_unit`: `VND`, `index_points`, or
 `unknown`. Confirmed equity OHLC, price, previous/raw/adjusted close and absolute
@@ -131,6 +147,8 @@ certify market prices, corporate-action adjustments or production deployment par
 
 Screener responses include `meta.availability`, `meta.screen_scope`, cache/fallback staleness and matched-count metadata. An unavailable provider without a verified fallback returns `data: []`, `meta.availability: "unavailable"` and an error; a successful zero-match screen remains available. Whole-Universe reads require a completed daily symbol-coverage record; symbol-specific reads may still return an unverified row.
 
+Daily screener publication assembles retained, source-certified VND quotes independently of annual ratio enrichment. A completion record requires the exact active symbol set and a positive, dated, unit-certified quote for every row, committed with that record; resumed runs revalidate the durable row set before publication. Missing ratios remain null (existing same-day metrics are retained), and failed optional enrichment has a separate partial `screener_ratio_enrichment` receipt. Quote trade dates are never replaced by materialization time: complete but old observations remain stale. Missing quote coverage withholds the Universe record; classification and capitalization remain unavailable unless supplied by their actual sources.
+
 ### Market
 - `GET /market/indices`
 - `GET /market/world-indices`
@@ -144,6 +162,10 @@ Screener responses include `meta.availability`, `meta.screen_scope`, cache/fallb
 - `GET /market/research/rss-feed`
 
 Heatmap responses separate `price_updated_at` from `constituents_as_of`, and return `constituents_stale`, `cached` and `partial`; a fresh price does not prove the constituent partition current. A request-limited live provider response is marked partial. Breadth requires a verified screener Universe; without one it returns an error instead of treating a partial day as the whole market.
+
+`GET /market/top-movers` resolves admitted retained last-session SQL rankings before any live-provider acquisition. Rows preserve `source`, `price_source`, `price_unit`, the observation date in `updated_at` / `session_label`, and `is_last_session` / `is_stale`; response-level source/session/staleness describe those selected rows. Retained status does not certify a complete market universe or successful live acquisition. VN30 membership and exchange restrictions apply before ranking and limiting; daily changes use each symbol's prior admitted observation.
+
+Retained inputs and successful top-mover responses use the existing 120-second caches. Serving admitted retained rows does not start an automatic provider refresh, including while those cache entries remain valid. Only absence of admitted retained rows reaches provider acquisition; equivalent requests share occupied provider work until its actual completion, including after a caller timeout or cancellation. Read/provider failures remain explicit and error-bearing responses are not cached as successes.
 
 ### News
 - `GET /news/feed`
@@ -299,19 +321,28 @@ Request:
 GET /api/v1/equity/VNM/quote
 ```
 
-Response (trimmed):
+Illustrative stored-response shape (trimmed; not a verification receipt):
 ```json
 {
-  "error": false,
   "data": {
     "symbol": "VNM",
     "price": 65800,
     "change": 300,
     "changePct": 0.46,
     "volume": 1842100,
-    "updatedAt": "2026-02-22T09:30:00+07:00"
+    "updated_at": "2026-02-22T00:00:00",
+    "price_unit": "VND",
+    "as_of": "2026-02-22T00:00:00+07:00",
+    "upstream_source": "vnstock_vnd:VCI"
   },
-  "cached": true
+  "meta": {
+    "count": 1,
+    "source": "postgres:stored_quote",
+    "upstream_source": "vnstock_vnd:VCI",
+    "as_of": "2026-02-22T00:00:00+07:00",
+    "stale": true
+  },
+  "error": null
 }
 ```
 

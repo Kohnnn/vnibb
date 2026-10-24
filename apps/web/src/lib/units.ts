@@ -1,3 +1,5 @@
+import { normalizeFinancialPeriod } from './financialPeriods'
+
 export type UnitDisplay = 'auto' | 'raw' | 'K' | 'M' | 'B' | 'USD'
 
 export interface UnitConfig {
@@ -357,6 +359,55 @@ export function toFiniteNumber(value: unknown): number | null {
   return null
 }
 
+function hasCanonicalFieldEvidence(value: unknown, unit: string): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const metadata = value as Record<string, unknown>
+  if (metadata.unavailable_reason) return false
+  const declaredUnits = [metadata.unit, metadata.value_unit].filter((entry) => entry !== undefined && entry !== null)
+  if (declaredUnits.some((entry) => entry !== unit)) return false
+  if (Array.isArray(metadata.components)) {
+    return metadata.components.length > 0 && metadata.components.every((component) => hasCanonicalFieldEvidence(component, unit))
+  }
+  if (declaredUnits.length === 0) return false
+  return (typeof metadata.source_unit === 'string' && metadata.source_unit.trim().length > 0)
+    || Boolean(metadata.unitEvidence && typeof metadata.unitEvidence === 'object' && Object.keys(metadata.unitEvidence).length > 0)
+}
+
+export function readCanonicalStatementValue(
+  row: Record<string, unknown>,
+  key: string,
+  flow = true,
+): number | null {
+  const period = normalizeFinancialPeriod(typeof row.period === 'string' ? row.period : null)
+  const isTtm = period === 'TTM' || Boolean(period?.startsWith('TTM-'))
+  if (!period || period === 'YTD' || row.unavailable_reason
+    || row.currency !== 'VND' || row.value_unit !== 'VND'
+    || !['consolidated', 'separate'].includes(String(row.consolidation_basis).toLowerCase())) return null
+  const expectedFlow = isTtm ? 'trailing_twelve_months'
+    : period.includes('YTD') ? 'cumulative_ytd'
+      : period.startsWith('Q') ? 'single_quarter' : 'annual'
+  if (flow && row.flow_basis !== expectedFlow) return null
+  if (isTtm) {
+    if (row.aggregation_basis !== (flow ? 'four_quarter_flow_sum' : 'latest_quarter_snapshot')) return null
+    if (!Array.isArray(row.source_periods) || row.source_periods.length !== (flow ? 4 : 1)) return null
+    const sourceQuarters = row.source_periods.map((sourcePeriod) => typeof sourcePeriod === 'string'
+      ? normalizeFinancialPeriod(sourcePeriod)?.match(/^Q([1-4])-(20\d{2})$/) : null)
+    if (sourceQuarters.some((quarter) => !quarter)) return null
+    const ordinals = sourceQuarters.map((quarter) => Number(quarter![2]) * 4 + Number(quarter![1]))
+    if (ordinals.some((ordinal, index) => ordinal !== ordinals[0] - index)) return null
+    if (flow) {
+      const metadata = row.unit_metadata as Record<string, unknown> | undefined
+      const field = metadata?.[key]
+      if (!field || typeof field !== 'object' || !('components' in field)
+        || !Array.isArray(field.components) || field.components.length !== 4) return null
+    }
+  }
+  const metadata = row.unit_metadata as Record<string, unknown> | undefined
+  const unit = key === 'eps' || key === 'eps_diluted' ? 'VND/share' : 'VND'
+  const value = row[key]
+  return hasCanonicalFieldEvidence(metadata?.[key], unit) && isFiniteNumber(value) ? value : null
+}
+
 export function clampPercentage(
   value: number | null | undefined,
   type: 'yoy_change' | 'margin' | 'yield' | 'ratio' = 'yoy_change'
@@ -411,11 +462,8 @@ export function normalizePercentValue(
  * The absolute denominator is deliberately the only option: a second convention
  * in this helper is what let the two surfaces drift apart.
  *
- * A negative prior value still makes the percentage unreadable as ordinary
- * growth, so `percentChangeDetail` classifies the pair and callers MUST render
- * that classification rather than labelling every negative-base cell as one
- * undifferentiated "turnaround": a loss that narrowed is not a loss that flipped
- * to profit.
+ * `percentChangeDetail` uses metric identity to reserve profit/loss language for
+ * earnings. Other metrics retain neutral signed changes with the same arithmetic.
  */
 export function calculatePercentChange(
   current: number | null | undefined,
@@ -436,6 +484,7 @@ export function calculatePercentChange(
 
 /** How a comparison reads once a negative endpoint is accounted for. */
 export type PercentChangeBasis =
+  | 'change'
   | 'growth'
   | 'loss-to-profit'
   | 'loss-narrowed'
@@ -451,7 +500,27 @@ export interface PercentChangeDetail {
   label: string | null
 }
 
+const EARNINGS_METRIC_KEYS: Record<string, true> = {
+  gross_profit: true,
+  operating_income: true,
+  operating_profit: true,
+  pre_tax_income: true,
+  pre_tax_profit: true,
+  profit_before_tax: true,
+  net_income: true,
+  net_income_cf: true,
+  npat_before_mi: true,
+  npat_reported: true,
+  npat_adjusted: true,
+  ebit: true,
+  ebitda: true,
+  eps: true,
+  eps_diluted: true,
+  eps_reported: true,
+}
+
 const PERCENT_CHANGE_LABELS: Record<PercentChangeBasis, string | null> = {
+  change: null,
   growth: null,
   'loss-to-profit': 'to profit',
   'loss-narrowed': 'loss narrowed',
@@ -473,14 +542,17 @@ export function percentChangeDetail(
   current: number | null | undefined,
   previous: number | null | undefined,
   options: {
+    metricKey: string
     minimumBase?: number
     clamp?: 'yoy_change' | 'margin' | 'yield' | 'ratio'
-  } = {}
+  }
 ): PercentChangeDetail {
   const hasNegativeBase = isFiniteNumber(previous) && (previous < 0 || (previous > 0 && isFiniteNumber(current) && current < 0))
-  const basis = isFiniteNumber(current) && isFiniteNumber(previous)
-    ? classifyPercentChange(current, previous)
-    : 'growth'
+  const basis = EARNINGS_METRIC_KEYS[options.metricKey] === true
+    ? isFiniteNumber(current) && isFiniteNumber(previous)
+      ? classifyPercentChange(current, previous)
+      : 'growth'
+    : 'change'
   return {
     change: calculatePercentChange(current, previous, options),
     hasNegativeBase,
@@ -496,11 +568,12 @@ export function percentChangeDetail(
 export function describePercentChange(detail: PercentChangeDetail): string | undefined {
   if (!detail.hasNegativeBase) return undefined
   const denominator = 'This percentage divides by the absolute prior value.'
+  if (detail.basis === 'change') return `An endpoint is negative. ${denominator}`
   switch (detail.basis) {
     case 'loss-to-profit':
       return `Prior period was a loss and the current period is profitable (loss to profit). ${denominator}`
     case 'loss-narrowed':
-      return `Both periods are losses and the loss narrowed. ${denominator}`
+      return `The loss narrowed relative to the prior period. ${denominator}`
     case 'loss-widened':
       return `Both periods are losses and the loss widened. ${denominator}`
     case 'profit-to-loss':

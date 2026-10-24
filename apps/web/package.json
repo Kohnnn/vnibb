@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "dev:3000": "next dev -p 3000",
-    "dev:3001": "next dev -p 3001",
+    "dev": "next dev --webpack",
+    "dev:3000": "next dev --webpack -p 3000",
+    "dev:3001": "next dev --webpack -p 3001",
     "dev:safe": "powershell -ExecutionPolicy Bypass -File ./scripts/start-dev.ps1",
     "predev": "node ./scripts/generate-changelog.mjs",
     "prebuild": "node ./scripts/generate-changelog.mjs",

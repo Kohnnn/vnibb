@@ -573,7 +573,7 @@ export function WidgetWrapper({
                 previous_symbol: displaySymbol,
                 next_symbol: newSymbol,
             });
-            if (isTradingViewWidget(widgetType) && usesTradingViewWidgetSymbol(widgetType) && scopeMode === 'override') {
+            if (scopeMode === 'override') {
                 setWidgetTickerOverride(id, newSymbol);
                 persistTickerScope({ mode: 'override', symbol: newSymbol });
                 return;

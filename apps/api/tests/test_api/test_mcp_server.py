@@ -703,6 +703,127 @@ async def test_sql_ratio_consumers_withhold_unadmitted_percentages(
     assert all(getattr(stored_row, column) == 0.2 for column in percent_columns)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("certified", [False, True])
+async def test_sql_ratio_consumers_withhold_retained_interest_coverage_without_inputs(
+    monkeypatch, test_engine, test_db, certified
+):
+    from vnibb.services import ai_context_service
+
+    raw = {"interest_coverage": 12, "debt_service_coverage": 8,
+           "ratio_units": dict.fromkeys(server.PERCENT_RATIO_FIELDS, "percent")}
+    if certified:
+        raw.update({
+            "symbol": "FPT", "dataset": "finance.ratio", "datasetVariant": "finance.ratio.year",
+            "source": "vietcap", "providerSource": "vietcap", "comTypeCode": "CT",
+            "rawFiscalBasis": {"year": 2025, "quarter": 5},
+            "raw": {"year": 2025, "quarter": 5, "ratioType": "RATIO_YEAR", "reported_coverage": 12},
+            "descriptors": [{"field": "reported_coverage", "parent": None,
+                             "fullTitleEn": "Interest coverage", "unit": "times"}],
+            "descriptorEvidence": {"symbol": "FPT", "section": "RATIO", "comTypeCode": "CT",
+                                   "source": "vietcap", "endpoint": "/v1/company/FPT/financial-statement/metrics",
+                                   "receivedAt": "2026-10-13T01:00:00Z"},
+        })
+    stored = server.FinancialRatio(
+        id=1, symbol="FPT", period="2025", period_type="year", fiscal_year=2025,
+        source="vietcap" if certified else "VCI", interest_coverage=12, raw_data=raw,
+    )
+    test_db.add(stored)
+    await test_db.commit()
+    session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(server, "async_session_maker", session_maker)
+    monkeypatch.setattr(ai_context_service, "async_session_maker", session_maker)
+
+    async def database_available():
+        return True
+
+    monkeypatch.setattr(server, "check_database_connection", database_available)
+    generic = await server.query_database_collection_data(collection="financial_ratios", symbol="FPT")
+    latest = await server.get_latest_financial_ratios("FPT")
+    snapshot = await server.get_symbol_snapshot("FPT")
+    for item in (generic["items"][0], latest["item"], snapshot["snapshot"]["ratios"]):
+        assert item["interest_coverage"] == (12 if certified else None)
+        if not certified:
+            assert item["unavailable_metrics"]["interest_coverage"] == "interest_inputs_unverified"
+            assert item["raw_observation"]["interest_coverage"] == 12
+        assert item["raw_data"] == raw
+    await test_db.refresh(stored)
+    assert stored.interest_coverage == 12
+    assert stored.raw_data == raw
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("canonical,label", [
+    (False, "financial_expenses"), (True, "financial_expenses"), (True, "interest_expense"),
+])
+@pytest.mark.parametrize("period,period_type,quarter,reason", [
+    ("2025", "year", None, None),
+    ("Q2-2025", "quarter", 2, None),
+    ("2025", "quarter", None, "ambiguous_quarterly_fiscal_identity"),
+    ("Q1-2025", "quarter", 2, "conflicting_fiscal_identity"),
+])
+async def test_sql_statement_consumers_admit_observations_without_rewriting_evidence(
+    monkeypatch, test_engine, test_db, canonical, label, period, period_type, quarter, reason
+):
+    from vnibb.services import ai_context_service
+
+    raw_data = {label: 900, "provider_rows": [{"label": label, "value": 900}]}
+    unit_metadata = {"revenue": {"source_unit": "VND", "value_unit": "VND"}}
+    raw_data["_financial_lineage"] = {
+        "symbol": "FPT", "statement_type": "income", "source": "VCI",
+        "period": period, "fiscal_year": 2025, "fiscal_quarter": quarter,
+        "currency": "VND", "value_unit": "VND", "consolidation_basis": "consolidated",
+        "flow_basis": "annual" if period_type == "year" else "single_quarter",
+        "aggregation_basis": "reported_annual" if period_type == "year" else "reported_quarter",
+        "source_periods": [period], "unit_metadata": unit_metadata,
+    }
+    if canonical:
+        raw_data["_financial_lineage"]["canonical_data"] = {
+            "symbol": "FPT", "statement_type": "income", "period": period,
+            "fiscal_year": 2025, "fiscal_quarter": quarter, "source": "VCI",
+            "value_unit": "VND", "interest_expense": 900, "revenue": 1000,
+            "unit_metadata": {**unit_metadata, "interest_expense": {
+                "label": label, "source_unit": "VND", "value_unit": "VND",
+            }},
+        }
+    stored = server.IncomeStatement(
+        id=1, symbol="FPT", period=period, period_type=period_type, fiscal_year=2025,
+        fiscal_quarter=quarter, source="VCI", interest_expense=900, revenue=1000, raw_data=raw_data,
+    )
+    test_db.add(stored)
+    await test_db.commit()
+    session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(server, "async_session_maker", session_maker)
+    monkeypatch.setattr(ai_context_service, "async_session_maker", session_maker)
+
+    async def database_available():
+        return True
+
+    monkeypatch.setattr(server, "check_database_connection", database_available)
+    generic = await server.query_database_collection_data(
+        collection="income_statements", symbol="FPT", period_type=period_type,
+    )
+    latest = await server.get_latest_financial_statement("FPT", period_type=period_type)
+    snapshot = await server.get_symbol_snapshot("FPT")
+
+    for payload in (generic["items"][0], latest["item"], snapshot["snapshot"]["income_statement"]):
+        accepted = canonical and label == "interest_expense" and reason is None
+        assert payload["interest_expense"] == (900 if accepted else None)
+        assert payload["revenue"] == (None if reason else 1000)
+        assert payload["raw_data"] == raw_data
+        assert payload.get("data_status", "available") == ("available" if accepted else "partial_unavailable")
+        if not accepted:
+            assert "interest_expense" in payload["unavailable_metrics"]
+            assert payload["raw_observation"]["interest_expense"] == 900
+        if reason:
+            assert payload["unavailable_reason"] == reason
+    assert latest["data_status"] == ("available" if canonical and label == "interest_expense" and reason is None else "partial_unavailable")
+    await test_db.refresh(stored)
+    assert stored.interest_expense == 900
+    assert stored.revenue == 1000
+    assert stored.raw_data == raw_data
+
+
 @pytest.mark.parametrize("value,expected", [("quarter", "quarter"), (" YEAR ", "year")])
 def test_fiscal_period_filters_match_persisted_lowercase_values(value, expected):
     _, queries, _, _ = server.build_collection_queries(collection="income_statements", period_type=value)
@@ -717,6 +838,7 @@ async def test_public_sql_tool_preserves_fetched_rows_and_deep_evidence(
     from datetime import date, timedelta
 
     evidence = "  audit\n" + "evidence " * 100 + "https://example.test/report?unit=VND&basis=consolidated"
+    canonical_data = {"zero": 0, "missing": None, "flag": False}
     test_db.add(server.Stock(id=1, symbol="VNM", exchange="HOSE"))
     await test_db.flush()
     test_db.add_all(server.StockPrice(
@@ -726,11 +848,18 @@ async def test_public_sql_tool_preserves_fetched_rows_and_deep_evidence(
     test_db.add(server.BalanceSheet(
         id=1, symbol="VNM", period="2025", period_type="year", fiscal_year=2025,
         source="vietcap", total_equity=0,
-        raw_data={"_financial_lineage": {"unit_metadata": {"revenue": {
-            "provider_value": 0, "source_unit": "VND", "raw_value": None,
-            "raw_unit": "VND", "normalization_multiplier": 1, "validated": True,
-        }}, "canonical_data": {"zero": 0, "missing": None, "flag": False},
-        "source_report": {"evidence": evidence}}},
+        raw_data={"_financial_lineage": {
+            "symbol": "VNM", "statement_type": "balance", "source": "vietcap",
+            "period": "2025", "fiscal_year": 2025, "fiscal_quarter": None,
+            "currency": "VND", "value_unit": "VND", "consolidation_basis": "consolidated",
+            "flow_basis": "instantaneous", "aggregation_basis": "reported_annual",
+            "source_periods": ["2025"], "unit_metadata": {
+                "total_equity": {
+                    "provider_value": 0, "source_unit": "VND", "value_unit": "VND", "raw_value": None,
+                    "raw_unit": "VND", "normalization_multiplier": 1, "validated": True,
+                },
+            }, "canonical_data": canonical_data,
+            "source_report": {"evidence": evidence}}},
     ))
     await test_db.commit()
     monkeypatch.setattr(server, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
@@ -743,7 +872,7 @@ async def test_public_sql_tool_preserves_fetched_rows_and_deep_evidence(
     latest = await server.get_latest_financial_statement("VNM", "balance_sheet", "YEAR")
     assert latest["item"]["total_equity"] == 0
     assert latest["item"]["raw_data"]["_financial_lineage"]["source_report"]["evidence"] == evidence
-    assert latest["item"]["raw_data"]["_financial_lineage"]["canonical_data"] == {"zero": 0, "missing": None, "flag": False}
+    assert latest["item"]["raw_data"]["_financial_lineage"]["canonical_data"] == canonical_data
 
 
 @pytest.mark.asyncio

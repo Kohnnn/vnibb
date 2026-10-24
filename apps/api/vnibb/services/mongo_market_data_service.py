@@ -425,6 +425,7 @@ class MongoMarketDataService:
         def _read() -> list[dict[str, Any]]:
             query = {"source": "vietcap", "symbol": symbol_upper}
             if store == "market_financial_metric_map":
+                query["symbol"] = {"$eq": symbol_upper, "$type": "string"}
                 query["schemaVersion"] = 3
             cursor = self._get_collection(store).find(query, {"_id": 0}).sort(
                 [("updatedAt", -1), ("comTypeCode", 1), ("section", 1)]
@@ -595,8 +596,8 @@ class MongoMarketDataService:
                 if not levels:
                     for index in range(1, 4):
                         for side, price_keys, volume_keys in (
-                            ("buy", (f"bidPrice{index}", f"bid{index}"), (f"bidVol{index}", f"bidVolume{index}")),
-                            ("sell", (f"offerPrice{index}", f"askPrice{index}", f"ask{index}"), (f"offerVol{index}", f"askVolume{index}", f"askVol{index}")),
+                            ("buy", (f"bidPrice{index}", f"bid{index}", f"bid_price_{index}"), (f"bidVol{index}", f"bidVolume{index}", f"bid_vol_{index}")),
+                            ("sell", (f"offerPrice{index}", f"askPrice{index}", f"ask{index}", f"ask_price_{index}"), (f"offerVol{index}", f"askVolume{index}", f"askVol{index}", f"ask_vol_{index}")),
                         ):
                             price = next((raw[key] for key in price_keys if raw.get(key) is not None), None)
                             volume = next((raw[key] for key in volume_keys if raw.get(key) is not None), None)
@@ -986,7 +987,13 @@ class MongoMarketDataService:
                 doc = row.get("doc")
                 if not isinstance(doc, dict):
                     continue
+                doc = dict(doc)
                 doc.pop("_id", None)
+                if doc.get("schemaVersion") != 3:
+                    doc = {**doc, "moatScore": None, "moat": None}
+                    factors = doc.get("moatFactors")
+                    if isinstance(factors, dict):
+                        doc["moatFactors"] = {key: value for key, value in factors.items() if key != "interest_coverage"}
                 symbol = str(doc.get("symbol") or "").upper()
                 if symbol:
                     results[symbol] = doc

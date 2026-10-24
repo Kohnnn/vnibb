@@ -25,6 +25,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from vnibb.core.price_units import persisted_price_record
+from vnibb.providers.vnstock.financials import admitted_interest_expense
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ VARIANT_YEAR_SUFFIX = ".year"
 
 
 ENGINE_SOURCE = "vnibb-fundamental-engine"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # --- key alias tuples (first non-null match wins) -------------------------
 
@@ -65,7 +66,7 @@ NPAT_ALIASES = (
 )
 GROSS_PROFIT_ALIASES = ("gross_profit", "grossProfit")
 EBIT_ALIASES = ("ebit", "operating_profit", "operating_income", "profit_from_operating_activities")
-INTEREST_EXPENSE_ALIASES = ("interest_expense", "interestExpense", "finance_cost", "financial_expenses")
+INTEREST_EXPENSE_ALIASES = ("interest_expense", "interestExpense")
 TOTAL_ASSETS_ALIASES = ("total_assets", "total_asset")  # live-confirmed
 EQUITY_ALIASES = (
     "owners_equity",  # live-confirmed
@@ -324,6 +325,21 @@ def _normalize_statement_rows(records: Sequence[dict[str, Any]]) -> list[dict[st
             lineage[key] = {"rawValue": raw[key], "rawUnit": unit, "scaleToVnd": scale}
             if scale is not None:
                 row[key] = value * scale
+        interest_key = next((key for key in INTEREST_EXPENSE_ALIASES if raw.get(key) is not None), None)
+        if interest_key is not None:
+            row["interest_expense"] = row[interest_key]
+            financial_lineage = (raw.get("raw_data") or {}).get("_financial_lineage") or {}
+            metadata_sources = (
+                raw.get("unit_metadata") or {},
+                (financial_lineage.get("canonical_data") or {}).get("unit_metadata") or {},
+                financial_lineage.get("unit_metadata") or {},
+            )
+            if not any("interest_expense" in metadata for metadata in metadata_sources):
+                evidence = lineage.get(interest_key, {})
+                if evidence.get("scaleToVnd") is not None:
+                    row["unit_metadata"] = {**(raw.get("unit_metadata") or {}), "interest_expense": {
+                        "label": interest_key, "source_unit": evidence["rawUnit"], "value_unit": "VND",
+                    }}
         row["_valuation_unit_lineage"] = lineage
         normalized.append(row)
     return normalized
@@ -685,7 +701,7 @@ def compute_moat_factors(
 
     latest_income = income_by_year[years[-1]]
     ebit = _pick_float(latest_income, *EBIT_ALIASES)
-    interest_expense = _pick_float(latest_income, *INTEREST_EXPENSE_ALIASES)
+    interest_expense = admitted_interest_expense(latest_income)
     interest_coverage = None
     if ebit is not None and interest_expense not in (None, 0):
         interest_coverage = ebit / abs(float(interest_expense))
@@ -1023,6 +1039,21 @@ def compute_fundamental_snapshot(
         if getattr(snapshot, name) is not None
     ]
     return snapshot
+
+
+def fundamental_valuation_unavailable_reason(snapshot: dict[str, Any] | None) -> str | None:
+    if not snapshot:
+        return None
+    inputs = snapshot.get("inputs")
+    inputs = inputs if isinstance(inputs, dict) else {}
+    reason = inputs.get("comparisonUnavailableReason")
+    if reason:
+        return str(reason)
+    lineage = inputs.get("unitLineage")
+    price = lineage.get("price") if isinstance(lineage, dict) else None
+    if inputs.get("unitQuality") != "verified" or not isinstance(price, dict) or price.get("unit") != "VND":
+        return "Retained snapshot valuation basis is unverified; verified input units and declared VND price lineage are required."
+    return None
 
 
 def to_document(snapshot: FundamentalSnapshot, snapshot_date: date) -> dict[str, Any]:

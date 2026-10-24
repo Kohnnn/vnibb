@@ -11,8 +11,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useUnit } from '@/contexts/UnitContext';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { useBalanceSheet, useCashFlow, useFinancialRatios, useIncomeStatement, useProfile } from '@/lib/queries';
-import { describeUnavailableStatementRows, formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
-import { convertFinancialValueForUnit, formatNumber, formatPercent, formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
+import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { convertFinancialValueForUnit, formatNumber, formatPercent, formatUnitValuePlain, getUnitLegend, readCanonicalStatementValue, resolveUnitScale } from '@/lib/units';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { BalanceSheetData, CashFlowData, FinancialRatioData, IncomeStatementData } from '@/types/equity';
 interface FinancialSnapshotWidgetProps {
@@ -100,7 +100,9 @@ function toFiniteNumber(value: unknown): number | null {
         return Number.isFinite(value) ? value : null;
     }
     if (typeof value === 'string') {
-        const parsed = Number(value.replace(/,/g, '').trim());
+        const text = value.replace(/,/g, '').trim();
+        if (!text) return null;
+        const parsed = Number(text);
         return Number.isFinite(parsed) ? parsed : null;
     }
     return null;
@@ -128,16 +130,12 @@ function readObjectNumber(source: Record<string, unknown> | null | undefined, ke
 
 function readEntryNumber(entry: Record<string, unknown> | null | undefined, directKeys: string[], rawKeys: string[] = []): number | null {
     if (!entry) return null;
+    const metadata = entry.unit_metadata && typeof entry.unit_metadata === 'object' ? entry.unit_metadata : {};
+    if (isUnavailableStatementRow(entry) || Object.entries(metadata).some(([key, field]) => (directKeys.includes(key) || rawKeys.includes(key)) && field && typeof field === 'object' && 'unavailable_reason' in field && isUnavailableStatementRow(field))) return null;
 
     const direct = readObjectNumber(entry, directKeys);
     if (direct !== null) return direct;
-
-    const rawData = entry.raw_data;
-    if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) {
-        return null;
-    }
-
-    return readObjectNumber(rawData as Record<string, unknown>, rawKeys);
+    return null;
 }
 
 function parseYearAndQuarter(periodKey: string): { year: number | null; quarter: number | null; isYtd: boolean } {
@@ -201,7 +199,7 @@ function formatSnapshotPeriodLabel(periodKey: string, mode: FinancialPeriodMode)
 
 function buildPeriodMap<T extends { period?: string }>(rows: T[], mode: FinancialPeriodMode): Map<string, T> {
     const map = new Map<string, T>();
-    rows.forEach((row) => {
+    canonicalPeriodRows(rows).rows.forEach((row) => {
         // Only a row that actually says TTM may be keyed as a TTM period; the
         // normalizer otherwise derives a TTM key from any row in TTM mode, which
         // relabelled a quarter (and the ratio feed, which has no TTM at all) as a
@@ -237,19 +235,45 @@ function getComparablePeriodKey(periodKey: string, context: SnapshotContext): st
 }
 
 function valueFromIncome(context: SnapshotContext, periodKey: string, directKeys: string[], rawKeys: string[] = []): number | null {
-    return readEntryNumber(context.incomeByPeriod.get(periodKey) as Record<string, unknown> | undefined, directKeys, rawKeys);
+    const entry = context.incomeByPeriod.get(periodKey) as Record<string, unknown> | undefined;
+    if (!entry) return null;
+    for (const key of [...directKeys, ...rawKeys]) {
+        const value = readCanonicalStatementValue(entry, key);
+        if (value !== null) return value;
+    }
+    return null;
 }
 
 function valueFromBalance(context: SnapshotContext, periodKey: string, directKeys: string[], rawKeys: string[] = []): number | null {
-    return readEntryNumber(context.balanceByPeriod.get(periodKey) as Record<string, unknown> | undefined, directKeys, rawKeys);
+    const entry = context.balanceByPeriod.get(periodKey) as Record<string, unknown> | undefined;
+    if (!entry) return null;
+    if ([...directKeys, ...rawKeys].some((key) => RAW_BALANCE_ALIASES.shares_outstanding.includes(key))) return readEntryNumber(entry, [...directKeys, ...rawKeys]);
+    for (const key of [...directKeys, ...rawKeys]) {
+        const value = readCanonicalStatementValue(entry, key, false);
+        if (value !== null) return value;
+    }
+    return null;
 }
 
 function valueFromCash(context: SnapshotContext, periodKey: string, directKeys: string[], rawKeys: string[] = []): number | null {
-    return readEntryNumber(context.cashByPeriod.get(periodKey) as Record<string, unknown> | undefined, directKeys, rawKeys);
+    const entry = context.cashByPeriod.get(periodKey) as Record<string, unknown> | undefined;
+    if (!entry) return null;
+    for (const key of [...directKeys, ...rawKeys]) {
+        const value = readCanonicalStatementValue(entry, key);
+        if (value !== null) return value;
+    }
+    return null;
 }
 
 function valueFromRatios(context: SnapshotContext, periodKey: string, directKeys: string[]): number | null {
-    return readEntryNumber(context.ratiosByPeriod.get(periodKey) as Record<string, unknown> | undefined, directKeys);
+    const entry = context.ratiosByPeriod.get(periodKey) as Record<string, unknown> | undefined;
+    if (directKeys.some((key) => key === 'payout_ratio' || key === 'dividend_yield')) {
+        const units = entry?.ratio_units as Record<string, unknown> | undefined;
+        if (directKeys.some((key) => units?.[key] !== 'percent')) return null;
+    }
+    if (directKeys.some((key) => ['eps', 'bvps', 'dps'].includes(key)
+        && (entry?.ratio_units as Record<string, unknown> | undefined)?.[key] !== 'VND/share')) return null;
+    return readEntryNumber(entry, directKeys);
 }
 
 function safeDivide(numerator: number | null, denominator: number | null, multiplier = 1): number | null {
@@ -265,8 +289,8 @@ function yearOverYearGrowth(current: number | null, previous: number | null): nu
 function deriveDebt(context: SnapshotContext, periodKey: string): number | null {
     const shortDebt = valueFromBalance(context, periodKey, ['short_term_debt']);
     const longDebt = valueFromBalance(context, periodKey, ['long_term_debt']);
-    if (shortDebt === null && longDebt === null) return null;
-    return (shortDebt || 0) + (longDebt || 0);
+    if (shortDebt === null || longDebt === null) return null;
+    return shortDebt + longDebt;
 }
 
 function deriveWorkingCapitalDelta(context: SnapshotContext, periodKey: string): number | null {
@@ -686,8 +710,14 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
         }));
     }, [periods, snapshotContext, unitConfig]);
 
+    const exportData = useMemo(() => sectionTables.flatMap((section) => periods.map((periodKey) => ({
+        section: section.title,
+        period: periodKey,
+        ...Object.fromEntries(section.rows.map((row) => [row.id, row.values[periodKey] ?? null])),
+    }))), [sectionTables, periods]);
+
     const statementValues = useMemo(
-        () => sectionTables.flatMap((section) => section.rows.flatMap((row) => Object.values(row.values).filter((value): value is number | null | undefined => typeof value === 'number' || value === null || value === undefined))),
+        () => sectionTables.flatMap((section) => section.rows.filter((row) => SNAPSHOT_SECTIONS.find((definition) => definition.id === section.id)?.rows.find((definition) => definition.id === row.id)?.kind === 'statement').flatMap((row) => Object.values(row.values).filter((value): value is number | null | undefined => typeof value === 'number' || value === null || value === undefined))),
         [sectionTables]
     );
     const tableScale = useMemo(() => resolveUnitScale(statementValues, unitConfig), [statementValues, unitConfig]);
@@ -733,10 +763,10 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
                 lastDataDate: null,
                 fetchedAt,
                 stale: Boolean(combinedError && hasPeriods),
-                extra: hasPeriods ? { periods: periods.length } : undefined,
+                extra: hasPeriods ? { periods: periods.length, data: exportData } : undefined,
             }),
         );
-    }, [onDataChange, hasPeriods, combinedError, fetchedAt, symbol, statementPeriod, period, periods.length]);
+    }, [onDataChange, hasPeriods, combinedError, fetchedAt, symbol, statementPeriod, period, periods.length, exportData]);
 
     return (
         <WidgetContainer
@@ -752,6 +782,7 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
             isLoading={isLoading && !hasPeriods}
             widgetId={id}
             hideHeader={hideHeader}
+            exportData={exportData}
             noPadding
         >
             <div className="flex h-full flex-col overflow-hidden bg-[var(--bg-primary)]">
@@ -816,7 +847,7 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
                                                 const definition = SNAPSHOT_SECTIONS.find((item) => item.id === section.id)?.rows.find((item) => item.id === row.id);
                                                 if (!definition) return '-';
                                                 if (definition.kind === 'percent') {
-                                                    return formatPercent(value as number | null | undefined, { decimals: 1, input: 'percent', clamp: 'margin' });
+                                                    return formatPercent(value as number | null | undefined, { decimals: 1, input: 'percent', ...(row.id === 'payout_ratio' ? {} : { clamp: 'margin' as const }) });
                                                 }
                                                 if (definition.kind === 'ratio') {
                                                     return formatNumber(value as number | null | undefined, { decimals: 2 });

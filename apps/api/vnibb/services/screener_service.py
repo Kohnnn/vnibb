@@ -116,7 +116,7 @@ class ScreenerService:
                             if metric == "debt_assets":
                                 if metric in units:
                                     values["extended_metrics"][field] = value
-                            else:
+                            elif metric in ScreenerSnapshot.__table__.c:
                                 values[metric] = value
                         values = normalize_screener_record(values)
                         # Same ownership rule as `CacheManager.store_screener_data`:

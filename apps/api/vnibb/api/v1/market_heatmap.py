@@ -129,23 +129,6 @@ def resolve_heatmap_size_value(row: Row, metric: str, tools: HeatmapRowTools) ->
     if preferred is not None and preferred > 0:
         return preferred
 
-    market_cap = tools.to_float(row.get("market_cap"))
-    if market_cap is not None and market_cap > 0:
-        return market_cap
-
-    price = tools.to_float(row.get("price"))
-    shares_outstanding = tools.to_float(row.get("shares_outstanding"))
-    if price not in (None, 0) and shares_outstanding not in (None, 0):
-        derived_market_cap = price * shares_outstanding
-        if derived_market_cap > 0:
-            return derived_market_cap
-
-    volume = tools.to_float(row.get("volume"))
-    if price not in (None, 0) and volume not in (None, 0):
-        traded_value = price * volume
-        if traded_value > 0:
-            return traded_value
-
     return None
 
 

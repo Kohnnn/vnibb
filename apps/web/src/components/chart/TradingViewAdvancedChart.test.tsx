@@ -13,6 +13,7 @@ const mockCreateChart = jest.fn(() => ({
   priceScale: () => ({ applyOptions: jest.fn() }),
   timeScale: () => ({ setVisibleLogicalRange: jest.fn(), fitContent: jest.fn() }),
   applyOptions: jest.fn(),
+  subscribeCrosshairMove: jest.fn(),
   remove: jest.fn(),
 }));
 

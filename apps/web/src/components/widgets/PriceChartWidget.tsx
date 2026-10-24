@@ -16,7 +16,7 @@ import {
   normalizePriceChartTimeframe,
   normalizePriceChartMode,
 } from '@/lib/priceChartControls';
-import { formatDividendYield, formatPercent, formatRatio, normalizeDividendYield } from '@/lib/formatters';
+import { formatDividendYield, formatPercent, formatRatio, readDividendYield } from '@/lib/formatters';
 import type { FinancialRatioData } from '@/types/equity';
 import type { ScreenerData } from '@/types/screener';
 import { firstFinite } from './utils';
@@ -50,11 +50,6 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
     dataUpdatedAt: metricsUpdatedAt,
   } = useScreenerData({ symbol, limit: 1, enabled: Boolean(symbol) });
   const { data: ratiosData } = useFinancialRatios(symbol, { period: 'FY', enabled: Boolean(symbol) });
-  // QA-v4 F3: Snapshot dividend yield was reading from FY ratios (often 0)
-  // and the screener (also 0), while Key Metrics MARKET pulled TTM and
-  // showed 3.00%. Add a TTM slice so the snapshot resolves from the same
-  // source as Key Metrics.
-  const { data: ratiosTtmData } = useFinancialRatios(symbol, { period: 'TTM', enabled: Boolean(symbol) });
 
   const configuredTimeframe = normalizePriceChartTimeframe(config?.timeframe ?? timeframe);
   const configuredMode = normalizePriceChartMode(config?.chartType);
@@ -86,21 +81,13 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
   const exchange = profileData?.data?.exchange;
   const metrics = screenerData?.data?.[0] as ScreenerData | undefined;
   const latestRatio = latestByFinancialPeriod(ratiosData?.data) as FinancialRatioData | undefined;
-  const ttmRatio = (ratiosTtmData?.data || []).find((row) =>
-    String((row as { period?: string }).period || '').toUpperCase() === 'TTM',
-  ) as FinancialRatioData | undefined;
-  const ttmDividendYieldRaw = (ttmRatio as { dividend_yield?: number | string | null } | undefined)?.dividend_yield;
-  const ttmDividendYield = ttmDividendYieldRaw === null || ttmDividendYieldRaw === undefined
-    ? null
-    : (typeof ttmDividendYieldRaw === 'number' ? ttmDividendYieldRaw : Number(ttmDividendYieldRaw));
   const snapshotMetrics: SnapshotMetric = {
     pe: firstFinite(latestRatio?.pe, metrics?.pe),
     pb: firstFinite(latestRatio?.pb, metrics?.pb),
     roe: firstFinite(latestRatio?.roe, metrics?.roe),
     dividendYield: firstFinite(
-      normalizeDividendYield(Number.isFinite(ttmDividendYield) ? ttmDividendYield : null),
-      normalizeDividendYield(latestRatio?.dividend_yield),
-      normalizeDividendYield(metrics?.dividend_yield),
+      readDividendYield(latestRatio?.dividend_yield, latestRatio?.ratio_units?.dividend_yield),
+      readDividendYield(metrics?.dividend_yield, metrics?.ratio_units?.dividend_yield),
     ),
   };
   const hasMetrics = Boolean(
