@@ -581,7 +581,6 @@ async def test_heatmap_reuses_executor_work_after_provider_deadline(client, monk
     from concurrent.futures import Future
 
     from vnibb.api.v1 import market
-    from vnibb.providers.vnstock import equity_screener
 
     work = Future()
     submissions = []

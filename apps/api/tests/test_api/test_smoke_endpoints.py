@@ -1976,7 +1976,7 @@ async def test_market_indices_slow_provider_settles_for_concurrent_users(client,
     from vnibb.api.v1 import market
 
     release = asyncio.Event()
-    finished = asyncio.Event()
+    provider_task = None
     calls = 0
     observed_at = "2026-03-20T00:00:00"
 
@@ -1984,14 +1984,13 @@ async def test_market_indices_slow_provider_settles_for_concurrent_users(client,
         return [{"index_name": "VNINDEX", "current_value": 1340.0, "time": observed_at}]
 
     async def slow_provider(_params):
-        nonlocal calls
+        nonlocal calls, provider_task
+        provider_task = asyncio.current_task()
         calls += 1
-        try:
-            await release.wait()
-            return []
-        finally:
-            finished.set()
+        await release.wait()
+        return []
 
+    monkeypatch.setattr(market, "_market_provider_jobs", {})
     monkeypatch.setattr(market, "MARKET_PROVIDER_TIMEOUT_SECONDS", 0.02)
     monkeypatch.setattr(market, "_load_latest_market_indices_from_db", stored_rows)
     monkeypatch.setattr(market, "_fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[]))
@@ -2012,7 +2011,8 @@ async def test_market_indices_slow_provider_settles_for_concurrent_users(client,
         assert calls == 1
     finally:
         release.set()
-        await finished.wait()
+        if provider_task is not None:
+            await provider_task
         await asyncio.sleep(0)
 
 
