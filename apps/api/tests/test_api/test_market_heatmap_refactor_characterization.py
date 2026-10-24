@@ -586,12 +586,11 @@ async def test_heatmap_reuses_executor_work_after_provider_deadline(client, monk
     work = Future()
     submissions = []
 
-    class HeldExecutor:
-        def submit(self, func, *args, **kwargs):
-            submissions.append(func)
-            return work
+    def hold_coordinator(executor, func, *args):
+        submissions.append((executor, func))
+        return asyncio.wrap_future(work)
 
-    monkeypatch.setattr(equity_screener, "_executor", HeldExecutor())
+    monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", hold_coordinator)
     monkeypatch.setattr(market.settings, "vnstock_timeout", 0.02)
     monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
     try:
@@ -603,6 +602,7 @@ async def test_heatmap_reuses_executor_work_after_provider_deadline(client, monk
                 assert response.status_code == 503
                 await asyncio.sleep(0)
         assert len(submissions) == 1
+        assert submissions[0][0] is None
         assert not work.cancelled()
     finally:
         work.set_result([])
@@ -627,13 +627,15 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
     completions = []
     children = []
 
+    def run_coordinator(executor, func, *args):
+        assert executor is None
+        batches.append(func)
+        future = pool.submit(func, *args)
+        completions.append(future)
+        return asyncio.wrap_future(future)
+
     class ControlledExecutor:
         def submit(self, func, *args, **kwargs):
-            if func.__name__ == "_fetch_sync":
-                batches.append(func)
-                future = pool.submit(func, *args, **kwargs)
-                completions.append(future)
-                return future
             children.append(args[0])
             if len(batches) == 1:
                 return running if len(children) == 1 else queued
@@ -648,12 +650,16 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
         def __init__(self, **kwargs):
             pass
 
-        def all_symbols(self, **kwargs):
-            return pd.DataFrame({"symbol": ["VNM", "FPT"]})
+        def symbols_by_exchange(self):
+            return pd.DataFrame({
+                "symbol": ["VNM", "FPT"], "exchange": "HOSE", "type": "STOCK",
+            })
 
     monkeypatch.setattr(equity_screener, "_executor", ControlledExecutor())
+    monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", run_coordinator)
     monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace())
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: object)
     monkeypatch.setattr(market.settings, "vnstock_timeout", 0.02)
     monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
     monkeypatch.setattr(market, "_load_stock_metadata", lambda _s: _async({}))
@@ -684,6 +690,253 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
         pool.shutdown(wait=True)
 
 
+@pytest.mark.asyncio
+async def test_heatmap_distinct_batches_progress_at_child_worker_capacity(client, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, Event, Lock
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    from vnibb.api.v1 import market
+    from vnibb.providers.vnstock import equity_screener, runtime
+
+    capacity = 12
+    pool = ThreadPoolExecutor(max_workers=capacity)
+    coordinators = ThreadPoolExecutor(max_workers=capacity)
+
+    def run_coordinator(executor, func, *args):
+        assert executor is None
+        return asyncio.wrap_future(coordinators.submit(func, *args))
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", run_coordinator)
+    coordinators_ready = Barrier(capacity, timeout=1)
+    children_ready = Event()
+    release = Event()
+    lock = Lock()
+    active = peak = 0
+    symbols = [f"A{index:02}" for index in range(capacity)]
+
+    class Listing:
+        def __init__(self, *, source):
+            assert source == "VCI"
+
+        def symbols_by_exchange(self):
+            coordinators_ready.wait()
+            return pd.DataFrame({"symbol": symbols, "exchange": "HOSE", "type": "STOCK"})
+
+        def all_symbols(self, **kwargs):
+            if "exchange" in kwargs:
+                coordinators_ready.wait()
+            return pd.DataFrame({"symbol": symbols, "exchange": "HOSE"})
+
+    class Quote:
+        def __init__(self, *, source, symbol):
+            assert source == "VCI"
+
+        def history(self, *, start, end):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                if active == capacity:
+                    children_ready.set()
+            try:
+                if not release.wait(1):
+                    raise TimeoutError("Test quote work was not released")
+                return pd.DataFrame([{
+                    "time": date.today().isoformat(), "close": 100_000.0,
+                    "volume": 1_000_000, "price_unit": "VND",
+                }])
+            finally:
+                with lock:
+                    active -= 1
+
+    monkeypatch.setattr(equity_screener, "_executor", pool)
+    monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace(
+        stock=lambda **kwargs: SimpleNamespace(quote=Quote(**kwargs)),
+    ))
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
+    monkeypatch.setattr(market.settings, "vnstock_timeout", 6)
+    monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
+    monkeypatch.setattr(market, "_load_stock_metadata", lambda _s: _async({}))
+    monkeypatch.setattr(market, "_load_change_pct_map", lambda _s: _async({}))
+    monkeypatch.setattr(market, "_load_latest_price_time", lambda _s: _async(None))
+    requests = [asyncio.create_task(client.get(
+        f"/api/v1/market/heatmap?exchange=HOSE&limit={limit}&size_metric=volume&use_cache=false"
+    )) for limit in range(1, capacity + 1)]
+    try:
+        async with asyncio.timeout(0.75):
+            while not children_ready.is_set():
+                await asyncio.sleep(0.001)
+        assert children_ready.is_set(), (
+            "Distinct heatmap acquisitions occupied the child pool instead of running quotes"
+        )
+        release.set()
+        async with asyncio.timeout(2):
+            responses = await asyncio.gather(*requests)
+        assert [response.status_code for response in responses] == [200] * capacity
+        assert [response.json()["count"] for response in responses] == list(range(1, capacity + 1))
+        assert peak == capacity
+    finally:
+        release.set()
+        coordinators_ready.abort()
+        await asyncio.gather(*requests, return_exceptions=True)
+        pool.shutdown(wait=True, cancel_futures=True)
+        coordinators.shutdown(wait=True, cancel_futures=True)
+
+
+@pytest.mark.asyncio
+async def test_screener_single_and_batch_share_quote_worker_budget(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event, Lock
+
+    import pandas as pd
+
+    from vnibb.providers.vnstock import equity_screener, runtime
+
+    pool = ThreadPoolExecutor(max_workers=2)
+    coordinators = ThreadPoolExecutor(max_workers=2)
+    single_started = Event()
+    capacity_reached = Event()
+    over_capacity = Event()
+    release = Event()
+    lock = Lock()
+    active = peak = 0
+
+    def run_acquisition(executor, func, *args):
+        return asyncio.wrap_future((executor or coordinators).submit(func, *args))
+
+    class Listing:
+        def __init__(self, *, source):
+            assert source == "VCI"
+
+        def symbols_by_exchange(self):
+            return pd.DataFrame({
+                "symbol": ["FPT", "HPG"], "exchange": "HOSE", "type": "STOCK",
+            })
+
+    class Quote:
+        def __init__(self, *, source, symbol):
+            assert source == "VCI"
+            self.symbol = symbol
+
+        def history(self, *, start, end):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                if self.symbol == "VNM":
+                    single_started.set()
+                if active == 2:
+                    capacity_reached.set()
+                if active > 2:
+                    over_capacity.set()
+            try:
+                if not release.wait(2):
+                    raise TimeoutError("Test quote work was not released")
+                return pd.DataFrame([{
+                    "time": date.today().isoformat(), "close": 100.0, "volume": 1_000_000,
+                }])
+            finally:
+                with lock:
+                    active -= 1
+
+    monkeypatch.setattr(equity_screener, "_executor", pool)
+    monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", run_acquisition)
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
+    monkeypatch.setattr(equity_screener.settings, "vnstock_timeout", 6)
+    params = equity_screener.StockScreenerParams
+    fetch = equity_screener.VnstockScreenerFetcher.fetch
+    requests = [asyncio.create_task(fetch(params(symbol="VNM", include_ratios=False)))]
+    try:
+        async with asyncio.timeout(0.75):
+            while not single_started.is_set():
+                await asyncio.sleep(0.001)
+        requests.append(asyncio.create_task(fetch(params(exchange="HOSE", limit=2, include_ratios=False))))
+        async with asyncio.timeout(0.75):
+            while not capacity_reached.is_set():
+                await asyncio.sleep(0.001)
+        try:
+            async with asyncio.timeout(0.1):
+                while not over_capacity.is_set():
+                    await asyncio.sleep(0.001)
+        except TimeoutError:
+            pass
+        release.set()
+        async with asyncio.timeout(2):
+            single, batch = await asyncio.gather(*requests)
+        assert [row.symbol for row in single] == ["VNM"]
+        assert {row.symbol for row in batch} == {"FPT", "HPG"}
+        assert peak == 2
+    finally:
+        release.set()
+        await asyncio.gather(*requests, return_exceptions=True)
+        pool.shutdown(wait=True, cancel_futures=True)
+        coordinators.shutdown(wait=True, cancel_futures=True)
+
+
+@pytest.mark.asyncio
+async def test_heatmap_quote_only_uses_real_listing_exchange_before_limit(client, monkeypatch):
+    import pandas as pd
+
+    from vnibb.api.v1 import market
+    from vnibb.providers.vnstock import equity_screener, runtime
+
+    calls = {"broad_stock": 0, "listing": 0, "quotes": []}
+
+    def broad_stock_is_forbidden():
+        calls["broad_stock"] += 1
+        raise AssertionError("Quote-only acquisition must not construct Finance")
+
+    class Listing:
+        def __init__(self, *, source):
+            assert source == "VCI"
+
+        def all_symbols(self, *, show_log=False):
+            raise AssertionError("all_symbols has no exchange metadata or exchange filter")
+
+        def symbols_by_exchange(self, *, lang="vi", show_log=False):
+            calls["listing"] += 1
+            return pd.DataFrame([
+                {"symbol": "FPT", "organ_name": "Other exchange", "exchange": "HNX", "type": "STOCK"},
+                {"symbol": "BOND", "organ_name": "Not equity", "exchange": "HOSE", "type": "BOND"},
+                {"symbol": "VNM", "organ_name": "Vinamilk", "exchange": "hose", "type": "STOCK"},
+            ])
+
+    class Quote:
+        def __init__(self, *, source, symbol):
+            assert source == "VCI"
+            calls["quotes"].append(symbol)
+
+        def history(self, *, start, end):
+            return pd.DataFrame([{
+                "time": date.today().isoformat(), "close": 100.0, "volume": 1_000_000,
+            }])
+
+    monkeypatch.setattr(equity_screener, "get_vnstock", broad_stock_is_forbidden)
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
+    monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
+    monkeypatch.setattr(market, "_load_stock_metadata", lambda _s: _async({}))
+    monkeypatch.setattr(market, "_load_change_pct_map", lambda _s: _async({}))
+    monkeypatch.setattr(market, "_load_latest_price_time", lambda _s: _async(None))
+
+    response = await client.get(
+        "/api/v1/market/heatmap?exchange=HOSE&limit=1&size_metric=volume&use_cache=false"
+    )
+
+    assert response.status_code == 200
+    assert calls == {"broad_stock": 0, "listing": 1, "quotes": ["VNM"]}
+    payload = response.json()
+    assert payload["count"] == 1
+    stock = _find_stock(payload, "VNM")
+    assert stock["price"] == 100_000.0
+    assert stock["market_cap"] == 1_000_000
+
+
 @pytest.fixture
 def screener_supplier(monkeypatch):
     from types import SimpleNamespace
@@ -699,9 +952,11 @@ def screener_supplier(monkeypatch):
             pass
 
         def all_symbols(self, **kwargs):
+            return pd.DataFrame([{"symbol": "VNM", "organ_name": "Vinamilk"}])
+
+        def symbols_by_exchange(self, *, lang="vi", show_log=False):
             return pd.DataFrame([{
-                "symbol": "VNM", "organ_name": "Vinamilk", "exchange": "HOSE",
-                "industry_name": "Food", "market_cap": 150_000_000_000.0,
+                "symbol": "VNM", "organ_name": "Vinamilk", "exchange": "HOSE", "type": "STOCK",
             }])
 
     def ratios(**kwargs):
@@ -719,11 +974,20 @@ def screener_supplier(monkeypatch):
             "volume": 1_000_000, "price_unit": "VND",
         }])
 
+    class Quote:
+        def __init__(self, *, source, symbol):
+            assert (source, symbol) == ("VCI", "VNM")
+
+        def history(self, **kwargs):
+            return history(**kwargs)
+
+
     supplier = SimpleNamespace(
         finance=SimpleNamespace(ratio=ratios), quote=SimpleNamespace(history=history),
     )
     monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace(stock=lambda **_kw: supplier))
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
     monkeypatch.setattr(market, "_load_stock_metadata", lambda _s: _async({}))
     monkeypatch.setattr(market, "_load_change_pct_map", lambda _s: _async({"VNM": 3.2}))
@@ -735,7 +999,9 @@ def screener_supplier(monkeypatch):
 @pytest.mark.parametrize("quote_state", ["available", "empty", "unavailable"])
 async def test_heatmap_acquires_quotes_without_financial_ratios(client, screener_supplier, quote_state):
     screener_supplier["quote_state"] = quote_state
-    response = await client.get("/api/v1/market/heatmap?exchange=HOSE&limit=10&use_cache=false")
+    response = await client.get(
+        "/api/v1/market/heatmap?exchange=HOSE&limit=10&size_metric=volume&use_cache=false"
+    )
 
     assert screener_supplier["ratios"] == 0
     assert screener_supplier["quotes"] == 1
@@ -750,7 +1016,7 @@ async def test_heatmap_acquires_quotes_without_financial_ratios(client, screener
     assert payload["cached"] is False
     stock = _find_stock(payload, "VNM")
     assert stock["price"] == 100_000.0
-    assert stock["market_cap"] == 150_000_000_000.0
+    assert stock["market_cap"] == 1_000_000
     assert stock["change_pct"] == 3.2
 
 
@@ -773,7 +1039,7 @@ async def test_full_screener_keeps_financial_ratio_acquisition(screener_supplier
 @pytest.mark.asyncio
 async def test_heatmap_valid_quotes_outside_selected_group_are_empty_not_unavailable(client, screener_supplier):
     response = await client.get(
-        "/api/v1/market/heatmap?group_by=hnx30&exchange=HOSE&limit=10&use_cache=false"
+        "/api/v1/market/heatmap?group_by=hnx30&exchange=HOSE&limit=10&size_metric=volume&use_cache=false"
     )
 
     assert response.status_code == 200
