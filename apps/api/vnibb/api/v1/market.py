@@ -3026,7 +3026,7 @@ async def get_industry_bubble(
 
     cache_manager = CacheManager()
     screener_rows: List[dict[str, Any]] = []
-    fresh_rows: Optional[List[dict[str, Any]]] = None
+    fresh_rows: list[dict[str, Any]] | None = None
 
     async def _fetch_fresh_rows() -> List[dict[str, Any]]:
         nonlocal fresh_rows

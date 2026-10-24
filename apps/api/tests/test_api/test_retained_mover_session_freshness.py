@@ -1,6 +1,6 @@
 """Retained movers follow completed configured market sessions, not server dates."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -43,7 +43,7 @@ async def test_public_retained_movers_follow_completed_session(
 
         @classmethod
         def utcnow(cls):
-            return clock.astimezone(timezone.utc).replace(tzinfo=None)
+            return clock.astimezone(UTC).replace(tzinfo=None)
 
     class FrozenDate(date):
         @classmethod
