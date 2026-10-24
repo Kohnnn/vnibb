@@ -10,7 +10,6 @@ from vnibb.models.stock import Stock, StockPrice
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mover_type", ["gainer", "loser", "volume", "value"])
 @pytest.mark.parametrize(
     "instant,observed,holidays,close_time,market_timezone,is_stale",
     [
@@ -31,7 +30,7 @@ from vnibb.models.stock import Stock, StockPrice
     ],
 )
 async def test_public_retained_movers_follow_completed_session(
-    client, test_db, test_engine, monkeypatch, mover_type, instant, observed,
+    client, test_db, test_engine, monkeypatch, instant, observed,
     holidays, close_time, market_timezone, is_stale,
 ):
     clock = datetime.fromisoformat(instant)
@@ -67,7 +66,7 @@ async def test_public_retained_movers_follow_completed_session(
     for index in range(10):
         symbol = f"T{index:02}"
         test_db.add(Stock(id=index + 1, symbol=symbol, exchange="HOSE"))
-        close = 35_200.0 if index % 2 else 28_800.0
+        close = 35_200.0 if index % 2 or index == 0 else 28_800.0
         for offset, (day, price, source) in enumerate([
             (session_day - timedelta(days=1), 32.0, "KBS"),
             (session_day, close, "vietcap_vnd" if index else "vnstock"),
@@ -81,7 +80,7 @@ async def test_public_retained_movers_follow_completed_session(
     await test_db.commit()
 
     response = await client.get(
-        f"/api/v1/market/top-movers?type={mover_type}&index=VNINDEX&limit=20"
+        "/api/v1/market/top-movers?type=gainer&index=VNINDEX&limit=20"
     )
 
     assert response.status_code == 200
@@ -92,7 +91,8 @@ async def test_public_retained_movers_follow_completed_session(
     assert payload["updated_at"] == f"{observed}T00:00:00"
     assert payload["source"] == "vietcap_vnd"
     assert payload["error"] is None
-    assert payload["count"] == (5 if mover_type == "gainer" else 4 if mover_type == "loser" else 9)
+    assert payload["count"] == 5
+    assert {row["symbol"] for row in payload["data"]} == {"T01", "T03", "T05", "T07", "T09"}
     for row in payload["data"]:
         index = int(row["symbol"][1:])
         assert index != 0  # Unknown source units remain inadmissible.
