@@ -111,7 +111,8 @@ def auth_header(user=OWNER):
 def request_body(record):
     return {
         "message": "Compare these frozen values, not latest VNM",
-        "matrix_selection": {"snapshot_id": record["snapshot"]["snapshot_id"], "result_ids": [cell["result_id"] for cell in record["snapshot"]["cells"]]},
+        "matrix_run_ref": record["snapshot"]["snapshot_id"],
+        "candidate_ids": [cell["result_id"] for cell in record["snapshot"]["cells"]],
         "context": {"symbol": "VNM", "dataSnapshot": {"revenue": "WRONG-LATEST"}},
         "settings": {"webSearch": True, "enableWorkflowOutputs": True},
     }
@@ -124,7 +125,7 @@ async def test_matrix_send_reaches_actual_provider_payload_without_truncation(ma
     question = "Which company has the most reliable cash conversion, and why?"
     body["message"] = "Compare the ten frozen selected cells. " + "context " * 235 + question
     assert len(body["message"]) < 2000
-    expected = await resolve_matrix_selection(test_db, OWNER, body["matrix_selection"])
+    expected = await resolve_matrix_selection(test_db, OWNER, {"snapshot_id": body["matrix_run_ref"], "result_ids": body["candidate_ids"]})
     response = await client.post("/chat/stream", json=body, headers=auth_header())
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
@@ -167,7 +168,7 @@ async def test_matrix_send_rejects_unbound_or_wrong_owner(matrix_chat, user, sta
 async def test_matrix_send_reauthorizes_revoked_selection(matrix_chat, test_db):
     client, record, completion = matrix_chat
     body = request_body(record)
-    await resolve_matrix_selection(test_db, OWNER, body["matrix_selection"])
+    await resolve_matrix_selection(test_db, OWNER, {"snapshot_id": body["matrix_run_ref"], "result_ids": body["candidate_ids"]})
     test_db.add(AppKeyValue(key=f"matrix:revoked:{record['snapshot']['snapshot_id']}", value={"revoked": True}))
     await test_db.commit()
     response = await client.post("/chat/stream", json=body, headers=auth_header())
@@ -190,7 +191,7 @@ async def test_matrix_send_requires_explicit_export_rights(matrix_chat, monkeypa
 async def test_matrix_selection_bounds_reject_not_truncate(matrix_chat):
     client, record, completion = matrix_chat
     body = request_body(record)
-    body["matrix_selection"]["result_ids"] = [str(uuid4()) for _ in range(121)]
+    body["candidate_ids"] = [str(uuid4()) for _ in range(121)]
     response = await client.post("/chat/stream", json=body, headers=auth_header())
     assert response.status_code == 422
     completion.assert_not_awaited()
@@ -199,7 +200,8 @@ async def test_matrix_selection_bounds_reject_not_truncate(matrix_chat):
 @pytest.mark.asyncio
 async def test_matrix_context_rejects_oversize_instead_of_silent_truncation(matrix_chat, test_db):
     _, record, _ = matrix_chat
-    packet = await resolve_matrix_selection(test_db, OWNER, request_body(record)["matrix_selection"])
+    body = request_body(record)
+    packet = await resolve_matrix_selection(test_db, OWNER, {"snapshot_id": body["matrix_run_ref"], "result_ids": body["candidate_ids"]})
     oversized = deepcopy(packet)
     oversized["snapshot"]["limitations"] = ["x" * MAX_MATRIX_CONTEXT_BYTES]
     with pytest.raises(HTTPException) as error:
@@ -302,7 +304,7 @@ async def test_matrix_peer_comparison_workflow_reaches_code_owned_playbook_instr
         if cell["entity_id"] == "AAA3"
     )
     body = request_body(record)
-    body["matrix_selection"]["result_ids"] = [result_id]
+    body["candidate_ids"] = [result_id]
     body["workflow"] = {"id": "peer-comparison", "revision": 1, "symbol": "AAA3"}
     response = await client.post("/chat/stream", json=body, headers=auth_header())
     assert response.status_code == 200
@@ -314,3 +316,21 @@ async def test_matrix_peer_comparison_workflow_reaches_code_owned_playbook_instr
     assert playbook["description"] in developer_prompt
     assert "Mandatory evidence: matrix_evidence" in developer_prompt
     assert "Ignore evidence" not in developer_prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["ref_only", "ids_only", "duplicate", "legacy"])
+async def test_matrix_wire_contract_rejects_unpaired_ambiguous_or_legacy_fields(matrix_chat, invalid):
+    client, record, completion = matrix_chat
+    body = request_body(record)
+    if invalid == "ref_only":
+        body.pop("candidate_ids")
+    elif invalid == "ids_only":
+        body.pop("matrix_run_ref")
+    elif invalid == "duplicate":
+        body["candidate_ids"] = [body["candidate_ids"][0]] * 2
+    else:
+        body["matrix_selection"] = {"snapshot_id": body.pop("matrix_run_ref"), "result_ids": body.pop("candidate_ids")}
+    response = await client.post("/chat/stream", json=body, headers=auth_header())
+    assert response.status_code == 422
+    completion.assert_not_awaited()

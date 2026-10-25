@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 
 from vnibb.core.auth import require_active_user
 from vnibb.core.database import async_session_maker
-from vnibb.schemas.matrix import MatrixSelection
+from vnibb.schemas.matrix import Identifier, MatrixSelection, ResultIds
 from vnibb.services.matrix_copilot_context import build_matrix_copilot_context
 from vnibb.services.matrix_service import resolve_matrix_selection, require_matrix_export_rights
 from vnibb.services.ai_context_service import ai_context_service
@@ -92,8 +92,24 @@ class ChatStreamRequest(BaseModel):
     context: WidgetContext | None = None
     history: list[Message] = []
     settings: CopilotRequestSettings | None = None
-    matrix_selection: MatrixSelection | None = None
+    matrix_run_ref: Identifier | None = None
+    candidate_ids: ResultIds | None = None
     workflow: CuratedWorkflowSelection | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_matrix_handoff(cls, value):
+        if isinstance(value, dict) and "matrix_selection" in value:
+            raise ValueError("Use distinct matrix_run_ref and candidate_ids fields for Matrix handoff")
+        return value
+
+    @model_validator(mode="after")
+    def validate_matrix_handoff(self):
+        if (self.matrix_run_ref is None) != (self.candidate_ids is None):
+            raise ValueError("matrix_run_ref and candidate_ids must be supplied together")
+        if self.matrix_run_ref is not None:
+            MatrixSelection(snapshot_id=self.matrix_run_ref, result_ids=self.candidate_ids)
+        return self
 
 
 RESERVED_SERVER_CONTEXT_KEYS = ("matrix_selection", "source_catalog", "curated_workflow")
@@ -266,12 +282,12 @@ async def chat_stream(
     Final message: data: {"done": true}\n\n
     """
     matrix_context = None
-    if request.matrix_selection is not None:
+    if request.matrix_run_ref is not None:
         try:
             user = await require_active_user(authorization)
             async with async_session_maker() as db:
                 packet = await resolve_matrix_selection(
-                    db, user.id, request.matrix_selection.model_dump(mode="json")
+                    db, user.id, {"snapshot_id": request.matrix_run_ref, "result_ids": request.candidate_ids}
                 )
             require_matrix_export_rights(packet)
             matrix_context = build_matrix_copilot_context(packet)

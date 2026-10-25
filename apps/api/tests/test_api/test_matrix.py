@@ -49,7 +49,7 @@ async def stored(test_db):
     snapshot = {
         "schema_version": "matrix-v1", "matrix_id": str(uuid4()), "snapshot_id": snapshot_id,
         "revision": revision, "created_at": "2026-01-01T00:00:00Z", "synthetic": False,
-        "anchor_symbol": "FPT", "playbook_id": "nonfinancial", "definition_revision": "matrix-playbooks-1",
+        "anchor_symbol": "FPT", "playbook_id": "nonfinancial", "definition_revision": PLAYBOOKS[0]["definition_revision"],
         "period": "2025", "period_type": "year", "entities": [
             {"entity_id": symbol, "symbol": symbol, "name": symbol, "sector": "Technology"}
             for symbol in ["FPT", "CMG"]
@@ -90,7 +90,9 @@ async def test_owner_and_revocation_apply_to_every_reference(test_db, stored):
     ]:
         with pytest.raises(HTTPException) as error:
             await operation("other-owner")
-        assert (error.value.status_code, error.value.detail) == (404, "Matrix reference not found")
+        assert error.value.status_code == 404
+        assert "Matrix reference not found" in error.value.detail
+        assert "already-exported data cannot be retracted" in error.value.detail
     assert await service.list_matrix_snapshots(test_db, "other-owner") == []
     await service.revoke_matrix_snapshot(test_db, OWNER, sid)
     assert await service.list_matrix_snapshots(test_db, OWNER) == []
@@ -136,12 +138,16 @@ async def test_create_seals_new_identity_and_retains_historical_values(test_db, 
     monkeypatch.setattr(service, "build_matrix_observations", build)
     request = {"anchor_symbol": "FPT", "symbols": ["FPT", "CMG"], "playbook_id": "nonfinancial", "period": "2025", "period_type": "year"}
     first = await service.create_matrix_snapshot(test_db, OWNER, request)
+    await service.review_matrix_snapshot(test_db, OWNER, first["snapshot_id"], {"result_ids": [first["cells"][0]["result_id"]], "state": "reviewed"})
     observations["cells"][0]["payload"]["metrics"][0]["value"] = "999"
     observations["evidence"][0]["value"] = "999"
     second = await service.create_matrix_snapshot(test_db, OWNER, {**request, "matrix_id": first["matrix_id"]})
     assert first["matrix_id"] == second["matrix_id"]
     assert first["revision"] != second["revision"]
     assert first["cells"][0]["result_id"] != second["cells"][0]["result_id"]
+    assert all(cell["review_state"] == "unreviewed" for cell in second["cells"])
+    reviewed = await service.get_matrix_snapshot(test_db, OWNER, first["snapshot_id"])
+    assert reviewed["cells"][0]["review_state"] == "reviewed"
     evidence = await service.get_matrix_evidence(test_db, OWNER, first["snapshot_id"], first["cells"][0]["result_id"])
     assert evidence[0]["value"] == "123456789.125"
     with pytest.raises(HTTPException) as error:
@@ -304,3 +310,19 @@ async def test_non_null_metric_without_evidence_fails_closed(test_db, stored):
             "result_ids": [stored["snapshot"]["cells"][0]["result_id"]],
         })
     assert error.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_missing_frozen_observation_is_not_an_empty_unavailable_result(test_db, stored):
+    snapshot = stored["snapshot"]
+    record = await test_db.get(AppKeyValue, f"matrix:snapshot:{snapshot['snapshot_id']}")
+    missing = copy.deepcopy(record.value)
+    missing["evidence"] = []
+    record.value = missing
+    await test_db.commit()
+    with pytest.raises(HTTPException) as error:
+        await service.resolve_matrix_selection(test_db, OWNER, {"snapshot_id": snapshot["snapshot_id"], "result_ids": [snapshot["cells"][0]["result_id"]]})
+    assert error.value.status_code == 409
+    assert error.value.detail.startswith("evidence_not_found:")
+    assert "no partial evidence" in error.value.detail
+    assert service._evidence_for_cells([], [{"evidence_ids": [], "payload": {"metrics": [{"value": None, "evidence_ids": []}]}}]) == []

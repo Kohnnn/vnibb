@@ -106,22 +106,36 @@ original observations instead of reading as independent corroboration. Sector
 metrics that a stored record cannot support report `unavailable`; they are never
 substituted with a generic proxy.
 
+Retained EOD citations expose a frozen `observation_reference`: symbol, trade date,
+exact decimal value, VND currency/price unit, original source and source key,
+collection, content revision and timezone-qualified retrieval time. Missing fields
+are never synthesized. A complete reference does not grant source rights;
+`rights_unverified` remains distinct from exact evidence. SQL prices without an
+original source key remain non-comparable. Missing frozen references report
+`evidence_not_found`, separately from an empty observation or unavailable store.
+Bank regulatory cells remain explicitly unavailable without the applicable
+circular/version, method, perimeter, observation date and reported/derived basis;
+accounting leverage or deposits never substitute for regulatory ratios.
+
 Snapshots are owner-bound and immutable in the existing PostgreSQL `app_kv` store,
 one key per snapshot, with append-only revision-bound review events and separate
 revocation. Snapshot IDs are references, not grants: every open or handoff rechecks
 ownership and revocation, and cross-owner or revoked references disclose nothing.
+Revocation blocks future reads; it cannot retract data already exported.
 
 ### Handoff
 
-Two scoped follow-up paths consume the same `{snapshot_id, result_ids}` selection
-through one server-side resolution service; neither accepts browser-supplied values
-as authority.
+Two scoped follow-up paths resolve the same frozen selection through one
+server-side service; neither accepts browser-supplied values as authority.
 
 - **VniAgent** — the widget stages a human-reviewed draft from selected result IDs.
-  Send submits the typed selection, the server reauthorizes it and rebuilds the
-  frozen context. The request text carries references only and never a displayed
-  value, and it performs no latest-data symbol inference. Reserved server context
-  keys are rejected if a client tries to supply them.
+  Send submits distinct top-level `matrix_run_ref` and `candidate_ids` fields.
+  The paired fields are bounded and unique; the old `matrix_selection` wire field
+  is rejected. Internal widget state and MCP retain `{snapshot_id, result_ids}`.
+  The server reauthorizes and rebuilds the frozen context without latest-data
+  symbol inference. Request text carries references only, not displayed values;
+  reserved server context keys are rejected. Oversized complete selections fail
+  with `413`; evidence is never silently truncated into a partial selection.
 - **External MCP** — read-only `get_matrix_selection` resolves the same selection
   from the per-request authenticated user identity, never from a token in tool
   arguments. A user JWT authorizes only that Matrix tool; it cannot enumerate or

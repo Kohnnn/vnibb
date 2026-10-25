@@ -7,6 +7,16 @@ export function MatrixResult({ cell, density = 'standard' }: { cell: MatrixCell;
     <span className={`matrix-state matrix-state-${cell.state}`}>{cell.state.replaceAll('_', ' ')}</span>
     {cell.payload.kind === 'table' && <span className="matrix-kind">Table · {metrics.length} metrics</span>}
     {preview.length > 0 && <dl>{preview.map((metric) => <div key={metric.key}><dt>{metric.label}</dt><dd>{metric.display}</dd></div>)}</dl>}
+    {density === 'expanded' && metrics.filter((metric) => metric.regulatory_basis).map((metric) => <section key={metric.key} aria-label={`${metric.label} regulatory basis`}>
+      <strong>{metric.label}</strong><p>{metric.basis}</p>
+      <dl>
+        <div><dt>Circular / version</dt><dd>{metric.regulatory_basis!.circular_versions.join('; ')}</dd></div>
+        <div><dt>Method</dt><dd>{metric.regulatory_basis!.method || 'Unavailable: not retained'}</dd></div>
+        <div><dt>Regulatory perimeter</dt><dd>{metric.regulatory_basis!.perimeter || 'Unavailable: not retained'}</dd></div>
+        <div><dt>Observation date</dt><dd>{metric.regulatory_basis!.observation_date || 'Unavailable: not retained'}</dd></div>
+        <div><dt>Reported or derived</dt><dd>{metric.regulatory_basis!.reported_or_derived || 'Unavailable: no reported observation or regulatory derivation admitted'}</dd></div>
+      </dl>
+    </section>)}
     {metrics.length > preview.length && <span className="matrix-muted">+{metrics.length - preview.length} in result</span>}
     {cell.payload.text && <p className={density === 'compact' ? 'matrix-clamp' : undefined}>{cell.payload.text}</p>}
     {cell.payload.labels?.map((label) => <span className="matrix-kind" key={label}>{label}</span>)}

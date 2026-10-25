@@ -12,6 +12,14 @@ export interface MatrixMetric {
   as_of: string | null;
   basis: string;
   evidence_ids: string[];
+  regulatory_basis?: {
+    circular_versions: string[];
+    method: string | null;
+    perimeter: string | null;
+    observation_date: string | null;
+    reported_or_derived: 'issuer_reported' | 'vnibb_derived' | null;
+    source_urls: string[];
+  } | null;
 }
 
 export interface MatrixDimension {
@@ -60,6 +68,19 @@ export interface MatrixSnapshot {
   limitations: string[];
 }
 
+export interface MatrixObservationReference {
+  symbol: string;
+  trade_date: string;
+  value: string;
+  currency: 'VND';
+  price_unit: 'VND';
+  source: string;
+  source_key: string;
+  collection: 'market_prices_eod';
+  observation_revision: string;
+  retrieved_at: string;
+}
+
 export interface MatrixEvidence {
   evidence_id: string;
   entity_id: string;
@@ -75,8 +96,11 @@ export interface MatrixEvidence {
   formula: string | null;
   input_evidence_ids: string[];
   limitations: string[];
+  observation_reference?: MatrixObservationReference | null;
+  observation_state?: 'exact' | 'unknown_provenance' | 'ambiguous_unit' | 'derived' | 'rights_unverified';
 }
 
+export interface MatrixHandoff { matrix_run_ref: string; candidate_ids: string[] }
 export interface MatrixSelection { snapshot_id: string; result_ids: string[] }
 export interface MatrixResearchRequest extends MatrixSelection {
   revision: string;

@@ -1,6 +1,5 @@
 import copy
 import json
-import os
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -23,13 +22,14 @@ from vnibb.services.matrix_observations import (
     build_matrix_observations,
 )
 from vnibb.services.matrix_playbooks import PLAYBOOKS
+from vnibb.services.matrix_rights import allowlisted_matrix_sources
 
 MAX_MATRIX_BYTES = 524288
 MAX_REVIEW_EVENTS = 1000
 
 
 def _not_found():
-    return HTTPException(status_code=404, detail="Matrix reference not found")
+    return HTTPException(status_code=404, detail="evidence_not_found: Matrix reference not found. Revocation blocks future fetches; already-exported data cannot be retracted.")
 
 
 def _validate(model, value):
@@ -112,7 +112,7 @@ def _evidence_for_cells(evidence, cells):
         requested.extend(cell["evidence_ids"])
         for metric in cell["payload"].get("metrics", []):
             if metric.get("value") is not None and not metric["evidence_ids"]:
-                raise HTTPException(status_code=409, detail="Matrix evidence is incomplete")
+                raise HTTPException(status_code=409, detail="evidence_not_found: frozen Matrix observation is absent; no partial evidence returned")
             requested.extend(metric["evidence_ids"])
     visited = set()
     while requested:
@@ -120,7 +120,7 @@ def _evidence_for_cells(evidence, cells):
         if evidence_id in visited:
             continue
         if evidence_id not in by_id:
-            raise HTTPException(status_code=409, detail="Matrix evidence is incomplete")
+            raise HTTPException(status_code=409, detail="evidence_not_found: frozen Matrix observation is absent; no partial evidence returned")
         visited.add(evidence_id)
         requested.extend(by_id[evidence_id]["input_evidence_ids"])
     return [copy.deepcopy(item) for item in evidence if item["evidence_id"] in visited]
@@ -282,20 +282,10 @@ async def resolve_matrix_selection(db, user_id: str, selection: dict) -> dict:
     return packet
 
 
-NON_GRANTABLE_SUPPLIERS = frozenset({"unknown", "vnstock", "vnstock_ratio"})
-
-
-def _allowlisted_sources() -> set[str]:
-    sources = {source.strip() for source in os.getenv("MATRIX_EXPORT_ALLOWED_SOURCES", "").split(",") if source.strip()}
-    return {source for source in sources
-            if source.rsplit(":", 1)[-1] not in NON_GRANTABLE_SUPPLIERS
-            and not (source.startswith("stored.sql.") and ":" not in source)}
-
-
 def require_matrix_export_rights(packet: dict) -> None:
     if packet.get("snapshot", {}).get("synthetic") is True:
         return
-    allowed = _allowlisted_sources()
+    allowed = allowlisted_matrix_sources()
     evidence = packet.get("evidence", [])
     by_id = {item["evidence_id"]: item for item in evidence}
     approved = {item["evidence_id"] for item in evidence

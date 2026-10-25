@@ -301,6 +301,23 @@ Supabase sign-out removes the session row, so the online Auth check denies subse
 
 Before cutover, clear the formerly stored platform admin key from every operator browser profile/site storage, rotate the formerly browser-exposed key in backend and authorized automation/operational secret stores, and roll all workers. Clearing browser storage is not revocation, and the stored value must never be read out or pasted into analytics, tickets, or chat; verify the old key fails and the rotated key works only on authorized automation/operational routes.
 
+If that historical value was also assigned to `VNIBB_APPS_SCRIPT_KEY` or
+`VNIBB_MCP_SHARED_BEARER_TOKEN`, rotate all affected scopes to independent secrets;
+changing only the admin variable does not revoke the other grants. Keep each
+delivery file `0600` in private custody and verify old-key rejection, own-scope
+success and cross-scope denial without logging headers or secret values. Retain
+new credentials during an image rollback; restoring the old environment would
+reactivate an exposed credential. External Apps Script/MCP callers need their
+respective new secret, not the admin automation key.
+
+The October 25 continuation explicitly keeps `ADMIN_USER_IDS` empty. Rotation
+does not enable interactive admin or authorize silent account promotion. Actual
+serving Compose labels decide the recreation commands: application services use
+the base file, while Caddy uses base plus runtime override. Do not combine them
+when the runtime override changes application mounts. An authorized same-image,
+same-config Caddy recreation removes obsolete inherited secret copies; it does
+not change proxy routing. Auth, PostgreSQL, MongoDB and Redis stay untouched.
+
 Interactive admin production acceptance remains **BLOCKED** until operator UUID verification, key rotation, authenticated live acceptance (including completed sign-out/revocation), and documented Auth availability/latency operations are recorded. Acceptance must cover allowlisted draft/publish and published reload, non-allowlisted and expired/denied-session rejection, shared-key rejection on interactive routes, and rotated-key automation. See `docs/admin_global_system_layouts.md` for the full rollout checklist.
 
 ### 2026-10-04 interrupted-session release recovery

@@ -21,6 +21,8 @@ from vnibb.services.matrix_playbooks import (
     classify_sector,
     normalized_classification,
 )
+from vnibb.services.matrix_rights import allowlisted_matrix_sources
+from vnibb.services.mongo_market_data_service import MongoReadError, get_mongo_market_data_service
 
 MODELS = (IncomeStatement, BalanceSheet, CashFlow, FinancialRatio)
 STORED_LIMIT = "Retained serving observation, not original issuer evidence; source publication, audit and restatement authority are not verified."
@@ -138,6 +140,7 @@ class ObservationBuilder:
         self.rows = rows
         self.captured_at = captured_at
         self.evidence: dict[str, dict] = {}
+        self.incompatible_metrics: set[str] = set()
 
     def observe(self, table: type, field: str, label: str, *, key: str | None = None, previous: bool = False, raw_keys: tuple[str, ...] = (), unit: str | None = None) -> dict:
         metric_key = key or field
@@ -162,7 +165,7 @@ class ObservationBuilder:
             limits.append("Unit/scale is not retained; value must not be compared or used in a derived ratio.")
         if _unknown_basis(basis):
             limits.append("Accounting scope or single-quarter versus year-to-date basis is not retained.")
-        evidence = {"entity_id": self.symbol, "source": _source_label(table, row), "locator": f"{table.__tablename__}/row/{row.id}/period/{row.period_type}/{row.period}", "field": source_field, "value": canonical, "unit": metric_unit, "period": _row_period(row), "as_of": None, "captured_at": self.captured_at, "provenance": "stored_observation", "formula": None, "input_evidence_ids": [], "limitations": limits + [f"Row updated: {_iso(row.updated_at) or 'unknown'} (not publication date)."]}
+        evidence = {"entity_id": self.symbol, "source": _source_label(table, row), "locator": f"{table.__tablename__}/row/{row.id}/period/{row.period_type}/{row.period}", "field": source_field, "value": canonical, "unit": metric_unit, "period": _row_period(row), "as_of": None, "captured_at": self.captured_at, "provenance": "stored_observation", "observation_state": "ambiguous_unit" if metric_unit == "unknown unit" else "unknown_provenance", "formula": None, "input_evidence_ids": [], "limitations": limits + [f"Row updated: {_iso(row.updated_at) or 'unknown'} (not publication date)."]}
         evidence_id = f"e-{_identity(evidence)}"
         evidence["evidence_id"] = evidence_id
         self.evidence[evidence_id] = evidence
@@ -175,7 +178,14 @@ class ObservationBuilder:
         if any(item["unit"] == "unknown unit" or _unknown_basis(item["basis"]) for item in inputs):
             return {**absent, "basis": "Derivation withheld: input unit or accounting scope is unknown"}
         if len({item["unit"] for item in inputs}) != 1 or len({item["basis"] for item in inputs}) != 1:
+            self.incompatible_metrics.add(key)
             return {**absent, "basis": "Derivation withheld: input units or accounting scopes differ"}
+        expected_periods = [self.period] * len(inputs)
+        if operation == "growth":
+            expected_periods[-1] = f"{int(self.period[:4]) - 1}{self.period[4:]}"
+        if [item["period"] for item in inputs] != expected_periods:
+            self.incompatible_metrics.add(key)
+            return {**absent, "basis": "Derivation withheld: input fiscal periods differ from the required comparison"}
         values = [Decimal(item["value"]) for item in inputs]
         if operation != "sum" and values[-1] <= 0:
             return {**absent, "basis": "Derivation withheld: denominator must be positive"}
@@ -192,7 +202,7 @@ class ObservationBuilder:
                 formula = f"{inputs[0]['key']} / {inputs[1]['key']}" + (" * 100" if unit == "%" else "")
         canonical = canonical_decimal(value)
         input_ids = list(dict.fromkeys(eid for item in inputs for eid in item["evidence_ids"]))
-        evidence = {"entity_id": self.symbol, "source": "derived.matrix", "locator": f"matrix/{DEFINITION_REVISION}/{self.symbol}/{self.period}/{key}", "field": key, "value": canonical, "unit": unit, "period": self.period, "as_of": None, "captured_at": self.captured_at, "provenance": "derived", "formula": formula, "input_evidence_ids": input_ids, "limitations": ["Calculated from frozen serving inputs; not an issuer-reported or regulatory measure."]}
+        evidence = {"entity_id": self.symbol, "source": "derived.matrix", "locator": f"matrix/{DEFINITION_REVISION}/{self.symbol}/{self.period}/{key}", "field": key, "value": canonical, "unit": unit, "period": self.period, "as_of": None, "captured_at": self.captured_at, "provenance": "derived", "observation_state": "derived", "formula": formula, "input_evidence_ids": input_ids, "limitations": ["Calculated from frozen serving inputs; not an issuer-reported or regulatory measure."]}
         evidence_id = f"e-{_identity(evidence)}"
         evidence["evidence_id"] = evidence_id
         self.evidence[evidence_id] = evidence
@@ -228,6 +238,7 @@ def _financial_metrics(builder: ObservationBuilder, playbook: str) -> dict[str, 
             "funding": [loans, deposits, derive("accounting_loan_deposit", "Accounting loans/deposits (not regulatory LDR)", [loans, deposits], "ratio", "multiple")],
             "capital": [equity, assets, derive("equity_assets", "Equity/assets (not CAR)", [equity, assets], "ratio", "%")],
             "credit": [observe(FinancialRatio, "nim", "Explicit net interest margin", raw_keys=("net_interest_margin",)), observe(FinancialRatio, "npl", "Explicit nonperforming-loan ratio", raw_keys=("non_performing_loan_ratio", "nonperforming_loan_ratio"))],
+            "regulatory": _bank_regulatory_metrics(builder.period),
         })
     elif playbook == "insurer":
         metrics["insurance"] = [observe(IncomeStatement, key, label, raw_keys=(key,)) for key, label in (("insurance_premiums", "Explicit insurance premiums"), ("insurance_claims", "Explicit insurance claims"), ("investment_income", "Explicit investment income"))]
@@ -242,11 +253,11 @@ def _cell(entity_id: str, dimension_id: str, payload: dict, *, state: str = "sup
     return {"result_id": "", "entity_id": entity_id, "dimension_id": dimension_id, "result_revision": "", "state": state, "payload": payload, "evidence_ids": evidence_ids or [], "basis": basis, "limitations": limitations or [], "review_state": "unreviewed"}
 
 
-def _metric_cell(symbol: str, dimension: str, metrics: list[dict]) -> dict:
+def _metric_cell(symbol: str, dimension: str, metrics: list[dict], *, compatible: bool = True) -> dict:
     available = [metric for metric in metrics if metric["value"] is not None]
     limits = [metric["basis"] for metric in metrics if metric["value"] is None]
     unknown = any(metric["unit"] == "unknown unit" or _unknown_basis(metric["basis"]) for metric in available)
-    state = "unavailable" if not available else "non_comparable" if unknown else "supported"
+    state = "unavailable" if not available else "non_comparable" if unknown or not compatible else "supported"
     if unknown:
         limits.append("Some retained values have unknown unit or accounting scope; no claim of cross-company comparability.")
     if available and dimension == "valuation":
@@ -349,6 +360,8 @@ async def build_matrix_observations(db, symbols: list[str], playbook_id: str, pe
         raise ValueError("Every selected company must have a retained company record")
     anchor = by_symbol[anchor_symbol or symbols[0]]
     family, subtype = classify_sector(anchor.industry, anchor.sector)
+    if playbook_id == "nonfinancial" and any(classify_sector(stock.industry, stock.sector)[0] in {"bank", "insurer", "securities"} for stock in stocks):
+        raise ValueError("Nonfinancial playbook is unsupported for financial-services classification; select the supported sector playbook")
     industry = normalized_classification(anchor.industry or anchor.sector)
     if family != playbook_id or any(
         classify_sector(stock.industry, stock.sector) != (family, subtype) or (
@@ -363,7 +376,7 @@ async def build_matrix_observations(db, symbols: list[str], playbook_id: str, pe
         stock = by_symbol[symbol]
         builder = ObservationBuilder(symbol, period, rows[symbol], captured_at)
         result["entities"].append({"entity_id": symbol, "symbol": symbol, "name": stock.company_name or stock.short_name or symbol, "sector": stock.industry or stock.sector})
-        result["cells"].extend(_metric_cell(symbol, key, metrics) for key, metrics in _financial_metrics(builder, playbook_id).items())
+        result["cells"].extend(_metric_cell(symbol, key, metrics, compatible=not any(metric["key"] in builder.incompatible_metrics for metric in metrics)) for key, metrics in _financial_metrics(builder, playbook_id).items())
         classification, evidence = _classification_cell(stock, captured_at)
         result["cells"].append(classification)
         result["evidence"].extend([*builder.evidence.values(), *evidence])
@@ -392,11 +405,85 @@ def _mark_incompatible_comparisons(cells: list[dict]) -> None:
             cell["limitations"].append("Selected companies have different units or accounting scopes for the same metric; comparison is withheld.")
 
 
+def _bank_regulatory_metrics(period: str) -> list[dict]:
+    capital = "https://baochinhphu.vn/ty-le-an-toan-von-voi-ngan-hang-thuong-mai-chi-nhanh-ngan-hang-nuoc-ngoai-102250718105551891.htm"
+    credit = "https://baochinhphu.vn/thoi-diem-trinh-tu-phan-loai-no-cua-ngan-hang-thuong-mai-102240715162220808.htm"
+    funding = "https://baochinhphu.vn/sua-quy-dinh-ty-le-bao-dam-an-toan-trong-hoat-dong-cua-ngan-hang-102230201100326706.htm"
+    definitions = [
+        (key, label, ["14/2025/TT-NHNN; bank-specific applicability/adoption unverified", "41/2016/TT-NHNN; bank-specific applicable version unverified"], [capital], "No retained reported ratio/inputs, applicable circular version, method, buffers, regulatory perimeter or observation date; accounting equity/assets is not capital adequacy")
+        for key, label in (("car", "Regulatory CAR"), ("cet1", "Regulatory CET1"), ("tier1", "Regulatory Tier 1"), ("rwa", "Regulatory risk-weighted assets"))
+    ]
+    definitions.extend([
+        ("reported_npl", "Reported regulatory NPL", ["31/2024/TT-NHNN; current amendments and bank-specific classification unverified"], [credit], "No retained issuer-reported NPL observation with verified classification scope, applicable version, method, regulatory perimeter and observation date; generic accounting debt aliases are not a regulatory NPL observation"),
+        ("npl_coverage", "Reported NPL coverage", ["31/2024/TT-NHNN; current amendments and bank-specific classification unverified"], [credit], "No retained reported coverage or verified NPL denominator, classification scope, method, perimeter or observation date; allowance/gross loans is not NPL coverage"),
+        ("regulatory_ldr", "Regulatory loan/deposit ratio", ["22/2019/TT-NHNN as amended by 26/2022/TT-NHNN; applicable version unverified"], [funding], "No retained regulatory inputs, deposit exclusions, applicable version, method, perimeter or observation date; accounting loans/deposits is not regulatory LDR"),
+        ("regulatory_liquidity", "Regulatory liquidity / LCR / NSFR", ["Applicable SBV circular/version and bank adoption not retained", "Basel LCR/NSFR are separate frameworks, not an SBV applicability claim"], ["https://www.bis.org/committees/bcbs/basel-framework/standard/lcr"], "No retained reported liquidity ratio, HQLA/stressed flows/stable-funding inputs, applicable version, method, perimeter or observation date; deposit growth and accounting LDR are not liquidity proxies"),
+    ])
+    return [{**_metric(key, label, period, reason), "regulatory_basis": {"circular_versions": versions, "method": None, "perimeter": None, "observation_date": None, "reported_or_derived": None, "source_urls": urls}} for key, label, versions, urls, reason in definitions]
+
+
+def _retained_trade_date(value: object) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def retained_close_reference(row: dict, symbol: str, captured_at: str) -> dict | None:
+    trade_date = _retained_trade_date(row.get("tradeDate"))
+    value = canonical_decimal(row.get("close"))
+    if (row.get("symbol") != symbol or not isinstance(trade_date, date) or value is None
+            or row.get("priceUnit") != "VND" or not all(isinstance(row.get(key), str) and row[key].strip() and len(row[key]) <= 128 for key in ("source", "sourceKey"))):
+        return None
+    reference = {"symbol": symbol, "trade_date": trade_date.isoformat(), "value": value, "currency": "VND", "price_unit": row["priceUnit"], "source": row["source"], "source_key": row["sourceKey"], "collection": "market_prices_eod"}
+    reference["observation_revision"] = _identity(reference)
+    return {**reference, "retrieved_at": captured_at}
+
+
+async def _merge_mongo_close(result: dict, symbol: str, start: date, end: date, captured_at: str, sql_date: date | None, metric: dict) -> tuple[dict, str]:
+    state = "non_comparable" if metric["evidence_ids"] else "unavailable"
+    mongo = get_mongo_market_data_service()
+    if not mongo.enabled:
+        return metric, state
+    try:
+        rows = await mongo.get_eod_prices_between(symbol, start_date=start, end_date=end, limit=370, include_provenance=True)
+    except MongoReadError as exc:
+        metric["basis"] += f"; retained Mongo evidence unavailable ({exc.state}), not an empty result"
+        return metric, state if metric["evidence_ids"] else "failed"
+    if not rows:
+        return metric, state
+    retained = rows[-1]
+    reference = retained_close_reference(retained, symbol, captured_at)
+    if reference and (sql_date is None or reference["trade_date"] >= sql_date.isoformat()):
+        source = f"stored.mongo.market_prices_eod:{reference['source']}"
+        rights_verified = source in allowlisted_matrix_sources()
+        evidence = {"entity_id": symbol, "source": source, "locator": reference["source_key"], "field": "close", "value": reference["value"], "unit": reference["price_unit"], "period": metric["period"], "as_of": reference["trade_date"], "captured_at": captured_at, "provenance": "stored_observation", "observation_state": "exact" if rights_verified else "rights_unverified", "observation_reference": reference, "formula": None, "input_evidence_ids": [], "limitations": [STORED_LIMIT, "Observation revision pins the retained value and citation fields, not upstream authority."] + ([] if rights_verified else ["Exact citation and external export unavailable: source rights are unverified; retained metadata is not a permission grant."])}
+        evidence["evidence_id"] = f"e-{_identity(evidence)}"
+        result["evidence"].append(evidence)
+        metric.update(value=reference["value"], display=f"{reference['value']} VND", unit="VND", as_of=reference["trade_date"], basis="Frozen retained EOD observation; not original issuer evidence" if rights_verified else "Exact citation unavailable: source rights unverified; frozen retained metadata only", evidence_ids=[evidence["evidence_id"]])
+        return metric, "supported" if rights_verified else "non_comparable"
+    if reference:
+        return metric, state
+    retained_date = _retained_trade_date(retained.get("tradeDate"))
+    if retained_date is not None and (sql_date is None or retained_date > sql_date):
+        metric = _metric("close", "Stored close", metric["period"], "Latest retained Mongo close has incomplete source/unit/key metadata; older SQL close not substituted")
+        metric["as_of"] = retained_date.isoformat()
+        return metric, "unavailable"
+    metric["basis"] += "; Mongo close has incomplete source/unit/key metadata; exact citation unavailable"
+    return metric, state
+
+
 async def _add_stored_closes(db, result: dict, symbols: list[str], year: int, quarter: int | None, captured_at: str) -> None:
     month = quarter * 3 if quarter else 12
     end = date(year, month, calendar.monthrange(year, month)[1])
     start = date(year, month - 2 if quarter else 1, 1)
-    result["dimensions"].append({"dimension_id": "stored_close", "label": "Stored market close", "question": "What final stored daily close exists within the selected fiscal period?", "output_type": "number", "source_scope": "Retained SQL daily prices; only source-certified units are normalized", "definition_revision": DEFINITION_REVISION})
+    result["dimensions"].append({"dimension_id": "stored_close", "label": "Stored market close", "question": "What final stored daily close exists within the selected fiscal period?", "output_type": "number", "source_scope": "Retained SQL daily prices and Mongo EOD rows; exact references require retained metadata and approved source rights", "definition_revision": DEFINITION_REVISION})
     for symbol in symbols:
         price = (await db.execute(select(StockPrice).where(StockPrice.symbol == symbol, StockPrice.interval == "1D", StockPrice.time >= start, StockPrice.time <= end).order_by(StockPrice.time.desc(), StockPrice.id.desc()).limit(1))).scalars().first()
         metric = _metric("close", "Stored close", str(year) if not quarter else f"{year}-Q{quarter}", "No retained daily close within the requested fiscal period")
@@ -410,13 +497,15 @@ async def _add_stored_closes(db, result: dict, symbols: list[str], year: int, qu
             limits = [f"Trade date is distinct from write date {_iso(price.created_at)}.", STORED_LIMIT]
             if not certified:
                 limits.insert(0, "Price scale is not retained; VND versus thousand VND cannot be inferred.")
-            evidence = {"entity_id": symbol, "source": _source_label(StockPrice, price), "locator": f"stock_prices/row/{price.id}/trade-date/{price.time.isoformat()}", "field": "close", "value": value, "unit": unit, "period": metric["period"], "as_of": price.time.isoformat(), "captured_at": captured_at, "provenance": "stored_observation", "formula": None, "input_evidence_ids": [], "limitations": limits}
+            evidence = {"entity_id": symbol, "source": _source_label(StockPrice, price), "locator": f"stock_prices/row/{price.id}/trade-date/{price.time.isoformat()}", "field": "close", "value": value, "unit": unit, "period": metric["period"], "as_of": price.time.isoformat(), "captured_at": captured_at, "provenance": "stored_observation", "observation_state": "unknown_provenance" if certified else "ambiguous_unit", "formula": None, "input_evidence_ids": [], "limitations": limits}
             evidence["evidence_id"] = f"e-{_identity(evidence)}"
             evidence_ids = [evidence["evidence_id"]]
             result["evidence"].append(evidence)
-            basis = "Stored daily close; source-certified unit" if certified else "Stored daily close; unit unknown"
-            metric.update(value=value, display=display_decimal(value, unit), unit=unit, as_of=price.time.isoformat(), basis=basis, evidence_ids=evidence_ids)
-        state = "supported" if evidence_ids and certified else "non_comparable" if evidence_ids else "unavailable"
+            basis = "Stored daily close; source key and frozen exact reference not retained" if certified else "Stored daily close; unit unknown"
+            limits.append("SQL source labels can certify a normalization unit, but do not retain the source key required for an exact observation reference.")
+            metric.update(value=value, display=f"{value} {unit}", unit=unit, as_of=price.time.isoformat(), basis=basis, evidence_ids=evidence_ids)
+        metric, state = await _merge_mongo_close(result, symbol, start, end, captured_at, price.time if price is not None else None, metric)
+        evidence_ids = metric["evidence_ids"]
         result["cells"].append(_cell(symbol, "stored_close", {"kind": "number", "metrics": [metric]}, state=state, evidence_ids=evidence_ids, limitations=[metric["basis"], "Period-specific closes do not establish a common market observation date."]))
 
 
@@ -432,7 +521,7 @@ def build_matrix_fixture() -> dict:
         value = "-1234567.895" if index == 0 else "0"
         evidence_id = f"fixture-evidence-{symbol}"
         evidence.append({"evidence_id": evidence_id, "entity_id": symbol, "source": "synthetic.fixture", "locator": f"fixture/1/{symbol}/signed_value", "field": "signed_value", "value": value, "unit": "VND", "period": "2024", "as_of": None, "captured_at": created_at, "provenance": "stored_observation", "formula": None, "input_evidence_ids": [], "limitations": ["Invented demonstration data, never a real issuer observation."]})
-        metric = {"key": "signed_value", "label": "Synthetic signed value", "value": value, "display": display_decimal(value, "VND"), "unit": "VND", "period": "2024", "as_of": None, "basis": "Synthetic known basis", "evidence_ids": [evidence_id]}
+        metric = {"key": "signed_value", "label": "Synthetic signed value", "value": value, "display": display_decimal(value, "VND"), "unit": "VND", "period": "2024", "as_of": None, "basis": "Synthetic known basis", "evidence_ids": [evidence_id], "regulatory_basis": None}
         for dimension, _ in definitions:
             state, ids, limits = "supported", [], []
             if dimension in {"number", "table"}:
