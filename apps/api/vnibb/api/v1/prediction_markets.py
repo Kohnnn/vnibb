@@ -589,9 +589,10 @@ async def list_prediction_market_calibration(
         "recession": ("recession", "us recession", "global recession"),
     }
     markers = keywords[topic]
-    market = active_market_candidates(datetime.now(UTC))
+    market = PredictionMarket
     stmt = (
         select(market)
+        .where(*snapshot_eligibility(datetime.now(UTC)))
         .where(_topic_matches(markers, include_slug=True, market=market))
         .order_by(market.updated_at.desc(), market.id.asc())
         .limit(limit)
@@ -698,7 +699,7 @@ def _topic_aggregates(db: AsyncSession):
     every price is numeric and within [0, 1], and at least one is positive.
     Both PostgreSQL and SQLite use bounded, correlated JSON expansion.
     """
-    market = active_market_candidates(datetime.now(UTC))
+    market = PredictionMarket
     price, numeric = _observed_price_sql(market, db)
     weight = case((market.volume >= 1, market.volume), else_=1.0)
     columns = [market.source, func.count(market.id).label("source_count"),
@@ -713,7 +714,11 @@ def _topic_aggregates(db: AsyncSession):
                 func.sum(case((valid, weight), else_=0.0)).label(f"{topic}_weight"),
             )
         )
-    return select(*columns).group_by(market.source)
+    return (
+        select(*columns)
+        .where(*snapshot_eligibility(datetime.now(UTC)))
+        .group_by(market.source)
+    )
 
 
 def _weighted_topic(row, topic: str) -> float | None:

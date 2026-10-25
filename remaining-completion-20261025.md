@@ -22,3 +22,33 @@ Final full gate passed in 628.9 s: frontend lint/typecheck/changelog/build, 178 
 User accepted complete-or-reject HTTP `413` for oversized frozen selections instead of partial evidence. Source rights remain default-deny; a complete citation is not a redistribution grant. Three independent code-review defects were fixed: nested regulatory links, older Mongo overriding newer SQL closes, and MCP losing `evidence_not_found`; explicit comparability state also replaces parsing English basis text.
 
 User authorized separate rotation of admin automation, Apps Script and MCP credentials while keeping interactive admin locked. No operator is silently promoted. External clients must receive their respective scoped credentials through private custody; old exposed credentials must never be restored during image rollback. Rotation/deployment remain pending actual release evidence.
+
+## Prediction-query acceptance follow-up
+
+The isolated current production snapshot contains 87,553 prediction markets,
+79,704 active. At its explicit October 24 fixture clock, 10,858 are eligible,
+including 10,000 Kalshi rows. Actual execution exposed a remaining defect:
+the shared 1,000/source candidate limit ran before topic filtering/aggregation.
+Issue #33 was reopened; cutover stopped before credentials or serving images
+changed. Calibration now applies eligibility/topic filtering before its requested
+limit; spread/cross-calibration aggregate all eligible rows in SQL. Other
+candidate-policy callers and response contracts are unchanged.
+
+The late-CPI regression failed before and passed after. Both independent review
+axes passed. Against the same isolated PostgreSQL snapshot, five request shapes
+each ran three times, with EXPLAIN ANALYZE and transferred-row counts. The fixed
+source overlay matched an independent unrestricted 10,858-row column-projection
+reference for all five shapes; the prior image disagreed for Fed calibration,
+spread and cross-calibration. The actual historical full-ORM implementation hit
+the declared five-second SQL timeout in all three paths.
+
+All 15 fixed requests met the predeclared five-second and 256 MiB incremental
+client-memory budgets; the largest observed increment was 4.13 MiB. Calibration
+transferred 2/25/0 CPI/Fed/recession rows, aggregates four source rows. These are
+ARM64-under-QEMU measurements on the 87,553-row restored snapshot, not native
+production latency or proof at the historical 13.3-million-row ceiling. The
+fixture clock makes retained rows eligible and does not certify current health.
+Exact final-image replay and deployment acceptance remain required.
+
+Private plans, before/after timings, memory and semantic-reference outputs:
+`prediction-scale-4-20261025T124500Z/` under the existing private evidence root.

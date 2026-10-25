@@ -13,6 +13,7 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Prediction calibration filters the complete eligible topic set before its requested result limit; spread and cross-calibration aggregate eligible markets in SQL without the biased per-source candidate cap (#24, #33).
 - Matrix retains complete frozen EOD citation fields without inventing missing source keys or unit evidence; source-rights uncertainty and missing-reference errors remain explicit. Reviews stay revision-bound, financial-quality derivations require matching periods, and bank regulatory dimensions remain unavailable without their regulatory basis (#90–#92, #96).
 - Matrix-to-VniAgent requests use distinct `matrix_run_ref` and `candidate_ids` fields, reject the previous wire field and refuse oversized complete selections rather than silently truncating evidence (#93). External conversational-client release remains gated.
 - Cloud-01 Mongo EOD freshness reads use the two existing bootstrap date/source-date indexes instead of collection scans and sorts. Indexed probes preserve October 23 observation dates; this performance change does not recover the missing current-session cohort.
