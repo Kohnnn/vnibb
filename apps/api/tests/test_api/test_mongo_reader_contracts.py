@@ -413,6 +413,9 @@ async def test_eod_public_tool_preserves_source_age_and_one_sided_bound(monkeypa
         assert response["items"][0]["sourceDate"] == "2025-01-01"
         assert response["items"][0]["receivedAt"].startswith("2026-01-01")
         assert response["items"][0]["providerSource"] == "vietcap"
+        assert response["items"][0]["source"] == "vietcap"
+        assert response["items"][0]["sourceKey"] == "retained-id"
+        assert response["items"][0]["priceUnit"] == "VND"
     assert set(collection.query["tradeDate"]) == ({"$gte"} if bound == "start_date" else {"$lte"})
 
 

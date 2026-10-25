@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Literal
 
@@ -14,6 +15,15 @@ class MatrixModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class MatrixRegulatoryBasis(MatrixModel):
+    circular_versions: list[str]
+    method: str | None = None
+    perimeter: str | None = None
+    observation_date: date | None = None
+    reported_or_derived: Literal["issuer_reported", "vnibb_derived"] | None = None
+    source_urls: list[str]
+
+
 class MatrixMetric(MatrixModel):
     key: str
     label: str
@@ -24,6 +34,7 @@ class MatrixMetric(MatrixModel):
     as_of: str | None
     basis: str
     evidence_ids: list[str]
+    regulatory_basis: MatrixRegulatoryBasis | None = None
 
     @model_validator(mode="after")
     def validate_value(self):
@@ -75,6 +86,30 @@ class MatrixCell(MatrixModel):
     review_state: ReviewState
 
 
+class MatrixObservationReference(MatrixModel):
+    symbol: Symbol
+    trade_date: date
+    value: str
+    currency: Literal["VND"]
+    price_unit: Literal["VND"]
+    source: Identifier
+    source_key: Identifier
+    collection: Literal["market_prices_eod"]
+    observation_revision: Identifier
+    retrieved_at: datetime
+
+    @model_validator(mode="after")
+    def validate_value(self):
+        try:
+            if not Decimal(self.value).is_finite():
+                raise ValueError("Observation values must be finite decimals")
+        except InvalidOperation as exc:
+            raise ValueError("Observation values must be decimal strings") from exc
+        if self.retrieved_at.tzinfo is None:
+            raise ValueError("Observation retrieval time must include a timezone")
+        return self
+
+
 class MatrixEvidence(MatrixModel):
     evidence_id: str
     entity_id: str
@@ -90,6 +125,24 @@ class MatrixEvidence(MatrixModel):
     formula: str | None
     input_evidence_ids: list[str]
     limitations: list[str]
+    observation_reference: MatrixObservationReference | None = None
+    observation_state: Literal["exact", "unknown_provenance", "ambiguous_unit", "derived", "rights_unverified"] = "unknown_provenance"
+
+    @model_validator(mode="after")
+    def validate_observation_reference(self):
+        reference = self.observation_reference
+        if self.observation_state == "exact" and reference is None:
+            raise ValueError("Exact evidence requires a frozen observation reference")
+        if reference and (
+            self.observation_state not in {"exact", "rights_unverified"} or self.provenance != "stored_observation"
+            or self.entity_id != reference.symbol or self.value != reference.value
+            or self.unit != reference.price_unit or self.as_of != reference.trade_date.isoformat()
+            or self.locator != reference.source_key
+            or self.source != f"stored.mongo.{reference.collection}:{reference.source}"
+            or datetime.fromisoformat(self.captured_at.replace("Z", "+00:00")) != reference.retrieved_at
+        ):
+            raise ValueError("Exact evidence must match every frozen observation reference field")
+        return self
 
 
 class MatrixSnapshot(MatrixModel):

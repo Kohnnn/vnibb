@@ -65,7 +65,7 @@ export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, on
     {cell ? <>
       <div className="matrix-tabs" role="tablist" aria-label="Result details">{(['Result', 'Evidence', 'Basis', 'Review'] as const).map((name) => <button key={name} type="button" role="tab" aria-selected={tab === name} onClick={() => setTab(name)}>{name}</button>)}</div>
       <div role="tabpanel" aria-label={tab} className="matrix-inspector-body">
-        {tab === 'Result' && <><MatrixResult cell={cell} density="expanded" /><p className="matrix-muted">Result {cell.result_id}<br />Revision {cell.result_revision}</p></>}
+        {tab === 'Result' && <><MatrixResult cell={cell} density="expanded" />{cell.payload.metrics?.filter((metric) => metric.regulatory_basis).map((metric) => <section key={metric.key} aria-label={`${metric.label} regulatory sources`}>{metric.regulatory_basis!.source_urls.map((url) => <a key={url} href={url} target="_blank" rel="noopener noreferrer">Regulatory framework source (not issuer evidence)</a>)}</section>)}<p className="matrix-muted">Result {cell.result_id}<br />Revision {cell.result_revision}</p></>}
         {tab === 'Evidence' && <>
           <p className="matrix-notice">Retained serving observations are not original issuer documents. {snapshot.synthetic && 'These observations are synthetic demonstration data.'}</p>
           {error && <p role="alert">{error}</p>}
@@ -74,6 +74,15 @@ export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, on
           {evidence?.map((item) => <article className="matrix-evidence" key={item.evidence_id}>
             <strong>{item.field}</strong><p>{item.value ?? 'Unavailable'} {item.unit}</p>
             <dl><div><dt>Source</dt><dd>{item.source}</dd></div><div><dt>Locator</dt><dd>{item.locator}</dd></div><div><dt>Period / as of</dt><dd>{item.period} / {item.as_of || 'Not supplied'}</dd></div><div><dt>Captured</dt><dd>{item.captured_at}</dd></div><div><dt>Provenance</dt><dd>{item.provenance}</dd></div></dl>
+            <p>Observation state: {item.observation_state || 'unknown_provenance'}</p>
+            {item.observation_reference && <dl aria-label="Frozen stored observation reference">
+              <div><dt>Symbol / trade date</dt><dd>{item.observation_reference.symbol} / {item.observation_reference.trade_date}</dd></div>
+              <div><dt>Exact value / currency / price unit</dt><dd>{item.observation_reference.value} / {item.observation_reference.currency} / {item.observation_reference.price_unit}</dd></div>
+              <div><dt>Retained source / key</dt><dd>{item.observation_reference.source} / {item.observation_reference.source_key}</dd></div>
+              <div><dt>Collection</dt><dd>{item.observation_reference.collection}</dd></div>
+              <div><dt>Observation revision</dt><dd>{item.observation_reference.observation_revision}</dd></div>
+              <div><dt>Frozen retrieval time</dt><dd>{item.observation_reference.retrieved_at}</dd></div>
+            </dl>}
             {item.formula && <p>Formula: {item.formula}</p>}{item.input_evidence_ids.length > 0 && <p>Inputs: {item.input_evidence_ids.join(', ')}</p>}
             {item.limitations.map((limit) => <p key={limit} className="matrix-notice">{limit}</p>)}
           </article>)}

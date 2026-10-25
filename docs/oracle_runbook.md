@@ -125,6 +125,32 @@ Before approved live application, independently review the exact migration hash 
 
 After independent review and explicit parent approval, that exact migration was applied once on 24 October 2026. The wrapper exited 1 only during its post-apply hash lookup: setting `search_path` to `public` hid `pgcrypto`'s `extensions.digest`. No DDL retry was run. Independent bounded read-only inspection at 09:55 UTC confirmed the new symbol index was unique, valid, ready and immediate; all 1,754 complete rows retained the same ordered SHA-256, the prior primary-key index and all seven protected container identities were unchanged, and the Alembic revision stayed `f8c3a102d679`. No row DML or stamp occurred. `database/stock-key-acceptance.json` preserves both the failed wrapper and the actual-state adjudication; do not reapply the failed wrapper. A later full migration must validate the existing index idempotently rather than recreate it.
 
+### Off-source recovery and independent key custody (25 October 2026)
+
+Paired snapshot `20261024T100501Z` passed the existing strict, networkless
+restore utility on a workstation distinct from cloud-01: 42 PostgreSQL public
+tables, 1,754 stocks, 1,413,263 prices and all 17 populated Mongo collections
+(8,086,310 documents, zero failures). Local verification/restore took 164.9 s;
+authenticated transfer and full-hash verification took 689.267 s. The combined
+855.130 s excludes application rebuild, DNS and traffic cutover; it is not a
+full-service RTO or a recurring RPO guarantee. Scratch containers/volumes were
+removed; serving containers and volumes were unchanged.
+
+An additional age-encrypted copy is retained with private permissions. Its
+recovery identity is independently retained on the existing deploy-01 account
+in a 0700 directory with a 0600 identity file. Distinct-machine streaming decrypt
+exited successfully in 419.281 s: the full encrypted hash and all three decrypted
+member sizes/hashes matched the originals. No plaintext or encrypted archive
+persisted on the custody host; temporary decrypt tooling was removed. This
+establishes separate-host/store recovery, not a separate human custodian or
+credential-compromise independence. Private plaintext originals remain retained;
+retiring them needs a separately approved retention decision.
+
+Exact artifact hashes, private custody location and observed receipts are in
+`remaining-completion-20261025/offbox/drill-20261025T001456Z-536a67/` under the
+existing private VNIBB evidence root. Never put the recovery identity in source,
+chat, command arguments or the encrypted archive's storage location.
+
 ### Historical pre-release observation (13 October 2026)
 
 Trusted public TLS and authorized read-only MCP were available on 13 October 2026 at `https://129.150.58.64.sslip.io`; `/mcp-health` and API health reported production revision `2c57654277ef5546662afc3cc7ed4a4e355e441e`. Production still reported source `KBS`, so readiness is not proof that the current IQ/free-VCI source policy is deployed. Strict known-host public SSH timed out and Tailscale reported `NeedsLogin`; host deployment, production migration and current backup inspection were not established.
@@ -300,6 +326,23 @@ Supabase sign-out removes the session row, so the online Auth check denies subse
 `ADMIN_API_KEY` is now a **server-only automation/operations secret**. Layout publishers use `GET` / `PUT /api/v1/admin/automation/system-layouts/{dashboard_key}` with `X-Admin-Key` and fixed actor `automation:layout-publisher`; do not send `X-Admin-Actor`. Retained `/data`, realtime start/stop, and metrics/debug operational routes still consume this secret. Never put it in browser settings or `NEXT_PUBLIC_*` variables. The two `apps/api/scripts/publish_*_markets_layout.py` publishers read `ADMIN_API_KEY` from their execution environment.
 
 Before cutover, clear the formerly stored platform admin key from every operator browser profile/site storage, rotate the formerly browser-exposed key in backend and authorized automation/operational secret stores, and roll all workers. Clearing browser storage is not revocation, and the stored value must never be read out or pasted into analytics, tickets, or chat; verify the old key fails and the rotated key works only on authorized automation/operational routes.
+
+If that historical value was also assigned to `VNIBB_APPS_SCRIPT_KEY` or
+`VNIBB_MCP_SHARED_BEARER_TOKEN`, rotate all affected scopes to independent secrets;
+changing only the admin variable does not revoke the other grants. Keep each
+delivery file `0600` in private custody and verify old-key rejection, own-scope
+success and cross-scope denial without logging headers or secret values. Retain
+new credentials during an image rollback; restoring the old environment would
+reactivate an exposed credential. External Apps Script/MCP callers need their
+respective new secret, not the admin automation key.
+
+The October 25 continuation explicitly keeps `ADMIN_USER_IDS` empty. Rotation
+does not enable interactive admin or authorize silent account promotion. Actual
+serving Compose labels decide the recreation commands: application services use
+the base file, while Caddy uses base plus runtime override. Do not combine them
+when the runtime override changes application mounts. An authorized same-image,
+same-config Caddy recreation removes obsolete inherited secret copies; it does
+not change proxy routing. Auth, PostgreSQL, MongoDB and Redis stay untouched.
 
 Interactive admin production acceptance remains **BLOCKED** until operator UUID verification, key rotation, authenticated live acceptance (including completed sign-out/revocation), and documented Auth availability/latency operations are recorded. Acceptance must cover allowlisted draft/publish and published reload, non-allowlisted and expired/denied-session rejection, shared-key rejection on interactive routes, and rotated-key automation. See `docs/admin_global_system_layouts.md` for the full rollout checklist.
 

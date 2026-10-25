@@ -62,7 +62,9 @@ test('sends every selected reference unchanged with the session token exclusivel
     expect(options?.method).toBe('POST');
     expect(new Headers(options?.headers).get('Authorization')).toBe(`Bearer ${token}`);
     const body = String(options?.body);
-    expect(JSON.parse(body).matrix_selection).toEqual(selection);
+    expect(JSON.parse(body).matrix_run_ref).toBe(selection.snapshot_id);
+    expect(JSON.parse(body).candidate_ids).toEqual(selection.result_ids);
+    expect(JSON.parse(body)).not.toHaveProperty('matrix_selection');
     expect(JSON.parse(body).message).toBe(request.message);
     expect(body).not.toContain(token);
     expect(body).not.toContain('test-refresh-token');

@@ -3,7 +3,7 @@
 import { env } from './env';
 import { isSupabaseConfigured, supabase } from './supabase';
 import type { AISettings } from './aiSettings';
-import type { MatrixSelection } from '@/types/matrix';
+import type { MatrixHandoff, MatrixSelection } from '@/types/matrix';
 
 const LOCALHOST_OR_LOOPBACK_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i
 const SSLIP_HOST_RE = /^[0-9]+(?:[.-][0-9]+){3}\.sslip\.io$/i
@@ -3523,11 +3523,13 @@ export async function openCopilotChatStream(
     if (token) {
         headers.set('Authorization', `Bearer ${token}`);
     }
+    const { matrix_selection: selection, ...payload } = buildCopilotRequestPayload(request);
+    const handoff: MatrixHandoff | undefined = selection ? { matrix_run_ref: selection.snapshot_id, candidate_ids: selection.result_ids } : undefined;
 
     return fetch(`${API_BASE_URL}/copilot/chat/stream`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(buildCopilotRequestPayload(request)),
+        body: JSON.stringify({ ...payload, ...handoff }),
         signal,
     });
 }
