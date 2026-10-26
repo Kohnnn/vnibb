@@ -464,3 +464,29 @@ async def test_complete_cohort_preserves_null_no_trade_and_suspended_prices(admi
         assert len(empty) == 2
         assert all(row.price is None and row.trade_date is None and row.volume == 0 for row in empty)
         assert len((await session.scalars(select(StockPrice))).all()) == 48
+
+
+@pytest.mark.asyncio
+async def test_conflicting_stored_price_is_preserved_without_poisoning_later_rows(admission_stores, monkeypatch):
+    stores = admission_stores
+    async with stores.sessions.begin() as session:
+        stocks = [Stock(symbol=symbol, is_active=1) for symbol in ["AAA", "BBB"]]
+        session.add_all(stocks)
+        await session.flush()
+        price = StockPrice(
+            stock_id=stocks[0].id, symbol="AAA", time=SESSION, open=10000,
+            high=12000, low=9000, close=10500, volume=100, interval="1D", source="vietcap_vnd",
+        )
+        session.add(price)
+        await session.flush()
+        original = (price.id, price.created_at, price.close, price.source)
+    monkeypatch.setattr(VietcapClient, "get_price_board", lambda *args, **kwargs: [board_row("AAA"), board_row("BBB")])
+    progress = {}
+    assert await DataPipeline().sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress=progress) == 1
+    assert progress["session_admitted"] == ["BBB"]
+    assert progress["session_errors"] == ["AAA"]
+    async with stores.sessions() as session:
+        retained = await session.scalar(select(StockPrice).where(StockPrice.symbol == "AAA"))
+        assert (retained.id, retained.created_at, retained.close, retained.source) == original
+        assert set(await session.scalars(select(ScreenerSnapshot.symbol))) == {"BBB"}
+        assert not (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
