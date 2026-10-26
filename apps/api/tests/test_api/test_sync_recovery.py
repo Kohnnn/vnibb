@@ -767,6 +767,57 @@ async def test_screener_resumed_base_and_marker_commit_atomically(screener_base_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("prefix_damage", ["missing", "invalid"])
+async def test_screener_resume_repairs_only_uncommitted_prefix_members(
+    screener_base_pipeline, prefix_damage,
+):
+    from datetime import datetime
+
+    from vnibb.models.screener import ScreenerSnapshot
+    from vnibb.models.stock import Stock, StockPrice
+    from vnibb.services.cache_manager import CacheManager
+
+    pipeline, sessions = screener_base_pipeline
+    today = datetime.utcnow().date()
+    symbols = [f"B{index:02d}" for index in range(22)]
+    async with sessions.begin() as session:
+        session.add_all([Stock(id=index + 1, symbol=symbol, is_active=1) for index, symbol in enumerate(symbols)])
+        session.add_all([
+            StockPrice(id=index + 1, stock_id=index + 1, symbol=symbol, time=today,
+                       open=110, high=110, low=110, close=110, volume=0,
+                       source="vnstock_vnd:VCI", interval="1D")
+            for index, symbol in enumerate(symbols)
+        ])
+        session.add_all([
+            ScreenerSnapshot(symbol=symbol, snapshot_date=today, trade_date=today, price=100,
+                             extended_metrics={"price_unit": "VND", "price_source": "vnstock_vnd:VCI"})
+            for symbol in symbols[1:21]
+        ])
+        if prefix_damage == "invalid":
+            session.add(ScreenerSnapshot(
+                symbol="B00", snapshot_date=today, trade_date=today, price=0,
+                extended_metrics={"price_unit": "VND", "price_source": "vnstock_vnd:VCI"},
+            ))
+    progress = {"stage": "screener", "last_index": 20, "last_symbol": "B20"}
+
+    assert await pipeline.sync_screener_data(progress=progress) == 2
+
+    async with sessions() as session:
+        marker = (await session.scalars(select(SyncStatus).where(
+            SyncStatus.sync_type == "screener_universe",
+        ))).one()
+        assert marker.additional_data["expected_symbols"] == symbols
+        assert marker.additional_data["expected_count"] == marker.success_count == progress["base_count"] == 22
+        rows = (await session.scalars(select(ScreenerSnapshot).order_by(ScreenerSnapshot.symbol))).all()
+        assert [(row.symbol, row.price) for row in rows] == [
+            (symbol, 110 if symbol in {"B00", "B21"} else 100) for symbol in symbols
+        ]
+        cached = await CacheManager(db=session).get_screener_data(allow_stale=False)
+        assert cached.hit and not cached.is_stale
+        assert {row.symbol for row in cached.data} == set(symbols)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("interruption", ["checkpoint", "final_commit"])
 async def test_cancelled_final_commit_keeps_previous_same_day_admitted_cohort(screener_base_pipeline, monkeypatch, interruption):
     from datetime import datetime
