@@ -599,7 +599,7 @@ async def test_pipeline_session_acquisition_is_opt_in_and_clears_unqualified_quo
         def utcnow(cls):
             return observed.replace(tzinfo=None)
 
-    def board(self, symbols):
+    def board(self, symbols, **kwargs):
         calls.append(symbols)
         return [{
             "listingInfo": {
@@ -618,7 +618,11 @@ async def test_pipeline_session_acquisition_is_opt_in_and_clears_unqualified_quo
     monkeypatch.setattr(data_pipeline_module, "async_session_maker", sessions)
     monkeypatch.setattr(data_pipeline_module, "datetime", FrozenDateTime)
     monkeypatch.setattr(VietcapClient, "get_price_board", board)
-    monkeypatch.setattr("vnibb.services.mongo_market_data_service.get_mongo_market_data_service", lambda: SimpleNamespace(enabled=False))
+    retained = SimpleNamespace(
+        retain_price_board_envelope=lambda *args: None,
+        retain_market_sessions=lambda records: {record["symbol"]: record for record in records},
+    )
+    monkeypatch.setattr("vnibb.services.mongo_market_data_service.get_mongo_market_data_service", lambda: retained)
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_cache_set_json", cached)
     async with sessions.begin() as session:
@@ -645,7 +649,7 @@ async def test_pipeline_session_acquisition_is_opt_in_and_clears_unqualified_quo
         assert typed[0]["market_session_date"] == session_date.isoformat()
         assert typed[0]["expected_symbols"] == ["AAA", "BBB"]
 
-    def unavailable(self, symbols):
+    def unavailable(self, symbols, **kwargs):
         raise RuntimeError("source unavailable")
 
     monkeypatch.setattr(VietcapClient, "get_price_board", unavailable)

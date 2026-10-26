@@ -1363,6 +1363,7 @@ class DataPipeline:
         market_sessions: dict[str, dict[str, Any]] = {}
         materialized_sessions: set[str] = set()
         session_errors: list[str] = []
+        session_input_complete = True
         today = datetime.utcnow().date()
 
         previous_snapshot_fallback: Dict[str, Dict[str, Any]] = {}
@@ -1435,45 +1436,65 @@ class DataPipeline:
 
             client = VietcapClient()
             mongo = get_mongo_market_data_service()
+            seen_symbols: set[str] = set()
+            rejected_symbols: set[str] = set()
             for batch_start in range(0, len(deduped_symbols), 50):
                 requested = deduped_symbols[batch_start:batch_start + 50]
                 try:
-                    raw_rows = await asyncio.to_thread(client.get_price_board, requested)
+                    raw_rows = await asyncio.to_thread(client.get_price_board, requested, validate_membership=False)
                     batch_observed_at = datetime.now(UTC)
-                    qualified = {}
-                    for raw in raw_rows:
-                        symbol = raw.get("listingInfo", {}).get("symbol")
+                    await asyncio.to_thread(
+                        mongo.retain_price_board_envelope, requested, raw_rows, expected_session, batch_observed_at,
+                    )
+                    if not isinstance(raw_rows, list):
+                        raise ValueError("Invalid Vietcap board response")
+                    identities: dict[str, set[int]] = {}
+                    row_identities = []
+                    for index, raw in enumerate(raw_rows):
+                        claims = set()
+                        if isinstance(raw, dict):
+                            for section_name in ("listingInfo", "matchPrice", "bidAsk"):
+                                section = raw.get(section_name)
+                                if isinstance(section, dict):
+                                    for field in (("symbol", "ticker") if section_name == "listingInfo" else ("symbol",)):
+                                        value = section.get(field)
+                                        if isinstance(value, str) and value:
+                                            claims.add(value)
+                        row_identities.append(claims)
+                        for symbol in claims:
+                            identities.setdefault(symbol, set()).add(index)
+                    ambiguous = {
+                        symbol for claims in row_identities if len(claims) != 1 for symbol in claims
+                    } | {symbol for symbol, indexes in identities.items() if len(indexes) != 1}
+                    rejected_symbols.update(ambiguous | (seen_symbols & set(identities)))
+                    rejected_symbols.update(set(identities) - set(requested))
+                    seen_symbols.update(identities)
+                    qualified = []
+                    for raw, claims in zip(raw_rows, row_identities):
+                        symbol = next(iter(claims)) if len(claims) == 1 else None
                         record = qualify_market_session(raw, symbol, expected_session, batch_observed_at)
-                        if symbol not in requested or symbol in qualified or record is None:
-                            raise ValueError(f"Unqualified Vietcap board row: {symbol}")
-                        qualified[symbol] = record
-                    if set(qualified) != set(requested):
-                        raise ValueError("Incomplete Vietcap board batch")
-                    market_sessions.update(qualified)
-                    if mongo.enabled:
-                        def store_raw(records=tuple(qualified.values()), observed_at=batch_observed_at):
-                            from pymongo import UpdateOne
-
-                            operations = []
-                            for record in records:
-                                key = f"vietcap:price_board:{record['symbol']}:{record['session_date']}"
-                                operations.append(UpdateOne(
-                                    {"recordKey": key},
-                                    {"$set": {**record, "recordKey": key, "dataset": "equity.price_board", "updatedAt": observed_at}},
-                                    upsert=True,
-                                ))
-                            mongo._get_collection("market_vnstock_premium_records").bulk_write(operations, ordered=False)
-                        try:
-                            await asyncio.to_thread(store_raw)
-                        except Exception as exc:
-                            logger.warning("Vietcap board Mongo retention failed: %s", exc)
+                        if symbol not in requested or symbol in rejected_symbols or record is None:
+                            session_input_complete = False
+                            continue
+                        qualified.append(record)
+                    retained = await asyncio.to_thread(mongo.retain_market_sessions, qualified)
+                    market_sessions.update(retained)
+                    if set(retained) != set(requested):
+                        session_input_complete = False
                 except Exception as exc:
-                    session_errors.extend(requested)
-                    logger.warning("Vietcap board acquisition failed for %s: %s", requested, exc)
+                    session_input_complete = False
+                    logger.warning("Vietcap board acquisition/retention failed for %s: %s", requested, exc)
+            for symbol in rejected_symbols:
+                market_sessions.pop(symbol, None)
+            session_errors = sorted(set(deduped_symbols) - set(market_sessions))
             if progress is not None:
+                prior_errors = len(progress.get("session_errors", []))
                 progress["market_session_date"] = expected_session.isoformat()
+                progress["session_requested"] = sorted(deduped_symbols)
+                progress["session_admitted"] = sorted(market_sessions)
                 progress["session_errors"] = session_errors
-                progress["error_count"] = progress.get("error_count", 0) + len(session_errors)
+                progress["session_input_complete"] = session_input_complete
+                progress["error_count"] = max(0, progress.get("error_count", 0) - prior_errors) + len(session_errors)
 
         if progress is not None:
             progress.setdefault("stage_stats", {})
@@ -1483,6 +1504,10 @@ class DataPipeline:
                 "screener",
                 {"success": 0, "errors": 0, "ratio_errors": 0, "base_errors": 0, "total": len(deduped_symbols)},
             )
+            if acquire_sessions:
+                stats = progress["stage_stats"]["screener"]
+                stats["errors"] = max(0, stats["errors"] - prior_errors) + len(session_errors)
+                stats["base_errors"] = len(session_errors)
 
         async with async_session_maker() as session:
             count = 0
@@ -2182,6 +2207,7 @@ class DataPipeline:
                 and limit is None
                 and active_symbols == expected_symbols
                 and not session_errors
+                and (not acquire_sessions or session_input_complete)
                 and {snapshot.symbol for snapshot in snapshot_rows} == expected_symbols
                 and valid_base_symbols == expected_symbols
             ):
