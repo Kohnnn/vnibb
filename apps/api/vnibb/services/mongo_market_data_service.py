@@ -277,6 +277,37 @@ class MongoMarketDataService:
                 retained[record["symbol"]] = candidate
         return retained
 
+    def verified_market_sessions(
+        self, records: dict[str, dict[str, Any]], envelopes: list[dict[str, Any]],
+    ) -> set[str]:
+        """Recheck immutable qualified rows and exact received input envelopes."""
+        collection = self._session_collection()
+        retained_envelopes = []
+        for envelope in envelopes:
+            digest = sha256(json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            stored = collection.find_one({
+                "recordKey": f"vietcap:price_board_envelope:{envelope['session_date']}:{digest}",
+                "dataset": "equity.price_board_envelope",
+            })
+            if stored is not None and all(stored.get(field) == value for field, value in envelope.items()):
+                retained_envelopes.append(envelope)
+        verified = set()
+        for symbol, record in records.items():
+            stored = collection.find_one({
+                "recordKey": f"vietcap:price_board:{symbol}:{record['session_date']}",
+                "dataset": "equity.price_board",
+            })
+            if stored is None or any(stored.get(field) != value for field, value in record.items()):
+                continue
+            for envelope in retained_envelopes:
+                raw = envelope.get("raw")
+                if (envelope["session_date"] == record["session_date"]
+                    and symbol in envelope["requested_symbols"]
+                    and isinstance(raw, list) and record["raw"] in raw):
+                    verified.add(symbol)
+                    break
+        return verified
+
     def ensure_eod_indexes(self) -> list[str]:
         """Ensure the EOD collection has the required unique natural key."""
         if not self.enabled:

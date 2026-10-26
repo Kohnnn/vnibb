@@ -1,9 +1,9 @@
 """Offline admission against explicitly supplied, disposable loopback stores."""
 
-from copy import deepcopy
-from datetime import UTC, date, datetime
 import ipaddress
 import os
+from copy import deepcopy
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -18,7 +18,9 @@ from vnibb.core.database import Base
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.sync_status import SyncStatus
+from vnibb.services import cache_manager as cache_module
 from vnibb.services import data_pipeline as pipeline_module
+from vnibb.services.cache_manager import CacheManager
 from vnibb.services.data_pipeline import DataPipeline
 from vnibb.services.mongo_market_data_service import MongoMarketDataService
 from vnibb.services.vietcap_client import VietcapClient
@@ -81,6 +83,7 @@ async def admission_stores(monkeypatch):
             return OBSERVED.replace(tzinfo=None)
 
     monkeypatch.setattr(pipeline_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(cache_module, "datetime", FrozenDateTime)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     try:
@@ -164,8 +167,8 @@ async def test_identical_incomplete_replay_preserves_values_and_lineage(admissio
             receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
         return (
             list(stores.mongo.market_vnstock_premium_records.find({}, {"_id": 0}).sort("recordKey")),
-            [(row.symbol, row.price, row.volume, row.trade_date, row.extended_metrics) for row in snapshots],
-            [(row.symbol, row.time, row.open, row.high, row.low, row.close, row.volume, row.source) for row in prices],
+            [(row.id, row.symbol, row.price, row.volume, row.trade_date, row.extended_metrics, row.created_at) for row in snapshots],
+            [(row.id, row.symbol, row.time, row.open, row.high, row.low, row.close, row.volume, row.source, row.created_at) for row in prices],
             len(receipts),
         )
 
@@ -250,3 +253,214 @@ async def test_missing_durable_envelope_fails_closed(admission_stores, monkeypat
     async with stores.sessions() as session:
         assert not (await session.scalars(select(StockPrice))).all()
         assert not (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+
+
+@pytest.mark.asyncio
+async def test_interrupted_same_day_rerun_preserves_admitted_cohort(admission_stores, monkeypatch):
+    stores = admission_stores
+    symbols = [f"B{index:02d}" for index in range(50)]
+    async with stores.sessions.begin() as session:
+        stocks = [Stock(symbol=symbol, is_active=1) for symbol in symbols]
+        session.add_all(stocks)
+        await session.flush()
+        session.add_all([
+            StockPrice(stock_id=stock.id, symbol=stock.symbol, time=date(2026, 10, 23),
+                       open=10000, high=10000, low=10000, close=10000, volume=100,
+                       interval="1D", source="vietcap_vnd")
+            for stock in stocks
+        ])
+    pipeline = DataPipeline()
+    pipeline.cache_writes_enabled = False
+    assert await pipeline.sync_screener_data(enrich_ratios=False) == 50
+    async with stores.sessions() as session:
+        before = await CacheManager(db=session).get_screener_data()
+        assert before.hit and len(before.data) == 50
+        original = [(row.id, row.symbol, row.price, row.extended_metrics, row.created_at) for row in before.data]
+    async with stores.sessions.begin() as session:
+        await session.execute(text("UPDATE stock_prices SET close = 11000, high = 11000"))
+
+    class Interrupted(BaseException):
+        pass
+
+    async def interrupt_checkpoint(*args, **kwargs):
+        raise Interrupted()
+
+    monkeypatch.setattr(pipeline, "_checkpoint", interrupt_checkpoint)
+    with pytest.raises(Interrupted):
+        await pipeline.sync_screener_data(enrich_ratios=False, progress={}, sync_id=123)
+    async with stores.sessions() as session:
+        after = await CacheManager(db=session).get_screener_data()
+        assert after.hit
+        assert [(row.id, row.symbol, row.price, row.extended_metrics, row.created_at) for row in after.data] == original
+        assert len((await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("table", ["stock_prices", "screener_snapshots"])
+async def test_postgres_constraint_failure_isolates_one_of_50_observations(admission_stores, monkeypatch, table):
+    stores = admission_stores
+    async with stores.sessions.begin() as session:
+        await session.execute(text(f"ALTER TABLE {table} ADD CONSTRAINT reject_one_observation CHECK (symbol <> 'B00')"))
+    symbols = [f"B{index:02d}" for index in range(50)]
+    count, progress = await run_board(stores, monkeypatch, symbols, [board_row(symbol) for symbol in symbols])
+    assert count == 49
+    assert progress["committed_count"] == 49
+    assert progress["base_count"] == 49
+    assert progress["session_admitted"] == symbols[1:]
+    assert progress["session_errors"] == ["B00"]
+    assert progress["error_count"] == 1
+    assert progress["stage_stats"]["screener"]["success"] == 49
+    assert progress["stage_stats"]["screener"]["base_errors"] == 1
+    async with stores.sessions() as session:
+        assert set(await session.scalars(select(StockPrice.symbol))) == set(symbols[1:] if table == "stock_prices" else symbols)
+        assert set(await session.scalars(select(ScreenerSnapshot.symbol))) == set(symbols[1:])
+        assert not (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", ["raw", "envelope", "price", "active_membership"])
+async def test_receipt_revalidates_durable_evidence_and_membership(admission_stores, monkeypatch, damage):
+    stores = admission_stores
+    symbols = [f"B{index:02d}" for index in range(50)]
+    original = stores.service.retain_market_sessions
+
+    def retain_then_damage(records):
+        retained = original(records)
+        if damage in {"raw", "envelope"}:
+            dataset = "equity.price_board" if damage == "raw" else "equity.price_board_envelope"
+            stores.mongo.market_vnstock_premium_records.delete_many({"dataset": dataset})
+        return retained
+
+    monkeypatch.setattr(stores.service, "retain_market_sessions", retain_then_damage)
+    if damage in {"price", "active_membership"}:
+        async with stores.sessions.begin() as session:
+            statement = (
+                "UPDATE stock_prices SET close = 1 WHERE symbol = NEW.symbol;"
+                if damage == "price" else "UPDATE stocks SET is_active = 0 WHERE symbol = 'B49';"
+            )
+            await session.execute(text(f"CREATE FUNCTION damage_evidence() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN {statement} RETURN NEW; END $$"))
+            await session.execute(text("CREATE TRIGGER damage_evidence AFTER INSERT ON screener_snapshots FOR EACH ROW EXECUTE FUNCTION damage_evidence()"))
+    count, progress = await run_board(stores, monkeypatch, symbols, [board_row(symbol) for symbol in symbols])
+    async with stores.sessions() as session:
+        assert not (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+        assert not (await CacheManager(db=session).get_screener_data()).hit
+        assert len((await session.scalars(select(ScreenerSnapshot))).all()) == 50
+    if damage != "active_membership":
+        assert count == 0
+        assert progress["base_count"] == 0
+        assert progress["session_admitted"] == []
+        assert progress["session_errors"] == symbols
+
+
+@pytest.mark.asyncio
+async def test_identical_complete_replay_preserves_cohort_identity(admission_stores, monkeypatch):
+    stores = admission_stores
+    assert (await run_board(stores, monkeypatch, ["AAA"], [board_row("AAA")]))[0] == 1
+
+    async def durable_state():
+        async with stores.sessions() as session:
+            snapshot = await session.scalar(select(ScreenerSnapshot))
+            price = await session.scalar(select(StockPrice))
+            receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+            return (
+                (snapshot.id, snapshot.created_at, snapshot.extended_metrics, snapshot.price),
+                (price.id, price.created_at, price.close, price.source),
+                [(row.id, row.additional_data, row.completed_at) for row in receipts],
+            )
+
+    before = await durable_state()
+    monkeypatch.setattr(pipeline_module.datetime, "utcnow", classmethod(lambda cls: datetime(2026, 10, 26, 10)))
+    assert await DataPipeline().sync_screener_data(enrich_ratios=False, acquire_sessions=True) == 1
+    assert await durable_state() == before
+
+
+@pytest.mark.asyncio
+async def test_cache_failure_cannot_publish_partial_cohort(admission_stores, monkeypatch):
+    stores = admission_stores
+    symbols = [f"B{index:02d}" for index in range(50)]
+    observed_counts = []
+
+    async def unavailable_cache(*args, **kwargs):
+        async with stores.sessions() as session:
+            reader = await CacheManager(db=session).get_screener_data()
+            observed_counts.append(len(reader.data) if reader.hit else 0)
+        raise ConnectionError("Disposable cache unavailable")
+
+    async def cache_ready(self):
+        return True
+
+    monkeypatch.setattr(pipeline_module.redis_client, "set_json", unavailable_cache)
+    monkeypatch.setattr(DataPipeline, "_ensure_redis", cache_ready)
+    assert (await run_board(stores, monkeypatch, symbols, [board_row(symbol) for symbol in symbols]))[0] == 50
+    assert observed_counts and set(observed_counts) <= {0, 50}
+    async with stores.sessions() as session:
+        assert (await CacheManager(db=session).get_screener_data()).hit
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["missing", "active_membership", "complete"])
+async def test_same_day_recovery_replaces_only_a_complete_cohort(admission_stores, monkeypatch, failure):
+    stores = admission_stores
+    symbols = [f"B{index:02d}" for index in range(50)]
+    async with stores.sessions.begin() as session:
+        stocks = [Stock(symbol=symbol, is_active=1) for symbol in symbols]
+        session.add_all(stocks)
+        await session.flush()
+        session.add_all([
+            StockPrice(stock_id=stock.id, symbol=stock.symbol, time=date(2026, 10, 23),
+                       open=10000, high=10000, low=10000, close=10000, volume=100,
+                       interval="1D", source="vietcap_vnd")
+            for stock in stocks
+        ])
+    pipeline = DataPipeline()
+    pipeline.cache_writes_enabled = False
+    assert await pipeline.sync_screener_data(enrich_ratios=False) == 50
+    async with stores.sessions() as session:
+        before = [(row.id, row.price, row.extended_metrics, row.created_at) for row in (
+            await session.scalars(select(ScreenerSnapshot).order_by(ScreenerSnapshot.symbol))
+        ).all()]
+    rows = [board_row(symbol) for symbol in symbols]
+    if failure == "missing":
+        rows.pop()
+    if failure == "active_membership":
+        async def deactivate_after_materialization(*args, **kwargs):
+            async with stores.sessions.begin() as session:
+                await session.execute(text("UPDATE stocks SET is_active = 0 WHERE symbol = 'B49'"))
+
+        monkeypatch.setattr(pipeline, "_checkpoint", deactivate_after_materialization)
+    monkeypatch.setattr(VietcapClient, "get_price_board", lambda *args, **kwargs: deepcopy(rows))
+    await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress={}, sync_id=123 if failure == "active_membership" else None)
+    async with stores.sessions() as session:
+        snapshots = (await session.scalars(select(ScreenerSnapshot).order_by(ScreenerSnapshot.symbol))).all()
+        receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+        prices = set(await session.scalars(select(StockPrice.symbol).where(StockPrice.time == SESSION)))
+        assert prices == set(symbols[:-1] if failure == "missing" else symbols)
+        if failure == "complete":
+            assert len(receipts) == 2
+            assert all(row.price == 11000 and row.trade_date == SESSION for row in snapshots)
+            assert [row.id for row in snapshots] == [row[0] for row in before]
+            assert [row.created_at for row in snapshots] == [row[3] for row in before]
+            reader = await CacheManager(db=session).get_screener_data()
+            assert reader.hit and not reader.is_stale
+        else:
+            assert len(receipts) == 1
+            assert [(row.id, row.price, row.extended_metrics, row.created_at) for row in snapshots] == before
+
+
+@pytest.mark.asyncio
+async def test_complete_cohort_preserves_null_no_trade_and_suspended_prices(admission_stores, monkeypatch):
+    stores = admission_stores
+    symbols = [f"B{index:02d}" for index in range(50)]
+    rows = [board_row(symbol) for symbol in symbols]
+    for row in rows[-2:]:
+        row["matchPrice"].update(openPrice=None, highest=0, lowest=0, matchPrice=0, accumulatedVolume=0)
+    rows[-1]["listingInfo"].update(tradingStatus="TRADING_SUSPENSION", tradingStatusCode="110", securityStatus="Y")
+    assert (await run_board(stores, monkeypatch, symbols, rows))[0] == 50
+    async with stores.sessions() as session:
+        reader = await CacheManager(db=session).get_screener_data()
+        assert reader.hit and not reader.is_stale
+        assert reader.market_session_counts == {"qualified": 50, "traded": 48, "no_trade": 1, "suspended": 1}
+        empty = [row for row in reader.data if row.symbol in symbols[-2:]]
+        assert len(empty) == 2
+        assert all(row.price is None and row.trade_date is None and row.volume == 0 for row in empty)
+        assert len((await session.scalars(select(StockPrice))).all()) == 48

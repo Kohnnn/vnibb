@@ -1362,6 +1362,8 @@ class DataPipeline:
         expected_session = expected_market_session(now=observed_at)
         market_sessions: dict[str, dict[str, Any]] = {}
         materialized_sessions: set[str] = set()
+        retained_envelopes: list[dict[str, Any]] = []
+        materialization_errors: set[str] = set()
         session_errors: list[str] = []
         session_input_complete = True
         today = datetime.utcnow().date()
@@ -1446,6 +1448,7 @@ class DataPipeline:
                     await asyncio.to_thread(
                         mongo.retain_price_board_envelope, requested, raw_rows, expected_session, batch_observed_at,
                     )
+                    retained_envelopes.append({"requested_symbols": requested, "raw": raw_rows, "session_date": expected_session.isoformat()})
                     if not isinstance(raw_rows, list):
                         raise ValueError("Invalid Vietcap board response")
                     identities: dict[str, set[int]] = {}
@@ -1510,12 +1513,29 @@ class DataPipeline:
                 stats["base_errors"] = len(session_errors)
 
         async with async_session_maker() as session:
+            if engine.dialect.name == "postgresql":
+                await session.execute(text("LOCK TABLE screener_snapshots IN SHARE ROW EXCLUSIVE MODE"))
+            prior_receipts = (await session.scalars(select(SyncStatus).where(
+                SyncStatus.sync_type == "screener_universe", SyncStatus.status == "completed",
+                SyncStatus.error_count == 0,
+            ))).all()
+            protects_admitted_cohort = any(
+                (receipt.additional_data or {}).get("snapshot_date") == today.isoformat()
+                for receipt in prior_receipts
+            )
+            original_snapshots = {
+                row["symbol"]: dict(row) for row in (await session.execute(
+                    select(*ScreenerSnapshot.__table__.c).where(ScreenerSnapshot.snapshot_date == today)
+                )).mappings()
+            }
+            publication_transaction = await session.begin_nested()
             count = 0
             for idx in range(start_index, len(deduped_symbols)):
                 symbol = deduped_symbols[idx]
                 if enrich_ratios:
                     await self._wait_for_rate_limit("screener")
                 try:
+                    row_transaction = await session.begin_nested()
                     ratio_df = None
                     for ratio_source in ratio_sources:
                         try:
@@ -1664,6 +1684,7 @@ class DataPipeline:
                     latest_price_row = latest_price_fallback.get(symbol, {})
                     market_session = market_sessions.get(symbol)
                     if acquire_sessions and market_session is None:
+                        await row_transaction.rollback()
                         continue
                     row = normalize_price_record(row, symbol=symbol)
                     row["trade_date"] = self._parse_date_value(
@@ -1695,14 +1716,29 @@ class DataPipeline:
                                 "close": match["matchPrice"], "volume": int(match["accumulatedVolume"]),
                                 "interval": "1D", "source": "vietcap_vnd",
                             }
-                            price_stmt = get_upsert_stmt(
-                                StockPrice, ["symbol", "time", "interval"], price_values,
-                                preserve_existing_on_null={"value"},
-                                update_condition=source_update_condition(StockPrice, "vietcap_vnd"),
-                            )
-                            price_result = await session.execute(price_stmt.returning(StockPrice.id))
-                            if not price_result.scalars().all():
-                                raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
+                            async with async_session_maker.begin() as price_session:
+                                existing_price = await price_session.scalar(select(StockPrice).where(
+                                    StockPrice.symbol == symbol, StockPrice.time == expected_session,
+                                    StockPrice.interval == "1D",
+                                ).with_for_update())
+                                if existing_price is not None and (
+                                    existing_price.source not in {"vietcap", "vietcap_vnd"}
+                                    or any(getattr(existing_price, field) != value for field, value in price_values.items() if field != "source")
+                                ):
+                                    raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
+                                if existing_price is None or existing_price.source != "vietcap_vnd":
+                                    price_stmt = get_upsert_stmt(
+                                        StockPrice, ["symbol", "time", "interval"], price_values,
+                                        preserve_existing_on_null={"value", "adj_close"},
+                                        update_overrides=lambda stmt: {"created_at": StockPrice.created_at},
+                                        update_condition=and_(
+                                            source_update_condition(StockPrice, "vietcap_vnd"),
+                                            *(getattr(StockPrice, field) == value for field, value in price_values.items() if field != "source"),
+                                        ),
+                                    )
+                                    price_result = await price_session.execute(price_stmt.returning(StockPrice.id))
+                                    if not price_result.scalars().all():
+                                        raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
                             price_cache_batch.append({
                                 **price_values, "time": expected_session.isoformat(), "price_unit": "VND",
                                 "price_source": "vietcap_vnd", "raw": market_session["raw"],
@@ -1736,12 +1772,14 @@ class DataPipeline:
                         and price_provenance.get("price_unit") == "VND"
                         and price_provenance.get("price_source")
                     ):
+                        materialization_errors.add(symbol)
                         if progress is not None:
                             progress["error_count"] = progress.get("error_count", 0) + 1
                             stats = progress["stage_stats"]["screener"]
                             stats["errors"] += 1
                             stats["base_errors"] = stats.get("base_errors", 0) + 1
                         if not ratio_df:
+                            await row_transaction.rollback()
                             continue
                     market_cap_value = (
                         _parse_float(row.get("market_cap"))
@@ -1900,6 +1938,7 @@ class DataPipeline:
                                     updates["extended_metrics"], "$.market_session",
                                     func.json(func.json_extract(stmt.excluded.extended_metrics, "$.market_session")),
                                 )
+                        updates["created_at"] = ScreenerSnapshot.created_at
                         return updates
                     stmt = get_upsert_stmt(
                         ScreenerSnapshot,
@@ -1917,7 +1956,6 @@ class DataPipeline:
                     stored = await session.execute(stmt.returning(*ScreenerSnapshot.__table__.c))
                     values = dict(stored.mappings().one())
                     extended_metrics = values["extended_metrics"] or {}
-                    count += 1
                     if market_session:
                         materialized_sessions.add(symbol)
 
@@ -1966,10 +2004,16 @@ class DataPipeline:
                     )
                     if market_session:
                         cache_batch[-1].update(market_session=market_session, change=None, change_pct=None)
+                    await row_transaction.commit()
+                    count += 1
                     if progress is not None:
                         progress["success_count"] = progress.get("success_count", 0) + 1
                         progress["stage_stats"]["screener"]["success"] += 1
                 except Exception as ratio_error:
+                    if row_transaction.is_active:
+                        await row_transaction.rollback()
+                    materialization_errors.add(symbol)
+                    materialized_sessions.discard(symbol)
                     logger.debug(f"Screener base assembly failed for {symbol}: {ratio_error}")
                     if progress is not None:
                         progress["error_count"] = progress.get("error_count", 0) + 1
@@ -1977,17 +2021,8 @@ class DataPipeline:
                         stats = progress["stage_stats"]["screener"]
                         stats["base_errors"] = stats.get("base_errors", 0) + 1
 
-                if count % batch_size == 0:
-                    await session.commit()
-                    if progress is not None:
-                        progress["committed_count"] = count
-                    for item in cache_batch:
-                        cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
-                        await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
-                    cache_batch = []
-                    for item in price_cache_batch:
-                        await self._cache_set_json(build_cache_key("vnibb", "price", "latest", item["symbol"]), item, CACHE_TTL_PRICE_LATEST)
-                    price_cache_batch = []
+                if count and count % batch_size == 0:
+                    # Checkpoint progress, never publish mutable same-day rows mid-cohort.
                     if progress is not None and sync_id is not None:
                         progress["last_symbol"] = symbol
                         progress["last_index"] = idx
@@ -2001,6 +2036,7 @@ class DataPipeline:
                         select(ScreenerSnapshot)
                         .where(
                             ScreenerSnapshot.snapshot_date == today,
+                            ScreenerSnapshot.symbol.in_(deduped_symbols),
                             or_(
                                 ScreenerSnapshot.revenue_growth.is_(None),
                                 ScreenerSnapshot.earnings_growth.is_(None),
@@ -2171,6 +2207,29 @@ class DataPipeline:
 
             await session.flush()
             expected_symbols = set(deduped_symbols)
+            durable_sessions = set()
+            if acquire_sessions:
+                try:
+                    durable_sessions = await asyncio.to_thread(mongo.verified_market_sessions, market_sessions, retained_envelopes)
+                except Exception as exc:
+                    logger.warning("Market-session publication readback failed: %s", exc)
+                prices = {row.symbol: row for row in (await session.scalars(select(StockPrice).where(
+                    StockPrice.symbol.in_(expected_symbols), StockPrice.time == expected_session,
+                    StockPrice.interval == "1D",
+                ).with_for_update())).all()}
+                for symbol in list(durable_sessions):
+                    record = market_sessions[symbol]
+                    if record["status"] != "traded":
+                        continue
+                    price_row = prices.get(symbol)
+                    match = record["raw"]["matchPrice"]
+                    expected_price = {
+                        "open": match["openPrice"], "high": match["highest"], "low": match["lowest"],
+                        "close": match["matchPrice"], "volume": match["accumulatedVolume"],
+                        "source": "vietcap_vnd", "stock_id": stock_metadata[symbol]["stock_id"],
+                    }
+                    if price_row is None or any(getattr(price_row, field) != value for field, value in expected_price.items()):
+                        durable_sessions.discard(symbol)
             snapshot_rows = (await session.scalars(
                 select(ScreenerSnapshot).where(
                     ScreenerSnapshot.snapshot_date == today,
@@ -2185,9 +2244,21 @@ class DataPipeline:
                     qualified = market_sessions.get(snapshot.symbol)
                     valid = (
                         snapshot.symbol in materialized_sessions and qualified is not None
+                        and snapshot.symbol in durable_sessions
                         and (snapshot.extended_metrics or {}).get("market_session") == qualified
                         and snapshot_session_coverage(snapshot, expected_session, datetime.now(UTC)) is not None
                     )
+                    if valid and qualified["status"] != "traded" and snapshot.price is not None:
+                        retained_price = await session.scalar(select(StockPrice).where(
+                            StockPrice.symbol == snapshot.symbol, StockPrice.time == snapshot.trade_date,
+                            StockPrice.interval == "1D",
+                        ).with_for_update())
+                        valid = (
+                            retained_price is not None
+                            and retained_price.close == snapshot.price
+                            and retained_price.source == (snapshot.extended_metrics or {}).get("price_source")
+                            and retained_price.stock_id == stock_metadata[snapshot.symbol]["stock_id"]
+                        )
                 else:
                     valid = (
                         price is not None and math.isfinite(price) and price > 0
@@ -2196,21 +2267,44 @@ class DataPipeline:
                     )
                 if valid:
                     valid_base_symbols.add(snapshot.symbol)
+            if acquire_sessions:
+                session_errors = sorted(expected_symbols - valid_base_symbols)
+                count = len(valid_base_symbols)
             if progress is not None:
                 progress["base_count"] = len(valid_base_symbols)
+                if acquire_sessions:
+                    prior_errors = len(progress.get("session_errors", []))
+                    progress["session_admitted"] = sorted(valid_base_symbols)
+                    progress["session_errors"] = session_errors
+                    progress["error_count"] = max(0, progress.get("error_count", 0) - prior_errors - len(materialization_errors)) + len(session_errors)
+                    progress["success_count"] = count
+                    stats = progress["stage_stats"]["screener"]
+                    stats["success"] = count
+                    stats["base_errors"] = len(session_errors)
+                    stats["errors"] = len(session_errors) + stats.get("ratio_errors", 0)
+            if engine.dialect.name == "postgresql":
+                await session.execute(text("LOCK TABLE stocks IN SHARE MODE"))
             active_symbols = set((await session.scalars(
                 select(Stock.symbol).where(Stock.is_active == 1)
             )).all())
-            if (
-                symbols is None
-                and exchanges is None
-                and limit is None
+            publish_cohort = (
+                symbols is None and exchanges is None and limit is None
                 and active_symbols == expected_symbols
-                and not session_errors
+                and not session_errors and not materialization_errors
                 and (not acquire_sessions or session_input_complete)
                 and {snapshot.symbol for snapshot in snapshot_rows} == expected_symbols
                 and valid_base_symbols == expected_symbols
-            ):
+            )
+            current_snapshots = {row["symbol"]: dict(row) for row in (await session.execute(
+                select(*ScreenerSnapshot.__table__.c).where(ScreenerSnapshot.snapshot_date == today)
+            )).mappings()}
+            identical_receipt = original_snapshots == current_snapshots and any(
+                (receipt.additional_data or {}).get("snapshot_date") == today.isoformat()
+                and (receipt.additional_data or {}).get("expected_symbols") == sorted(expected_symbols)
+                and (receipt.additional_data or {}).get("market_session_date") == (expected_session.isoformat() if acquire_sessions else None)
+                for receipt in prior_receipts
+            )
+            if publish_cohort and not identical_receipt:
                 session.add(
                     SyncStatus(
                         sync_type="screener_universe",
@@ -2229,6 +2323,25 @@ class DataPipeline:
                         },
                     )
                 )
+            if not publish_cohort and protects_admitted_cohort:
+                await publication_transaction.rollback()
+                if progress is not None:
+                    persisted_snapshots = (await session.scalars(select(ScreenerSnapshot).where(
+                        ScreenerSnapshot.snapshot_date == today, ScreenerSnapshot.symbol.in_(expected_symbols),
+                    ))).all()
+                    progress["base_count"] = sum(
+                        snapshot.symbol in durable_sessions
+                        and (snapshot.extended_metrics or {}).get("market_session") == market_sessions.get(snapshot.symbol)
+                        and snapshot_session_coverage(snapshot, expected_session, datetime.now(UTC)) is not None
+                        for snapshot in persisted_snapshots
+                    ) if acquire_sessions else len(persisted_snapshots)
+                cache_batch = []
+                price_cache_batch = []
+            else:
+                await publication_transaction.commit()
+            if not publish_cohort and (acquire_sessions or (symbols is None and exchanges is None and limit is None)):
+                cache_batch = []
+                price_cache_batch = []
             if ratio_failed_symbols:
                 session.add(SyncStatus(
                     sync_type="screener_ratio_enrichment", status="partial",
