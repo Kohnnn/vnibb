@@ -2023,10 +2023,13 @@ class DataPipeline:
                 logger.info("Back-filled %d screener rows from financial ratios", backfilled_rows)
 
             await session.flush()
-            snapshot_rows = (await session.scalars(
-                select(ScreenerSnapshot).where(ScreenerSnapshot.snapshot_date == today)
-            )).all()
             expected_symbols = set(deduped_symbols)
+            snapshot_rows = (await session.scalars(
+                select(ScreenerSnapshot).where(
+                    ScreenerSnapshot.snapshot_date == today,
+                    ScreenerSnapshot.symbol.in_(expected_symbols),
+                )
+            )).all()
             valid_base_symbols = set()
             for snapshot in snapshot_rows:
                 quote = screener_price_record(snapshot)
@@ -2038,7 +2041,7 @@ class DataPipeline:
                 ):
                     valid_base_symbols.add(snapshot.symbol)
             if progress is not None:
-                progress["base_count"] = len(valid_base_symbols & expected_symbols)
+                progress["base_count"] = len(valid_base_symbols)
             if (
                 symbols is None
                 and exchanges is None

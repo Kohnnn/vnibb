@@ -76,3 +76,37 @@ Application release acceptance is not research-data acceptance. #24 retains its 
 ## Published ticket dispositions
 
 Final publication posted 12 evidence comments and closed [#90](https://github.com/Kohnnn/vnibb/issues/90#issuecomment-6399023783), [#91](https://github.com/Kohnnn/vnibb/issues/91#issuecomment-6399024202) and [#92](https://github.com/Kohnnn/vnibb/issues/92#issuecomment-6399024720) as completed, preserving their original bodies. The [parent QA disposition](https://github.com/Kohnnn/vnibb/issues/111#issuecomment-6399026769) records the exact remaining gates. One final read-only tracker list verified 10 open issues: #24, #35, #42, #81, #93, #96, #106, #111, #129 and #161. Safe receipt: `tracker-final-publication-20261025.safe.json`, SHA256 `f66a013c19d89b2e70431493e68da6377d31f9af44a6b78bc4e0dcb0186480eb`. Independent final documentation/evidence review found no blocking findings; no additional application check or deployment was run for this documentation-only follow-up.
+
+## 26 October continuation: genuine readiness and final main rollout
+
+The user now authorizes merging the related work, including the evidence-only PR, and a new OCI/frontend rollout. The earlier instruction to leave that PR unmerged applies to the previous accepted deployment, not this newly requested release. Reconfirmed choices: keep interactive admin locked, external conversational-client release gated and the no-send policy. #35/#42/#81/#93 remain bounded by those choices.
+
+- [x] Reconcile all 10 remaining tickets and actual cloud-01 stores. Fresh indexed PostgreSQL reads took 0.072–3.602 ms; Mongo latest reads examined one key/document. No blocking work or memory/disk pressure justified DB tuning. Proposed event/news NULL lookup optimization was retracted: the queries were historical counters with zero new calls, not current application code.
+- [ ] Complete #161 token/phrase admission and identified-release before/after consensus-input proof. SQLite red: two failures; focused green: 20 passed. The same new contract passed twice on a dedicated migrated PostgreSQL database.
+- [x] Repair OHLC source identity, stalled provider-free screener materialization and exact active-Universe certification; preserve raw data, source units, cancellation counts and all active gaps. Final OHLC/discovery/SQL-Mongo selection passed 142 tests; daily/window checks passed 49; membership checks passed 118.
+- [ ] Finish #24 real separate-worker/API and honest UI canary acceptance without faults on shared serving stores; distinguish isolated proof from actual production observations.
+- [ ] Resolve #129 with genuine completed-session observations and a full screener receipt. Baseline: 946/1,519 current, 518 older, 55 unqualified; every active latest screener snapshot is October 14. The daily owner timed out after 7,199.926 seconds in prices before reaching screener. Current-source gaps and the uncertified calendar cannot be repaired by an index or fabricated date.
+- [x] Investigate reachable #96/#106 evidence. Techcombank issuer inputs and an October 3 VNM display were recovered in the existing research/QA notes; legal/method/rights and original October 7 lineage gaps remain explicit, not filled by proxies.
+- [ ] Run the final source gate and independent reviews, commit related changes only, merge main, publish the immutable image and redeploy API/MCP/scheduler plus frontend. Preserve Auth/PostgreSQL/Mongo/Redis/Caddy and the existing rotated credentials.
+- [ ] Publish final per-ticket evidence and actual detailed-health verdict; do not label deployment success as source/readiness recovery.
+
+### Current-source and pre-release verification
+
+The initial diagnostic `getList` POST used a bare symbol array and returned an empty HTTP 200; it did not exercise the installed client contract. Read-only inspection of installed vnstock 4.0.9 established the body `{"symbols":["VNM","A32","EGL"]}`. One corrected request returned all three raw envelopes at 03:59:41 UTC: VNM had a 57,700 match and 608,400 accumulated volume; A32 had zero match/volume; EGL had exceptional-price-limit status, `ENDED`, and October 23 receive time beside an October 26 listing/trade clock. These are current intraday observations, not authoritative October 23 no-trade/session certificates. Neither request wrote data; no zero-price bar or current date was manufactured.
+
+The changed native OHLC client then fetched two actual VNM bars dated October 22 and 23 with matching supplier symbol, converted both, and wrote nothing. This exercises the source path, not only mocked tests.
+
+| Boundary | Failing-before / passing-after evidence |
+|---|---|
+| Macro admission | 2 failures before; 20 focused SQLite checks and 2 migrated PostgreSQL checks passed; native identified-release afterproof remains required |
+| Source identity | 4 failures before; four-file OHLC/discovery/SQL-Mongo selection passed 139 tests |
+| Active membership and inactive history | 4 failures before; selected reader/writer/health checks passed 118 tests, 25 deselected |
+| Inclusive backfill window | 2 failures before; only inclusive requested dates reach either store; all-outside response is empty |
+| Stalled daily prices | 1 timeout failure before; daily/window combined selection passed 49 tests; committed counts and external-cancellation behavior remain covered |
+| Release adapter | Parent generated-cutover/rollback syntax self-check passed without production commands; independent safety review remains a separate gate |
+
+The native canary's early blank heatmap screenshot was captured while retries were pending. Once the actual 503 reached its terminal state, the existing unavailable/retry branch rendered. No heatmap component or duplicate test change is required; transient loading is not recorded as a terminal defect.
+
+Final local gate: frontend lint passed with 79 pre-existing warnings and zero errors; typecheck, production build, changelog check and all 178 Jest suites passed (1,391 tests, one skipped). The combined gate then stopped on two changed import-order diagnostics; both were fixed. Continued backend changed-line Ruff and compile passed, followed by 3,720 tests, 45 skipped, one NumPy warning and four subtests in 340.45 seconds. Standards review found an invalid-identity response classified as empty; four failing regressions demonstrated it, the client now raises an explicit validation failure, and the final four-file selection passed 142 tests with changed-line Ruff clean. Final real VNM OHLC smoke again returned the two matching-symbol October 22/23 bars without writes. No second full-backend run is claimed after that one-line correction; hosted final-head CI remains required.
+
+Independent Standards re-review has zero unresolved findings; Spec review has no proven code defect and retains release/source evidence gates. Separate application-only cutover review found a missing-application rollback/reconciliation blocker; the helper must be repaired and re-reviewed before any cutover GO. Normal source gates do not authorize an unsafe helper.

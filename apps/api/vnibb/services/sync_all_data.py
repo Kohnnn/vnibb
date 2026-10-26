@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 DAILY_MARKET_HISTORY_DAYS = 21
 
+DAILY_PRICE_BUDGET_SECONDS = 6000
 
 @dataclass
 class SyncResult:
@@ -597,18 +598,24 @@ async def run_daily_market_sync(
                     raise RuntimeError(f"{name} acquisition unavailable or incomplete")
             except Exception as exc:
                 count = max(count, int(progress.get("committed_count", 0)))
-                errors.append(str(exc))
-                logger.exception("%s sync failed: %s", name, exc)
+                message = f"{name} timed out" if isinstance(exc, TimeoutError) else str(exc)
+                errors.append(message)
+                logger.exception("%s sync failed: %s", name, message)
             return SyncResult(
                 not errors, count, max(len(errors), int(progress.get("error_count", 0))),
                 time.monotonic() - started, errors, complete=not errors,
             )
 
         price_progress: dict = {}
-        await record("daily_prices", lambda: acquire("daily_prices", lambda: data_pipeline.sync_daily_prices(
-            symbols=symbols, days=history_days, fill_missing_gaps=True,
-            cache_recent=False, progress=price_progress,
-        ), price_progress), price_progress)
+        async def daily_prices() -> int:
+            # ponytail: reserve 20 minutes for retained assembly and remaining stages; no source-coverage guarantee.
+            remaining = max(0, DAILY_PRICE_BUDGET_SECONDS - (time.monotonic() - daily_started))
+            async with asyncio.timeout(remaining):
+                return await data_pipeline.sync_daily_prices(
+                    symbols=symbols, days=history_days, fill_missing_gaps=True,
+                    cache_recent=False, progress=price_progress,
+                )
+        await record("daily_prices", lambda: acquire("daily_prices", daily_prices, price_progress), price_progress)
         screener_progress: dict = {}
         await record("screener", lambda: acquire("screener", lambda: data_pipeline.sync_screener_data(
             progress=screener_progress, enrich_ratios=False,

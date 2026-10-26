@@ -151,7 +151,10 @@ class VietcapClient:
         }
         data = self._request("POST", url, TRADING_BASE, json_body=body)
         if isinstance(data, list) and data:
-            return data[0]
+            row = data[0]
+            if not isinstance(row, dict) or not isinstance(row.get("symbol"), str) or row["symbol"].upper() != symbol.upper():
+                raise ValueError("OHLC source symbol missing or mismatched")
+            return row
         return None
 
     # -- iq.vietcap.com.vn (company / fundamentals) ------------------------

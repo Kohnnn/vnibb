@@ -50,8 +50,8 @@ class Collection:
         return []
 
 
-def chart(day):
-    return {"o": [10000], "h": [20000], "l": [10000], "c": [15000], "v": [10],
+def chart(day, symbol="VCI"):
+    return {"symbol": symbol, "o": [10000], "h": [20000], "l": [10000], "c": [15000], "v": [10],
             "t": [datetime.combine(day, datetime.min.time(), tzinfo=UTC).timestamp()]}
 
 
@@ -97,6 +97,7 @@ def fixture(monkeypatch):
 async def test_sql_discovery_persists_absent_symbol_in_empty_or_partial_collection(fixture, existing):
     if existing:
         fixture.prices.documents.append({"symbol": "VCI", "source": "legacy", "tradeDate": datetime(2026, 1, 1)})
+    fixture.client.get_ohlc.side_effect = lambda symbol, **kwargs: chart(date.today(), symbol)
     result = await sync.run_mongo_eod_sync()
     assert {row["symbol"] for row in fixture.prices.documents if row["source"] == "vietcap"} == {"NEW", "VCI"}
     assert (result["expected"], result["attempted"], result["succeeded"], result["empty"], result["failed"]) == (2, 2, 2, 0, 0)
@@ -269,7 +270,7 @@ async def test_cancellation_retains_completed_window_receipt(fixture, monkeypatc
     import asyncio
 
     original = sync._acquire_eod
-    fixture.client.get_ohlc.return_value = chart(date(2020, 1, 5))
+    fixture.client.get_ohlc.side_effect = lambda symbol, **kwargs: chart(date(2020, 1, 5), symbol)
 
     async def acquire(client, symbol, *args, **kwargs):
         if symbol == "VCI":
@@ -290,7 +291,7 @@ async def test_empty_first_fifty_do_not_starve_new_symbol(fixture):
     symbols = [f"A{index:02}" for index in range(50)] + ["NEW"]
     fixture.session.execute.return_value.scalars.return_value.all = lambda: symbols
     fixture.session.execute.return_value.all.return_value = [(symbol, None) for symbol in symbols]
-    fixture.client.get_ohlc.side_effect = lambda symbol, **kwargs: chart(date(2020, 1, 5)) if symbol == "NEW" else None
+    fixture.client.get_ohlc.side_effect = lambda symbol, **kwargs: chart(date(2020, 1, 5), symbol) if symbol == "NEW" else None
     first = await sync.run_mongo_eod_catchup(start=date(2020, 1, 1), end=date(2020, 3, 1))
     assert first["empty"] == 50 and first["complete"] is False
     fixture.client.get_ohlc.reset_mock()

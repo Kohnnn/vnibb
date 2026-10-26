@@ -19,6 +19,7 @@ import pytest
 from sqlalchemy import select
 
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
 from vnibb.services.cache_manager import CacheManager
 
@@ -206,6 +207,8 @@ def _verified_run(snapshot_date: date, symbols: list[str]) -> SyncStatus:
 async def test_partial_latest_day_uses_previous_verified_universe(test_db):
     yesterday = TODAY - timedelta(days=1)
     test_db.add_all([
+        Stock(symbol="AAA", is_active=1),
+        Stock(symbol="BBB", is_active=1),
         _row("AAA", snapshot_date=yesterday, source="KBS", trade_date=yesterday),
         _row("BBB", snapshot_date=yesterday, source="vnstock", trade_date=yesterday),
         _row("AAA", source="KBS", trade_date=TODAY),
@@ -238,6 +241,8 @@ async def test_unverified_latest_day_cannot_claim_universe_even_if_fresh(test_db
 @pytest.mark.asyncio
 async def test_verified_day_requires_every_expected_symbol_and_then_serves_all(test_db):
     test_db.add_all([
+        Stock(symbol="AAA", is_active=1),
+        Stock(symbol="BBB", is_active=1),
         _row("AAA", source="KBS", trade_date=TODAY),
         _verified_run(TODAY, ["AAA", "BBB"]),
     ])
@@ -260,6 +265,8 @@ async def test_verified_day_requires_every_expected_symbol_and_then_serves_all(t
 async def test_newer_partial_run_does_not_override_last_verified_day(test_db):
     yesterday = TODAY - timedelta(days=1)
     test_db.add_all([
+        Stock(symbol="AAA", is_active=1),
+        Stock(symbol="BBB", is_active=1),
         _row("AAA", snapshot_date=yesterday, trade_date=yesterday),
         _row("BBB", snapshot_date=yesterday, trade_date=yesterday),
         _row("AAA", trade_date=TODAY),
@@ -277,6 +284,8 @@ async def test_newer_partial_run_does_not_override_last_verified_day(test_db):
 @pytest.mark.asyncio
 async def test_oldest_trade_date_keeps_universe_stale(test_db):
     test_db.add_all([
+        Stock(symbol="AAA", is_active=1),
+        Stock(symbol="BBB", is_active=1),
         _row("AAA", trade_date=TODAY),
         _row("BBB", trade_date=TODAY - timedelta(days=2)),
         _verified_run(TODAY, ["AAA", "BBB"]),
@@ -286,6 +295,34 @@ async def test_oldest_trade_date_keeps_universe_stale(test_db):
     result = await CacheManager(db=test_db).get_screener_data(source=None)
     assert result.hit is True
     assert result.is_stale is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transition", ["newly_active", "removed"])
+async def test_verified_universe_rejects_changed_active_membership(test_db, transition):
+    old_active = ["AAA"] if transition == "newly_active" else ["AAA", "BBB"]
+    stock = Stock(symbol="BBB", is_active=int(transition == "removed"))
+    test_db.add_all([
+        Stock(symbol="AAA", is_active=1),
+        stock,
+        _row("AAA", trade_date=TODAY),
+        _row("BBB", trade_date=TODAY),
+        _verified_run(TODAY, old_active),
+    ])
+    await test_db.commit()
+    manager = CacheManager(db=test_db)
+    assert (await manager.get_screener_data(allow_stale=False)).hit is True
+
+    stock.is_active = int(transition == "newly_active")
+    await test_db.commit()
+
+    result = await manager.get_screener_data(allow_stale=True)
+    assert result.hit is False
+    assert result.data is None
+    symbol_result = await manager.get_screener_data(symbol="BBB", source=None)
+    assert symbol_result.hit is True
+    assert symbol_result.data[0].symbol == "BBB"
+    assert (await _stored(test_db, "BBB")).snapshot_date == TODAY
 
 
 @pytest.mark.asyncio

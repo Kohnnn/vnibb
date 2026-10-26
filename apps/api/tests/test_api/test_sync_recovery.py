@@ -764,3 +764,114 @@ async def test_screener_resumed_base_and_marker_commit_atomically(screener_base_
         marker = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).one()
         assert marker.additional_data["expected_symbols"] == ["FPT", "VNM"]
         assert marker.success_count == 2 and progress["base_count"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transition", ["newly_active", "removed"])
+async def test_screener_active_membership_transition_keeps_inactive_history(
+    screener_base_pipeline, transition,
+):
+    from datetime import datetime, timedelta
+
+    from vnibb.models.screener import ScreenerSnapshot
+    from vnibb.models.stock import Stock, StockPrice
+    from vnibb.services.cache_manager import CacheManager
+
+    pipeline, sessions = screener_base_pipeline
+    today = datetime.utcnow().date()
+    yesterday = today - timedelta(days=1)
+    async with sessions.begin() as session:
+        session.add_all([
+            Stock(id=1, symbol="AAA", is_active=1),
+            Stock(id=2, symbol="BBB", is_active=int(transition == "removed")),
+            Stock(id=3, symbol="OLD", is_active=0),
+        ])
+        for index, symbol in enumerate(["AAA", "BBB"], 1):
+            session.add(StockPrice(
+                id=index, stock_id=index, symbol=symbol, time=today,
+                open=100, high=100, low=100, close=100, volume=0,
+                source="vnstock_vnd:VCI", interval="1D",
+            ))
+    old_expected = ["AAA"] if transition == "newly_active" else ["AAA", "BBB"]
+    assert await pipeline.sync_screener_data(enrich_ratios=False) == len(old_expected)
+    async with sessions() as session:
+        marker = (await session.scalars(select(SyncStatus).where(
+            SyncStatus.sync_type == "screener_universe",
+        ))).one()
+        assert marker.additional_data["expected_symbols"] == old_expected
+
+    async with sessions.begin() as session:
+        stock = (await session.scalars(select(Stock).where(Stock.symbol == "BBB"))).one()
+        stock.is_active = int(transition == "newly_active")
+        session.add_all([
+            ScreenerSnapshot(symbol="OLD", snapshot_date=today, price=0),
+            ScreenerSnapshot(symbol="OLD", snapshot_date=yesterday, price=75),
+        ])
+    expected = ["AAA", "BBB"] if transition == "newly_active" else ["AAA"]
+    progress = {}
+    assert await pipeline.sync_screener_data(progress=progress, enrich_ratios=False) == len(expected)
+
+    async with sessions() as session:
+        markers = (await session.scalars(select(SyncStatus).where(
+            SyncStatus.sync_type == "screener_universe",
+        ).order_by(SyncStatus.id))).all()
+        assert len(markers) == 2
+        assert markers[-1].additional_data["expected_symbols"] == expected
+        assert markers[-1].additional_data["expected_count"] == len(expected)
+        assert markers[-1].success_count == progress["base_count"] == len(expected)
+        result = await CacheManager(db=session).get_screener_data(allow_stale=False)
+        assert result.hit is True
+        assert {row.symbol for row in result.data} == set(expected)
+        rows = (await session.scalars(select(ScreenerSnapshot))).all()
+        assert {(row.symbol, row.snapshot_date) for row in rows} == {
+            ("AAA", today), ("BBB", today), ("OLD", today), ("OLD", yesterday),
+        }
+        assert all(row.extended_metrics["price_source"] == "vnstock_vnd:VCI"
+                   for row in rows if row.symbol in {"AAA", "BBB"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_base", [
+    "missing", "zero", "negative", "nonfinite", "future_date", "unknown_unit", "missing_source",
+])
+async def test_screener_inactive_leftover_cannot_hide_invalid_active_base(
+    screener_base_pipeline, invalid_base,
+):
+    from datetime import datetime, timedelta
+
+    from vnibb.models.screener import ScreenerSnapshot
+    from vnibb.models.stock import Stock
+
+    pipeline, sessions = screener_base_pipeline
+    today = datetime.utcnow().date()
+    async with sessions.begin() as session:
+        session.add_all([
+            Stock(symbol="AAA", is_active=1), Stock(symbol="BBB", is_active=1),
+            Stock(symbol="OLD", is_active=0),
+        ])
+        for symbol in ("AAA", "OLD"):
+            session.add(ScreenerSnapshot(
+                symbol=symbol, snapshot_date=today, trade_date=today, price=100,
+                extended_metrics={"price_unit": "VND", "price_source": "vnstock_vnd:VCI"},
+            ))
+        if invalid_base != "missing":
+            session.add(ScreenerSnapshot(
+                symbol="BBB", snapshot_date=today,
+                trade_date=today + timedelta(days=int(invalid_base == "future_date")),
+                price={"zero": 0, "negative": -1, "nonfinite": float("inf")}.get(invalid_base, 100),
+                extended_metrics={
+                    "price_unit": "unknown" if invalid_base == "unknown_unit" else "VND",
+                    "price_source": None if invalid_base == "missing_source" else "vnstock_vnd:VCI",
+                },
+            ))
+    progress = {"stage": "screener", "last_index": 1}
+    assert await pipeline.sync_screener_data(progress=progress, enrich_ratios=False) == 0
+
+    async with sessions() as session:
+        assert not (await session.scalars(select(SyncStatus).where(
+            SyncStatus.sync_type == "screener_universe",
+        ))).all()
+        assert progress["base_count"] == 1
+        assert (await session.scalars(select(ScreenerSnapshot).where(
+            ScreenerSnapshot.symbol == "OLD",
+        ))).one().price == 100
