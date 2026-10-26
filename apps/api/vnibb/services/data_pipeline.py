@@ -2025,10 +2025,8 @@ class DataPipeline:
                         stats["base_errors"] = stats.get("base_errors", 0) + 1
 
                 if count and count % batch_size == 0:
-                    # Checkpoint progress, never publish mutable same-day rows mid-cohort.
+                    # Checkpoint outcome stats, not a resume cursor for uncommitted snapshots.
                     if progress is not None and sync_id is not None:
-                        progress["last_symbol"] = symbol
-                        progress["last_index"] = idx
                         await self._checkpoint(progress, sync_id)
 
 
