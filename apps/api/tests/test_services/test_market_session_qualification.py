@@ -3,7 +3,6 @@ from datetime import UTC, date, datetime
 from unittest.mock import Mock
 
 import pytest
-
 from vnibb.core.config import settings
 from vnibb.services.market_session import (
     expected_market_session,
