@@ -155,7 +155,7 @@ def reconcile_census(rows, raw, cache, receipts, admitted, expected, now):
             reasons.extend(f"sql_session_{reason}" for reason in _session_reasons(session, symbol, expected, now))
         if session is not None and session != board:
             # Mongo adds storage metadata; compare the qualified envelope fields only.
-            if not isinstance(board, dict) or any(board.get(key) != value for key, value in session.items()):
+            if not isinstance(session, dict) or not isinstance(board, dict) or any(board.get(key) != value for key, value in session.items()):
                 reasons.append("mongo_sql_session_lineage_mismatch")
         eod = retained.get("eod")
         if eod is None:
