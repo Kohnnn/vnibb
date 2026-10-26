@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from vnibb.models.data_quality import DataQualityBreachState, DataQualityRun
 from vnibb.services.data_quality import (
+    _configured_market_holidays,
     _vietcap_freshness_warning,
     complete_quality_run,
     ensure_quality_run,
@@ -27,6 +28,18 @@ def test_configured_holiday_does_not_add_market_day_staleness():
     assert latest_market_business_day(holiday, {holiday}) == date(2026, 9, 1)
     assert market_day_staleness(date(2026, 9, 1), date(2026, 9, 3), {holiday}) == 1
     assert _vietcap_freshness_warning(date(2026, 9, 1), 0, today=holiday, holidays={holiday}) is None
+
+
+def test_published_2026_closures_and_configured_additions_are_excluded(monkeypatch):
+    from vnibb.core.config import settings
+
+    monkeypatch.setattr(settings, "market_holiday_dates", ["2026-10-09"])
+    holidays = _configured_market_holidays()
+    assert latest_market_business_day(date(2026, 1, 2), holidays) == date(2025, 12, 31)
+    assert latest_market_business_day(date(2026, 2, 23) - timedelta(days=1), holidays) == date(2026, 2, 13)
+    assert latest_market_business_day(date(2026, 9, 2), holidays) == date(2026, 8, 28)
+    assert latest_market_business_day(date(2026, 10, 9), holidays) == date(2026, 10, 8)
+    assert latest_market_business_day(date(2026, 10, 26), holidays) == date(2026, 10, 26)
 
 
 @pytest.mark.asyncio

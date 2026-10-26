@@ -7,8 +7,9 @@ falls back to stale cache when API calls fail.
 """
 
 import logging
+import math
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Generic, List, Optional, TypeVar
 
 from sqlalchemy import Float, and_, case, func, or_, select
@@ -23,10 +24,16 @@ from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
+from vnibb.services.market_session import expected_market_session, session_coverage
 from vnibb.services.screener_metadata import screener_metadata_updates
 
 logger = logging.getLogger(__name__)
 
+_QUALIFIED_RETAINED_PRICE_SOURCES = frozenset({"vietcap_vnd", "vnstock_vnd"} | {
+    f"{prefix}:{provider}"
+    for prefix in ("vnstock_vnd", "vnstock_history", "vnstock_data_history")
+    for provider in ("KBS", "VCI", "TCBS")
+})
 T = TypeVar("T")
 
 def _coerce_date(value: Any) -> Optional[date]:
@@ -42,6 +49,53 @@ def _coerce_date(value: Any) -> Optional[date]:
         return None
 
 
+def snapshot_session_coverage(
+    row: Any, expected_session: date | None, now: datetime,
+) -> str | None:
+    if expected_session is None:
+        return None
+    metrics = row.extended_metrics if isinstance(row.extended_metrics, dict) else {}
+    record = metrics.get("market_session")
+    if not isinstance(record, dict) or record.get("scope") != "vietcap_board":
+        return None
+    coverage = session_coverage(record, row.symbol, expected_session)
+    if coverage is None:
+        return None
+    try:
+        observed_at = datetime.fromisoformat(record["observed_at"].replace("Z", "+00:00"))
+        current_utc = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
+        if observed_at.tzinfo is None or observed_at > current_utc:
+            return None
+        if row.trade_date is not None and row.trade_date > expected_session:
+            return None
+        if coverage != "traded":
+            if row.volume != 0:
+                return None
+            if row.price is None:
+                return coverage if row.trade_date is None else None
+            if (
+                row.trade_date is None or row.trade_date >= expected_session
+                or not math.isfinite(row.price) or row.price <= 0
+                or metrics.get("price_unit") != "VND"
+                or metrics.get("price_source") not in _QUALIFIED_RETAINED_PRICE_SOURCES
+            ):
+                return None
+            return coverage
+        match = record["raw"]["matchPrice"]
+        if (
+            row.trade_date != expected_session
+            or metrics.get("price_unit") != "VND"
+            or metrics.get("price_source") != "vietcap_vnd"
+            or row.price is None or not math.isfinite(row.price) or row.price <= 0
+            or row.price != match["matchPrice"]
+            or row.volume != match["accumulatedVolume"]
+        ):
+            return None
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    return coverage
+
+
 
 @dataclass
 class CacheResult(Generic[T]):
@@ -51,6 +105,8 @@ class CacheResult(Generic[T]):
     is_stale: bool
     cached_at: Optional[datetime]
     hit: bool
+    freshness_basis: str | None = None
+    market_session_counts: dict[str, int] | None = None
 
     @property
     def is_fresh(self) -> bool:
@@ -178,10 +234,14 @@ class CacheManager:
             # writer never created whenever the host runs ahead of UTC.
             now = datetime.utcnow()
             today = now.date()
+            expected_session = expected_market_session(now=now.replace(tzinfo=UTC))
+            receipt_session_declared = False
+            receipt_session_date = None
 
             # Source labels vary across scheduled writers. Symbol reads prefer
             # their requested label; Universe reads must include every symbol.
             async def _resolve():
+                nonlocal receipt_session_declared, receipt_session_date
                 if symbol:
                     conditions = [ScreenerSnapshot.symbol == symbol.upper()]
                     if source:
@@ -189,12 +249,8 @@ class CacheManager:
                     latest_date_query = select(func.max(ScreenerSnapshot.snapshot_date)).where(
                         *conditions
                     )
-                    if not allow_stale:
-                        latest_date_query = latest_date_query.where(
-                            ScreenerSnapshot.snapshot_date == today
-                        )
                     latest_date = (await session.execute(latest_date_query)).scalar()
-                    if latest_date is None:
+                    if latest_date is None or latest_date > today:
                         return None, None
                     if (today - latest_date).days > self.MAX_STALE_DAYS:
                         return "stale", None
@@ -219,6 +275,7 @@ class CacheManager:
                         SyncStatus.completed_at >= datetime.combine(
                             oldest_day, datetime.min.time()
                         ),
+                        SyncStatus.completed_at <= now,
                     )
                     .order_by(SyncStatus.completed_at.desc(), SyncStatus.id.desc())
                 )
@@ -233,7 +290,6 @@ class CacheManager:
                     if (
                         snapshot_date is None
                         or snapshot_date > today
-                        or (not allow_stale and snapshot_date != today)
                         or snapshot_date < oldest_day
                         or not isinstance(expected, list)
                         or not expected
@@ -245,9 +301,9 @@ class CacheManager:
                     expected_symbols = set(expected)
                     if len(expected_symbols) != len(expected) or expected_symbols != active_symbols:
                         continue
-                    candidates.append((snapshot_date, expected, expected_symbols))
+                    candidates.append((snapshot_date, expected, expected_symbols, metadata))
 
-                for snapshot_date, expected, expected_symbols in sorted(
+                for snapshot_date, expected, expected_symbols, metadata in sorted(
                     candidates, key=lambda candidate: candidate[0], reverse=True
                 ):
                     rows = await session.execute(
@@ -257,7 +313,12 @@ class CacheManager:
                         )
                     )
                     snapshots = list(rows.scalars().all())
-                    if {row.symbol for row in snapshots} == expected_symbols:
+                    if (
+                        len(snapshots) == len(expected)
+                        and {row.symbol for row in snapshots} == expected_symbols
+                    ):
+                        receipt_session_declared = "market_session_date" in metadata
+                        receipt_session_date = metadata.get("market_session_date")
                         return "ok", snapshots
 
                 return None, None
@@ -281,18 +342,41 @@ class CacheManager:
                 logger.debug(f"Cache miss for screener data (symbol={symbol}, source={source})")
                 return CacheResult(data=None, is_stale=False, cached_at=None, hit=False)
 
-            # Use the oldest constituent's market date for a Universe. Even if
-            # quotes are current, a prior-day partition is still stale.
-            market_dates = [s.trade_date or s.snapshot_date for s in snapshots]
-            market_date = max(market_dates) if symbol else min(market_dates)
+            has_session_coverage = receipt_session_declared or any(
+                isinstance(row.extended_metrics, dict)
+                and "market_session" in row.extended_metrics
+                for row in snapshots
+            )
+            session_counts = None
+            freshness_basis = "trade_date" if symbol else "verified_universe_oldest_trade_date"
+            if has_session_coverage:
+                freshness_basis = (
+                    "vietcap_board_session" if symbol else "verified_universe_vietcap_board_session"
+                )
+                session_counts = {"qualified": 0, "traded": 0, "no_trade": 0, "suspended": 0}
+                for row in snapshots:
+                    coverage = snapshot_session_coverage(row, expected_session, now)
+                    if coverage is not None:
+                        session_counts["qualified"] += 1
+                        session_counts[coverage] += 1
+                is_stale = session_counts["qualified"] != len(snapshots)
+                if receipt_session_declared and receipt_session_date != expected_session.isoformat():
+                    is_stale = True
+            else:
+                # Legacy receipts retain their actual oldest-quote freshness rule.
+                market_dates = [s.trade_date or s.snapshot_date for s in snapshots]
+                market_date = max(market_dates) if symbol else min(market_dates)
+                is_stale = (today - market_date).days > self.SCREENER_TTL_MINUTES // 1440
+                if not symbol and any(s.snapshot_date != today for s in snapshots):
+                    is_stale = True
             latest_created = max(s.created_at for s in snapshots)
-            is_stale = (today - market_date).days > self.SCREENER_TTL_MINUTES // 1440
-            if not symbol and any(s.snapshot_date != today for s in snapshots):
-                is_stale = True
 
             if is_stale and not allow_stale:
                 logger.debug(f"Cache stale for screener data, age={now - latest_created}")
-                return CacheResult(data=None, is_stale=True, cached_at=latest_created, hit=False)
+                return CacheResult(
+                    data=None, is_stale=True, cached_at=latest_created, hit=False,
+                    freshness_basis=freshness_basis, market_session_counts=session_counts,
+                )
 
             logger.info(
                 f"Cache hit for screener data: {len(snapshots)} records, "
@@ -303,6 +387,8 @@ class CacheManager:
                 is_stale=is_stale,
                 cached_at=latest_created,
                 hit=True,
+                freshness_basis=freshness_basis,
+                market_session_counts=session_counts,
             )
 
         except Exception as e:
@@ -404,12 +490,15 @@ class CacheManager:
                     price_unit=record.get("price_unit") or record.get("priceUnit") or (record.get("extended_metrics") or {}).get("price_unit"),
                     price_source=record.get("price_source") or (record.get("extended_metrics") or {}).get("price_source"),
                 )
-                for key in ("ratio_units", "provider_evidence"):
+                for key in ("ratio_units", "provider_evidence", "market_session"):
                     value = record.get(key, (record.get("extended_metrics") or {}).get(key))
-                    if value is not None:
+                    if value is not None or (key == "market_session" and (
+                        key in record or key in (record.get("extended_metrics") or {})
+                    )):
                         extended_metrics[key] = value
                 compact_extended_metrics = {
-                    key: value for key, value in extended_metrics.items() if value is not None
+                    key: value for key, value in extended_metrics.items()
+                    if value is not None or key == "market_session"
                 }
                 if "debt_assets" in (extended_metrics.get("ratio_units") or {}):
                     compact_extended_metrics["debt_to_asset"] = (

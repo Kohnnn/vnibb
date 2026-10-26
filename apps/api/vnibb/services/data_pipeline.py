@@ -12,7 +12,8 @@ import math
 import os
 import re
 from contextvars import ContextVar
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -51,7 +52,8 @@ from vnibb.core.vn_sectors import resolve_sector_name
 from vnibb.providers.vnstock.runtime import validate_source
 from vnibb.providers.vnstock.reference_fields import identity, parse_datetime, supplied
 from vnibb.services.screener_metadata import screener_metadata_updates
-from vnibb.services.cache_manager import StructuredPersistenceConflict, source_update_condition
+from vnibb.services.cache_manager import StructuredPersistenceConflict, snapshot_session_coverage, source_update_condition
+from vnibb.services.market_session import expected_market_session, qualify_market_session
 from vnibb.models.alerts import BlockTrade
 from vnibb.models.company import Company, Officer, Shareholder
 from vnibb.models.derivatives import DerivativePrice
@@ -1109,8 +1111,9 @@ class DataPipeline:
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
         enrich_ratios: bool = True,
+        acquire_sessions: bool = False,
     ) -> int:
-        """Materialize dated quote bases, with optional best-effort annual ratios."""
+        """Materialize retained quotes; acquire provider-board sessions only when requested."""
         from vnibb.providers.vnstock.runtime import (
             create_finance,
             finance_method_kwargs,
@@ -1118,7 +1121,7 @@ class DataPipeline:
             run_financial_provider,
         )
 
-        Listing = get_listing_class()
+        Listing = get_listing_class() if enrich_ratios else None
 
         logger.info("Syncing screener data...")
         loop = asyncio.get_running_loop()
@@ -1295,12 +1298,13 @@ class DataPipeline:
         company_metadata: Dict[str, Dict[str, Any]] = {}
         async with async_session_maker() as session:
             rows = await session.execute(
-                select(Stock.symbol, Stock.company_name, Stock.exchange, Stock.industry).where(
+                select(Stock.symbol, Stock.company_name, Stock.exchange, Stock.industry, Stock.id).where(
                     Stock.symbol.in_(deduped_symbols)
                 )
             )
-            for symbol, company_name, exchange_value, industry_value in rows.fetchall():
+            for symbol, company_name, exchange_value, industry_value, stock_id in rows.fetchall():
                 stock_metadata[str(symbol).upper()] = {
+                    "stock_id": stock_id,
                     "company_name": _normalize_text(company_name),
                     "exchange": _normalize_text(exchange_value),
                     "industry": _normalize_text(industry_value),
@@ -1346,11 +1350,19 @@ class DataPipeline:
                 start_index = last_index + 1
             elif last_symbol and last_symbol in deduped_symbols:
                 start_index = deduped_symbols.index(last_symbol) + 1
+        if acquire_sessions:
+            start_index = 0
 
         ratio_sources = [primary_source] if enrich_ratios else []
         batch_size = 20
-        ratio_failed_symbols: List[str] = []
-        cache_batch: List[Dict[str, Any]] = []
+        ratio_failed_symbols: list[str] = []
+        cache_batch: list[dict[str, Any]] = []
+        price_cache_batch: list[dict[str, Any]] = []
+        observed_at = datetime.now(UTC)
+        expected_session = expected_market_session(now=observed_at)
+        market_sessions: dict[str, dict[str, Any]] = {}
+        materialized_sessions: set[str] = set()
+        session_errors: list[str] = []
         today = datetime.utcnow().date()
 
         previous_snapshot_fallback: Dict[str, Dict[str, Any]] = {}
@@ -1416,6 +1428,52 @@ class DataPipeline:
                     "price_source": normalized_price.get("price_source") or row.source,
                     "volume": _parse_float(row.volume),
                 }
+
+        if acquire_sessions:
+            from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+            from vnibb.services.vietcap_client import VietcapClient
+
+            client = VietcapClient()
+            mongo = get_mongo_market_data_service()
+            for batch_start in range(0, len(deduped_symbols), 50):
+                requested = deduped_symbols[batch_start:batch_start + 50]
+                try:
+                    raw_rows = await asyncio.to_thread(client.get_price_board, requested)
+                    batch_observed_at = datetime.now(UTC)
+                    qualified = {}
+                    for raw in raw_rows:
+                        symbol = raw.get("listingInfo", {}).get("symbol")
+                        record = qualify_market_session(raw, symbol, expected_session, batch_observed_at)
+                        if symbol not in requested or symbol in qualified or record is None:
+                            raise ValueError(f"Unqualified Vietcap board row: {symbol}")
+                        qualified[symbol] = record
+                    if set(qualified) != set(requested):
+                        raise ValueError("Incomplete Vietcap board batch")
+                    market_sessions.update(qualified)
+                    if mongo.enabled:
+                        def store_raw(records=tuple(qualified.values()), observed_at=batch_observed_at):
+                            from pymongo import UpdateOne
+
+                            operations = []
+                            for record in records:
+                                key = f"vietcap:price_board:{record['symbol']}:{record['session_date']}"
+                                operations.append(UpdateOne(
+                                    {"recordKey": key},
+                                    {"$set": {**record, "recordKey": key, "dataset": "equity.price_board", "updatedAt": observed_at}},
+                                    upsert=True,
+                                ))
+                            mongo._get_collection("market_vnstock_premium_records").bulk_write(operations, ordered=False)
+                        try:
+                            await asyncio.to_thread(store_raw)
+                        except Exception as exc:
+                            logger.warning("Vietcap board Mongo retention failed: %s", exc)
+                except Exception as exc:
+                    session_errors.extend(requested)
+                    logger.warning("Vietcap board acquisition failed for %s: %s", requested, exc)
+            if progress is not None:
+                progress["market_session_date"] = expected_session.isoformat()
+                progress["session_errors"] = session_errors
+                progress["error_count"] = progress.get("error_count", 0) + len(session_errors)
 
         if progress is not None:
             progress.setdefault("stage_stats", {})
@@ -1579,6 +1637,9 @@ class DataPipeline:
                     listing_row = listing_metadata.get(symbol, {})
                     previous_row = previous_snapshot_fallback.get(symbol, {})
                     latest_price_row = latest_price_fallback.get(symbol, {})
+                    market_session = market_sessions.get(symbol)
+                    if acquire_sessions and market_session is None:
+                        continue
                     row = normalize_price_record(row, symbol=symbol)
                     row["trade_date"] = self._parse_date_value(
                         row.get("trade_date") or row.get("tradeDate") or row.get("trading_date")
@@ -1596,10 +1657,52 @@ class DataPipeline:
                         ),
                         row,
                     )
+                    if market_session:
+                        if market_session["status"] == "traded":
+                            match = market_session["raw"]["matchPrice"]
+                            price_provenance = {
+                                "price": match["matchPrice"], "volume": match["accumulatedVolume"],
+                                "trade_date": expected_session, "price_unit": "VND", "price_source": "vietcap_vnd",
+                            }
+                            price_values = {
+                                "stock_id": stock_row["stock_id"], "symbol": symbol, "time": expected_session,
+                                "open": match["openPrice"], "high": match["highest"], "low": match["lowest"],
+                                "close": match["matchPrice"], "volume": int(match["accumulatedVolume"]),
+                                "interval": "1D", "source": "vietcap_vnd",
+                            }
+                            price_stmt = get_upsert_stmt(
+                                StockPrice, ["symbol", "time", "interval"], price_values,
+                                preserve_existing_on_null={"value"},
+                                update_condition=source_update_condition(StockPrice, "vietcap_vnd"),
+                            )
+                            price_result = await session.execute(price_stmt.returning(StockPrice.id))
+                            if not price_result.scalars().all():
+                                raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
+                            price_cache_batch.append({
+                                **price_values, "time": expected_session.isoformat(), "price_unit": "VND",
+                                "price_source": "vietcap_vnd", "raw": market_session["raw"],
+                            })
+                        else:
+                            price_provenance = {}
+                            for candidate in (latest_price_row, previous_row):
+                                candidate_quote = SimpleNamespace(
+                                    symbol=symbol, price=candidate.get("price"), volume=0,
+                                    trade_date=self._parse_date_value(candidate.get("trade_date")),
+                                    extended_metrics={
+                                        "market_session": market_session,
+                                        "price_unit": candidate.get("price_unit"),
+                                        "price_source": candidate.get("price_source"),
+                                    },
+                                )
+                                if candidate_quote.price is not None and snapshot_session_coverage(candidate_quote, expected_session, datetime.now(UTC)):
+                                    price_provenance = candidate
+                                    break
                     price_value = _parse_float(price_provenance.get("price"))
                     volume_value = _parse_float(price_provenance.get("volume"))
                     trade_date_value = self._parse_date_value(price_provenance.get("trade_date"))
-                    if not (
+                    if market_session and market_session["status"] != "traded":
+                        volume_value = 0
+                    if not market_session and not (
                         price_value is not None
                         and math.isfinite(price_value)
                         and price_value > 0
@@ -1662,6 +1765,8 @@ class DataPipeline:
                         price_unit=price_provenance.get("price_unit", "unknown"),
                         price_source=price_provenance.get("price_source"),
                     )
+                    if market_session:
+                        extended_metrics["market_session"] = market_session
                     for key in ("ratio_units", "provider_evidence"):
                         if row.get(key) is not None:
                             extended_metrics[key] = row[key]
@@ -1753,12 +1858,24 @@ class DataPipeline:
                             row.get("foreign_ownership") or row.get("foreignOwnership")
                         ),
                         "extended_metrics": extended_metrics or None,
-                        "source": "vnstock_ratio" if ratio_df else price_provenance.get("price_source"),
+                        "source": "vnstock_ratio" if ratio_df else price_provenance.get("price_source") or "vietcap",
                         "created_at": datetime.utcnow(),
                     }
                     for metric in row.get("ratio_units", {}):
                         if metric in ScreenerSnapshot.__table__.c:
                             values[metric] = row.get(metric)
+                    def session_updates(stmt, market_session=market_session):
+                        updates = screener_metadata_updates(
+                            stmt, engine.dialect.name, stmt.excluded.trade_date.is_(None) if not market_session else False,
+                        )
+                        if market_session:
+                            updates.update(price=stmt.excluded.price, trade_date=stmt.excluded.trade_date, volume=stmt.excluded.volume)
+                            if engine.dialect.name == "sqlite":
+                                updates["extended_metrics"] = func.json_set(
+                                    updates["extended_metrics"], "$.market_session",
+                                    func.json(func.json_extract(stmt.excluded.extended_metrics, "$.market_session")),
+                                )
+                        return updates
                     stmt = get_upsert_stmt(
                         ScreenerSnapshot,
                         ["symbol", "snapshot_date"],
@@ -1770,14 +1887,14 @@ class DataPipeline:
                             "current_ratio", "quick_ratio", "eps", "bvps", "foreign_ownership",
                         },
                         preserve_columns_without=("trade_date", {"price", "volume"}),
-                        update_overrides=lambda stmt: screener_metadata_updates(
-                            stmt, engine.dialect.name, stmt.excluded.trade_date.is_(None)
-                        ),
+                        update_overrides=session_updates,
                     )
                     stored = await session.execute(stmt.returning(*ScreenerSnapshot.__table__.c))
                     values = dict(stored.mappings().one())
                     extended_metrics = values["extended_metrics"] or {}
                     count += 1
+                    if market_session:
+                        materialized_sessions.add(symbol)
 
                     previous_snapshot_fallback[symbol] = {
                         "company_name": values.get("company_name"),
@@ -1822,6 +1939,8 @@ class DataPipeline:
                             "bvps": values.get("bvps"),
                         }
                     )
+                    if market_session:
+                        cache_batch[-1].update(market_session=market_session, change=None, change_pct=None)
                     if progress is not None:
                         progress["success_count"] = progress.get("success_count", 0) + 1
                         progress["stage_stats"]["screener"]["success"] += 1
@@ -1841,6 +1960,9 @@ class DataPipeline:
                         cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
                         await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
                     cache_batch = []
+                    for item in price_cache_batch:
+                        await self._cache_set_json(build_cache_key("vnibb", "price", "latest", item["symbol"]), item, CACHE_TTL_PRICE_LATEST)
+                    price_cache_batch = []
                     if progress is not None and sync_id is not None:
                         progress["last_symbol"] = symbol
                         progress["last_index"] = idx
@@ -2034,18 +2156,32 @@ class DataPipeline:
             for snapshot in snapshot_rows:
                 quote = screener_price_record(snapshot)
                 price = _parse_float(quote.get("price"))
-                if (
-                    price is not None and math.isfinite(price) and price > 0
-                    and snapshot.trade_date is not None and snapshot.trade_date <= today
-                    and quote["price_unit"] == "VND" and quote.get("price_source")
-                ):
+                if acquire_sessions:
+                    qualified = market_sessions.get(snapshot.symbol)
+                    valid = (
+                        snapshot.symbol in materialized_sessions and qualified is not None
+                        and (snapshot.extended_metrics or {}).get("market_session") == qualified
+                        and snapshot_session_coverage(snapshot, expected_session, datetime.now(UTC)) is not None
+                    )
+                else:
+                    valid = (
+                        price is not None and math.isfinite(price) and price > 0
+                        and snapshot.trade_date is not None and snapshot.trade_date <= today
+                        and quote["price_unit"] == "VND" and quote.get("price_source")
+                    )
+                if valid:
                     valid_base_symbols.add(snapshot.symbol)
             if progress is not None:
                 progress["base_count"] = len(valid_base_symbols)
+            active_symbols = set((await session.scalars(
+                select(Stock.symbol).where(Stock.is_active == 1)
+            )).all())
             if (
                 symbols is None
                 and exchanges is None
                 and limit is None
+                and active_symbols == expected_symbols
+                and not session_errors
                 and {snapshot.symbol for snapshot in snapshot_rows} == expected_symbols
                 and valid_base_symbols == expected_symbols
             ):
@@ -2061,6 +2197,7 @@ class DataPipeline:
                             "snapshot_date": today.isoformat(),
                             "expected_symbols": sorted(set(deduped_symbols)),
                             "expected_count": len(expected_symbols),
+                            **({"market_session_date": expected_session.isoformat(), "market_session_scope": "vietcap_board"} if acquire_sessions else {}),
                             "base_only": not enrich_ratios,
                             "ratio_errors": len(ratio_failed_symbols),
                         },
@@ -2084,6 +2221,8 @@ class DataPipeline:
             for item in cache_batch:
                 cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
                 await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
+            for item in price_cache_batch:
+                await self._cache_set_json(build_cache_key("vnibb", "price", "latest", item["symbol"]), item, CACHE_TTL_PRICE_LATEST)
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = None
                 progress["last_index"] = None

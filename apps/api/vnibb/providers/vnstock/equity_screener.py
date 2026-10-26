@@ -170,9 +170,9 @@ class ScreenerData(BaseModel):
         None, alias="industryName", description="Industry classification"
     )
 
-    # ==========================================================================
+    # =======================================================================
     # PRICE & VOLUME
-    # ==========================================================================
+    # =======================================================================
     price: Optional[float] = Field(None, description="Current price")
     price_unit: PriceUnit = "unknown"
     price_source: Optional[str] = None
@@ -187,6 +187,9 @@ class ScreenerData(BaseModel):
         None,
         alias="tradeDate",
         description="Trading date of the price and volume fields",
+    )
+    market_session: Optional[dict[str, Any]] = Field(
+        None, description="Bounded, validated source-session status and date"
     )
     market_cap: Optional[float] = Field(
         None, alias="marketCap", description="Market capitalization"

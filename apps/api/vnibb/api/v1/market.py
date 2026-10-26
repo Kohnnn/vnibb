@@ -12,7 +12,8 @@ import logging
 import re
 import unicodedata
 from functools import wraps
-from datetime import datetime, date, time as market_time, timedelta
+from datetime import UTC, date, datetime, time as market_time, timedelta
+from types import SimpleNamespace
 from typing import Any, Dict, List, Literal, Optional
 from collections import defaultdict
 from zoneinfo import ZoneInfo
@@ -34,7 +35,6 @@ from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
     StockScreenerParams,
-    ScreenerData,
 )
 from vnibb.providers.vnstock.market_overview import (
     VnstockMarketOverviewFetcher,
@@ -49,8 +49,9 @@ from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
-from vnibb.services.cache_manager import CacheManager
+from vnibb.services.cache_manager import CacheManager, snapshot_session_coverage
 from vnibb.services.data_quality import latest_market_business_day
+from vnibb.services.market_session import expected_market_session
 from vnibb.services.sector_service import SectorService
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.providers.vnstock import get_stock
@@ -169,10 +170,14 @@ class HeatmapStock(BaseModel):
     industry: Optional[str] = None
     market_cap: float
     price: float
-    change: float  # Absolute price change
-    change_pct: float  # Percentage change
+    change: float | None = None  # Absolute price change
+    change_pct: float | None = None  # Percentage change
     volume: Optional[float] = None
-
+    trade_date: str | None = None
+    session_date: str | None = None
+    session_status: str | None = None
+    session_source: str | None = None
+    session_scope: str | None = None
 
 class SectorGroup(BaseModel):
     """Aggregated sector data for heatmap."""
@@ -180,7 +185,7 @@ class SectorGroup(BaseModel):
     sector: str
     stocks: List[HeatmapStock]
     total_market_cap: float
-    avg_change_pct: float
+    avg_change_pct: float | None = None
     stock_count: int
 
 
@@ -320,6 +325,7 @@ class MarketBreadthExchangeData(BaseModel):
     advancers: int
     decliners: int
     unchanged: int
+    unknown_change: int = 0
     ad_ratio: Optional[float] = None
     pct_above_sma20: Optional[float] = None
     pct_above_sma50: Optional[float] = None
@@ -1200,10 +1206,23 @@ def _extract_snapshot_value_traded(extended_metrics: dict[str, Any]) -> Optional
     )
 
 
+def _snapshot_session_projection(row: Any, metrics: dict[str, Any]) -> tuple[dict[str, Any] | None, bool]:
+    if "market_session" not in metrics:
+        return None, False
+    now = datetime.now(UTC)
+    coverage = snapshot_session_coverage(row, expected_market_session(now=now), now)
+    session = metrics["market_session"]
+    return (
+        {key: session.get(key) for key in ("session_date", "status", "source", "scope")}
+        if coverage is not None else None,
+        coverage != "traded",
+    )
+
+
 def _normalize_screener_row(item: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     if hasattr(item, "model_dump"):
-        payload = item.model_dump(mode="json", by_alias=False)
+        payload = item.model_dump(mode="json", by_alias=False, exclude_unset=True)
     elif isinstance(item, ScreenerSnapshot):
         payload = vars(item)
     elif isinstance(item, dict):
@@ -1225,6 +1244,21 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
     )
     sector = _normalize_text(_first_non_none(payload.get("sector"), payload.get("sector_name")))
     price_record = screener_price_record({**payload, "symbol": symbol, "price": _first_non_none(payload.get("price"), payload.get("close"))})
+    metrics = payload.get("extended_metrics")
+    metrics = dict(metrics) if isinstance(metrics, dict) else {}
+    if "market_session" not in metrics and "market_session" in payload:
+        metrics["market_session"] = payload["market_session"]
+    for key in ("price_unit", "price_source"):
+        if key not in metrics and key in payload:
+            metrics[key] = payload[key]
+    row = SimpleNamespace(
+        symbol=symbol, price=_first_non_none(payload.get("price"), payload.get("close")),
+        volume=payload.get("volume"),
+        trade_date=_coerce_to_date(_first_non_none(payload.get("trade_date"), payload.get("tradeDate"))),
+        extended_metrics=metrics,
+    )
+    market_session, returns_withheld = _snapshot_session_projection(row, metrics)
+    returns_withheld = returns_withheld or bool(payload.get("_session_returns_withheld"))
 
     return {
         "symbol": symbol,
@@ -1239,6 +1273,8 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
         "sector": sector,
         "price": _to_float(price_record.get("price")) if price_record["price_unit"] != "unknown" else None,
         "price_unit": price_record["price_unit"],
+        "market_session": market_session,
+        "_session_returns_withheld": returns_withheld,
         "volume": _to_float(payload.get("volume")),
         "market_cap": _to_float(
             _first_non_none(payload.get("market_cap"), payload.get("marketCap"))
@@ -1246,7 +1282,7 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
         "shares_outstanding": _to_float(
             _first_non_none(payload.get("shares_outstanding"), payload.get("sharesOutstanding"))
         ),
-        "change_pct": _to_float(
+        "change_pct": None if returns_withheld else _to_float(
             _first_non_none(
                 payload.get("price_change_1d_pct"),
                 payload.get("change_1d"),
@@ -1254,23 +1290,24 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
                 payload.get("changePct"),
                 payload.get("price_change_pct"),
                 payload.get("priceChangePct"),
+                _extract_snapshot_change_pct(metrics),
             )
         ),
-        "weekly_pct": _to_float(
+        "weekly_pct": None if returns_withheld else _to_float(
             _first_non_none(
                 payload.get("price_change_1w_pct"),
                 payload.get("weekly_pct"),
                 payload.get("weeklyPct"),
             )
         ),
-        "monthly_pct": _to_float(
+        "monthly_pct": None if returns_withheld else _to_float(
             _first_non_none(
                 payload.get("price_change_1m_pct"),
                 payload.get("monthly_pct"),
                 payload.get("monthlyPct"),
             )
         ),
-        "ytd_pct": _to_float(
+        "ytd_pct": None if returns_withheld else _to_float(
             _first_non_none(
                 payload.get("price_change_ytd_pct"),
                 payload.get("ytd_pct"),
@@ -1292,7 +1329,6 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
         "constituent_date": _first_non_none(
             payload.get("trade_date"),
             payload.get("tradeDate"),
-            payload.get("snapshot_date"),
         ),
     }
 
@@ -1544,6 +1580,7 @@ async def _load_latest_snapshot_metrics(
                     ScreenerSnapshot.symbol.label("symbol"),
                     ScreenerSnapshot.price.label("price"),
                     ScreenerSnapshot.volume.label("volume"),
+                    ScreenerSnapshot.trade_date.label("trade_date"),
                     ScreenerSnapshot.snapshot_date.label("snapshot_date"),
                     ScreenerSnapshot.created_at.label("created_at"),
                     ScreenerSnapshot.extended_metrics.label("extended_metrics"),
@@ -1567,6 +1604,7 @@ async def _load_latest_snapshot_metrics(
                         ranked_snapshots.c.symbol,
                         ranked_snapshots.c.price,
                         ranked_snapshots.c.volume,
+                        ranked_snapshots.c.trade_date,
                         ranked_snapshots.c.snapshot_date,
                         ranked_snapshots.c.created_at,
                         ranked_snapshots.c.extended_metrics,
@@ -1574,15 +1612,26 @@ async def _load_latest_snapshot_metrics(
                 )
             ).all()
 
-            for symbol, price, volume, snapshot_date, created_at, extended_metrics in rows:
+            for symbol, price, volume, trade_date, snapshot_date, created_at, extended_metrics in rows:
                 symbol_key = _normalize_symbol(symbol)
                 payload = extended_metrics if isinstance(extended_metrics, dict) else {}
                 price_record = screener_price_record({"symbol": symbol, "price": price, "extended_metrics": payload})
+                snapshot = SimpleNamespace(
+                    symbol=symbol, price=price, volume=volume, trade_date=trade_date,
+                    extended_metrics=payload,
+                )
+                market_session, returns_withheld = _snapshot_session_projection(snapshot, payload)
                 metrics_map[symbol_key] = {
                     "price": _to_float(price_record.get("price")) if price_record["price_unit"] != "unknown" else None,
                     "price_unit": price_record["price_unit"],
+                    "trade_date": trade_date.isoformat() if trade_date else None,
                     "volume": _to_float(volume),
-                    "change_pct": _extract_snapshot_change_pct(payload),
+                    "change_pct": (
+                        None if returns_withheld
+                        else _extract_snapshot_change_pct(payload)
+                    ),
+                    "market_session": market_session,
+                    "_session_returns_withheld": returns_withheld,
                     "value": _extract_snapshot_value_traded(payload),
                     "updated_at": _serialize_datetime_like(
                         _first_non_none(payload.get("updated_at"), snapshot_date, created_at)
@@ -1753,7 +1802,7 @@ async def _fetch_market_screener_rows(limit: int = 1500) -> List[dict[str, Any]]
             row["industry"] = metadata.get("industry")
         if not row.get("sector") and metadata.get("sector"):
             row["sector"] = metadata.get("sector")
-        if row.get("change_pct") is None and symbol in change_map:
+        if row.get("change_pct") is None and not row.get("_session_returns_withheld") and symbol in change_map:
             row["change_pct"] = change_map[symbol]
 
     return screener_rows
@@ -1860,13 +1909,16 @@ def _build_market_breadth_rows(
         sma50_eligible = 0
         new_highs_52w = 0
         new_lows_52w = 0
+        unknown_change = 0
 
         for row in exchange_rows:
             symbol = _normalize_symbol(row.get("symbol"))
-            change_pct = _to_float(row.get("change_pct")) or 0.0
             price = _to_float(row.get("price"))
-
-            if change_pct > 0:
+            change_pct = _to_float(row.get("change_pct"))
+            session = row.get("market_session")
+            if change_pct is None or (isinstance(session, dict) and session.get("status") in {"no_trade", "suspended"}):
+                unknown_change += 1
+            elif change_pct > 0:
                 advancers += 1
             elif change_pct < 0:
                 decliners += 1
@@ -1901,6 +1953,7 @@ def _build_market_breadth_rows(
                 advancers=advancers,
                 decliners=decliners,
                 unchanged=unchanged,
+                unknown_change=unknown_change,
                 ad_ratio=(round(advancers / decliners, 2) if decliners > 0 else None),
                 pct_above_sma20=(
                     round((above_sma20 / sma20_eligible) * 100, 1) if sma20_eligible > 0 else None
@@ -1952,6 +2005,19 @@ def _apply_snapshot_metrics_to_movers(
         symbol = _normalize_symbol(item.get("symbol"))
         metrics = metrics_map.get(symbol)
         if not metrics:
+            continue
+        session = metrics.get("market_session")
+        if isinstance(session, dict):
+            item["market_session"] = session
+        if "trade_date" in metrics:
+            item["trade_date"] = metrics["trade_date"]
+        if metrics.get("_session_returns_withheld") or (
+            isinstance(session, dict) and session.get("status") in {"no_trade", "suspended"}
+        ):
+            item["price_change_pct"] = None
+            item["price_change"] = None
+            if not isinstance(session, dict):
+                item.pop("market_session", None)
             continue
 
         current_pct = _to_float(item.get("price_change_pct"))
@@ -2187,7 +2253,8 @@ async def _build_snapshot_top_movers(
         volume = _to_float(
             _first_non_none(getattr(item, "volume", None), extended_metrics.get("volume"))
         )
-        change_pct = _extract_snapshot_change_pct(extended_metrics)
+        session, returns_withheld = _snapshot_session_projection(item, extended_metrics)
+        change_pct = None if returns_withheld else _extract_snapshot_change_pct(extended_metrics)
         value = _extract_snapshot_value_traded(extended_metrics)
         if value in (None, 0) and price not in (None, 0) and volume not in (None, 0):
             value = price * volume
@@ -2197,8 +2264,11 @@ async def _build_snapshot_top_movers(
                 "symbol": symbol,
                 "price": price,
                 "price_unit": price_record["price_unit"],
+                "trade_date": _coerce_to_date(getattr(item, "trade_date", None)),
                 "volume": volume,
                 "change_pct": change_pct,
+                "market_session": session,
+                "_session_returns_withheld": returns_withheld,
                 "value": value,
                 "updated_at": _serialize_datetime_like(
                     _first_non_none(
@@ -2213,11 +2283,15 @@ async def _build_snapshot_top_movers(
     if not rows:
         return []
 
-    missing_change_symbols = [row["symbol"] for row in rows if row.get("change_pct") is None]
+    missing_change_symbols = [
+        row["symbol"] for row in rows
+        if row.get("change_pct") is None
+        and not row.get("_session_returns_withheld")
+    ]
     if missing_change_symbols:
         change_map = await _load_change_pct_map(missing_change_symbols)
         for row in rows:
-            if row.get("change_pct") is None and row["symbol"] in change_map:
+            if row.get("change_pct") is None and not row.get("_session_returns_withheld") and row["symbol"] in change_map:
                 row["change_pct"] = change_map[row["symbol"]]
 
     sorted_rows = _sort_top_movers(
@@ -2227,6 +2301,7 @@ async def _build_snapshot_top_movers(
                 "price_change_pct": row.get("change_pct"),
                 "last_price": row.get("price"),
                 "price_unit": row.get("price_unit"),
+                "trade_date": row.get("trade_date"),
                 "volume": row.get("volume"),
                 "value": row.get("value"),
             }
@@ -2236,6 +2311,7 @@ async def _build_snapshot_top_movers(
         limit=limit,
     )
 
+    session_by_symbol = {row["symbol"]: row.get("market_session") for row in rows}
     payload: List[dict[str, Any]] = []
     for row in sorted_rows:
         last_price = _to_float(row.get("last_price"))
@@ -2255,6 +2331,7 @@ async def _build_snapshot_top_movers(
                 "index": index,
                 "last_price": last_price,
                 "price_unit": row.get("price_unit"),
+                "trade_date": row["trade_date"].isoformat() if row.get("trade_date") else None,
                 "price_change": price_change,
                 "price_change_pct": change_pct,
                 "volume": row.get("volume"),
@@ -2262,6 +2339,7 @@ async def _build_snapshot_top_movers(
                 "avg_volume_20d": None,
                 "volume_spike_pct": None,
                 "updated_at": row.get("updated_at"),
+                "market_session": session_by_symbol.get(row.get("symbol")),
             }
         )
 
@@ -2345,7 +2423,7 @@ async def get_heatmap_data(
         )
 
         # Try cache first
-        screener_data: List[ScreenerData] = []
+        screener_data: list[Any] = []
         cached = False
         partial = True
 
@@ -2364,33 +2442,7 @@ async def get_heatmap_data(
                         freshness,
                         len(cache_result.data),
                     )
-                    # Convert ORM to Pydantic
-                    screener_data = []
-                    for s in cache_result.data:
-                        extended_metrics = (
-                            s.extended_metrics if isinstance(s.extended_metrics, dict) else {}
-                        )
-                        price_record = screener_price_record(s)
-                        screener_data.append(
-                            ScreenerData(
-                                symbol=s.symbol,
-                                organ_name=s.company_name,
-                                exchange=s.exchange,
-                                industry_name=s.industry,
-                                price=price_record.get("price") if price_record["price_unit"] != "unknown" else None,
-                                price_unit=price_record["price_unit"],
-                                price_source=price_record.get("price_source"),
-                                volume=s.volume,
-                                market_cap=s.market_cap,
-                                pe=s.pe,
-                                pb=s.pb,
-                                change_1d=_extract_snapshot_change_pct(extended_metrics),
-                                trade_date=getattr(s, "trade_date", None)
-                                or getattr(s, "snapshot_date", None),
-                                updated_at=getattr(s, "updated_at", None)
-                                or getattr(s, "snapshot_date", None),
-                            )
-                        )
+                    screener_data = [_normalize_screener_row(row) for row in cache_result.data]
                     cached = True
                     partial = not cache_result.hit
             except Exception as e:
