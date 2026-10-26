@@ -868,3 +868,82 @@ Recommended VNIBB guardrails:
 Pass/fail rule:
 - PASS: all five checks are within thresholds
 - FAIL: any single threshold is exceeded or paid shape usage appears
+
+## Read-only database readiness census (#167)
+
+Use the existing preflight command's explicit census mode, with private runtime
+credentials already loaded and an independently pinned serving revision:
+
+```bash
+umask 077
+PYTHONPATH=apps/api python apps/api/scripts/query_plan_preflight.py \
+  --readiness-census --expected-revision "$EXPECTED_REVISION" \
+  --mongo-max-time-ms 3000 --output-json "$PRIVATE_EVIDENCE/census.private.json"
+```
+
+This mode skips every HTTP benchmark, provider import/acquisition and cache refresh.
+Do not pass `--api-base-url`, `--require-screener`, or `--output-markdown`. With
+`--output-json`, the command exclusively creates a mode-0600 file and prints only
+aggregate counts; without it, stdout contains private per-symbol evidence. Keep
+that evidence outside the repository. A zero exit means capture succeeded, **not**
+that the database is ready. Connection/query errors fail capture, not missing-data
+counts. It does not install indexes, run migrations, materialize or publish rows.
+
+PostgreSQL uses read-only transactions, 5-second statement/1-second lock deadlines
+and rollback; serving price/snapshot reads are planner-first and reject sequential
+scans. Mongo reads use existing index hints and `maxTimeMS`; Redis uses only bounded
+`GETRANGE` and `TTL` on known pipeline keys. SQL membership is recounted before/after
+capture and the revision is checked for drift. The cross-store window is explicitly
+non-atomic. Receipt/envelope capture fails rather than silently truncating above
+1,000 records. Calendar-based expected completion is not exchange finality evidence.
+
+On a serving host, retain strict known-host SSH verification and the existing
+identity. Inspect sanitized Docker identities before/after; do not print container
+environment variables. If the new command is not deployed, stream the reviewed
+`scripts/readiness_census.py` source into `docker exec -i vnibb-api python -B -`
+and invoke `readiness_census(EXPECTED_REVISION, 3000)` there, capturing stdout to a
+private local file. This executes the same census without copying files into the
+container, deploying, calling consumer GETs, or writing a datastore. Never bypass
+SSH host-key checks or use consumer endpoints that can populate caches.
+
+### Captured production aggregates, 26 October 2026
+
+Actual retained-store capture: **12:26:27–12:26:32 UTC**, revision
+`229d7a54b4aec6622bbaec92680a60ae48b729b2`, expected session `2026-10-26`.
+Active membership was recounted as **1,519** (HOSE 412 / HNX 302 / UPCOM 805),
+ordered-symbol SHA-256
+`0f18c347a7a931f159e5becba361dc3d1907efcbe437a090f897742dee361207`.
+
+| Observation | Count |
+| --- | ---: |
+| Durable SQL price rows / snapshot rows, all history | 1,414,178 / 318,202 |
+| Active symbols with a retained SQL price / snapshot | 1,519 / 1,519 |
+| Current actual SQL trade dates, price and snapshot | 872 / 872 |
+| Snapshots materialized today / older snapshots | 1,464 / 55 |
+| Active symbols with retained Mongo EOD / current EOD | 1,517 / 810 |
+| Current received batch envelopes / qualified Mongo board documents | 0 / 0 |
+| Independently qualified embedded SQL sessions | 0 |
+| Durable Universe completion receipts, all history | 0 |
+| Existing Redis screener / latest-price keys | 1,464 / 0 |
+| Receipt-admitted Universe / qualified session count | 0 / 0 |
+
+All 1,519 symbols lack a retained current board/session proof and completion receipt;
+647 actual SQL trade dates are older than the expected session. Fifty-five retained
+SQL price/snapshot rows have uncertified units (snapshot source proof is also absent).
+Two symbols lack Mongo EOD; 133 latest Mongo/SQL price dates differ; 234 same-date
+Mongo EOD records lack the required raw/unit evidence. These are distinct overlapping
+reasons, not a single missing-row count. Existing Redis screener numeric/date values
+match their SQL snapshots; no consumer request was made to refill absent keys.
+
+The public `CacheManager.get_screener_data(source=None)` reader was called directly
+inside a read-only transaction: miss, zero admitted rows,
+`verified_universe_unavailable`. Durable rows are not admitted coverage. This capture
+contained zero null snapshot prices; the earlier isolated replay's 647 null prices
+was different evidence and was neither copied nor changed. Provider-scope-only health
+degradation and null-price semantics remain unchanged. No readiness recovery, source
+permission, acquisition, scheduler or deployment claim follows from this census.
+
+Detailed per-symbol JSON, raw envelopes, receipt decisions, query plan, command-source
+hash and unchanged before/after API/PostgreSQL/Mongo/Redis identities are retained
+privately under the implementation evidence directory's `census-167/`. No credentials
+or per-symbol raw records belong in this runbook.
