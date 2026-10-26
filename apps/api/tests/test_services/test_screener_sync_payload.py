@@ -631,6 +631,7 @@ async def test_pipeline_session_acquisition_is_opt_in_and_clears_unqualified_quo
         session.add_all(stocks)
         await session.flush()
         session.add(StockPrice(
+            id=1,
             stock_id=stocks[1].id, symbol="BBB", time=session_date - timedelta(days=3),
             open=20000, high=20000, low=20000, close=20000, volume=5,
             interval="1D", source="vietcap_vnd",

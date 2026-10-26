@@ -767,6 +767,52 @@ async def test_screener_resumed_base_and_marker_commit_atomically(screener_base_
 
 
 @pytest.mark.asyncio
+async def test_cancelled_final_commit_keeps_previous_same_day_admitted_cohort(screener_base_pipeline, monkeypatch):
+    from datetime import datetime
+
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from vnibb.models.stock import Stock, StockPrice
+    from vnibb.services.cache_manager import CacheManager
+
+    pipeline, sessions = screener_base_pipeline
+    today = datetime.utcnow().date()
+    symbols = [f"B{index:02d}" for index in range(50)]
+    async with sessions.begin() as session:
+        session.add_all([Stock(id=index, symbol=symbol, is_active=1) for index, symbol in enumerate(symbols, 1)])
+        session.add_all([
+            StockPrice(id=index, stock_id=index, symbol=symbol, time=today, open=100, high=100,
+                       low=100, close=100, volume=1, source="vnstock_vnd:VCI", interval="1D")
+            for index, symbol in enumerate(symbols, 1)
+        ])
+    assert await pipeline.sync_screener_data(enrich_ratios=False) == 50
+    async with sessions() as session:
+        reader = await CacheManager(db=session).get_screener_data()
+        assert reader.hit and len(reader.data) == 50
+        before = sorted((row.id, row.symbol, row.price, row.created_at) for row in reader.data)
+    async with sessions.begin() as session:
+        await session.execute(update(StockPrice).values(close=110, high=110))
+
+    original_commit = AsyncSession.commit
+
+    async def cancel_publication(session):
+        if any(isinstance(row, SyncStatus) and row.sync_type == "screener_universe" for row in session.new):
+            raise asyncio.CancelledError()
+        await original_commit(session)
+
+    monkeypatch.setattr(AsyncSession, "commit", cancel_publication)
+    with pytest.raises(asyncio.CancelledError):
+        await pipeline.sync_screener_data(enrich_ratios=False)
+    async with sessions() as session:
+        reader = await CacheManager(db=session).get_screener_data()
+        assert reader.hit and len(reader.data) == 50
+        assert sorted((row.id, row.symbol, row.price, row.created_at) for row in reader.data) == before
+        assert len((await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()) == 1
+        assert set(await session.scalars(select(StockPrice.close))) == {110}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("transition", ["newly_active", "removed"])
 async def test_screener_active_membership_transition_keeps_inactive_history(
     screener_base_pipeline, transition,
