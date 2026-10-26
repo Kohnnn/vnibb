@@ -61,20 +61,23 @@ def snapshot_session_coverage(
     coverage = session_coverage(record, row.symbol, expected_session)
     if coverage is None:
         return None
+    trade_date = _coerce_date(row.trade_date)
+    if row.trade_date is not None and trade_date is None:
+        return None
     try:
         observed_at = datetime.fromisoformat(record["observed_at"].replace("Z", "+00:00"))
         current_utc = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
         if observed_at.tzinfo is None or observed_at > current_utc:
             return None
-        if row.trade_date is not None and row.trade_date > expected_session:
+        if trade_date is not None and trade_date > expected_session:
             return None
         if coverage != "traded":
             if row.volume != 0:
                 return None
             if row.price is None:
-                return coverage if row.trade_date is None else None
+                return coverage if trade_date is None else None
             if (
-                row.trade_date is None or row.trade_date >= expected_session
+                trade_date is None or trade_date >= expected_session
                 or not math.isfinite(row.price) or row.price <= 0
                 or metrics.get("price_unit") != "VND"
                 or metrics.get("price_source") not in _QUALIFIED_RETAINED_PRICE_SOURCES
@@ -83,7 +86,7 @@ def snapshot_session_coverage(
             return coverage
         match = record["raw"]["matchPrice"]
         if (
-            row.trade_date != expected_session
+            trade_date != expected_session
             or metrics.get("price_unit") != "VND"
             or metrics.get("price_source") != "vietcap_vnd"
             or row.price is None or not math.isfinite(row.price) or row.price <= 0

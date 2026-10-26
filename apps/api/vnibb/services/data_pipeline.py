@@ -1473,7 +1473,7 @@ class DataPipeline:
                     rejected_symbols.update(set(identities) - set(requested))
                     seen_symbols.update(identities)
                     qualified = []
-                    for raw, claims in zip(raw_rows, row_identities):
+                    for raw, claims in zip(raw_rows, row_identities, strict=True):
                         symbol = next(iter(claims)) if len(claims) == 1 else None
                         record = qualify_market_session(raw, symbol, expected_session, batch_observed_at)
                         if symbol not in requested or symbol in rejected_symbols or record is None:
@@ -1515,6 +1515,9 @@ class DataPipeline:
         async with async_session_maker() as session:
             if engine.dialect.name == "postgresql":
                 await session.execute(text("LOCK TABLE screener_snapshots IN SHARE ROW EXCLUSIVE MODE"))
+            elif engine.dialect.name == "sqlite":
+                # Legacy SQLite reads do not BEGIN; a root SAVEPOINT would commit on release.
+                await session.execute(text("BEGIN"))
             prior_receipts = (await session.scalars(select(SyncStatus).where(
                 SyncStatus.sync_type == "screener_universe", SyncStatus.status == "completed",
                 SyncStatus.error_count == 0,
@@ -2337,8 +2340,6 @@ class DataPipeline:
                     ) if acquire_sessions else len(persisted_snapshots)
                 cache_batch = []
                 price_cache_batch = []
-            else:
-                await publication_transaction.commit()
             if not publish_cohort and (acquire_sessions or (symbols is None and exchanges is None and limit is None)):
                 cache_batch = []
                 price_cache_batch = []

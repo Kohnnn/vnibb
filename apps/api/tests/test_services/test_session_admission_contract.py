@@ -9,11 +9,13 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import pytest
+import sqlalchemy.ext.asyncio as sqlalchemy_async
 from pymongo import MongoClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from scripts.readiness_census import _admitted, _retained, reconcile_census
 from vnibb.core.database import Base
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
@@ -87,7 +89,7 @@ async def admission_stores(monkeypatch):
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     try:
-        yield SimpleNamespace(sessions=sessions, mongo=database, service=service)
+        yield SimpleNamespace(sessions=sessions, mongo=database, service=service, pg_url=pg_url, mongo_url=mongo_url)
     finally:
         client.drop_database(schema)
         client.close()
@@ -464,6 +466,59 @@ async def test_complete_cohort_preserves_null_no_trade_and_suspended_prices(admi
         assert len(empty) == 2
         assert all(row.price is None and row.trade_date is None and row.volume == 0 for row in empty)
         assert len((await session.scalars(select(StockPrice))).all()) == 48
+
+    def census_engine(url, **kwargs):
+        assert url == stores.pg_url
+        connect_args = {**kwargs.pop("connect_args", {}), "server_settings": {"search_path": stores.mongo.name}}
+        return create_async_engine(url, **kwargs, connect_args=connect_args)
+
+    monkeypatch.setattr(sqlalchemy_async, "create_async_engine", census_engine)
+    settings = SimpleNamespace(database_url=stores.pg_url, mongodb_url=stores.mongo_url,
+                               mongodb_database=stores.mongo.name, redis_url="")
+    admitted = await _admitted(settings)
+    assert admitted["hit"] and admitted["count"] == 50
+    assert admitted["symbols"] == symbols
+    assert admitted["market_session_counts"] == {"qualified": 50, "traded": 48, "no_trade": 1, "suspended": 1}
+    assert admitted["whole_market_verified"] is False
+    async with stores.sessions() as session:
+        captured = [dict(row) for row in (await session.execute(text("""
+            SELECT u.symbol, to_jsonb(s) snapshot_row, to_jsonb(p) price_row
+            FROM stocks u LEFT JOIN screener_snapshots s ON s.symbol=u.symbol
+            LEFT JOIN stock_prices p ON p.symbol=u.symbol WHERE u.is_active=1 ORDER BY u.symbol
+        """))).mappings()]
+        receipts = list(await session.scalars(text("SELECT to_jsonb(r) FROM sync_status r WHERE sync_type='screener_universe'")))
+    stores.mongo.market_vnstock_premium_records.create_index(
+        [("dataset", 1), ("symbol", 1), ("observedAt", -1)], name="idx_dataset_symbol_observedAt_desc",
+    )
+    stores.mongo.market_prices_eod.create_index(
+        [("symbol", 1), ("tradeDate", -1)], name="idx_symbol_tradeDate_desc",
+    )
+    retained, cache, envelopes = _retained(settings, symbols, SESSION, 3000)
+    report = reconcile_census(captured, retained, cache, receipts, admitted, SESSION, OBSERVED)
+    assert report["durable"]["current_sql_session_qualified"] == 50
+    assert report["durable"]["null_actual_snapshot_prices"] == 2
+    assert not {"sql_session_invalid", "mongo_sql_session_lineage_mismatch", "not_in_admitted_universe"} & report["reason_counts"].keys()
+    assert captured[0]["snapshot_row"]["trade_date"] == "2026-10-26"
+    assert len(envelopes) == 1 and all(retained[symbol]["envelope_keys"] for symbol in symbols)
+
+    collection = stores.mongo.market_vnstock_premium_records
+    received = envelopes[0]
+    for damage in ("empty", "unrelated", "changed", "unrequested", "wrong_session"):
+        envelope = deepcopy(received)
+        if damage == "empty":
+            envelope["raw"] = []
+        elif damage == "unrelated":
+            envelope["raw"] = [board_row("OTHER")]
+        elif damage == "changed":
+            envelope["raw"][0]["matchPrice"]["matchPrice"] = 10500
+        elif damage == "unrequested":
+            envelope["requested_symbols"] = symbols[1:]
+        else:
+            envelope["session_date"] = "2026-10-23"
+        collection.replace_one({"recordKey": received["recordKey"]}, envelope)
+        retained, cache, _ = _retained(settings, symbols, SESSION, 3000)
+        report = reconcile_census(captured, retained, cache, receipts, admitted, SESSION, OBSERVED)
+        assert "mongo_received_envelope_missing" in report["rows"][0]["reasons"], damage
 
 
 @pytest.mark.asyncio

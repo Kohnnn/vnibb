@@ -284,6 +284,7 @@ def _postgres(settings, now):
 async def _admitted(settings):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
     from vnibb.services.cache_manager import CacheManager
 
     engine = create_async_engine(settings.database_url, connect_args={"timeout": 3})
@@ -297,15 +298,16 @@ async def _admitted(settings):
             rows = result.data or []
             # CacheManager returns a miss on SQL errors; do not mislabel an aborted read as absence.
             await session.execute(text("SELECT 1"))
+            summary = {"hit": result.hit, "count": len(rows), "symbols": sorted(row.symbol for row in rows), "is_stale": result.is_stale, "freshness_basis": result.freshness_basis, "market_session_counts": result.market_session_counts, "health_reason": "verified_universe_unavailable" if not rows else "completed_session_not_covered" if result.is_stale else None, "whole_market_verified": False}
             await session.rollback()
-            return {"hit": result.hit, "count": len(rows), "symbols": sorted(row.symbol for row in rows), "is_stale": result.is_stale, "freshness_basis": result.freshness_basis, "market_session_counts": result.market_session_counts, "health_reason": "verified_universe_unavailable" if not rows else "completed_session_not_covered" if result.is_stale else None, "whole_market_verified": False}
+            return summary
     finally:
         await engine.dispose()
 
 
 def _retained(settings, symbols, expected, max_time_ms):
-    from pymongo import MongoClient
     import redis
+    from pymongo import MongoClient
 
     mongo = MongoClient(settings.mongodb_url, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000, socketTimeoutMS=5000)
     raw, cache = {}, {}
@@ -323,7 +325,15 @@ def _retained(settings, symbols, expected, max_time_ms):
             boards = list(collection.find(query, {"_id": 0}).hint("idx_dataset_symbol_observedAt_desc").limit(1).max_time_ms(max_time_ms))
             latest = list(collection.find({"dataset": "equity.price_board", "symbol": symbol}, {"_id": 0}).sort("session_date", -1).hint("idx_dataset_symbol_observedAt_desc").limit(1).max_time_ms(max_time_ms))
             eod = list(database.market_prices_eod.find({"symbol": symbol}, {"_id": 0}).sort("tradeDate", -1).hint("idx_symbol_tradeDate_desc").limit(1).max_time_ms(max_time_ms))
-            envelope_keys = [value.get("recordKey") for value in envelopes if isinstance(value.get("requested_symbols"), list) and symbol in value["requested_symbols"]]
+            board = boards[0] if boards else None
+            envelope_keys = [
+                value.get("recordKey") for value in envelopes
+                if value.get("session_date") == str(expected)
+                and isinstance(value.get("requested_symbols"), list) and symbol in value["requested_symbols"]
+                and isinstance(value.get("raw"), list) and isinstance(board, dict)
+                and board.get("symbol") == symbol and board.get("session_date") == str(expected)
+                and isinstance(board.get("raw"), dict) and board["raw"] in value["raw"]
+            ]
             raw[symbol] = {"board_count": count, "board": boards[0] if boards else None, "envelope_keys": envelope_keys, "latest_board": latest[0] if latest else None, "eod": eod[0] if eod else None}
             cached = {}
             if client:
