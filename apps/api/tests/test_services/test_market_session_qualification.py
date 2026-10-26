@@ -100,7 +100,7 @@ def test_stored_session_revalidates_native_raw(damage):
     assert session_coverage(damaged, "AAA", SESSION) is None
 
 
-def test_price_board_posts_normalized_unique_membership_and_rejects_partial_response():
+def test_price_board_posts_normalized_membership_and_preserves_unqualified_response():
     client = VietcapClient()
     row = _raw()
     client._request = Mock(return_value=[row])
@@ -111,6 +111,12 @@ def test_price_board_posts_normalized_unique_membership_and_rejects_partial_resp
     client._request.return_value = [row, row]
     with pytest.raises(ValueError):
         client.get_price_board(["AAA"])
+    assert client.get_price_board(["AAA"], validate_membership=False) == [row, row]
     client._request.return_value = []
     with pytest.raises(ValueError):
         client.get_price_board(["AAA"])
+    assert client.get_price_board(["AAA"], validate_membership=False) == []
+    client._request.return_value = {"malformed": "envelope"}
+    with pytest.raises(ValueError):
+        client.get_price_board(["AAA"])
+    assert client.get_price_board(["AAA"], validate_membership=False) == {"malformed": "envelope"}
