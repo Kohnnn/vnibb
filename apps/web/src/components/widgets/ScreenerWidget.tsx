@@ -1030,7 +1030,22 @@ export function ScreenerWidget({
                             onSort={handleSort}
                         />
                     ) : viewMode === 'performance' ? (
-                        <PerformanceTable data={filteredData.map((stock) => ({ ...stock, symbol: String(stock.ticker ?? stock.symbol ?? '') })) as never[]} onSymbolClick={handleSymbolSelect} onAddToWatchlist={handleAddToWatchlist} />
+                        <PerformanceTable
+                            data={filteredData.map((stock) => ({
+                                symbol: String(stock.ticker ?? stock.symbol ?? ''),
+                                name: String(stock.organ_name ?? stock.company_name ?? stock.ticker ?? stock.symbol ?? ''),
+                                price: stock.price ?? null,
+                                perf_1d: stock.change_1d ?? null,
+                                perf_1w: stock.perf_1w ?? null,
+                                perf_1m: stock.perf_1m ?? null,
+                                perf_3m: stock.perf_3m ?? null,
+                                perf_6m: stock.perf_6m ?? null,
+                                perf_ytd: stock.perf_ytd ?? null,
+                                perf_1y: stock.perf_1y ?? null,
+                            }))}
+                            onSymbolClick={handleSymbolSelect}
+                            onAddToWatchlist={handleAddToWatchlist}
+                        />
                     ) : (
                         <div className="h-full overflow-y-auto p-4 scrollbar-hide">
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">

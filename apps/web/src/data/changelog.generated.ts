@@ -16,6 +16,7 @@ live in \`docs/\`.
 
 ## [Unreleased]
 
+- Screener performance rows preserve API company names and daily returns without unsafe casts. Missing periods sort last in either direction; actual zero changes stay neutral in chart cards. Historical completeness and AI price windows exclude published 2026 closures as well as configured closures, retaining uncertainty for unverified years (#111, #129).
 - Screener session evidence is independently qualified against dated Vietcap board records, actual stored prices and exact active membership. Provider-board zero volume and suspension stay scoped observations, not all-market no-trade or completeness certification. Unknown prices remain nullable, actual trade dates are preserved, and screener cards/performance views render unavailable values without zero substitution (#129).
 - Completed-session calculations include the independently verified HOSE/HNX 2026 holiday notices and January 2 amendment. Calendar verification is year-bounded; configured closures remain additive. New board acquisition is opt-in pending source-use authorization, and provider-only coverage does not clear the whole-market readiness gate.
 - Prediction calibration filters the complete eligible topic set before its requested result limit; spread and cross-calibration aggregate eligible markets in SQL without the biased per-source candidate cap (#24, #33).

@@ -9,6 +9,7 @@ export interface ScreenerData {
     market_session?: { session_date: string; status: 'traded' | 'no_trade' | 'suspended'; source: string; scope: 'vietcap_board' } | null;
 
     company_name?: string;
+    organ_name?: string | null;
     exchange?: string;
     industry?: string;
     price?: number | null;

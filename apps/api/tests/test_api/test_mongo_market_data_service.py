@@ -296,6 +296,39 @@ def test_historical_metadata_reports_internal_gap_and_unit_status(monkeypatch):
     assert "internal business-day gaps" in meta.warnings[0]
 
 
+@pytest.mark.parametrize("configured,end", [([], date(2026, 4, 28)), (["2026-04-28"], date(2026, 4, 29))])
+def test_historical_completeness_excludes_official_and_configured_closures(monkeypatch, configured, end):
+    from vnibb.api.v1 import equity
+
+    monkeypatch.setattr(equity.settings, "market_holiday_dates", configured)
+    start = date(2026, 4, 24)
+    rows = [_bar(start, 10000.0), _bar(end, 12000.0)]
+
+    assert equity._historical_rows_cover_request(rows, start, end, "1D")
+    meta = equity._historical_resolution_meta(
+        rows, "raw", start_date=start, end_date=end, interval="1D",
+        source_counts={"mongo": 2}, mongo_docs=[{"priceUnit": "VND"}], warnings=[],
+    )
+    assert meta.completeness_status == "complete"
+    assert not any("business-day" in warning for warning in meta.warnings)
+    assert not equity._historical_rows_cover_request(rows[:1], start, end, "1D")
+
+
+def test_historical_completeness_discloses_unverified_calendar_year(monkeypatch):
+    from vnibb.api.v1 import equity
+
+    monkeypatch.setattr(equity.settings, "market_holiday_dates", [])
+    start, end = date(2027, 3, 8), date(2027, 3, 9)
+    meta = equity._historical_resolution_meta(
+        [_bar(start, 10000.0), _bar(end, 12000.0)], "raw",
+        start_date=start, end_date=end, interval="1D",
+        source_counts={"mongo": 2}, mongo_docs=[{"priceUnit": "VND"}], warnings=[],
+    )
+
+    assert meta.completeness_status == "complete"
+    assert any("unconfigured exchange holidays" in warning for warning in meta.warnings)
+
+
 @pytest.mark.asyncio
 async def test_partial_mongo_and_sql_cover_request_without_provider(client, monkeypatch):
     from vnibb.api.v1 import equity

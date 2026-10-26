@@ -12,6 +12,7 @@ from sqlalchemy import desc, select
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.core.insider_units import normalize_deal_action
+from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
 from vnibb.core.price_units import persisted_price_record
 from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
@@ -205,7 +206,7 @@ def _build_price_context(price_rows: Sequence[Any]) -> dict[str, Any] | None:
     series.sort(key=lambda item: item["time"])
     latest = series[-1]
     latest_unit = latest["price_unit"]
-    holidays = {date.fromisoformat(value) for value in settings.market_holiday_dates}
+    holidays = OFFICIAL_MARKET_HOLIDAYS | {date.fromisoformat(value) for value in settings.market_holiday_dates}
     by_date: dict[str, list[dict[str, Any]]] = {}
     for row in series:
         by_date.setdefault(row["time"], []).append(row)
@@ -258,6 +259,8 @@ def _build_price_context(price_rows: Sequence[Any]) -> dict[str, Any] | None:
     limitations = sorted({status["reason"] for status in (window_5d, window_20d, range_status) if status["reason"]})
     if invalid_timestamps:
         limitations.append("Invalid timestamps prevent certification of the latest observation.")
+    calendar = market_calendar_metadata(date.fromisoformat(latest["time"]))
+    calendar_verified = calendar["verified"] and date.fromisoformat(window_20d["start_date"]).year == calendar["year"]
     return {
         "latest": latest if not invalid_timestamps else None,
         "summary": {
@@ -273,9 +276,16 @@ def _build_price_context(price_rows: Sequence[Any]) -> dict[str, Any] | None:
         "recent_series": series[-PRICE_WINDOW:],
         "excluded_unknown_unit_rows": sum(row["price_unit"] == "unknown" for row in series),
         "limitations": limitations,
-        "calendar": {"holiday_source": "MARKET_HOLIDAY_DATES",
-                     "status": "configured_closures_only", "exchange_calendar_verified": False,
-                     "limitation": "Only configured exchange closures are excluded."},
+        "calendar": {
+            **calendar,
+            "verified": calendar_verified,
+            "exchange_calendar_verified": calendar_verified,
+            "status": "published_and_configured_closures" if calendar_verified else "partially_verified_exchange_calendar",
+            "limitation": calendar["limitation"] if calendar_verified else (
+                "No exchange-published calendar has been verified for every year in these windows. "
+                "Only published 2026 and configured closures are excluded."
+            ),
+        },
     }
 
 
