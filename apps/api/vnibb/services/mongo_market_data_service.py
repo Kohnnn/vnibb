@@ -10,6 +10,7 @@ import re
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
+from hashlib import sha256
 from typing import Any
 
 from vnibb.core.config import settings
@@ -168,10 +169,8 @@ def _dedup_eod_rows(
 class MongoMarketDataService:
     """Lazy MongoDB accessor for the canonical `vnibb-market` corpus.
 
-    Reads are the primary use. A single controlled writer
-    (`bulk_upsert_eod_prices`) exists so the scheduled daily-EOD sync can keep
-    `market_prices_eod` fresh through the same db-name/connection the reads use,
-    avoiding the drift that occurs when only operator-run scripts write.
+    Reads are primary. Controlled EOD and opt-in session writers retain raw
+    evidence through the same database connection used by analytical reads.
     The service never logs the connection string.
     """
 
@@ -200,6 +199,83 @@ class MongoMarketDataService:
             )
 
         return self._client[settings.mongodb_database][name]
+
+    def _session_collection(self) -> Any:
+        from pymongo import ReadPreference
+        from pymongo.read_concern import ReadConcern
+        from pymongo.write_concern import WriteConcern
+
+        if not self.enabled:
+            raise RuntimeError("MongoDB analytical source is not configured")
+
+        collection = self._get_collection("market_vnstock_premium_records").with_options(
+            write_concern=WriteConcern(w="majority", j=True),
+            read_concern=ReadConcern("majority"), read_preference=ReadPreference.PRIMARY,
+        )
+        collection.create_index(
+            [("recordKey", 1)], unique=True, name="uniq_price_board_record_key",
+            partialFilterExpression={"dataset": {"$in": ["equity.price_board", "equity.price_board_envelope"]}},
+        )
+        return collection
+
+    def retain_price_board_envelope(
+        self, requested: list[str], raw: Any, session: date, observed_at: datetime,
+    ) -> None:
+        payload = {"requested_symbols": requested, "session_date": session.isoformat(), "raw": raw}
+        digest = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        key = f"vietcap:price_board_envelope:{session.isoformat()}:{digest}"
+        collection = self._session_collection()
+        result = collection.update_one({"recordKey": key}, {"$setOnInsert": {
+            **payload, "recordKey": key, "dataset": "equity.price_board_envelope",
+            "source": "vietcap", "observed_at": observed_at.isoformat(),
+        }}, upsert=True)
+        if not result.acknowledged:
+            raise RuntimeError("Unacknowledged price-board envelope retention")
+        retained = collection.find_one({"recordKey": key})
+        retained_payload = {field: retained.get(field) for field in payload} if retained else None
+        if json.dumps(retained_payload, sort_keys=True, separators=(",", ":")) != json.dumps(payload, sort_keys=True, separators=(",", ":")):
+            raise RuntimeError("Price-board envelope retention could not be verified")
+
+    def retain_market_sessions(self, records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        from pymongo import UpdateOne
+        from pymongo.errors import BulkWriteError
+
+        from vnibb.services.market_session import session_coverage
+
+        if not records:
+            return {}
+        collection = self._session_collection()
+        keyed = {
+            f"vietcap:price_board:{record['symbol']}:{record['session_date']}": record
+            for record in records
+        }
+        operations = [UpdateOne({"recordKey": key}, {"$setOnInsert": {
+            **record, "recordKey": key, "dataset": "equity.price_board",
+            "updatedAt": datetime.fromisoformat(record["observed_at"]),
+        }}, upsert=True) for key, record in keyed.items()]
+        failed: set[int] = set()
+        try:
+            result = collection.bulk_write(operations, ordered=False)
+            if not result.acknowledged:
+                raise RuntimeError("Unacknowledged market-session retention")
+        except BulkWriteError as exc:
+            if exc.details.get("writeConcernErrors") or not exc.details.get("writeErrors"):
+                raise
+            failed = {error["index"] for error in exc.details["writeErrors"]}
+        retained = {}
+        for index, (key, record) in enumerate(keyed.items()):
+            if index in failed:
+                continue
+            stored = collection.find_one({"recordKey": key})
+            if stored is None:
+                continue
+            candidate = {field: stored.get(field) for field in record}
+            if (
+                all(candidate[field] == value for field, value in record.items() if field != "observed_at")
+                and session_coverage(candidate, record["symbol"], date.fromisoformat(record["session_date"]))
+            ):
+                retained[record["symbol"]] = candidate
+        return retained
 
     def ensure_eod_indexes(self) -> list[str]:
         """Ensure the EOD collection has the required unique natural key."""
