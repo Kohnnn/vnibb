@@ -32,3 +32,10 @@ GitHub parent: [#129](https://github.com/Kohnnn/vnibb/issues/129). Integration b
 | 5 | [#171](https://github.com/Kohnnn/vnibb/issues/171) | #168, #169, #170 |
 | 6 | [#172](https://github.com/Kohnnn/vnibb/issues/172) | #168, #171 |
 | 7 | [#173](https://github.com/Kohnnn/vnibb/issues/173) | #171, #172 |
+
+## Implementation evidence — 26 October 2026
+
+- **Census (#167):** fresh bounded, provider-free datastore reads at 12:26:27–12:26:32 UTC pinned serving revision `229d7a54b4aec6622bbaec92680a60ae48b729b2`. Recounted 1,519 active symbols; PostgreSQL retained 1,414,178 prices and 318,202 snapshots. Only 872 symbols had current actual price dates. Current board envelopes, qualified board records, embedded SQL session records, completion receipts and admitted Universe rows were all zero. Stored rows are not admitted coverage. The read-only census and preflight regressions passed 12 checks; no store or container identity changed.
+- **Permission (#168):** no affirmative storage/public-serving grant is retained. [Vietcap terms](https://www.vietcap.com.vn/dieu-khoan-su-dung-chinh-sach-bao-mat) reserve rights and restrict copying/distribution/publication beyond personal download/printing. HNX asks users to contact the exchange before publishing website information; its [disclaimer](https://hnx.vn/khuyen-cao.html) is not a redistribution license. Keep source use default-deny pending an applicable owner/license grant and a source-backed exchange/instrument/segment/finality/no-trade contract.
+- **Production (#171–#173):** acquisition, writes, scheduling and redeployment remain unperformed. A successful code merge cannot close the strict-watch alert or establish the following scheduled session.
+
