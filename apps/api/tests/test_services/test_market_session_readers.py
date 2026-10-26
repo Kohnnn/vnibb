@@ -320,6 +320,25 @@ async def test_request_quote_update_requires_matching_typed_admission(test_db, r
 
 
 @pytest.mark.asyncio
+async def test_typed_admission_does_not_freeze_unrelated_legacy_quote(test_db):
+    admitted, legacy = _row("AAA"), _row("BBB")
+    legacy.extended_metrics.pop("market_session")
+    await _seed(test_db, [admitted])
+    test_db.add_all([Stock(symbol="BBB", is_active=0), legacy])
+    await test_db.commit()
+
+    assert await CacheManager(db=test_db).store_screener_data([
+        {"symbol": "AAA", "price": 20000, "volume": 200, "trade_date": SESSION, "pe": 12},
+        {"symbol": "BBB", "price": 11000, "volume": 110, "trade_date": SESSION, "pe": 13},
+    ], source="VCI") == 2
+    await test_db.refresh(admitted)
+    await test_db.refresh(legacy)
+
+    assert (admitted.price, admitted.volume, admitted.pe) == (10000, 100, 12)
+    assert (legacy.price, legacy.volume, legacy.pe) == (11000, 110, 13)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("damage", ["missing_date", "unknown_unit", "unknown_source", "nonzero_volume", "current_date", "zero_price"])
 async def test_nontraded_session_cannot_certify_unqualified_retained_price(test_db, damage):
     row = _row("AAA", "no_trade")
