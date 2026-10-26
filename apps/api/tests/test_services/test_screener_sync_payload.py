@@ -573,3 +573,86 @@ async def test_scheduled_ratio_backfill_pairs_admitted_values_with_evidence(
         assert (row.roe, row.price) == (20, 60300)
         assert row.extended_metrics["days_payable"] == 12
         assert row.extended_metrics["price_source"] == "stored_quote"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_session_acquisition_is_opt_in_and_clears_unqualified_quotes(test_engine, monkeypatch):
+    from copy import deepcopy
+    from datetime import UTC, date
+
+    from vnibb.models.sync_status import SyncStatus
+    from vnibb.services.cache_manager import snapshot_session_coverage
+    from vnibb.services.vietcap_client import VietcapClient
+
+    session_date = date(2026, 10, 26)
+    observed = datetime(2026, 10, 26, 9, tzinfo=UTC)
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    cache = []
+    calls = []
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return observed.astimezone(tz)
+
+        @classmethod
+        def utcnow(cls):
+            return observed.replace(tzinfo=None)
+
+    def board(self, symbols):
+        calls.append(symbols)
+        return [{
+            "listingInfo": {
+                "symbol": symbol, "ticker": symbol, "stockType": "STOCK", "type": "STOCK",
+                "isDelisted": 0, "tradingDate": session_date.isoformat(),
+                "receivedTime": "2026-10-26T01:44:00Z", "tradingStatus": "TRADING_ACTIVATED",
+                "tradingStatusCode": "20", "securityStatus": "N",
+            },
+            "bidAsk": {"symbol": symbol, "session": "ENDED", "time": "2026-10-26T08:00:00Z", "receivedTime": "2026-10-26T08:00:03Z"},
+            "matchPrice": {"symbol": symbol, "session": "ENDED", "time": "2026-10-26T08:00:00Z", "receivedTime": "2026-10-26T08:00:03Z", "openPrice": None, "highest": 0, "lowest": 0, "matchPrice": 0, "accumulatedVolume": 0},
+        } for symbol in symbols]
+
+    async def cached(key, value, ttl):
+        cache.append(deepcopy(value))
+
+    monkeypatch.setattr(data_pipeline_module, "async_session_maker", sessions)
+    monkeypatch.setattr(data_pipeline_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(VietcapClient, "get_price_board", board)
+    monkeypatch.setattr("vnibb.services.mongo_market_data_service.get_mongo_market_data_service", lambda: SimpleNamespace(enabled=False))
+    pipeline = DataPipeline()
+    monkeypatch.setattr(pipeline, "_cache_set_json", cached)
+    async with sessions.begin() as session:
+        session.add_all([Stock(symbol="AAA", is_active=1), Stock(symbol="BBB", is_active=1)])
+        session.add_all([
+            ScreenerSnapshot(symbol="AAA", snapshot_date=session_date, trade_date=session_date, price=10000, volume=5, pe=12, extended_metrics={"price_unit": "VND", "price_source": "unverified", "ratio_units": {"roe": "percent"}, "market_session": {"raw": {"obsolete": True}}}),
+            ScreenerSnapshot(symbol="BBB", snapshot_date=session_date, trade_date=session_date - timedelta(days=3), price=20000, volume=5, extended_metrics={"price_unit": "VND", "price_source": "vietcap_vnd"}),
+        ])
+
+    assert await pipeline.sync_screener_data(enrich_ratios=False) == 2
+    assert calls == []
+    assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True) == 2
+    assert calls == [["AAA", "BBB"]]
+    async with sessions() as session:
+        rows = {row.symbol: row for row in (await session.scalars(select(ScreenerSnapshot))).all()}
+        assert (rows["AAA"].price, rows["AAA"].trade_date, rows["AAA"].volume, rows["AAA"].pe) == (None, None, 0, 12)
+        assert (rows["BBB"].price, rows["BBB"].trade_date, rows["BBB"].volume) == (20000, session_date - timedelta(days=3), 0)
+        assert all(snapshot_session_coverage(row, session_date, observed) == "no_trade" for row in rows.values())
+        assert "obsolete" not in rows["AAA"].extended_metrics["market_session"]["raw"]
+        assert rows["AAA"].extended_metrics["ratio_units"] == {"roe": "percent"}
+        receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+        typed = [row.additional_data for row in receipts if "market_session_date" in row.additional_data]
+        assert len(typed) == 1
+        assert typed[0]["market_session_date"] == session_date.isoformat()
+        assert typed[0]["expected_symbols"] == ["AAA", "BBB"]
+
+    def unavailable(self, symbols):
+        raise RuntimeError("source unavailable")
+
+    monkeypatch.setattr(VietcapClient, "get_price_board", unavailable)
+    progress = {}
+    assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress=progress) == 0
+    assert progress["base_count"] == 0
+    assert progress["error_count"] == 2
+    async with sessions() as session:
+        receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+        assert sum("market_session_date" in row.additional_data for row in receipts) == 1

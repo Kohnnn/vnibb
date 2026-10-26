@@ -10,6 +10,7 @@ from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Query, Request
 from sqlalchemy import text
@@ -19,6 +20,7 @@ from vnibb.core.auth import User, require_admin_access
 from vnibb.core.cache import redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import engine, get_db
+from vnibb.core.market_calendar import market_calendar_metadata
 from vnibb.core.middleware.logging import get_recent_error_events
 from vnibb.services.ai_model_catalog_service import ai_model_catalog_service
 from vnibb.services.ai_prompt_library_service import ai_prompt_library_service
@@ -1020,10 +1022,9 @@ async def get_data_health(db: AsyncSession = Depends(get_db)):
         "data_quality": {
             "last_successful_run": serialize_quality_run(last_successful_run),
             "source_freshness": serialize_quality_run(latest_quality_run),
-            "calendar": {
-                "holiday_source": "MARKET_HOLIDAY_DATES",
-                "limitation": "Only configured exchange closures are excluded.",
-            },
+            "calendar": market_calendar_metadata(
+                datetime.now(ZoneInfo(settings.vn_timezone)).date()
+            ),
             "trend": [serialize_quality_run(run) for run in trend],
         },
     }

@@ -1,8 +1,9 @@
 # backend/vnibb/api/v1/health.py
 
 import asyncio
+import math
 import time
-from datetime import date, datetime, time as market_time, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Response, status
@@ -12,8 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.core.cache import redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
+from vnibb.core.market_calendar import market_calendar_metadata
+from vnibb.core.price_units import screener_price_record
 from vnibb.services.cache_manager import CacheManager
-from vnibb.services.data_quality import latest_market_business_day
+from vnibb.services.market_session import expected_market_session
 
 router = APIRouter()
 
@@ -173,12 +176,17 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
         trade_date = min(actual_dates) if actual_dates else None
         missing_trade_dates = len(snapshots) - len(actual_dates)
         now_ict = datetime.now(ZoneInfo(settings.vn_timezone))
-        close_time = market_time.fromisoformat(settings.intraday_market_close)
-        session_anchor = now_ict.date()
-        if now_ict.time() < close_time:
-            session_anchor -= timedelta(days=1)
-        expected_session = latest_market_business_day(
-            session_anchor, {date.fromisoformat(day) for day in settings.market_holiday_dates}
+        expected_session = expected_market_session(now=now_ict)
+        calendar = market_calendar_metadata(expected_session)
+        session_counts = verified.market_session_counts
+        typed_session = session_counts is not None
+        missing_prices = sum(
+            row.price is None or not math.isfinite(row.price) or row.price <= 0
+            for row in snapshots
+        )
+        unknown_price_units = sum(
+            row.price is not None and screener_price_record(row)["price_unit"] != "VND"
+            for row in snapshots
         )
         snapshot_age_days = (
             (now_ict.date() - trade_date).days if trade_date is not None else None
@@ -195,28 +203,68 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
                 trade_date.isoformat() if trade_date is not None else None
             ),
             "screener_snapshot_age_days": snapshot_age_days,
-            "screener_freshness_basis": "verified_universe_oldest_trade_date",
+            "screener_freshness_basis": (
+                verified.freshness_basis or "verified_universe_oldest_trade_date"
+            ),
             "screener_verified_universe": bool(snapshots),
             "screener_verified_count": len(snapshots),
             "screener_missing_trade_dates": missing_trade_dates,
+            "screener_missing_actual_prices": missing_prices,
+            "screener_stale_actual_trade_dates": sum(
+                actual_date < expected_session for actual_date in actual_dates
+            ),
+            "screener_future_trade_dates": sum(
+                actual_date > expected_session for actual_date in actual_dates
+            ),
+            "screener_unknown_price_units": unknown_price_units,
+            "screener_qualified_session_count": (session_counts or {}).get("qualified", 0),
+            "screener_session_counts": {
+                state: (session_counts or {}).get(state, 0)
+                for state in ("traded", "no_trade", "suspended")
+            },
+            "screener_missing_session_coverage": (
+                len(snapshots) - session_counts["qualified"] if typed_session else None
+            ),
+            "provider_session_coverage": ({
+                "source": "vietcap", "scope": "vietcap_board",
+                "session_date": expected_session.isoformat(),
+                "verified": bool(snapshots) and not verified.is_stale,
+                "qualified_count": session_counts["qualified"],
+                "expected_count": len(snapshots),
+            } if typed_session else None),
+            "market_data_coverage_verified": False,
+            "market_data_coverage_limitation": (
+                "Vietcap board sessions do not certify whole-market coverage, including "
+                "odd-lot and put-through trades; no_trade means no matched volume on this provider board."
+                if typed_session else
+                "Legacy quote dates do not certify whole-market session coverage."
+            ),
             "screener_expected_session": expected_session.isoformat(),
             "screener_calendar": {
-                "holiday_source": "MARKET_HOLIDAY_DATES",
-                "exchange_calendar_verified": False,
-                "limitation": "Only configured exchange closures are excluded.",
+                **calendar,
+                "exchange_calendar_verified": calendar["verified"],
             },
         }
         if not snapshots:
             database_component["screener_freshness_reason"] = "verified_universe_unavailable"
+        elif typed_session:
+            if verified.is_stale:
+                database_component["screener_freshness_reason"] = "completed_session_not_covered"
         elif missing_trade_dates:
             database_component["screener_freshness_reason"] = "missing_constituent_trade_dates"
         elif trade_date != expected_session:
             database_component["screener_freshness_reason"] = "completed_session_not_covered"
         if (
             "screener_freshness_reason" in database_component
-            or (snapshot_age_days is not None and snapshot_age_days > _SCREENER_FRESHNESS_BREACH_DAYS)
+            or (
+                not typed_session and snapshot_age_days is not None
+                and snapshot_age_days > _SCREENER_FRESHNESS_BREACH_DAYS
+            )
         ):
             database_component["freshness_breach"] = True
+            health["status"] = "degraded"
+        if typed_session:
+            database_component["market_data_coverage_reason"] = "provider_scope_only"
             health["status"] = "degraded"
         health["components"]["database"] = database_component
     except Exception as e:

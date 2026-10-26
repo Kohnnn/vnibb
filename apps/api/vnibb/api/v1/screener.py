@@ -11,7 +11,7 @@ import asyncio
 import logging
 import math
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, List, Literal, Optional
 
 import pandas as pd
@@ -37,8 +37,9 @@ from vnibb.providers.vnstock.equity_screener import (
     StockScreenerParams,
     VnstockScreenerFetcher,
 )
-from vnibb.services.cache_manager import CacheManager
+from vnibb.services.cache_manager import CacheManager, snapshot_session_coverage
 from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
+from vnibb.services.market_session import expected_market_session
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.screener_filter_service import ScreenerFilterService
 
@@ -197,6 +198,12 @@ def _to_screener_data_row(row: object) -> ScreenerData:
                 value = extended_metrics.get("debt_to_assets", extended_metrics.get(metric))
         return value
     price_record = screener_price_record(row)
+    session_declared = "market_session" in extended_metrics
+    now = datetime.now(UTC)
+    coverage = (
+        snapshot_session_coverage(row, expected_market_session(now=now), now)
+        if session_declared else None
+    )
 
     def _pick(*values: Any) -> Any:
         for value in values:
@@ -213,26 +220,33 @@ def _to_screener_data_row(row: object) -> ScreenerData:
         price_unit=price_record["price_unit"],
         price_source=price_record.get("price_source"),
         volume=getattr(row, "volume", None),
+        **({"market_session": (
+            {key: extended_metrics["market_session"].get(key) for key in ("session_date", "status", "source", "scope")}
+            if coverage is not None else None
+        )} if session_declared else {}),
         trade_date=getattr(row, "trade_date", None),
-        change_1d=_pick(
-            getattr(row, "change_1d", None),
-            getattr(row, "price_change_1d_pct", None),
-            extended_metrics.get("change_1d"),
-            extended_metrics.get("price_change_1d_pct"),
+        change_1d=(
+            None if session_declared and coverage != "traded"
+            else _pick(
+                getattr(row, "change_1d", None),
+                getattr(row, "price_change_1d_pct", None),
+                extended_metrics.get("change_1d"),
+                extended_metrics.get("price_change_1d_pct"),
+            )
         ),
-        perf_1w=_pick(
+        perf_1w=None if session_declared and coverage != "traded" else _pick(
             getattr(row, "perf_1w", None),
             getattr(row, "price_change_1w_pct", None),
             extended_metrics.get("perf_1w"),
             extended_metrics.get("price_change_1w_pct"),
         ),
-        perf_1m=_pick(
+        perf_1m=None if session_declared and coverage != "traded" else _pick(
             getattr(row, "perf_1m", None),
             getattr(row, "price_change_1m_pct", None),
             extended_metrics.get("perf_1m"),
             extended_metrics.get("price_change_1m_pct"),
         ),
-        perf_ytd=_pick(
+        perf_ytd=None if session_declared and coverage != "traded" else _pick(
             getattr(row, "perf_ytd", None),
             getattr(row, "price_change_ytd_pct", None),
             extended_metrics.get("perf_ytd"),
@@ -1114,6 +1128,11 @@ async def _enrich_screener_metrics(
             price = _coerce_float(row.price) if row.price_unit == "VND" else None
             if shares not in (None, 0) and price not in (None, 0):
                 updates["market_cap"] = price * shares * _shares_multiplier(shares)
+
+        if "market_session" in row.model_fields_set and (
+            row.market_session is None or row.market_session.get("status") != "traded"
+        ):
+            updates.update(dict.fromkeys(("change_1d", "perf_1w", "perf_1m", "perf_ytd")))
 
         if updates:
             percent_updates = {

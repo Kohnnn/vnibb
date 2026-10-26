@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
+from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
 from vnibb.models.data_quality import DataQualityBreachState, DataQualityRun
 from vnibb.models.news import CompanyEvent, CompanyNews
 from vnibb.models.screener import ScreenerSnapshot
@@ -49,7 +50,7 @@ def _to_iso(value: Any) -> str | None:
 
 
 def _configured_market_holidays() -> set[date]:
-    return {date.fromisoformat(value) for value in settings.market_holiday_dates}
+    return OFFICIAL_MARKET_HOLIDAYS | {date.fromisoformat(value) for value in settings.market_holiday_dates}
 
 
 def is_market_business_day(anchor: date, holidays: Iterable[date] = ()) -> bool:
@@ -578,10 +579,7 @@ async def run_data_quality_check(
             "mongo_eod_quality": mongo_eod_quality,
             "observed_market_date": observed_market_date.isoformat(),
             "market_day_staleness": market_staleness,
-            "calendar": {
-                "holiday_source": "MARKET_HOLIDAY_DATES",
-                "limitation": "Only configured exchange closures are excluded.",
-            },
+            "calendar": market_calendar_metadata(market_today),
             "warnings": warnings,
             "status": "failed" if mongo_eod_quality["status"] == "failed" else "warning" if warnings else "ok",
         }

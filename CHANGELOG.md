@@ -13,6 +13,8 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Screener session evidence is independently qualified against dated Vietcap board records, actual stored prices and exact active membership. Provider-board zero volume and suspension stay scoped observations, not all-market no-trade or completeness certification. Unknown prices remain nullable, actual trade dates are preserved, and screener cards/performance views render unavailable values without zero substitution (#129).
+- Completed-session calculations include the independently verified HOSE/HNX 2026 holiday notices and January 2 amendment. Calendar verification is year-bounded; configured closures remain additive. New board acquisition is opt-in pending source-use authorization, and provider-only coverage does not clear the whole-market readiness gate.
 - Prediction calibration filters the complete eligible topic set before its requested result limit; spread and cross-calibration aggregate eligible markets in SQL without the biased per-source candidate cap (#24, #33).
 - Prediction calibration, spread, and cross-calibration share token/phrase-bound macro admission from question/description only, excluding opaque slug fragments and standalone headline, Federico, or federally legal hemp matches while retaining CPI-U and explicit mixed-tag macro records. Requested limits, SQL aggregates, eligibility, and provider-free read behavior are unchanged (#161).
 - Matrix retains complete frozen EOD citation fields without inventing missing source keys or unit evidence; source-rights uncertainty and missing-reference errors remain explicit. Reviews stay revision-bound, financial-quality derivations require matching periods, and bank regulatory dimensions remain unavailable without their regulatory basis (#90–#92, #96).

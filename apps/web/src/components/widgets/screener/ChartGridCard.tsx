@@ -9,9 +9,11 @@ export interface ChartGridCardProps {
   symbol: string;
   exchange?: string;
   name: string;
-  price: number;
-  change: number;
-  changePercent: number;
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
+  sessionStatus?: 'traded' | 'no_trade' | 'suspended';
+  tradeDate?: string | null;
   onClick?: () => void;
   onAddToWatchlist?: () => void;
 }
@@ -23,10 +25,12 @@ export function ChartGridCard({
   price,
   change,
   changePercent,
+  sessionStatus,
   onClick,
+  tradeDate,
   onAddToWatchlist,
 }: ChartGridCardProps) {
-  const isPositive = changePercent >= 0;
+  const isPositive = (changePercent ?? 0) >= 0;
 
   return (
     <div
@@ -39,7 +43,9 @@ export function ChartGridCard({
         <button type="button" onClick={(event) => { event.stopPropagation(); onClick?.(); }} aria-label={`View ${symbol}`} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">
           <div className="truncate text-sm font-black uppercase tracking-tight text-white transition-colors group-hover:text-blue-400">{symbol}</div>
           <div className="truncate text-[10px] font-bold uppercase tracking-tighter text-[var(--text-muted)]">{name}</div>
+          {tradeDate && <div className="truncate text-[9px] font-medium text-[var(--text-muted)]">Last traded {tradeDate.slice(0, 10)}</div>}
         </button>
+        {sessionStatus && sessionStatus !== 'traded' && <div className="truncate text-[9px] font-medium text-[var(--text-muted)]">{sessionStatus === 'suspended' ? 'Suspended' : 'No Vietcap board trade reported'}</div>}
         {onAddToWatchlist && <button type="button" onClick={(event) => { event.stopPropagation(); onAddToWatchlist(); }} aria-label={`Add ${symbol} to Watchlist`} className="min-h-9 min-w-9 rounded p-2 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"><Plus size={14} /></button>}
       </div>
 
@@ -51,13 +57,13 @@ export function ChartGridCard({
       {/* Price + Change */}
       <div className="flex items-baseline justify-between border-t border-[var(--border-subtle)] pt-1">
         <span className="text-sm font-mono font-bold text-[var(--text-primary)]">
-          {price.toLocaleString()}
+          {price === null ? '—' : price.toLocaleString()}
         </span>
         <span className={cn(
             "text-[10px] font-black px-1.5 py-0.5 rounded",
-            isPositive ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+            changePercent === null ? 'text-[var(--text-muted)]' : isPositive ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
         )}>
-          {isPositive ? '▲' : '▼'}{Math.abs(changePercent).toFixed(2)}%
+          {changePercent === null ? '—' : `${isPositive ? '▲' : '▼'}${Math.abs(changePercent).toFixed(2)}%`}
         </span>
       </div>
     </div>
