@@ -575,25 +575,13 @@ async def list_prediction_market_calibration(
     limit: int = Query(default=25, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> PredictionMarketCalibrationResponse:
-    """List markets tagged for a maintained topic and the consensus YES price.
-
-    The current implementation uses simple substring matching across the
-    canonical taxonomy tags. Phase 7.5 will replace this with the
-    estimator-backed result; the endpoint is here so the Macro Calibration
-    widget can fetch the same payload both through /calibration (raw
-    markets) and /estimate/{topic} (curated odds-to-estimate output).
-    """
-    keywords = {
-        "cpi": ("cpi", "inflation", "core cpi", "headline"),
-        "fed": ("fed", "fomc", "rate cut", "rate hike", "powell", "federal reserve"),
-        "recession": ("recession", "us recession", "global recession"),
-    }
-    markers = keywords[topic]
+    """List explicit topic matches and their consensus, filtered before the limit."""
+    markers = _TOPIC_KEYWORDS[topic]
     market = PredictionMarket
     stmt = (
         select(market)
         .where(*snapshot_eligibility(datetime.now(UTC)))
-        .where(_topic_matches(markers, include_slug=True, market=market))
+        .where(_topic_matches(markers, market=market))
         .order_by(market.updated_at.desc(), market.id.asc())
         .limit(limit)
     )
@@ -641,12 +629,10 @@ _TOPIC_KEYWORDS = {
 }
 
 
-def _topic_matches(keywords: tuple[str, ...], *, include_slug: bool = False, market=PredictionMarket):
+def _topic_matches(keywords: tuple[str, ...], *, market=PredictionMarket):
     text = market.question + " " + func.coalesce(market.description, "")
-    if include_slug:
-        text = text + " " + func.coalesce(market.slug, "")
-    haystack = func.lower(text)
-    return or_(*(haystack.contains(keyword, autoescape=True) for keyword in keywords))
+    phrases = "|".join("[- \t\r\n\f\v]+".join(keyword.split()) for keyword in keywords)
+    return func.lower(text).regexp_match(r"(^|[^a-z0-9_])(" + phrases + r")([^a-z0-9_]|$)")
 
 
 def _observed_price_sql(market, db: AsyncSession):

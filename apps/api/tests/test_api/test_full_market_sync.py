@@ -1,5 +1,6 @@
 import asyncio
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
@@ -263,6 +264,50 @@ async def test_daily_receipt_retains_prices_when_screener_fails(monkeypatch, dai
     assert set(stages) == {"daily_prices", "screener", "indices", "rs_ratings", "corporate_actions", "profiles", "financials"}
     assert stages["daily_prices"]["synced_count"] == 20
     assert stages["screener"]["progress"]["errors"][0]["error"] == "ratio unavailable"
+
+
+@pytest.mark.asyncio
+async def test_daily_price_timeout_still_materializes_retained_screener(monkeypatch, daily_receipts):
+    clock = [0.0]
+
+    async def seeded(self):
+        clock[0] = 7080.0
+        return ["FPT", "VNM"]
+
+    async def prices(*, progress, **kwargs):
+        progress.update(committed_count=20, error_count=3, last_symbol="FPT",
+                        errors=[{"symbol": "VNM", "error": "source unavailable"}])
+        await asyncio.Event().wait()
+
+    async def screener(*, progress, enrich_ratios):
+        assert enrich_ratios is False
+        progress.update(committed_count=2, base_count=2)
+        return 2
+
+    monkeypatch.setattr("vnibb.services.sync_all_data.time", SimpleNamespace(
+        monotonic=lambda: clock[0], time=lambda: 0,
+    ))
+    monkeypatch.setattr(FullMarketSync, "_get_seeded_symbols", seeded)
+    monkeypatch.setattr(data_pipeline, "sync_daily_prices", prices)
+    monkeypatch.setattr(data_pipeline, "sync_screener_data", screener)
+
+    results = await asyncio.wait_for(run_daily_market_sync(), timeout=1)
+
+    assert not results["daily_prices"].success
+    assert not results["daily_prices"].complete
+    assert results["daily_prices"].synced_count == 20
+    assert results["daily_prices"].error_count == 3
+    assert results["screener"].success
+    assert results["screener"].synced_count == 2
+    final = daily_receipts[-1]
+    assert final["status"] == "partial"
+    assert final["success_count"] == 22
+    assert final["error_count"] == 3
+    assert final["additional_data"]["active_stage"] is None
+    price_stage = final["additional_data"]["stages"]["daily_prices"]
+    assert price_stage["status"] == "failed"
+    assert price_stage["progress"]["last_symbol"] == "FPT"
+    assert price_stage["progress"]["errors"][0]["error"] == "source unavailable"
 
 
 @pytest.mark.asyncio

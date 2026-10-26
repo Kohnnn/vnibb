@@ -154,3 +154,11 @@ Full legal attachments were not acquired. R1/R4 establish document identity; sub
 - [B1: Basel standards and implementation][B1].
 - [B2: DIS30, links between financial statements and regulatory exposures, effective/published 2019-12-15][B2].
 - [B3: Liquidity Coverage Ratio framework][B3]. HTML only; no linked PDFs retrieved.
+
+## 26 October follow-up: issuer observations recovered, admission still gated
+
+[#96](https://github.com/Kohnnn/vnibb/issues/96) is no longer blocked by a blanket absence of issuer inputs. [Techcombank's 1H2026 capital disclosure](https://techcombank.com/content/dam/techcombank/public-site/documents/car-disclosure-report-1h2026-publish.pdf), pp. 4–6, identifies Circular 41/2016/TT-NHNN and amendments, Basel II adoption in July 2019, and separate solo/consolidated capital tables. It explicitly excludes Techcom Non-life Insurance and Techcom Life from regulatory consolidation. Table 2's flattened PDF headers do not safely establish every RWA column; visually validate date/perimeter before admission.
+
+The [3Q2026 issuer release](https://techcombank.com/content/dam/techcombank/public-site/documents/eng-3q26-press-release.pdf), published 20 October for 30 September observations, reports Basel II CAR 15.0%, Tier 1 ratio 14.1%, reported NPL 1.36% including CIC impacts versus organic NPL 1.26%, and coverage approximately 107.0%. It labels regulatory LDR 77.7% and short-term funding used for medium/long-term loans 27.9% as bank-only SBV measures. These are reported values, not VNIBB-derived calculations; Tier 1 is not CET1, accounting LDR is not regulatory LDR, and solvency ratios are not LCR.
+
+The [2025 annual report](https://techcombank.com/content/dam/techcombank/public-site/documents/techcombank-2025-annual-report-eng-vf.pdf) supplies loan classifications and provisions in Notes 4.6, 9 and 10, but does not establish the exact coverage numerator/denominator linkage required here. The operative amendment/method/buffer chain, explicit CET1 and LCR/NSFR evidence, exact regulatory inputs, and reuse permission remain incomplete. The [issuer investor footer](https://techcombank.com/en/investors) states “All rights reserved”; research access is not redistribution or model-export permission. No values were imported or unavailable Matrix cells replaced. #96 remains open.

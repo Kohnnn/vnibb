@@ -41,6 +41,9 @@ def ohlc_rows_from_gap_chart(symbol: str, raw: dict[str, Any], *, instrument_typ
     """Expand parallel arrays (o/h/l/c/v/t) into per-day documents."""
     if not raw:
         return []
+    raw_symbol = raw.get("symbol")
+    if not isinstance(raw_symbol, str) or raw_symbol.upper() != symbol.upper():
+        raise ValueError(f"OHLC source symbol does not match requested symbol {symbol}")
     from vnibb.core.price_units import is_index_symbol
     kind = str(instrument_type or "").upper()
     price_unit = "index_points" if kind in {"INDEX", "FU"} or is_index_symbol(symbol) else "VND" if kind in {"STOCK", "ETF", "CW"} else "unknown"

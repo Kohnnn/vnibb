@@ -782,7 +782,7 @@ async def test_scheduled_price_acquisition_ingests_real_sql_source_rows(monkeypa
         iq_calls.append((symbol, kwargs))
         if outcome != "live_iq":
             raise RuntimeError("IQ outage")
-        return {"o": [60000], "h": [61000], "l": [59000], "c": [60500], "v": [100], "t": [epoch]}
+        return {"symbol": symbol, "o": [60000], "h": [61000], "l": [59000], "c": [60500], "v": [100], "t": [epoch]}
 
     class CachedCollection:
         def find(self, query, projection):
@@ -956,7 +956,7 @@ async def test_scheduled_price_partial_failure_keeps_committed_symbol_rows(monke
         if symbol == "FPT":
             raise RuntimeError("IQ transport unavailable")
         epoch = int(datetime(2026, 3, 17, tzinfo=UTC).timestamp())
-        return {"o": [60000], "h": [61000], "l": [59000], "c": [60500], "v": [100], "t": [epoch]}
+        return {"symbol": symbol, "o": [60000], "h": [61000], "l": [59000], "c": [60500], "v": [100], "t": [epoch]}
 
     async def unavailable(*args, **kwargs):
         raise RuntimeError("free VCI transport unavailable")

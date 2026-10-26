@@ -450,6 +450,7 @@ def _main(runner: Any) -> int:
                 cutoff_epoch = int(datetime.combine(args.cutoff + timedelta(days=1), datetime.min.time(), tzinfo=UTC).timestamp()) - 1
                 raw = client.get_ohlc(symbol, count_back=args.count_back, to_epoch=cutoff_epoch)
                 rows = ohlc_rows_from_gap_chart(symbol, raw, instrument_type=meta.get("type")) if raw else []
+                rows = [row for row in rows if args.start <= row["tradeDate"].date() <= args.cutoff]
                 require_data(rows, f"OHLC {symbol}")
                 coll_name = price_collection_for(meta.get("type"))
                 n = upsert_eod_rows(db, coll_name, symbol, rows, dry_run=False)

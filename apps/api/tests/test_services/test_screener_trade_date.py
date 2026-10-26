@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.api.v1.screener import _build_screener_meta
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
 from vnibb.providers.vnstock.equity_screener import (
     ScreenerData,
@@ -163,6 +164,7 @@ async def test_detailed_health_reports_trade_date_basis(
 
     monkeypatch.setattr(health, "datetime", FrozenDateTime)
     trade_date = TODAY - timedelta(days=2)
+    test_db.add(Stock(symbol="VNM", is_active=1))
     test_db.add(
         ScreenerSnapshot(
             symbol="VNM",

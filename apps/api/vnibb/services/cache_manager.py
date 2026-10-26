@@ -205,8 +205,10 @@ class CacheManager:
                     )
                     return "ok", list(rows.scalars().all())
 
-                # Rows alone cannot certify a Universe: a full-run marker must
-                # match the exact set committed for that partition.
+                # A completed partition must certify the current active Universe.
+                active_symbols = set(await session.scalars(
+                    select(Stock.symbol).where(Stock.is_active == 1)
+                ))
                 oldest_day = today - timedelta(days=self.MAX_STALE_DAYS)
                 runs = await session.execute(
                     select(SyncStatus.additional_data)
@@ -241,7 +243,7 @@ class CacheManager:
                     ):
                         continue
                     expected_symbols = set(expected)
-                    if len(expected_symbols) != len(expected):
+                    if len(expected_symbols) != len(expected) or expected_symbols != active_symbols:
                         continue
                     candidates.append((snapshot_date, expected, expected_symbols))
 
