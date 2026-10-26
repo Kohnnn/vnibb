@@ -19,7 +19,7 @@ def screener_metadata_updates(stmt, dialect_name, quote_missing):
 
         old = json_object(existing.extended_metrics)
         new = json_object(incoming.extended_metrics)
-        non_price = new.op("-")("price_unit").op("-")("price_source")
+        non_price = new.op("-")("price_unit").op("-")("price_source").op("-")("market_session")
         new = case((quote_missing, non_price), else_=new)
         new = case(
             (json_object(new.op("->")("ratio_units")).has_key("debt_assets"), new),
@@ -43,7 +43,7 @@ def screener_metadata_updates(stmt, dialect_name, quote_missing):
         old = func.coalesce(func.nullif(existing.extended_metrics, "null"), "{}")
         new = func.coalesce(func.nullif(incoming.extended_metrics, "null"), "{}")
         new = case(
-            (quote_missing, func.json_remove(new, "$.price_unit", "$.price_source")),
+            (quote_missing, func.json_remove(new, "$.price_unit", "$.price_source", "$.market_session")),
             else_=new,
         )
         new = case(

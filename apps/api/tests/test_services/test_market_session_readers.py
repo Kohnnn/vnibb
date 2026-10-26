@@ -8,6 +8,7 @@ import pytest
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
+from vnibb.providers.vnstock.equity_screener import ScreenerData
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.market_session import qualify_market_session
 
@@ -269,6 +270,53 @@ async def test_cache_write_preserves_native_session_evidence(test_db):
     assert cached.data[0].price is None
     assert cached.data[0].trade_date is None
     assert cached.data[0].extended_metrics["market_session"] == record
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refresh", ["quote_less", "changed_quote", "changed_session"])
+async def test_request_refresh_preserves_admitted_quote_and_session(test_db, refresh):
+    row = _row("AAA")
+    evidence = deepcopy(row.extended_metrics)
+    await _seed(test_db, [row])
+    admitted = await CacheManager(db=test_db).get_screener_data(allow_stale=False)
+    assert admitted.hit and not admitted.is_stale
+    payload = ScreenerData(symbol="AAA", pe=12).model_dump()
+    if refresh == "changed_quote":
+        payload.update(price=20000, volume=200, trade_date=SESSION)
+    elif refresh == "changed_session":
+        payload["market_session"] = _record("AAA", "no_trade")
+
+    assert await CacheManager(db=test_db).store_screener_data([payload], source="VCI") == 1
+    await test_db.refresh(row)
+    cached = await CacheManager(db=test_db).get_screener_data(allow_stale=False)
+
+    assert cached.hit and not cached.is_stale
+    assert cached.market_session_counts == {"qualified": 1, "traded": 1, "no_trade": 0, "suspended": 0}
+    assert (row.price, row.volume, row.trade_date, row.source, row.created_at) == (
+        10000, 100, SESSION, "vietcap_vnd", OBSERVED.replace(tzinfo=None),
+    )
+    assert row.extended_metrics["market_session"] == evidence["market_session"]
+    assert row.extended_metrics["price_unit"] == evidence["price_unit"]
+    assert row.extended_metrics["price_source"] == evidence["price_source"]
+    assert row.pe == 12
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("receipt_kind", ["unrelated_member", "different_session", "legacy"])
+async def test_request_quote_update_requires_matching_typed_admission(test_db, receipt_kind):
+    row = _row("AAA")
+    receipt = _receipt(["BBB"] if receipt_kind == "unrelated_member" else ["AAA"], typed=receipt_kind != "legacy")
+    if receipt_kind == "different_session":
+        receipt.additional_data["market_session_date"] = "2026-10-23"
+    test_db.add_all([Stock(symbol="AAA", is_active=1), row, receipt])
+    await test_db.commit()
+
+    assert await CacheManager(db=test_db).store_screener_data([
+        {"symbol": "AAA", "price": 10001, "volume": 101, "trade_date": SESSION, "pe": 12},
+    ], source="VCI") == 1
+    await test_db.refresh(row)
+
+    assert (row.price, row.volume, row.trade_date, row.pe) == (10001, 101, SESSION, 12)
 
 
 @pytest.mark.asyncio

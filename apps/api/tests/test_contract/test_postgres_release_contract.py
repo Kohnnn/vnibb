@@ -213,3 +213,76 @@ async def test_screener_quote_base_preserves_ratio_metadata_on_postgres(test_db,
         await test_db.execute(StockPrice.__table__.delete().where(StockPrice.symbol == symbol))
         await test_db.execute(Stock.__table__.delete().where(Stock.symbol == symbol))
         await test_db.commit()
+
+
+@pytest.mark.postgres_contract
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refresh", ["quote_less", "changed_quote", "changed_session"])
+async def test_postgres_request_refresh_preserves_admitted_session(test_db, monkeypatch, refresh):
+    from datetime import UTC
+
+    from vnibb.models.screener import ScreenerSnapshot
+    from vnibb.models.sync_status import SyncStatus
+    from vnibb.providers.vnstock.equity_screener import ScreenerData
+    from vnibb.services import cache_manager
+    from vnibb.services.market_session import qualify_market_session
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def utcnow(cls):
+            return cls(2026, 10, 26, 9)
+
+    monkeypatch.setattr(cache_manager, "datetime", FrozenDateTime)
+    symbol = f"S{uuid4().hex[:8]}".upper()
+    session_date = date(2026, 10, 26)
+    observed = datetime(2026, 10, 26, 8, 12, tzinfo=UTC)
+    raw = {
+        "listingInfo": {
+            "symbol": symbol, "ticker": symbol, "stockType": "STOCK", "type": "STOCK",
+            "isDelisted": 0, "tradingDate": "2026-10-26", "receivedTime": "2026-10-26T01:44:00Z",
+            "tradingStatus": "TRADING_ACTIVATED", "tradingStatusCode": "20", "securityStatus": "N",
+        },
+        "bidAsk": {"symbol": symbol, "session": "ENDED", "time": "2026-10-26T08:00:00Z", "receivedTime": "2026-10-26T08:00:03Z"},
+        "matchPrice": {
+            "symbol": symbol, "session": "ENDED", "time": "2026-10-26T08:00:00Z", "receivedTime": "2026-10-26T08:00:03Z",
+            "matchPrice": 10000, "openPrice": 10000, "highest": 11000, "lowest": 9000, "accumulatedVolume": 100,
+        },
+    }
+    evidence = qualify_market_session(raw, symbol, session_date, observed)
+    assert evidence is not None
+    receipt = SyncStatus(
+        sync_type="screener_universe", status="completed", error_count=0, success_count=1,
+        completed_at=observed.replace(tzinfo=None),
+        additional_data={"snapshot_date": session_date.isoformat(), "market_session_date": session_date.isoformat(),
+                         "expected_symbols": [symbol], "expected_count": 1},
+    )
+    row = ScreenerSnapshot(
+        symbol=symbol, snapshot_date=session_date, trade_date=session_date,
+        price=10000, volume=100, source="vietcap_vnd", created_at=observed.replace(tzinfo=None),
+        extended_metrics={"price_unit": "VND", "price_source": "vietcap_vnd", "market_session": evidence},
+    )
+    try:
+        test_db.add_all([Stock(symbol=symbol, is_active=1), row, receipt])
+        await test_db.commit()
+        admitted = await CacheManager(db=test_db).get_screener_data(symbol=symbol, source=None, allow_stale=False)
+        assert admitted.hit and not admitted.is_stale
+        payload = ScreenerData(symbol=symbol, pe=12).model_dump()
+        if refresh == "changed_quote":
+            payload.update(price=20000, volume=200, trade_date=session_date)
+        elif refresh == "changed_session":
+            payload["market_session"] = {**evidence, "session_date": "2026-10-23"}
+        assert await CacheManager(db=test_db).store_screener_data([payload], source="VCI") == 1
+        await test_db.refresh(row)
+        cached = await CacheManager(db=test_db).get_screener_data(symbol=symbol, source=None, allow_stale=False)
+        assert cached.hit and not cached.is_stale
+        assert (row.price, row.volume, row.trade_date, row.pe) == (10000, 100, session_date, 12)
+        assert row.created_at == observed.replace(tzinfo=None)
+        assert row.extended_metrics["market_session"] == evidence
+        assert row.extended_metrics["price_unit"] == "VND"
+        assert row.extended_metrics["price_source"] == "vietcap_vnd"
+    finally:
+        await test_db.execute(ScreenerSnapshot.__table__.delete().where(ScreenerSnapshot.symbol == symbol))
+        if receipt.id is not None:
+            await test_db.execute(SyncStatus.__table__.delete().where(SyncStatus.id == receipt.id))
+        await test_db.execute(Stock.__table__.delete().where(Stock.symbol == symbol))
+        await test_db.commit()

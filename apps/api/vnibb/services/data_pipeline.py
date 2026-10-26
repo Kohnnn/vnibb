@@ -1162,6 +1162,14 @@ class DataPipeline:
                     return parsed
             return None
 
+        def _valid_base_quote(quote: Dict[str, Any], trade_date: Optional[date]) -> bool:
+            price = _parse_float(quote.get("price"))
+            return bool(
+                price is not None and math.isfinite(price) and price > 0
+                and trade_date is not None and trade_date <= today
+                and quote["price_unit"] == "VND" and quote.get("price_source")
+            )
+
         def _normalize_dividend_yield(value: Any) -> Optional[float]:
             parsed = _parse_float(value)
             if parsed is None:
@@ -1533,7 +1541,14 @@ class DataPipeline:
             }
             publication_transaction = await session.begin_nested()
             count = 0
-            for idx in range(start_index, len(deduped_symbols)):
+            pending_indices = [
+                idx for idx, symbol in enumerate(deduped_symbols)
+                if idx >= start_index or not _valid_base_quote(
+                    screener_price_record(original_snapshots.get(symbol, {})),
+                    original_snapshots.get(symbol, {}).get("trade_date"),
+                )
+            ]
+            for idx in pending_indices:
                 symbol = deduped_symbols[idx]
                 if enrich_ratios:
                     await self._wait_for_rate_limit("screener")
@@ -2240,7 +2255,6 @@ class DataPipeline:
             valid_base_symbols = set()
             for snapshot in snapshot_rows:
                 quote = screener_price_record(snapshot)
-                price = _parse_float(quote.get("price"))
                 if acquire_sessions:
                     qualified = market_sessions.get(snapshot.symbol)
                     valid = (
@@ -2261,11 +2275,7 @@ class DataPipeline:
                             and retained_price.stock_id == stock_metadata[snapshot.symbol]["stock_id"]
                         )
                 else:
-                    valid = (
-                        price is not None and math.isfinite(price) and price > 0
-                        and snapshot.trade_date is not None and snapshot.trade_date <= today
-                        and quote["price_unit"] == "VND" and quote.get("price_source")
-                    )
+                    valid = _valid_base_quote(quote, snapshot.trade_date)
                 if valid:
                     valid_base_symbols.add(snapshot.symbol)
             if acquire_sessions:
@@ -2345,7 +2355,7 @@ class DataPipeline:
                 session.add(SyncStatus(
                     sync_type="screener_ratio_enrichment", status="partial",
                     started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
-                    success_count=len(deduped_symbols) - start_index - len(ratio_failed_symbols),
+                    success_count=len(pending_indices) - len(ratio_failed_symbols),
                     error_count=len(ratio_failed_symbols),
                     additional_data={
                         "snapshot_date": today.isoformat(),
