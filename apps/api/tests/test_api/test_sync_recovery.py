@@ -767,7 +767,8 @@ async def test_screener_resumed_base_and_marker_commit_atomically(screener_base_
 
 
 @pytest.mark.asyncio
-async def test_cancelled_final_commit_keeps_previous_same_day_admitted_cohort(screener_base_pipeline, monkeypatch):
+@pytest.mark.parametrize("interruption", ["checkpoint", "final_commit"])
+async def test_cancelled_final_commit_keeps_previous_same_day_admitted_cohort(screener_base_pipeline, monkeypatch, interruption):
     from datetime import datetime
 
     from sqlalchemy import update
@@ -795,21 +796,46 @@ async def test_cancelled_final_commit_keeps_previous_same_day_admitted_cohort(sc
         await session.execute(update(StockPrice).values(close=110, high=110))
 
     original_commit = AsyncSession.commit
+    interrupt = [True]
+    checkpoints = []
+
+    async def checkpoint(progress, sync_id):
+        assert sync_id == 123
+        checkpoints.append(dict(progress))
+        if interrupt[0] and interruption == "checkpoint" and progress["stage_stats"]["screener"]["success"] >= 40:
+            raise asyncio.CancelledError()
 
     async def cancel_publication(session):
-        if any(isinstance(row, SyncStatus) and row.sync_type == "screener_universe" for row in session.new):
+        if interrupt[0] and interruption == "final_commit" and any(isinstance(row, SyncStatus) and row.sync_type == "screener_universe" for row in session.new):
             raise asyncio.CancelledError()
         await original_commit(session)
 
     monkeypatch.setattr(AsyncSession, "commit", cancel_publication)
+    monkeypatch.setattr(pipeline, "_checkpoint", checkpoint)
+    progress = {}
     with pytest.raises(asyncio.CancelledError):
-        await pipeline.sync_screener_data(enrich_ratios=False)
+        await pipeline.sync_screener_data(enrich_ratios=False, progress=progress, sync_id=123)
     async with sessions() as session:
         reader = await CacheManager(db=session).get_screener_data()
         assert reader.hit and len(reader.data) == 50
         assert sorted((row.id, row.symbol, row.price, row.created_at) for row in reader.data) == before
         assert len((await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()) == 1
         assert set(await session.scalars(select(StockPrice.close))) == {110}
+    assert len(checkpoints) == 2
+    assert progress.get("last_index") is None and progress.get("last_symbol") is None
+    interrupt[0] = False
+    assert await pipeline.sync_screener_data(enrich_ratios=False, progress=progress, sync_id=123) == 50
+    async with sessions() as session:
+        reader = await CacheManager(db=session).get_screener_data()
+        assert reader.hit and len(reader.data) == 50
+        assert {row.symbol for row in reader.data} == set(symbols)
+        assert all(row.price == 110 for row in reader.data)
+        assert sorted((row.id, row.symbol, row.created_at) for row in reader.data) == [
+            (row_id, symbol, created_at) for row_id, symbol, _, created_at in before
+        ]
+        receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe").order_by(SyncStatus.id))).all()
+        assert len(receipts) == 2 and receipts[-1].additional_data["expected_symbols"] == symbols
+        assert receipts[-1].success_count == progress["base_count"] == progress["committed_count"] == 50
 
 
 @pytest.mark.asyncio
