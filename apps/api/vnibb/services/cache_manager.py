@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Generic, List, Optional, TypeVar
 
-from sqlalchemy import Float, String, and_, case, cast, func, or_, select
+from sqlalchemy import JSON, Date, Float, String, and_, case, cast, func, literal_column, or_, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -587,6 +587,10 @@ class CacheManager:
                 for k in prep_data[0].keys()
                 if k not in ["symbol", "snapshot_date", "source"]
             }
+            # INSERT has no outer SELECT to auto-correlate; refer to its conflict target directly.
+            stored_symbol = literal_column("screener_snapshots.symbol", String)
+            stored_date = literal_column("screener_snapshots.snapshot_date", Date)
+            stored_metrics = literal_column("screener_snapshots.extended_metrics", JSON)
             receipt = SyncStatus.additional_data
             expected = receipt["expected_symbols"]
             if dialect_name == "postgresql":
@@ -598,21 +602,21 @@ class CacheManager:
                 members = func.json_each(expected).table_valued("value")
                 expected_count = func.json_array_length(expected)
             member_matches = select(members.c.value).where(
-                members.c.value == ScreenerSnapshot.symbol,
-            ).correlate(SyncStatus, ScreenerSnapshot).exists()
-            stored_session = ScreenerSnapshot.extended_metrics["market_session"]
-            admitted_session = select(SyncStatus.id).where(
+                members.c.value == stored_symbol,
+            ).correlate(SyncStatus).exists()
+            stored_session = stored_metrics["market_session"]
+            admitted_session = select(SyncStatus.id).select_from(SyncStatus).where(
                 SyncStatus.sync_type == "screener_universe", SyncStatus.status == "completed",
-                SyncStatus.error_count == 0, SyncStatus.completed_at <= now,
-                receipt["snapshot_date"].as_string() == cast(ScreenerSnapshot.snapshot_date, String),
+                SyncStatus.error_count == 0, SyncStatus.completed_at.is_not(None),
+                receipt["snapshot_date"].as_string() == cast(stored_date, String),
                 receipt["market_session_date"].as_string() == stored_session["session_date"].as_string(),
                 cast(receipt["expected_count"].as_string(), String) == cast(expected_count, String),
                 SyncStatus.success_count == expected_count, expected_count > 0,
                 stored_session["source"].as_string() == "vietcap",
                 stored_session["scope"].as_string() == "vietcap_board",
-                stored_session["symbol"].as_string() == ScreenerSnapshot.symbol,
+                stored_session["symbol"].as_string() == stored_symbol,
                 member_matches,
-            ).correlate(ScreenerSnapshot).exists()
+            ).exists()
             quote_missing = stmt.excluded.price.is_(None)
             for column in ("price", "trade_date", "volume", "created_at"):
                 preserve = quote_missing | admitted_session if column in {"trade_date", "volume"} else admitted_session
