@@ -26,7 +26,12 @@ def screener_metadata_updates(stmt, dialect_name, quote_missing):
             else_=new.op("-")("debt_to_asset"),
         )
         units = json_object(old.op("->")("ratio_units")).op("||")(json_object(new.op("->")("ratio_units")))
-        merged = old.op("||")(new).op("||")(func.jsonb_build_object("ratio_units", units))
+        merged = old.op("||")(new)
+        merged = case(
+            (old.has_key("ratio_units") | new.has_key("ratio_units"),
+             merged.op("||")(func.jsonb_build_object("ratio_units", units))),
+            else_=merged,
+        )
         def has_marker(metric):
             return json_object(new.op("->")("ratio_units")).has_key(metric)
 
