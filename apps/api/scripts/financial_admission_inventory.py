@@ -6,14 +6,86 @@ import re
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
+import sys
+import tempfile
+from contextlib import contextmanager
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--symbols", required=True, help="Explicit comma-separated symbols (maximum 50)")
+    parser.add_argument("--periods", required=True, help="Explicit comma-separated YYYY or Qn-YYYY periods (maximum 40)")
+    parser.add_argument("--env-file", type=Path, help="Private dotenv file containing a read-only database URL")
+    return parser.parse_args()
+
+
+def selected_url(env_file):
+    if env_file is None:
+        return os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
+    from dotenv.parser import parse_stream
+
+    values = {}
+    with env_file.open(encoding="utf-8") as stream:
+        for binding in parse_stream(stream):
+            if binding.error:
+                raise ValueError("Invalid dotenv file")
+            if binding.key in {"DATABASE_URL_SYNC", "DATABASE_URL"}:
+                if binding.key in values:
+                    raise ValueError("Duplicate database URL")
+                values[binding.key] = binding.value
+    url = values.get("DATABASE_URL_SYNC") or values.get("DATABASE_URL")
+    if not url or "${" in url:
+        raise ValueError("Explicit database URL required without environment interpolation")
+    return url
+
+
+@contextmanager
+def isolated_import_environment():
+    original_environment = dict(os.environ)
+    original_directory = os.getcwd()
+    with tempfile.TemporaryDirectory() as root:
+        directory = Path(root) / "a" / "b" / "c"
+        directory.mkdir(parents=True)
+        try:
+            os.environ.clear()
+            os.environ.update(VNSTOCK_SOURCE="VCI", VNSTOCK_RUNTIME_TIER="free")
+            os.chdir(directory)
+            yield
+        finally:
+            os.chdir(original_directory)
+            os.environ.clear()
+            os.environ.update(original_environment)
+
+
+if __name__ == "__main__":
+    _args = parse_args()
+    try:
+        _url = selected_url(_args.env_file)
+        if not _url:
+            raise ValueError("Explicit database URL required")
+    except Exception as exc:
+        print(json.dumps({"status": "inventory_failed", "error_type": type(exc).__name__}))
+        raise SystemExit(1)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 
 from scripts.verify_database import FINANCIAL_DATASETS
-from vnibb.core.financial_sources import ADMITTED_FINANCIAL_SOURCES
-from vnibb.mcp.server import _serialize_row, serialize_data_value
-from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+if __name__ == "__main__":
+    try:
+        with isolated_import_environment():
+            from vnibb.core.financial_sources import ADMITTED_FINANCIAL_SOURCES
+            from vnibb.mcp.server import _serialize_row, serialize_data_value
+            from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+    except Exception as exc:
+        print(json.dumps({"status": "inventory_failed", "error_type": type(exc).__name__}))
+        raise SystemExit(1)
+else:
+    from vnibb.core.financial_sources import ADMITTED_FINANCIAL_SOURCES
+    from vnibb.mcp.server import _serialize_row, serialize_data_value
+    from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 
 MODELS = {"income_statements": IncomeStatement, "balance_sheets": BalanceSheet, "cash_flows": CashFlow}
 MAX_SYMBOLS = 50
@@ -154,19 +226,10 @@ def inventory(url, symbols, periods):
     return build_report(symbols, periods, datasets)
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--symbols", required=True, help="Explicit comma-separated symbols (maximum 50)")
-    parser.add_argument("--periods", required=True, help="Explicit comma-separated YYYY or Qn-YYYY periods (maximum 40)")
-    parser.add_argument("--env-file", type=Path, help="Private dotenv file containing a read-only database URL")
-    args = parser.parse_args()
+def main(args, url):
     try:
         symbols, periods = parse_scope(args.symbols, args.periods)
-        if args.env_file:
-            from dotenv import load_dotenv
-            if not load_dotenv(args.env_file, override=False):
-                raise ValueError("Environment file missing or empty")
-        report = inventory(os.getenv("DATABASE_URL_SYNC") or os.getenv("DATABASE_URL"), symbols, periods)
+        report = inventory(url, symbols, periods)
         print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
         return int(any(row["status"] == "consumer_fault" for cell in report["cells"] for row in cell["rows"]) or
                    any(row["status"] == "consumer_fault" for key in ("invalid_fiscal_year_rows", "unclassified_identity_rows") for row in report[key]))
@@ -176,4 +239,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(_args, _url))

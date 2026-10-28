@@ -1,4 +1,10 @@
 """Bounded SQL inventory uses the MCP collection admission contract."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
 import pytest
 from sqlalchemy import create_engine, insert
 
@@ -94,6 +100,44 @@ def test_nonfinite_stored_value_is_consumer_fault(tmp_path, value):
     assert result["fields"]["revenue"] == {
         "stored": True, "admitted": None, "reason": "consumer_fault",
     }
+
+
+def test_cli_uses_only_explicit_env_file_and_ignores_cwd_settings(tmp_path):
+    api = Path(__file__).resolve().parents[2]
+    selected = tmp_path / "selected.db"
+    unrelated = tmp_path / "unrelated.db"
+    for path, symbol in [(selected, "FPT"), (unrelated, "VCI")]:
+        engine = create_engine(f"sqlite:///{path}")
+        for model in MODELS.values():
+            model.__table__.create(engine)
+        with engine.begin() as conn:
+            conn.execute(insert(MODELS["income_statements"].__table__),
+                         {"id": 1, **row(symbol=symbol, revenue=12)})
+        engine.dispose()
+    (tmp_path / ".env").write_text("VNSTOCK_SOURCE=KBS\nmalformed key !!!\n")
+    private = tmp_path / "private.env"
+    private.write_text(f"DATABASE_URL=sqlite:///{selected}\n")
+    env = {**os.environ, "PYTHONPATH": str(api), "VNSTOCK_SOURCE": "KBS",
+           "DATABASE_URL_SYNC": f"sqlite:///{unrelated}"}
+    command = [sys.executable, "-m", "scripts.financial_admission_inventory",
+               "--symbols", "FPT,VCI", "--periods", "2025", "--env-file"]
+    result = subprocess.run([*command, str(private)], cwd=tmp_path, env=env, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert cell(report, "income_statements", "FPT", "2025")["status"] == "present"
+    assert cell(report, "income_statements", "VCI", "2025")["status"] == "missing_row"
+    assert "malformed" not in result.stderr
+
+    private.write_text("VNSTOCK_SOURCE=VCI\n")
+    result = subprocess.run([*command, str(private)], cwd=tmp_path, env=env, text=True, capture_output=True)
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["status"] == "inventory_failed"
+    assert str(unrelated) not in result.stdout + result.stderr
+
+    result = subprocess.run([*command, str(tmp_path / "missing.env")], cwd=tmp_path, env=env, text=True, capture_output=True)
+    assert result.returncode == 1
+    assert json.loads(result.stdout) == {"status": "inventory_failed", "error_type": "FileNotFoundError"}
+    assert result.stderr == ""
 
 
 @pytest.mark.parametrize("symbols,periods", [("FPT,FPT", "2025"), ("FPT", "2025,2025"),
