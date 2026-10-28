@@ -284,10 +284,11 @@ async def test_interrupted_same_day_rerun_preserves_admitted_cohort(admission_st
     class Interrupted(BaseException):
         pass
 
-    async def interrupt_checkpoint(*args, **kwargs):
+    async def interrupt_progress(progress, *args, **kwargs):
+        assert progress["stage_stats"]["screener"]["success"] == 20
         raise Interrupted()
 
-    monkeypatch.setattr(pipeline, "_checkpoint", interrupt_checkpoint)
+    monkeypatch.setattr(pipeline, "_save_progress", interrupt_progress)
     with pytest.raises(Interrupted):
         await pipeline.sync_screener_data(enrich_ratios=False, progress={}, sync_id=123)
     async with stores.sessions() as session:
