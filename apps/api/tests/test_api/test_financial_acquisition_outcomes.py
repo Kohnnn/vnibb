@@ -11,7 +11,7 @@ from vnibb.services.data_pipeline import DataPipeline
 def acquisition(monkeypatch):
     attempts, rows, receipts, queries = [], [], [], []
     state = SimpleNamespace(failure=None, conflict=None, cache_failure=False, periods=None,
-                            empty=None, system_exit=None, failure_by_symbol=None)
+                            empty=None, system_exit=None, failure_by_symbol=None, source='VCI')
     pipeline = DataPipeline()
 
     class Result:
@@ -78,7 +78,7 @@ def acquisition(monkeypatch):
         if state.failure_by_symbol == query['symbol']:
             raise RuntimeError(f'{kind} unavailable for {query["symbol"]}')
         return [FinancialStatementData(symbol=query['symbol'], statement_type=kind, period=period,
-                    source='VCI', value_unit=None, unavailable_reason='unknown_source_unit',
+                    source=state.source, value_unit=None, unavailable_reason='unknown_source_unit',
                     raw_data={'provider_value': 123}).model_dump(mode='json') for period in periods]
 
     monkeypatch.setattr(module, 'async_session_maker', Session)
@@ -166,6 +166,18 @@ async def test_retained_source_conflict_is_not_acquired(acquisition):
     assert progress['stage_stats']['financials']['persisted_rows'] == 0
     outcome = progress['financial_acquisition']['outcomes']['VNM']['income']
     assert outcome['period_outcomes'][state.conflict]['status'] == 'retained_source_conflict'
+
+
+@pytest.mark.asyncio
+async def test_issuer_observation_is_not_persisted_by_financial_acquisition(acquisition):
+    pipeline, state, _, rows, _, _ = acquisition
+    state.source = 'issuer_report'
+    progress = {}
+    assert await pipeline.sync_financials(symbols=['FPT'], count=1, progress=progress) == 0
+    assert rows == []
+    outcomes = progress['financial_acquisition']['outcomes']['FPT']
+    assert all(outcome['status'] == 'failed' for outcome in outcomes.values())
+    assert all('issuer_report persistence is not enabled' in outcome['error'] for outcome in outcomes.values())
 
 
 @pytest.mark.asyncio
