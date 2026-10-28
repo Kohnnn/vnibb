@@ -426,11 +426,12 @@ async def test_same_day_recovery_replaces_only_a_complete_cohort(admission_store
     if failure == "missing":
         rows.pop()
     if failure == "active_membership":
-        async def deactivate_after_materialization(*args, **kwargs):
+        async def deactivate_after_materialization(progress, *args, **kwargs):
+            assert progress["stage_stats"]["screener"]["success"] >= 20
             async with stores.sessions.begin() as session:
                 await session.execute(text("UPDATE stocks SET is_active = 0 WHERE symbol = 'B49'"))
 
-        monkeypatch.setattr(pipeline, "_checkpoint", deactivate_after_materialization)
+        monkeypatch.setattr(pipeline, "_save_progress", deactivate_after_materialization)
     monkeypatch.setattr(VietcapClient, "get_price_board", lambda *args, **kwargs: deepcopy(rows))
     await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress={}, sync_id=123 if failure == "active_membership" else None)
     async with stores.sessions() as session:
