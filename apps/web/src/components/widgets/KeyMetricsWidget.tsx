@@ -16,6 +16,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner';
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { marketCapExplanation, resolveMarketCap } from '@/lib/marketCap';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface KeyMetricsWidgetProps {
@@ -76,7 +77,7 @@ function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
     );
 }
 
-import { toNumber, resolveMetric } from './utils';
+import { resolveMetric } from './utils';
 
 function formatRatioPercent(value: number | null | undefined): string {
     if (value === null || value === undefined || !Number.isFinite(value)) return '-';
@@ -131,10 +132,14 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
         return typeof value === 'number' && Number.isFinite(value) ? value : null;
     })();
     const quantWarning = extractQuantWarning(quantMetrics, 'benchmark_risk');
-    const derivedMarketCap =
-        toNumber(profile?.data?.outstanding_shares) && toNumber(quote?.price)
-            ? (toNumber(profile?.data?.outstanding_shares) || 0) * (toNumber(quote?.price) || 0)
-            : null
+    const profileData = profile?.data;
+    const marketCap = useMemo(() => resolveMarketCap(
+        { label: 'Profile', value: profileData?.market_cap, provenance: profileData?.market_cap_provenance },
+        { label: 'Screener', value: stock?.market_cap, provenance: stock?.market_cap_provenance },
+    ), [profileData, stock]);
+    const marketCapDisplay = marketCap.status === 'available'
+        ? formatUnitValue(marketCap.value, unitConfig)
+        : marketCap.status === 'conflict' ? 'Conflict' : 'Unavailable';
 
     const metricMap = {
         pe: resolveMetric([
@@ -178,10 +183,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
             { value: latestRatio?.current_ratio, source: 'Ratios', positiveOnly: true },
             { value: stock?.current_ratio, source: 'Screener', positiveOnly: true },
         ]),
-        marketCap: resolveMetric([
-            { value: stock?.market_cap, source: 'Screener', positiveOnly: true },
-            { value: derivedMarketCap, source: 'Profile+Quote', positiveOnly: true },
-        ]),
+        marketCap,
         dividendYield: resolveMetric([
             { value: readDividendYield(latestRatio?.dividend_yield, latestRatio?.ratio_units?.dividend_yield), source: 'Ratios' },
             { value: readDividendYield(stock?.dividend_yield, stock?.ratio_units?.dividend_yield), source: 'Screener' },
@@ -231,7 +233,9 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
             metricMap.beta.value,
         ],
     );
-    const hasData = Boolean(mergedStock && Object.values(mergedStock).some((v) => v !== null && v !== undefined));
+    const hasData = Boolean(Object.values(mergedStock).some((v) => v !== null && v !== undefined) ||
+        profileData?.outstanding_shares != null || profileData?.market_cap != null || profileData?.market_cap_provenance ||
+        stock?.market_cap != null || stock?.market_cap_provenance);
     const isFallback = Boolean(error && hasData);
     const hasHistory = Boolean(
         history && (history.roe?.length || history.roa?.length || history.pe_ratio?.length || history.pb_ratio?.length)
@@ -250,10 +254,10 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                 lastDataDate: null,
                 fetchedAt: dataUpdatedAt || null,
                 stale: isFallback,
-                extra: hasData ? { metrics: mergedStock } : undefined,
+                extra: { metrics: mergedStock, marketCap, profile: profileData, quote },
             }),
         );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, mergedStock]);
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, mergedStock, marketCap, profileData, quote]);
 
     const highlightCards = activeCategory === 'valuation'
         ? [
@@ -274,7 +278,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                     { label: 'Gross Margin', value: formatRatioPercent(mergedStock?.gross_margin) },
                 ]
                 : [
-                    { label: 'Market Cap', value: formatUnitValue(mergedStock?.market_cap, unitConfig) },
+                    { label: 'Market Cap', value: marketCapDisplay },
                     { label: 'Dividend Yield', value: formatDividendYield(mergedStock?.dividend_yield) },
                     { label: 'Beta', value: formatRatio(mergedStock?.beta) },
                 ]
@@ -298,7 +302,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                     fetchedAt={dataUpdatedAt || null}
                     isFetching={(isFetching || historyFetching) && hasData}
                     isCached={isFallback}
-                    note={metricMap.marketCap.source === 'Profile+Quote' ? 'Market cap derived from profile shares x quote' : 'Ratios & health'}
+                    note="Ratios & health"
                     sourceLabel="Screener + ratios"
                     align="right"
                 />
@@ -405,7 +409,11 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                             {activeCategory === 'market' && (
                                 <div className="space-y-2">
                                     <QuantWarningBanner warning={quantWarning} className="mb-2" />
-                                    <MetricRow label="Market Cap" value={formatUnitValue(mergedStock?.market_cap, unitConfig)} source={metricMap.marketCap.source} />
+                                    <MetricRow label="Market Cap" value={marketCapDisplay} source={marketCap.status === 'available' ? marketCap.inputs.find((input) => input.provenance?.status === 'available')?.provenance?.source ?? undefined : undefined} />
+                                    <details className="text-[10px] text-[var(--text-muted)]">
+                                        <summary className="cursor-pointer">Market cap provenance</summary>
+                                        <p>{marketCapExplanation(marketCap)}</p>
+                                    </details>
                                     <MetricRow label="Dividend Yield" value={formatDividendYield(mergedStock?.dividend_yield)} source={metricMap.dividendYield.source} />
                                     <MetricRow label="Beta" value={formatRatio(mergedStock?.beta)} source={metricMap.beta.source} />
                                 </div>

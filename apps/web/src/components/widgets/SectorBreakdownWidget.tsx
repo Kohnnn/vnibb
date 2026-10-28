@@ -11,6 +11,7 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { useMarketHeatmap } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { cn } from '@/lib/utils';
+import type { SectorGroup } from '@/lib/api';
 import { toNumber } from './utils';
 
 interface SectorBreakdownWidgetProps {
@@ -20,6 +21,7 @@ interface SectorBreakdownWidgetProps {
 }
 
 const COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#22d3ee', '#ef4444', '#06b6d4', '#f97316', '#22c55e'];
+const EMPTY_SECTORS: SectorGroup[] = [];
 const TOP_OPTIONS = [5, 10, 20, -1] as const;
 const METRIC_OPTIONS = [
   { id: 'share', label: 'MCap Share' },
@@ -39,8 +41,12 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
     use_cache: true,
   });
 
-  const sectors = data?.sectors || [];
-  const totalCap = sectors.reduce((sum, sector) => sum + (sector.total_market_cap || 0), 0);
+  const sectors = data?.sectors ?? EMPTY_SECTORS;
+  const admittedSectors = useMemo(() => sectors.filter((sector) => Number.isInteger(sector.cap_count) && sector.cap_count > 0 && sector.cap_count <= sector.stock_count && typeof sector.total_market_cap === 'number' && Number.isFinite(sector.total_market_cap) && sector.total_market_cap > 0), [sectors]);
+  const totalCap = admittedSectors.length ? admittedSectors.reduce((sum, sector) => sum + sector.total_market_cap!, 0) : null;
+  const capCount = admittedSectors.reduce((sum, sector) => sum + sector.cap_count, 0);
+  const stockCount = sectors.reduce((sum, sector) => sum + sector.stock_count, 0);
+  const capCoverage = `Admitted market cap: ${capCount} of ${stockCount} returned stocks${capCount < stockCount || data?.partial ? ' (partial coverage)' : ''}`;
 
   const chartData = useMemo(() => {
     // `avg_change_pct` is absent when the sector has no usable change rows.
@@ -48,8 +54,10 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
     // `toNumber` keeps a genuine 0 and leaves a missing change null.
     const baseRows = sectors.map((sector, index) => ({
       name: sector.sector,
-      value: sector.total_market_cap || 0,
-      share: totalCap ? (sector.total_market_cap / totalCap) * 100 : 0,
+      value: admittedSectors.includes(sector) ? sector.total_market_cap : null,
+      sizeValue: typeof sector.total_size_value === 'number' && Number.isFinite(sector.total_size_value) && sector.total_size_value > 0 ? sector.total_size_value : 0,
+      share: totalCap !== null && admittedSectors.includes(sector) ? (sector.total_market_cap! / totalCap) * 100 : null,
+      capCount: admittedSectors.includes(sector) ? sector.cap_count : 0,
       changePct: toNumber(sector.avg_change_pct),
       stockCount: sector.stock_count || 0,
       color: COLORS[index % COLORS.length],
@@ -58,7 +66,7 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
     const sortedRows = [...baseRows].sort((left, right) => {
       if (metric === 'change') return (right.changePct ?? -Infinity) - (left.changePct ?? -Infinity);
       if (metric === 'count') return right.stockCount - left.stockCount;
-      return right.share - left.share;
+      return (right.share ?? -Infinity) - (left.share ?? -Infinity);
     });
 
     if (topCount === -1 || sortedRows.length <= topCount) {
@@ -67,13 +75,15 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
 
     const visible = sortedRows.slice(0, topCount);
     const remaining = sortedRows.slice(topCount);
-    const otherShare = remaining.reduce((sum, row) => sum + row.share, 0);
-    const otherValue = remaining.reduce((sum, row) => sum + row.value, 0);
+    const knownCaps = remaining.filter((row) => row.value !== null);
+    const otherValue = knownCaps.length ? knownCaps.reduce((sum, row) => sum + row.value!, 0) : null;
+    const otherShare = totalCap !== null && otherValue !== null ? (otherValue / totalCap) * 100 : null;
     const otherCount = remaining.reduce((sum, row) => sum + row.stockCount, 0);
-    const pricedRemaining = remaining.filter((row) => row.changePct !== null && row.value > 0);
-    const pricedValue = pricedRemaining.reduce((sum, row) => sum + row.value, 0);
+    const otherCapCount = remaining.reduce((sum, row) => sum + row.capCount, 0);
+    const pricedRemaining = remaining.filter((row) => row.changePct !== null && row.sizeValue > 0);
+    const pricedValue = pricedRemaining.reduce((sum, row) => sum + row.sizeValue, 0);
     const weightedChange = pricedValue > 0
-      ? pricedRemaining.reduce((sum, row) => sum + (row.changePct as number) * row.value, 0) / pricedValue
+      ? pricedRemaining.reduce((sum, row) => sum + (row.changePct as number) * row.sizeValue, 0) / pricedValue
       : null;
 
     return [
@@ -82,16 +92,18 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
         name: 'Other',
         value: otherValue,
         share: otherShare,
+        sizeValue: remaining.reduce((sum, row) => sum + row.sizeValue, 0),
+        capCount: otherCapCount,
         changePct: weightedChange,
         stockCount: otherCount,
         color: '#64748b',
       },
     ];
-  }, [metric, sectors, topCount, totalCap]);
+  }, [metric, sectors, admittedSectors, topCount, totalCap]);
 
   const metricValueKey = metric === 'change' ? 'changePct' : metric === 'count' ? 'stockCount' : 'share';
   const metricAxisLabel = metric === 'change' ? 'Avg Change %' : metric === 'count' ? 'Stocks' : 'Share %';
-  const metricNote = metric === 'change' ? 'Average daily change' : metric === 'count' ? 'Constituent count' : 'Market cap share';
+  const metricNote = metric === 'change' ? 'Average daily change' : metric === 'count' ? 'Constituent count' : 'Share of admitted market cap';
 
   const hasData = chartData.length > 0;
   const isFallback = Boolean(error && hasData);
@@ -107,10 +119,11 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
         fetchedAt: dataUpdatedAt,
         stale: isFallback,
         derived: true,
-        extra: hasData ? { metric, sectorCount: sectors.length } : undefined,
+        coverage: capCount < stockCount || data?.partial ? 'partial' : undefined,
+        extra: hasData ? { metric, sectorCount: sectors.length, capCount, stockCount, totalMarketCap: totalCap, sectors } : undefined,
       }),
     );
-  }, [hasData, data?.price_updated_at, dataUpdatedAt, isFallback, metric, sectors.length, onDataChange]);
+  }, [hasData, data?.price_updated_at, data?.partial, dataUpdatedAt, isFallback, metric, sectors, capCount, stockCount, totalCap, onDataChange]);
 
   return (
     <WidgetContainer title="Market Sector Breakdown" onRefresh={() => refetch()} onClose={onRemove} isLoading={isLoading && !hasData}>
@@ -163,6 +176,7 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
             </div>
           </div>
         </div>
+        {hasData && <div className="px-1 py-1 text-[10px] text-[var(--text-muted)]">{capCoverage}</div>}
         <div className="flex-1 w-full">
           {isLoading && !hasData ? (
             <WidgetSkeleton variant="chart" />
@@ -189,7 +203,7 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
                         const payload = props?.payload;
                         if (metric === 'change') return [payload?.changePct === null || payload?.changePct === undefined ? '—' : `${Number(payload.changePct).toFixed(2)}%`, 'Avg Change'];
                         if (metric === 'count') return [String(payload?.stockCount || 0), 'Stocks'];
-                        return [`${payload?.share ? payload.share.toFixed(1) : '0.0'}%`, 'Share'];
+                        return [payload?.share == null ? 'Unavailable' : `${payload.share.toFixed(1)}%`, 'Share of admitted cap'];
                       }}
                     />
                     <Bar dataKey={metricValueKey} radius={[0, 6, 6, 0]}>
@@ -220,12 +234,13 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
                               : `${entry.changePct >= 0 ? '+' : ''}${entry.changePct.toFixed(2)}%`
                             : metric === 'count'
                               ? entry.stockCount.toLocaleString()
-                              : `${entry.share.toFixed(1)}%`}
+                              : entry.share === null ? '—' : `${entry.share.toFixed(1)}%`}
                         </span>
                       </div>
                       <div className="mt-1 flex items-center justify-between text-[11px] text-[var(--text-muted)]">
                         <span>{entry.stockCount} stocks</span>
                         <span>{entry.changePct === null ? 'Change —' : `${entry.changePct >= 0 ? '+' : ''}${entry.changePct.toFixed(2)}%`}</span>
+                        <span>Cap: {entry.capCount}/{entry.stockCount}{entry.capCount < entry.stockCount ? ' (partial)' : ''}</span>
                       </div>
                     </div>
                   ))}

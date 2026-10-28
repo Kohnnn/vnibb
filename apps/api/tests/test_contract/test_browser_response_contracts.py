@@ -145,7 +145,7 @@ async def test_browser_profile_envelope(client, monkeypatch, profile_row, stored
         return None
 
     async def no_market_cap(*args, **kwargs):
-        return None
+        return {"value": None, "status": "unavailable", "observations": []}
 
     async def no_last_data_date(*args, **kwargs):
         return None

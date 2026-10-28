@@ -34,6 +34,7 @@ const LISTING = [
 describe('ListingBrowserWidget industry classification (issue #107)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    localStorage.clear();
     mockUseSymbolsByGroup.mockReturnValue({
       data: undefined, isLoading:false, error: null, refetch: jest.fn(), dataUpdatedAt: 0,
     });
@@ -62,5 +63,16 @@ describe('ListingBrowserWidget industry classification (issue #107)', () => {
     expect(screen.queryByText('VCB')).not.toBeInTheDocument();
     // The row keeps saying the industry is unavailable rather than naming one.
     expect(screen.getByText('Industry unavailable')).toBeInTheDocument();
+  });
+
+  test('names group, sorting and saved view deletion controls', () => {
+    render(<ListingBrowserWidget id="listing-1" />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Group filter' }), { target: { value: 'VN30' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Sort listings' }), { target: { value: 'company' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save View' }));
+    const deleteButton = screen.getByRole('button', { name: 'Delete saved view All exchanges • VN30 • Sort: company' });
+    fireEvent.click(deleteButton);
+    expect(deleteButton).not.toBeInTheDocument();
   });
 });

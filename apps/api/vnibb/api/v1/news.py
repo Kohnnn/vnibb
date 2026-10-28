@@ -6,6 +6,7 @@ Uses public Vietnamese financial RSS feeds.
 """
 
 import logging
+import math
 from collections import defaultdict
 from typing import Any
 
@@ -15,6 +16,7 @@ from pydantic import BaseModel
 from vnibb.core.cache import cached
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.market_cap import resolve_market_cap
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.providers.vnstock.equity_screener import (
     ScreenerData,
@@ -207,7 +209,9 @@ class HeatmapStock(BaseModel):
     name: str
     sector: str
     industry: str | None = None
-    market_cap: float
+    market_cap: float | None
+    market_cap_provenance: dict[str, Any]
+    size_value: float
     price: float
     change: float  # Absolute price change
     change_pct: float  # Percentage change
@@ -219,7 +223,9 @@ class SectorGroup(BaseModel):
 
     sector: str
     stocks: list[HeatmapStock]
-    total_market_cap: float
+    total_market_cap: float | None
+    total_size_value: float
+    cap_count: int
     avg_change_pct: float
     stock_count: int
 
@@ -694,7 +700,7 @@ async def get_heatmap_data(
         )
 
         # Try cache first
-        screener_data: list[ScreenerData] = []
+        screener_data: list[tuple[ScreenerData, dict[str, Any], float | None]] = []
         cached = False
 
         if use_cache:
@@ -709,20 +715,24 @@ async def get_heatmap_data(
                     logger.info(
                         f"Using cached screener data for heatmap ({len(cache_result.data)} records)"
                     )
-                    # Convert ORM to Pydantic
                     screener_data = [
-                        ScreenerData(
-                            symbol=s.symbol,
-                            organ_name=s.company_name,
-                            exchange=s.exchange,
-                            industry_name=s.industry,
-                            price=s.price,
-                            volume=s.volume,
-                            market_cap=s.market_cap,
-                            pe=s.pe,
-                            pb=s.pb,
-                            change_1d=_coerce_extended_metric(
-                                s.extended_metrics, "change_1d", "price_change_1d_pct"
+                        (
+                            ScreenerData(
+                                symbol=s.symbol,
+                                organ_name=s.company_name,
+                                exchange=s.exchange,
+                                industry_name=s.industry,
+                                price=s.price,
+                                volume=s.volume,
+                                pe=s.pe,
+                                pb=s.pb,
+                                change_1d=_coerce_extended_metric(
+                                    s.extended_metrics, "change_1d", "price_change_1d_pct"
+                                ),
+                            ),
+                            resolve_market_cap(s, source="postgres:screener_snapshot"),
+                            _coerce_extended_metric(
+                                s.extended_metrics, "value_traded", "valueTraded", "trading_value", "value"
                             ),
                         )
                         for s in cache_result.data
@@ -733,12 +743,22 @@ async def get_heatmap_data(
 
         # Fetch from API if no cache
         if not screener_data:
-            screener_data = await VnstockScreenerFetcher.fetch(params)
+            provider_rows = await VnstockScreenerFetcher.fetch(params)
+            screener_data = [
+                (
+                    stock,
+                    resolve_market_cap(stock, source=f"provider:{settings.vnstock_source}"),
+                    _coerce_extended_metric(
+                        stock.model_dump(), "value_traded", "valueTraded", "trading_value", "value"
+                    ),
+                )
+                for stock in provider_rows
+            ]
             logger.info(f"Fetched {len(screener_data)} stocks from API for heatmap")
 
         # Step 2: Filter by exchange if needed
         if exchange != "ALL":
-            screener_data = [s for s in screener_data if s.exchange == exchange]
+            screener_data = [item for item in screener_data if item[0].exchange == exchange]
 
         vn30_symbols = {
             symbol.upper()
@@ -746,30 +766,30 @@ async def get_heatmap_data(
         }
         hnx30_symbols = {
             stock.symbol.upper()
-            for stock in sorted(
+            for stock, _, _ in sorted(
                 (
-                    stock
-                    for stock in screener_data
-                    if (stock.exchange or "").upper() == "HNX"
-                    and stock.market_cap is not None
-                    and stock.market_cap > 0
+                    item for item in screener_data
+                    if (item[0].exchange or "").upper() == "HNX"
+                    and item[1]["value"] is not None
+                    and item[1]["value"] > 0
                 ),
-                key=lambda stock: stock.market_cap or 0,
-                reverse=True,
+                key=lambda item: (-item[1]["value"], item[0].symbol.upper()),
             )[:30]
         }
 
         groups: dict[str, list[HeatmapStock]] = defaultdict(list)
 
-        for stock in screener_data:
+        for stock, cap, value_traded in screener_data:
             symbol = stock.symbol.upper()
             if group_by == "vn30" and symbol not in vn30_symbols:
                 continue
             if group_by == "hnx30" and symbol not in hnx30_symbols:
                 continue
 
-            # Skip stocks with missing critical data
-            if not stock.market_cap or stock.market_cap <= 0:
+            size_value = {
+                "market_cap": cap["value"], "volume": stock.volume, "value_traded": value_traded,
+            }[size_metric]
+            if size_value is None or not math.isfinite(size_value) or size_value <= 0:
                 continue
             if not stock.price or stock.price <= 0:
                 continue
@@ -799,7 +819,9 @@ async def get_heatmap_data(
                 name=stock.organ_name or stock.symbol,
                 sector=group_key,
                 industry=stock.industry_name,
-                market_cap=stock.market_cap,
+                market_cap=cap["value"],
+                market_cap_provenance=cap,
+                size_value=size_value,
                 price=stock.price,
                 change=change,
                 change_pct=change_pct,
@@ -811,25 +833,24 @@ async def get_heatmap_data(
         # Step 5: Create sector aggregations
         sectors: list[SectorGroup] = []
         for sector_name, stocks in groups.items():
-            total_market_cap = sum(s.market_cap for s in stocks)
-            # Weighted average change by market cap
-            if total_market_cap > 0:
-                avg_change_pct = sum(s.change_pct * s.market_cap for s in stocks) / total_market_cap
-            else:
-                avg_change_pct = 0
+            caps = [s.market_cap for s in stocks if s.market_cap is not None]
+            total_market_cap = sum(caps) if caps else None
+            total_size_value = sum(s.size_value for s in stocks)
+            avg_change_pct = sum(s.change_pct * s.size_value for s in stocks) / total_size_value
 
             sectors.append(
                 SectorGroup(
                     sector=sector_name,
                     stocks=stocks,
                     total_market_cap=total_market_cap,
+                    total_size_value=total_size_value,
+                    cap_count=len(caps),
                     avg_change_pct=avg_change_pct,
                     stock_count=len(stocks),
                 )
             )
 
-        # Sort sectors by total market cap (largest first)
-        sectors.sort(key=lambda s: s.total_market_cap, reverse=True)
+        sectors.sort(key=lambda s: s.total_size_value, reverse=True)
 
         total_stocks = sum(len(s.stocks) for s in sectors)
 

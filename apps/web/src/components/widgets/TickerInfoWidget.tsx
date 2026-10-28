@@ -13,6 +13,7 @@ import { TrendingUp, TrendingDown, Info, Activity } from 'lucide-react';
 import { formatCompactValueForUnit, formatNumber, formatPriceValueForUnit } from '@/lib/units';
 import { cn } from '@/lib/utils';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { marketCapExplanation, resolveMarketCap } from '@/lib/marketCap';
 
 import { toPositiveNumber, firstPositiveNumber, clampPercent, getChangeDirection } from './utils';
 
@@ -77,6 +78,10 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasQuote, { timeoutMs: 8_000 })
   const screenerRow = screenerData?.data?.[0]
   const profileData = profile?.data
+  const marketCap = useMemo(() => resolveMarketCap(
+    { label: 'Profile', value: profileData?.market_cap, provenance: profileData?.market_cap_provenance },
+    { label: 'Screener', value: screenerRow?.market_cap, provenance: screenerRow?.market_cap_provenance },
+  ), [profileData, screenerRow]);
   // Strict per-row certification: every history row must carry an explicit `price_unit`
   // of 'VND'. The response-level `unit_status` is deliberately NOT used to fill a missing
   // row marker — deployed payloads have been observed reporting confirmed_vnd alongside
@@ -103,10 +108,12 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
         sourceLabel: 'Quote + profile',
         lastDataDate: sourceUpdatedAt,
         fetchedAt: quoteUpdatedAt,
-        extra: { quote, profile: profileData, screener: screenerRow },
+        cached: Boolean(quote?.cached) || isFallback,
+        stale: Boolean(quote?.stale) || isFallback,
+        extra: { quote, profile: profileData, screener: screenerRow, marketCap },
       }),
     )
-  }, [onDataChange, profileData, quote, screenerRow, hasQuote, symbol, quoteUpdatedAt, sourceUpdatedAt])
+  }, [onDataChange, profileData, quote, screenerRow, marketCap, hasQuote, isFallback, symbol, quoteUpdatedAt, sourceUpdatedAt])
 
   const handleRetry = () => {
     refetchQuote();
@@ -143,21 +150,6 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     ? unitConfig.display === 'USD' ? 'USD' : 'VND'
     : quote?.price_unit === 'index_points' ? 'Index points' : 'Price unit unconfirmed'
 
-  const screenerMarketCap = toPositiveNumber(screenerRow?.market_cap)
-  const profileMarketCap = toPositiveNumber(profileData?.market_cap)
-  const sharesOutstanding = toPositiveNumber(profileData?.outstanding_shares)
-  const confirmedVndPrice = quote?.price_unit === 'VND' ? toPositiveNumber(price) : null
-  const derivedMarketCap =
-    sharesOutstanding && confirmedVndPrice ? sharesOutstanding * confirmedVndPrice : null
-  // Reported market caps take precedence; derive only from an explicitly confirmed VND quote.
-  const marketCap = screenerMarketCap ?? profileMarketCap ?? derivedMarketCap
-  const marketCapSource = screenerMarketCap
-    ? 'Screener'
-    : profileMarketCap
-      ? 'Profile'
-      : derivedMarketCap
-        ? 'Derived'
-        : 'Unavailable'
 
   const companyName =
     profileData?.company_name ||
@@ -222,15 +214,13 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
           isFetching={isFetching && hasQuote}
           isCached={Boolean(quote?.cached) || isFallback}
           note={
-            marketCapSource === 'Derived'
-              ? 'Market cap derived from profile shares x quote'
-              : quote?.price_unit !== 'VND'
-                ? priceUnitLabel
-                : quote?.cached
-                  ? 'Cached response'
-                  : unitConfig.display === 'USD'
-                    ? 'Price and value fields shown in USD using current FX defaults'
-                    : undefined
+            quote?.price_unit !== 'VND'
+              ? priceUnitLabel
+              : quote?.cached
+                ? 'Cached response'
+                : unitConfig.display === 'USD'
+                  ? 'Price and value fields shown in USD using current FX defaults'
+                  : undefined
           }
           sourceLabel="Quote + profile"
           className="justify-between"
@@ -276,8 +266,8 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             { label: 'Open', value: formatPriceValueForUnit(openPrice, priceDisplayConfig) },
             {
               label: 'Mkt Cap',
-              value: formatCompactValueForUnit(marketCap, unitConfig, { decimals: 2 }),
-              source: marketCapSource,
+              value: marketCap.status === 'available' ? formatCompactValueForUnit(marketCap.value, unitConfig, { decimals: 2 }) : marketCap.status === 'conflict' ? 'Conflict' : 'Unavailable',
+              source: marketCap.status === 'available' ? marketCap.inputs.find((input) => input.provenance?.status === 'available')?.provenance?.source : undefined,
             },
           ].slice(0, 8).map((item, i) => (
             <div
@@ -300,6 +290,10 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               )}
             </div>
           ))}
+          <details className="col-span-2 text-[10px] text-[var(--text-muted)]">
+            <summary className="cursor-pointer">Market cap provenance</summary>
+            <p>{marketCapExplanation(marketCap)}</p>
+          </details>
         </div>
 
         {hasRange && (
@@ -340,11 +334,6 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             {industry && (
               <span className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
                 {industry}
-              </span>
-            )}
-            {marketCapSource === 'Derived' && (
-              <span className="inline-flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
-                MCap derived
               </span>
             )}
             {quantRegime.hasData && (

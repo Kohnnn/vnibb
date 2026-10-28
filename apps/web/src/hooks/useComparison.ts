@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { API_BASE_URL } from '@/lib/api';
+import { resolveMarketCap, type MarketCapProvenance, type MarketCapResult } from '@/lib/marketCap';
 
 export interface MetricDefinition {
     id?: string;
@@ -17,6 +18,8 @@ export interface StockMetrics {
     industry?: string;
     exchange?: string;
     metrics: Record<string, any>;
+    market_cap_provenance?: MarketCapProvenance | null;
+    market_cap_result?: MarketCapResult;
 }
 
 export interface PricePerformancePoint {
@@ -73,16 +76,17 @@ export const useComparison = (
             const dataMap = data?.data && typeof data.data === 'object' && !Array.isArray(data.data)
                 ? data.data as Record<string, StockMetrics>
                 : {};
-            const stocks: StockMetrics[] = Array.isArray(data?.stocks)
+            const rawStocks: StockMetrics[] = Array.isArray(data?.stocks)
                 ? data.stocks
-                : Object.entries(dataMap).map(([symbol, stock]) => ({
-                    symbol: stock?.symbol || symbol,
-                    company_name: stock?.company_name,
-                    name: stock?.company_name || stock?.name,
-                    industry: stock?.industry,
-                    exchange: stock?.exchange,
-                    metrics: stock?.metrics || {},
-                }));
+                : Object.entries(dataMap).map(([symbol, stock]) => ({ ...stock, symbol: stock?.symbol || symbol }));
+            const stocks = rawStocks.map((stock) => {
+                const marketCap = resolveMarketCap({ label: stock.symbol, value: stock.metrics?.market_cap, provenance: stock.market_cap_provenance });
+                return {
+                    ...stock,
+                    market_cap_result: marketCap,
+                    metrics: { ...stock.metrics, market_cap: marketCap.value },
+                };
+            });
             const mappedData = stocks.reduce((acc: Record<string, StockMetrics>, stock: StockMetrics) => {
                 acc[stock.symbol] = {
                     symbol: stock.symbol,
@@ -91,6 +95,8 @@ export const useComparison = (
                     industry: stock.industry,
                     exchange: stock.exchange,
                     metrics: stock.metrics || {},
+                    market_cap_provenance: stock.market_cap_provenance,
+                    market_cap_result: stock.market_cap_result,
                 };
                 return acc;
             }, {} as Record<string, StockMetrics>);
@@ -121,6 +127,9 @@ export const useComparison = (
 
             return {
                 ...data,
+                sector_averages: data?.sector_averages && typeof data.sector_averages === 'object'
+                    ? Object.fromEntries(Object.entries(data.sector_averages).filter(([key]) => key !== 'market_cap'))
+                    : data?.sector_averages,
                 symbols: stocks.map((stock: StockMetrics) => stock.symbol),
                 stocks,
                 data: mappedData,

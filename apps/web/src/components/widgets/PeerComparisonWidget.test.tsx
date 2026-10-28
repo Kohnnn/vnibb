@@ -108,3 +108,33 @@ describe('PeerComparisonWidget percent basis (issue #106)', () => {
     expect(screen.getByText(/provider unit basis is not independently verified/)).toBeInTheDocument();
   });
 });
+
+describe('PeerComparisonWidget market cap provenance', () => {
+  beforeEach(() => {
+    mockUsePeers.mockReturnValue({ data: undefined });
+  });
+
+  test('excludes captured unverified and conflicting caps from the loaded peer average', () => {
+    const provenance = { status: 'available', value: 100, source: 'certified', currency: 'VND', unit: 'VND', as_of: '2026-10-26', share_basis: 'outstanding', observations: [{ value: 100, source: 'certified' }] };
+    const onDataChange = jest.fn();
+    mockUseComparison.mockReturnValue({
+      data: {
+        metrics: [{ id: 'market_cap', name: 'Market Cap', format: 'currency' }],
+        stocks: [
+          { symbol: 'VCI', metrics: { market_cap: 22410910941.25 } },
+          { symbol: 'FPT', metrics: { market_cap: 100 }, market_cap_provenance: provenance },
+          { symbol: 'VNM', metrics: { market_cap: 200 }, market_cap_provenance: { ...provenance, status: 'conflict', value: null, reason: 'Sources disagree' } },
+        ],
+      }, isLoading: false, refetch: jest.fn(), dataUpdatedAt: 0,
+    });
+    render(<PeerComparisonWidget id="peer-1" symbol="VCI" config={{ comparisonPeers: ['VCI', 'FPT', 'VNM'] }} onDataChange={onDataChange} />);
+    const row = within(screen.getByText('Market Cap').closest('tr') as HTMLElement);
+    expect(row.getByText('Unavailable')).toBeInTheDocument();
+    expect(row.getByText('Conflict')).toBeInTheDocument();
+    expect(row.getByText(/Sources disagree/)).toBeInTheDocument();
+    expect(row.getByText(/22410910941.25/)).toBeInTheDocument();
+    expect(row.queryByText('22.4B')).not.toBeInTheDocument();
+    expect(row.getByText('(n=1)')).toBeInTheDocument();
+    expect(JSON.stringify(onDataChange.mock.calls)).toContain('22410910941.25');
+  });
+});

@@ -202,7 +202,7 @@ export function ListingBrowserWidget({
               ))}
             </div>
 
-            <select value={group} onChange={(event) => setGroup(event.target.value as GroupFilter)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500">
+            <select aria-label="Group filter" value={group} onChange={(event) => setGroup(event.target.value as GroupFilter)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500">
               {GROUP_OPTIONS.map((option) => (
                 <option key={option} value={option}>{option === 'ALL' ? 'All groups' : option}</option>
               ))}
@@ -221,7 +221,7 @@ export function ListingBrowserWidget({
               ))}
             </select>
 
-            <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500">
+            <select aria-label="Sort listings" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500">
               <option value="symbol">Sort: Symbol</option>
               <option value="company">Sort: Company</option>
               <option value="industry">Sort: Industry</option>
@@ -259,7 +259,7 @@ export function ListingBrowserWidget({
                   <button type="button" onClick={() => applySavedView(view)} className="inline-flex items-center gap-1 hover:text-[var(--text-primary)]">
                     <FolderOpen size={11} /> {view.name}
                   </button>
-                  <button type="button" onClick={() => setSavedViews(removeListingBrowserView(view.id))} className="text-[var(--text-muted)] hover:text-rose-300">
+                  <button type="button" aria-label={`Delete saved view ${view.name}`} onClick={() => setSavedViews(removeListingBrowserView(view.id))} className="text-[var(--text-muted)] hover:text-rose-300">
                     <X size={11} />
                   </button>
                 </div>

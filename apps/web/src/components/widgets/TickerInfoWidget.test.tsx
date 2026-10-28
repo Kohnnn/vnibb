@@ -1,7 +1,9 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
+import { useSyncExternalStore } from 'react';
 import { useHistoricalPrices, useProfile, useScreenerData, useStockQuote } from '@/lib/queries';
 import { useUnit } from '@/contexts/UnitContext';
 import { TickerInfoWidget } from './TickerInfoWidget';
+import { deriveWidgetHealth } from '@/lib/widgetHealth';
 
 jest.mock('@/lib/queries', () => ({
   useHistoricalPrices: jest.fn(), useProfile: jest.fn(), useScreenerData: jest.fn(),
@@ -48,54 +50,48 @@ describe('TickerInfoWidget confirmed-unit market cap', () => {
     mockHistory.mockReturnValue({ data: { data:[] } });
   });
 
-  test('derives full VND market cap from confirmed 57300 VND price without thousand-VND conversion', () => {
+  test('does not derive market cap from a dated quote and undated shares', () => {
     render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
-    const cell = within(screen.getByText('Mkt Cap').parentElement!);
-    expect(cell.getByText('57.30B')).toBeInTheDocument();
-    expect(cell.getByText('Derived')).toBeInTheDocument();
+    expect(within(screen.getByText('Mkt Cap').parentElement!).getByText('Unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/lacks certified VND unit/)).toBeInTheDocument();
   });
 
-  test('preserves an explicitly low VND price when deriving market cap', () => {
-    mockStockQuote.mockReturnValue({
-      data: { symbol: 'FPT', price: 57.3, price_unit: 'VND' },
-      isLoading:false, isFetching:false, refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT,
-    });
-    render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
-    const cell = within(screen.getByText('Mkt Cap').parentElement!);
-    expect(cell.getByText('57.30M')).toBeInTheDocument();
-    expect(cell.getByText('Derived')).toBeInTheDocument();
+  test('captured VCI payload remains unavailable and retains raw inputs', () => {
+    const onDataChange = jest.fn();
+    mockStockQuote.mockReturnValue({ data: { symbol: 'VCI', price: 19150, price_unit: 'VND', updatedAt: '2026-10-26' }, isLoading: false, refetch: jest.fn() });
+    mockProfile.mockReturnValue({ data: { data: { outstanding_shares: 1152231925, market_cap: 22065241363750 } } });
+    mockScreener.mockReturnValue({ data: { data: [{ market_cap: 22410910941.25 }] }, refetch: jest.fn() });
+    render(<TickerInfoWidget id="ticker-1" symbol="VCI" onDataChange={onDataChange} />);
+    expect(within(screen.getByText('Mkt Cap').parentElement!).getByText('Unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('22.41B')).not.toBeInTheDocument();
+    expect(screen.getByText(/22410910941.25/)).toBeInTheDocument();
+    expect(JSON.stringify(onDataChange.mock.calls)).toContain('22065241363750');
   });
 
-  test.each(['unknown', 'index_points', undefined])('does not infer market cap from a %s quote unit', (price_unit) => {
-    mockStockQuote.mockReturnValue({
-      data: { symbol: 'FPT', price: 57.3, price_unit },
-      isLoading:false, isFetching:false, refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT,
-    });
+  test('displays a certified low VND cap without scaling it by a guessed multiplier', () => {
+    const provenance = { status: 'available', value: 57.3, source: 'certified source', unit: 'VND', currency: 'VND', as_of: '2026-10-26', share_basis: 'outstanding', observations: [{ value: 57.3, source: 'certified source' }] };
+    mockProfile.mockReturnValue({ data: { data: { market_cap: 57.3, market_cap_provenance: provenance } } });
+    mockScreener.mockReturnValue({ data: { data: [{ market_cap: 57.3, market_cap_provenance: provenance }] }, refetch: jest.fn() });
     render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
-    const cell = within(screen.getByText('Mkt Cap').parentElement!);
-    expect(cell.getByText('Unavailable')).toBeInTheDocument();
-    expect(cell.queryByText('Derived')).not.toBeInTheDocument();
+    expect(within(screen.getByText('Mkt Cap').parentElement!).getByText('57.30')).toBeInTheDocument();
+    expect(screen.getByText(/share basis outstanding/)).toBeInTheDocument();
+  });
+  test('converts a certified VND cap to USD once', () => {
+    mockUnit.mockReturnValue({ config: USD_UNIT });
+    const provenance = { status: 'available', value: 2500000, source: 'certified source', unit: 'VND', currency: 'VND', as_of: '2026-10-26', share_basis: 'outstanding', observations: [{ value: 2500000, source: 'certified source' }] };
+    mockProfile.mockReturnValue({ data: { data: { market_cap: 2500000, market_cap_provenance: provenance } } });
+    render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
+    expect(within(screen.getByText('Mkt Cap').parentElement!).getByText('100.00')).toBeInTheDocument();
   });
 
-  test('retains reported screener market cap precedence over derived value', () => {
-    mockScreener.mockReturnValue({ data: { data: [{ market_cap: 60_000_000_000 }] }, refetch: jest.fn() });
-    mockProfile.mockReturnValue({ data: { data: { outstanding_shares: 1_000_000, market_cap: 59_000_000_000 } } });
-    render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
-    const cell = within(screen.getByText('Mkt Cap').parentElement!);
-    expect(cell.getByText('60.00B')).toBeInTheDocument();
-    expect(cell.getByText('Screener')).toBeInTheDocument();
-  });
 
-  test('retains reported profile market cap even when the quote unit is unknown', () => {
-    mockStockQuote.mockReturnValue({
-      data: { symbol: 'FPT', price: 57.3, price_unit: 'unknown' },
-      isLoading:false, isFetching:false, refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT,
-    });
-    mockProfile.mockReturnValue({ data: { data: { outstanding_shares: 1_000_000, market_cap: 59_000_000_000 } } });
+  test('shows a conflict when certified sources disagree', () => {
+    const provenance = { status: 'available', value: 100, source: 'profile', unit: 'VND', currency: 'VND', as_of: '2026-10-26', share_basis: 'outstanding', observations: [{ value: 100, source: 'profile' }] };
+    mockProfile.mockReturnValue({ data: { data: { market_cap: 100, market_cap_provenance: provenance } } });
+    mockScreener.mockReturnValue({ data: { data: [{ market_cap: 200, market_cap_provenance: { ...provenance, value: 200, source: 'screener' } }] }, refetch: jest.fn() });
     render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
-    const cell = within(screen.getByText('Mkt Cap').parentElement!);
-    expect(cell.getByText('59.00B')).toBeInTheDocument();
-    expect(cell.getByText('Profile')).toBeInTheDocument();
+    expect(within(screen.getByText('Mkt Cap').parentElement!).getByText('Conflict')).toBeInTheDocument();
+    expect(screen.getByText(/Certified market-cap values, dates, or share bases disagree/)).toBeInTheDocument();
   });
 });
 
@@ -296,5 +292,44 @@ describe('TickerInfoWidget freshness contract', () => {
     // become the source date.
     expect(provenance.updatedAt).toBeFalsy();
     expect(provenance.fetchedAt).toBe(QUOTE_RECEIPT);
+  });
+
+  test('keeps cached and stale health when refetch advances receipt time or fails with retained data', () => {
+    const onDataChange = jest.fn();
+    const quote = {
+      symbol: 'FPT', price: 57300, price_unit: 'VND',
+      updatedAt: QUOTE_OBSERVED_AT, cached: true, stale: true,
+    };
+    let snapshot = {
+      data: quote, isLoading: false, isFetching: false,
+      refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT, error: undefined as Error | undefined,
+    };
+    let notify: () => void = () => {};
+    mockStockQuote.mockImplementation(() => useSyncExternalStore(
+      (listener) => { notify = listener; return () => {}; },
+      () => snapshot,
+    ));
+    render(<TickerInfoWidget id="ticker-1" symbol="FPT" onDataChange={onDataChange} />);
+    const initial = onDataChange.mock.calls.at(-1)[0].__widgetRuntime.provenance;
+    expect(deriveWidgetHealth(initial)).toMatchObject({ status: 'stale', label: 'Stale' });
+    expect(deriveWidgetHealth(initial).detail).toContain('cached snapshot');
+
+    act(() => {
+      snapshot = { ...snapshot, dataUpdatedAt: QUOTE_RECEIPT + 60_000 };
+      notify();
+    });
+    const refreshed = onDataChange.mock.calls.at(-1)[0].__widgetRuntime.provenance;
+    expect(refreshed.updatedAt).toBe(QUOTE_OBSERVED_AT);
+    expect(refreshed.fetchedAt).toBe(QUOTE_RECEIPT + 60_000);
+    expect(deriveWidgetHealth(refreshed).status).toBe('stale');
+
+    act(() => {
+      snapshot = { ...snapshot, data: { ...quote, cached: false, stale: false }, error: new Error('Quote refetch unavailable') };
+      notify();
+    });
+    const fallback = onDataChange.mock.calls.at(-1)[0].__widgetRuntime.provenance;
+    expect(fallback).toMatchObject({ cached: true, stale: true, updatedAt: QUOTE_OBSERVED_AT });
+    expect(deriveWidgetHealth(fallback).detail).toContain('cached snapshot');
+    expect(screen.getByText('57,300.00')).toBeInTheDocument();
   });
 });

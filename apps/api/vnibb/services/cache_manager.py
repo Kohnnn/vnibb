@@ -7,26 +7,35 @@ falls back to stale cache when API calls fail.
 """
 
 import logging
+import math
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Generic, List, Optional, TypeVar
 
-from sqlalchemy import Float, and_, case, func, or_, select
+from sqlalchemy import Float, and_, case, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.cache_constants import DB_CACHE_TTLS
 from vnibb.core.database import async_session_factory
+from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
+from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.core.price_units import normalize_screener_record
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
-from vnibb.services.screener_metadata import screener_metadata_updates
+from vnibb.services.market_session import expected_market_session, session_coverage
+from vnibb.services.screener_metadata import reconcile_snapshot_cap, screener_metadata_updates
 
 logger = logging.getLogger(__name__)
 
+_QUALIFIED_RETAINED_PRICE_SOURCES = frozenset({"vietcap_vnd", "vnstock_vnd"} | {
+    f"{prefix}:{provider}"
+    for prefix in ("vnstock_vnd", "vnstock_history", "vnstock_data_history")
+    for provider in ("KBS", "VCI", "TCBS")
+})
 T = TypeVar("T")
 
 def _coerce_date(value: Any) -> Optional[date]:
@@ -42,6 +51,53 @@ def _coerce_date(value: Any) -> Optional[date]:
         return None
 
 
+def snapshot_session_coverage(
+    row: Any, expected_session: date | None, now: datetime,
+) -> str | None:
+    if expected_session is None:
+        return None
+    metrics = row.extended_metrics if isinstance(row.extended_metrics, dict) else {}
+    record = metrics.get("market_session")
+    if not isinstance(record, dict) or record.get("scope") != "vietcap_board":
+        return None
+    coverage = session_coverage(record, row.symbol, expected_session)
+    if coverage is None:
+        return None
+    try:
+        observed_at = datetime.fromisoformat(record["observed_at"].replace("Z", "+00:00"))
+        current_utc = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
+        if observed_at.tzinfo is None or observed_at > current_utc:
+            return None
+        if row.trade_date is not None and row.trade_date > expected_session:
+            return None
+        if coverage != "traded":
+            if row.volume != 0:
+                return None
+            if row.price is None:
+                return coverage if row.trade_date is None else None
+            if (
+                row.trade_date is None or row.trade_date >= expected_session
+                or not math.isfinite(row.price) or row.price <= 0
+                or metrics.get("price_unit") != "VND"
+                or metrics.get("price_source") not in _QUALIFIED_RETAINED_PRICE_SOURCES
+            ):
+                return None
+            return coverage
+        match = record["raw"]["matchPrice"]
+        if (
+            row.trade_date != expected_session
+            or metrics.get("price_unit") != "VND"
+            or metrics.get("price_source") != "vietcap_vnd"
+            or row.price is None or not math.isfinite(row.price) or row.price <= 0
+            or row.price != match["matchPrice"]
+            or row.volume != match["accumulatedVolume"]
+        ):
+            return None
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    return coverage
+
+
 
 @dataclass
 class CacheResult(Generic[T]):
@@ -51,6 +107,8 @@ class CacheResult(Generic[T]):
     is_stale: bool
     cached_at: Optional[datetime]
     hit: bool
+    freshness_basis: str | None = None
+    market_session_counts: dict[str, int] | None = None
 
     @property
     def is_fresh(self) -> bool:
@@ -178,10 +236,14 @@ class CacheManager:
             # writer never created whenever the host runs ahead of UTC.
             now = datetime.utcnow()
             today = now.date()
+            expected_session = expected_market_session(now=now.replace(tzinfo=UTC))
+            receipt_session_declared = False
+            receipt_session_date = None
 
             # Source labels vary across scheduled writers. Symbol reads prefer
             # their requested label; Universe reads must include every symbol.
             async def _resolve():
+                nonlocal receipt_session_declared, receipt_session_date
                 if symbol:
                     conditions = [ScreenerSnapshot.symbol == symbol.upper()]
                     if source:
@@ -189,12 +251,8 @@ class CacheManager:
                     latest_date_query = select(func.max(ScreenerSnapshot.snapshot_date)).where(
                         *conditions
                     )
-                    if not allow_stale:
-                        latest_date_query = latest_date_query.where(
-                            ScreenerSnapshot.snapshot_date == today
-                        )
                     latest_date = (await session.execute(latest_date_query)).scalar()
-                    if latest_date is None:
+                    if latest_date is None or latest_date > today:
                         return None, None
                     if (today - latest_date).days > self.MAX_STALE_DAYS:
                         return "stale", None
@@ -205,8 +263,10 @@ class CacheManager:
                     )
                     return "ok", list(rows.scalars().all())
 
-                # Rows alone cannot certify a Universe: a full-run marker must
-                # match the exact set committed for that partition.
+                # A completed partition must certify the current active Universe.
+                active_symbols = set(await session.scalars(
+                    select(Stock.symbol).where(Stock.is_active == 1)
+                ))
                 oldest_day = today - timedelta(days=self.MAX_STALE_DAYS)
                 runs = await session.execute(
                     select(SyncStatus.additional_data)
@@ -217,6 +277,7 @@ class CacheManager:
                         SyncStatus.completed_at >= datetime.combine(
                             oldest_day, datetime.min.time()
                         ),
+                        SyncStatus.completed_at <= now,
                     )
                     .order_by(SyncStatus.completed_at.desc(), SyncStatus.id.desc())
                 )
@@ -231,7 +292,6 @@ class CacheManager:
                     if (
                         snapshot_date is None
                         or snapshot_date > today
-                        or (not allow_stale and snapshot_date != today)
                         or snapshot_date < oldest_day
                         or not isinstance(expected, list)
                         or not expected
@@ -241,11 +301,11 @@ class CacheManager:
                     ):
                         continue
                     expected_symbols = set(expected)
-                    if len(expected_symbols) != len(expected):
+                    if len(expected_symbols) != len(expected) or expected_symbols != active_symbols:
                         continue
-                    candidates.append((snapshot_date, expected, expected_symbols))
+                    candidates.append((snapshot_date, expected, expected_symbols, metadata))
 
-                for snapshot_date, expected, expected_symbols in sorted(
+                for snapshot_date, expected, expected_symbols, metadata in sorted(
                     candidates, key=lambda candidate: candidate[0], reverse=True
                 ):
                     rows = await session.execute(
@@ -255,7 +315,12 @@ class CacheManager:
                         )
                     )
                     snapshots = list(rows.scalars().all())
-                    if {row.symbol for row in snapshots} == expected_symbols:
+                    if (
+                        len(snapshots) == len(expected)
+                        and {row.symbol for row in snapshots} == expected_symbols
+                    ):
+                        receipt_session_declared = "market_session_date" in metadata
+                        receipt_session_date = metadata.get("market_session_date")
                         return "ok", snapshots
 
                 return None, None
@@ -279,18 +344,41 @@ class CacheManager:
                 logger.debug(f"Cache miss for screener data (symbol={symbol}, source={source})")
                 return CacheResult(data=None, is_stale=False, cached_at=None, hit=False)
 
-            # Use the oldest constituent's market date for a Universe. Even if
-            # quotes are current, a prior-day partition is still stale.
-            market_dates = [s.trade_date or s.snapshot_date for s in snapshots]
-            market_date = max(market_dates) if symbol else min(market_dates)
+            has_session_coverage = receipt_session_declared or any(
+                isinstance(row.extended_metrics, dict)
+                and "market_session" in row.extended_metrics
+                for row in snapshots
+            )
+            session_counts = None
+            freshness_basis = "trade_date" if symbol else "verified_universe_oldest_trade_date"
+            if has_session_coverage:
+                freshness_basis = (
+                    "vietcap_board_session" if symbol else "verified_universe_vietcap_board_session"
+                )
+                session_counts = {"qualified": 0, "traded": 0, "no_trade": 0, "suspended": 0}
+                for row in snapshots:
+                    coverage = snapshot_session_coverage(row, expected_session, now)
+                    if coverage is not None:
+                        session_counts["qualified"] += 1
+                        session_counts[coverage] += 1
+                is_stale = session_counts["qualified"] != len(snapshots)
+                if receipt_session_declared and receipt_session_date != expected_session.isoformat():
+                    is_stale = True
+            else:
+                # Legacy receipts retain their actual oldest-quote freshness rule.
+                market_dates = [s.trade_date or s.snapshot_date for s in snapshots]
+                market_date = max(market_dates) if symbol else min(market_dates)
+                is_stale = (today - market_date).days > self.SCREENER_TTL_MINUTES // 1440
+                if not symbol and any(s.snapshot_date != today for s in snapshots):
+                    is_stale = True
             latest_created = max(s.created_at for s in snapshots)
-            is_stale = (today - market_date).days > self.SCREENER_TTL_MINUTES // 1440
-            if not symbol and any(s.snapshot_date != today for s in snapshots):
-                is_stale = True
 
             if is_stale and not allow_stale:
                 logger.debug(f"Cache stale for screener data, age={now - latest_created}")
-                return CacheResult(data=None, is_stale=True, cached_at=latest_created, hit=False)
+                return CacheResult(
+                    data=None, is_stale=True, cached_at=latest_created, hit=False,
+                    freshness_basis=freshness_basis, market_session_counts=session_counts,
+                )
 
             logger.info(
                 f"Cache hit for screener data: {len(snapshots)} records, "
@@ -301,6 +389,8 @@ class CacheManager:
                 is_stale=is_stale,
                 cached_at=latest_created,
                 hit=True,
+                freshness_basis=freshness_basis,
+                market_session_counts=session_counts,
             )
 
         except Exception as e:
@@ -402,12 +492,31 @@ class CacheManager:
                     price_unit=record.get("price_unit") or record.get("priceUnit") or (record.get("extended_metrics") or {}).get("price_unit"),
                     price_source=record.get("price_source") or (record.get("extended_metrics") or {}).get("price_source"),
                 )
-                for key in ("ratio_units", "provider_evidence"):
+                for key in ("ratio_units", "provider_evidence", "market_session"):
                     value = record.get(key, (record.get("extended_metrics") or {}).get(key))
-                    if value is not None:
+                    if value is not None or (key == "market_session" and (
+                        key in record or key in (record.get("extended_metrics") or {})
+                    )):
                         extended_metrics[key] = value
+                share_keys = ("shares_outstanding", "outstanding_shares", "sharesOutstanding", "issue_share")
+                metrics = record.get("extended_metrics") or {}
+                if any(record.get(key) is not None for key in (*share_keys, "shares_outstanding_provenance")):
+                    share_record = record
+                else:
+                    share_record = metrics
+                shares = resolve_screener_shares(share_record, source=f"cache:{source}")
+                if shares["observations"]:
+                    extended_metrics["shares_outstanding_provenance"] = shares
+                cap_fields = ("market_cap", "marketCap", "market_cap_provenance", "shares_outstanding", "outstanding_shares")
+                cap_input = any(record.get(key) is not None for key in cap_fields) or any(
+                    (record.get("extended_metrics") or {}).get(key) is not None for key in cap_fields
+                )
+                cap = resolve_market_cap(record, source=f"cache:{source}") if cap_input else {"value": None, "observations": [], "status": "unavailable"}
+                if cap["observations"] or cap["status"] == "conflict":
+                    extended_metrics["market_cap_provenance"] = cap
                 compact_extended_metrics = {
-                    key: value for key, value in extended_metrics.items() if value is not None
+                    key: value for key, value in extended_metrics.items()
+                    if value is not None or key == "market_session"
                 }
                 if "debt_assets" in (extended_metrics.get("ratio_units") or {}):
                     compact_extended_metrics["debt_to_asset"] = (
@@ -430,7 +539,7 @@ class CacheManager:
                     "industry": record.get("industry_name") or record.get("industryName"),
                     "price": price_value,
                     "volume": record.get("volume"),
-                    "market_cap": record.get("market_cap") or record.get("marketCap"),
+                    "market_cap": cap["value"],
                     "pe": record.get("pe"),
                     "pb": record.get("pb"),
                     "ps": record.get("ps"),
@@ -486,26 +595,25 @@ class CacheManager:
             # the retention sweep, not by an incidental request-path write.
             dialect_name = session.get_bind().dialect.name
             dialect_insert = insert if dialect_name == "postgresql" else sqlite_insert
-            stmt = dialect_insert(ScreenerSnapshot).values(prep_data)
-
-            update_cols = {
-                k: func.coalesce(stmt.excluded[k], ScreenerSnapshot.__table__.c[k])
-                for k in prep_data[0].keys()
-                if k not in ["symbol", "snapshot_date", "source"]
-            }
-            quote_missing = stmt.excluded.price.is_(None)
-            for column in ("trade_date", "volume"):
-                update_cols[column] = case(
-                    (quote_missing, ScreenerSnapshot.__table__.c[column]),
-                    else_=update_cols[column],
+            for values in prep_data:
+                stmt = dialect_insert(ScreenerSnapshot).values(**values)
+                update_cols = {
+                    k: func.coalesce(stmt.excluded[k], ScreenerSnapshot.__table__.c[k])
+                    for k in values
+                    if k not in ["symbol", "snapshot_date", "source"]
+                }
+                quote_missing = stmt.excluded.price.is_(None)
+                for column in ("trade_date", "volume"):
+                    update_cols[column] = case(
+                        (quote_missing, ScreenerSnapshot.__table__.c[column]),
+                        else_=update_cols[column],
+                    )
+                update_cols.update(screener_metadata_updates(stmt, dialect_name, quote_missing))
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["symbol", "snapshot_date"], set_=update_cols
                 )
-            update_cols.update(screener_metadata_updates(stmt, dialect_name, quote_missing))
-
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["symbol", "snapshot_date"], set_=update_cols
-            )
-
-            await session.execute(stmt)
+                result = await session.execute(stmt.returning(*ScreenerSnapshot.__table__.c))
+                await reconcile_snapshot_cap(session, dict(result.mappings().one()), values)
             await session.commit()
 
             logger.info(f"Stored {len(prep_data)} screener records (source={source})")
@@ -626,40 +734,37 @@ class CacheManager:
             )
             listing_date = _parse_optional_date(data.get("listing_date") or data.get("listingDate"))
 
-            def _normalize_share_count(value: Any) -> Optional[float]:
-                if value is None:
-                    return None
+            def _share_count(value: Any) -> Optional[float]:
                 try:
                     numeric = float(value)
                 except (TypeError, ValueError):
                     return None
-                if numeric == 0:
-                    return None
-                if abs(numeric) < 1_000_000:
-                    return numeric * 1_000_000.0
-                return numeric
+                return numeric if math.isfinite(numeric) and numeric > 0 else None
 
-            def _resolve_listed_share_count(
-                listed_value: Any,
-                outstanding_value: Any,
-            ) -> Optional[float]:
-                listed_shares = _normalize_share_count(listed_value)
-                outstanding_shares = _normalize_share_count(outstanding_value)
-                if listed_shares is None:
-                    return outstanding_shares
-                if outstanding_shares is None:
-                    return listed_shares
-
-                gap_ratio = abs(outstanding_shares - listed_shares) / max(outstanding_shares, 1.0)
-                if listed_shares < outstanding_shares and gap_ratio <= 0.02:
-                    return outstanding_shares
-                return listed_shares
-
-            outstanding_shares = _normalize_share_count(data.get("outstanding_shares"))
-            listed_shares = _resolve_listed_share_count(
-                data.get("listed_shares"),
-                outstanding_shares,
-            )
+            share_count_keys = ("outstanding_shares", "shares_outstanding", "sharesOutstanding")
+            share_metadata_keys = ("shares_unit", "shares_as_of", "shares_source", "share_basis",
+                                   "outstanding_shares_unit", "outstanding_shares_as_of",
+                                   "outstanding_shares_source")
+            share_keys = (*share_count_keys, *share_metadata_keys, "shares_outstanding_provenance")
+            incoming_shares = next((data[key] for key in share_count_keys if data.get(key) is not None), None)
+            outstanding_shares = _share_count(incoming_shares)
+            listed_shares = _share_count(data.get("listed_shares"))
+            incoming_share_evidence = resolve_screener_shares(data, source="cache:profile")
+            share_conflict = incoming_share_evidence["status"] == "conflict"
+            cap = resolve_market_cap(data, source="cache:profile")
+            raw_data = dict(data)
+            share_update = outstanding_shares is not None or share_conflict
+            for key in share_keys:
+                raw_data.pop(key, None)
+            if share_update and not share_conflict:
+                raw_data["outstanding_shares"] = incoming_shares
+                raw_data.update({key: data[key] for key in share_metadata_keys if data.get(key) is not None})
+                if isinstance(data.get("shares_outstanding_provenance"), dict):
+                    raw_data["shares_outstanding_provenance"] = data["shares_outstanding_provenance"]
+            raw_data.pop("market_cap", None)
+            raw_data.pop("marketCap", None)
+            raw_data.pop("market_cap_provenance", None)
+            # Capitalization is reconciled after the upsert acquires the row lock.
 
             values = {
                 "symbol": symbol,
@@ -673,12 +778,12 @@ class CacheManager:
                 "listing_date": listing_date,
                 "website": data.get("website") or None,
                 "business_description": data.get("description") or None,
-                "outstanding_shares": outstanding_shares,
+                "outstanding_shares": None if share_conflict else outstanding_shares,
                 "listed_shares": listed_shares,
                 "address": data.get("address") or None,
                 "phone": data.get("phone") or None,
                 "email": data.get("email") or None,
-                "raw_data": data or None,
+                "raw_data": {},
                 "created_at": now,
                 "updated_at": now,
             }
@@ -689,9 +794,46 @@ class CacheManager:
                 for key in values
                 if key not in {"symbol", "created_at"}
             }
-            await session.execute(
+            updates["raw_data"] = Company.raw_data
+            result = await session.execute(
                 stmt.on_conflict_do_update(index_elements=["symbol"], set_=updates)
+                .returning(Company.raw_data, Company.outstanding_shares)
             )
+            stored_raw_value, stored_shares = result.one()
+            stored_raw = dict(stored_raw_value or {})
+            old_cap = resolve_market_cap(stored_raw, source="postgres:company_profile")
+            if share_conflict:
+                old_shares = resolve_screener_shares(stored_raw, source="postgres:company_profile")
+                observations = old_shares["observations"] + [
+                    item for item in incoming_share_evidence["observations"]
+                    if item not in old_shares["observations"]
+                ]
+                if stored_shares is not None and not any(item.get("value") == stored_shares for item in observations):
+                    observations.append({"value": stored_shares, "unit": None, "as_of": None,
+                                         "source": None, "share_basis": None,
+                                         "record_source": "postgres:company_profile_column"})
+                raw_data["shares_outstanding_provenance"] = {
+                    **incoming_share_evidence, "status": "conflict", "value": None,
+                    "observations": observations,
+                }
+                raw_data["shares_outstanding_provenance"]["previous_record"] = {
+                    key: stored_raw[key] for key in share_keys if key in stored_raw
+                }
+                raw_data["shares_outstanding_provenance"]["incoming_record"] = {
+                    key: data[key] for key in (*share_count_keys, *share_metadata_keys) if data.get(key) is not None
+                }
+            if share_update:
+                for key in share_keys:
+                    stored_raw.pop(key, None)
+            stored_raw.update({key: value for key, value in raw_data.items() if value is not None})
+            if cap["observations"] or cap["status"] == "conflict":
+                reconciled = reconcile_market_caps(old_cap, cap)
+                stored_raw.pop("marketCap", None)
+                stored_raw.update(market_cap=reconciled["value"], market_cap_provenance=reconciled)
+            updates = {"raw_data": stored_raw}
+            if share_conflict:
+                updates["outstanding_shares"] = None
+            await session.execute(update(Company).where(Company.symbol == symbol).values(**updates))
 
             await session.commit()
             logger.info(f"Stored profile in cache: {symbol}")

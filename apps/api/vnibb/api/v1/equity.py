@@ -25,8 +25,10 @@ from vnibb.core.cache import build_cache_key, cached, redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_factory, get_db
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
 from vnibb.core.ratio_units import admitted_ratio_value
+from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.company import Company, Shareholder
 
@@ -2200,11 +2202,7 @@ def _pick_optional_text(*values: Any) -> Optional[str]:
 
 def _normalize_share_count(value: Any) -> Optional[float]:
     numeric = _coerce_optional_float(value)
-    if numeric in (None, 0):
-        return None
-    if abs(numeric) < 1_000_000:
-        return numeric * 1_000_000.0
-    return numeric
+    return numeric if numeric is not None and math.isfinite(numeric) and numeric > 0 else None
 
 
 def _pick_optional_share_count(*values: Any) -> Optional[float]:
@@ -2215,21 +2213,6 @@ def _pick_optional_share_count(*values: Any) -> Optional[float]:
     return None
 
 
-def _resolve_listed_share_count(
-    *listed_values: Any,
-    outstanding_shares: Any = None,
-) -> Optional[float]:
-    listed_shares = _pick_optional_share_count(*listed_values)
-    outstanding_value = _normalize_share_count(outstanding_shares)
-    if listed_shares is None:
-        return outstanding_value
-    if outstanding_value is None:
-        return listed_shares
-
-    gap_ratio = abs(outstanding_value - listed_shares) / max(outstanding_value, 1.0)
-    if listed_shares < outstanding_value and gap_ratio <= 0.02:
-        return outstanding_value
-    return listed_shares
 
 
 
@@ -2845,70 +2828,55 @@ def _build_dividend_row_from_payload(
 async def _resolve_profile_market_cap(
     db: AsyncSession,
     symbol: str,
-    outstanding_shares: Optional[float],
-    fallback_market_cap: Optional[float] = None,
-) -> Optional[float]:
-    shares_value = _coerce_optional_float(outstanding_shares)
-    latest_price = await _get_latest_price(db, symbol)
-
-    if latest_price in (None, 0):
-        try:
-            quote_data, _ = await VnstockStockQuoteFetcher.fetch(
-                symbol=symbol,
-                source=settings.vnstock_source,
-            )
-            if quote_data.price_unit == "VND":
-                latest_price = _pick_optional_float(latest_price, quote_data.price, quote_data.prev_close)
-        except BaseException as exc:
-            if _is_control_flow_exception(exc):
-                raise
-            logger.warning(
-                "Quote fallback failed while resolving market cap for %s: %s", symbol, exc
-            )
-
-    latest_price_vnd = _coerce_optional_float(latest_price)
-
-    if shares_value not in (None, 0) and latest_price_vnd not in (None, 0):
-        multiplier = 1.0 if shares_value >= 1_000_000 else 1_000_000.0
-        return shares_value * multiplier * latest_price_vnd
-
-    direct_market_cap = _coerce_optional_float(fallback_market_cap)
-    if direct_market_cap not in (None, 0):
-        return direct_market_cap
-
-    latest_snapshot_market_cap = (
+    profile_record: Optional[dict[str, Any]] = None,
+    profile_source: str = "postgres:company_profile",
+    incoming_record: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    profile_record = profile_record or {}
+    share_evidence = resolve_screener_shares(profile_record, source=profile_source)
+    shares_record = profile_record if share_evidence["status"] != "conflict" else {}
+    today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+    price_row = (
         await db.execute(
-            select(ScreenerSnapshot.market_cap)
+            select(StockPrice)
             .where(
-                ScreenerSnapshot.symbol == symbol,
-                ScreenerSnapshot.market_cap.is_not(None),
+                StockPrice.symbol == symbol, StockPrice.interval == "1D",
+                StockPrice.time <= today,
+            )
+            .order_by(StockPrice.time.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    price_record = persisted_price_record(price_row) if price_row is not None else {}
+    if price_record and not price_record.get("price_source"):
+        price_record["price_source"] = price_record.get("source")
+    snapshot = (
+        await db.execute(
+            select(ScreenerSnapshot)
+            .where(
+                ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.snapshot_date <= today,
+                (ScreenerSnapshot.trade_date.is_(None) | (ScreenerSnapshot.trade_date <= today)),
             )
             .order_by(ScreenerSnapshot.snapshot_date.desc())
             .limit(1)
         )
     ).scalar_one_or_none()
-    latest_snapshot_market_cap_value = _coerce_optional_float(latest_snapshot_market_cap)
-    if latest_snapshot_market_cap_value not in (None, 0):
-        return latest_snapshot_market_cap_value
-
-    try:
-        screener_rows = await VnstockScreenerFetcher.fetch(
-            StockScreenerParams(symbol=symbol, limit=1, source=settings.vnstock_source)
+    profile_cap = resolve_market_cap(
+        profile_record, source=profile_source,
+        price_record=price_record, shares_record=shares_record,
+    )
+    if incoming_record is not None:
+        incoming_shares = resolve_screener_shares(incoming_record, source="vnstock:profile")
+        incoming_cap = resolve_market_cap(
+            incoming_record, source="vnstock:profile", price_record=price_record,
+            shares_record=incoming_record if incoming_shares["status"] != "conflict" else {},
         )
-        if screener_rows:
-            screener_market_cap = _coerce_optional_float(
-                getattr(screener_rows[0], "market_cap", None)
-            )
-            if screener_market_cap not in (None, 0):
-                return screener_market_cap
-    except BaseException as exc:
-        if _is_control_flow_exception(exc):
-            raise
-        logger.warning(
-            "Screener fallback failed while resolving market cap for %s: %s", symbol, exc
-        )
-
-    return None
+        profile_cap = reconcile_market_caps(profile_cap, incoming_cap)
+    return reconcile_market_caps(
+        profile_cap,
+        resolve_market_cap(snapshot, source="postgres:screener_snapshot")
+        if snapshot is not None else resolve_market_cap({}, source="postgres:screener_snapshot"),
+    )
 
 
 async def _get_outstanding_shares(db: AsyncSession, symbol: str) -> Optional[float]:
@@ -2925,12 +2893,9 @@ async def _get_outstanding_shares(db: AsyncSession, symbol: str) -> Optional[flo
     raw_payload = company_row[2] if isinstance(company_row[2], dict) else {}
     return _pick_optional_share_count(
         company_row[0],
-        company_row[1],
         raw_payload.get("outstanding_shares"),
-        raw_payload.get("listed_shares"),
         raw_payload.get("issue_share"),
         raw_payload.get("financial_ratio_issue_share"),
-        raw_payload.get("listed_volume"),
     )
 
 
@@ -3175,29 +3140,6 @@ def _extract_year_quarter(period_value: str) -> tuple[Optional[int], Optional[in
 
 
 
-def _build_ratio_eps_lookups(
-    ratio_rows: List[FinancialRatioData],
-) -> tuple[dict[tuple[int, int], float], dict[int, float]]:
-    eps_by_year_quarter: dict[tuple[int, int], float] = {}
-    eps_by_year: dict[int, float] = {}
-
-    for item in ratio_rows:
-        eps_value = _coerce_optional_float(item.eps)
-        if eps_value is None:
-            continue
-
-        year, quarter = _extract_year_quarter(item.period or "")
-        if year is None:
-            continue
-
-        if year not in eps_by_year:
-            eps_by_year[year] = eps_value
-
-        if quarter is not None and (year, quarter) not in eps_by_year_quarter:
-            eps_by_year_quarter[(year, quarter)] = eps_value
-
-    return eps_by_year_quarter, eps_by_year
-
 
 async def _enrich_income_eps_from_ratios(
     symbol: str,
@@ -3208,14 +3150,17 @@ async def _enrich_income_eps_from_ratios(
     if not rows:
         return rows
 
-    missing_eps_rows = [row for row in rows if row.eps is None]
-    if not missing_eps_rows:
+    if not any(row.eps is None for row in rows):
         return rows
 
     period_upper = (period or "").upper()
+    if period_upper not in {"YEAR", "FY", "QUARTER", "Q", "Q1", "Q2", "Q3", "Q4"}:
+        return rows
     normalized_period = "year" if period_upper in {"YEAR", "FY"} else "quarter"
 
-    ratio_data: List[FinancialRatioData] = []
+    from vnibb.services.vietcap_financials import decode_vietcap_financial_record
+
+    db_rows = []
 
     try:
         stmt = (
@@ -3227,34 +3172,43 @@ async def _enrich_income_eps_from_ratios(
             .order_by(desc(FinancialRatio.fiscal_year), desc(FinancialRatio.fiscal_quarter))
         )
         db_rows = (await db.execute(stmt)).scalars().all()
-        ratio_data = [_to_ratio_data(item) for item in db_rows]
     except Exception as db_error:
         logger.warning("EPS enrichment ratio DB lookup failed for %s: %s", symbol, db_error)
 
-    if not ratio_data:
-        return rows
-
-    eps_by_year_quarter, eps_by_year = _build_ratio_eps_lookups(ratio_data)
-    if not eps_by_year_quarter and not eps_by_year:
-        return rows
-
-    for row in rows:
-        if row.eps is not None:
+    for ratio in db_rows:
+        raw = ratio.raw_data if isinstance(ratio.raw_data, dict) else {}
+        if ratio.source != "vietcap" or raw.get("source") != "vietcap" or raw.get("dataset") != "finance.ratio" or raw.get("symbol") != symbol:
             continue
-
-        year, quarter = _extract_year_quarter(row.period)
-        if year is None:
+        decoded = decode_vietcap_financial_record(raw)
+        basis = decoded["fiscalBasis"]
+        value = decoded["values"].get("eps")
+        if (value is None or ratio.eps != value or basis.get("reason")
+                or basis.get("periodType") != normalized_period
+                or ratio.fiscal_year != basis.get("year")
+                or ratio.fiscal_quarter != basis.get("quarter")
+                or normalize_statement_period(ratio.period) != basis.get("period")):
             continue
-
-        eps_value: Optional[float] = None
-        if quarter is not None:
-            eps_value = eps_by_year_quarter.get((year, quarter))
-        if eps_value is None:
-            eps_value = eps_by_year.get(year)
-
-        if eps_value is not None:
-            row.eps = eps_value
-
+        for row in rows:
+            if (row.eps is not None or row.unavailable_reason
+                    or row.unit_metadata.get("eps", {}).get("unavailable_reason")
+                    or row.symbol.upper() != symbol or row.statement_type != "income"
+                    or normalize_statement_period(row.period) != basis.get("period")
+                    or row.fiscal_year not in (None, basis.get("year"))
+                    or row.fiscal_quarter not in (None, basis.get("quarter"))
+                    or str(row.consolidation_basis).lower() != basis.get("consolidation")
+                    or (normalized_period == "quarter" and
+                        (row.flow_basis not in {"single_quarter", "cumulative_ytd"}
+                         or row.flow_basis != basis.get("quarterBasis")))):
+                continue
+            evidence = {**decoded["fieldEvidence"]["eps"], "source": ratio.source,
+                        "dataset": raw["dataset"], "recordKey": raw.get("recordKey")}
+            candidate = row.model_copy(deep=True)
+            candidate.eps = value
+            candidate.unit_metadata["eps"] = evidence
+            candidate = admit_statement_rows([candidate], period)[0]
+            if candidate.eps is not None:
+                row.eps = candidate.eps
+                row.unit_metadata["eps"] = candidate.unit_metadata["eps"]
     return rows
 
 
@@ -4389,28 +4343,33 @@ async def get_profile(
 
                 outstanding_shares = _pick_optional_share_count(
                     company.outstanding_shares,
-                    company.listed_shares,
                     raw_profile.get("outstanding_shares"),
-                    raw_profile.get("listed_shares"),
                     raw_profile.get("issue_share"),
                     raw_profile.get("financial_ratio_issue_share"),
-                    raw_profile.get("listed_volume"),
                     await _get_outstanding_shares(db, symbol_upper),
                 )
-                listed_shares = _resolve_listed_share_count(
+                recorded_shares = [raw_profile[key] for key in (
+                    "outstanding_shares", "shares_outstanding", "sharesOutstanding"
+                ) if raw_profile.get(key) is not None]
+                share_evidence = resolve_screener_shares(raw_profile, source="postgres:company_profile")
+                share_metadata_matches = bool(recorded_shares) and all(
+                    _coerce_optional_float(value) == outstanding_shares for value in recorded_shares
+                ) and share_evidence["status"] == "available"
+                if not share_metadata_matches and share_evidence["status"] == "available":
+                    share_evidence = {**share_evidence, "status": "unavailable", "value": None,
+                                      "unit": None, "as_of": None, "source": None, "share_basis": None}
+                listed_shares = _pick_optional_share_count(
                     company.listed_shares,
-                    company.outstanding_shares,
                     raw_profile.get("listed_shares"),
                     raw_profile.get("listed_volume"),
-                    raw_profile.get("issue_share"),
-                    raw_profile.get("financial_ratio_issue_share"),
-                    outstanding_shares=outstanding_shares,
                 )
-                market_cap = await _resolve_profile_market_cap(
+                market_cap_provenance = await _resolve_profile_market_cap(
                     db=db,
                     symbol=symbol_upper,
-                    outstanding_shares=outstanding_shares,
-                    fallback_market_cap=raw_profile.get("market_cap"),
+                    profile_record={
+                        **raw_profile,
+                        "outstanding_shares": raw_profile.get("outstanding_shares", company.outstanding_shares),
+                    },
                 )
 
                 website = company.website
@@ -4451,7 +4410,13 @@ async def get_profile(
                         description=description,
                         outstanding_shares=outstanding_shares,
                         listed_shares=listed_shares,
-                        market_cap=market_cap,
+                        shares_unit=raw_profile.get("shares_unit") if share_metadata_matches else None,
+                        shares_as_of=raw_profile.get("shares_as_of") if share_metadata_matches else None,
+                        shares_source=raw_profile.get("shares_source") if share_metadata_matches else None,
+                        share_basis=raw_profile.get("share_basis") if share_metadata_matches else None,
+                        shares_outstanding_provenance=share_evidence,
+                        market_cap=market_cap_provenance["value"],
+                        market_cap_provenance=market_cap_provenance,
                         no_employees=no_employees,
                         address=address,
                         phone=phone,
@@ -4468,11 +4433,8 @@ async def get_profile(
             stock_result = await db.execute(select(Stock).where(Stock.symbol == symbol_upper))
             stock = stock_result.scalar_one_or_none()
             if stock:
-                market_cap = await _resolve_profile_market_cap(
-                    db=db,
-                    symbol=symbol_upper,
-                    outstanding_shares=None,
-                    fallback_market_cap=None,
+                market_cap_provenance = await _resolve_profile_market_cap(
+                    db=db, symbol=symbol_upper,
                 )
                 fallback_profile = EquityProfileData(
                     symbol=stock.symbol,
@@ -4482,7 +4444,8 @@ async def get_profile(
                     industry=stock.industry,
                     sector=stock.sector or stock.industry,
                     listing_date=_coerce_iso_date(stock.listing_date),
-                    market_cap=market_cap,
+                    market_cap=market_cap_provenance["value"],
+                    market_cap_provenance=market_cap_provenance,
                 )
 
         if fallback_profile and not refresh:
@@ -4505,6 +4468,7 @@ async def get_profile(
         )
         profile_data = data[0] if data else None
         if profile_data:
+            cap_source_record = profile_data.model_dump(mode="json")
             raw_profile = {}
             if hasattr(profile_data, "model_extra") and isinstance(profile_data.model_extra, dict):
                 raw_profile = profile_data.model_extra
@@ -4578,35 +4542,64 @@ async def get_profile(
 
             profile_data.outstanding_shares = _pick_optional_share_count(
                 profile_data.outstanding_shares,
-                profile_data.listed_shares,
                 raw_profile.get("outstanding_shares"),
-                raw_profile.get("listed_shares"),
                 raw_profile.get("issue_share"),
                 raw_profile.get("financial_ratio_issue_share"),
-                raw_profile.get("listed_volume"),
                 await _get_outstanding_shares(db, symbol_upper),
             )
-            profile_data.listed_shares = _resolve_listed_share_count(
+            if cap_source_record.get("outstanding_shares") is None:
+                profile_data.shares_unit = None
+                profile_data.shares_as_of = None
+                profile_data.shares_source = None
+                profile_data.share_basis = None
+            profile_data.listed_shares = _pick_optional_share_count(
                 profile_data.listed_shares,
                 raw_profile.get("listed_shares"),
                 raw_profile.get("listed_volume"),
-                raw_profile.get("issue_share"),
-                raw_profile.get("financial_ratio_issue_share"),
-                outstanding_shares=profile_data.outstanding_shares,
             )
 
-            profile_data.market_cap = await _resolve_profile_market_cap(
-                db=db,
-                symbol=symbol_upper,
-                outstanding_shares=profile_data.outstanding_shares,
-                fallback_market_cap=profile_data.market_cap,
-            )
+            if (cap_source_record.get("shares_outstanding_provenance") or {}).get("status") == "conflict":
+                profile_data.outstanding_shares = None
+                profile_data.shares_unit = None
+                profile_data.shares_as_of = None
+                profile_data.shares_source = None
+                profile_data.share_basis = None
 
-            stored = await cache_manager.store_profile_data(
-                symbol_upper, profile_data.model_dump(mode="json")
-            )
+            store_record = profile_data.model_dump(mode="json")
+            for key in ("outstanding_shares", "shares_outstanding", "sharesOutstanding",
+                        "shares_unit", "shares_as_of", "shares_source", "share_basis",
+                        "outstanding_shares_unit", "outstanding_shares_as_of",
+                        "outstanding_shares_source", "market_cap", "marketCap",
+                        "market_cap_provenance"):
+                store_record.pop(key, None)
+                if key in cap_source_record:
+                    store_record[key] = cap_source_record[key]
+            stored = await cache_manager.store_profile_data(symbol_upper, store_record)
             if not stored:
                 logger.warning("Profile cache write failed (symbol=%s)", symbol_upper)
+            stored_row = (await db.execute(
+                select(Company.outstanding_shares, Company.raw_data).where(Company.symbol == symbol_upper)
+            )).first()
+            stored_raw = stored_row[1] if stored_row and isinstance(stored_row[1], dict) else {}
+            if stored and stored_row:
+                stored_evidence = resolve_screener_shares(stored_raw, source="postgres:company_profile")
+                profile_data.shares_outstanding_provenance = stored_evidence
+                if stored_evidence["status"] == "conflict":
+                    profile_data.outstanding_shares = None
+                    profile_data.shares_unit = profile_data.shares_as_of = None
+                    profile_data.shares_source = profile_data.share_basis = None
+                elif stored_evidence["status"] == "available" and stored_row[0] == stored_evidence["value"]:
+                    profile_data.outstanding_shares = stored_row[0]
+                    profile_data.shares_unit = stored_evidence["unit"]
+                    profile_data.shares_as_of = stored_evidence["as_of"]
+                    profile_data.shares_source = stored_evidence["source"]
+                    profile_data.share_basis = stored_evidence["share_basis"]
+            market_cap_provenance = await _resolve_profile_market_cap(
+                db=db, symbol=symbol_upper, profile_record=stored_raw,
+                incoming_record=None if stored else cap_source_record,
+            )
+            profile_data.market_cap = market_cap_provenance["value"]
+            profile_data.market_cap_provenance = market_cap_provenance
             return StandardResponse(
                 data=profile_data,
                 meta=MetaData(
@@ -6728,7 +6721,7 @@ async def get_metrics_history(
 @router.get(
     "/{symbol}/income-statement", response_model=StandardResponse[List[FinancialStatementData]]
 )
-@cached(ttl=86400, key_prefix="income_statement_v4")
+@cached(ttl=86400, key_prefix="income_statement_v5_eps_admitted")
 async def get_income_statement(
     symbol: str,
     period: Literal[
@@ -6777,6 +6770,11 @@ async def get_income_statement(
             rows=data,
             db=db,
         )
+        for row, admitted in zip(data, admit_statement_rows(data, period), strict=True):
+            row.eps, row.eps_diluted = admitted.eps, admitted.eps_diluted
+            for field in ("eps", "eps_diluted"):
+                if field in admitted.unit_metadata:
+                    row.unit_metadata[field] = admitted.unit_metadata[field]
         return StandardResponse(
             data=data,
             meta=MetaData(count=len(data), last_data_date=last_data_date),
@@ -6806,6 +6804,11 @@ async def get_income_statement(
                 rows=fallback_data,
                 db=db,
             )
+            for row, admitted in zip(fallback_data, admit_statement_rows(fallback_data, period), strict=True):
+                row.eps, row.eps_diluted = admitted.eps, admitted.eps_diluted
+                for field in ("eps", "eps_diluted"):
+                    if field in admitted.unit_metadata:
+                        row.unit_metadata[field] = admitted.unit_metadata[field]
             if fallback_data:
                 return StandardResponse(
                     data=fallback_data,

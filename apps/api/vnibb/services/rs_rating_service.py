@@ -497,6 +497,11 @@ class RSRatingService:
                             "price_unit": normalized_price["price_unit"],
                             "price_source": normalized_price.get("price_source"),
                         }
+                        cap_provenance = snapshot.extended_metrics.get("market_cap_provenance")
+                        if isinstance(cap_provenance, dict):
+                            snapshot.extended_metrics["market_cap_provenance"] = {
+                                **cap_provenance, "carried_forward": True,
+                            }
                         snapshot.volume = seed.volume
                         snapshot.market_cap = seed.market_cap
                         snapshot.pe = seed.pe

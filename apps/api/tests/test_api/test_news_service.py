@@ -2,6 +2,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
+from xml.etree import ElementTree as ET
 
 import pytest
 
@@ -88,6 +89,64 @@ def test_vnm_football_does_not_match_peer_name_substrings():
     )
     assert row["relevance_score"] == 0
     assert row["matched_symbols"] == []
+
+
+def test_news_crawler_parses_rss_leaf_text_and_namespaced_fields():
+    item = ET.fromstring("""<item xmlns:content="http://purl.org/rss/1.0/modules/content/"
+        xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <title>RSS headline</title><link>https://example.com/rss</link>
+        <description>RSS summary</description><content:encoded>RSS body</content:encoded>
+        <category>Markets</category><pubDate>Mon, 26 Oct 2026 09:00:00 GMT</pubDate>
+        <dc:date>2026-10-25T10:00:00Z</dc:date>
+    </item>""")
+
+    assert NewsCrawlerService._parse_rss_item(item, "RSS source") == {
+        "title": "RSS headline", "summary": "RSS summary", "content": "RSS body",
+        "source": "RSS source", "url": "https://example.com/rss", "category": "Markets",
+        "pub_date": "Mon, 26 Oct 2026 09:00:00 GMT",
+    }
+
+
+def test_news_crawler_parses_atom_leaf_text_and_link():
+    item = ET.fromstring("""<entry xmlns="http://www.w3.org/2005/Atom">
+        <title>Atom headline</title><link href="https://example.com/atom"/>
+        <summary>Atom summary</summary><content>Atom body</content>
+        <category>Economy</category><published>2026-10-24T12:30:00Z</published>
+        <updated>2026-10-26T14:00:00Z</updated>
+    </entry>""")
+
+    assert NewsCrawlerService._parse_rss_item(item, "Atom source") == {
+        "title": "Atom headline", "summary": "Atom summary", "content": "Atom body",
+        "source": "Atom source", "url": "https://example.com/atom", "category": "Economy",
+        "pub_date": "2026-10-24T12:30:00Z",
+    }
+
+
+def test_news_crawler_parses_dublin_core_date_when_rss_date_absent():
+    item = ET.fromstring("""<item xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <title>Other headline</title><link>https://example.com/other</link>
+        <dc:date>2026-10-23T08:15:00Z</dc:date>
+    </item>""")
+
+    article = NewsCrawlerService._parse_rss_item(item, "RSS source")
+    assert article is not None
+    assert article["pub_date"] == "2026-10-23T08:15:00Z"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("category", ["Markets", "x" * 50, "y" * 60, None])
+async def test_news_crawler_bounds_rss_category_for_storage(category):
+    item = ET.fromstring("<item><title>Headline</title><link>https://example.com/article</link></item>")
+    if category is not None:
+        ET.SubElement(item, "category").text = category
+    article = NewsCrawlerService._parse_rss_item(item, "RSS source")
+    assert article is not None
+    session = SimpleNamespace(execute=AsyncMock())
+
+    await NewsCrawlerService()._store_article(session, article)
+
+    statement = session.execute.await_args.args[0]
+    assert statement.compile().params["category"] == (category[:50] if category is not None else None)
 
 
 def test_news_crawler_parses_vnexpress_vietnamese_gmt7_date():

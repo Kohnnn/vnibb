@@ -192,13 +192,25 @@ describe('TickerProfileWidget', () => {
     expect(screen.queryByText(/VND 126/)).not.toBeInTheDocument()
   })
 
-  test('renders the screener magnitude once it declares a VND market-cap unit', () => {
+  test('renders only a certified VND market cap', () => {
+    const provenance = {
+      status: 'available' as const, value: 126_024_313_333.5, reason: null, source: 'certified',
+      unit: 'VND' as const, currency: 'VND' as const, as_of: '2026-10-26', share_basis: 'outstanding' as const,
+      observations: [{ value: 126_024_313_333.5, source: 'certified', unit: 'VND', currency: 'VND', as_of: '2026-10-26', shares: 1, shares_unit: 'shares', shares_as_of: '2026-10-26', share_basis: 'outstanding', price: null, price_unit: null, price_as_of: null, calculation: null }],
+    }
     mockProfile.mockReturnValue(queryResult<EquityProfileResponse>({ symbol: 'VNM', data: { symbol: 'VNM', company_name: 'Vietnam Dairy Products' } }))
-    mockScreener.mockReturnValue(queryResult<ScreenerResponse>({
-      data: [{ ticker: 'VNM', market_cap: 126_024_313_333.5, market_cap_unit: 'VND' }],
-    }))
+    mockScreener.mockReturnValue(queryResult<ScreenerResponse>({ data: [{ ticker: 'VNM', market_cap: provenance.value, market_cap_provenance: provenance }] }))
     render(<TickerProfileWidget symbol="VNM" />)
-
     expect(marketCapCard()).toHaveTextContent('VND 126.02B')
+    expect(marketCapCard()).toHaveTextContent('source certified')
+  })
+
+  test('does not trust the legacy unit marker or a conflicting cap', () => {
+    mockProfile.mockReturnValue(queryResult<EquityProfileResponse>({ symbol: 'VCI', data: { symbol: 'VCI', market_cap: 22065241363750 } }))
+    mockScreener.mockReturnValue(queryResult<ScreenerResponse>({ data: [{ ticker: 'VCI', market_cap: 22410910941.25, market_cap_unit: 'VND' }] }))
+    render(<TickerProfileWidget symbol="VCI" />)
+    expect(marketCapCard()).toHaveTextContent('Not disclosed')
+    expect(marketCapCard()).toHaveTextContent('22410910941.25')
+    expect(marketCapCard()).not.toHaveTextContent('VND 22.41B')
   })
 })

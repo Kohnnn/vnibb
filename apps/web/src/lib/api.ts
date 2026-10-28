@@ -3,7 +3,8 @@
 import { env } from './env';
 import { isSupabaseConfigured, supabase } from './supabase';
 import type { AISettings } from './aiSettings';
-import type { MatrixSelection } from '@/types/matrix';
+import type { MatrixHandoff, MatrixSelection } from '@/types/matrix';
+import type { MarketCapProvenance } from '@/lib/marketCap';
 
 const LOCALHOST_OR_LOOPBACK_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i
 const SSLIP_HOST_RE = /^[0-9]+(?:[.-][0-9]+){3}\.sslip\.io$/i
@@ -206,9 +207,9 @@ export async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}):
 
     try {
         const response = await fetch(url, {
+            ...fetchOptions,
             headers,
             signal: requestSignal,
-            ...fetchOptions,
             body: requestBody,
         });
 
@@ -1705,6 +1706,8 @@ export interface SectorStockData {
     change?: number;
     change_pct?: number;
     volume?: number;
+    market_cap?: number | null;
+    market_cap_provenance?: MarketCapProvenance | null;
 }
 
 export interface SectorTopMoversData {
@@ -1797,12 +1800,13 @@ export interface SectorBoardStock {
     change_pct?: number | null;
     volume?: number | null;
     market_cap?: number | null;
+    market_cap_provenance?: MarketCapProvenance | null;
     color: string;
 }
 
 export interface SectorBoardSector {
     name: string;
-    change_pct: number;
+    change_pct: number | null;
     stocks: SectorBoardStock[];
 }
 
@@ -3523,11 +3527,13 @@ export async function openCopilotChatStream(
     if (token) {
         headers.set('Authorization', `Bearer ${token}`);
     }
+    const { matrix_selection: selection, ...payload } = buildCopilotRequestPayload(request);
+    const handoff: MatrixHandoff | undefined = selection ? { matrix_run_ref: selection.snapshot_id, candidate_ids: selection.result_ids } : undefined;
 
     return fetch(`${API_BASE_URL}/copilot/chat/stream`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(buildCopilotRequestPayload(request)),
+        body: JSON.stringify({ ...payload, ...handoff }),
         signal,
     });
 }
@@ -3746,7 +3752,9 @@ export interface HeatmapStock {
     name: string;
     sector: string;
     industry?: string | null;
-    market_cap: number;
+    market_cap: number | null;
+    market_cap_provenance: MarketCapProvenance | null;
+    size_value: number;
     price: number;
     change: number;
     change_pct: number;
@@ -3756,8 +3764,10 @@ export interface HeatmapStock {
 export interface SectorGroup {
     sector: string;
     stocks: HeatmapStock[];
-    total_market_cap: number;
-    avg_change_pct: number;
+    total_market_cap: number | null;
+    total_size_value: number;
+    cap_count: number;
+    avg_change_pct: number | null;
     stock_count: number;
 }
 
@@ -3852,6 +3862,8 @@ export interface IndustryBubblePoint {
     x: number;
     y: number;
     size: number;
+    market_cap?: number | null;
+    market_cap_provenance?: MarketCapProvenance | null;
     price?: number | null;
     change_pct?: number | null;
     color: string;

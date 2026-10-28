@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useProfile, useDividends, useInsiderDeals, useScreenerData } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { marketCapExplanation, resolveMarketCap } from '@/lib/marketCap';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -63,21 +64,6 @@ function formatMarketCapCompact(value: number | null | undefined): string {
     return `VND ${formatLargeNumber(value, { decimals: 2 })}`
 }
 
-// Market cap counts as money only when its payload declares the denomination.
-// Both sources publish a bare magnitude today, so this withholds instead of
-// guessing VND from size or source order.
-function readDeclaredMarketCap(
-    source: { market_cap?: number | null } | null | undefined
-): number | null {
-    if (!source) return null
-    // The unit is not part of the published profile/screener contract yet, so
-    // read it defensively; it becomes a declared field when the API adds it.
-    const unit = 'market_cap_unit' in source ? source.market_cap_unit : null
-    if (unit !== 'VND') return null
-    return typeof source.market_cap === 'number' && Number.isFinite(source.market_cap)
-        ? source.market_cap
-        : null
-}
 
 export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useProfile(symbol);
@@ -103,6 +89,10 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
 
     const profile = data?.data;
     const screenerRow = screenerData?.data?.[0];
+    const marketCap = useMemo(() => resolveMarketCap(
+        { label: 'Profile', value: profile?.market_cap, provenance: profile?.market_cap_provenance },
+        { label: 'Screener', value: screenerRow?.market_cap, provenance: screenerRow?.market_cap_provenance },
+    ), [profile, screenerRow]);
     const dividends = dividendsData?.data ?? [];
     const insiderDeals = insiderDealsData ?? [];
     const hasData = Boolean(profile);
@@ -130,9 +120,9 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
             lastDataDate: null,
             fetchedAt,
             stale: isFallback,
-            extra: { sections: showCorporateActions ? 3 : 1 },
+            extra: { sections: showCorporateActions ? 3 : 1, marketCap },
         }));
-    }, [fetchedAt, hasData, isFallback, onDataChange, showCorporateActions, symbol]);
+    }, [fetchedAt, hasData, isFallback, marketCap, onDataChange, showCorporateActions, symbol]);
 
     if (timedOut && isLoading && !hasData) {
         return (
@@ -163,13 +153,6 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
     if (!profileData) {
         return <WidgetEmpty message={`No profile data for ${symbol}`} />;
     }
-    // Market cap renders as money only when the payload declares the unit it is
-    // denominated in: both the profile and the screener row publish a bare
-    // number today, so labeling that magnitude "VND" would be a guess from size
-    // alone. The card stays "Not disclosed" until a source publishes a unit.
-    // ponytail: drop the reads' casts once profile/screener publish the unit.
-    const declaredMarketCap =
-        readDeclaredMarketCap(screenerRow) ?? readDeclaredMarketCap(profileData);
     const companyName = cleanText(profileData.company_name) || symbol
     const shortName = cleanText(profileData.short_name)
     const description = cleanText(profileData.description)
@@ -198,7 +181,7 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
         { label: 'Website', value: website ? website.replace(/^https?:\/\//, '') : 'Unavailable', icon: Globe },
         { label: 'Employees', value: employeeCount ? employeeCount.toLocaleString() : 'Unavailable', icon: Users },
         { label: 'Established', value: establishedYear ? `${establishedYear}` : 'Unavailable', icon: Calendar },
-        { label: 'Market Cap', value: formatMarketCapCompact(declaredMarketCap), icon: Building2 },
+        { label: 'Market Cap', value: marketCap.status === 'conflict' ? 'Conflict' : formatMarketCapCompact(marketCap.value), icon: Building2 },
     ] as Array<{ label: string; value: string; icon: typeof Building2 }>
 
     return (
@@ -262,6 +245,12 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                             <div className="truncate text-sm font-medium text-[var(--text-primary)]">
                                 {item.value}
                             </div>
+                            {item.label === 'Market Cap' && (
+                                <details className="mt-1 text-[10px] text-[var(--text-muted)]">
+                                    <summary className="cursor-pointer">Market cap provenance</summary>
+                                    <p>{marketCapExplanation(marketCap)}</p>
+                                </details>
+                            )}
                         </div>
                     )
                 })}

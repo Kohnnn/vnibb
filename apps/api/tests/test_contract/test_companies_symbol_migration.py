@@ -9,7 +9,6 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-
 from vnibb.services.cache_manager import CacheManager
 
 pytestmark = [
@@ -148,7 +147,10 @@ async def test_companies_index_repair_preserves_identity_rows_and_references(dup
                 payload = (await connection.execute(text(
                     "SELECT raw_data, outstanding_shares FROM companies WHERE symbol='VCB'"
                 ))).one()
-                assert payload.raw_data == {"company_name": "New", "outstanding_shares": 0}
+                assert payload.raw_data["company_name"] == "New"
+                assert payload.raw_data["outstanding_shares"] == 0
+                assert payload.raw_data["market_cap"] is None
+                assert payload.raw_data["market_cap_provenance"]["status"] == "unavailable"
                 assert payload.outstanding_shares is None
     finally:
         async with engine.begin() as cleanup:

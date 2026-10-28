@@ -277,6 +277,30 @@ test('ordinary Vietnamese group followers adopt their new group ticker without c
   expect(onSymbolChange).not.toHaveBeenCalled();
 });
 
+test.each(['A', 'B', 'C', 'D'] as const)('selecting a ticker in group %s does not change Global', async (group) => {
+  const user = userEvent.setup();
+  const onSymbolChange = jest.fn();
+  render(<WidgetWrapper id="screener" title="Screener" widgetType="screener" dashboardId="dashboard" tabId="tab" widgetGroup={group} symbol="VCI" showTickerSelector onSymbolChange={onSymbolChange}>
+    <output />
+  </WidgetWrapper>);
+  await user.click(screen.getByTitle('Select widget ticker'));
+  await user.click(screen.getByRole('button', { name: 'Pick VNM' }));
+  expect(mockSetGroupSymbol).toHaveBeenCalledWith(group, 'VNM');
+  expect(onSymbolChange).not.toHaveBeenCalled();
+});
+
+test('selecting a Global ticker broadcasts to Global', async () => {
+  const user = userEvent.setup();
+  const onSymbolChange = jest.fn();
+  render(<WidgetWrapper id="screener" title="Screener" widgetType="screener" dashboardId="dashboard" tabId="tab" widgetGroup="global" symbol="VCI" showTickerSelector onSymbolChange={onSymbolChange}>
+    <output />
+  </WidgetWrapper>);
+  await user.click(screen.getByTitle('Select widget ticker'));
+  await user.click(screen.getByRole('button', { name: 'Pick VNM' }));
+  expect(mockSetGroupSymbol).toHaveBeenCalledWith('global', 'VNM');
+  expect(onSymbolChange).toHaveBeenCalledWith('VNM');
+});
+
 test('changing a detached TradingView chart ticker remains local', async () => {
   mockWidgetType = 'tradingview_chart';
   mockWidgetConfig = { symbol: 'NASDAQ:AAPL', tickerScope: 'override', useLinkedSymbol: false };

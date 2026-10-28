@@ -4,7 +4,7 @@ import { FinancialsWidget } from '@/components/widgets/FinancialsWidget';
 import { FinancialSnapshotWidget } from '@/components/widgets/FinancialSnapshotWidget';
 import { UnitProvider } from '@/contexts/UnitContext';
 import type { UseQueryResult } from '@tanstack/react-query';
-import type { EquityProfileResponse, IncomeStatementResponse, FinancialRatiosResponse } from '@/types/equity';
+import type { BalanceSheetResponse, EquityProfileResponse, IncomeStatementResponse, FinancialRatiosResponse } from '@/types/equity';
 
 jest.mock('@/lib/queries', () => ({
   useIncomeStatement: jest.fn(),
@@ -401,6 +401,25 @@ describe('FinancialsWidget', () => {
     const published = onDataChange.mock.calls.at(-1)?.[0].data.find((row: { section: string }) => row.section === 'Profit & Loss');
     expect(published).toEqual(expect.objectContaining({ revenue: 120_000_000_000, interest_expense: null, financial_expenses: null, payout_ratio: 0.25 }));
     expect(JSON.parse(screen.getByTestId('financial-export').textContent!)).toContainEqual(published);
+  });
+
+  test.each([
+    ['unknown unit', { outstanding_shares: 850.1, shares_as_of: '2025-12-31' }, 850.1, 'Unavailable', null],
+    ['unverified statement count', null, 850.1, 'Unavailable', null],
+    ['different observation date', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2026-12-31' }, null, 'Unavailable', null],
+    ['certified small count', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2025-12-31' }, null, '0.000100', 0.0001],
+  ])('snapshot share row preserves evidence for %s', (_name, profile, directShares, expected, exported) => {
+    const onDataChange = jest.fn();
+    mockUseProfile.mockReturnValue(makeQueryResult({ data: profile }) as unknown as UseQueryResult<EquityProfileResponse, Error>);
+    mockUseBalanceSheet.mockReturnValue(makeQueryResult({ data: [{ period: '2025', currency: 'VND', value_unit: 'VND',
+      consolidation_basis: 'consolidated', total_assets: 100_000_000_000, shares_outstanding: directShares,
+      unit_metadata: { total_assets: { source_unit: 'VND', value_unit: 'VND' } },
+    }] }) as unknown as UseQueryResult<BalanceSheetResponse, Error>);
+    renderWithProviders(<FinancialSnapshotWidget id="snapshot-shares" symbol="FPT" config={{ defaultPeriod: 'FY', periodSyncGroup: null }} onDataChange={onDataChange} />);
+    expect(screen.getByText('Y/E shares out, mn').closest('tr')).toHaveTextContent(expected);
+    const balance = onDataChange.mock.calls.at(-1)?.[0].data.find((row: { section: string }) => row.section === 'Balance Sheet');
+    expect(balance.shares_outstanding).toBe(exported);
+    expect(JSON.parse(screen.getByTestId('financial-export').textContent!)).toContainEqual(balance);
   });
 
   test('excludes conflicting fiscal rows instead of overwriting their values', async () => {

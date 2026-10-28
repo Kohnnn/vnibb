@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.api.v1.screener import _build_screener_meta
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
 from vnibb.providers.vnstock.equity_screener import (
     ScreenerData,
@@ -36,6 +37,23 @@ def test_screener_transform_preserves_provider_trade_date():
     )
 
     assert rows[0].trade_date == date(2026, 9, 21)
+
+
+@pytest.mark.parametrize("field", ["value_traded", "valueTraded", "trading_value"])
+def test_screener_transform_preserves_explicit_traded_value(field):
+    row = VnstockScreenerFetcher.transform_data(
+        StockScreenerParams(symbol="VNM"),
+        [{"ticker": "VNM", "price": 100, "volume": 10, field: 4321}],
+    )[0]
+    assert row.value_traded == 4321
+    assert row.model_dump()["value_traded"] == 4321
+
+
+def test_screener_transform_does_not_infer_traded_value():
+    row = VnstockScreenerFetcher.transform_data(
+        StockScreenerParams(symbol="VNM"), [{"ticker": "VNM", "price": 100, "volume": 10}],
+    )[0]
+    assert row.value_traded is None
 
 
 def test_screener_meta_prefers_market_trade_date_over_write_timestamp():
@@ -163,6 +181,7 @@ async def test_detailed_health_reports_trade_date_basis(
 
     monkeypatch.setattr(health, "datetime", FrozenDateTime)
     trade_date = TODAY - timedelta(days=2)
+    test_db.add(Stock(symbol="VNM", is_active=1))
     test_db.add(
         ScreenerSnapshot(
             symbol="VNM",

@@ -1,24 +1,28 @@
 // Screener data types from backend API
+import type { MarketCapProvenance } from '@/lib/marketCap';
 
 export interface ScreenerData {
     id?: string;
     ticker: string;
     symbol?: string;
     updated_at?: string | null;
+    trade_date?: string | null;
+    market_session?: { session_date: string; status: 'traded' | 'no_trade' | 'suspended'; source: string; scope: 'vietcap_board' } | null;
 
     company_name?: string;
     exchange?: string;
     industry?: string;
-    price?: number;
-    change_1d?: number;
-    volume?: number;
-    market_cap?: number;
-    pe?: number;
-    pb?: number;
-    ps?: number;
-    roe?: number;
-    roa?: number;
-    roic?: number;
+    price?: number | null;
+    change_1d?: number | null;
+    volume?: number | null;
+    market_cap?: number | null;
+    market_cap_provenance?: MarketCapProvenance | null;
+    pe?: number | null;
+    pb?: number | null;
+    ps?: number | null;
+    roe?: number | null;
+    roa?: number | null;
+    roic?: number | null;
     gross_margin?: number;
     operating_margin?: number;
     net_margin?: number;

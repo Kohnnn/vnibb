@@ -488,7 +488,7 @@ async def test_profile_refresh_timeout_reports_explicit_unavailable(client, monk
 
 
 @pytest.mark.asyncio
-async def test_profile_cache_backfills_sector_and_scales_market_cap(client, test_db):
+async def test_profile_cache_backfills_sector_without_guessing_share_or_cap_scale(client, test_db):
     test_db.add(
         Stock(
             id=1,
@@ -533,9 +533,11 @@ async def test_profile_cache_backfills_sector_and_scales_market_cap(client, test
     assert response.status_code == 200
     payload = response.json()
     assert payload["data"]["sector"] == "Chung khoan"
-    assert payload["data"]["outstanding_shares"] == pytest.approx(850_100_000.0)
-    assert payload["data"]["listed_shares"] == pytest.approx(850_100_000.0)
-    assert payload["data"]["market_cap"] == pytest.approx(31_028_650_000_000.0)
+    assert payload["data"]["outstanding_shares"] == pytest.approx(850.1)
+    assert payload["data"]["listed_shares"] == pytest.approx(850.1)
+    assert payload["data"]["market_cap"] is None
+    assert payload["data"]["market_cap_provenance"]["status"] == "unavailable"
+    assert payload["data"]["market_cap_provenance"]["observations"][0]["shares"] == 850.1
     assert payload["meta"]["last_data_date"].startswith("2026-03-14T09:30:00")
 
 
@@ -969,7 +971,7 @@ async def test_income_statement_smoke_returns_data(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_income_statement_enriches_missing_eps_from_ratio_db(client, test_db, monkeypatch):
+async def test_income_statement_withholds_unsourced_eps_from_ratio_db(client, test_db, monkeypatch):
     test_db.add(
         FinancialRatio(
             id=1,
@@ -1006,7 +1008,129 @@ async def test_income_statement_enriches_missing_eps_from_ratio_db(client, test_
     assert response.status_code == 200
     payload = response.json()
     assert payload["meta"]["count"] == 1
-    assert payload["data"][0]["eps"] == 4200.0
+    assert payload["data"][0]["eps"] is None
+
+
+def _iq_eps_ratio(year, *, value=4200, consolidation="consolidated", unit="VND/share"):
+    raw = {
+        "symbol": "VCI", "dataset": "finance.ratio", "datasetVariant": "finance.ratio.year",
+        "source": "vietcap", "comTypeCode": "CT", "recordKey": f"VCI:finance.ratio.year:{year}",
+        "raw": {"year": year, "quarter": 5, "ratioType": "RATIO_YEAR",
+                "reported_eps": value, "consolidationBasis": consolidation},
+        "descriptors": [{"field": "reported_eps", "parent": None,
+                         "fullTitleEn": "EPS basic (VND)", "unit": unit}],
+        "descriptorEvidence": {"symbol": "VCI", "section": "RATIO", "comTypeCode": "CT",
+            "source": "vietcap", "endpoint": "/v1/company/VCI/financial-statement/metrics",
+            "receivedAt": "2026-10-13T01:00:00Z"},
+    }
+    return FinancialRatio(id=year, symbol="VCI", period=str(year), period_type="year", fiscal_year=year,
+                          eps=value, source="vietcap", raw_data=raw)
+
+
+@pytest.mark.asyncio
+async def test_income_statement_vci_does_not_admit_ratio_eps_without_statement_basis(client, test_db, monkeypatch):
+    test_db.add_all([_iq_eps_ratio(year) for year in range(2022, 2026)])
+    await test_db.commit()
+
+    async def statements(**kwargs):
+        return [FinancialStatementData(symbol="VCI", period=str(year), fiscal_year=year,
+                    statement_type="income", source="VCI") for year in range(2022, 2026)]
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", statements)
+    monkeypatch.setattr("vnibb.api.v1.equity._load_financial_statement_fallback", AsyncMock(return_value=[]))
+    monkeypatch.setattr("vnibb.api.v1.equity._cross_fill_income_statement_rows",
+                        AsyncMock(side_effect=lambda **kwargs: kwargs["rows"]))
+    response = await client.get("/api/v1/equity/VCI/income-statement?period=year&limit=4")
+    assert response.status_code == 200
+    assert [row["period"] for row in response.json()["data"]] == ["2022", "2023", "2024", "2025"]
+    assert all(row["eps"] is None for row in response.json()["data"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change, expected", [
+    ("valid", 4200), ("zero", 0), ("bad_unit", None), ("bad_basis", None),
+    ("bad_period", None), ("bad_value", None), ("rejected", None),
+])
+async def test_ratio_eps_fill_requires_matching_sourced_basis(test_db, change, expected):
+    from vnibb.api.v1.equity import _enrich_income_eps_from_ratios
+
+    ratio = _iq_eps_ratio(2025, value=0 if change == "zero" else 4200,
+                          unit="USD/share" if change == "bad_unit" else "VND/share",
+                          consolidation="separate" if change == "bad_basis" else "consolidated")
+    if change == "bad_period":
+        ratio.raw_data["raw"]["year"] = 2024
+    if change == "bad_value":
+        ratio.eps = 4300
+    test_db.add(ratio)
+    await test_db.commit()
+    row = FinancialStatementData(symbol="VCI", period="2025", fiscal_year=2025,
+        statement_type="income", source="VCI", currency="VND", value_unit="VND",
+        consolidation_basis="consolidated", flow_basis="annual",
+        unit_metadata={"eps": {"unavailable_reason": "unit_unverified"}} if change == "rejected" else {})
+    result = await _enrich_income_eps_from_ratios("VCI", "year", [row], test_db)
+    assert result[0].eps == expected
+    if expected is not None:
+        evidence = result[0].unit_metadata["eps"]
+        assert evidence["unit"] == "VND/share"
+        assert evidence["source"] == "vietcap"
+        assert evidence["recordKey"] == "VCI:finance.ratio.year:2025"
+        assert evidence["descriptors"][0]["field"] == "reported_eps"
+
+
+@pytest.mark.asyncio
+async def test_quarter_eps_never_falls_back_to_a_different_quarter(test_db):
+    from vnibb.api.v1.equity import _enrich_income_eps_from_ratios
+
+    ratio = _iq_eps_ratio(2025)
+    ratio.period = "Q1-2025"
+    ratio.period_type = "quarter"
+    ratio.fiscal_quarter = 1
+    ratio.raw_data["datasetVariant"] = "finance.ratio.quarter"
+    ratio.raw_data["raw"].update({"quarter": 1, "ratioType": None, "quarterBasis": "single_quarter"})
+    test_db.add(ratio)
+    await test_db.commit()
+    rows = [FinancialStatementData(symbol="VCI", period=period, fiscal_year=2025,
+        fiscal_quarter=quarter, statement_type="income", source="VCI", currency="VND", value_unit="VND",
+        consolidation_basis="consolidated", flow_basis="single_quarter") for period, quarter in (
+            ("Q1-2025", None), ("Q1-2025", 1), ("Q1-2025", 2), ("Q2-2025", 2),
+        )]
+    result = await _enrich_income_eps_from_ratios("VCI", "quarter", rows, test_db)
+    assert [row.eps for row in result] == [4200, 4200, None, None]
+
+
+@pytest.mark.asyncio
+async def test_income_statement_withholds_unsourced_statement_eps(client, monkeypatch):
+    async def statements(**kwargs):
+        return [FinancialStatementData(symbol="VCI", period="2025", fiscal_year=2025,
+            statement_type="income", source="VCI", eps=4200, eps_diluted=4000)]
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", statements)
+    monkeypatch.setattr("vnibb.api.v1.equity._load_financial_statement_fallback", AsyncMock(return_value=[]))
+    monkeypatch.setattr("vnibb.api.v1.equity._cross_fill_income_statement_rows",
+                        AsyncMock(side_effect=lambda **kwargs: kwargs["rows"]))
+    response = await client.get("/api/v1/equity/VCI/income-statement?period=FY&limit=1")
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["eps"] is None and row["eps_diluted"] is None
+    assert row["unit_metadata"]["eps"]["unavailable_reason"] == "unverified_statement_currency_or_unit"
+
+
+@pytest.mark.asyncio
+async def test_income_statement_preserves_certified_statement_eps(client, monkeypatch):
+    async def statements(**kwargs):
+        return [FinancialStatementData(symbol="VNM", period="2025", fiscal_year=2025,
+            statement_type="income", source="VCI", currency="VND", value_unit="VND",
+            consolidation_basis="consolidated", flow_basis="annual", eps=0,
+            unit_metadata={"eps": {"source_unit": "VND/share", "value_unit": "VND/share"}})]
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", statements)
+    monkeypatch.setattr("vnibb.api.v1.equity._load_financial_statement_fallback", AsyncMock(return_value=[]))
+    monkeypatch.setattr("vnibb.api.v1.equity._cross_fill_income_statement_rows",
+                        AsyncMock(side_effect=lambda **kwargs: kwargs["rows"]))
+    response = await client.get("/api/v1/equity/VNM/income-statement?period=FY&limit=1")
+    assert response.status_code == 200
+    assert response.json()["data"][0]["eps"] == 0
+    assert response.json()["data"][0]["unit_metadata"]["eps"]["source_unit"] == "VND/share"
 
 
 @pytest.mark.asyncio
@@ -1096,7 +1220,7 @@ async def test_shareholders_falls_back_to_db_on_timeout_with_unverified_ownershi
 
 
 @pytest.mark.asyncio
-async def test_profile_endpoint_prefers_scaled_listed_shares_from_cached_company_row(
+async def test_profile_endpoint_preserves_distinct_unscaled_share_counts(
     client, test_db
 ):
     test_db.add(
@@ -1125,7 +1249,9 @@ async def test_profile_endpoint_prefers_scaled_listed_shares_from_cached_company
     response = await client.get("/api/v1/equity/VCI/profile")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["data"]["listed_shares"] == pytest.approx(850_100_000.0)
+    assert payload["data"]["listed_shares"] == pytest.approx(850.0)
+    assert payload["data"]["outstanding_shares"] == pytest.approx(850.1)
+    assert payload["data"]["market_cap"] is None
 
 
 @pytest.mark.asyncio
@@ -1976,7 +2102,7 @@ async def test_market_indices_slow_provider_settles_for_concurrent_users(client,
     from vnibb.api.v1 import market
 
     release = asyncio.Event()
-    finished = asyncio.Event()
+    provider_task = None
     calls = 0
     observed_at = "2026-03-20T00:00:00"
 
@@ -1984,14 +2110,13 @@ async def test_market_indices_slow_provider_settles_for_concurrent_users(client,
         return [{"index_name": "VNINDEX", "current_value": 1340.0, "time": observed_at}]
 
     async def slow_provider(_params):
-        nonlocal calls
+        nonlocal calls, provider_task
+        provider_task = asyncio.current_task()
         calls += 1
-        try:
-            await release.wait()
-            return []
-        finally:
-            finished.set()
+        await release.wait()
+        return []
 
+    monkeypatch.setattr(market, "_market_provider_jobs", {})
     monkeypatch.setattr(market, "MARKET_PROVIDER_TIMEOUT_SECONDS", 0.02)
     monkeypatch.setattr(market, "_load_latest_market_indices_from_db", stored_rows)
     monkeypatch.setattr(market, "_fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[]))
@@ -2012,7 +2137,8 @@ async def test_market_indices_slow_provider_settles_for_concurrent_users(client,
         assert calls == 1
     finally:
         release.set()
-        await finished.wait()
+        if provider_task is not None:
+            await provider_task
         await asyncio.sleep(0)
 
 
@@ -2367,6 +2493,15 @@ def test_market_overview_rejects_compact_index_payloads():
     assert rows[0].current_value == pytest.approx(1853.6)
 
 
+def _certified_market_cap(value):
+    return {
+        "market_cap": value, "market_cap_source": "issuer:cap", "market_cap_unit": "VND",
+        "market_cap_currency": "VND", "market_cap_as_of": "2026-10-23",
+        "outstanding_shares": 100, "shares_unit": "shares", "share_basis": "outstanding",
+        "shares_as_of": "2026-10-23", "shares_source": "issuer:shares",
+    }
+
+
 @pytest.mark.asyncio
 async def test_industry_bubble_returns_sector_points(client, test_db, monkeypatch):
     async def fake_get_screener_data(*args, **kwargs):
@@ -2379,7 +2514,7 @@ async def test_industry_bubble_returns_sector_points(client, test_db, monkeypatc
                     "industry_name": "Chung khoan",
                     "price": 35.7,
                     "volume": 1_000_000,
-                    "market_cap": 30_000_000_000.0,
+                    **_certified_market_cap(30_000_000_000.0),
                     "pe": 18.0,
                     "pb": 1.5,
                     "price_change_1d_pct": 1.5,
@@ -2392,7 +2527,7 @@ async def test_industry_bubble_returns_sector_points(client, test_db, monkeypatc
                     "industry_name": "Chung khoan",
                     "price": 28.5,
                     "volume": 900_000,
-                    "market_cap": 25_000_000_000.0,
+                    **_certified_market_cap(25_000_000_000.0),
                     "pe": 16.0,
                     "pb": 1.3,
                     "price_change_1d_pct": 0.8,
@@ -2405,7 +2540,7 @@ async def test_industry_bubble_returns_sector_points(client, test_db, monkeypatc
                     "industry_name": "Cong nghe va thong tin",
                     "price": 120.0,
                     "volume": 800_000,
-                    "market_cap": 100_000_000_000.0,
+                    **_certified_market_cap(100_000_000_000.0),
                     "pe": 20.0,
                     "pb": 4.0,
                     "price_change_1d_pct": 1.0,
@@ -2507,7 +2642,7 @@ async def test_industry_bubble_average_includes_omitted_sector_peer(client, monk
             "industry_name": "Chung khoan",
             "price": 10.0,
             "volume": 1000,
-            "market_cap": float(index),
+            **_certified_market_cap(float(index)),
             "pb": float(index),
             "pe": float(index * 10),
         }
@@ -2550,8 +2685,8 @@ async def test_industry_bubble_average_includes_omitted_sector_peer(client, monk
 @pytest.mark.asyncio
 async def test_industry_bubble_excludes_non_finite_metrics(client, monkeypatch):
     rows = [
-        {"symbol": "VCI", "industry_name": "Chung khoan", "market_cap": 100.0, "pb": 1.0, "pe": 10.0},
-        {"symbol": "SSI", "industry_name": "Chung khoan", "market_cap": 200.0, "pb": 2.0, "pe": 20.0},
+        {"symbol": "VCI", "industry_name": "Chung khoan", **_certified_market_cap(100.0), "pb": 1.0, "pe": 10.0},
+        {"symbol": "SSI", "industry_name": "Chung khoan", **_certified_market_cap(200.0), "pb": 2.0, "pe": 20.0},
         {"symbol": "HCM", "industry_name": "Chung khoan", "market_cap": float("inf"), "pb": float("nan"), "pe": float("inf")},
     ]
 
@@ -2690,7 +2825,7 @@ async def test_sector_board_aggregate_includes_omitted_constituent(client, monke
             "industry_name": "Chung khoan",
             "price": 10.0,
             "volume": float(index),
-            "market_cap": float(index),
+            **_certified_market_cap(float(index)),
             "price_change_1d_pct": change_pct,
         }
         for index, (symbol, change_pct) in enumerate(

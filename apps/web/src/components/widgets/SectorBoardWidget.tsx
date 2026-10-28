@@ -69,12 +69,11 @@ function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardW
     () => Object.entries(marketSummary).slice(0, 4),
     [marketSummary]
   );
-  const strongestSector = useMemo(() => {
-    return sectors.length ? [...sectors].sort((left, right) => right.change_pct - left.change_pct)[0] : null;
-  }, [sectors]);
-  const weakestSector = useMemo(() => {
-    return sectors.length ? [...sectors].sort((left, right) => left.change_pct - right.change_pct)[0] : null;
-  }, [sectors]);
+  const rankedSectors = useMemo(() => sectors
+    .filter((sector): sector is typeof sector & { change_pct: number } => typeof sector.change_pct === 'number' && Number.isFinite(sector.change_pct))
+    .sort((left, right) => right.change_pct - left.change_pct), [sectors]);
+  const strongestSector = rankedSectors[0];
+  const weakestSector = rankedSectors[rankedSectors.length - 1];
 
   useEffect(() => {
     onDataChange?.(
@@ -119,8 +118,8 @@ function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardW
               >
                 <div className="text-[9px] uppercase tracking-[0.16em] text-[var(--text-muted)]">{key}</div>
                 <div className="text-xs font-semibold text-[var(--text-primary)]">{formatNumber(value?.value ?? null, { decimals: 2 })}</div>
-                <div className={cn('text-[10px] font-semibold', (value?.change_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
-                  {formatNumber(value?.change_pct ?? null, { decimals: 2 })}%
+                <div className={cn('text-[10px] font-semibold', value?.change_pct == null || !Number.isFinite(value.change_pct) ? 'text-[var(--text-muted)]' : value.change_pct >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
+                  {value?.change_pct == null || !Number.isFinite(value.change_pct) ? 'Unavailable' : `${formatNumber(value.change_pct, { decimals: 2 })}%`}
                 </div>
               </div>
             ))}
@@ -129,7 +128,7 @@ function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardW
           {hasData && (
             <div className="mb-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
               <span className="font-semibold text-[var(--text-primary)]">Leadership:</span>{' '}
-              strongest {strongestSector?.name || '--'} ({formatNumber(strongestSector?.change_pct ?? null, { decimals: 2 })}%) · weakest {weakestSector?.name || '--'} ({formatNumber(weakestSector?.change_pct ?? null, { decimals: 2 })}%)
+              strongest {strongestSector ? `${strongestSector.name} (${formatNumber(strongestSector.change_pct, { decimals: 2 })}%)` : 'Unavailable'} · weakest {weakestSector ? `${weakestSector.name} (${formatNumber(weakestSector.change_pct, { decimals: 2 })}%)` : 'Unavailable'}
             </div>
           )}
 
@@ -195,8 +194,8 @@ function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardW
                     <div className="break-words whitespace-normal text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
                       {sector.name}
                     </div>
-                    <div className={cn('text-xs font-semibold', sector.change_pct >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
-                      {sector.change_pct >= 0 ? '+' : ''}{formatNumber(sector.change_pct, { decimals: 2 })}%
+                    <div className={cn('text-xs font-semibold', sector.change_pct == null || !Number.isFinite(sector.change_pct) ? 'text-[var(--text-muted)]' : sector.change_pct >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
+                      {sector.change_pct == null || !Number.isFinite(sector.change_pct) ? 'Unavailable' : `${sector.change_pct >= 0 ? '+' : ''}${formatNumber(sector.change_pct, { decimals: 2 })}%`}
                     </div>
                   </div>
                     <div className="divide-y divide-[var(--border-subtle)]">
@@ -215,9 +214,8 @@ function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardW
                           </div>
                         </div>
                         <div className="min-w-[64px] text-right">
-                            <div className={cn('break-words whitespace-normal text-xs font-semibold tabular-nums', colorClass(stock.color))}>
-                              {stock.change_pct != null && stock.change_pct > 0 ? '+' : ''}
-                              {formatNumber(stock.change_pct ?? null, { decimals: 2 })}%
+                            <div className={cn('break-words whitespace-normal text-xs font-semibold tabular-nums', stock.change_pct == null || !Number.isFinite(stock.change_pct) ? 'text-[var(--text-muted)]' : colorClass(stock.color))}>
+                              {stock.change_pct == null || !Number.isFinite(stock.change_pct) ? 'Unavailable' : `${stock.change_pct > 0 ? '+' : ''}${formatNumber(stock.change_pct, { decimals: 2 })}%`}
                             </div>
                             <div className="text-[10px] font-mono text-[var(--text-secondary)]">
                               {formatPriceValueForUnit(stock.price ?? null, unitConfig, { decimals: 2 })}
