@@ -5,6 +5,9 @@
 > every "Open Item" here is moot. The `--symbols-group` convenience it asked
 > for exists where it mattered (`scripts/build_fundamental_screener.py`).
 > Kept only for the history of why the KBS floor was abandoned.
+> The sponsored backfill commands and KBS fallback below are historical only; the
+> sponsored script has been removed and neither path is an authorized workflow.
+> Current source-use and production recovery gates are in `database-readiness-plan.md`.
 >
 > Update 2026-06-11: For full-universe + deeper-history backfill, prefer the
 > Vietcap pipeline (`VIETCAP_DATA_SOURCE.md`, `apps/api/scripts/vietcap/`).
