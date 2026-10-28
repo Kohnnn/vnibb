@@ -26,6 +26,13 @@ from sqlalchemy import select
 from vnibb.core.auth import User, require_active_user
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, check_database_connection
+from vnibb.core.financial_sources import (
+    ADMITTED_FINANCIAL_SOURCES,
+    ISSUER_SOURCE,
+    PRIMARY_FINANCIAL_SOURCES,
+    SECONDARY_FINANCIAL_SOURCES,
+    issuer_evidence_admitted,
+)
 from vnibb.core.logging_config import setup_logging
 from vnibb.core.price_units import normalize_price_record, persisted_price_record
 from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS, admitted_ratio_value
@@ -37,7 +44,7 @@ from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
-from vnibb.providers.vnstock.financials import FinancialStatementData, admitted_interest_expense
+from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.services.ai_context_service import AIContextService
 from vnibb.services.financial_service import admit_statement_rows
 from vnibb.services.matrix_service import require_matrix_export_rights, resolve_matrix_selection
@@ -1170,8 +1177,8 @@ async def query_database_collection_data(
     )
     financial_collection = spec.collection in {*STATEMENT_COLLECTIONS.values(), "financial_ratios"}
     if financial_collection:
-        queries.insert(0, _query_equal("source", ["vietcap", "VCI"]))
-        applied_filters["admitted_sources"] = ["vietcap", "VCI"]
+        queries.insert(0, _query_equal("source", list(ADMITTED_FINANCIAL_SOURCES)))
+        applied_filters["admitted_sources"] = list(ADMITTED_FINANCIAL_SOURCES)
 
     rows = await list_collection_documents_paginated(
         spec.collection,
@@ -1212,11 +1219,17 @@ async def _get_latest_symbol_document(
             _query_limit(1),
         ]
     )
-    for source_values in (["vietcap"], ["VCI"]):
+    for source_values in (
+        list(PRIMARY_FINANCIAL_SOURCES),
+        list(SECONDARY_FINANCIAL_SOURCES),
+        [ISSUER_SOURCE],
+    ):
         source_queries = [_query_equal("source", source_values), *queries]
         rows = await list_collection_documents(collection_id, queries=source_queries)
-        if rows:
-            return rows[0]
+        for row in rows:
+            if source_values == [ISSUER_SOURCE] and not issuer_evidence_admitted(row.get("raw_data")):
+                continue
+            return row
     return None
 
 

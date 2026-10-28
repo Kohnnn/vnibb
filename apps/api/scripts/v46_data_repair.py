@@ -549,61 +549,11 @@ async def _backfill_ev_sales(batch_size: int) -> int:
 
 
 async def _backfill_income_eps_from_ratios(batch_size: int) -> int:
-    async with async_session_maker() as session:
-        ratio_rows = (
-            await session.execute(
-                select(
-                    FinancialRatio.symbol,
-                    FinancialRatio.period,
-                    FinancialRatio.fiscal_year,
-                    FinancialRatio.fiscal_quarter,
-                    FinancialRatio.eps,
-                ).where(FinancialRatio.eps.is_not(None))
-            )
-        ).all()
-
-        eps_by_year_quarter: dict[tuple[str, int, int], float] = {}
-        eps_by_year: dict[tuple[str, int], float] = {}
-        for symbol, period, fiscal_year, fiscal_quarter, eps in ratio_rows:
-            eps_value = _to_float(eps)
-            if eps_value is None:
-                continue
-            year, quarter = _extract_year_quarter(period, fiscal_year, fiscal_quarter)
-            if year is None:
-                continue
-            if (symbol, year) not in eps_by_year:
-                eps_by_year[(symbol, year)] = eps_value
-            if quarter is not None and (symbol, year, quarter) not in eps_by_year_quarter:
-                eps_by_year_quarter[(symbol, year, quarter)] = eps_value
-
-        income_rows = (
-            (await session.execute(select(IncomeStatement).where(IncomeStatement.eps.is_(None))))
-            .scalars()
-            .all()
-        )
-
-        updated = 0
-        for index, row in enumerate(income_rows, start=1):
-            year, quarter = _extract_year_quarter(row.period, row.fiscal_year, row.fiscal_quarter)
-            if year is None:
-                continue
-
-            eps_value = None
-            if quarter is not None:
-                eps_value = eps_by_year_quarter.get((row.symbol, year, quarter))
-            if eps_value is None:
-                eps_value = eps_by_year.get((row.symbol, year))
-            if eps_value is None:
-                continue
-
-            row.eps = eps_value
-            updated += 1
-
-            if index % batch_size == 0:
-                await session.commit()
-
-        await session.commit()
-        return updated
+    # ponytail: EPS backfill fenced until it routes through admit_statement_rows with
+    # exact fiscal/source/basis evidence and lineage. The removed path filled blank EPS
+    # without lineage and could borrow an unrelated quarter's ratio.
+    del batch_size
+    return 0
 
 
 async def _backfill_industry(batch_size: int) -> dict[str, int]:
