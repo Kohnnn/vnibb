@@ -1266,8 +1266,7 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
         extended_metrics=metrics,
     )
     market_session, returns_withheld = _snapshot_session_projection(row, metrics)
-    if "market_cap_provenance" not in payload and isinstance(metrics.get("market_cap_provenance"), dict):
-        payload = {**payload, "market_cap_provenance": metrics["market_cap_provenance"]}
+    returns_withheld = returns_withheld or bool(payload.get("_session_returns_withheld"))
     market_cap = resolve_market_cap(payload, source=str(payload.get("source") or "market:screener"))
 
     return {
