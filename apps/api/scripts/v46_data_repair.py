@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import re
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -549,11 +550,8 @@ async def _backfill_ev_sales(batch_size: int) -> int:
 
 
 async def _backfill_income_eps_from_ratios(batch_size: int) -> int:
-    # ponytail: EPS backfill fenced until it routes through admit_statement_rows with
-    # exact fiscal/source/basis evidence and lineage. The removed path filled blank EPS
-    # without lineage and could borrow an unrelated quarter's ratio.
-    del batch_size
-    return 0
+    # ponytail: enable only with exact fiscal/source/basis admission and safe persistence.
+    raise RuntimeError("EPS backfill is disabled: financial lineage cannot be preserved")
 
 
 async def _backfill_industry(batch_size: int) -> dict[str, int]:
@@ -826,6 +824,13 @@ async def _backfill_market_cap(batch_size: int) -> int:
 async def main() -> int:
     args = parse_args()
 
+    if not args.audit_only and args.target in {"all", "eps"}:
+        try:
+            await _backfill_income_eps_from_ratios(args.batch_size)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+
     before = await _collect_metrics()
     operations: dict[str, Any] = {}
 
@@ -833,10 +838,6 @@ async def main() -> int:
         run_all = args.target == "all"
         if run_all or args.target == "ev-sales":
             operations["ev_sales_rows_updated"] = await _backfill_ev_sales(args.batch_size)
-        if run_all or args.target == "eps":
-            operations["income_eps_rows_updated"] = await _backfill_income_eps_from_ratios(
-                args.batch_size
-            )
         if run_all or args.target == "industry":
             operations.update(await _backfill_industry(args.batch_size))
         if run_all or args.target == "market-cap":

@@ -28,10 +28,8 @@ from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, check_database_connection
 from vnibb.core.financial_sources import (
     ADMITTED_FINANCIAL_SOURCES,
-    ISSUER_SOURCE,
     PRIMARY_FINANCIAL_SOURCES,
     SECONDARY_FINANCIAL_SOURCES,
-    issuer_evidence_admitted,
 )
 from vnibb.core.logging_config import setup_logging
 from vnibb.core.price_units import normalize_price_record, persisted_price_record
@@ -1222,14 +1220,11 @@ async def _get_latest_symbol_document(
     for source_values in (
         list(PRIMARY_FINANCIAL_SOURCES),
         list(SECONDARY_FINANCIAL_SOURCES),
-        [ISSUER_SOURCE],
     ):
         source_queries = [_query_equal("source", source_values), *queries]
         rows = await list_collection_documents(collection_id, queries=source_queries)
-        for row in rows:
-            if source_values == [ISSUER_SOURCE] and not issuer_evidence_admitted(row.get("raw_data")):
-                continue
-            return row
+        if rows:
+            return rows[0]
     return None
 
 

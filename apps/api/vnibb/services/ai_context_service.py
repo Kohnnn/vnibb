@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
@@ -925,7 +925,7 @@ class AIContextService:
             ratio_row = (
                 await session.execute(
                     select(FinancialRatio)
-                    .where(FinancialRatio.symbol == symbol)
+                    .where(FinancialRatio.symbol == symbol, or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"))
                     .order_by(
                         desc(FinancialRatio.fiscal_year),
                         desc(FinancialRatio.fiscal_quarter),
@@ -937,7 +937,7 @@ class AIContextService:
             income_row = (
                 await session.execute(
                     select(IncomeStatement)
-                    .where(IncomeStatement.symbol == symbol)
+                    .where(IncomeStatement.symbol == symbol, or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"))
                     .order_by(
                         desc(IncomeStatement.fiscal_year),
                         desc(IncomeStatement.fiscal_quarter),
@@ -949,7 +949,7 @@ class AIContextService:
             balance_row = (
                 await session.execute(
                     select(BalanceSheet)
-                    .where(BalanceSheet.symbol == symbol)
+                    .where(BalanceSheet.symbol == symbol, or_(BalanceSheet.source.is_(None), BalanceSheet.source != "issuer_report"))
                     .order_by(
                         desc(BalanceSheet.fiscal_year),
                         desc(BalanceSheet.fiscal_quarter),
@@ -961,7 +961,7 @@ class AIContextService:
             cash_row = (
                 await session.execute(
                     select(CashFlow)
-                    .where(CashFlow.symbol == symbol)
+                    .where(CashFlow.symbol == symbol, or_(CashFlow.source.is_(None), CashFlow.source != "issuer_report"))
                     .order_by(
                         desc(CashFlow.fiscal_year),
                         desc(CashFlow.fiscal_quarter),
