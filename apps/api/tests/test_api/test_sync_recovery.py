@@ -977,6 +977,13 @@ async def test_file_sqlite_acquired_sessions_keep_prices_on_interruption(tmp_pat
             receipt = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).one()
             assert receipt.additional_data["expected_symbols"] == symbols
             assert (await session.get(SyncStatus, sync_id)).additional_data["committed_count"] == 22
+            before_replay = sorted((row.id, row.symbol, row.price, row.extended_metrics, row.created_at) for row in reader.data)
+        assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress=progress, sync_id=sync_id) == 22
+        async with sessions() as session:
+            replay = await CacheManager(db=session).get_screener_data()
+            assert replay.hit
+            assert sorted((row.id, row.symbol, row.price, row.extended_metrics, row.created_at) for row in replay.data) == before_replay
+            assert len((await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()) == 1
     finally:
         await engine.dispose()
 

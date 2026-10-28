@@ -1856,7 +1856,11 @@ class DataPipeline:
 
                     without_fallback = reconcile_market_caps(*cap_results) if cap_fallback else None
                     if cap_fallback or profile_shares["status"] == "conflict":
-                        cap_results.append(resolve_market_cap(previous_row, source="postgres:screener_snapshot"))
+                        # A retained price alone is not a prior capitalization observation.
+                        cap_results.append(resolve_market_cap(
+                            {key: previous_row.get(key) for key in ("market_cap", "market_cap_provenance")},
+                            source="postgres:screener_snapshot",
+                        ))
                     cap = reconcile_market_caps(*cap_results)
                     if cap_fallback and (cap["observations"] or cap["status"] == "conflict"):
                         cap["carried_forward"] = True
