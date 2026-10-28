@@ -13,6 +13,7 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- MCP financial collection, latest and snapshot readers withhold issuer-report rows until field-bound evidence and ownership-safe persistence are implemented; the previous four-key evidence check was insufficient. Legacy V46 EPS and all-target writes now fail explicitly before any database work rather than reporting a successful zero-row repair. Issuer recovery and production cutover remain unverified.
 - Dashboard widget toolbars measure their containing cells to avoid compact-layout oscillation; native ticker-group selections no longer change Global. Listing Browser controls have accessible names, and mobile header tools wrap within the viewport.
 - Market-cap serving preserves observation lineage and withholds unsupported or conflicting values instead of guessing units or share counts. Income EPS enrichment requires matching fiscal and source evidence; RSS parsing retains ordinary leaf-element text and original publication dates. These source changes do not establish production data readiness or source-use rights.
 - Screener performance rows preserve API company names and daily returns without unsafe casts. Missing periods sort last in either direction; actual zero changes stay neutral in chart cards. Historical completeness and AI price windows exclude published 2026 closures as well as configured closures, retaining uncertainty for unverified years (#111, #129).
