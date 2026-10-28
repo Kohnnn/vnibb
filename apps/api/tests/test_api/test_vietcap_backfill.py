@@ -178,7 +178,44 @@ def test_ohlc_rejects_unequal_arrays():
     from vnibb.services.vietcap_ingestion import ohlc_rows_from_gap_chart
 
     with pytest.raises(ValueError, match="Unequal OHLC"):
-        ohlc_rows_from_gap_chart("VNM", {"o": [1], "h": [2], "l": [1], "c": [2], "v": [], "t": [1]})
+        ohlc_rows_from_gap_chart("VNM", {"symbol": "VNM", "o": [1], "h": [2], "l": [1], "c": [2], "v": [], "t": [1]})
+@pytest.mark.parametrize("response", [[{"o": []}], [{"symbol": "MSFT"}], [{"symbol": " vnm "}]])
+def test_get_ohlc_rejects_missing_or_mismatched_source_identity(response):
+    from vnibb.services.vietcap_client import VietcapClient
+
+    client = VietcapClient(min_interval_seconds=0, max_retries=0)
+    client._request = lambda *args, **kwargs: response
+    with pytest.raises(ValueError, match="OHLC source symbol missing or mismatched"):
+        client.get_ohlc("VNM")
+
+
+def test_get_ohlc_returns_matching_raw_source_identity_unchanged():
+    from vnibb.services.vietcap_client import VietcapClient
+
+    raw = {"symbol": "vnm", "o": [], "h": [], "l": [], "c": [], "v": [], "t": []}
+    client = VietcapClient(min_interval_seconds=0, max_retries=0)
+    client._request = lambda *args, **kwargs: [raw]
+    assert client.get_ohlc("VNM") is raw
+@pytest.mark.parametrize("raw_symbol", [None, "", "MSFT", " vnm "])
+def test_ohlc_rejects_missing_or_mismatched_raw_symbol(raw_symbol):
+    from vnibb.services.vietcap_ingestion import ohlc_rows_from_gap_chart
+
+    raw = {"o": [1], "h": [2], "l": [1], "c": [2], "v": [3], "t": [1720000000]}
+    if raw_symbol is not None:
+        raw["symbol"] = raw_symbol
+    with pytest.raises(ValueError, match="OHLC source symbol"):
+        ohlc_rows_from_gap_chart("VNM", raw, instrument_type="STOCK")
+
+
+def test_ohlc_accepts_matching_raw_symbol_without_mutating_payload():
+    from copy import deepcopy
+    from vnibb.services.vietcap_ingestion import ohlc_rows_from_gap_chart
+
+    raw = {"symbol": "VNM", "o": [1], "h": [2], "l": [1], "c": [2], "v": [3], "t": [1720000000]}
+    original = deepcopy(raw)
+    rows = ohlc_rows_from_gap_chart("VNM", raw, instrument_type="STOCK")
+    assert rows[0]["symbol"] == "VNM"
+    assert raw == original
 
 
 def test_listing_writer_keeps_identity_when_metadata_changes():
@@ -303,10 +340,10 @@ def test_sync_fetches_symbol_descriptors_once_and_actual_iq_type():
 def test_ohlc_units_require_actual_instrument_contract():
     from vnibb.services.vietcap_ingestion import ohlc_rows_from_gap_chart
 
-    raw = {"o": [1], "h": [2], "l": [1], "c": [2], "v": [3], "t": [1720000000]}
+    raw = {"symbol": "VNM", "o": [1], "h": [2], "l": [1], "c": [2], "v": [3], "t": [1720000000]}
     assert ohlc_rows_from_gap_chart("VNM", raw, instrument_type="STOCK")[0]["priceUnit"] == "VND"
-    assert ohlc_rows_from_gap_chart("VNINDEX", raw)[0]["priceUnit"] == "index_points"
-    assert ohlc_rows_from_gap_chart("BOND1", raw, instrument_type="BOND")[0]["priceUnit"] == "unknown"
+    assert ohlc_rows_from_gap_chart("VNINDEX", {**raw, "symbol": "VNINDEX"})[0]["priceUnit"] == "index_points"
+    assert ohlc_rows_from_gap_chart("BOND1", {**raw, "symbol": "BOND1"}, instrument_type="BOND")[0]["priceUnit"] == "unknown"
 
 
 def test_statement_writer_retains_success_response_lineage():
@@ -491,7 +528,7 @@ def test_cli_applied_stock_prices_reach_structured_bridge(monkeypatch, capsys, f
 
     class PriceClient(FakeVietcapClient):
         def get_ohlc(self, symbol, *, count_back, to_epoch=None):
-            return {"o": [1], "h": [2], "l": [1], "c": [2], "v": [3], "t": [1720000000]}
+            return {"symbol": symbol, "o": [1], "h": [2], "l": [1], "c": [2], "v": [3], "t": [1720000000]}
 
     captured = []
     order = []
@@ -521,12 +558,94 @@ def test_cli_applied_stock_prices_reach_structured_bridge(monkeypatch, capsys, f
     assert order == ["listing", "prices"]
 
 
+def test_cli_records_invalid_ohlc_source_identity_as_failed(monkeypatch, fake_mongo):
+    from vnibb.services import vietcap_financials, vietcap_ingestion
+    from vnibb.services.vietcap_client import VietcapClient
+
+    class Client(FakeVietcapClient):
+        get_ohlc = VietcapClient.get_ohlc
+
+        def _request(self, *args, **kwargs):
+            return [{"symbol": "MSFT", "o": [1], "h": [2], "l": [1], "c": [2], "v": [3], "t": [1720000000]}]
+
+    def unexpected_write(*args, **kwargs):
+        raise AssertionError("Invalid source identity must not be persisted")
+
+    async def listings(trading, search):
+        return 1
+
+    monkeypatch.setenv("MONGODB_URL", "mongodb://fixture")
+    monkeypatch.setattr(backfill_vietcap, "load_env_file", lambda _: None)
+    monkeypatch.setattr(backfill_vietcap, "VietcapClient", Client)
+    monkeypatch.setattr(backfill_vietcap, "upsert_eod_rows", unexpected_write)
+    monkeypatch.setattr(vietcap_financials, "persist_vietcap_prices", unexpected_write)
+    monkeypatch.setattr(vietcap_ingestion, "upsert_listing_rows", lambda *a, **k: 1)
+    monkeypatch.setattr(vietcap_financials, "persist_vietcap_listings", listings)
+    monkeypatch.setattr(sys, "argv", ["backfill_vietcap.py", "--symbols", "AAA", "--datasets", "ohlc", "--apply"])
+    assert backfill_vietcap.main() == 1
+    state = backfill_vietcap.json.loads(
+        backfill_vietcap.Path(backfill_vietcap.os.environ["VNIBB_BACKFILL_CHECKPOINT"]).read_text()
+    )
+    receipt = state["receipts"]["AAA"]["ohlc"]
+    assert receipt["outcome"] == "failed"
+    assert receipt["details"]["ohlc_error"] == "OHLC source symbol missing or mismatched"
+
+
+@pytest.mark.parametrize("include_boundaries", [True, False])
+def test_cli_only_persists_ohlc_within_inclusive_requested_window(monkeypatch, fake_mongo, include_boundaries):
+    from datetime import UTC, date, datetime
+
+    from vnibb.services import vietcap_financials, vietcap_ingestion
+
+    days = [1, 2, 3, 4] if include_boundaries else [1, 4]
+    timestamps = [int(datetime(2026, 1, day, tzinfo=UTC).timestamp()) for day in days]
+
+    class Client(FakeVietcapClient):
+        def get_ohlc(self, symbol, *, count_back, to_epoch=None):
+            return {"symbol": symbol, "o": [1] * len(days), "h": [2] * len(days), "l": [1] * len(days),
+                    "c": [2] * len(days), "v": [3] * len(days), "t": timestamps}
+
+    mongo_dates, sql_dates = [], []
+
+    def preserve(db, collection, symbol, rows, *, dry_run):
+        mongo_dates.extend(row["tradeDate"].date() for row in rows)
+        return len(rows)
+
+    async def persist(symbol, rows, **kwargs):
+        sql_dates.extend(row["tradeDate"].date() for row in rows)
+        return len(rows)
+
+    async def listings(trading, search):
+        return 1
+
+    monkeypatch.setenv("MONGODB_URL", "mongodb://fixture")
+    monkeypatch.setattr(backfill_vietcap, "load_env_file", lambda _: None)
+    monkeypatch.setattr(backfill_vietcap, "VietcapClient", Client)
+    monkeypatch.setattr(backfill_vietcap, "upsert_eod_rows", preserve)
+    monkeypatch.setattr(vietcap_financials, "persist_vietcap_prices", persist)
+    monkeypatch.setattr(vietcap_ingestion, "upsert_listing_rows", lambda *a, **k: 1)
+    monkeypatch.setattr(vietcap_financials, "persist_vietcap_listings", listings)
+    monkeypatch.setattr(sys, "argv", ["backfill_vietcap.py", "--symbols", "AAA", "--datasets", "ohlc", "--apply",
+                                      "--start", "2026-01-02", "--cutoff", "2026-01-03"])
+    assert backfill_vietcap.main() == (0 if include_boundaries else 1)
+    expected = [date(2026, 1, 2), date(2026, 1, 3)] if include_boundaries else []
+    assert mongo_dates == sql_dates == expected
+    state = backfill_vietcap.json.loads(
+        backfill_vietcap.Path(backfill_vietcap.os.environ["VNIBB_BACKFILL_CHECKPOINT"]).read_text()
+    )
+    receipt = state["receipts"]["AAA"]["ohlc"]
+    assert receipt["outcome"] == ("succeeded" if include_boundaries else "empty")
+    if include_boundaries:
+        assert receipt["details"]["ohlc"]["first"] == "2026-01-02"
+        assert receipt["details"]["ohlc"]["last"] == "2026-01-03"
+
+
 def test_selected_listing_persists_before_first_stock_price(monkeypatch, fake_mongo):
     from vnibb.services import vietcap_financials, vietcap_ingestion
 
     class Client(FakeVietcapClient):
         def get_ohlc(self, symbol, *, count_back, to_epoch=None):
-            return {"o": [1], "h": [2], "l": [1], "c": [2], "v": [3], "t": [1720000000]}
+            return {"symbol": symbol, "o": [1], "h": [2], "l": [1], "c": [2], "v": [3], "t": [1720000000]}
 
     order = []
 
@@ -618,7 +737,7 @@ def test_cli_retains_invalid_source_bars_and_reports_failed_partial_window(monke
     class Client(FakeVietcapClient):
         def get_ohlc(self, symbol, *, count_back, to_epoch=None):
             # Middle bar reproduces the observed AAA source bounds discrepancy.
-            return {"o": [3694.95] * 3, "h": [3694.95] * 3, "l": [3694.95] * 3,
+            return {"symbol": symbol, "o": [3694.95] * 3, "h": [3694.95] * 3, "l": [3694.95] * 3,
                     "c": [3694.95, 3722.12, 3694.95], "v": [11900, 11900, None], "t": timestamps}
 
     mongo_rows = []

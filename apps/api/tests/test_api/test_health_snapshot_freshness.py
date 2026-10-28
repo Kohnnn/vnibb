@@ -91,12 +91,15 @@ async def test_detailed_health_rejects_uncertified_current_partition(
 async def test_current_partial_partition_cannot_hide_stale_verified_universe(
     client: AsyncClient, test_db: AsyncSession
 ):
+    from vnibb.models.stock import Stock
     from vnibb.models.sync_status import SyncStatus
 
     today = datetime.utcnow().date()
     certified_day = today - timedelta(days=4)
     oldest_trade_day = today - timedelta(days=6)
     test_db.add_all([
+        Stock(symbol="VNM", is_active=1),
+        Stock(symbol="FPT", is_active=1),
         ScreenerSnapshot(symbol="VNM", snapshot_date=certified_day, trade_date=certified_day),
         ScreenerSnapshot(symbol="FPT", snapshot_date=certified_day, trade_date=oldest_trade_day),
         ScreenerSnapshot(symbol="VNM", snapshot_date=today, trade_date=today),
@@ -125,6 +128,7 @@ async def test_verified_universe_matches_completed_ict_session(
     client: AsyncClient, test_db: AsyncSession, monkeypatch, ict_hour, expected_session
 ):
     from vnibb.api.v1 import health
+    from vnibb.models.stock import Stock
     from vnibb.models.sync_status import SyncStatus
 
     today = datetime.utcnow().date()
@@ -137,6 +141,7 @@ async def test_verified_universe_matches_completed_ict_session(
 
     monkeypatch.setattr(health, "datetime", FrozenDateTime)
     test_db.add_all([
+        Stock(symbol="VNM", is_active=1),
         ScreenerSnapshot(symbol="VNM", snapshot_date=today, trade_date=session_day),
         SyncStatus(
             sync_type="screener_universe", status="completed", error_count=0,

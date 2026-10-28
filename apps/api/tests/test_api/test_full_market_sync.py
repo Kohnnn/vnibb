@@ -1,5 +1,6 @@
 import asyncio
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
@@ -130,7 +131,8 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
         calls.append("seeded")
         return ["VNM", "FPT"]
 
-    async def fake_screener(*, progress):
+    async def fake_screener(*, progress, enrich_ratios):
+        assert enrich_ratios is False
         calls.append("screener_universe")
         return 2
 
@@ -234,7 +236,7 @@ async def test_daily_receipt_retains_prices_when_screener_fails(monkeypatch, dai
         progress.update(committed_count=20, success_count=2)
         return 20
 
-    async def screener(*, progress):
+    async def screener(*, progress, enrich_ratios):
         calls.append("screener")
         progress.update(committed_count=1, success_count=2, error_count=1,
                         errors=[{"symbol": "VNM", "error": "ratio unavailable"}])
@@ -265,6 +267,50 @@ async def test_daily_receipt_retains_prices_when_screener_fails(monkeypatch, dai
 
 
 @pytest.mark.asyncio
+async def test_daily_price_timeout_still_materializes_retained_screener(monkeypatch, daily_receipts):
+    clock = [0.0]
+
+    async def seeded(self):
+        clock[0] = 7080.0
+        return ["FPT", "VNM"]
+
+    async def prices(*, progress, **kwargs):
+        progress.update(committed_count=20, error_count=3, last_symbol="FPT",
+                        errors=[{"symbol": "VNM", "error": "source unavailable"}])
+        await asyncio.Event().wait()
+
+    async def screener(*, progress, enrich_ratios):
+        assert enrich_ratios is False
+        progress.update(committed_count=2, base_count=2)
+        return 2
+
+    monkeypatch.setattr("vnibb.services.sync_all_data.time", SimpleNamespace(
+        monotonic=lambda: clock[0], time=lambda: 0,
+    ))
+    monkeypatch.setattr(FullMarketSync, "_get_seeded_symbols", seeded)
+    monkeypatch.setattr(data_pipeline, "sync_daily_prices", prices)
+    monkeypatch.setattr(data_pipeline, "sync_screener_data", screener)
+
+    results = await asyncio.wait_for(run_daily_market_sync(), timeout=1)
+
+    assert not results["daily_prices"].success
+    assert not results["daily_prices"].complete
+    assert results["daily_prices"].synced_count == 20
+    assert results["daily_prices"].error_count == 3
+    assert results["screener"].success
+    assert results["screener"].synced_count == 2
+    final = daily_receipts[-1]
+    assert final["status"] == "partial"
+    assert final["success_count"] == 22
+    assert final["error_count"] == 3
+    assert final["additional_data"]["active_stage"] is None
+    price_stage = final["additional_data"]["stages"]["daily_prices"]
+    assert price_stage["status"] == "failed"
+    assert price_stage["progress"]["last_symbol"] == "FPT"
+    assert price_stage["progress"]["errors"][0]["error"] == "source unavailable"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("blocked_stage", ["daily_prices", "screener"])
 async def test_daily_receipt_retains_active_stage_on_cancellation(monkeypatch, daily_receipts, blocked_stage):
     entered = asyncio.Event()
@@ -283,7 +329,7 @@ async def test_daily_receipt_retains_active_stage_on_cancellation(monkeypatch, d
     async def prices(*, progress, **kwargs):
         return await acquire("daily_prices", progress, 20)
 
-    async def screener(*, progress):
+    async def screener(*, progress, enrich_ratios):
         return await acquire("screener", progress, 1)
 
     monkeypatch.setattr(data_pipeline, "sync_daily_prices", prices)
@@ -345,7 +391,7 @@ async def test_daily_receipt_cancellation_persists_to_sql(test_engine, monkeypat
     async def prices(*, progress, **kwargs):
         return await acquire("daily_prices", progress, 20)
 
-    async def screener(*, progress):
+    async def screener(*, progress, enrich_ratios):
         return await acquire("screener", progress, 1)
 
     monkeypatch.setattr(data_pipeline, "sync_daily_prices", prices)

@@ -202,7 +202,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
         const ambiguous = periodIssues.filter((issue) => issue.reason === 'ambiguous-basis');
         if (ambiguous.length > 0) {
             notes.push(
-                `Unavailable: ${ambiguous.map((issue) => issue.period).join(', ')} returned conflicting rows with no basis field, so no value is shown.`
+                `Unavailable: ${ambiguous.map((issue) => issue.period).join(', ')} returned conflicting rows without an authoritative basis/revision selection, so no value is shown.`
             );
         }
         if (invalidPeriodCount > 0) {
@@ -262,9 +262,9 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
         return resolveUnitScale(values, unitConfig);
     }, [displayItems, unitConfig]);
 
-    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
+    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig).replace(/^Values in/, 'Display units:'), [tableScale, unitConfig]);
     const unitNote = useMemo(
-        () => `Note: ${unitLegend}; per-share values (DPS) are VND per share and are not converted • Reporting Standard: VAS • First available period is the base period`,
+        () => `${unitLegend}. Display settings do not verify source units or reporting standard. First available period is the base period.`,
         [unitLegend]
     );
 
@@ -652,12 +652,17 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                         fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={statementNote ?? (period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right')}
+                        note={period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right'}
                         sourceLabel="Cash flow"
                         align="right"
                     />
                 </div>
                 <div className="flex-1 overflow-auto scrollbar-hide pt-1">
+                    {statementNote && (
+                        <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+                            {statementNote}
+                        </div>
+                    )}
                     {timedOut && isLoading && !hasData ? (
                         <WidgetError
                             title="Loading timed out"

@@ -516,11 +516,13 @@ async def _seed_screener_snapshots(session, symbols: list[str]) -> None:
     from datetime import datetime
 
     from vnibb.models.screener import ScreenerSnapshot
+    from vnibb.models.stock import Stock
     from vnibb.models.sync_status import SyncStatus
 
     today = datetime.utcnow().date()
     expected_symbols = sorted(set(symbols))
     for sym in expected_symbols:
+        session.add(Stock(symbol=sym, is_active=1))
         session.add(
             ScreenerSnapshot(
                 symbol=sym,

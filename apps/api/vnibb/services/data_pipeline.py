@@ -1743,6 +1743,19 @@ class DataPipeline:
                             observation.get("value") is not None for observation in result["observations"]
                         ) for result in cap_results
                     )
+                    if not cap_fallback:
+                        shares_for_market_cap = company_row.get("outstanding_shares") or company_row.get("listed_shares")
+                        if not shares_for_market_cap:
+                            shares_for_market_cap = _parse_float(row.get("shares_outstanding"))
+                        if shares_for_market_cap and price_value and price_provenance.get("price_unit") == "VND":
+                            estimated = resolve_market_cap(
+                                {"shares_outstanding": shares_for_market_cap},
+                                source="vnstock:ratio",
+                                price_record=price_provenance,
+                            )
+                            if estimated["observations"]:
+                                cap_results.append(estimated)
+
                     without_fallback = reconcile_market_caps(*cap_results) if cap_fallback else None
                     if cap_fallback or profile_shares["status"] == "conflict":
                         cap_results.append(resolve_market_cap(previous_row, source="postgres:screener_snapshot"))

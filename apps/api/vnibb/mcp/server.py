@@ -1497,6 +1497,8 @@ async def get_matrix_selection(
             404: "Matrix selection not found",
             422: "Invalid Matrix selection",
         }.get(exc.status_code, "Matrix selection unavailable")
+        if exc.status_code == 409 and str(exc.detail).startswith("evidence_not_found:"):
+            message = "evidence_not_found: Matrix frozen evidence not found"
         raise ToolError(message) from None
     except Exception:
         raise ToolError("Matrix selection unavailable") from None

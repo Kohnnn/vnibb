@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.services import prediction_market_service as service
 from vnibb.services.prediction_market_policy import snapshot_eligibility
@@ -33,13 +32,22 @@ def market(source_id: str, **changes):
 async def test_source_cap_blocks_new_market_but_refreshes_existing(test_db, monkeypatch):
     monkeypatch.setattr(service, "MAX_SOURCE_MARKETS", 1)
     assert await service.persist_prediction_markets(test_db, [market("KXREAL-1")]) == 1
-    with pytest.raises(service.PredictionMarketAdmissionError, match="blocked for 1 new markets.*refreshed 1"):
+    with pytest.raises(service.PredictionMarketAdmissionError) as error:
         await service.persist_prediction_markets(test_db, [
             market("KXREAL-1", question="Updated price and title"),
             market("KXREAL-2"),
         ])
+    assert error.value.persisted_count == 1
+    assert error.value.rejected_count == 1
+    assert error.value.source_cap is True
     stored = (await test_db.execute(select(PredictionMarket))).scalars().all()
     assert [(row.source_id, row.question) for row in stored] == [("KXREAL-1", "Updated price and title")]
+    with pytest.raises(service.PredictionMarketAdmissionError) as error:
+        await service.persist_prediction_markets(test_db, [market("KXREAL-2")])
+    assert error.value.persisted_count == 0
+    assert error.value.rejected_count == 1
+    assert error.value.source_cap is True
+    assert (await test_db.scalars(select(PredictionMarket.source_id))).all() == ["KXREAL-1"]
 
 @pytest.mark.asyncio
 async def test_legacy_multivariate_rows_do_not_consume_real_kalshi_slots(test_db, monkeypatch):
@@ -131,10 +139,14 @@ async def test_promoted_synthetic_and_missing_timestamp_consume_live_slots(test_
 @pytest.mark.asyncio
 async def test_unrefreshed_new_market_does_not_take_a_live_slot(test_db, monkeypatch):
     monkeypatch.setattr(service, "MAX_SOURCE_MARKETS", 1)
-    with pytest.raises(service.PredictionMarketAdmissionError, match="blocked for 1 new markets"):
+    with pytest.raises(service.PredictionMarketAdmissionError) as error:
         await service.persist_prediction_markets(test_db, [
             market("KXSTALE", updated_at=datetime.now(UTC) - timedelta(hours=25)),
         ])
+    assert error.value.persisted_count == 0
+    assert error.value.rejected_count == 1
+    assert error.value.source_cap is False
+    assert (await test_db.scalars(select(PredictionMarket.id))).all() == []
     assert await service.persist_prediction_markets(test_db, [market("KXLIVE")]) == 1
     assert (await test_db.execute(select(PredictionMarket.source_id))).scalars().all() == ["KXLIVE"]
 
@@ -229,8 +241,11 @@ async def test_combo_market_cannot_bypass_provider_filter_via_shared_writer(test
 @pytest.mark.asyncio
 async def test_oversized_market_update_is_rejected_without_mutating_existing(test_db):
     await service.persist_prediction_markets(test_db, [market("KXREAL-1")])
-    with pytest.raises(service.PredictionMarketAdmissionError, match="field size limit"):
+    with pytest.raises(service.PredictionMarketAdmissionError) as error:
         await service.persist_prediction_markets(test_db, [market("KXREAL-1", description="x" * 10000)])
+    assert error.value.persisted_count == 0
+    assert error.value.rejected_count == 1
+    assert error.value.source_cap is False
     stored = (await test_db.execute(select(PredictionMarket))).scalars().one()
     assert stored.description is None
 
@@ -239,10 +254,13 @@ async def test_oversized_market_update_is_rejected_without_mutating_existing(tes
 async def test_physical_ceiling_blocks_updates_and_new_rows_without_partial_mutation(test_db, monkeypatch):
     await service.persist_prediction_markets(test_db, [market("KXREAL-1")])
     monkeypatch.setattr(service, "MAX_CATALOGUE_RELATION_BYTES", 1)
-    with pytest.raises(service.PredictionMarketAdmissionError, match="storage ceiling"):
+    with pytest.raises(service.PredictionMarketAdmissionError) as error:
         await service.persist_prediction_markets(test_db, [
             market("KXREAL-1", question="Should not overwrite"), market("KXREAL-2")
         ])
+    assert error.value.persisted_count == 0
+    assert error.value.rejected_count == 2
+    assert error.value.source_cap is False
     stored = (await test_db.execute(select(PredictionMarket))).scalars().all()
     assert [(row.source_id, row.question) for row in stored] == [("KXREAL-1", "Will the policy rate rise?")]
 

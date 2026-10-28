@@ -127,6 +127,12 @@ function parseViewMode(value: unknown): ViewMode {
     return value === 'chart' || value === 'performance' ? value : 'table';
 }
 
+function getMarketSessionStatus(value: unknown): 'traded' | 'no_trade' | 'suspended' | undefined {
+    if (!value || typeof value !== 'object' || !('status' in value)) return undefined;
+    const status = value.status;
+    return status === 'traded' || status === 'no_trade' || status === 'suspended' ? status : undefined;
+}
+
 function quickFilterConditions(filters: ActiveFilter[]): FilterCondition[] {
     return filters.flatMap((filter) => {
         if (filter.value === null || filter.value === undefined || filter.value === '') {
@@ -1034,9 +1040,11 @@ export function ScreenerWidget({
                                         symbol={String(stock.ticker ?? stock.symbol ?? '')}
                                         exchange={typeof stock.exchange === 'string' ? stock.exchange : undefined}
                                         name={typeof stock.organ_name === 'string' ? stock.organ_name : String(stock.company_name ?? stock.ticker ?? stock.symbol ?? 'Unknown')}
-                                        price={typeof stock.price === 'number' ? stock.price : 0}
-                                        change={typeof stock.change_1d === 'number' ? stock.change_1d : 0}
-                                        changePercent={typeof stock.change_1d === 'number' ? stock.change_1d : 0}
+                                        price={typeof stock.price === 'number' ? stock.price : null}
+                                        change={typeof stock.change_1d === 'number' ? stock.change_1d : null}
+                                        changePercent={typeof stock.change_1d === 'number' ? stock.change_1d : null}
+                                        sessionStatus={getMarketSessionStatus(stock.market_session)}
+                                        tradeDate={typeof stock.trade_date === 'string' ? stock.trade_date : null}
                                         onClick={() => handleSymbolSelect(String(stock.ticker ?? stock.symbol ?? ''))}
                                         onAddToWatchlist={() => handleAddToWatchlist(String(stock.ticker ?? stock.symbol ?? ''))}
                                     />

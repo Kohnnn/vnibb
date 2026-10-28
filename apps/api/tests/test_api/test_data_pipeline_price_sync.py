@@ -4,7 +4,6 @@ from datetime import date
 
 import pandas as pd
 import pytest
-
 import vnibb.services.data_pipeline as data_pipeline_module
 from vnibb.core.config import settings
 from vnibb.providers.vnstock.price_board import PriceBoardData
@@ -477,7 +476,6 @@ def _create_stock_price_tables_for_sqlite(conn):
     from sqlalchemy import BigInteger, Integer
     from sqlalchemy.dialects import sqlite as sqlite_dialect
     from sqlalchemy.schema import CreateIndex, CreateTable
-
     from vnibb.models.stock import Stock, StockPrice
 
     dialect = sqlite_dialect.dialect()
@@ -674,7 +672,6 @@ async def test_automatic_maintenance_preserves_history_until_explicit_price_clea
 
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from sqlalchemy import select
-
     from vnibb.core import scheduler
     from vnibb.models.stock import StockPrice
 
@@ -775,7 +772,6 @@ async def test_scheduled_price_acquisition_ingests_real_sql_source_rows(monkeypa
     from datetime import UTC, datetime
 
     from sqlalchemy import select
-
     from vnibb.models.stock import StockPrice
     from vnibb.services.vietcap_client import VietcapClient
 
@@ -786,7 +782,7 @@ async def test_scheduled_price_acquisition_ingests_real_sql_source_rows(monkeypa
         iq_calls.append((symbol, kwargs))
         if outcome != "live_iq":
             raise RuntimeError("IQ outage")
-        return {"o": [60000], "h": [61000], "l": [59000], "c": [60500], "v": [100], "t": [epoch]}
+        return {"symbol": symbol, "o": [60000], "h": [61000], "l": [59000], "c": [60500], "v": [100], "t": [epoch]}
 
     class CachedCollection:
         def find(self, query, projection):
@@ -960,7 +956,7 @@ async def test_scheduled_price_partial_failure_keeps_committed_symbol_rows(monke
         if symbol == "FPT":
             raise RuntimeError("IQ transport unavailable")
         epoch = int(datetime(2026, 3, 17, tzinfo=UTC).timestamp())
-        return {"o": [60000], "h": [61000], "l": [59000], "c": [60500], "v": [100], "t": [epoch]}
+        return {"symbol": symbol, "o": [60000], "h": [61000], "l": [59000], "c": [60500], "v": [100], "t": [epoch]}
 
     async def unavailable(*args, **kwargs):
         raise RuntimeError("free VCI transport unavailable")

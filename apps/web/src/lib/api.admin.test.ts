@@ -1,5 +1,7 @@
 import type { Session } from '@supabase/supabase-js';
 import {
+    createDashboard,
+    fetchAPI,
     getAdminSession,
     getAdminSystemDashboardTemplateBundle,
     saveAdminAIRuntimeConfig,
@@ -66,4 +68,47 @@ test('an admin API request sends only the session bearer and exposes a denied re
     } finally {
         window.removeEventListener('vnibb:admin-access-denied', denied);
     }
+});
+
+test('dashboard JSON posts preserve client headers alongside merged content type and authentication', async () => {
+    localStorage.setItem('vnibb_dashboard_client_id', 'owned-browser-client');
+    jest.mocked(supabase!.auth.getSession).mockResolvedValue({
+        data: { session: { access_token: 'test-session-token' } as Session },
+        error: null,
+    });
+    const payload = { name: 'Pending workspace', description: 'Existing pending creation retry', isDefault: false };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ id: 42, ...payload }) } as Response);
+
+    await createDashboard(payload);
+
+    const [url, options] = fetchMock.mock.calls[0];
+    const headers = new Headers(options?.headers);
+    expect(url).toBe('https://api.example.test/api/v1/dashboard/');
+    expect(options?.method).toBe('POST');
+    expect(JSON.parse(String(options?.body))).toEqual(payload);
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(headers.get('Authorization')).toBe('Bearer test-session-token');
+    expect(headers.get('X-VNIBB-Client-ID')).toBe('owned-browser-client');
+});
+
+test('caller headers cannot replace the internal cancellation signal or JSON header merge', async () => {
+    const caller = new AbortController();
+    const { promise, reject } = Promise.withResolvers<Response>();
+    fetchMock.mockImplementationOnce((_url, options) => {
+        options?.signal?.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true });
+        return promise;
+    });
+
+    const request = fetchAPI('/controlled-request', {
+        method: 'POST', body: JSON.stringify({ value: 1 }),
+        headers: { 'X-Request-Context': 'preserved' }, signal: caller.signal,
+    });
+    const options = fetchMock.mock.calls[0][1];
+    expect(options?.signal).not.toBe(caller.signal);
+    expect(new Headers(options?.headers).get('Content-Type')).toBe('application/json');
+    expect(new Headers(options?.headers).get('X-Request-Context')).toBe('preserved');
+    const cancelled = expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    caller.abort();
+    expect(options?.signal?.aborted).toBe(true);
+    await cancelled;
 });

@@ -140,6 +140,27 @@ class VietcapClient:
         data = self._request("GET", url, TRADING_BASE)
         return data if isinstance(data, list) else []
 
+    def get_price_board(self, symbols: list[str]) -> list[dict]:
+        if not isinstance(symbols, list) or any(not isinstance(symbol, str) or not symbol.strip() for symbol in symbols):
+            raise ValueError("Price board symbols must be nonempty strings")
+        requested = list(dict.fromkeys(symbol.strip().upper() for symbol in symbols))
+        if not requested:
+            return []
+        url = f"{TRADING_BASE}/api/price/symbols/getList"
+        rows = self._request("POST", url, TRADING_BASE, json_body={"symbols": requested})
+        if not isinstance(rows, list):
+            raise ValueError("Invalid price board response")
+        returned = []
+        for row in rows:
+            listing = row.get("listingInfo") if isinstance(row, dict) else None
+            symbol = listing.get("symbol") if isinstance(listing, dict) else None
+            if not isinstance(symbol, str) or symbol not in requested:
+                raise ValueError("Price board source symbol missing or unexpected")
+            returned.append(symbol)
+        if len(returned) != len(set(returned)) or set(returned) != set(requested):
+            raise ValueError("Price board source membership is duplicate or incomplete")
+        return rows
+
     def get_ohlc(self, symbol: str, *, count_back: int = 10000, to_epoch: int | None = None) -> dict[str, Any] | None:
         """Return the raw gap-chart row for one symbol (parallel o/h/l/c/v/t arrays)."""
         url = f"{TRADING_BASE}/api/chart/OHLCChart/gap-chart"
@@ -151,7 +172,10 @@ class VietcapClient:
         }
         data = self._request("POST", url, TRADING_BASE, json_body=body)
         if isinstance(data, list) and data:
-            return data[0]
+            row = data[0]
+            if not isinstance(row, dict) or not isinstance(row.get("symbol"), str) or row["symbol"].upper() != symbol.upper():
+                raise ValueError("OHLC source symbol missing or mismatched")
+            return row
         return None
 
     # -- iq.vietcap.com.vn (company / fundamentals) ------------------------

@@ -95,11 +95,61 @@ New Vietnamese ingestion uses Vietcap IQ/Trading as primary and free vnstock VCI
 
 Verify the exact FPT income-statement GET and OPTIONS separately for the current origin, both approved Vercel aliases and an unrelated denied origin. Include validation responses and native browser response consumption. Successful CORS transport does not certify financial values or freshness.
 
-Detailed health uses the consumer's certified screener Universe partition and its oldest actual constituent trade date, not independent global maxima. A missing receipt or trade date remains degraded. `screener_expected_session` uses the configured ICT close and `MARKET_HOLIDAY_DATES`; its calendar limitation is explicit, not official exchange-calendar certification. Before declaring recovery, compare the completed exchange session, active Universe membership, successful full-run receipt and every constituent trade date. Keep acquisition failures and stale disclosure visible; do not restamp dates, relax thresholds, fabricate completion markers or rewrite history.
+Detailed health reads the same certified screener Universe partition as consumers. Legacy partitions retain the oldest-actual-trade-date gate. Typed session receipts additionally require exact current active membership and independently revalidated raw provider records; every new record is scoped `vietcap_board`. A provider-board zero-volume/suspension observation may have no actual price, so missing prices and historical trade dates are reported separately from provider session coverage. They must never become zero prices or current trade dates. Provider-only coverage keeps whole-market readiness degraded because odd-lot/put-through completeness is unproved. Completed-session calculations use the official HOSE/HNX 2026 closure notices and January 2 amendment plus additive `MARKET_HOLIDAY_DATES`; other years remain unverified. Before recovery, require exchange-session authority, complete segment coverage, source-use permission, exact active membership, a genuine full-run receipt and independently admitted constituent observations. New `acquire_sessions=True` materialization is opt-in and is not enabled by the daily worker without source-use authorization; private captured-source replay is not public-serving permission.
 
 For the QA release, set `PREDICTION_MARKET_POPULATE_ON_STARTUP=false` in the private serving environment before replacing the scheduler. This disables only the immediate restart-population task; normal daily and recurring prediction ingestion remain scheduled. The application default remains `true` for existing installations. Preserve the explicit release setting during rollback so a restart does not introduce an unrequested acquisition.
 
 Auth has a separate native CORS policy. For GoTrue v2.177, map `GOTRUE_CORS_ALLOWED_HEADERS=${GOTRUE_CORS_ALLOWED_HEADERS:-apikey}` into the Auth service and set the matching private environment value. The missing `apikey` allowance can produce OPTIONS 204 without CORS headers and prevent the password POST. Preserve issuer, keys, redirects and the existing GoTrue origin behavior; `GOTRUE_URI_ALLOW_LIST` controls redirects, not CORS. Before an approved Auth-only recreation, save effective configuration and all container identities privately. Recreate only Auth on its retained image with `--no-deps --no-build --pull never`, verify the real sorted browser preflight and genuine password login, and confirm the other seven container identities/images are unchanged. Restore the saved Auth mapping/environment and use the same Auth-only command for rollback. No database restore or broader proxy policy is required.
+
+### Auth image/schema compatibility maintenance
+
+The issuing database must be resolved from the running Auth container's `GOTRUE_DB_DATABASE_URL`, without printing credentials. On 24 October 2026 it is `vnibb`, namespace `auth`, not a sibling database. Its `auth.sessions` includes `oauth_client_id`, `refresh_token_hmac_key`, `refresh_token_counter` and `scopes`; the served v2.177.0 model lacks all four and its `SELECT *` session read fails during genuine refresh. Do not remove columns, reset Auth, rewrite migration history or substitute frontend signed-out recovery.
+
+The pinned official stable v2.188.1 image contains the matching session model and migrations through `20260302000000`; every one of its 69 migration versions is already present in this database. The multi-platform digest is `sha256:87db8c737af49a64236c461882ed3925f8b1e5c2c47176c64694dedc65153573`; its Linux ARM64 manifest is `sha256:220d95f056474405bed60681442aadf458aa722371ec5561a9d86a0603f9f2f9`. Sources: [session model](https://github.com/supabase/auth/blob/v2.188.1/internal/models/sessions.go), [migration inventory](https://github.com/supabase/auth/tree/v2.188.1/migrations) and [stable release](https://github.com/supabase/auth/releases/tag/v2.188.1). This deliberately matches the existing schema instead of introducing newer migrations.
+
+Before authorized maintenance, retain the verified paired full-`vnibb`/Mongo backup and a separate private custom-format `pg_dump -d vnibb -n auth`, globals, validated TOC, checksums, effective configuration, migration versions, session columns and all container identities. TOC/checksum verification is not a restore test. Require no pending candidate migration and an effective Auth configuration diff restricted to the image. Use the current base Compose project and private environment, not dated runtime overrides; recreate only `auth` with `--no-deps --no-build --pull never`. Abort on changed environment, schema/migration versions or non-Auth identities/mounts. Verify genuine owned-account password login, refresh, online identity, protected access and logout/revoked-refresh rejection; delete only the owned fixtures. Native automatic refresh requires separate real browser afterproof, not a token/date simulation.
+
+Rollback only Auth to the retained `supabase/gotrue@sha256:6a916b47af0386b7e0152ca84f3d45d050bf056e449a75a5460b48742fd67822` with unchanged configuration and the same service-only flags. That restores the prior service, including its known broken refresh; it is not a recovery claim. No database restore or downgrade is automatic. Unexpected startup migrations require a separate approved recovery decision using the retained backups.
+
+### Bounded database optimization observation (24 October 2026)
+
+Read-only cloud-01 diagnostics at 09:16–09:25 UTC used 5-second SQL statement and 1-second lock deadlines, Mongo `maxTimeMS: 3000`, and query-planner-first execution. The restored `ix_stock_price_date_only` remained valid and ready: global/daily latest-date reads took 0.132/0.098 ms with 5/4 cached blocks. Existing indexed VNM recent-price and per-source prediction reads took 0.431 ms and 0.145–3.021 ms respectively. These measurements do not justify another PostgreSQL index or configuration change. Preserve all current active and natural-key indexes; historical cumulative scan/dead-tuple counters alone do not justify destructive maintenance.
+
+The metric-map reference reader now explicitly includes the existing partial index's string-symbol predicate: `symbol: {$eq: normalized_symbol, $type: "string"}`. The old unhinted query planned a collection scan over 6,972 documents (165.6 MB logical); the qualified query used `uq_metric_map_symbol_type_section_source` and examined 5 keys / 4 documents in 0 ms for each of VNM, ANI and FPT. Ordered full-document SHA-256 identities and field sets matched for all three symbols; the old comparison read was hinted to the same existing partial index to avoid executing a collection scan. Source, schema, sort, projection, cap and Mongo's existing matching-array semantics remain unchanged. The small retained sort needs no new index. No DDL, index removal, acquisition or production configuration write was performed. Rollback is an application-image rollback only; there is no database migration to reverse.
+
+Private evidence is under `/home/compute_01/.config/vnibb/qa-main-release-20261024/database/` (`postgres-fresh-readonly.json`, `postgres-indexed-executions.json`, `fresh-readonly.json`, `mongo-indexed-experiment.json`, `mongo-result-equivalence.json`). The retained 05:51 UTC backup pair and manifest were present with matching manifest identity; this investigation did not perform a restore. Application tests and post-rollout actual-reader acceptance remain release gates, not claims from these diagnostics.
+
+The subsequent bounded native listing attempt exposed separate schema drift, not a query-tuning issue: `ON CONFLICT (symbol)` failed because `public.stocks` retained only its ID primary key. At 09:39 UTC, all 1,754 rows had distinct non-null symbols, with no duplicate repair required; the ORM and actual listing writer both require symbol uniqueness. Migration `d47b2a61f903` (`20261024_1400_restore_stock_symbol_key.py`) restores only `CREATE UNIQUE INDEX CONCURRENTLY ix_stocks_symbol ON stocks (symbol)`, with 5-second lock and 120-second statement bounds, timeout restoration and fail-closed validation of an existing same-name index. It performs no row writes, deduplication or Alembic stamping. The downstream price natural key `(symbol, time, interval)` was already valid, ready, immediate and backed by its validated unique constraint.
+
+Before approved live application, independently review the exact migration hash and `database/stock-key-maintenance.py`; its read-only `stock-key-preflight.json` rechecks the full stock-row hash, distinct/null counts, blockers, long transactions, protected container identities and both fresh 09:27 UTC backup payload checksums. Only explicit `--apply` runs the reviewed migration, then verifies the same row hash, unchanged revision and preserved old indexes. Keep this natural key during application rollback; automatic downgrade refuses removal, and dropping a newly created index requires separate provenance-checked schema approval. Preflight and source inspection are not live-application or test-pass claims.
+
+After independent review and explicit parent approval, that exact migration was applied once on 24 October 2026. The wrapper exited 1 only during its post-apply hash lookup: setting `search_path` to `public` hid `pgcrypto`'s `extensions.digest`. No DDL retry was run. Independent bounded read-only inspection at 09:55 UTC confirmed the new symbol index was unique, valid, ready and immediate; all 1,754 complete rows retained the same ordered SHA-256, the prior primary-key index and all seven protected container identities were unchanged, and the Alembic revision stayed `f8c3a102d679`. No row DML or stamp occurred. `database/stock-key-acceptance.json` preserves both the failed wrapper and the actual-state adjudication; do not reapply the failed wrapper. A later full migration must validate the existing index idempotently rather than recreate it.
+
+### Off-source recovery and independent key custody (25 October 2026)
+
+Paired snapshot `20261024T100501Z` passed the existing strict, networkless
+restore utility on a workstation distinct from cloud-01: 42 PostgreSQL public
+tables, 1,754 stocks, 1,413,263 prices and all 17 populated Mongo collections
+(8,086,310 documents, zero failures). Local verification/restore took 164.9 s;
+authenticated transfer and full-hash verification took 689.267 s. The combined
+855.130 s excludes application rebuild, DNS and traffic cutover; it is not a
+full-service RTO or a recurring RPO guarantee. Scratch containers/volumes were
+removed; serving containers and volumes were unchanged.
+
+An additional age-encrypted copy is retained with private permissions. Its
+recovery identity is independently retained on the existing deploy-01 account
+in a 0700 directory with a 0600 identity file. Distinct-machine streaming decrypt
+exited successfully in 419.281 s: the full encrypted hash and all three decrypted
+member sizes/hashes matched the originals. No plaintext or encrypted archive
+persisted on the custody host; temporary decrypt tooling was removed. This
+establishes separate-host/store recovery, not a separate human custodian or
+credential-compromise independence. Private plaintext originals remain retained;
+retiring them needs a separately approved retention decision.
+
+Exact artifact hashes, private custody location and observed receipts are in
+`remaining-completion-20261025/offbox/drill-20261025T001456Z-536a67/` under the
+existing private VNIBB evidence root. Never put the recovery identity in source,
+chat, command arguments or the encrypted archive's storage location.
 
 ### Historical pre-release observation (13 October 2026)
 
@@ -276,6 +326,23 @@ Supabase sign-out removes the session row, so the online Auth check denies subse
 `ADMIN_API_KEY` is now a **server-only automation/operations secret**. Layout publishers use `GET` / `PUT /api/v1/admin/automation/system-layouts/{dashboard_key}` with `X-Admin-Key` and fixed actor `automation:layout-publisher`; do not send `X-Admin-Actor`. Retained `/data`, realtime start/stop, and metrics/debug operational routes still consume this secret. Never put it in browser settings or `NEXT_PUBLIC_*` variables. The two `apps/api/scripts/publish_*_markets_layout.py` publishers read `ADMIN_API_KEY` from their execution environment.
 
 Before cutover, clear the formerly stored platform admin key from every operator browser profile/site storage, rotate the formerly browser-exposed key in backend and authorized automation/operational secret stores, and roll all workers. Clearing browser storage is not revocation, and the stored value must never be read out or pasted into analytics, tickets, or chat; verify the old key fails and the rotated key works only on authorized automation/operational routes.
+
+If that historical value was also assigned to `VNIBB_APPS_SCRIPT_KEY` or
+`VNIBB_MCP_SHARED_BEARER_TOKEN`, rotate all affected scopes to independent secrets;
+changing only the admin variable does not revoke the other grants. Keep each
+delivery file `0600` in private custody and verify old-key rejection, own-scope
+success and cross-scope denial without logging headers or secret values. Retain
+new credentials during an image rollback; restoring the old environment would
+reactivate an exposed credential. External Apps Script/MCP callers need their
+respective new secret, not the admin automation key.
+
+The October 25 continuation explicitly keeps `ADMIN_USER_IDS` empty. Rotation
+does not enable interactive admin or authorize silent account promotion. Actual
+serving Compose labels decide the recreation commands: application services use
+the base file, while Caddy uses base plus runtime override. Do not combine them
+when the runtime override changes application mounts. An authorized same-image,
+same-config Caddy recreation removes obsolete inherited secret copies; it does
+not change proxy routing. Auth, PostgreSQL, MongoDB and Redis stay untouched.
 
 Interactive admin production acceptance remains **BLOCKED** until operator UUID verification, key rotation, authenticated live acceptance (including completed sign-out/revocation), and documented Auth availability/latency operations are recorded. Acceptance must cover allowlisted draft/publish and published reload, non-allowlisted and expired/denied-session rejection, shared-key rejection on interactive routes, and rotated-key automation. See `docs/admin_global_system_layouts.md` for the full rollout checklist.
 

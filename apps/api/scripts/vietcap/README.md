@@ -20,6 +20,8 @@ python scripts/vietcap/backfill_vietcap.py backfill --symbols VCB,BVH,FPT --max-
 
 Rerunning the same slice upserts the existing natural keys. Apply also awaits descriptor-supported financial persistence through the existing cache/database bridge. Unsupported fields remain unavailable; raw data remains preserved. Neither command deletes, reconciles, rescales, or repairs existing data.
 
+OHLC responses must identify the requested symbol before conversion. Apply persists only rows inside the inclusive `--start`/`--cutoff` window to Mongo and SQL; a response containing only outside-window rows records the existing empty outcome. `countBack` is not a completeness guarantee and no missing session is synthesized.
+
 ## Flags
 
 | Flag | Meaning |
@@ -44,6 +46,7 @@ Rerunning the same slice upserts the existing natural keys. Apply also awaits de
 - Statement and ratio values stay raw. Units are unknown unless actual payload/descriptor evidence establishes them. No magnitude-based scaling or guessed metric mapping is allowed.
 - Structured fields require the symbol/section descriptor evidence consumed by `vietcap_financials`; unsupported units, labels or ambiguous fields remain unavailable.
 - IQ application failures, including `successful=false`, raise even on HTTP 200. Required OHLC arrays must have equal lengths.
+- OHLC acquisition admits a response only when its raw `symbol` is present and matches the requested symbol (case-insensitively). Missing or mismatched source identity is rejected before assigning the requested document symbol; the raw response stays unchanged.
 - `sourceResponse` preserves the original IQ status/code/success/trace metadata; descriptor response metadata is retained separately in `descriptorEvidence.sourceResponse`.
 - Statement/ratio envelopes retain `responseEvidence` (symbol, company type, section, source, endpoint and receipt time). Response-level unit/currency/scale and flow/consolidation declarations are consumed only when that exact scope and receipt match; contradictory declarations remain unavailable. The metrics endpoint spans multiple sections, so its response-level declarations additionally require an explicit matching `section`. Full responses and per-field evidence survive PostgreSQL/MCP lineage without mutating raw rows.
 - Ratio writers retain supplied `RATIO` descriptors and their evidence, and recurring financial acquisition forwards that section only when IQ actually supplies it. The observed IQ metrics contract supplies statement sections plus `NOTE`, not ratio descriptors. The observed statistics-financial contract supplies raw field names but no unit/percent encoding. Those fields remain raw until authoritative mapping and units are available; no descriptors are synthesized from camel-case keys.

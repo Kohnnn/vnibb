@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import MatrixWidget from './MatrixWidget';
 import { matrixApi } from '@/lib/matrix';
 import type { MatrixPreparation, MatrixSnapshot } from '@/types/matrix';
@@ -315,4 +315,52 @@ it('traps narrow inspector keyboard focus and restores the initiating result', a
   expect(screen.getByRole('tab', { name: 'Review' })).toHaveFocus();
   fireEvent.keyDown(dialog, { key: 'Escape' });
   expect(result).toHaveFocus();
+});
+
+it('shows every frozen observation reference field without numeric conversion', async () => {
+  jest.spyOn(matrixApi, 'evidence').mockResolvedValue([{
+    evidence_id: 'observation-1', entity_id: 'FPT', source: 'stored.mongo.market_prices_eod:vietcap', locator: 'vietcap:FPT:eod:2025-12-30',
+    field: 'close', value: '9007199254740993.125', unit: 'VND', period: '2025', as_of: '2025-12-30', captured_at: '2026-01-01T00:00:00Z',
+    provenance: 'stored_observation', formula: null, input_evidence_ids: [], limitations: ['Source rights are unverified.'], observation_state: 'rights_unverified',
+    observation_reference: {
+      symbol: 'FPT', trade_date: '2025-12-30', value: '9007199254740993.125', currency: 'VND', price_unit: 'VND', source: 'vietcap',
+      source_key: 'vietcap:FPT:eod:2025-12-30', collection: 'market_prices_eod', observation_revision: 'frozen-observation-revision', retrieved_at: '2026-01-01T00:00:00Z',
+    },
+  }]);
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Explore synthetic fixture' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Inspect FPT Profit quality' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+  const reference = await screen.findByLabelText('Frozen stored observation reference');
+  for (const text of ['FPT / 2025-12-30', '9007199254740993.125 / VND / VND', 'vietcap / vietcap:FPT:eod:2025-12-30', 'market_prices_eod', 'frozen-observation-revision', '2026-01-01T00:00:00Z']) {
+    expect(reference).toHaveTextContent(text);
+  }
+  expect(screen.getByText('Observation state: rights_unverified')).toBeInTheDocument();
+  expect(screen.getByText('Source rights are unverified.')).toBeInTheDocument();
+});
+
+it('keeps regulatory source links out of result buttons and available in the inspector', async () => {
+  jest.spyOn(matrixApi, 'fixture').mockResolvedValue({ ...snapshot, cells: snapshot.cells.map((cell): MatrixSnapshot['cells'][number] => ({
+    ...cell, state: 'unavailable', payload: { kind: 'table', metrics: [{
+      key: 'car', label: 'Regulatory CAR', value: null, display: 'Unavailable', unit: 'unknown unit', period: '2025', as_of: null,
+      basis: 'No reported regulatory observation; accounting equity/assets is not CAR', evidence_ids: [],
+      regulatory_basis: { circular_versions: ['14/2025/TT-NHNN; bank applicability unverified'], method: null, perimeter: null, observation_date: null, reported_or_derived: null, source_urls: ['https://baochinhphu.vn/'] },
+    }] }, evidence_ids: [], limitations: ['No regulatory evidence retained'],
+  })) });
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Explore synthetic fixture' }));
+  const result = await screen.findByRole('button', { name: 'Inspect FPT Profit quality' });
+  fireEvent.change(screen.getByLabelText('Density'), { target: { value: 'expanded' } });
+  expect(result.querySelector('a, button')).toBeNull();
+  expect(screen.queryByRole('link', { name: 'Regulatory framework source (not issuer evidence)' })).not.toBeInTheDocument();
+  fireEvent.click(result);
+  const inspector = within(screen.getByRole('dialog'));
+  const basis = inspector.getByRole('region', { name: 'Regulatory CAR regulatory basis' });
+  expect(basis).toHaveTextContent('14/2025/TT-NHNN; bank applicability unverified');
+  expect(basis).toHaveTextContent('MethodUnavailable: not retained');
+  expect(basis).toHaveTextContent('Regulatory perimeterUnavailable: not retained');
+  expect(basis).toHaveTextContent('Observation dateUnavailable: not retained');
+  expect(basis).toHaveTextContent('no reported observation or regulatory derivation admitted');
+  expect(basis).toHaveTextContent('accounting equity/assets is not CAR');
+  expect(inspector.getByRole('link', { name: 'Regulatory framework source (not issuer evidence)' })).toHaveAttribute('href', 'https://baochinhphu.vn/');
 });

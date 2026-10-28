@@ -62,7 +62,8 @@ def iq_sync(monkeypatch):
     client.get_company_search_bar.return_value = [
         {"code": symbol, "comTypeCode": "CT"} for symbol in symbols
     ]
-    client.get_ohlc.return_value = {
+    client.get_ohlc.side_effect = lambda symbol, **kwargs: {
+        "symbol": symbol,
         "o": [10000], "h": [20000], "l": [10000], "c": [15000],
         "v": [10],
         "t": [datetime.combine(date.today(), datetime.min.time(), tzinfo=UTC).timestamp()],

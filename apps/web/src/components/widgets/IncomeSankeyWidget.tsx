@@ -78,7 +78,7 @@ function IncomeSankeyWidgetComponent({ id, symbol, onRemove, onDataChange }: Inc
     const ambiguous = periodIssues.filter((issue) => issue.reason === 'ambiguous-basis');
     if (ambiguous.length > 0) {
       notes.push(
-        `Unavailable: ${ambiguous.map((issue) => issue.period).join(', ')} returned conflicting rows with no basis field, so no flow is shown for ${ambiguous.length === 1 ? 'it' : 'them'}.`,
+        `Unavailable: ${ambiguous.map((issue) => issue.period).join(', ')} returned conflicting rows without an authoritative basis/revision selection, so no flow is shown for ${ambiguous.length === 1 ? 'it' : 'them'}.`,
       );
     }
     if (invalidPeriodCount > 0) {

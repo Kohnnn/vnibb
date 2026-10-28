@@ -5,16 +5,6 @@ from types import SimpleNamespace
 import pytest
 from vnibb.api.v1 import market
 
-def _cap(value):
-    if value is None:
-        return {"market_cap": None}
-    return {
-        "market_cap": value, "market_cap_source": "issuer:cap", "market_cap_unit": "VND",
-        "market_cap_currency": "VND", "market_cap_as_of": "2026-10-23",
-        "outstanding_shares": 100, "shares_unit": "shares", "share_basis": "outstanding",
-        "shares_as_of": "2026-10-23", "shares_source": "issuer:shares",
-    }
-
 
 @pytest.fixture
 def bubble_inputs(monkeypatch):
@@ -186,8 +176,8 @@ async def test_industry_bubble_retained_points_do_not_wait_for_owned_provider(
             timed_out = await pending
             assert timed_out.status_code == 503
             bubble_inputs.extend([
-                {"symbol": "FPT", "industry": "technology", **_cap(100.0)},
-                {"symbol": "CMG", "industry": "technology", **_cap(200.0)},
+                {"symbol": "FPT", "industry": "technology", "market_cap": 100.0},
+                {"symbol": "CMG", "industry": "technology", "market_cap": 200.0},
             ])
 
             async def ratios(_symbols):
@@ -219,14 +209,14 @@ async def test_industry_bubble_reference_refresh_selects_useful_peer_observation
     client, monkeypatch, bubble_inputs, retained_cap, provider_cap, expected_date,
 ):
     bubble_inputs.append({
-        "symbol": "CMG", "industry": "technology", **_cap(retained_cap),
+        "symbol": "CMG", "industry": "technology", "market_cap": retained_cap,
         "snapshot_date": "2026-10-23",
     })
 
     async def provider(_params):
         return [
-            {"symbol": "FPT", "industry": "technology", **_cap(100.0)},
-            {"symbol": "CMG", "industry": "technology", **_cap(provider_cap),
+            {"symbol": "FPT", "industry": "technology", "market_cap": 100.0},
+            {"symbol": "CMG", "industry": "technology", "market_cap": provider_cap,
              "snapshot_date": "2026-10-24"},
         ]
 

@@ -190,6 +190,37 @@ async def test_http_selection_rejects_duplicates_empty_and_foreign_results(matri
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["missing_evidence", "store_outage"])
+async def test_http_missing_frozen_evidence_is_distinct_from_store_outage(
+    matrix_http, matrix_store, monkeypatch, failure
+):
+    fixture, factory = matrix_store
+    args = selection_args(fixture)
+    if failure == "missing_evidence":
+        async with factory() as db:
+            stored = await db.get(AppKeyValue, f"matrix:snapshot:{args['snapshot_id']}")
+            value = copy.deepcopy(stored.value)
+            value["evidence"] = []
+            stored.value = value
+            await db.commit()
+    else:
+        async def unavailable(*args, **kwargs):
+            raise RuntimeError("private storage outage details must not escape")
+        monkeypatch.setattr(server, "resolve_matrix_selection", unavailable)
+    async with connected_client(matrix_http, signed_token()) as (session, _):
+        result = await session.call_tool("get_matrix_selection", args)
+        text = error_text(result)
+        assert result.structuredContent is None
+        if failure == "missing_evidence":
+            assert "evidence_not_found: Matrix frozen evidence not found" in text
+            assert "Matrix selection unavailable" not in text
+        else:
+            assert "Matrix selection unavailable" in text
+            assert "evidence_not_found" not in text
+            assert "private storage outage" not in text
+
+
+@pytest.mark.asyncio
 async def test_matrix_export_rights_default_deny_exact_source_and_synthetic(
     matrix_http, matrix_store, monkeypatch
 ):

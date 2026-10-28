@@ -406,6 +406,34 @@ async def test_candidates_bound_each_source_before_analysis_filters(client, test
 
 
 @pytest.mark.asyncio
+async def test_topic_reads_include_matching_market_beyond_source_candidate_limit(client, test_db):
+    now = datetime.now(UTC)
+    unrelated = [
+        _market(source="kalshi", source_id=f"weather-{index}", question="Will it rain tomorrow?")
+        for index in range(1000)
+    ]
+    for row in unrelated:
+        row.updated_at = now
+    cpi = _market(source="kalshi", source_id="late-cpi", question="CPI above target?", yes_price=0.7)
+    cpi.updated_at = now - timedelta(hours=1)
+    test_db.add_all([*unrelated, cpi])
+    await test_db.commit()
+
+    calibration = (await client.get("/api/v1/prediction-markets/calibration")).json()
+    assert [row["source_id"] for row in calibration["markets"]] == ["late-cpi"]
+    assert calibration["consensus_yes_price"] == pytest.approx(0.7)
+    spread = (await client.get("/api/v1/prediction-markets/spread")).json()
+    cpi_spread = next(row for row in spread["topics"] if row["topic"] == "cpi")
+    assert cpi_spread["kalshi_consensus"] == pytest.approx(0.7)
+    assert cpi_spread["n_kalshi"] == 1001
+    cross = (await client.get("/api/v1/prediction-markets/cross-calibration")).json()
+    cpi_cross = next(row for row in cross["topics"] if row["topic"] == "cpi")
+    assert cpi_cross["sources"] == [
+        {"source": "kalshi", "consensus_yes_price": pytest.approx(0.7), "n_markets": 1}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_missing_price_vector_is_not_zero_probability(client, test_db):
     from vnibb.services.prediction_market_estimator import _load_active_markets
 

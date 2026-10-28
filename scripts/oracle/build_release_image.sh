@@ -9,7 +9,9 @@ if [[ -z "$revision" ]]; then
   revision="$(git rev-parse --verify HEAD)"
 fi
 python_bin="${PYTHON_BIN:-}"
-args=(--platform "$platform" --build-arg "IMAGE_RELEASE_REVISION=$revision")
+args=(--platform "$platform" --build-arg "IMAGE_RELEASE_REVISION=$revision"
+  --label "org.opencontainers.image.revision=$revision"
+  --label "org.opencontainers.image.source=https://github.com/Kohnnn/vnibb")
 
 if [[ -z "$python_bin" ]]; then
   for candidate in python3 python py; do

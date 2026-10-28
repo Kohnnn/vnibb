@@ -13,6 +13,7 @@ from vnibb.services.prediction_market_intraday_snapshot_service import (
     snapshot_active_prediction_markets_intraday,
 )
 from vnibb.services.prediction_market_service import (
+    PredictionMarketAdmissionError,
     ingest_polymarket_gamma_markets_with_default_client,
 )
 from vnibb.services.prediction_market_snapshot_service import snapshot_active_prediction_markets
@@ -38,7 +39,7 @@ async def populate_prediction_markets_now(session: AsyncSession) -> dict[str, in
     except Exception as exc:
         logger.warning("populate: polymarket ingest failed: %s", exc)
         failed_sources.append("polymarket")
-        counts["polymarket"] = 0
+        counts["polymarket"] = exc.persisted_count if isinstance(exc, PredictionMarketAdmissionError) else 0
 
     # 2. Kalshi (live, paginated).
     try:
@@ -46,7 +47,7 @@ async def populate_prediction_markets_now(session: AsyncSession) -> dict[str, in
     except Exception as exc:
         logger.warning("populate: kalshi ingest failed: %s", exc)
         failed_sources.append("kalshi")
-        counts["kalshi"] = 0
+        counts["kalshi"] = exc.persisted_count if isinstance(exc, PredictionMarketAdmissionError) else 0
 
     # Live providers only: an outage must not turn fixtures into measurements.
     for source, ingest in (
@@ -59,7 +60,7 @@ async def populate_prediction_markets_now(session: AsyncSession) -> dict[str, in
         except Exception as exc:
             logger.warning("populate: %s ingest failed: %s", source, exc)
             failed_sources.append(source)
-            counts[source] = 0
+            counts[source] = exc.persisted_count if isinstance(exc, PredictionMarketAdmissionError) else 0
 
     # 6. Nightly snapshot.
     try:

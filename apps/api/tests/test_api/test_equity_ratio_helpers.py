@@ -1,21 +1,26 @@
-from types import SimpleNamespace
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+from vnibb.api.v1.equity import (
+    _compute_rolling_high_low,
+    _enrich_financial_statement_rows,
+    _enrich_missing_ratio_metrics,
+    _load_mongo_financial_ratio_rows,
+    _load_mongo_financial_statement_rows,
+    _ratio_has_metric_value,
+    _to_ratio_data,
+    get_fundamental_analysis,
+)
 from vnibb.api.v1.schemas import StandardResponse
-from vnibb.api.v1.equity import _enrich_financial_statement_rows, _ratio_has_metric_value, _to_ratio_data
-from vnibb.api.v1.equity import _enrich_missing_ratio_metrics
-from vnibb.api.v1.equity import _compute_rolling_high_low, _load_mongo_financial_ratio_rows, _load_mongo_financial_statement_rows
-from vnibb.api.v1.equity import get_fundamental_analysis
 from vnibb.models.company import Company
-from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
+from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
 from vnibb.providers.vnstock.financials import FinancialStatementData
-
 
 
 @pytest.mark.asyncio
@@ -28,8 +33,8 @@ from vnibb.providers.vnstock.financials import FinancialStatementData
 ])
 async def test_ratio_endpoint_does_not_resurrect_rejected_merged_metrics(monkeypatch, test_db, client, preferred_units, preferred_roe, expected):
     from vnibb.api.v1 import equity
-    from vnibb.models.trading import FinancialRatio
     from vnibb.core import cache
+    from vnibb.models.trading import FinancialRatio
 
     monkeypatch.setattr(cache, "_memory_cache", {})
 
@@ -131,7 +136,10 @@ def test_ratio_merge_retains_fallback_cell_evidence():
 ])
 def test_ratio_merge_distinguishes_omitted_yield_from_unit_rejection(raw, expected):
     from vnibb.api.v1.equity import _merge_ratio_rows
-    from vnibb.providers.vnstock.financial_ratios import FinancialRatiosQueryParams, VnstockFinancialRatiosFetcher
+    from vnibb.providers.vnstock.financial_ratios import (
+        FinancialRatiosQueryParams,
+        VnstockFinancialRatiosFetcher,
+    )
 
     preferred = VnstockFinancialRatiosFetcher.transform_data(FinancialRatiosQueryParams(symbol="FPT"), [raw])[0]
     fallback = FinancialRatioData(symbol="FPT", period="2025", dividend_yield=0.25,

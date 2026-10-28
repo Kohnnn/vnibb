@@ -13,7 +13,6 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
-
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.models.prediction_market_archive import PredictionMarketArchive
 from vnibb.services import prediction_market_retention as retention

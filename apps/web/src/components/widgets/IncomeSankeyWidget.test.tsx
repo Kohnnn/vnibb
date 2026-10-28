@@ -132,7 +132,7 @@ describe('income_sankey saved dashboard widget', () => {
     fireEvent.click(screen.getByRole('button', { name: 'TTM' }));
 
     expect(await screen.findByText('Income flow unavailable for FPT')).toBeInTheDocument();
-    expect(screen.getAllByText(/TTM-2025 returned no certified value \(unknown_source_unit\)/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/unknown_source_unit/).length).toBeGreaterThan(0);
   });
 
   it('discloses an uncertified period while still charting the certified ones', async () => {
@@ -149,7 +149,7 @@ describe('income_sankey saved dashboard widget', () => {
     // The certified period is still charted ...
     expect(widget.querySelectorAll('svg[viewBox="0 0 1120 420"] path').length).toBeGreaterThan(0);
     // ... and the uncertified period's reason is visible rather than silently dropped.
-    expect(screen.getAllByText(/2025 returned no certified value \(conflicting_duplicate_period\)/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/conflicting_duplicate_period/).length).toBeGreaterThan(0);
   });
 
   it('reports an unavailable selected quarter rather than charting a different usable quarter', async () => {

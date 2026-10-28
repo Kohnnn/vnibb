@@ -318,7 +318,7 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
         for row in data:
             try:
 
-                def _clean(value: Any) -> Optional[str]:
+                def _clean(value: Any) -> str | None:
                     if value is None:
                         return None
                     text = str(value).strip()
@@ -326,7 +326,7 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                         return None
                     return text
 
-                def _date(*keys: str, source: dict[str, Any] = row) -> Optional[str]:
+                def _date(*keys: str, source: dict[str, Any] = row) -> str | None:
                     for key in keys:
                         parsed = _parse_sortable_event_date(supplied(source, key))
                         if parsed is not None:

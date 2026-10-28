@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
 import vnibb.services.technical_analysis as technical_analysis
-from vnibb.api.v1 import technical
+from vnibb.api.v1 import equity, technical
 from vnibb.core.config import settings
 from vnibb.providers.vnstock import runtime
 from vnibb.services.technical_analysis import TechnicalAnalysisService
@@ -120,6 +120,11 @@ async def test_full_analysis_loads_and_merges_quote_once(monkeypatch):
         }
     )
 
+    async def no_retained_history(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(TechnicalAnalysisService, "_load_retained_ohlcv_frame", no_retained_history)
+
     class Quote:
         def history(self, **_kwargs):
             nonlocal history_calls
@@ -150,6 +155,59 @@ async def test_full_analysis_loads_and_merges_quote_once(monkeypatch):
     assert analysis["symbol"] == "VCI"
     assert analysis["price_unit"] == "VND"
     assert analysis["moving_averages"]["current_price"] == 360000.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("price_unit", ["VND", "unknown"])
+async def test_full_analysis_uses_retained_sessions_when_live_provider_is_blocked(monkeypatch, price_unit):
+    latest_session = date.today() - timedelta(days=20)
+    rows = [
+        equity.EquityHistoricalData(
+            symbol="VCI", time=timestamp.date(), price_unit=price_unit,
+            price_source="retained:test", open=100_000 + index * 100,
+            high=102_000 + index * 100, low=99_000 + index * 100,
+            close=101_000 + index * 100, volume=1_000_000,
+        )
+        for index, timestamp in enumerate(pd.bdate_range(end=latest_session, periods=260))
+    ]
+    provider_calls = 0
+
+    async def retained_mongo(*_args, **_kwargs):
+        return rows
+
+    async def retained_sql(*_args, **_kwargs):
+        return []
+
+    def blocked_provider(*_args, **_kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        raise AssertionError("Retained full analysis must not acquire live provider data")
+
+    monkeypatch.setattr(equity, "_load_historical_from_mongo", retained_mongo)
+    monkeypatch.setattr(equity, "_load_historical_from_db", retained_sql)
+    monkeypatch.setattr(runtime, "get_vnstock_class", blocked_provider)
+    monkeypatch.setattr(technical_analysis.VnstockStockQuoteFetcher, "fetch", blocked_provider)
+
+    analysis = await asyncio.wait_for(
+        technical.get_full_analysis(symbol="VCI", timeframe="W", lookback_days=200),
+        timeout=1,
+    )
+    assert provider_calls == 0
+
+    if price_unit == "unknown":
+        assert analysis.signals.overall_signal == "unavailable"
+        assert analysis.signals.total_indicators == 0
+        assert analysis.signals.data_quality["reason"] == "unresolved_price_units"
+        assert analysis.data_quality["unresolved_session_count"] == 260
+        return
+    assert analysis.moving_averages.current_price == 126_900
+    assert analysis.signals.total_indicators > 0
+    assert analysis.data_quality["latest_date"] == rows[-1].time.isoformat()
+    assert analysis.data_quality["freshness_as_of"] == rows[-1].time.isoformat()
+    assert analysis.data_quality["source_counts"] == {"mongo": 260}
+    assert analysis.data_quality["unit_status"] == "confirmed_vnd"
+    assert analysis.data_quality["completeness_status"] == "partial"
+    assert analysis.data_quality["stale"] is True
 
 
 @pytest.mark.asyncio

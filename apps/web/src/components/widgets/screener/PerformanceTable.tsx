@@ -8,14 +8,14 @@ import { cn } from '@/lib/utils';
 export interface PerformanceData {
   symbol: string;
   name: string;
-  price: number;
-  perf_1d: number;
-  perf_1w: number;
-  perf_1m: number;
-  perf_3m: number;
-  perf_6m: number;
-  perf_ytd: number;
-  perf_1y: number;
+  price: number | null;
+  perf_1d: number | null;
+  perf_1w: number | null;
+  perf_1m: number | null;
+  perf_3m: number | null;
+  perf_6m: number | null;
+  perf_ytd: number | null;
+  perf_1y: number | null;
 }
 
 const TIMEFRAME_COLUMNS = [
@@ -96,13 +96,13 @@ export function PerformanceTable({ data, onSymbolClick, onAddToWatchlist }: Perf
                 </div>
               </td>
               <td className="px-3 py-2 text-right font-mono text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">
-                {row.price.toLocaleString()}
+                {row.price == null ? '—' : row.price.toLocaleString()}
               </td>
               {TIMEFRAME_COLUMNS.map(col => {
-                const value = row[col.key as keyof PerformanceData] as number;
-                const isPositive = value > 0;
-                const isNegative = value < 0;
-                
+                const value = row[col.key as keyof PerformanceData] as number | null;
+                const isPositive = value !== null && value > 0;
+                const isNegative = value !== null && value < 0;
+
                 return (
                   <td
                     key={col.key}
@@ -111,7 +111,7 @@ export function PerformanceTable({ data, onSymbolClick, onAddToWatchlist }: Perf
                         isPositive ? 'bg-green-500/5 text-green-500' : isNegative ? 'bg-red-500/5 text-red-500' : 'text-[var(--text-muted)]'
                     )}
                   >
-                    {isPositive ? '+' : ''}{value?.toFixed(2)}%
+                    {value == null ? '—' : `${isPositive ? '+' : ''}${value.toFixed(2)}%`}
                   </td>
                 );
               })}

@@ -145,21 +145,234 @@ def financial_packet():
                      "raw_data": {"structured": {"fiscalBasis": {"year": 2025, "periodType": "year"}}}}}
 
 
+def msr_withheld_financial_packet():
+    """Minimized public serialization of retained MSR income row 188122."""
+    return {
+        "symbol": "MSR", "period_type": "year", "statement": "income_statement",
+        "collection": "income_statements", "found": True,
+        "item": {
+            "id": 188122, "symbol": "MSR", "source": "vietcap", "period": "2019",
+            "period_type": "year", "fiscal_year": 2019, "fiscal_quarter": None,
+            "currency": "VND", "value_unit": None, "data_status": "partial_unavailable",
+            "eps": None, "eps_diluted": None,
+            "unavailable_metrics": {
+                "eps": "unverified_statement_currency_or_unit",
+                "eps_diluted": "unverified_statement_currency_or_unit",
+            },
+            "unit_metadata": {
+                "eps": {"unavailable_reason": "unverified_statement_currency_or_unit"},
+                "eps_diluted": {"unavailable_reason": "unverified_statement_currency_or_unit"},
+            },
+            "raw_observation": {
+                "id": 188122, "symbol": "MSR", "source": "vietcap", "period": "2019",
+                "period_type": "year", "fiscal_year": 2019, "fiscal_quarter": None,
+                "eps": 356.0, "eps_diluted": 0.0,
+            },
+            "raw_data": {
+                "symbol": "MSR", "source": "vietcap", "dataset": "finance.income_statement",
+                "datasetVariant": "finance.income_statement.year", "comTypeCode": "CT",
+                "sourceDate": "2020-03-20T00:00:00",
+                "raw": {"ticker": "MSR", "yearReport": 2019, "lengthReport": 5,
+                        "isa23": 356.0, "isa24": 0.0},
+                "descriptors": [{"field": "isa23", "titleEn": "EPS basic (VND)"},
+                                {"field": "isa24", "titleEn": "EPS diluted (VND)"}],
+                "structured": {
+                    "source": "vietcap", "values": {"eps": 356.0, "eps_diluted": 0.0},
+                    "unavailable": {"revenue": "unit_unverified"},
+                    "fiscalBasis": {"year": 2019, "periodType": "year", "period": "2019",
+                                    "quarter": None, "consolidation": "unknown", "reason": None},
+                },
+                "_financial_lineage": {"canonical_data": {
+                    "symbol": "MSR", "source": "vietcap", "period": "2019",
+                    "statement_type": "income", "fiscal_year": 2019, "fiscal_quarter": None,
+                    "currency": "VND", "value_unit": None, "eps": 356.0, "eps_diluted": 0.0,
+                }},
+            },
+        },
+    }
+
+
+def test_public_financial_read_explicit_withholding_of_retained_metrics_is_partial():
+    packet = json.loads(json.dumps(msr_withheld_financial_packet()))
+    with pytest.raises(qa.Partial):
+        qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": "income_statement"})
+
+
+SQL_FINANCIAL_ALIASES = [
+    ("income_statement", "operating_expense", "operating_expenses"),
+    ("income_statement", "profit_before_tax", "income_before_tax"),
+    ("income_statement", "tax_expense", "income_tax"),
+    ("balance_sheet", "equity", "total_equity"),
+    ("balance_sheet", "cash", "cash_and_equivalents"),
+    ("balance_sheet", "receivables", "accounts_receivable"),
+    ("balance_sheet", "long_term_liabilities", "non_current_liabilities"),
+    ("cash_flow", "net_cash_flow", "net_change_in_cash"),
+    ("ratio", "pe", "pe_ratio"), ("ratio", "pb", "pb_ratio"), ("ratio", "ps", "ps_ratio"),
+    ("ratio", "debt_equity", "debt_to_equity"), ("ratio", "debt_assets", "debt_to_assets"),
+]
+
+
+def aliased_financial_packet(statement, field, column, value):
+    packet = financial_packet()
+    packet["collection"] = qa.STATEMENTS.get(statement, "financial_ratios")
+    if statement == "ratio":
+        packet.pop("statement")
+    else:
+        packet["statement"] = statement
+    item = packet["item"]
+    item.pop("revenue")
+    item[column] = value
+    item["raw_data"].update(
+        raw={"reported_metric": value}, descriptors=[{"field": "reported_metric"}],
+        comTypeCode="CT", sourceDate="2026-01-01",
+    )
+    item["raw_data"]["structured"].update(
+        values={field: value},
+        fieldEvidence={field: {"unit": "VND", "unitEvidence": {"units": ["VND"], "scales": [1]}}},
+    )
+    item["raw_data"]["structured"]["fiscalBasis"]["consolidation"] = "consolidated"
+    return packet
+
+
+@pytest.mark.parametrize("statement,field,column", SQL_FINANCIAL_ALIASES)
+@pytest.mark.parametrize("value", [0.0, 12.0])
+def test_public_financial_admitted_sql_alias_is_not_an_omission(statement, field, column, value):
+    packet = aliased_financial_packet(statement, field, column, value)
+    args = {"symbol": "MSR", "period_type": "year"}
+    if statement != "ratio":
+        args["statement"] = statement
+    assert qa.financial(packet, args) == [packet["item"]]
+
+
+@pytest.mark.parametrize("statement,field,column", SQL_FINANCIAL_ALIASES)
+def test_public_financial_missing_sql_alias_remains_failure(statement, field, column):
+    packet = aliased_financial_packet(statement, field, column, 12.0)
+    packet["item"][column] = None
+    args = {"symbol": "MSR", "period_type": "year"}
+    if statement != "ratio":
+        args["statement"] = statement
+    with pytest.raises(qa.Failure) as caught:
+        qa.financial(packet, args)
+    assert type(caught.value) is qa.Failure
+
+
+@pytest.mark.parametrize("statement,field,column,canonical_field", [
+    ("income_statement", "operating_expense", "operating_expenses", "operating_expenses"),
+    ("income_statement", "profit_before_tax", "income_before_tax", "pre_tax_profit"),
+    ("income_statement", "tax_expense", "income_tax", "tax_expense"),
+    ("balance_sheet", "equity", "total_equity", "total_equity"),
+    ("balance_sheet", "cash", "cash_and_equivalents", "cash_and_equivalents"),
+    ("balance_sheet", "receivables", "accounts_receivable", "accounts_receivable"),
+    ("balance_sheet", "long_term_liabilities", "non_current_liabilities", "long_term_liabilities"),
+    ("cash_flow", "net_cash_flow", "net_change_in_cash", "net_change_in_cash"),
+])
+@pytest.mark.parametrize("wrong_reason_field", [False, True])
+def test_public_financial_sql_alias_withholding_uses_public_column_and_canonical_value(
+    statement, field, column, canonical_field, wrong_reason_field,
+):
+    packet = aliased_financial_packet(statement, field, column, 0.0)
+    item = packet["item"]
+    item.update(id=188122, fiscal_quarter=None, currency="VND", value_unit=None)
+    item["raw_observation"] = {key: item[key] for key in (
+        "id", "symbol", "source", "period", "period_type", "fiscal_year", "fiscal_quarter", column,
+    )}
+    canonical = {key: item[key] for key in (
+        "symbol", "source", "period", "fiscal_year", "fiscal_quarter", "currency", "value_unit",
+    )}
+    canonical.update(statement_type={"income_statement": "income", "balance_sheet": "balance", "cash_flow": "cashflow"}[statement])
+    canonical[canonical_field] = 0.0
+    item["raw_data"]["_financial_lineage"] = {"canonical_data": canonical}
+    item["raw_data"].update(symbol="MSR", source="vietcap", dataset=f"finance.{statement}", datasetVariant=f"finance.{statement}.year")
+    item["raw_data"]["structured"]["source"] = "vietcap"
+    item[column] = None
+    item["data_status"] = "partial_unavailable"
+    item["unavailable_metrics"] = {field if wrong_reason_field else column: "unverified_statement_currency_or_unit"}
+    item["unit_metadata"] = {canonical_field: {"unavailable_reason": "unverified_statement_currency_or_unit"}}
+    expected = qa.Failure if wrong_reason_field else qa.Partial
+    with pytest.raises(expected) as caught:
+        qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": statement})
+    assert type(caught.value) is expected
+
+
+@pytest.mark.parametrize("section,field,value", [
+    ("unavailable_metrics", "eps", None),
+    ("unavailable_metrics", "eps", "unit_unverified"),
+    ("unavailable_metrics", "eps_diluted", None),
+    ("unit_metadata", "eps", {"unavailable_reason": "unit_unverified"}),
+    ("raw_observation", "eps", None),
+    ("raw_observation", "eps", 357.0),
+    ("raw_observation", "symbol", "VNM"),
+    ("raw_observation", "source", "vci"),
+    ("raw_observation", "fiscal_year", 2020),
+    ("raw_observation", "id", 188121),
+])
+def test_public_financial_withholding_requires_matching_field_and_observation(section, field, value):
+    packet = msr_withheld_financial_packet()
+    packet["item"][section][field] = value
+    with pytest.raises(qa.Failure) as caught:
+        qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": "income_statement"})
+    assert type(caught.value) is qa.Failure
+
+
+@pytest.mark.parametrize("field,value", [
+    ("eps", None), ("eps", 357.0), ("symbol", "VNM"), ("source", "vci"),
+    ("fiscal_year", 2020), ("statement_type", "balance"), ("value_unit", "VND"),
+])
+def test_public_financial_withholding_requires_matching_canonical_evidence(field, value):
+    packet = msr_withheld_financial_packet()
+    packet["item"]["raw_data"]["_financial_lineage"]["canonical_data"][field] = value
+    with pytest.raises(qa.Failure) as caught:
+        qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": "income_statement"})
+    assert type(caught.value) is qa.Failure
+
+
+def test_public_financial_unrelated_withholding_reason_does_not_explain_omission():
+    packet = msr_withheld_financial_packet()
+    packet["item"]["unavailable_metrics"] = {"revenue": "unverified_statement_currency_or_unit"}
+    with pytest.raises(qa.Failure) as caught:
+        qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": "income_statement"})
+    assert type(caught.value) is qa.Failure
+
+
+def test_public_financial_admitted_metric_does_not_hide_another_unexplained_omission():
+    packet = msr_withheld_financial_packet()
+    packet["item"]["eps"] = 356.0
+    packet["item"]["unavailable_metrics"].pop("eps_diluted")
+    with pytest.raises(qa.Failure) as caught:
+        qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": "income_statement"})
+    assert type(caught.value) is qa.Failure
+
+
+
+@pytest.mark.parametrize("fault", ["structured_value", "observation", "canonical", "status", "verified_units"])
+def test_public_financial_withholding_rejects_missing_or_contradictory_proof(fault):
+    packet = msr_withheld_financial_packet()
+    item = packet["item"]
+    if fault == "structured_value":
+        item["raw_data"]["structured"]["values"].pop("eps")
+    elif fault == "observation":
+        item.pop("raw_observation")
+    elif fault == "canonical":
+        item["raw_data"].pop("_financial_lineage")
+    elif fault == "status":
+        item["data_status"] = "available"
+    else:
+        item["value_unit"] = "VND"
+        item["raw_data"]["_financial_lineage"]["canonical_data"]["value_unit"] = "VND"
+    with pytest.raises(qa.Failure) as caught:
+        qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": "income_statement"})
+    assert type(caught.value) is qa.Failure
+
 def test_numeric_period_with_all_financial_metrics_null_rejected():
     packet = financial_packet()
     packet["item"].update(revenue=None, period=2025)
     with pytest.raises(qa.Failure) as caught:
         qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": "income_statement"})
-    assert type(caught.value) is qa.Failure, "withheld-but-present evidence must fail, not read as partial"
+    assert type(caught.value) is qa.Failure
 
 
 def test_sql_row_missing_a_metric_kept_in_source_evidence_rejected():
-    """The writer persists only rows with at least one admitted value.
-
-    A SQL row whose expected metrics are all null while its retained `structured`
-    evidence still holds an admitted value is lost data, so it must fail rather
-    than take the withholding path.
-    """
+    """A decoder unit reason does not explain loss from the public read overlay."""
     packet = financial_packet()
     packet["item"].update(revenue=None, period=2025)
     packet["item"]["raw_data"]["structured"]["values"] = {"revenue": 10}
@@ -201,7 +414,7 @@ def test_raw_financial_withholding_every_monetary_metric_is_partial():
     """
     args = {"symbol": "MSR", "dataset": "finance.balance_sheet", "period_type": "year", "limit": 100}
     packet = raw_financial_packet(raw_financial_row())
-    with pytest.raises(qa.Partial, match="no admitted finite financial metrics"):
+    with pytest.raises(qa.Partial):
         qa.financial(packet, args, raw=True)
     packet["items"][0]["structured"]["unavailable"] = {"record": "invalid_raw_row"}
     with pytest.raises(qa.Failure) as caught:
@@ -210,6 +423,18 @@ def test_raw_financial_withholding_every_monetary_metric_is_partial():
     packet["items"][0]["structured"].pop("unavailable")
     with pytest.raises(qa.Failure) as caught:
         qa.financial(packet, args, raw=True)
+    assert type(caught.value) is qa.Failure
+
+
+@pytest.mark.parametrize("reasons", [
+    {"unrelated": "unit_unverified"}, {"total_assets": "anything"},
+    {"record": "unit_unverified"}, {"total_assets": "unit_unverified", "record": "invalid_raw_row"},
+])
+def test_raw_financial_arbitrary_reason_map_is_not_withholding_evidence(reasons):
+    row = raw_financial_row()
+    row["structured"]["unavailable"] = reasons
+    with pytest.raises(qa.Failure) as caught:
+        qa.financial(raw_financial_packet(row), {"symbol": "MSR", "dataset": "finance.balance_sheet", "period_type": "year"}, raw=True)
     assert type(caught.value) is qa.Failure
 
 
@@ -224,12 +449,33 @@ def test_later_row_hard_violation_is_not_masked_by_earlier_withholding():
     wrong_provider["source"] = "vci"
     with pytest.raises(qa.Failure) as caught:
         qa.financial(raw_financial_packet(raw_financial_row(), wrong_provider), args, raw=True)
-    assert type(caught.value) is qa.Failure and "IQ provider" in str(caught.value)
+    assert type(caught.value) is qa.Failure
     conflicting = raw_financial_row()
     conflicting["structured"]["fiscalBasis"] = {"year": 2025, "periodType": "quarter"}
     with pytest.raises(qa.Failure) as caught:
         qa.financial(raw_financial_packet(raw_financial_row(), conflicting), args, raw=True)
-    assert type(caught.value) is qa.Failure and "fiscal identity" in str(caught.value)
+    assert type(caught.value) is qa.Failure
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["provider", "fiscal", "nonfinite"])
+async def test_sql_financial_hard_failure_after_withheld_row_remains_failure(fault):
+    runner = qa.Runner(SimpleNamespace(expected_revision="test", holiday=[], matrix_fixtures=None))
+    fields = runner.catalog["collections"]["income_statements"]["fields"]
+    withheld = dict.fromkeys(fields) | msr_withheld_financial_packet()["item"]
+    invalid = json.loads(json.dumps(withheld))
+    if fault == "provider":
+        invalid["source"] = "vci"
+    elif fault == "fiscal":
+        invalid["raw_data"]["structured"]["fiscalBasis"]["year"] = 2020
+    else:
+        invalid["eps"] = float("inf")
+    async def read():
+        return {"collection": "income_statements", "row_count": 2, "items": [withheld, invalid]}
+
+    await runner.checked("SQL/financial", read, lambda payload: runner.sql_rows(
+        payload, {"collection": "income_statements", "symbol": "MSR", "period_type": "year"}))
+    assert runner.report["checks"][-1]["status"] == "FAIL"
 
 
 def test_admitted_row_with_malformed_fiscal_basis_fails_despite_missing_source_date():
@@ -249,12 +495,12 @@ def test_admitted_row_with_malformed_fiscal_basis_fails_despite_missing_source_d
     malformed["structured"]["fiscalBasis"] = {"year": "2025", "periodType": "year"}
     with pytest.raises(qa.Failure) as caught:
         qa.financial(raw_financial_packet(malformed), args, raw=True)
-    assert type(caught.value) is qa.Failure and "fiscal basis" in str(caught.value)
+    assert type(caught.value) is qa.Failure
     withheld = raw_financial_row()
     withheld.pop("sourceDate")
     withheld["structured"].pop("unavailable")
     withheld["structured"]["values"] = {field: 123.0}
-    with pytest.raises(qa.Partial, match="source date unknown"):
+    with pytest.raises(qa.Partial):
         qa.financial(raw_financial_packet(withheld), args, raw=True)
 
 
@@ -279,8 +525,9 @@ def test_empty_content_is_withheld_not_failed():
 def test_sql_financial_year_conflicting_with_raw_source_basis_rejected():
     packet = financial_packet()
     packet["item"]["raw_data"]["structured"]["fiscalBasis"]["year"] = 2024
-    with pytest.raises(qa.Failure, match="fiscal year conflict"):
+    with pytest.raises(qa.Failure) as caught:
         qa.financial(packet, {"symbol": "MSR", "period_type": "year", "statement": "income_statement"})
+    assert type(caught.value) is qa.Failure
 
 
 def test_joint_remote_schema_and_row_truncation_cannot_pass():

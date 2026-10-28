@@ -623,7 +623,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 }
             }
 
-            if (!unreadableStorage && storedFolders) {
+            if ((storageCommit === null || storageCommit === 'committed') && storedFolders) {
                 try {
                     const parsedFolders = JSON.parse(storedFolders);
                     if (Array.isArray(parsedFolders)) {
@@ -636,17 +636,6 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 }
             }
 
-            if (unreadableStorage) {
-                dashboards = [];
-                folders = [];
-                migrationNotices.push({
-                    tone: 'warning',
-                    message: 'Dashboard storage was corrupted and has been reset',
-                    detail: unreadableStorageBackedUp
-                        ? 'A backup of your previous dashboards has been created'
-                        : 'Your previous dashboards could not be recovered',
-                });
-            }
 
             // Apply migrations
             const migrations: ((dashboards: Dashboard[]) => { dashboards: Dashboard[]; notice?: DashboardMigrationNotice })[] = [
@@ -725,12 +714,11 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 },
             ];
 
-            let migrationChanged = false;
+            // A malformed workspace must not prevent unrelated workspaces from migrating.
             try {
                 for (const migration of migrations) {
                     const result = migration(dashboards);
                     if (result.dashboards !== dashboards) {
-                        migrationChanged = true;
                         dashboards = result.dashboards;
                         if (result.notice) {
                             migrationNotices.push(result.notice);
@@ -739,14 +727,22 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 }
             } catch {
                 markUnreadableStorage();
-                dashboards = [];
-                folders = [];
-                migrationNotices.push({
-                    tone: 'warning',
-                    message: 'Dashboard storage was corrupted and has been reset',
-                    detail: unreadableStorageBackedUp
-                        ? 'A backup of your previous dashboards has been created'
-                        : 'Your previous dashboards could not be recovered',
+                dashboards = dashboards.flatMap((dashboard) => {
+                    try {
+                        return migrations.reduce((current, migration) => migration(current).dashboards, [dashboard]);
+                    } catch {
+                        return [];
+                    }
+                });
+            }
+
+            if (!hasValidDashboardSnapshot([], folders)) {
+                markUnreadableStorage();
+                const folderIds = new Set<string>();
+                folders = folders.filter((folder) => {
+                    if (!hasValidDashboardSnapshot([], [folder]) || folderIds.has(folder.id)) return false;
+                    folderIds.add(folder.id);
+                    return true;
                 });
             }
 
@@ -761,14 +757,23 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
             if (!hasValidDashboardSnapshot(dashboards, folders)) {
                 markUnreadableStorage();
-                dashboards = [];
-                folders = [];
+                const dashboardIds = new Set<string>();
+                dashboards = dashboards.filter((dashboard) => {
+                    if (!hasValidDashboardSnapshot([dashboard], folders) || dashboardIds.has(dashboard.id)) return false;
+                    dashboardIds.add(dashboard.id);
+                    return true;
+                });
+            }
+
+            if (unreadableStorage) {
                 migrationNotices.push({
                     tone: 'warning',
-                    message: 'Dashboard storage was corrupted and has been reset',
+                    message: dashboards.length > 0
+                        ? 'Some dashboard storage was corrupted; valid workspaces were preserved'
+                        : 'Dashboard storage was corrupted and has been reset',
                     detail: unreadableStorageBackedUp
                         ? 'A backup of your previous dashboards has been created'
-                        : 'Your previous dashboards could not be recovered',
+                        : 'A backup of your previous dashboards could not be created',
                 });
             }
 
@@ -779,16 +784,6 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 if (!existing) {
                     dashboards.push(sysDash);
                 }
-            }
-
-            // Ensure initial folder exists
-            if (!folders.find((f) => f.id === INITIAL_FOLDER_ID)) {
-                folders.unshift({
-                    id: INITIAL_FOLDER_ID,
-                    name: INITIAL_FOLDER_NAME,
-                    order: 0,
-                    isExpanded: true,
-                });
             }
 
             // Determine active dashboard

@@ -205,7 +205,7 @@ services:
       retries: 12
 
   auth:
-    image: supabase/gotrue:v2.177.0
+    image: supabase/gotrue:v2.188.1@sha256:87db8c737af49a64236c461882ed3925f8b1e5c2c47176c64694dedc65153573
     container_name: vnibb-auth
     restart: unless-stopped
     depends_on:

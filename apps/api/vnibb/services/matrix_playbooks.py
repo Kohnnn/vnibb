@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-DEFINITION_REVISION = "matrix-playbooks-1"
+DEFINITION_REVISION = "matrix-playbooks-2"
 
 
 def _dimension(key: str, label: str, question: str, kind: str = "table") -> dict:
@@ -50,6 +50,7 @@ PLAYBOOKS = [
             _dimension("capital", "Accounting capital", "What are equity/assets (not CAR)?"),
             _dimension("credit", "Margin and credit quality", "Are explicitly defined NIM and NPL observations retained, without proxy substitution?"),
             _dimension("valuation", "Book valuation", "What period-specific PB is retained?"),
+            _dimension("regulatory", "Regulatory evidence unavailable", "Which capital, NPL coverage, regulatory funding and liquidity observations remain unavailable, and which legal/method/perimeter evidence is missing?"),
             *_COMMON,
         ],
     },

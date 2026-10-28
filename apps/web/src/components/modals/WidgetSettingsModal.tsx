@@ -182,6 +182,11 @@ export function WidgetSettingsModal({
         () => getTradingViewAdvancedConfigHints(widget?.type),
         [widget?.type]
     );
+    const mergedConfig = useMemo(() => advancedConfigState.parsed ? pruneConfig({
+        ...advancedConfigState.parsed,
+        ...Object.fromEntries(tradingViewFields.map((field) => [field.key, draftConfig[field.key]])),
+        refreshInterval: refreshInterval > 0 ? refreshInterval : undefined,
+    }) : null, [advancedConfigState.parsed, draftConfig, refreshInterval, tradingViewFields]);
     const effectivePreviewSymbol = useMemo(() => {
         if (!widget || !usesTradingViewWidgetSymbol(widget.type)) {
             return undefined;
@@ -194,31 +199,19 @@ export function WidgetSettingsModal({
         return linkedSymbolEnabled ? globalMarketsSymbol : configuredSymbol;
     }, [draftConfig.symbol, globalMarketsSymbol, linkedSymbolEnabled, widget]);
     const runtimePreviewConfig = useMemo(() => {
-        if (!widget || !tradingViewMode || !advancedConfigState.parsed) {
+        if (!widget || !tradingViewMode || !mergedConfig) {
             return null;
         }
 
-        const previewConfig = pruneConfig({
-            ...advancedConfigState.parsed,
-            ...draftConfig,
-            refreshInterval: refreshInterval > 0 ? refreshInterval : undefined,
-        });
-
-        return buildTradingViewRuntimeConfig(widget.type, previewConfig, effectivePreviewSymbol);
-    }, [advancedConfigState.parsed, draftConfig, effectivePreviewSymbol, refreshInterval, tradingViewMode, widget]);
+        return buildTradingViewRuntimeConfig(widget.type, mergedConfig, effectivePreviewSymbol);
+    }, [mergedConfig, effectivePreviewSymbol, tradingViewMode, widget]);
     const runtimePreviewAttributes = useMemo(() => {
-        if (!widget || !tradingViewMode || tradingViewMetadata?.format !== 'web_component' || !advancedConfigState.parsed) {
+        if (!widget || !tradingViewMode || tradingViewMetadata?.format !== 'web_component' || !mergedConfig) {
             return null;
         }
 
-        const previewConfig = pruneConfig({
-            ...advancedConfigState.parsed,
-            ...draftConfig,
-            refreshInterval: refreshInterval > 0 ? refreshInterval : undefined,
-        });
-
-        return buildTradingViewWebComponentAttributes(widget.type, previewConfig, effectivePreviewSymbol);
-    }, [advancedConfigState.parsed, draftConfig, effectivePreviewSymbol, refreshInterval, tradingViewMetadata?.format, tradingViewMode, widget]);
+        return buildTradingViewWebComponentAttributes(widget.type, mergedConfig, effectivePreviewSymbol);
+    }, [mergedConfig, effectivePreviewSymbol, tradingViewMetadata?.format, tradingViewMode, widget]);
     const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: isOpen && Boolean(widget), onClose });
 
     useEffect(() => {
@@ -265,16 +258,10 @@ export function WidgetSettingsModal({
         }
 
         try {
-            const parsedAdvancedConfig = advancedConfigState.parsed;
-            if (!parsedAdvancedConfig) {
+            const nextConfig = mergedConfig;
+            if (!nextConfig) {
                 throw new Error(advancedConfigState.error || 'Invalid JSON configuration');
             }
-
-            const nextConfig = pruneConfig({
-                ...parsedAdvancedConfig,
-                ...draftConfig,
-                refreshInterval: refreshInterval > 0 ? refreshInterval : undefined,
-            });
 
             if (
                 tradingViewMode &&

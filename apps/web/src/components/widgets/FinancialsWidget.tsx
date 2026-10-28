@@ -580,7 +580,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
         return resolveUnitScale(values, unitConfig);
     }, [tableData, activeTab, unitConfig]);
 
-    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
+    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig).replace(/^Values in/, 'Display units:'), [tableScale, unitConfig]);
     const denseColumns = useMemo<DenseTableColumn[]>(() => {
         if (!tableData) return []
         return tableData.periods.map((periodLabel) => ({
@@ -750,8 +750,8 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                                 initialScrollPosition="end"
                                 storageKey={`financials:${symbol}:${activeTab}:${period}`}
                                 footerNote={activeTab !== 'ratios'
-                                    ? `Note: ${unitLegend}; per-share values (EPS/BVPS/DPS) are ${unitConfig.display === 'USD' ? 'USD' : 'VND'} per share • Reporting Standard: VAS${negativeBaseLabels.length > 0 ? ` • Growth divides by the absolute prior-period value; negative-base comparisons are labelled (${negativeBaseLabels.join(', ')}), not ordinary growth` : ''}`
-                                    : `Note: Ratio history by ${period}. EPS/BVPS/DPS are ${unitConfig.display === 'USD' ? 'USD' : 'VND'} per share; dimensionless ratios are not currency-converted. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
+                                    ? `${unitLegend}; per-share rows are displayed without the table scale. Display settings do not verify source units or reporting standard.${negativeBaseLabels.length > 0 ? ` • Growth divides by the absolute prior-period value; negative-base comparisons are labelled (${negativeBaseLabels.join(', ')}), not ordinary growth` : ''}`
+                                    : `Note: Ratio history by ${period}. Per-share display currency: ${unitConfig.display === 'USD' ? 'USD' : 'VND'}; dimensionless ratios are not currency-converted. Display settings do not verify source units. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
                                 valueFormatter={(value, row) => {
                                     const meta = denseRowMeta.get(row.id)
                                     // `null` must stay null. Number(null) is 0, and 0 is finite, so
