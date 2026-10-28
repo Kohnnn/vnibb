@@ -344,10 +344,8 @@ async def _fetch_and_broadcast_cycle(symbols: set[str], market_open: bool):
 
 async def _run_price_cycle(symbols: set[str], market_open: bool):
     try:
-        await asyncio.wait_for(
-            _fetch_and_broadcast_cycle(symbols, market_open),
-            timeout=settings.websocket_cycle_timeout_seconds,
-        )
+        async with asyncio.timeout(settings.websocket_cycle_timeout_seconds):
+            await _fetch_and_broadcast_cycle(symbols, market_open)
     except TimeoutError:
         logger.warning(
             "Price broadcast cycle exceeded %.1f seconds",
@@ -371,7 +369,8 @@ async def fetch_and_broadcast_prices():
                 await _run_price_cycle(manager.get_all_subscribed_symbols(), status["is_open"])
             delay = ACTIVE_MARKET_SLEEP_SECONDS if status["is_open"] else IDLE_SLEEP_SECONDS
             try:
-                await asyncio.wait_for(manager.subscriptions_changed.wait(), timeout=delay)
+                async with asyncio.timeout(delay):
+                    await manager.subscriptions_changed.wait()
             except TimeoutError:
                 pass
         except asyncio.CancelledError:

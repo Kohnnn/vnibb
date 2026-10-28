@@ -474,6 +474,61 @@ async def test_existing_socket_receives_session_transition(monkeypatch):
         with pytest.raises(asyncio.CancelledError):
             await task
 
+@pytest.mark.asyncio
+async def test_broadcaster_propagates_cancellation_when_subscription_wakeup_completes(monkeypatch):
+    manager = ConnectionManager()
+    monkeypatch.setattr(websocket_api, "manager", manager)
+    woke = asyncio.Event()
+    broadcaster = None
+
+    async def wake_and_cancel():
+        if not woke.is_set():
+            woke.set()
+            broadcaster.cancel()
+            return
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(manager.subscriptions_changed, "wait", wake_and_cancel)
+    broadcaster = asyncio.create_task(websocket_api.fetch_and_broadcast_prices())
+    try:
+        await asyncio.wait_for(woke.wait(), 0.5)
+        done, _ = await asyncio.wait({broadcaster}, timeout=0.5)
+        assert broadcaster in done, "Broadcaster swallowed cancellation on subscription wakeup"
+        with pytest.raises(asyncio.CancelledError):
+            await broadcaster
+    finally:
+        if not broadcaster.done():
+            broadcaster.cancel()
+        await asyncio.gather(broadcaster, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_price_cycle_propagates_cancellation_when_cycle_completes(monkeypatch):
+    cycle = None
+
+    async def finish_and_cancel(*_args):
+        cycle.cancel()
+
+    monkeypatch.setattr(websocket_api, "_fetch_and_broadcast_cycle", finish_and_cancel)
+    cycle = asyncio.create_task(websocket_api._run_price_cycle({"FPT"}, False))
+    with pytest.raises(asyncio.CancelledError):
+        await cycle
+
+
+@pytest.mark.asyncio
+async def test_send_propagates_cancellation_when_send_completes():
+    manager = ConnectionManager()
+    websocket = FakeWebSocket()
+    manager.active_connections[websocket] = set()
+    send_task = None
+
+    async def send_and_cancel(_payload):
+        send_task.cancel()
+
+    websocket.send_json = send_and_cancel
+    send_task = asyncio.create_task(manager.send_json(websocket, {"type": "market_status"}, 0.5))
+    with pytest.raises(asyncio.CancelledError):
+        await send_task
 
 @pytest.mark.asyncio
 async def test_blocked_sync_worker_keeps_slot_and_does_not_duplicate(monkeypatch):

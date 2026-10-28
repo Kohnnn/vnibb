@@ -117,7 +117,8 @@ class ConnectionManager:
                         return False
                     await websocket.send_json(payload)
                     return True
-            return await asyncio.wait_for(send(), timeout=timeout)
+            async with asyncio.timeout(timeout):
+                return await send()
         except Exception as error:
             logger.debug("Failed to send WebSocket message: %s", error)
             if websocket in self.active_connections:
