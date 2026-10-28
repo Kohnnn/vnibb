@@ -101,7 +101,7 @@ Refresh/history declarations cite existing ingestion owners; unknown scopes rema
 
 ### Bounded SQL statement admission inventory
 
-For a separate field-level baseline, run from `apps/api` against the retained SQL store using a **read-only database account** and a private dotenv file containing `DATABASE_URL_SYNC` (or `DATABASE_URL`). Check that no existing environment variable overrides that URL. Provision only SELECT permissions on `income_statements`, `balance_sheets`, and `cash_flows`. This command makes no provider or Mongo requests and performs no writes:
+For a separate field-level baseline, run from `apps/api` against the retained SQL store using a **read-only database account** and a private dotenv file containing `DATABASE_URL_SYNC` (or `DATABASE_URL`). With `--env-file`, only its explicit URL is used; inherited database URLs and the working directory's dotenv files are ignored. If both keys are present, `DATABASE_URL_SYNC` takes precedence. Missing URLs, duplicate URL keys, malformed dotenv syntax and `${...}` interpolation fail closed. Without `--env-file`, the corresponding process environment URL is used instead. Provision only SELECT permissions on `income_statements`, `balance_sheets`, and `cash_flows`. This command makes no provider or Mongo requests and performs no writes:
 
 ```bash
 python -m scripts.financial_admission_inventory \
