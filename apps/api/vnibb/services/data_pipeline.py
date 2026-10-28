@@ -3398,6 +3398,8 @@ class DataPipeline:
                         VnstockFinancialsFetcher.transform_query(params)
                     )
                     items = VnstockFinancialsFetcher.transform_data(params, raw_items)
+                    if any(item.source == "issuer_report" for item in items):
+                        raise ValueError("issuer_report persistence is not enabled")
                     outcome["source_returned_period_count"] = len({
                         _parse_period_fields(entry.period, entry.raw_data)[0] for entry in items
                     })
