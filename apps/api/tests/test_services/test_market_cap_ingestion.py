@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from vnibb.core.market_cap import resolve_market_cap
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.sync_status import SyncStatus
 from vnibb.providers.vnstock.equity_profile import EquityProfileData, EquityProfileQueryParams, VnstockEquityProfileFetcher
 from vnibb.providers.vnstock.equity_screener import StockScreenerParams, VnstockScreenerFetcher
 from vnibb.services.cache_manager import CacheManager
@@ -164,6 +165,7 @@ async def test_concurrent_snapshot_writes_retain_both_observations(test_engine, 
         sqlite_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'snapshot.db'}")
         async with sqlite_engine.begin() as connection:
             await connection.run_sync(ScreenerSnapshot.__table__.create)
+            await connection.run_sync(SyncStatus.__table__.create)
     engine = sqlite_engine or test_engine
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     symbol = f"C{uuid4().hex[:7]}".upper()

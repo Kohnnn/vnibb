@@ -659,6 +659,10 @@ async def test_generic_financial_query_withholds_issuer_alongside_iq_and_vci(
     test_db.add(
         model(id=8, symbol="VNM", period="2025", period_type="year", fiscal_year=2025, source="VCI")
     )
+    test_db.add(
+        model(id=9, symbol="ISSUER", period="2025", period_type="year", fiscal_year=2025,
+              source="issuer_report", raw_data={"_financial_lineage": {"issuer_evidence": ISSUER_EVIDENCE}})
+    )
     await test_db.commit()
     monkeypatch.setattr(
         server, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False)
@@ -673,9 +677,11 @@ async def test_generic_financial_query_withholds_issuer_alongside_iq_and_vci(
     assert {row["source"] for row in result["items"]} == {"vietcap", "VCI"}
     assert result["filters_applied"]["admitted_sources"] == ["vietcap", "VCI"]
     issuer_only = await server.query_database_collection_data(
-        collection=collection, symbol="FPT", source="issuer_report"
+        collection=collection, symbol="ISSUER", period_type="year"
     )
     assert issuer_only["row_count"] == 0
+    assert issuer_only["items"] == []
+    assert issuer_only["filters_applied"]["admitted_sources"] == ["vietcap", "VCI"]
 
 
 @pytest.mark.asyncio
