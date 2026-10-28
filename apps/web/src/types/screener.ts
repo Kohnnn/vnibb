@@ -29,6 +29,7 @@ export interface ScreenerData {
     quick_ratio?: number;
     ev_ebitda?: number;
     dividend_yield?: number;
+    ratio_units?: Record<string, string | undefined> | null;
     listing_date?: string | null;
     listing_age_days?: number | null;
     target_price?: number | null;

@@ -3,6 +3,7 @@ useDefault = true
 
 [allowlist]
 description = "cached() decorator key_prefix args are cache namespaces, not secrets"
+regexTarget = "match"
 regexes = [
   '''key_prefix="[A-Za-z0-9_-]+"''',
 ]

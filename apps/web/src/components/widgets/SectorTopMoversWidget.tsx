@@ -88,7 +88,6 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup, onDataChang
       : [];
   const hasData = sectors.length > 0;
   const isFallback = Boolean(error && hasData);
-  const updatedAt = payload?.updated_at || dataUpdatedAt;
   const sectorUniverseCount = useMemo(() => {
     if (!sectorsCatalog) return 0;
     return Object.keys(sectorsCatalog).length;
@@ -108,12 +107,13 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup, onDataChang
         apiGroup: '/sectors',
         endpoint: `/sectors/top-movers?type=${viewType}&limit=5`,
         sourceLabel: viewType === 'gainers' ? 'Top gainers by sector' : 'Top losers by sector',
-        lastDataDate: updatedAt,
+        lastDataDate: null,
+        fetchedAt: dataUpdatedAt,
         stale: isFallback,
         extra: hasData ? { viewType, sectorCount: sectors.length } : undefined,
       }),
     );
-  }, [hasData, updatedAt, isFallback, viewType, sectors.length, onDataChange]);
+  }, [hasData, dataUpdatedAt, isFallback, viewType, sectors.length, onDataChange]);
 
   return (
     <WidgetContainer
@@ -128,7 +128,8 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup, onDataChang
       <div className="h-full flex flex-col relative group/widget">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
-            updatedAt={updatedAt}
+            updatedAt={null}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note={viewType === 'gainers' ? 'Top gainers by sector' : 'Top losers by sector'}

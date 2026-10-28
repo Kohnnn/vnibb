@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from vnibb.core.price_units import persisted_price_record
+
 CHART_COLORS = ["#22d3ee", "#60a5fa", "#34d399", "#f59e0b", "#f472b6"]
 
 
@@ -46,14 +48,19 @@ def _comparison_rows(
         price_context = snapshot.get("price_context") or {}
         ratios = snapshot.get("ratios") or {}
         company = snapshot.get("company") or {}
+        latest = persisted_price_record({"symbol": symbol, **(price_context.get("latest") or {})})
+        summary = price_context.get("summary") or {}
+        comparable = latest["price_unit"] == "VND"
         rows.append(
             {
                 "symbol": symbol,
                 "company": company.get("short_name") or company.get("company_name") or None,
-                "price": _coerce_number((price_context.get("latest") or {}).get("close")),
-                "change_20d_pct": _coerce_number(
-                    (price_context.get("summary") or {}).get("change_20d_pct")
-                ),
+                "price": _coerce_number(latest.get("close")) if comparable else None,
+                "price_unit": latest["price_unit"],
+                "price_source": latest.get("price_source") or latest.get("source"),
+                "change_20d_pct": _coerce_number(summary.get("change_20d_pct"))
+                if comparable and summary.get("price_unit") == "VND"
+                else None,
                 "pe_ratio": _coerce_number(ratios.get("pe_ratio")),
                 "pb_ratio": _coerce_number(ratios.get("pb_ratio")),
                 "roe": _coerce_number(ratios.get("roe")),
@@ -231,23 +238,40 @@ def _price_trend_chart(
 
     for index, snapshot in enumerate(market_context):
         symbol = str(snapshot.get("symbol") or "").strip().upper()
-        recent_series = (snapshot.get("price_context") or {}).get("recent_series") or []
+        price_context = snapshot.get("price_context") or {}
+        recent_series = price_context.get("recent_series") or []
         if not symbol or not recent_series:
             continue
 
-        valid_points = [
-            point
-            for point in recent_series
-            if _coerce_number(point.get("close")) not in (None, 0)
-            and str(point.get("time") or "").strip()
+        normalized_points = [
+            persisted_price_record({"symbol": symbol, **point}) for point in recent_series
         ]
-        if len(valid_points) < 2:
+        units = {point["price_unit"] for point in normalized_points}
+        latest = price_context.get("latest") or {}
+        window = ((price_context.get("summary") or {}).get("range_window_20d") or {})
+        points = sorted(
+            (
+                {
+                    "time": str(point.get("time") or "")[:10],
+                    "close": _coerce_number(point.get("close")),
+                }
+                for point in normalized_points
+            ),
+            key=lambda point: point["time"],
+        )
+        if (
+            len(units) != 1
+            or units == {"unknown"}
+            or window.get("status") != "available"
+            or latest.get("close") is None
+            or any(point["close"] is None or point["close"] <= 0 for point in points)
+            or [point["time"] for point in points][-1] != str(latest.get("time") or "")[:10]
+            or len({point["time"] for point in points}) != len(points)
+            or [point["time"] for point in points] != window.get("expected_dates")
+        ):
             continue
 
-        base_close = _coerce_number(valid_points[0].get("close"))
-        if base_close in (None, 0):
-            continue
-
+        base_close = points[0]["close"]
         series.append(
             {
                 "key": symbol,
@@ -255,21 +279,17 @@ def _price_trend_chart(
                 "color": CHART_COLORS[index % len(CHART_COLORS)],
             }
         )
-        for source_id in _symbol_source_ids(snapshot, "-PRICES"):
-            if source_id not in source_ids:
-                source_ids.append(source_id)
-
-        for point in valid_points:
-            date = str(point.get("time") or "")[:10]
-            close = _coerce_number(point.get("close"))
-            if not date or close is None:
-                continue
+        for point in points:
+            date = point["time"]
             if date not in date_seen:
                 date_seen.add(date)
                 all_dates.append(date)
             rows_by_date.setdefault(date, {"date": date})[symbol] = round(
-                (close / base_close) * 100, 2
+                (point["close"] / base_close) * 100, 2
             )
+        for source_id in _symbol_source_ids(snapshot, "-PRICES"):
+            if source_id not in source_ids:
+                source_ids.append(source_id)
 
     rows = [rows_by_date[date] for date in all_dates if date in rows_by_date]
     return rows, series, source_ids
@@ -373,7 +393,8 @@ def build_table_artifacts(message: str, context: dict[str, Any]) -> list[dict[st
                 [
                     {"key": "symbol", "label": "Symbol", "kind": "text"},
                     {"key": "company", "label": "Company", "kind": "text"},
-                    {"key": "price", "label": "Price", "kind": "currency"},
+                    {"key": "price", "label": "Price (VND)", "kind": "currency"},
+                    {"key": "price_unit", "label": "Price Unit", "kind": "text"},
                     {"key": "change_20d_pct", "label": "20D %", "kind": "percent"},
                     {"key": "pe_ratio", "label": "P/E", "kind": "number"},
                     {"key": "pb_ratio", "label": "P/B", "kind": "number"},

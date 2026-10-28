@@ -13,15 +13,17 @@ a ``LIMIT`` instead of counting the complement first. Measuring on production
 showed the debris is ~83 % of a 14.7 M row table, so a count is planned as a
 parallel sequential scan (~112 s) while the bounded ordered walk resolves via
 ``ix_prediction_markets_updated_at_id`` in a few milliseconds. Deletion is
-batched and resumable so each transaction stays short and the daily schedule can
+batched and resumable so each transaction stays short and the hourly schedule can
 drain a large backlog over several runs.
 
 Rows that retention cannot safely drop are deliberately kept:
 
 * inactive, closed contracts are owned by ``prediction_market_retention``,
   which archives eligible resolved contracts before deleting with an operator receipt;
-* rows referenced by archived snapshots are kept so history stays explainable;
 * synthetic fixture rows are provenance, not debris.
+
+Snapshots use soft catalogue references and retain their copied observations
+even when this sweep removes a stale nonterminal catalogue referent.
 
 Run: ``python -m vnibb.services.prediction_market_catalogue_retention --limit 5000``
 Apply: add ``--apply``.
@@ -95,7 +97,10 @@ async def purge_catalogue_debris(
     now: datetime | None = None,
     apply: bool = False,
 ) -> dict[str, int]:
-    """Delete up to ``limit`` unreadable catalogue rows. Returns a receipt."""
+    """Delete one bounded batch of unreadable catalogue rows. Returns a receipt."""
+    if limit <= 0:
+        raise ValueError("prediction market retention limit must be positive")
+    limit = min(limit, MARKET_RETENTION_BATCH)
     cutoff = market_retention_cutoff(now or datetime.now(UTC))
     ids = [
         row[0]

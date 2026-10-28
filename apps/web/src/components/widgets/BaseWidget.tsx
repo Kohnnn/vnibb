@@ -3,7 +3,7 @@
  *
  * Provides three composable hooks:
  *
- *  `useWidgetState(queryResults)`         → isLoading / hasData / isFallback / error / isFetching / updatedAt
+ *  `useWidgetState(queryResults)`         → isLoading / hasData / isFallback / error / isFetching / fetchedAt
  *  `useWidgetRuntime({ empty, apiGroup, … })` → calls onDataChange with buildWidgetRuntime
  *  `useWidgetExport({ data, filename })` → wires exportData / exportFilename into WidgetContainer
  *
@@ -35,7 +35,7 @@ export interface LoadingState {
   hasData: boolean;
   isFallback: boolean;
   error: Error | null;
-  updatedAt: number | undefined;
+  fetchedAt: number | undefined;
 }
 
 /** Arguments forwarded into `buildWidgetRuntime`. */
@@ -59,7 +59,7 @@ export interface WidgetExportOptions {
  * - `isFallback`  → true when there's an error BUT we still have data
  * - `error`       → the first non-null error encountered
  * - `isFetching`  → true when ANY query is fetching
- * - `updatedAt`   → the most recent `dataUpdatedAt` across all queries
+ * - `fetchedAt`   → the most recent `dataUpdatedAt` across all queries
  */
 export function buildWidgetLoadingState(queries: QueryResult[]): LoadingState {
   const isLoading = queries.every((q) => q.isLoading);
@@ -67,12 +67,12 @@ export function buildWidgetLoadingState(queries: QueryResult[]): LoadingState {
   const error = queries.find((q) => q.isError && q.error !== null)?.error ?? null;
   const isFallback = Boolean(error && hasData);
   const isFetching = queries.some((q) => q.isFetching);
-  const updatedAt = queries.reduce<number | undefined>((latest, q) => {
+  const fetchedAt = queries.reduce<number | undefined>((latest, q) => {
     const t = q.dataUpdatedAt;
     return t !== undefined && (latest === undefined || t > latest) ? t : latest;
   }, undefined);
 
-  return { isLoading, isFetching, hasData, isFallback, error, updatedAt };
+  return { isLoading, isFetching, hasData, isFallback, error, fetchedAt };
 }
 
 // ---------------------------------------------------------------------------

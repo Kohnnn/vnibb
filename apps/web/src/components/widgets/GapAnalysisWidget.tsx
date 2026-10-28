@@ -12,6 +12,7 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useDirectionColors } from '@/hooks/useDirectionColors'
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface GapAnalysisWidgetProps {
@@ -20,6 +21,8 @@ interface GapAnalysisWidgetProps {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+const formatPercent = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)}%` : 'N/A'
 
 type GapRow = {
   date: string
@@ -53,26 +56,31 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
   const monthlyAvgGap = metric?.monthly_avg_gap_pct || {}
   const monthRows = MONTHS.map((month) => ({
     month,
-    value: Number(monthlyAvgGap[month] ?? 0),
+    value: typeof monthlyAvgGap[month] === 'number' && Number.isFinite(monthlyAvgGap[month]) ? monthlyAvgGap[month] as number : null,
   }))
-  const maxAbs = Math.max(...monthRows.map((row) => Math.abs(row.value)), 1)
+  const maxAbs = Math.max(...monthRows.map((row) => Math.abs(row.value ?? 0)), 1)
   const hasData = topGaps.length > 0
   const quantWarning = extractQuantWarning(data, 'gap_stats')
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData)
+  const quality = data?.meta as { unit_status?: string; unresolved_excluded_dates?: string[]; unresolved_session_count?: number; quality_status?: string; unavailable?: boolean } | undefined
+  const certifiedUnits = ['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+  const derivedWithheld = Boolean(data) && (!certifiedUnits || quality?.quality_status === 'unavailable' || quality?.unavailable === true || Boolean(quality?.unresolved_excluded_dates?.length || quality?.unresolved_session_count) || Boolean(data?.error))
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
-      empty: !hasData,
+      empty: !hasData || derivedWithheld,
       apiGroup: '/quant',
       endpoint: `/quant/${upperSymbol}?period=${period}&metrics=gap_stats`,
       sourceLabel: 'Gap stats',
-      lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt,
+      lastDataDate: data?.data?.last_data_date ?? null,
+      fetchedAt: dataUpdatedAt,
       adjustmentMode: data?.data?.adjustment_mode,
       extra: {
-        gaps: topGaps.length,
-        fillRatePct: metric?.gap_fill_rate_pct ?? null,
+        gaps: derivedWithheld ? null : topGaps.length,
+        fillRatePct: derivedWithheld ? null : metric?.gap_fill_rate_pct ?? null,
       },
     }))
-  }, [data?.data?.adjustment_mode, data?.data?.computed_at, data?.data?.last_data_date, dataUpdatedAt, hasData, metric?.gap_fill_rate_pct, onDataChange, period, topGaps.length, upperSymbol])
+  }, [data?.data?.adjustment_mode, data?.data?.last_data_date, dataUpdatedAt, derivedWithheld, hasData, metric?.gap_fill_rate_pct, onDataChange, period, topGaps.length, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view gap analysis" icon={<ArrowUpDown size={18} />} />
@@ -98,14 +106,18 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} gap stats · same-day fills`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} gap stats · same-day fills`} align="right" />
         </div>
       </div>
 
-      {isLoading && !hasData ? (
+      {timedOut && isLoading && !hasData ? (
+        <WidgetError title="Loading timed out" error={new Error('Gap analysis took too long to load.')} onRetry={() => { resetTimeout(); refetch() }} />
+      ) : isLoading && !hasData ? (
         <WidgetSkeleton lines={8} />
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
+      ) : derivedWithheld ? (
+        <WidgetEmpty message="Gap analysis unavailable: historical price units or source quality were not certified." icon={<ArrowUpDown size={18} />} />
       ) : !hasData ? (
         <WidgetEmpty message="No gap data" icon={<ArrowUpDown size={18} />} />
       ) : (
@@ -114,15 +126,15 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
           <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Up</div>
-              <div className="text-emerald-300 font-mono">{Number(metric?.gap_up_frequency_pct ?? 0).toFixed(2)}%</div>
+              <div className="text-emerald-300 font-mono">{formatPercent(metric?.gap_up_frequency_pct)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Down</div>
-              <div className="text-red-300 font-mono">{Number(metric?.gap_down_frequency_pct ?? 0).toFixed(2)}%</div>
+              <div className="text-red-300 font-mono">{formatPercent(metric?.gap_down_frequency_pct)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Fill Rate</div>
-              <div className="text-cyan-300 font-mono">{Number(metric?.gap_fill_rate_pct ?? 0).toFixed(2)}%</div>
+              <div className="text-cyan-300 font-mono">{formatPercent(metric?.gap_fill_rate_pct)}</div>
             </div>
           </div>
 
@@ -149,11 +161,11 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
                       borderRadius: '8px',
                       fontSize: '11px',
                     }}
-                    formatter={(value: unknown) => [`${Number(value).toFixed(2)}%`, 'Avg Gap']}
+                    formatter={(value: unknown) => [formatPercent(value), 'Avg Gap']}
                   />
                   <Bar dataKey="value" radius={[2, 2, 0, 0]}>
                     {monthRows.map((entry) => (
-                      <Cell key={`gap-month-${entry.month}`} fill={entry.value >= 0 ? dirColors.positive : dirColors.negative} />
+                      <Cell key={`gap-month-${entry.month}`} fill={entry.value === null ? 'transparent' : entry.value >= 0 ? dirColors.positive : dirColors.negative} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -199,9 +211,9 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
                       <td className={`py-1 ${row.type === 'gap_up' ? 'price-up' : row.type === 'gap_down' ? 'price-down' : 'text-[var(--text-muted)]'}`}>
                         {row.type}
                       </td>
-                      <td className="py-1 text-right font-mono">{Number(row.gap_pct ?? 0).toFixed(2)}%</td>
-                      <td className={`py-1 text-right font-mono ${Number(row.next_day_return_pct ?? 0) >= 0 ? 'price-up' : 'price-down'}`}>
-                        {Number(row.next_day_return_pct ?? 0).toFixed(2)}%
+                      <td className="py-1 text-right font-mono">{formatPercent(row.gap_pct)}</td>
+                      <td className={`py-1 text-right font-mono ${typeof row.next_day_return_pct !== 'number' || !Number.isFinite(row.next_day_return_pct) ? 'text-[var(--text-muted)]' : row.next_day_return_pct >= 0 ? 'price-up' : 'price-down'}`}>
+                        {formatPercent(row.next_day_return_pct)}
                       </td>
                       <td className={`py-1 text-center ${statusClass}`} title={ageDays !== null ? `${ageDays}d since gap` : undefined}>
                         {statusLabel}

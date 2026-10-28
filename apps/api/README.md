@@ -23,7 +23,7 @@ High-performance REST API providing Vietnamese stock market data. Built with Fas
 ## 🚀 Features
 
 - **50+ API Endpoints** - Stocks, financials, news, sectors
-- **Real-time Data** - vnstock Golden Sponsor integration
+- **Market Data** - Vietcap IQ primary, free vnstock VCI for supported gaps
 - **Database** - Self-hosted database stack (system of record)
 - **Caching** - Cache tier for performance
 - **Docs** - Auto-generated Swagger/OpenAPI
@@ -37,7 +37,7 @@ High-performance REST API providing Vietnamese stock market data. Built with Fas
 - **Database:** Self-hosted database stack
 - **ORM:** SQLAlchemy 2.0 (async)
 - **Cache:** Cache tier with in-process memory fallback
-- **Data:** VNStock 4.0.9 free tier by default (KBS, VCI and DNSE supported; no TCBS)
+- **Data:** Vietcap IQ primary and community VNStock 4.0.9 VCI only
 
 ---
 
@@ -46,11 +46,19 @@ High-performance REST API providing Vietnamese stock market data. Built with Fas
 - The API requires `vnstock>=4.0.4,<4.1`. CI and immutable release images install
   SHA-256-constrained VNStock 4.0.9 and VNAI 2.6.2 publisher wheels from
   `constraints-vnstock.txt` while unrelated packages remain on public PyPI.
-- Free-tier startup does not import premium modules. A premium image needs its
-  own verified package provenance, source-license decision and runtime checks;
-  installing VNAI 2.6.2 is not proof that every historical 2.4.x hook is compatible.
-- Configure `VNSTOCK_SOURCE=KBS` for the current KBS-first fallback; VCI and DNSE
-  are alternative sources. Do not configure retired TCBS.
+- `VNSTOCK_RUNTIME_TIER=free` and `VNSTOCK_SOURCE=VCI` are the only accepted
+  runtime settings. Installed sponsor packages never select a paid runtime.
+  KBS, TCBS, MSN, FMP and DNSE are not execution fallbacks.
+- Image build, container startup, and local API startup reject discoverable
+  `vnstock_data`, `vnstock_ta`, `vnstock_pipeline`, `vnstock_news`, and `vnii`
+  before provider import/authentication. Rebuild without historical premium
+  runtime mounts or use a clean community virtual environment.
+- Unsupported VCI datasets report unavailable/provider failure; they do not
+  switch providers or synthesize observations. Stored historical lineage is retained.
+- The default request allowance is the documented guest guidance of about
+  20 requests/minute, split into 18 main and 2 reinforcement calls. Free community
+  registration is not assumed and an API key does not unlock a paid package here.
+- International Yahoo feeds are independent of this Vietnamese ingestion policy.
 
 ---
 
@@ -110,12 +118,10 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs)
 
 Follow [docs/oracle_runbook.md](../../docs/oracle_runbook.md) for the Oracle VM deploy, verify, cutover, and rollback sequence.
 
-Build the immutable image outside OCI. Pass the premium key only through a BuildKit secret, publish it, resolve its digest, and set `VNIBB_API_IMAGE_REPOSITORY=registry.example.com/vnibb/api` plus `VNIBB_API_IMAGE_DIGEST=sha256:<digest>` in `deployment/env.oracle`. The image stores its build revision in `/app/.release-revision`; stale `RELEASE_REVISION` runtime keys cannot override health, logs, or Sentry. Never pass `VNSTOCK_API_KEY` with `--build-arg` or install packages at container startup.
+Build the immutable free image outside OCI, publish it, resolve its digest, and set `VNIBB_API_IMAGE_REPOSITORY=registry.example.com/vnibb/api` plus `VNIBB_API_IMAGE_DIGEST=sha256:<digest>` in `deployment/env.oracle`. The image stores its build revision in `/app/.release-revision`; stale `RELEASE_REVISION` runtime keys cannot override health, logs, or Sentry. Do not supply sponsor credentials or install packages at container startup.
 
 ```bash
 export IMAGE_RELEASE_REVISION="$(git rev-parse --verify HEAD)"
-export VNSTOCK_API_KEY_FILE=/secure/path/vnstock-api-key
-export VNSTOCK_INSTALLER_SHA256=<verified-installer-sha256>
 bash ../../scripts/oracle/build_release_image.sh registry.example.com/vnibb/api:<release-tag>
 docker compose --env-file deployment/env.oracle -f ../../docker-compose.oracle.yml run --rm migrate
 docker compose --env-file deployment/env.oracle -f ../../docker-compose.oracle.yml up -d --no-build api mcp caddy
@@ -136,9 +142,12 @@ DATA_BACKEND=postgres  # Postgres is the only data backend
 SUPABASE_JWT_SECRET=your-jwt-secret
 ALLOW_ANONYMOUS_DASHBOARD_WRITES=true
 REDIS_URL=redis://localhost:6379/0  # cache-tier connection
-VNSTOCK_API_KEY=vnstock_xxx
-VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; premium modules belong in the BuildKit-built image
-VNSTOCK_EXTRA_INDEX_URL=https://vnstocks.com/api/simple  # Optional premium index for the immutable image build
+VNSTOCK_RUNTIME_TIER=free
+VNSTOCK_SOURCE=VCI
+VNSTOCK_RUNTIME_INSTALL=0  # Paid modules and runtime installation are disabled
+VNSTOCK_RATE_LIMIT_RPS=0.3  # 18 main calls/minute
+VNSTOCK_REINFORCEMENT_RPS=0.03333333333333333  # 2 calls/minute
+VNSTOCK_CALLS_PER_MINUTE=20
 ALEMBIC_STRICT=1  # Recommended for Oracle cutover so failed migrations do not boot a partial runtime
 CORS_ORIGINS=["https://vnibb.vercel.app"]
 CORS_ORIGIN_REGEX=^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$|^https://[a-z0-9-]+\\.vercel\\.app$

@@ -135,7 +135,15 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
       : EMPTY_CANDLES,
     [historicalCandles],
   )
-  const drawdown = useMemo(() => computeDrawdown(candles), [candles])
+  const meta = data?.meta
+  // Only per-row `price_unit` markers certify the series; a response-level
+  // `unit_status` cannot certify rows that carry no marker (QA #98).
+  const expectedUnit = meta?.unit_status === 'confirmed_vnd' ? 'VND' : 'index_points'
+  const certifiedUnits = Boolean(historicalCandles?.length)
+    && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(meta?.unit_status ?? '')
+    && (data?.data ??[]).every((row) => row.price_unit === expectedUnit)
+  const derivedWithheld = Boolean(data) && !certifiedUnits
+  const drawdown = useMemo(() => (derivedWithheld ?[] : computeDrawdown(candles)), [candles, derivedWithheld])
   const hasData = drawdown.length > 30
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
   const episodes = useMemo(() => computeEpisodes(drawdown), [drawdown])
@@ -146,7 +154,7 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
   const recent = drawdown.slice(-22)
   const magnitude = Math.abs(Math.min(...recent.map((point) => point.drawdownPct), -1))
   const adjustmentWarning = data?.meta?.adjustment_warning ?? null
-  const lastDataDate = candles.at(-1)?.time ?? dataUpdatedAt
+  const lastDataDate = candles.at(-1)?.time ?? null
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -155,6 +163,7 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
       endpoint: `/equity/historical?symbol=${upperSymbol}&start_date=${getQuantPeriodStartDate(period)}&adjustment_mode=adjusted`,
       sourceLabel: 'Historical prices',
       lastDataDate,
+      fetchedAt: dataUpdatedAt,
       adjustmentMode: 'adjusted',
       derived: true,
       extra: {
@@ -169,7 +178,7 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
 
       },
     }))
-  }, [adjustmentWarning, currentDrawdown, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, drawdown.length, episodes.length, hasData, lastDataDate, maxDrawdown, onDataChange, period, upperSymbol])
+  }, [adjustmentWarning, currentDrawdown, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, dataUpdatedAt, drawdown.length, episodes.length, hasData, lastDataDate, maxDrawdown, onDataChange, period, upperSymbol])
 
 
   if (!upperSymbol) {
@@ -201,12 +210,19 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} underwater`} align="right" />
+          <WidgetMeta updatedAt={lastDataDate} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} underwater`} align="right" />
         </div>
       </div>
 
       <QuantWarningBanner warning={adjustmentWarning} className="mb-2" />
 
+      {derivedWithheld ? (
+        <WidgetEmpty
+          message="Drawdown unavailable: historical price units were not certified."
+          icon={<ShieldAlert size={18} />}
+        />
+      ) : (
+        <>
       <div className="mb-2 grid grid-cols-3 gap-2 text-[10px]">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="uppercase tracking-widest text-[var(--text-muted)]">Current DD</div>
@@ -274,6 +290,8 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
           ))
         )}
       </div>
+        </>
+      )}
 
       {activeEpisode && activeEpisode.daysToRecovery == null && (
         <div className="pt-2 text-right text-[10px] text-amber-300">

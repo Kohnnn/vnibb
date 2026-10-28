@@ -12,7 +12,7 @@ export async function getFinancials(
         period?: string;
         align?: boolean;
         exclude空了?: boolean;
-        source?: string;
+        source?: 'VCI';
         signal?: AbortSignal;
     }
 ): Promise<unknown> {

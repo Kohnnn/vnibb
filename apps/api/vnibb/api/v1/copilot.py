@@ -14,7 +14,7 @@ from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, model_validator
 from fastapi.responses import StreamingResponse
 
-from vnibb.core.auth import get_current_user
+from vnibb.core.auth import require_active_user
 from vnibb.core.database import async_session_maker
 from vnibb.schemas.matrix import MatrixSelection
 from vnibb.services.matrix_copilot_context import build_matrix_copilot_context
@@ -268,7 +268,7 @@ async def chat_stream(
     matrix_context = None
     if request.matrix_selection is not None:
         try:
-            user = await get_current_user(authorization)
+            user = await require_active_user(authorization)
             async with async_session_maker() as db:
                 packet = await resolve_matrix_selection(
                     db, user.id, request.matrix_selection.model_dump(mode="json")

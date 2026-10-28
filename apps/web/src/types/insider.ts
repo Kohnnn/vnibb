@@ -12,6 +12,8 @@ export interface InsiderTrade {
     deal_price: number | null;
     deal_value: number | null;
     announce_date: string;
+    price_unit: string | null;
+    value_unit: string | null;
 }
 
 export interface BlockTrade {
@@ -52,14 +54,19 @@ export interface AlertSettings {
     notification_email: string | null;
 }
 
+// The sentiment endpoint aggregates the requested window itself. Money fields
+// are null unless every classified deal in that window carries finite value and
+// VND evidence; `value_unit` mirrors that admission so consumers never infer a
+// denomination. Counts stay present even when money is withheld.
 export interface InsiderSentiment {
     symbol: string;
     period_days: number;
     buy_count: number;
     sell_count: number;
-    buy_value: number;
-    sell_value: number;
-    net_value: number;
-    sentiment_score: number;
+    buy_value: number | null;
+    sell_value: number | null;
+    net_value: number | null;
+    sentiment_score: number | null;
     total_deals: number;
+    value_unit: string | null;
 }

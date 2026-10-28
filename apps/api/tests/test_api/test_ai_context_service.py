@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
+from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
 import pytest
 
+from vnibb.models.stock import Stock, StockPrice
 from vnibb.services.ai_context_service import (
     AIContextService,
     _build_dividends_context,
     _build_flow_context,
+    _build_price_context,
 )
 
 
@@ -187,6 +191,99 @@ def test_build_dividends_context_keeps_recent_items_and_summary():
     assert context["summary"]["latest_issue_method"] == "cash"
 
 
+
+def test_price_context_normalizes_full_orm_lineage_before_returns():
+    days = []
+    cursor = date(2026, 4, 1)
+    while len(days) < 21:
+        if cursor.weekday() < 5:
+            days.append(cursor)
+        cursor += timedelta(days=1)
+    rows = [
+        StockPrice(
+            symbol="VNM", time=days[index],
+            close=70 + index if index < 10 else (70 + index) * 1000,
+            volume=100, source="VCI" if index < 10 else "vnstock_vnd:VCI",
+        )
+        for index in range(21)
+    ]
+
+    context = _build_price_context(list(reversed(rows)))
+
+    assert context["latest"]["close"] == 90000
+    assert context["latest"]["price_unit"] == "VND"
+    assert context["latest"]["source"] == "vnstock_vnd:VCI"
+    assert context["recent_series"][0]["price_source"] == "vnstock_history:VCI"
+    assert context["summary"]["change_5d_pct"] == 5.88
+    assert context["summary"]["change_20d_pct"] == 28.57
+    assert context["summary"]["low_20d"] == 71000
+    assert context["excluded_unknown_unit_rows"] == 0
+
+
+def test_price_context_discloses_unknown_rows_without_bridging_return_windows():
+    rows = [
+        {"time": f"2026-04-{index + 1:02}", "close": 70000 + index * 1000, "source": "vnstock_vnd:VCI"}
+        for index in range(6)
+    ]
+    rows[2].update(close=72, source="vnstock")
+
+    context = _build_price_context(rows)
+
+    assert context["summary"]["change_5d_pct"] is None
+    assert context["recent_series"][2]["close"] is None
+    assert context["recent_series"][2]["price_unit"] == "unknown"
+    assert context["excluded_unknown_unit_rows"] == 1
+    assert context["limitations"]
+
+    rows[-1]["source"] = "vnstock"
+    context = _build_price_context(rows)
+    assert context["latest"]["close"] is None
+    assert context["summary"]["high_20d"] is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_price_snapshot_loads_daily_rows_with_full_source(monkeypatch, test_db):
+    from vnibb.mcp import server
+    from vnibb.services import ai_context_service
+
+    class SessionContext:
+        async def __aenter__(self):
+            return test_db
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr(ai_context_service, "async_session_maker", SessionContext)
+    monkeypatch.setattr(server, "_ensure_database_available", AsyncMock())
+    monkeypatch.setattr(server, "_get_latest_symbol_document", AsyncMock(return_value=None))
+    monkeypatch.setattr(server.settings, "vnibb_mcp_url", "http://mcp:8001/mcp")
+    outbound = AsyncMock(side_effect=AssertionError("snapshot self-call"))
+    monkeypatch.setattr(ai_context_service.vnibb_mcp_client_service, "_call_tool", outbound)
+    try:
+        test_db.add(Stock(
+            id=995100, symbol="MXA", company_name="Test MXA",
+            exchange="HOSE", is_active=1,
+        ))
+        for index, (interval, close, source) in enumerate((
+            ("1D", 72, "VCI"), ("1W", 999, "vnstock_vnd"),
+        )):
+            test_db.add(StockPrice(
+                id=995100 + index, stock_id=995100, symbol="MXA", time=date(2026, 4, 1),
+                interval=interval, open=close, high=close, low=close, close=close,
+                volume=100, source=source,
+            ))
+        await test_db.flush()
+
+        response = await server.get_symbol_snapshot("MXA")
+        snapshot = response["snapshot"]
+        outbound.assert_not_awaited()
+
+        assert snapshot["price_context"]["latest"]["close"] == 72000
+        assert snapshot["price_context"]["latest"]["source"] == "VCI"
+        assert len(snapshot["price_context"]["recent_series"]) == 1
+    finally:
+        await test_db.rollback()
+
 @pytest.mark.asyncio
 async def test_build_runtime_context_expands_single_symbol_with_peers_for_compare_prompts(
     monkeypatch,
@@ -284,3 +381,92 @@ async def test_build_database_snapshot_falls_back_when_vnibb_mcp_fails(monkeypat
     snapshot = await service._build_database_snapshot("VNM", use_vnibb_mcp=True)
 
     assert snapshot == {"symbol": "VNM", "source": "postgres", "company": {"symbol": "VNM"}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("statement_type", ["income", "balance", "cashflow"])
+@pytest.mark.parametrize("rejection", [
+    None, "ambiguous_quarter", "conflicting_identity", "field_rejected",
+    "unknown_currency", "unknown_source_unit", "conflicting_source", "statement_rejected",
+])
+async def test_postgres_financial_context_withholds_rejected_scalars(
+    monkeypatch, test_db, statement_type, rejection
+):
+    from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+    from vnibb.services import ai_context_service
+
+    models = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow}
+    fields = {
+        "income": ("revenue", "net_income"),
+        "balance": ("total_assets", "total_equity"),
+        "cashflow": ("operating_cash_flow", "free_cash_flow"),
+    }
+    metric, independent = fields[statement_type]
+    canonical = {
+        "period": "Q1-2024", "fiscal_year": 2024, "fiscal_quarter": 1,
+        "source": "KBS", "currency": "VND", "value_unit": "VND",
+        "consolidation_basis": "consolidated", "flow_basis": "single_quarter",
+        "aggregation_basis": "reported_quarter", "source_periods": ["Q1-2024"],
+        metric: 100.0, independent: 40.0,
+        "unit_metadata": {
+            field: {"source_unit": "VND", "value_unit": "VND"}
+            for field in (metric, independent)
+        },
+    }
+    if rejection == "conflicting_identity":
+        canonical["period"] = "Q2-2024"
+    if rejection == "field_rejected":
+        canonical["unit_metadata"][metric]["unavailable_reason"] = "conflicting_metric_rows"
+    if rejection == "unknown_currency":
+        canonical["currency"] = None
+    if rejection == "unknown_source_unit":
+        for evidence in canonical["unit_metadata"].values():
+            evidence.pop("source_unit")
+    if rejection == "conflicting_source":
+        canonical["source"] = "VCI"
+    if rejection == "statement_rejected":
+        canonical["unavailable_reason"] = "unknown_source_unit"
+    raw_data = {"_financial_lineage": {"canonical_data": canonical}}
+    row = models[statement_type](
+        id=995200,
+        symbol="VNM", source="KBS",
+        period="2024" if rejection == "ambiguous_quarter" else "Q1-2024",
+        period_type="quarter", fiscal_year=2024,
+        fiscal_quarter=None if rejection == "ambiguous_quarter" else 1,
+        raw_data=raw_data, **{metric: 100.0, independent: 40.0},
+    )
+    test_db.add(row)
+    await test_db.flush()
+
+    class SessionContext:
+        async def __aenter__(self):
+            return test_db
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr(ai_context_service, "async_session_maker", SessionContext)
+
+    snapshot = await AIContextService()._build_postgres_snapshot("VNM")
+    section = snapshot[{"income": "income_statement", "balance": "balance_sheet", "cashflow": "cash_flow"}[statement_type]]
+
+    if rejection is None:
+        assert section[metric] == 100.0
+        assert section[independent] == 40.0
+        return
+    assert section[metric] is None
+    assert section["raw_observation"][metric] == 100.0
+    assert section["raw_data"] == raw_data
+    if rejection == "field_rejected":
+        assert section[independent] == 40.0
+    else:
+        assert section[independent] is None
+        if rejection in {"unknown_currency", "unknown_source_unit"}:
+            reason = (
+                "unverified_statement_currency_or_unit" if rejection == "unknown_currency"
+                else "unverified_monetary_unit"
+            )
+            assert section["unavailable_metrics"][metric] == reason
+            assert section["unavailable_metrics"][independent] == reason
+        else:
+            assert section["unavailable_reason"]

@@ -95,6 +95,13 @@ describe('InvestorEventCalendarWidget', () => {
     await waitFor(() => {
       expect(onDataChange).toHaveBeenLastCalledWith({
         __widgetRuntime: {
+          provenance: {
+            sourceLabel: 'Company events',
+            apiGroup: '/equity',
+            endpoint: '/equity/:symbol/events',
+            updatedAt: null,
+            fetchedAt: null,
+          },
           data: {
             eventCount: 1,
             symbolCount: 1,

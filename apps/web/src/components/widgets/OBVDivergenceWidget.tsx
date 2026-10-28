@@ -91,10 +91,20 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
     enabled: Boolean(upperSymbol),
   });
 
-  const candles = (data?.data || []) as OHLCData[];
+  const meta = data?.meta;
+  // Only per-row `price_unit` markers certify the series; a response-level
+  // `unit_status` cannot certify rows that carry no marker (QA #98).
+  const expectedUnit = meta?.unit_status === 'confirmed_vnd' ? 'VND' : 'index_points';
+  const certifiedUnits = Boolean(data?.data?.length)
+    && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(meta?.unit_status ?? '')
+    && (data?.data ??[]).every((row) => row.price_unit === expectedUnit);
+  const derivedWithheld = Boolean(data) && !certifiedUnits;
+  const candles = (derivedWithheld ?[] : data?.data || []) as OHLCData[];
   const hasData = candles.length > 30;
   const isFallback = Boolean(error && hasData);
-  const adjustmentWarning = data?.meta?.adjustment_warning ?? null;
+  const adjustmentWarning = meta?.adjustment_warning ?? null;
+  const lastDataDate = [meta?.freshness_as_of, meta?.last_data_date, candles.at(-1)?.time]
+    .find((value) => value != null && value !== '' && !Number.isNaN(new Date(value).getTime())) ?? null;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
   const lookback = 20;
@@ -107,7 +117,8 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
         apiGroup: '/equity',
         endpoint: `/equity/historical?symbol=${upperSymbol}&adjustment_mode=adjusted`,
         sourceLabel: 'OBV divergence (derived)',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate,
+        fetchedAt: dataUpdatedAt,
         adjustmentMode: 'adjusted',
         stale: isFallback,
         derived: true,
@@ -121,7 +132,7 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
         },
       }),
     );
-  }, [adjustmentWarning, confidence, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, dataUpdatedAt, hasData, isFallback, onDataChange, signal, upperSymbol]);
+  }, [adjustmentWarning, confidence, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, dataUpdatedAt, hasData, isFallback, lastDataDate, onDataChange, signal, upperSymbol]);
 
   const recent = candles.slice(-lookback);
   const recentObv = calculateOBV(recent);
@@ -152,7 +163,8 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
           <span>OBV vs Price ({lookback}D)</span>
         </div>
         <WidgetMeta
-          updatedAt={dataUpdatedAt}
+          updatedAt={lastDataDate}
+          fetchedAt={dataUpdatedAt}
           isFetching={isFetching && hasData}
           isCached={isFallback}
           note="OBV divergence"
@@ -175,7 +187,13 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />
         ) : !hasData ? (
-          <WidgetEmpty message="Not enough historical candles" icon={<Activity size={18} />} size="compact" />
+          <WidgetEmpty
+            message={derivedWithheld
+              ? 'OBV divergence unavailable: historical price units were not certified.'
+              : 'Not enough historical candles'}
+            icon={<Activity size={18} />}
+            size="compact"
+          />
         ) : (
           <>
             <QuantWarningBanner warning={adjustmentWarning} className="mb-2" />

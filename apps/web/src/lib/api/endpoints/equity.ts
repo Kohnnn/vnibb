@@ -44,6 +44,9 @@ export interface QuoteData {
     value: number | null;
     updatedAt: string | null;
     updated_at?: string | null;
+    price_unit?: 'VND' | 'index_points' | 'unknown';
+    as_of?: string | null;
+    upstream_source?: string | null;
 }
 
 export interface QuoteResponse {
@@ -51,6 +54,12 @@ export interface QuoteResponse {
     data: QuoteData | null;
     cached?: boolean;
     error?: string | null;
+    meta?: {
+        source?: string | null;
+        upstream_source?: string | null;
+        as_of?: string | null;
+        stale?: boolean | null;
+    } | null;
 }
 
 export async function getHistoricalPrices(
@@ -59,7 +68,7 @@ export async function getHistoricalPrices(
         startDate?: string;
         endDate?: string;
         interval?: string;
-        source?: string;
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         signal?: AbortSignal;
     }

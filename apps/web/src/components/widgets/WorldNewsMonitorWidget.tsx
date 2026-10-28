@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useState, type FormEvent } from 'react';
+import { memo, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Clock, ExternalLink, Globe2, Newspaper, Radio, Rss, X, BookmarkPlus, Check } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -8,9 +8,10 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import { formatTimestamp } from '@/lib/format';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { addNotebookItem } from '@/lib/researchNotebook';
+import { newsObservationProvenance } from '@/lib/newsTime';
+import { formatTimestamp } from '@/lib/format';
 import {
   getWorldNews,
   getWorldNewsSources,
@@ -248,6 +249,22 @@ function WorldNewsMonitorWidgetComponent({
     ...article,
     tags: article.tags.join(', '),
   }));
+  const fetchedAt = data?.fetched_at ?? dataUpdatedAt;
+  // Source observation only: newest genuine article publication date across the
+  // rows actually displayed. The envelope `fetched_at` is retrieval evidence and
+  // never becomes freshness.
+  const observation = useMemo(
+    () => newsObservationProvenance(visibleArticles, { receiptAt: fetchedAt }),
+    [visibleArticles, fetchedAt],
+  );
+  // Feed failures the envelope reports degrade coverage even when rows look current.
+  const coverage = data?.failed_feed_count ? ('partial' as const) : observation.coverage;
+  const warnings = [
+    observation.warning,
+    data?.failed_feed_count
+      ? `${data.failed_feed_count} of ${data.feed_count} RSS feeds failed on the last fetch`
+      : undefined,
+  ].filter((value): value is string => Boolean(value));
 
   useEffect(() => {
     onDataChange?.(
@@ -256,12 +273,25 @@ function WorldNewsMonitorWidgetComponent({
         apiGroup: '/news',
         endpoint: '/news/world',
         sourceLabel: 'World news monitor',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate: observation.lastDataDate,
+        fetchedAt,
+        coverage,
         stale: isFallback,
+        cached: isFallback,
+        warnings: warnings.length ? warnings : undefined,
         extra: { count: visibleArticles.length },
       }),
     );
-  }, [onDataChange, hasData, dataUpdatedAt, isFallback, visibleArticles.length]);
+  }, [
+    onDataChange,
+    hasData,
+    fetchedAt,
+    isFallback,
+    visibleArticles.length,
+    observation.lastDataDate,
+    coverage,
+    warnings,
+  ]);
 
   function applyCustomFeed(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -302,7 +332,8 @@ function WorldNewsMonitorWidgetComponent({
               Live Source Links
             </div>
             <WidgetMeta
-              updatedAt={dataUpdatedAt}
+              updatedAt={observation.lastDataDate}
+              fetchedAt={fetchedAt}
               isFetching={isFetching && hasData}
               isCached={isFallback}
               note={sourceNote}

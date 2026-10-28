@@ -38,6 +38,11 @@ jest.mock('@/hooks/useLoadingTimeout', () => ({
   useLoadingTimeout: () => ({ timedOut: false, resetTimeout: jest.fn() }),
 }))
 
+import type { UseQueryResult } from '@tanstack/react-query'
+import type { EquityProfileResponse } from '@/types/equity'
+import type { ScreenerResponse } from '@/types/screener'
+import type { DividendsResponse } from '@/lib/api'
+
 import {
   useProfile,
   useDividends,
@@ -85,6 +90,24 @@ function setupReturns() {
   } as any)
 }
 
+// The widget reads only these fields; the caller names the response type the
+// stub stands in for, so a missing field surfaces at the mock site.
+function queryResult<T>(data: T): UseQueryResult<T, Error> {
+  return {
+    data,
+    isLoading: false,
+    error: null,
+    refetch: jest.fn(),
+    isFetching: false,
+    dataUpdatedAt: 0,
+  } as unknown as UseQueryResult<T, Error>
+}
+
+// The label and its value sit in sibling divs inside one info card.
+function marketCapCard() {
+  return screen.getByText('Market Cap').closest('div.rounded-xl') as HTMLElement
+}
+
 describe('TickerProfileWidget', () => {
   beforeEach(() => {
     mockProfile.mockReset()
@@ -92,6 +115,36 @@ describe('TickerProfileWidget', () => {
     mockInsider.mockReset()
     mockScreener.mockReset()
     setupReturns()
+  })
+
+  test.each([0.25, 0, 388])('renders endpoint-computed dividend percent %s without scaling', dividendYield => {
+    mockProfile.mockReturnValue(queryResult<EquityProfileResponse>({
+      symbol: 'VNM', data: { symbol: 'VNM', company_name: 'Vietnam Dairy Products' },
+    }))
+    mockDividends.mockReturnValue(queryResult<DividendsResponse>({
+      data: [{ symbol: 'VNM', dividend_type: 'cash', cash_dividend: 1000, dividend_yield: dividendYield }],
+    }))
+
+    render(<TickerProfileWidget symbol="VNM" />)
+
+    expect(screen.getByText(`Cash • ${dividendYield.toFixed(2)}%`)).toBeInTheDocument()
+  })
+
+  test.each([
+    [0, 'stock', '10.00% stock'],
+    [1000, 'mixed', 'VND1,000 + 10.00% stock'],
+  ] as const)('renders reported stock payout with %s cash (%s)', (cashDividend, type, payout) => {
+    mockProfile.mockReturnValue(queryResult<EquityProfileResponse>({
+      symbol: 'VNM', data: { symbol: 'VNM', company_name: 'Vietnam Dairy Products' },
+    }))
+    mockDividends.mockReturnValue(queryResult<DividendsResponse>({
+      data: [{ cash_dividend: cashDividend, stock_dividend: 10, type }],
+    }))
+
+    render(<TickerProfileWidget symbol="VNM" />)
+
+    expect(screen.getByText(payout)).toBeInTheDocument()
+    expect(screen.queryByText('VND0')).not.toBeInTheDocument()
   })
 
   test('shows loading skeleton while initial profile loads', () => {
@@ -128,5 +181,24 @@ describe('TickerProfileWidget', () => {
     render(<TickerProfileWidget symbol="VNM" />)
 
     expect(screen.getByTestId('widget-error')).toHaveTextContent(/profile fetch failed/i)
+  })
+
+  test('withholds market cap when no source declares its unit', () => {
+    mockProfile.mockReturnValue(queryResult<EquityProfileResponse>({ symbol: 'VNM', data: { symbol: 'VNM', company_name: 'Vietnam Dairy Products' } }))
+    mockScreener.mockReturnValue(queryResult<ScreenerResponse>({ data: [{ ticker: 'VNM', market_cap: 126_024_313_333.5 }] }))
+    render(<TickerProfileWidget symbol="VNM" />)
+
+    expect(marketCapCard()).toHaveTextContent('Not disclosed')
+    expect(screen.queryByText(/VND 126/)).not.toBeInTheDocument()
+  })
+
+  test('renders the screener magnitude once it declares a VND market-cap unit', () => {
+    mockProfile.mockReturnValue(queryResult<EquityProfileResponse>({ symbol: 'VNM', data: { symbol: 'VNM', company_name: 'Vietnam Dairy Products' } }))
+    mockScreener.mockReturnValue(queryResult<ScreenerResponse>({
+      data: [{ ticker: 'VNM', market_cap: 126_024_313_333.5, market_cap_unit: 'VND' }],
+    }))
+    render(<TickerProfileWidget symbol="VNM" />)
+
+    expect(marketCapCard()).toHaveTextContent('VND 126.02B')
   })
 })

@@ -1,19 +1,28 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from collections.abc import Sequence
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import desc, select
 
+from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
+from vnibb.core.insider_units import normalize_deal_action
+from vnibb.core.price_units import persisted_price_record
+from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.market import MarketSector, SectorPerformance
 from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
+from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.services.comparison_service import comparison_service
+from vnibb.services.data_quality import is_market_business_day
+from vnibb.services.financial_service import admit_statement_rows
 from vnibb.services.vnibb_mcp_client_service import vnibb_mcp_client_service
 
 logger = logging.getLogger(__name__)
@@ -59,7 +68,7 @@ def _coerce_number(value: Any) -> float | None:
         numeric = float(str(value).replace(",", ""))
     except (TypeError, ValueError):
         return None
-    if numeric != numeric:
+    if not math.isfinite(numeric):
         return None
     return numeric
 
@@ -166,48 +175,107 @@ def _augment_ratio_aliases(ratios: dict[str, Any] | None) -> dict[str, Any] | No
     return ratios
 
 
-def _build_price_context(price_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
-    normalized_rows = []
-    for row in price_rows:
-        row_time = str(row.get("time") or "")[:10]
-        close = _coerce_number(row.get("close"))
-        volume = _coerce_number(row.get("volume"))
-        if not row_time or close is None:
-            continue
-        normalized_rows.append({"time": row_time, "close": close, "volume": volume})
-
-    if not normalized_rows:
+def _build_price_context(price_rows: Sequence[Any]) -> dict[str, Any] | None:
+    if not price_rows:
         return None
-
-    series = sorted(normalized_rows, key=lambda item: item["time"])
+    series = []
+    invalid_timestamps = False
+    for price_row in price_rows:
+        row = persisted_price_record(price_row)
+        row_time = str(row.get("time") or "")[:10]
+        try:
+            date.fromisoformat(row_time)
+        except ValueError:
+            invalid_timestamps = True
+            continue
+        close = _coerce_number(row.get("close"))
+        unit = row["price_unit"]
+        series.append({
+            "time": row_time,
+            "close": close if unit != "unknown" and close is not None and close > 0 else None,
+            "volume": _coerce_number(row.get("volume")),
+            "price_unit": unit,
+            "source": row.get("source"),
+            "price_source": row.get("price_source") or row.get("source"),
+            "price_basis": row.get("price_basis") or row.get("adjustment_basis") or "raw_close",
+        })
+    if not series:
+        return {"latest": None, "summary": {}, "recent_series": [],
+                "limitations": ["Price timestamps are missing or invalid; latest observation is unavailable."]}
+    series.sort(key=lambda item: item["time"])
     latest = series[-1]
-    latest_close = latest["close"]
+    latest_unit = latest["price_unit"]
+    holidays = {date.fromisoformat(value) for value in settings.market_holiday_dates}
+    by_date: dict[str, list[dict[str, Any]]] = {}
+    for row in series:
+        by_date.setdefault(row["time"], []).append(row)
 
-    def percent_change(offset: int) -> float | None:
-        if len(series) <= offset:
-            return None
-        previous = series[-(offset + 1)]["close"]
-        if previous in (None, 0):
-            return None
-        return round(((latest_close - previous) / previous) * 100, 2)
+    def window_status(count: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        end = date.fromisoformat(latest["time"])
+        days: list[str] = []
+        cursor = end
+        while len(days) < count:
+            if is_market_business_day(cursor, holidays):
+                days.append(cursor.isoformat())
+            cursor -= timedelta(days=1)
+        expected = list(reversed(days))
+        rows = [row for day in expected for row in by_date.get(day, [])]
+        reason = None
+        if invalid_timestamps or not is_market_business_day(end, holidays):
+            reason = "invalid_exchange_session_timestamp"
+        elif any(day not in by_date for day in expected):
+            reason = "missing_exchange_sessions"
+        elif any(len(by_date[day]) != 1 for day in expected):
+            reason = "duplicate_exchange_sessions"
+        elif any(row["close"] is None for row in rows):
+            reason = "missing_nonfinite_or_unknown_price"
+        elif any(row["price_unit"] != latest_unit or row["price_basis"] != latest["price_basis"] for row in rows):
+            reason = "incompatible_price_units_or_basis"
+        return rows, {"start_date": expected[0], "end_date": latest["time"],
+                      "expected_dates": expected, "expected_observations": count,
+                      "observed_observations": len(rows),
+                      "status": "unavailable" if reason else "available", "reason": reason}
 
-    recent_window = series[-PRICE_WINDOW:]
-    recent_volumes = [row["volume"] for row in recent_window if row.get("volume") is not None]
-    low_20d = min((row["close"] for row in recent_window), default=None)
-    high_20d = max((row["close"] for row in recent_window), default=None)
+    def percent_change(offset: int) -> tuple[float | None, dict[str, Any]]:
+        rows, status = window_status(offset + 1)
+        if status["status"] != "available":
+            return None, status
+        value = ((rows[-1]["close"] - rows[0]["close"]) / rows[0]["close"]) * 100
+        if not math.isfinite(value):
+            status.update(status="unavailable", reason="nonfinite_return")
+            return None, status
+        return round(value, 2), status
 
+    change_5d, window_5d = percent_change(5)
+    change_20d, window_20d = percent_change(20)
+    range_rows, range_status = window_status(PRICE_WINDOW)
+    complete_range = range_status["status"] == "available"
+    volumes = [row["volume"] for row in range_rows]
+    average_volume = None
+    if complete_range and all(value is not None for value in volumes):
+        average = sum(value / len(volumes) for value in volumes)
+        average_volume = round(average, 2) if math.isfinite(average) else None
+    limitations = sorted({status["reason"] for status in (window_5d, window_20d, range_status) if status["reason"]})
+    if invalid_timestamps:
+        limitations.append("Invalid timestamps prevent certification of the latest observation.")
     return {
-        "latest": latest,
+        "latest": latest if not invalid_timestamps else None,
         "summary": {
-            "change_5d_pct": percent_change(5),
-            "change_20d_pct": percent_change(20),
-            "low_20d": low_20d,
-            "high_20d": high_20d,
-            "average_volume_20d": round(sum(recent_volumes) / len(recent_volumes), 2)
-            if recent_volumes
-            else None,
+            "price_unit": latest_unit,
+            "change_5d_pct": change_5d,
+            "change_20d_pct": change_20d,
+            "low_20d": min(row["close"] for row in range_rows) if complete_range else None,
+            "high_20d": max(row["close"] for row in range_rows) if complete_range else None,
+            "average_volume_20d": average_volume,
+            "return_windows": {"5d": window_5d, "20d": window_20d},
+            "range_window_20d": range_status,
         },
-        "recent_series": recent_window,
+        "recent_series": series[-PRICE_WINDOW:],
+        "excluded_unknown_unit_rows": sum(row["price_unit"] == "unknown" for row in series),
+        "limitations": limitations,
+        "calendar": {"holiday_source": "MARKET_HOLIDAY_DATES",
+                     "status": "configured_closures_only", "exchange_calendar_verified": False,
+                     "limitation": "Only configured exchange closures are excluded."},
     }
 
 
@@ -327,6 +395,7 @@ def _build_flow_context(
     rows: list[dict[str, Any]],
     *,
     extra_fields: Sequence[str] = (),
+    require_complete_session: bool = False,
 ) -> dict[str, Any] | None:
     normalized_rows: list[dict[str, Any]] = []
     for row in rows:
@@ -343,10 +412,18 @@ def _build_flow_context(
             "sell_volume": _coerce_number(row.get("sell_volume")),
             "net_volume": _coerce_number(row.get("net_volume")),
         }
+        if require_complete_session:
+            coverage = row.get("coverage") or {"scope": "unknown", "completed_session": False}
+            normalized["coverage"] = coverage
+            complete = coverage.get("scope") == "full_session" and coverage.get("completed_session") is True
+            for field in ("buy_value", "sell_value", "net_value", "buy_volume", "sell_volume", "net_volume"):
+                normalized[f"observed_{field}"] = normalized[field]
+                if not complete:
+                    normalized[field] = None
         for field in extra_fields:
             value = row.get(field)
             normalized[field] = _coerce_number(value) if value not in (None, "") else None
-        normalized_rows.append(_compact_dict(normalized))
+        normalized_rows.append(normalized if require_complete_session else _compact_dict(normalized))
 
     if not normalized_rows:
         return None
@@ -355,22 +432,26 @@ def _build_flow_context(
     recent_window = ordered[-FLOW_WINDOW:]
     recent_sessions = recent_window[-5:]
 
+    def summarize(window: Sequence[dict[str, Any]], field: str) -> float | None:
+        if require_complete_session and any(row.get(field) is None for row in window):
+            return None
+        return _sum_numeric(window, field)
+
+    summary = {
+        "net_value_5d": summarize(recent_window[-5:], "net_value"),
+        "net_value_20d": summarize(recent_window, "net_value"),
+        "net_volume_5d": summarize(recent_window[-5:], "net_volume"),
+        "net_volume_20d": summarize(recent_window, "net_volume"),
+        "positive_sessions_20d": sum(1 for row in recent_window if (row.get("net_value") or 0) > 0),
+        "negative_sessions_20d": sum(1 for row in recent_window if (row.get("net_value") or 0) < 0),
+    }
+    if require_complete_session and any(row.get("net_value") is None for row in recent_window):
+        summary["positive_sessions_20d"] = None
+        summary["negative_sessions_20d"] = None
+
     return {
         "latest_session": ordered[-1],
-        "summary": _compact_dict(
-            {
-                "net_value_5d": _sum_numeric(recent_window[-5:], "net_value"),
-                "net_value_20d": _sum_numeric(recent_window, "net_value"),
-                "net_volume_5d": _sum_numeric(recent_window[-5:], "net_volume"),
-                "net_volume_20d": _sum_numeric(recent_window, "net_volume"),
-                "positive_sessions_20d": sum(
-                    1 for row in recent_window if (row.get("net_value") or 0) > 0
-                ),
-                "negative_sessions_20d": sum(
-                    1 for row in recent_window if (row.get("net_value") or 0) < 0
-                ),
-            }
-        ),
+        "summary": summary if require_complete_session else _compact_dict(summary),
         "recent_sessions": recent_sessions,
     }
 
@@ -381,10 +462,10 @@ def _build_insider_context(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     sell_count = 0
 
     for row in rows:
-        action = str(row.get("deal_action") or "").strip().lower()
-        if any(keyword in action for keyword in ("mua", "buy")):
+        action_token = normalize_deal_action(row.get("deal_action"))
+        if action_token == "BUY":
             buy_count += 1
-        if any(keyword in action for keyword in ("ban", "bán", "sell")):
+        elif action_token == "SELL":
             sell_count += 1
 
         deals.append(
@@ -833,9 +914,9 @@ class AIContextService:
                 (
                     await session.execute(
                         select(StockPrice)
-                        .where(StockPrice.symbol == symbol)
+                        .where(StockPrice.symbol == symbol, StockPrice.interval == "1D")
                         .order_by(desc(StockPrice.time))
-                        .limit(PRICE_WINDOW)
+                        .limit(PRICE_WINDOW + 1)
                     )
                 )
                 .scalars()
@@ -980,18 +1061,11 @@ class AIContextService:
         ):
             return None
 
-        price_context = _build_price_context(
-            [
-                {
-                    "time": _iso_value(row.time),
-                    "close": row.close,
-                    "volume": row.volume,
-                }
-                for row in price_rows
-            ]
-        )
+        price_context = _build_price_context(price_rows)
+        ratio_units = (getattr(ratio_row, "raw_data", None) or {}).get("ratio_units")
+        ratio_source = getattr(ratio_row, "source", None)
 
-        return {
+        snapshot = {
             "symbol": symbol,
             "source": "postgres",
             "company": {
@@ -1020,15 +1094,15 @@ class AIContextService:
                 "pb_ratio": getattr(ratio_row, "pb_ratio", None),
                 "ps": getattr(ratio_row, "ps_ratio", None),
                 "ps_ratio": getattr(ratio_row, "ps_ratio", None),
-                "roe": getattr(ratio_row, "roe", None),
-                "roa": getattr(ratio_row, "roa", None),
-                "gross_margin": getattr(ratio_row, "gross_margin", None),
-                "operating_margin": getattr(ratio_row, "operating_margin", None),
-                "net_margin": getattr(ratio_row, "net_margin", None),
+                **{
+                    metric: admitted_ratio_value(
+                        getattr(ratio_row, metric, None), metric,
+                        ratio_units=ratio_units, source=ratio_source,
+                    )
+                    for metric in ("roe", "roa", "gross_margin", "operating_margin", "net_margin", "revenue_growth", "earnings_growth")
+                },
                 "current_ratio": getattr(ratio_row, "current_ratio", None),
                 "debt_to_equity": getattr(ratio_row, "debt_to_equity", None),
-                "revenue_growth": getattr(ratio_row, "revenue_growth", None),
-                "earnings_growth": getattr(ratio_row, "earnings_growth", None),
                 "eps": getattr(ratio_row, "eps", None),
                 "bvps": getattr(ratio_row, "bvps", None),
             }
@@ -1118,6 +1192,7 @@ class AIContextService:
                         "proprietary_net_volume": row.proprietary_net_volume,
                         "big_order_count": row.big_order_count,
                         "block_trade_count": row.block_trade_count,
+                        "coverage": row.coverage,
                     }
                     for row in order_flow_rows
                 ],
@@ -1127,6 +1202,7 @@ class AIContextService:
                     "big_order_count",
                     "block_trade_count",
                 ),
+                require_complete_session=True,
             ),
             "insider_deals": _build_insider_context(
                 [
@@ -1172,6 +1248,54 @@ class AIContextService:
                 ]
             ),
         }
+        for key, row, statement_type in (
+            ("income_statement", income_row, "income"),
+            ("balance_sheet", balance_row, "balance"),
+            ("cash_flow", cash_row, "cashflow"),
+        ):
+            section = snapshot[key]
+            if section is None:
+                continue
+            raw_data = getattr(row, "raw_data", None) or {}
+            lineage = raw_data.get("_financial_lineage") or {}
+            canonical = lineage.get("canonical_data") or {}
+            metadata = {
+                name: canonical.get(name, lineage.get(name))
+                for name in (
+                    "currency", "value_unit", "unit_metadata", "consolidation_basis",
+                    "flow_basis", "aggregation_basis", "source_periods", "unavailable_reason",
+                )
+                if name in canonical or name in lineage
+            }
+            metadata["unavailable_reason"] = (
+                canonical.get("unavailable_reason") or lineage.get("unavailable_reason")
+            )
+            source = getattr(row, "source", None)
+            if any(
+                evidence.get(name) not in (None, expected)
+                for evidence in (canonical, lineage)
+                for name, expected in (("source", source), ("symbol", symbol), ("statement_type", statement_type))
+            ):
+                metadata["unavailable_reason"] = "conflicting_statement_source"
+            admitted = admit_statement_rows([
+                FinancialStatementData(**metadata, **section, source=source,
+                    symbol=symbol, statement_type=statement_type, raw_data=raw_data)
+            ], section["period_type"] or "year")[0]
+            rejected = {
+                name: admitted.unavailable_reason or admitted.unit_metadata.get(name, {}).get("unavailable_reason")
+                for name, value in section.items()
+                if name in FinancialStatementData.model_fields
+                and name not in {"fiscal_year", "fiscal_quarter"}
+                and isinstance(value, (int, float)) and getattr(admitted, name) is None
+            }
+            if rejected:
+                section["raw_observation"] = dict(section)
+                section.update(dict.fromkeys(rejected))
+                section["raw_data"] = raw_data
+                section["unavailable_metrics"] = rejected
+                if admitted.unavailable_reason:
+                    section["unavailable_reason"] = admitted.unavailable_reason
+        return snapshot
 
     async def _build_postgres_market_snapshot(self) -> dict[str, Any] | None:
         async with async_session_maker() as session:

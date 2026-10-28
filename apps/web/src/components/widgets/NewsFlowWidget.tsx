@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState, useEffect } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { API_BASE_URL } from '@/lib/api';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -8,10 +8,10 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useInfiniteQuery } from '@tanstack/react-query';
+import { newsObservationProvenance } from '@/lib/newsTime';
 import { NewsFilterBar } from './news/NewsFilterBar';
 import { NewsCard } from './news/NewsCard';
 import { Loader2, Newspaper } from 'lucide-react';
-
 interface NewsFlowWidgetProps {
   id: string;
   symbol?: string;
@@ -19,6 +19,39 @@ interface NewsFlowWidgetProps {
   onRemove?: () => void;
   onDataChange?: (data: WidgetDataPayload) => void;
 }
+
+
+/**
+ * `/news/flow` envelope (`vnibb/services/news_service.py` `NewsResponse`). An
+ * item is a `NewsItem`; the publication fields are optional, so the row type
+ * mirrors exactly what `NewsCard` consumes.
+ */
+type NewsFlowItem = {
+  id: string | number;
+  published_at?: string | null;
+  published_date?: string | null;
+  pubDate?: string | null;
+  title: string;
+  summary?: string;
+  source: string;
+  url: string;
+  symbols: string[];
+  sentiment: 'positive' | 'negative' | 'neutral' | 'bullish' | 'bearish';
+  matched_symbols?: string[];
+  relevance_score?: number | null;
+  is_market_wide_fallback?: boolean;
+};
+type NewsFlowPage = {
+  items: NewsFlowItem[];
+  has_more?: boolean;
+};
+
+/** Shape check for the `/news/flow` envelope before it reaches rendering. */
+function isNewsFlowPage(payload: unknown): payload is NewsFlowPage {
+  if (typeof payload !== 'object' || payload === null || !('items' in payload)) return false
+  return Array.isArray(payload.items)
+}
+
 
 function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataChange }: NewsFlowWidgetProps) {
   const [filters, setFilters] = useState({
@@ -56,7 +89,9 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
 
       const res = await fetch(`${API_BASE_URL}/news/flow?${params.toString()}`);
       if (!res.ok) throw new Error('News flow failed');
-      return res.json();
+      const payload: unknown = await res.json();
+      if (!isNewsFlowPage(payload)) throw new Error('Unexpected /news/flow envelope');
+      return payload;
     },
     getNextPageParam: (lastPage, allPages) => {
       if (lastPage.has_more) {
@@ -68,9 +103,15 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
     staleTime: 5 * 60 * 1000,
   });
 
-  const allNews = data?.pages.flatMap((p: any) => p.items) || [];
+  const allNews: NewsFlowItem[] = data?.pages.flatMap((p) => p.items) || [];
   const hasData = allNews.length > 0;
   const isFallback = Boolean(error && hasData);
+  // `/news/flow` rows may lack a source publication date; the helper reports
+  // those as unknown instead of borrowing the query receipt.
+  const observation = useMemo(
+    () => newsObservationProvenance(allNews, { receiptAt: dataUpdatedAt }),
+    [allNews, dataUpdatedAt],
+  );
 
   useEffect(() => {
     onDataChange?.(
@@ -79,12 +120,26 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
         apiGroup: '/news',
         endpoint: '/news/flow',
         sourceLabel: filters.symbols.length ? 'Ticker feed' : 'Market feed',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate: observation.lastDataDate,
+        fetchedAt: dataUpdatedAt,
+        coverage: observation.coverage,
         stale: isFallback,
+        cached: isFallback,
+        warnings: observation.warning ? [observation.warning] : undefined,
         extra: { count: allNews.length },
       }),
     );
-  }, [onDataChange, hasData, dataUpdatedAt, isFallback, allNews.length, filters.symbols.length]);
+  }, [
+    onDataChange,
+    hasData,
+    dataUpdatedAt,
+    isFallback,
+    allNews.length,
+    filters.symbols.length,
+    observation.lastDataDate,
+    observation.coverage,
+    observation.warning,
+  ]);
 
   return (
     <WidgetContainer
@@ -100,7 +155,8 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
 
         <div className="px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={observation.lastDataDate}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note={filters.symbols.length ? 'Ticker feed' : 'Market feed'}
@@ -121,8 +177,8 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
             />
           ) : (
             <div className="flex flex-col">
-            {allNews.map((item: any, index: number) => (
-              <NewsCard key={`${item.id ?? item.url ?? item.title}-${index}`} news={item} />
+            {allNews.map((item, index) => (
+              <NewsCard key={`${item.id ?? item.url ?? item.title}-${index}`} news={{ ...item, id: String(item.id) }} />
             ))}
 
               {hasNextPage && (

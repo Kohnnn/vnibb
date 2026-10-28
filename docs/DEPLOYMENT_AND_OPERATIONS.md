@@ -12,6 +12,14 @@ The current operational picture reflected in recent project context is:
 
 The database stack is the single system of record for VNIBB persistence. It is self-hosted and portable, so it can be relocated to other infrastructure in the future without changing the application contract.
 
+### Observed deployment and target policy
+
+On 13 October 2026, trusted public HTTPS and authorized read-only MCP were available at `https://129.150.58.64.sslip.io`; API and `/mcp-health` reported `2c57654277ef5546662afc3cc7ed4a4e355e441e`. Production still reported `KBS`. The IQ/Trading-primary, free-VCI-only contracts below describe the current source policy, not proof that this older runtime has been cut over. Strict known-host SSH timed out and Tailscale remained `NeedsLogin`; production host/image/migration and current backup inspection were not established.
+
+Local migration to `f8c3a102d679` was observed, and actual PostgreSQL/Mongo exports with a size/SHA-256 manifest were preserved before local population. Neither local migration nor export creation proves deployed parity, restored recovery or complete financial/tick/depth coverage. See [Oracle Runbook](oracle_runbook.md#current-observation-versus-release-target) for commands and boundaries; detailed QA evidence stays in `mcp-database-qa-plan.md`.
+
+Release verification requires an independently selected published target SHA. `scripts/oracle/mcp_smoke_test.sh` requires `EXPECTED_REVISION` and reuses the read-only `mcp_acceptance.py` gates. Do not copy old production health into the expected target to manufacture a pass. A dirty working tree based on `552e29678164eba168b90a0b64fff779bac84e55` is not an image release identity.
+
 ## Why operations became a major project theme
 
 VNIBB depends on upstream market data providers that are not perfectly stable. That means operational quality is part of the product, not just infrastructure work.
@@ -26,16 +34,16 @@ The deployment and ops work has focused on:
 
 ## Runtime topology
 
-At a high level, production looks like:
+The intended deployment topology is:
 
 1. Vercel serves the frontend
 2. OCI hosts the backend runtime and the dedicated `vnibb-mcp` sidecar
 3. the backend exposes HTTP and WebSocket surfaces
 4. the `vnibb-mcp` sidecar exposes the read-only MCP HTTP surface for VniAgent and remote clients
 5. the self-hosted database stack backs persistence, runtime state, auth, and cache
-6. Vietcap is the primary EOD corpus; free VNStock/KBS provides runtime fallback and gap fill
-7. `VNSTOCK_RUNTIME_TIER=free` is the production default; premium modules are optional accelerators and never a startup dependency in free mode
-8. the API image is built once, published, and deployed by immutable digest; premium builds use BuildKit secrets only
+6. Vietcap IQ/Trading is the primary Vietnamese ingestion source for structured financials and market data; free VNStock VCI is supplementary where supported
+7. `VNSTOCK_RUNTIME_TIER=free` and `VNSTOCK_SOURCE=VCI` are the only supported execution policy; the shared provider importer rejects installed or already-loaded Sponsor packages before any VNStock import can authenticate, including direct OHLCV backfill calls outside startup
+8. the free-compatible API image is built once, published and deployed by immutable digest; do not mount or bootstrap premium packages for this deployment
 9. migrations run through the one-shot `migrate` service before API/MCP replacement; the API process does not migrate at startup
 10. API scheduling remains disabled and the profiled `scheduler` worker is the only scheduler runtime
 
@@ -49,10 +57,10 @@ VniAgent server context path
   -> apps/api
   -> VNIBB_MCP_URL
   -> vnibb-mcp
-  -> n6v self-hosted stack over Tailscale (<n6v-tailscale-ip>, private):
-     - MongoDB vnibb-market :27017  (market corpus)
-     - self-hosted Supabase Postgres :15433/:16543 (app/runtime state, auth)
-     - Redis :6379 (cache/locks)
+  -> verified deployment connection targets:
+     - MongoDB vnibb-market (raw/analytical corpus)
+     - PostgreSQL (app state and admitted structured observations)
+     - Redis (production scheduler locks/cache)
 ```
 
 ## Backend Tech Stack
@@ -77,16 +85,15 @@ VniAgent server context path
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| **Primary EOD** | Vietcap public market-data API | Canonical raw-VND OHLCV corpus and freshness basis |
-| **Runtime fallback** | VNStock 4.0 free tier (KBS baseline) | Screener, quotes, financials, and provider gap fill |
-| **AI Assist** | VNAI 2.6.2 publisher wheel | Installed with the constrained free-tier image; historical 2.4.x hook compatibility is unverified, so premium-only paths require separate runtime proof |
-| **Premium accelerators** | vnstock_data, vnstock_ta, vnstock_news, vnstock_pipeline | Optional; enabled only with `VNSTOCK_RUNTIME_TIER=premium` and a premium-built image |
+| **Primary Vietnamese source** | Vietcap IQ/Trading public API | Lossless provider records and descriptor-admitted fields; unknown units, dates, fiscal basis or coverage stay unverified |
+| **Supplementary parser/transport** | Free VNStock 4.0.x, VCI only | Supported free calls to the same Vietcap upstream; not independent outage protection |
+| **AI Assist dependency** | VNAI 2.6.2 publisher wheel | Constrained free-tier dependency; installation does not authorize sponsor modules or AI spend |
 
 ### Database & Persistence
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| **Persistence** | Self-hosted on n6v (MongoDB + Supabase Postgres + Redis, Tailscale-private) | System of record: market corpus, app/runtime state, auth, and cache |
+| **Persistence** | Self-hosted PostgreSQL + MongoDB + Redis | Oracle Compose defines local stores; inspect runtime URLs/mounts before recovery. Historical n6v topology is not current routing proof. |
 | **Async DB** | SQLAlchemy 2.0+ / asyncpg | Async ORM with connection pooling |
 | **Migrations** | Alembic 1.13+ | Schema migrations |
 
@@ -155,9 +162,19 @@ Local workspace browsing and interactive administration have separate access rul
 
 `NEXT_PUBLIC_ENABLE_AUTH` controls dashboard `/login` redirects; leaving it unset or `false` does not bypass backend admin authorization. `NEXT_PUBLIC_DISABLE_AUTH=true` only bypasses frontend route gating in tests/previews. Never expose `ADMIN_API_KEY` or signing secrets via frontend environment variables or storage. Clear previously stored browser admin keys and rotate the formerly exposed secret: clearing alone is not revocation. See `docs/admin_global_system_layouts.md` and `docs/oracle_runbook.md` for session revocation controls, all-worker rollout requirements, and the production acceptance gate, which remains BLOCKED pending verified operators, rotation, provisioned/accepted revocation authority, and authenticated live acceptance.
 
+Matrix owner APIs, Matrix-only copilot and Matrix MCP user-session access likewise require verified JWT issuer/audience/identity/expiry/session claims and an online issuing-Auth lookup on every request. A shared deployment bearer does not authorize Matrix ownership. Exact selection, other-owner, invalid, revoked and export-denied behavior are independent acceptance gates; missing real owner/other sessions keep live Matrix acceptance BLOCKED. Ordinary non-Matrix chat keeps its separate access path. See [MCP deployment](VNIBB_MCP_DEPLOYMENT.md) and the [read-only acceptance runbook](oracle_runbook.md#read-only-mcp-acceptance-gates).
+
+## Acquisition and analytical-read boundaries
+
+Recurring maintenance uses durable full active SQL symbol × dataset cycles, not market-cap rank buckets. Bounded daily continuation does not promise daily full-population completion. Recent EOD acquisition keeps a rolling ≤7-day window ending today at 10:15 UTC, so the 12:15 UTC historical owner defaults its catch-up end to today minus 7 days and advances the adjacent gap; each historical window is at most 30 days. The separate IQ profile/shareholder owner runs at 14:15 UTC with 50 pairs/600 seconds toward a completed full-universe cycle eligible for weekly refresh. SQL reference maintenance remains distinct from those physical Mongo stores. Exact cycle budgets and receipts are in [Auto Update Strategy](AUTO_UPDATE_STRATEGY.md); stable provider-free `inventory` and opt-in `backfill`/`resume` commands are in [Oracle Runbook](oracle_runbook.md#durable-population-commands).
+
+Native `--count-back 10000` STOCK acquisition records returned provider ranges under a fixed checkpoint source/start/cutoff contract. Confirmed listing scope includes explicit active and delisted instruments; historical/native scope is not interchangeable with active SQL maintenance. Provider history, acquisition-window success, retention windows and advertised MCP datasets do not prove oldest-history coverage or complete exchange sessions.
+
+Financial admission retains unknown units/scale/date/basis as unavailable, never magnitude-based repairs. Flow reads expose observed sample fields and withhold full-session/domestic totals unless `coverage.scope=full_session` and `completed_session=true`; daily foreign/proprietary data is not a matched sample denominator. Mongo reads preserve full storage envelopes and distinguish unavailable/query failures from genuinely empty data. MCP emits complete strict JSON: Decimal and unsafe integers remain exact strings, nonfinite values fail instead of becoming fabricated finite values, and responses are not truncated. Snapshot MCP builds directly from local stores; API VniAgent retains its explicit remote/disabled/failure/timeout direct-store fallback without treating database failures as safe empty data.
+
 ## Data Flow: Raw Data to Widgets
 
-The complete data pipeline from raw provider data to widget display:
+The large diagram below is a historical pipeline reference. Current Vietnamese ingestion starts with Vietcap IQ/Trading, stores lossless Mongo envelopes and admitted PostgreSQL fields, and uses only free VCI for supported supplementary requests. Current runtime commands and safe local/production recovery are in `oracle_runbook.md`; do not follow the diagram's obsolete KBS/DNSE/scraper or premium fallback paths.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -499,15 +516,15 @@ That staged method is worth keeping. It prevented the project from mixing too ma
 
 ## Oracle env profile
 
-For the Oracle backend deployment path, the current recommended runtime profile is:
+For the Oracle backend deployment path, use the free-compatible source policy. These settings are configuration guidance, not a claim that the observed older production revision already matches it:
 
 ```env
 ENVIRONMENT=production
 DATA_BACKEND=postgres
 CACHE_BACKEND=auto
 ALLOW_ANONYMOUS_DASHBOARD_WRITES=true
-VNSTOCK_SOURCE=KBS
-VNSTOCK_CALLS_PER_MINUTE=100
+VNSTOCK_RUNTIME_TIER=free
+VNSTOCK_SOURCE=VCI
 INTRADAY_SYMBOLS_PER_RUN=60
 SCHEDULER_LIVE_SYMBOLS_PER_RUN=60
 SCHEDULER_SUPPLEMENTAL_SYMBOLS_PER_RUN=120
@@ -529,17 +546,18 @@ SKIP_WEBSOCKET_STARTUP=false
 
 - `DATA_BACKEND=postgres`
 - `CACHE_BACKEND=auto`
-- `VNSTOCK_CALLS_PER_MINUTE=100`
 - `API_SKIP_SCHEDULER_STARTUP=true`
 - `SKIP_WEBSOCKET_STARTUP=false`
 
 ### Database stack writes
 
-Keep durable writes pointed at the self-hosted database stack. The runtime writes every durable record to Postgres; there is no second write target.
+Keep durable writes pointed at the verified self-hosted database stack: PostgreSQL holds app/runtime state and admitted structured observations; MongoDB holds lossless provider envelopes and analytical records. Verify both connection targets before acquisition; Redis provides coordination/cache, not a second authoritative market corpus.
 
 - durable state lives in the database stack
 - dashboards remain local-first with a durable save path
 - verify deploys with `bash scripts/oracle/runtime_verify.sh` before treating a rollout as successful
+
+Use existing client pacing and bounded acquisition budgets. The configured client floor is one request per second per client/worker; it is neither an upstream quota guarantee nor an aggregate ceiling, and overlapping concurrent phases are not additive throughput. Confirm process containment before treating a queued acquisition phase as sequential; see the dated containment-risk note in [Oracle Runbook](oracle_runbook.md#13-october-2026-concurrent-acquisition-containment-risk). Retired KBS or paid-runtime calls-per-day/minute recommendations must not be reused as free-VCI entitlement. Review actual provider errors and durable partial/failure receipts before raising attempt budgets.
 
 ### Why `CACHE_BACKEND=auto` is acceptable
 

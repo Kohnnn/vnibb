@@ -80,7 +80,8 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
             apiGroup: '/rs',
             endpoint,
             sourceLabel: `RS ${activeTab}`,
-            lastDataDate: activeQuery.dataUpdatedAt,
+            lastDataDate: null,
+            fetchedAt: activeQuery.dataUpdatedAt,
             extra: {
                 count: activeItems.length,
                 limit,
@@ -162,7 +163,8 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
                 </div>
                 <div className="flex items-center gap-2">
                     <WidgetMeta
-                        updatedAt={activeQuery.dataUpdatedAt}
+                        updatedAt={null}
+                        fetchedAt={activeQuery.dataUpdatedAt}
                         isFetching={activeQuery.isFetching && hasData}
                         isCached={isFallback}
                         note={activeTab === 'leaders' ? 'Leaders' : activeTab === 'laggards' ? 'Laggards' : 'Gainers'}

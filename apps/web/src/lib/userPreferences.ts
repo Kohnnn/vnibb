@@ -63,7 +63,7 @@ export const DEFAULT_TAB_OPTIONS: Array<{ value: DefaultTabPreference; label: st
   { value: 'news-events', label: 'News & Events' },
 ]
 
-function normalizeTabKey(rawValue: string | null | undefined): DefaultTabPreference | null {
+export function normalizeTabKey(rawValue: string | null | undefined): DefaultTabPreference | null {
   const normalized = String(rawValue || '')
     .trim()
     .toLowerCase()

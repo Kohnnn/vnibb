@@ -94,6 +94,8 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
       apiGroup: '/alerts',
       endpoint: `/api/v1/alerts/settings/${userId}`,
       sourceLabel: 'Alert preferences',
+      lastDataDate: null,
+      fetchedAt: dataUpdatedAt,
         stale: Boolean(error && settings),
         extra: {
           feedState: error ? (settings ? 'stale' : 'unavailable') : settings ? 'loaded' : 'loading',
@@ -104,7 +106,7 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
           emailVerified: false,
         },
     }));
-  }, [error, formData.enable_browser_notifications, notificationPermission, onDataChange, settings, userId]);
+  }, [error, formData.enable_browser_notifications, notificationPermission, onDataChange, settings, userId, dataUpdatedAt]);
 
   if (isLoading && !settings) {
     return <WidgetSkeleton lines={6} />;
@@ -128,7 +130,8 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
             Feed {feedState}
           </span>
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={null}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching}
             note="Alert preferences"
             align="right"

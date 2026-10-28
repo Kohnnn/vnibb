@@ -1,14 +1,16 @@
 import asyncio
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from vnibb.models.company import Company, Shareholder
 from vnibb.models.comparison import StockComparison
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.market_news import MarketNews
-from vnibb.models.news import Dividend
+from vnibb.models.news import CompanyEvent, Dividend
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
@@ -21,9 +23,17 @@ from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.providers.vnstock.foreign_trading import ForeignTradingData
 from vnibb.providers.vnstock.intraday import IntradayTradeData
 from vnibb.providers.vnstock.price_depth import OrderLevel, PriceDepthData
+from vnibb.providers.vnstock.market_overview import MarketIndexData
 from vnibb.providers.vnstock.stock_quote import StockQuoteData
 from vnibb.providers.vnstock.trading_stats import TradingStatsData
 from vnibb.services.sector_service import SectorPerformance, StockBrief
+
+@pytest.fixture
+def quote_database(test_engine, monkeypatch):
+    monkeypatch.setattr("vnibb.api.v1.equity.async_session_factory", async_sessionmaker(
+        test_engine, expire_on_commit=False,
+    ))
+
 
 
 @pytest.mark.asyncio
@@ -92,10 +102,12 @@ async def test_income_statement_endpoint_orders_oldest_first_and_enrichs_missing
                 revenue=1000.0,
                 operating_income=200.0,
                 net_income=150.0,
-                raw_data={
-                    "Selling Expenses": -40.0,
-                    "General & Admin Expenses": -60.0,
-                },
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    "symbol": "VNM", "period": "2024", "fiscal_year": 2024, "statement_type": "income", "source": "fixture",
+                    "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                      ("revenue", "operating_income", "net_income", "selling_general_admin")},
+                    "revenue": 1000, "operating_income": 200, "net_income": 150, "selling_general_admin": -100}}},
             ),
             IncomeStatement(
                 id=101,
@@ -106,10 +118,12 @@ async def test_income_statement_endpoint_orders_oldest_first_and_enrichs_missing
                 revenue=900.0,
                 operating_income=180.0,
                 net_income=130.0,
-                raw_data={
-                    "Selling Expenses": -30.0,
-                    "General & Admin Expenses": -50.0,
-                },
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    "symbol": "VNM", "period": "2023", "fiscal_year": 2023, "statement_type": "income", "source": "fixture",
+                    "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                      ("revenue", "operating_income", "net_income", "selling_general_admin")},
+                    "revenue": 900, "operating_income": 180, "net_income": 130, "selling_general_admin": -80}}},
             ),
             CashFlow(
                 id=100,
@@ -120,6 +134,12 @@ async def test_income_statement_endpoint_orders_oldest_first_and_enrichs_missing
                 depreciation=30.0,
                 operating_cash_flow=150.0,
                 capital_expenditure=-40.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    "symbol": "VNM", "period": "2024", "fiscal_year": 2024, "statement_type": "cashflow", "source": "fixture",
+                    "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                      ("depreciation", "operating_cash_flow", "capex")},
+                    "depreciation": 30, "operating_cash_flow": 150, "capex": -40}}},
             ),
             CashFlow(
                 id=101,
@@ -130,6 +150,12 @@ async def test_income_statement_endpoint_orders_oldest_first_and_enrichs_missing
                 depreciation=25.0,
                 operating_cash_flow=120.0,
                 capital_expenditure=-35.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    "symbol": "VNM", "period": "2023", "fiscal_year": 2023, "statement_type": "cashflow", "source": "fixture",
+                    "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                      ("depreciation", "operating_cash_flow", "capex")},
+                    "depreciation": 25, "operating_cash_flow": 120, "capex": -35}}},
             ),
         ]
     )
@@ -171,6 +197,13 @@ async def test_balance_and_cash_flow_endpoints_enrich_fields_and_order_oldest_fi
                     "n_1.short_term_trade_accounts_payable": 85.0,
                     "Good will (Bn. VND)": 12.0,
                     "n_3.intangible_fixed_assets": 18.0,
+                    "_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                        "symbol": "VNM", "period": "2024", "fiscal_year": 2024, "statement_type": "balance", "source": "fixture",
+                        "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "instant",
+                        "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                          ("total_assets", "total_liabilities", "total_equity", "accounts_payable", "goodwill", "intangible_assets")},
+                        "total_assets": 2000, "total_liabilities": 900, "total_equity": 1100,
+                        "accounts_payable": 85, "goodwill": 12, "intangible_assets": 18}},
                 },
             ),
             BalanceSheet(
@@ -184,6 +217,12 @@ async def test_balance_and_cash_flow_endpoints_enrich_fields_and_order_oldest_fi
                 total_equity=1000.0,
                 raw_data={
                     "n_1.short_term_trade_accounts_payable": 80.0,
+                    "_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                        "symbol": "VNM", "period": "2023", "fiscal_year": 2023, "statement_type": "balance", "source": "fixture",
+                        "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "instant",
+                        "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                          ("total_assets", "total_liabilities", "total_equity", "accounts_payable")},
+                        "total_assets": 1800, "total_liabilities": 800, "total_equity": 1000, "accounts_payable": 80}},
                 },
             ),
             CashFlow(
@@ -195,6 +234,12 @@ async def test_balance_and_cash_flow_endpoints_enrich_fields_and_order_oldest_fi
                 operating_cash_flow=200.0,
                 capital_expenditure=-50.0,
                 free_cash_flow=None,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    "symbol": "VNM", "period": "2024", "fiscal_year": 2024, "statement_type": "cashflow", "source": "fixture",
+                    "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                      ("operating_cash_flow", "capex")},
+                    "operating_cash_flow": 200, "capex": -50}}},
             ),
             CashFlow(
                 id=201,
@@ -205,6 +250,12 @@ async def test_balance_and_cash_flow_endpoints_enrich_fields_and_order_oldest_fi
                 operating_cash_flow=170.0,
                 capital_expenditure=-40.0,
                 free_cash_flow=None,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    "symbol": "VNM", "period": "2023", "fiscal_year": 2023, "statement_type": "cashflow", "source": "fixture",
+                    "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                      ("operating_cash_flow", "capex")},
+                    "operating_cash_flow": 170, "capex": -40}}},
             ),
         ]
     )
@@ -325,6 +376,7 @@ async def test_screener_smoke_returns_data(client, monkeypatch):
                 exchange="HOSE",
                 industry_name="Food",
                 price=75000,
+                price_unit="VND",
                 market_cap=150000000000,
                 updated_at=datetime(2026, 3, 14, 15, 0, 0),
             )
@@ -354,6 +406,7 @@ async def test_screener_smoke_without_trailing_slash_returns_data(client, monkey
                 exchange="HOSE",
                 industry_name="Food",
                 price=75000,
+                price_unit="VND",
                 market_cap=150000000000,
             )
         ]
@@ -421,6 +474,20 @@ async def test_profile_smoke_returns_data(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_profile_refresh_timeout_reports_explicit_unavailable(client, monkeypatch):
+    provider = AsyncMock(side_effect=TimeoutError())
+    monkeypatch.setattr("vnibb.api.v1.equity.VnstockEquityProfileFetcher.fetch", provider)
+
+    response = await client.get("/api/v1/equity/VCI/profile?refresh=true")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "data": None, "meta": None, "error": "Profile unavailable: deadline exceeded",
+    }
+    provider.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_profile_cache_backfills_sector_and_scales_market_cap(client, test_db):
     test_db.add(
         Stock(
@@ -456,7 +523,7 @@ async def test_profile_cache_backfills_sector_and_scales_market_cap(client, test
             close=36.5,
             volume=1_050_000,
             interval="1D",
-            source="vnstock",
+            source="KBS",
         )
     )
     await test_db.commit()
@@ -473,7 +540,11 @@ async def test_profile_cache_backfills_sector_and_scales_market_cap(client, test
 
 
 @pytest.mark.asyncio
-async def test_dividends_endpoint_falls_back_to_cached_dividend_rows(client, test_db, monkeypatch):
+@pytest.mark.parametrize("provider_fails", [False, True])
+@pytest.mark.parametrize("fallback_model", [Dividend, CompanyEvent])
+async def test_dividends_endpoint_falls_back_to_cached_rows(
+    client, test_db, monkeypatch, provider_fails, fallback_model
+):
     test_db.add(
         Stock(
             id=1,
@@ -488,17 +559,17 @@ async def test_dividends_endpoint_falls_back_to_cached_dividend_rows(client, tes
             stock_id=1,
             symbol="VNM",
             time=date(2026, 3, 14),
-            open=62.9,
-            high=63.4,
-            low=62.3,
-            close=63.1,
+            open=62900,
+            high=63400,
+            low=62300,
+            close=63100,
             volume=2_050_000,
             interval="1D",
-            source="vnstock",
+            source="vnstock_vnd:VCI",
         )
     )
-    test_db.add(
-        Dividend(
+    if fallback_model is Dividend:
+        fallback_row = Dividend(
             id=1,
             symbol="VNM",
             exercise_date=date(2025, 9, 15),
@@ -509,14 +580,31 @@ async def test_dividends_endpoint_falls_back_to_cached_dividend_rows(client, tes
             record_date=date(2025, 9, 16),
             payment_date=date(2025, 10, 5),
         )
-    )
+    else:
+        fallback_row = CompanyEvent(
+            id=1,
+            symbol="VNM",
+            event_type="dividend",
+            ex_date=date(2025, 9, 15),
+            record_date=date(2025, 9, 16),
+            payment_date=date(2025, 10, 5),
+            value=4300.0,
+            raw_data={"dividend_ratio": 43.0, "fiscal_year": 2025},
+        )
+    test_db.add(fallback_row)
     await test_db.commit()
 
-    async def fake_dividend_fetch(symbol):
-        assert symbol == "VNM"
-        return []
+    class Company:
+        def __init__(self, *, symbol, source):
+            assert symbol == "VNM"
+            assert source == "VCI"
 
-    monkeypatch.setattr("vnibb.api.v1.equity.VnstockDividendsFetcher.fetch", fake_dividend_fetch)
+        def events(self):
+            if provider_fails:
+                raise RuntimeError("VCI events unavailable")
+            return None
+
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_company_class", lambda: Company)
 
     response = await client.get("/api/v1/equity/VNM/dividends?limit=5")
 
@@ -529,14 +617,30 @@ async def test_dividends_endpoint_falls_back_to_cached_dividend_rows(client, tes
     assert payload["data"][0]["type"] == "cash"
     assert payload["data"][0]["annual_dps"] == 4300.0
     assert payload["data"][0]["dividend_yield"] == pytest.approx(6.8146, rel=1e-4)
+    assert payload["error"] is None
 
 
 @pytest.mark.asyncio
-async def test_quote_smoke_returns_data(client, monkeypatch):
+async def test_dividends_endpoint_propagates_provider_cancellation(test_db, monkeypatch):
+    from vnibb.api.v1 import equity
+
+    fetch = AsyncMock(side_effect=asyncio.CancelledError())
+    monkeypatch.setattr(equity.VnstockDividendsFetcher, "fetch", fetch)
+
+    with pytest.raises(asyncio.CancelledError):
+        await equity.get_dividends.__wrapped__(symbol="VNM", limit=5, db=test_db)
+
+    fetch.assert_awaited_once_with(symbol="VNM")
+    assert not test_db.in_transaction()
+
+
+@pytest.mark.asyncio
+async def test_quote_smoke_returns_data(client, monkeypatch, quote_database):
     async def fake_quote_fetch(*, symbol: str, source: str):
         quote = StockQuoteData(
             symbol=symbol,
             price=75000,
+            price_unit="VND",
             open=74000,
             high=76000,
             low=73500,
@@ -557,12 +661,15 @@ async def test_quote_smoke_returns_data(client, monkeypatch):
     payload = response.json()
     assert payload["data"]["symbol"] == "VNM"
     assert payload["data"]["price"] == 75000
+    assert payload["data"]["price_unit"] == "VND"
     assert response.headers["X-API-Version"]
     assert response.headers["X-Data-Source"] == "postgres"
 
 
 @pytest.mark.asyncio
-async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_stale(client, test_db):
+async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_stale(
+    client, test_db, quote_database,
+):
     test_db.add(Stock(id=1, symbol="FPT", exchange="HOSE", company_name="FPT"))
     test_db.add_all(
         [
@@ -577,7 +684,7 @@ async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_sta
                 close=92.9,
                 volume=1_200_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
             StockPrice(
                 id=2,
@@ -590,7 +697,7 @@ async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_sta
                 close=90.5,
                 volume=1_100_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
             ScreenerSnapshot(
                 id=1,
@@ -599,7 +706,7 @@ async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_sta
                 price=77.0,
                 volume=9_026_000,
                 source="vnstock",
-                extended_metrics={"updated_at": "2026-03-14T13:18:00"},
+                extended_metrics={"updated_at": "2026-03-14T13:18:00", "price_unit": "THOUSAND_VND"},
             ),
         ]
     )
@@ -609,15 +716,46 @@ async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_sta
     assert response.status_code == 200
     payload = response.json()
     assert payload["data"]["symbol"] == "FPT"
-    assert payload["data"]["price"] == 77.0
+    assert payload["data"]["price"] == 77_000.0
+    assert payload["data"]["price_unit"] == "VND"
     assert payload["data"]["high"] is None
     assert payload["data"]["low"] is None
     assert payload["data"]["volume"] == 9026000
     assert payload["data"]["updated_at"].startswith("2026-03-14T13:18:00")
 
 
+@pytest.mark.parametrize(
+    "snapshot_day,latest_day,previous_day,latest_unit",
+    [(7, 6, 5, "vnstock_vnd:KBS"), (7, 5, 2, "vnstock_vnd:KBS"),
+     (7, 6, 5, "unknown"), (5, 2, 1, "vnstock_vnd:KBS")],
+)
+def test_snapshot_daily_change_uses_its_prior_session(
+    snapshot_day, latest_day, previous_day, latest_unit
+):
+    from vnibb.api.v1 import equity
+
+    snapshot = SimpleNamespace(
+        symbol="FPT", snapshot_date=date(2026, 10, snapshot_day), price=110,
+        volume=1000, source="vnstock_vnd:KBS",
+        extended_metrics={"price_unit": "VND", "change_pct": 10},
+    )
+    latest = SimpleNamespace(
+        symbol="FPT", time=date(2026, 10, latest_day), close=100, source=latest_unit
+    )
+    previous = SimpleNamespace(
+        symbol="FPT", time=date(2026, 10, previous_day), close=90, source="vnstock_vnd:KBS"
+    )
+
+    quote = equity._build_quote_from_screener_snapshot(snapshot, latest, previous)
+
+    assert quote.price == 110
+    assert quote.prev_close == pytest.approx(100)
+    assert quote.change == pytest.approx(10)
+    assert quote.change_pct == 10
+
+
 @pytest.mark.asyncio
-async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, test_db):
+async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, test_db, quote_database):
     """RC-3: PREV CLOSE must be populated from the prior settled close even when the
     snapshot carries no live change_pct (after-market-hours), instead of being null."""
     test_db.add(Stock(id=2, symbol="VCI", exchange="HOSE", company_name="VCI"))
@@ -634,7 +772,7 @@ async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, t
                 close=24.5,
                 volume=5_000_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
             StockPrice(
                 id=12,
@@ -647,7 +785,7 @@ async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, t
                 close=24.7,
                 volume=4_800_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
             # Snapshot is same-day-fresh but has no live change metric (after close).
             ScreenerSnapshot(
@@ -657,7 +795,7 @@ async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, t
                 price=24.5,
                 volume=5_000_000,
                 source="vnstock_ratio",
-                extended_metrics={"updated_at": "2026-03-14T15:30:00"},
+                extended_metrics={"updated_at": "2026-03-14T15:30:00", "price_unit": "THOUSAND_VND"},
             ),
         ]
     )
@@ -667,8 +805,9 @@ async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, t
     assert response.status_code == 200
     payload = response.json()
     assert payload["data"]["symbol"] == "VCI"
-    # PREV CLOSE must come from the prior settled close (24.7), never null.
-    assert payload["data"]["prevClose"] == 24.7
+    # PREV CLOSE must come from the prior settled close in canonical VND.
+    assert payload["data"]["prevClose"] == 24_700
+    assert payload["data"]["price_unit"] == "VND"
 
 
 @pytest.mark.asyncio
@@ -689,7 +828,7 @@ async def test_trading_stats_backfills_52_week_range_from_price_history(
                 close=27.9,
                 volume=1_000_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
             StockPrice(
                 id=11,
@@ -702,7 +841,7 @@ async def test_trading_stats_backfills_52_week_range_from_price_history(
                 close=30.7,
                 volume=1_200_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
             StockPrice(
                 id=12,
@@ -715,7 +854,7 @@ async def test_trading_stats_backfills_52_week_range_from_price_history(
                 close=26.7,
                 volume=1_400_000,
                 interval="1D",
-                source="vnstock",
+                source="KBS",
             ),
         ]
     )
@@ -732,8 +871,8 @@ async def test_trading_stats_backfills_52_week_range_from_price_history(
     response = await client.get("/api/v1/equity/VCI/trading-stats")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["data"]["high52w"] == pytest.approx(31.25)
-    assert payload["data"]["low52w"] == pytest.approx(22.45)
+    assert payload["data"]["high52w"] == pytest.approx(31_250)
+    assert payload["data"]["low52w"] == pytest.approx(22_450)
 
 
 @pytest.mark.asyncio
@@ -774,6 +913,7 @@ async def test_historical_smoke_returns_data(client, monkeypatch):
                 high=74000,
                 low=72500,
                 close=73500,
+                price_unit="VND",
                 volume=1250000,
             )
         ]
@@ -790,6 +930,8 @@ async def test_historical_smoke_returns_data(client, monkeypatch):
     payload = response.json()
     assert payload["meta"]["count"] == 1
     assert payload["data"][0]["symbol"] == "VNM"
+    assert payload["data"][0]["close"] == 73_500
+    assert payload["data"][0]["price_unit"] == "VND"
 
 
 @pytest.mark.asyncio
@@ -881,6 +1023,11 @@ async def test_income_statement_falls_back_to_db_on_timeout(client, test_db, mon
             net_income=320,
             source="vnstock",
             updated_at=datetime(2026, 3, 12, 8, 15, 0),
+            raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                "symbol": "VNM", "period": "2024", "fiscal_year": 2024, "statement_type": "income", "source": "fixture",
+                "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in ("revenue", "net_income")},
+                "revenue": 1500, "net_income": 320}}},
         )
     )
     await test_db.commit()
@@ -905,7 +1052,7 @@ async def test_income_statement_falls_back_to_db_on_timeout(client, test_db, mon
 
 
 @pytest.mark.asyncio
-async def test_shareholders_falls_back_to_db_on_timeout(client, test_db, monkeypatch):
+async def test_shareholders_falls_back_to_db_on_timeout_with_unverified_ownership(client, test_db, monkeypatch):
     test_db.add(
         Company(
             id=1,
@@ -941,7 +1088,10 @@ async def test_shareholders_falls_back_to_db_on_timeout(client, test_db, monkeyp
     payload = response.json()
     assert payload["meta"]["count"] == 1
     assert payload["data"][0]["shareholder_name"] == "SCIC"
-    assert payload["data"][0]["ownership_pct"] == 36.0
+    assert payload["data"][0]["shares_owned"] == 725_000_000
+    assert payload["data"][0]["ownership_pct"] is None
+    assert payload["data"][0]["ownership_unit_status"] == "unverified"
+    assert payload["data"][0]["raw_data"]["ownership_pct"] == 36.0
     assert payload["error"] == "provider timed out"
 
 
@@ -993,6 +1143,8 @@ async def test_historical_endpoint_uses_recent_price_cache(client, monkeypatch):
                     "low": 99.5,
                     "close": 100.8,
                     "volume": 1200,
+                    "price_unit": "VND",
+                    "price_source": "vnstock_history:VCI",
                 },
                 {
                     "time": "2026-03-11T00:00:00",
@@ -1001,6 +1153,17 @@ async def test_historical_endpoint_uses_recent_price_cache(client, monkeypatch):
                     "low": 100.0,
                     "close": 101.5,
                     "volume": 1500,
+                    "price_unit": "VND",
+                    "price_source": "vnstock_history:VCI",
+                },
+                {
+                    # Unconfirmed unit must be excluded from the consumer payload.
+                    "time": "2026-03-10T00:00:00",
+                    "open": 500.0,
+                    "high": 500.0,
+                    "low": 500.0,
+                    "close": 500.0,
+                    "volume": 100,
                 },
             ]
         return None
@@ -1016,8 +1179,10 @@ async def test_historical_endpoint_uses_recent_price_cache(client, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["meta"]["count"] == 2
-    assert payload["data"][0]["time"] == "2026-03-10"
+    assert [row["time"] for row in payload["data"]] == ["2026-03-10", "2026-03-11"]
     assert payload["data"][1]["close"] == 101.5
+    assert all(row["price_unit"] == "VND" for row in payload["data"])
+    assert 500.0 not in {row["close"] for row in payload["data"]}
 
 
 @pytest.mark.asyncio
@@ -1038,6 +1203,13 @@ async def test_income_statement_merges_db_values_when_provider_payload_missing(
             income_tax=-100,
             net_income=420,
             source="vnstock",
+            raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                "symbol": "VCI", "period": "2025", "fiscal_year": 2025, "statement_type": "income", "source": "fixture",
+                "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                  ("revenue", "cost_of_revenue", "operating_income", "pre_tax_profit", "tax_expense", "net_income")},
+                "revenue": 1500, "cost_of_revenue": -600, "operating_income": 500,
+                "pre_tax_profit": 520, "tax_expense": -100, "net_income": 420}}},
         )
     )
     await test_db.commit()
@@ -1051,6 +1223,8 @@ async def test_income_statement_merges_db_values_when_provider_payload_missing(
                 period="2025",
                 statement_type=statement_type,
                 fiscal_year=2025,
+                source="fixture", currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                unit_metadata={field: {"unit": "VND", "source_unit": "VND"} for field in ("revenue", "net_income")},
                 revenue=1500,
                 cost_of_revenue=None,
                 operating_income=None,
@@ -1092,6 +1266,12 @@ async def test_cash_flow_merges_db_values_when_provider_payload_missing(
             depreciation=38,
             investing_cash_flow=-215,
             source="vnstock",
+            raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                "symbol": "VCI", "period": "2025", "fiscal_year": 2025, "statement_type": "cashflow", "source": "fixture",
+                "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated", "flow_basis": "annual",
+                "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in
+                                  ("operating_cash_flow", "capex", "dividends_paid", "depreciation", "investing_cash_flow")},
+                "operating_cash_flow": -3550, "capex": -238, "dividends_paid": 0, "depreciation": 38, "investing_cash_flow": -215}}},
         )
     )
     await test_db.commit()
@@ -1105,6 +1285,8 @@ async def test_cash_flow_merges_db_values_when_provider_payload_missing(
                 period="2025",
                 statement_type=statement_type,
                 fiscal_year=2025,
+                source="fixture", currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                unit_metadata={"investing_cash_flow": {"unit": "VND", "source_unit": "VND"}},
                 operating_cash_flow=None,
                 capital_expenditure=None,
                 dividends_paid=None,
@@ -1241,6 +1423,29 @@ async def test_growth_endpoint_returns_yoy_metrics(client, test_db):
     assert payload["data"]["symbol"] == "VNM"
     assert payload["data"]["yoy"]["revenue_growth"] == pytest.approx(25.0)
     assert payload["data"]["yoy"]["asset_growth"] == pytest.approx(25.0)
+    assert payload["data"]["growth_convention"] == "absolute_prior_denominator"
+    assert payload["data"]["quarter_comparison"] == "same_quarter_previous_year"
+
+
+@pytest.mark.asyncio
+async def test_growth_endpoint_msr_negative_base_keeps_reported_earnings(client, test_db):
+    test_db.add_all([
+        IncomeStatement(id=91, symbol="MSR", period="2024", period_type="year", fiscal_year=2024,
+                        net_income=-1_638_456_685_000),
+        IncomeStatement(id=92, symbol="MSR", period="2025", period_type="year", fiscal_year=2025,
+                        net_income=11_292_963_000),
+    ])
+    await test_db.commit()
+    response = await client.get("/api/v1/equity/MSR/growth")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["yoy"]["earnings_growth"] == pytest.approx(100.68924391492229)
+    detail = data["comparisons"]["yoy"]["earnings_growth"]
+    assert detail["previous"] == -1_638_456_685_000
+    assert detail["current"] == 11_292_963_000
+    assert detail["negative_base"] is True
+    assert detail["transition"] == "loss_to_profit"
+    assert detail["basis_status"] == "legacy_basis_unconfirmed"
 
 
 @pytest.mark.asyncio
@@ -1309,6 +1514,7 @@ async def test_transaction_flow_endpoint_returns_derived_domestic_flow(client, t
             close=35.7,
             volume=1_000_000,
             interval="1D",
+            source="vnstock_vnd:KBS",
         )
     )
     test_db.add(
@@ -1316,6 +1522,7 @@ async def test_transaction_flow_endpoint_returns_derived_domestic_flow(client, t
             id=900,
             symbol="VCI",
             trade_date=date(2026, 3, 20),
+            coverage={"scope": "full_session", "completed_session": True},
             buy_volume=1_200_000,
             sell_volume=900_000,
             buy_value=42_840_000.0,
@@ -1399,6 +1606,7 @@ async def test_transaction_flow_derives_missing_net_fields_from_buy_sell(client,
             close=120.5,
             volume=2_000_000,
             interval="1D",
+            source="vnstock_vnd:KBS",
         )
     )
     test_db.add(
@@ -1406,6 +1614,7 @@ async def test_transaction_flow_derives_missing_net_fields_from_buy_sell(client,
             id=901,
             symbol="FPT",
             trade_date=date(2026, 3, 21),
+            coverage={"scope": "full_session", "completed_session": True},
             buy_volume=1_500_000,
             sell_volume=1_200_000,
             buy_value=180_750_000.0,
@@ -1456,11 +1665,13 @@ async def test_transaction_flow_preserves_zero_bucket_inputs_for_domestic_deriva
                 close=10.0,
                 volume=1_000,
                 interval="1D",
+                source="vnstock_vnd:KBS",
             ),
             OrderFlowDaily(
                 id=902,
                 symbol="ZERO",
                 trade_date=trade_date,
+                coverage={"scope": "full_session", "completed_session": True},
                 net_volume=100,
                 net_value=1_000.0,
                 foreign_net_volume=0,
@@ -1591,6 +1802,7 @@ async def test_orderbook_endpoint_uses_latest_close_when_no_priced_snapshot(clie
             close=25.0,
             volume=1_000_000,
             interval="1D",
+            source="vnstock_vnd:KBS",
         )
     )
     await test_db.commit()
@@ -1619,6 +1831,248 @@ async def test_orderbook_endpoint_uses_latest_close_when_no_priced_snapshot(clie
     assert payload["data"]["entries"][0]["price"] == 25.0
     assert payload["data"]["entries"][0]["price_status"] == "reference"
     assert payload["data"]["last_price"] == 25.0
+
+
+@pytest.mark.asyncio
+async def test_orderbook_endpoint_exposes_current_depth_receipt_from_cache(client, monkeypatch):
+    receipt = {
+        "scope": "current_batch",
+        "status": "current_batch",
+        "rows": 5,
+        "observed_at": "2026-10-13T02:30:00",
+        "timestamp_meaning": "observed",
+        "price_unit": "VND",
+        "volume_unit": "shares",
+    }
+
+    async def fake_get_json(key):
+        if key.endswith(":orderbook:latest:VNM"):
+            return {
+                "symbol": "VNM",
+                "snapshot_time": "2026-10-13T02:31:00",
+                "entries": [{"level": 1, "price": 75000, "bid_vol": 12000, "ask_vol": 9000}],
+                "last_price": 75050,
+                "current_depth": receipt,
+                "latest_session_status": "current_batch",
+                "observed_at": "2026-10-13T02:30:00",
+                "timestamp_meaning": "observed",
+                "price_unit": "VND",
+                "volume_unit": "shares",
+            }
+        return None
+
+    async def fail_price_depth_fetch(*args, **kwargs):
+        raise AssertionError("provider fetch should not run for a warm orderbook cache")
+
+    monkeypatch.setattr("vnibb.api.v1.equity.redis_client.get_json", fake_get_json)
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockPriceDepthFetcher.fetch",
+        fail_price_depth_fetch,
+    )
+
+    response = await client.get("/api/v1/equity/VNM/orderbook")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["current_depth"] == receipt
+    assert data["latest_session_status"] == "current_batch"
+    assert data["observed_at"] == "2026-10-13T02:30:00"
+    assert data["timestamp_meaning"] == "observed"
+    assert data["price_unit"] == "VND"
+    assert data["volume_unit"] == "shares"
+    assert "sql_depth" not in data
+    assert "mongo_depth" not in data
+
+
+@pytest.mark.asyncio
+async def test_orderbook_endpoint_explicit_empty_cache_batch_is_authoritative(client, monkeypatch):
+    receipt = {"scope": "current_batch", "status": "empty", "rows": 0, "observed_at": None}
+
+    async def fake_get_json(key):
+        if key.endswith(":orderbook:latest:VNM"):
+            return {
+                "symbol": "VNM",
+                "snapshot_time": "2026-10-13T02:31:00",
+                "entries": [],
+                "raw_levels": [],
+                "current_depth": receipt,
+                "latest_session_status": "empty",
+            }
+        return None
+
+    async def fail_price_depth_fetch(*args, **kwargs):
+        raise AssertionError("explicit empty batch must not be re-fetched")
+
+    monkeypatch.setattr("vnibb.api.v1.equity.redis_client.get_json", fake_get_json)
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockPriceDepthFetcher.fetch",
+        fail_price_depth_fetch,
+    )
+
+    response = await client.get("/api/v1/equity/VNM/orderbook")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["entries"] == []
+    assert data["current_depth"] == receipt
+    assert data["latest_session_status"] == "empty"
+
+
+@pytest.mark.asyncio
+async def test_orderbook_endpoint_empty_latest_batch_beats_older_priced_snapshot(
+    client, test_db, monkeypatch
+):
+    empty_receipt = {"scope": "current_batch", "status": "empty", "rows": 0}
+    test_db.add_all(
+        [
+            OrderbookSnapshot(
+                id=910,
+                symbol="VCI",
+                snapshot_time=datetime(2026, 5, 28, 14, 45, 0),
+                price_depth={
+                    "symbol": "VCI",
+                    "entries": [{"level": 1, "price": 25.0, "bid_vol": 12000, "ask_vol": 9000}],
+                    "last_price": 25.0,
+                },
+                bid1_price=25.0,
+                bid1_volume=12000,
+            ),
+            OrderbookSnapshot(
+                id=911,
+                symbol="VCI",
+                snapshot_time=datetime(2026, 5, 29, 9, 15, 0),
+                price_depth={
+                    "symbol": "VCI",
+                    "raw_levels": [],
+                    "current_depth": empty_receipt,
+                    "latest_session_status": "empty",
+                },
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    async def failing_price_depth_fetch(*args, **kwargs):
+        raise RuntimeError("depth provider unavailable")
+
+    monkeypatch.setattr("vnibb.api.v1.equity.redis_client.get_json", lambda _key: None)
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockPriceDepthFetcher.fetch",
+        failing_price_depth_fetch,
+    )
+
+    response = await client.get("/api/v1/equity/VCI/orderbook")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["entries"] == []
+    assert data["current_depth"] == empty_receipt
+    assert data["latest_session_status"] == "empty"
+    assert data["is_stale"] is True
+
+
+@pytest.mark.asyncio
+async def test_market_indices_slow_provider_settles_for_concurrent_users(client, monkeypatch):
+    from vnibb.api.v1 import market
+
+    release = asyncio.Event()
+    finished = asyncio.Event()
+    calls = 0
+    observed_at = "2026-03-20T00:00:00"
+
+    async def stored_rows(_db):
+        return [{"index_name": "VNINDEX", "current_value": 1340.0, "time": observed_at}]
+
+    async def slow_provider(_params):
+        nonlocal calls
+        calls += 1
+        try:
+            await release.wait()
+            return []
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(market, "MARKET_PROVIDER_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(market, "_load_latest_market_indices_from_db", stored_rows)
+    monkeypatch.setattr(market, "_fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[]))
+    monkeypatch.setattr(market.VnstockMarketOverviewFetcher, "fetch", slow_provider)
+    try:
+        async with asyncio.timeout(0.75):
+            responses = await asyncio.gather(*(
+                client.get("/api/v1/market/indices?limit=2") for _ in range(20)
+            ))
+            retry = await client.get("/api/v1/market/indices?limit=2")
+        for response in [*responses, retry]:
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["source"] == "db_fallback"
+            assert payload["data"][0]["current_value"] == 1340.0
+            assert payload["updated_at"] == observed_at
+            assert "timed out" in payload["error"].lower()
+        assert calls == 1
+    finally:
+        release.set()
+        await finished.wait()
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_market_indices_complete_storage_skips_cold_providers(client, monkeypatch):
+    from vnibb.api.v1 import market
+
+    async def stored_rows(_db):
+        return [{
+            "index_name": "VNINDEX", "current_value": 1340.0,
+            "time": "2026-03-20T00:00:00",
+        }]
+
+    async def must_not_acquire(*_args):
+        pytest.fail("Complete stored indices must not wait for upstream acquisition")
+
+    monkeypatch.setattr(market, "_load_latest_market_indices_from_db", stored_rows)
+    monkeypatch.setattr(market, "_fetch_yahoo_market_indices", must_not_acquire)
+    monkeypatch.setattr(market.VnstockMarketOverviewFetcher, "fetch", must_not_acquire)
+    async with asyncio.timeout(0.75):
+        response = await client.get("/api/v1/market/indices?limit=1")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "db_fallback"
+    assert payload["updated_at"] == "2026-03-20T00:00:00"
+    assert payload["data"][0]["current_value"] == 1340.0
+
+
+@pytest.mark.asyncio
+async def test_market_indices_preserves_borrowed_pending_rows(client, test_db, monkeypatch):
+    from vnibb.api.v1 import market
+
+    test_db.add(StockIndex(
+        id=9191, index_code="VNINDEX", time=date(2026, 3, 20),
+        open=1330.0, high=1345.0, low=1325.0, close=1340.0, volume=1_000_000,
+    ))
+    monkeypatch.setattr(market, "_fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[]))
+    monkeypatch.setattr(
+        market.VnstockMarketOverviewFetcher, "fetch", lambda _p: asyncio.sleep(0, result=[])
+    )
+    for _ in range(2):
+        response = await client.get("/api/v1/market/indices?limit=1")
+        assert response.status_code == 200
+        assert response.json()["data"][0]["current_value"] == 1340.0
+
+
+@pytest.mark.asyncio
+async def test_market_indices_database_deadline_is_explicit_unavailability(client, monkeypatch):
+    from vnibb.api.v1 import market
+
+    async def stalled_database(_db):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(market, "MARKET_ROUTE_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(market, "_load_latest_market_indices_from_db", stalled_database)
+    async with asyncio.timeout(0.75):
+        response = await client.get("/api/v1/market/indices")
+    assert response.status_code == 503
+    assert response.json()["error"] == "http_error"
+    assert response.json()["details"]["status_code"] == 503
 
 
 @pytest.mark.asyncio
@@ -2353,6 +2807,7 @@ async def test_money_flow_trend_default_universe_returns_available_data(client, 
                 close=20 + index * 0.4,
                 volume=1_000_000,
                 interval="1D",
+                source="KBS",
             )
         )
     await test_db.commit()
@@ -2391,6 +2846,7 @@ async def test_money_flow_trend_returns_rrg_like_points(client, test_db):
                 close=20 + index * 0.4,
                 volume=1_000_000,
                 interval="1D",
+                source="KBS",
             )
         )
         test_db.add(
@@ -2405,6 +2861,7 @@ async def test_money_flow_trend_returns_rrg_like_points(client, test_db):
                 close=15 + index * 0.25,
                 volume=900_000,
                 interval="1D",
+                source="KBS",
             )
         )
     await test_db.commit()
@@ -2453,6 +2910,7 @@ async def test_correlation_matrix_returns_peer_matrix(client, test_db, monkeypat
                     close=close,
                     volume=1_000_000,
                     interval="1D",
+                    source="KBS",
                 )
             )
     await test_db.commit()
@@ -2504,6 +2962,7 @@ async def test_correlation_matrix_excludes_fabricated_stale_peer_returns(client,
                     close=close,
                     volume=1_000_000,
                     interval="1D",
+                    source="KBS",
                 )
             )
     await test_db.commit()
@@ -2551,6 +3010,7 @@ async def test_correlation_matrix_excludes_non_finite_close_before_returns(clien
                 close=close,
                 volume=1_000_000,
                 interval="1D",
+                source="KBS",
             )
         )
     for index, trade_date in enumerate(base_dates, start=1):
@@ -2567,6 +3027,7 @@ async def test_correlation_matrix_excludes_non_finite_close_before_returns(clien
                 close=close,
                 volume=1_000_000,
                 interval="1D",
+                source="KBS",
             )
         )
     await test_db.commit()
@@ -2579,6 +3040,34 @@ async def test_correlation_matrix_excludes_non_finite_close_before_returns(clien
     assert data["symbols"] == ["VCI"]
     assert ("VCI", "SSI") not in correlations
     assert data["overlap_counts"].get("VCI:SSI") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unknown_session", [True, False])
+async def test_correlation_returns_do_not_cross_unresolved_sessions(monkeypatch, unknown_session):
+    from vnibb.api.v1 import equity
+
+    dates = [date(2026, 9, 7) + timedelta(days=offset) for offset in range(8)]
+    dates += [date(2026, 9, 18), date(2026, 9, 21)]
+    rows = [
+        SimpleNamespace(
+            symbol="FPT", time=day, close=100 if index < 8 else 110,
+            source="unknown" if unknown_session and index == 8 else "vnstock_vnd:KBS",
+        )
+        for index, day in enumerate(dates)
+    ]
+    monkeypatch.setattr(
+        equity.comparison_service, "get_peers",
+        AsyncMock(return_value=SimpleNamespace(peers=[], industry="Technology")),
+    )
+    db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: rows)
+    )))
+
+    response = await equity.get_correlation_matrix("FPT", days=20, top_n=5, db=db)
+
+    assert response.data.returns_count == (7 if unknown_session else 9)
+    assert response.data.symbol_last_data_dates["FPT"] == dates[-1]
 
 
 @pytest.mark.asyncio
@@ -2885,7 +3374,8 @@ async def test_financial_ratios_endpoint_filters_specific_quarter_periods(client
 
 
 @pytest.mark.asyncio
-async def test_financial_ratios_endpoint_builds_ttm_row_from_latest_quarter(client, monkeypatch):
+async def test_financial_ratios_endpoint_reports_ttm_ratios_unsupported(client, monkeypatch):
+    """Ratio TTM is unsupported: quarterly rows must not be relabelled or summed into it."""
     async def fake_ratio_fetch(_params):
         return [
             FinancialRatioData(symbol="VCI", period="2024-Q3", pe=8.5, pb=1.2),
@@ -2896,27 +3386,73 @@ async def test_financial_ratios_endpoint_builds_ttm_row_from_latest_quarter(clie
         "vnibb.api.v1.equity.VnstockFinancialRatiosFetcher.fetch",
         fake_ratio_fetch,
     )
-    monkeypatch.setattr(
-        "vnibb.api.v1.equity._load_ratio_statement_support",
-        lambda **_kwargs: asyncio.sleep(0, result={"income": [], "balance": [], "cashflow": []}),
-    )
 
     response = await client.get("/api/v1/equity/VCI/ratios?period=TTM")
     assert response.status_code == 200
     payload = response.json()
-    assert len(payload["data"]) == 1
-    assert payload["data"][0]["period"] == "TTM"
-    metric_values = [
-        value
-        for key, value in payload["data"][0].items()
-        if key not in {"symbol", "period"} and value is not None
-    ]
-    assert metric_values
+    assert payload["data"] == []
+    assert "not supported" in (payload.get("error") or "")
+    assert payload["meta"]["count"] == 0
 
 
 @pytest.mark.asyncio
+async def test_ratios_period_aliases_fy_year_and_q_quarter_share_one_basis(client, monkeypatch):
+    """#106: the public FY/year and Q/quarter aliases must resolve to one canonical basis.
+
+    The provider fixture answers each requested period with that period's own rows, so an
+    alias that leaks through as a raw string upstream surfaces as the wrong series (or an
+    empty alias), not as a passing assertion.
+    """
+    requested_periods: list[str] = []
+
+    async def fake_ratio_fetch(params):
+        requested_periods.append(params.period)
+        if params.period == "year":
+            return [
+                FinancialRatioData(symbol="VNM", period="2024", pe=12.0, eps=4074.74),
+                FinancialRatioData(symbol="VNM", period="2023", pe=11.0, eps=3800.0),
+            ]
+        return [
+            FinancialRatioData(symbol="VNM", period="2024-Q4", pe=13.0),
+            FinancialRatioData(symbol="VNM", period="2024-Q3", pe=12.5),
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockFinancialRatiosFetcher.fetch",
+        fake_ratio_fetch,
+    )
+
+    async def fake_ratio_statement_support(**_kwargs):
+        return {"income": [], "balance": [], "cashflow": []}
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity._load_ratio_statement_support",
+        fake_ratio_statement_support,
+    )
+
+    annual = await client.get("/api/v1/equity/VNM/ratios?period=year")
+    annual_alias = await client.get("/api/v1/equity/VNM/ratios?period=FY")
+    quarterly = await client.get("/api/v1/equity/VNM/ratios?period=quarter")
+    quarterly_alias = await client.get("/api/v1/equity/VNM/ratios?period=Q")
+
+    for response in (annual, annual_alias, quarterly, quarterly_alias):
+        assert response.status_code == 200
+        assert response.json().get("error") is None, response.json()
+
+    assert annual.json()["data"], annual.json()
+    assert quarterly.json()["data"], quarterly.json()
+    assert annual_alias.json()["data"] == annual.json()["data"]
+    assert quarterly_alias.json()["data"] == quarterly.json()["data"]
+    assert [row["period"] for row in annual.json()["data"]] == ["2023", "2024"]
+    assert [row["period"] for row in quarterly.json()["data"]] == ["Q3-2024", "Q4-2024"]
+    # Every alias reached the provider as a canonical period, never as the raw alias.
+    assert set(requested_periods) == {"year", "quarter"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("certified", [True, False])
 async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_support(
-    client, monkeypatch
+    client, monkeypatch, certified
 ):
     async def fake_ratio_fetch(_params):
         return []
@@ -2925,12 +3461,22 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
         assert symbol == "VCI"
         assert period == "quarter"
         _ = limit
+        basis = ({"source": "fixture", "currency": "VND", "value_unit": "VND", "consolidation_basis": "Consolidated",
+                  "flow_basis": "instant" if statement_type == "balance" else "single_quarter",
+                  "fiscal_year": 2020, "fiscal_quarter": 1,
+                  "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in {
+                      "income": ("revenue", "operating_income", "net_income"),
+                      "balance": ("total_assets", "current_assets", "total_liabilities", "current_liabilities", "total_equity", "cash_and_equivalents"),
+                      "cashflow": ("operating_cash_flow", "free_cash_flow"),
+                  }[statement_type]}}
+                 if certified else {})
         if statement_type == "income":
             return [
                 FinancialStatementData(
                     symbol="VCI",
                     period="Q1-2020",
                     statement_type="income",
+                    **basis,
                     revenue=100.0,
                     operating_income=30.0,
                     net_income=20.0,
@@ -2942,6 +3488,7 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
                     symbol="VCI",
                     period="Q1-2020",
                     statement_type="balance",
+                    **basis,
                     total_assets=120.0,
                     current_assets=60.0,
                     total_liabilities=60.0,
@@ -2955,6 +3502,7 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
                 symbol="VCI",
                 period="Q1-2020",
                 statement_type="cashflow",
+                **basis,
                 operating_cash_flow=18.0,
                 free_cash_flow=10.0,
             )
@@ -2966,9 +3514,6 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
     async def fake_cross_fill_income_statement_rows(**kwargs):
         return kwargs["rows"]
 
-    async def fake_resolve_profile_market_cap(**_kwargs):
-        return None
-
     monkeypatch.setattr("vnibb.api.v1.equity.VnstockFinancialRatiosFetcher.fetch", fake_ratio_fetch)
     monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", fake_get_financials_with_ttm)
     monkeypatch.setattr(
@@ -2978,21 +3523,25 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
         "vnibb.api.v1.equity._cross_fill_income_statement_rows",
         fake_cross_fill_income_statement_rows,
     )
-    monkeypatch.setattr(
-        "vnibb.api.v1.equity._resolve_profile_market_cap", fake_resolve_profile_market_cap
-    )
 
     response = await client.get("/api/v1/equity/VCI/ratios?period=quarter")
     assert response.status_code == 200
     payload = response.json()
     assert payload["meta"]["count"] >= 1
     support_row = next(item for item in payload["data"] if "2020" in item["period"])
-    assert support_row["operating_margin"] == pytest.approx(30.0)
-    assert support_row["current_ratio"] == pytest.approx(2.5)
+    if certified:
+        assert support_row["operating_margin"] == pytest.approx(30.0)
+        assert support_row["current_ratio"] == pytest.approx(2.5)
+    else:
+        assert support_row["operating_margin"] is None
+        assert support_row["current_ratio"] is None
+        assert any(item.get("unavailable_reason") == "unverified_statement_basis"
+                   for item in support_row["provider_evidence"])
 
 
 @pytest.mark.asyncio
-async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_db, monkeypatch):
+@pytest.mark.parametrize("reason", [None, "missing_quarterly_source_data", "ttm_calculation_failed"])
+async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_db, monkeypatch, reason):
     test_db.add_all(
         [
             IncomeStatement(
@@ -3004,6 +3553,12 @@ async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_d
                 fiscal_quarter=1,
                 revenue=100.0,
                 net_income=20.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    "symbol": "VNM", "period": "Q1-2024", "fiscal_year": 2024, "fiscal_quarter": 1,
+                    "statement_type": "income", "source": "fixture", "currency": "VND", "value_unit": "VND",
+                    "consolidation_basis": "Consolidated", "flow_basis": "single_quarter",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in ("revenue", "net_income")},
+                    "revenue": 100, "net_income": 20}}},
             ),
             IncomeStatement(
                 id=901,
@@ -3014,6 +3569,12 @@ async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_d
                 fiscal_quarter=2,
                 revenue=120.0,
                 net_income=24.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    "symbol": "VNM", "period": "Q2-2024", "fiscal_year": 2024, "fiscal_quarter": 2,
+                    "statement_type": "income", "source": "fixture", "currency": "VND", "value_unit": "VND",
+                    "consolidation_basis": "Consolidated", "flow_basis": "single_quarter",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in ("revenue", "net_income")},
+                    "revenue": 120, "net_income": 24}}},
             ),
             IncomeStatement(
                 id=902,
@@ -3024,6 +3585,12 @@ async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_d
                 fiscal_quarter=3,
                 revenue=140.0,
                 net_income=28.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    "symbol": "VNM", "period": "Q3-2024", "fiscal_year": 2024, "fiscal_quarter": 3,
+                    "statement_type": "income", "source": "fixture", "currency": "VND", "value_unit": "VND",
+                    "consolidation_basis": "Consolidated", "flow_basis": "single_quarter",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in ("revenue", "net_income")},
+                    "revenue": 140, "net_income": 28}}},
             ),
             IncomeStatement(
                 id=903,
@@ -3034,13 +3601,20 @@ async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_d
                 fiscal_quarter=4,
                 revenue=160.0,
                 net_income=32.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    "symbol": "VNM", "period": "Q4-2024", "fiscal_year": 2024, "fiscal_quarter": 4,
+                    "statement_type": "income", "source": "fixture", "currency": "VND", "value_unit": "VND",
+                    "consolidation_basis": "Consolidated", "flow_basis": "single_quarter",
+                    "unit_metadata": {field: {"unit": "VND", "source_unit": "VND"} for field in ("revenue", "net_income")},
+                    "revenue": 160, "net_income": 32}}},
             ),
         ]
     )
     await test_db.commit()
 
     async def fake_get_financials_with_ttm(*args, **kwargs):
-        return []
+        return [FinancialStatementData(symbol="VNM", period="TTM", statement_type="income",
+            unavailable_reason=reason)] if reason else []
 
     monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", fake_get_financials_with_ttm)
 
@@ -3291,20 +3865,16 @@ async def test_market_world_indices_smoke_returns_data(client, monkeypatch):
     async def fake_yahoo_world_indices(limit: int):
         return []
 
-    async def fake_world_index_point(symbol: str, name: str):
-        return {
-            "symbol": symbol,
-            "name": name,
-            "value": 1234.5,
-            "change": 10.0,
-            "change_pct": 0.8,
-            "updated_at": "2026-02-15",
-        }
+    async def fake_market_overview(_params):
+        return [
+            MarketIndexData(index_name=name, current_value=1234.5, change=10.0, change_pct=0.8)
+            for name in ("VN-INDEX", "HNX-INDEX")
+        ]
 
     monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_world_indices", fake_yahoo_world_indices)
     monkeypatch.setattr(
-        "vnibb.api.v1.market._fetch_world_index_point",
-        fake_world_index_point,
+        "vnibb.api.v1.market.VnstockMarketOverviewFetcher.fetch",
+        fake_market_overview,
     )
 
     response = await client.get("/api/v1/market/world-indices?limit=2")
@@ -3312,6 +3882,8 @@ async def test_market_world_indices_smoke_returns_data(client, monkeypatch):
     payload = response.json()
     assert payload["count"] == 2
     assert payload["data"][0]["value"] == 1234.5
+    assert payload["source"] == "vnstock:market_overview_fallback"
+    assert payload["error"] == "Global index feed unavailable, using VN market index fallback"
 
 
 @pytest.mark.asyncio
@@ -3463,25 +4035,13 @@ async def test_health_detailed_returns_200(client):
 
 @pytest.mark.asyncio
 async def test_request_timeout_middleware_returns_504(client, monkeypatch):
-    monkeypatch.setattr("vnibb.api.v1.market.WORLD_INDEX_POINT_TIMEOUT_SECONDS", 2)
     monkeypatch.setattr("vnibb.core.config.settings.api_request_timeout_seconds", 0.01)
 
     async def fake_yahoo_world_indices(limit: int):
+        await asyncio.sleep(0.05)
         return []
 
-    async def fake_world_index_point(symbol: str, name: str):
-        await asyncio.sleep(0.05)
-        return {
-            "symbol": symbol,
-            "name": name,
-            "value": 1234.5,
-            "change": 10.0,
-            "change_pct": 0.8,
-            "updated_at": "2026-02-15",
-        }
-
     monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_world_indices", fake_yahoo_world_indices)
-    monkeypatch.setattr("vnibb.api.v1.market._fetch_world_index_point", fake_world_index_point)
 
     response = await client.get("/api/v1/market/world-indices?limit=1")
     assert response.status_code == 504
@@ -3551,6 +4111,19 @@ async def test_market_freshness_uses_latest_fully_settled_foreign_date(client, t
     assert foreign_bucket["reason"] == "latest_sync_unsettled"
     assert foreign_bucket["detail"] == "Current rows await completed sync validation."
     assert foreign_bucket["status"] == "fresh"
+    assert foreign_bucket["timestamp_basis"] == "trade_date"
+    assert foreign_bucket["scope"] == "validated_trade_dates"
+    assert foreign_bucket["fetched_at"] is None
+
+    settings_response = await client.get("/api/v1/market/data-sources/freshness")
+    assert settings_response.status_code == 200
+    foreign_source = next(
+        source for source in settings_response.json()["sources"]
+        if source["key"] == "foreign_trading"
+    )
+    assert foreign_source["timestamp_basis"] == "trade_date"
+    assert foreign_source["scope"] == "raw_stored_rows"
+    assert foreign_source["fetched_at"] is None
 
 
 @pytest.mark.asyncio
@@ -3586,6 +4159,83 @@ async def test_market_freshness_bucket_shapes(client, test_db):
         assert "age_days" in bucket or bucket["age_days"] is None
         assert "last_data_date" in bucket or bucket["last_data_date"] is None
         assert "detail" in bucket
+        assert "timestamp_basis" in bucket
+        assert "scope" in bucket
+        assert "fetched_at" in bucket
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("publication_age", [None, 17], ids=["unknown-date", "old-date"])
+async def test_market_freshness_news_never_substitutes_recent_crawl_for_publication(
+    client, test_db, publication_age
+):
+    fetched_at = datetime.combine(date.today(), datetime.min.time())
+    published_at = (
+        fetched_at - timedelta(days=publication_age)
+        if publication_age is not None
+        else None
+    )
+    test_db.add(
+        MarketNews(
+            id=1,
+            source="test",
+            title="Recently crawled article",
+            published_date=published_at,
+            crawled_at=fetched_at,
+        )
+    )
+    await test_db.commit()
+
+    banner_response = await client.get("/api/v1/market/freshness")
+    settings_response = await client.get("/api/v1/market/data-sources/freshness")
+    assert banner_response.status_code == 200
+    assert settings_response.status_code == 200
+    bucket = next(
+        item for item in banner_response.json()["buckets"]
+        if item["label"] == "Market news"
+    )
+    source = next(
+        item for item in settings_response.json()["sources"]
+        if item["key"] == "market_news"
+    )
+
+    assert bucket["last_data_date"] == (
+        published_at.date().isoformat() if published_at is not None else None
+    )
+    assert source["last_updated"] == (
+        published_at.isoformat() if published_at is not None else None
+    )
+    for item in (bucket, source):
+        assert item["age_days"] == publication_age
+        assert item["status"] == ("unknown" if publication_age is None else "critical")
+        assert item["timestamp_basis"] == "published_date"
+        assert item["scope"] == "published_articles"
+        assert item["fetched_at"] == fetched_at.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_data_sources_freshness_exposes_timestamp_basis_and_scope(client):
+    response = await client.get("/api/v1/market/data-sources/freshness")
+    assert response.status_code == 200
+    expected = {
+        "daily_prices": ("time", "daily_observations"),
+        "foreign_trading": ("trade_date", "raw_stored_rows"),
+        "market_news": ("published_date", "published_articles"),
+        "company_news": ("published_date", "published_articles"),
+        "financial_ratios": ("updated_at", "sync_storage_timestamps"),
+        "rs_rating": ("snapshot_date", "stored_snapshots"),
+        "screener_snapshot": ("snapshot_date", "stored_snapshots"),
+        "company_events": ("event_date", "scheduled_events"),
+        "shareholders": ("updated_at", "sync_storage_timestamps"),
+    }
+    sources = response.json()["sources"]
+    assert {item["key"] for item in sources} == set(expected)
+    for item in sources:
+        assert (item["timestamp_basis"], item["scope"]) == expected[item["key"]]
+        assert item["last_updated"] is None
+        assert item["age_days"] is None
+        assert item["status"] == "unknown"
+        assert item["fetched_at"] is None
 
 
 @pytest.mark.asyncio
@@ -3858,6 +4508,7 @@ async def test_flow_coverage_excludes_buy_volume_only_rows(client, test_db):
                 id=807,
                 symbol="PROVEN",
                 trade_date=trade_date,
+                coverage={"scope": "full_session", "completed_session": True},
                 buy_volume=100,
                 sell_volume=80,
                 proprietary_net_volume=5,
@@ -3888,6 +4539,7 @@ async def test_flow_coverage_accepts_order_flow_foreign_net_volume_without_forei
             id=808,
             symbol="DIRECT",
             trade_date=trade_date,
+            coverage={"scope": "full_session", "completed_session": True},
             buy_volume=100,
             sell_volume=80,
             foreign_net_volume=15,
@@ -3913,6 +4565,7 @@ async def test_flow_coverage_accepts_foreign_trading_when_order_flow_has_no_fore
                 id=809,
                 symbol="FOREIGN",
                 trade_date=trade_date,
+                coverage={"scope": "full_session", "completed_session": True},
                 buy_volume=100,
                 sell_volume=80,
                 proprietary_net_volume=5,
@@ -3937,6 +4590,7 @@ async def test_flow_coverage_counts_duplicate_foreign_sources_once(client, test_
                 id=810,
                 symbol="DUPLICATE",
                 trade_date=trade_date,
+                coverage={"scope": "full_session", "completed_session": True},
                 buy_volume=100,
                 sell_volume=80,
                 foreign_net_volume=15,
@@ -4172,5 +4826,8 @@ async def test_market_freshness_age_days_reflects_data_age(client, test_db):
     assert response.status_code == 200
     payload = response.json()
     prices_bucket = next(b for b in payload["buckets"] if b["label"] == "Daily prices")
+    assert prices_bucket["timestamp_basis"] == "time"
+    assert prices_bucket["scope"] == "daily_observations"
+    assert prices_bucket["fetched_at"] is None
     assert prices_bucket["age_days"] is not None
     assert prices_bucket["age_days"] >= 0

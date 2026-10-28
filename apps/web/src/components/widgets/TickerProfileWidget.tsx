@@ -10,9 +10,9 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import { Building2, Globe, Users, Calendar, MapPin, AlertTriangle } from 'lucide-react';
 import { formatTimestamp } from '@/lib/format';
-import { formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
+import { formatDividendPayout, formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
 import { formatLargeNumber } from '@/lib/units';
-import type { DividendRecord } from '@/lib/api';
+import { normalizeInsiderAction } from '@/lib/insiderActions';
 
 interface TickerProfileWidgetProps {
     symbol: string;
@@ -27,22 +27,6 @@ function formatDividendType(type: string | null | undefined): string {
     if (normalized === 'stock') return 'Stock';
     if (normalized === 'mixed') return 'Mixed';
     return 'Other';
-}
-
-function formatDividendValue(row: DividendRecord): string {
-    if (row.cash_dividend !== null && row.cash_dividend !== undefined) {
-        return formatVND(row.cash_dividend);
-    }
-    if (row.stock_dividend !== null && row.stock_dividend !== undefined) {
-        return `${row.stock_dividend.toFixed(2)}% stock`;
-    }
-    if (row.dividend_ratio !== null && row.dividend_ratio !== undefined) {
-        return String(row.dividend_ratio);
-    }
-    if (row.value !== null && row.value !== undefined) {
-        return formatVND(row.value);
-    }
-    return '-';
 }
 
 function cleanText(value: string | null | undefined): string | null {
@@ -79,6 +63,22 @@ function formatMarketCapCompact(value: number | null | undefined): string {
     return `VND ${formatLargeNumber(value, { decimals: 2 })}`
 }
 
+// Market cap counts as money only when its payload declares the denomination.
+// Both sources publish a bare magnitude today, so this withholds instead of
+// guessing VND from size or source order.
+function readDeclaredMarketCap(
+    source: { market_cap?: number | null } | null | undefined
+): number | null {
+    if (!source) return null
+    // The unit is not part of the published profile/screener contract yet, so
+    // read it defensively; it becomes a declared field when the API adds it.
+    const unit = 'market_cap_unit' in source ? source.market_cap_unit : null
+    if (unit !== 'VND') return null
+    return typeof source.market_cap === 'number' && Number.isFinite(source.market_cap)
+        ? source.market_cap
+        : null
+}
+
 export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useProfile(symbol);
     const {
@@ -108,7 +108,10 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
     const hasData = Boolean(profile);
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
-    const updatedAt = [dataUpdatedAt, dividendsUpdatedAt, insiderUpdatedAt]
+    // Profile, dividend, and insider rows expose no source observation date —
+    // only the query receipts, which say when we retrieved them. Freshness
+    // therefore stays unknown and the receipts move to `fetchedAt`.
+    const fetchedAt = [dataUpdatedAt, dividendsUpdatedAt, insiderUpdatedAt]
         .filter(Boolean)
         .sort((a, b) => Number(b) - Number(a))[0];
     const showDividendsSection = dividendsLoading || Boolean(dividendsError) || dividends.length > 0;
@@ -124,12 +127,12 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
             empty: !hasData,
             apiGroup: '/equity',
             endpoint: `/equity/${symbol}/profile`,
-            sourceLabel: 'vnstock',
-            lastDataDate: dataUpdatedAt,
+            lastDataDate: null,
+            fetchedAt,
             stale: isFallback,
             extra: { sections: showCorporateActions ? 3 : 1 },
         }));
-    }, [dataUpdatedAt, hasData, isFallback, onDataChange, showCorporateActions, symbol]);
+    }, [fetchedAt, hasData, isFallback, onDataChange, showCorporateActions, symbol]);
 
     if (timedOut && isLoading && !hasData) {
         return (
@@ -160,13 +163,13 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
     if (!profileData) {
         return <WidgetEmpty message={`No profile data for ${symbol}`} />;
     }
-    const marketCapValue =
-        (typeof screenerRow?.market_cap === 'number' && Number.isFinite(screenerRow.market_cap)
-            ? screenerRow.market_cap
-            : null) ??
-        (typeof profileData.market_cap === 'number' && Number.isFinite(profileData.market_cap)
-            ? profileData.market_cap
-            : null);
+    // Market cap renders as money only when the payload declares the unit it is
+    // denominated in: both the profile and the screener row publish a bare
+    // number today, so labeling that magnitude "VND" would be a guess from size
+    // alone. The card stays "Not disclosed" until a source publishes a unit.
+    // ponytail: drop the reads' casts once profile/screener publish the unit.
+    const declaredMarketCap =
+        readDeclaredMarketCap(screenerRow) ?? readDeclaredMarketCap(profileData);
     const companyName = cleanText(profileData.company_name) || symbol
     const shortName = cleanText(profileData.short_name)
     const description = cleanText(profileData.description)
@@ -195,13 +198,14 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
         { label: 'Website', value: website ? website.replace(/^https?:\/\//, '') : 'Unavailable', icon: Globe },
         { label: 'Employees', value: employeeCount ? employeeCount.toLocaleString() : 'Unavailable', icon: Users },
         { label: 'Established', value: establishedYear ? `${establishedYear}` : 'Unavailable', icon: Calendar },
-        { label: 'Market Cap', value: formatMarketCapCompact(marketCapValue), icon: Building2 },
+        { label: 'Market Cap', value: formatMarketCapCompact(declaredMarketCap), icon: Building2 },
     ] as Array<{ label: string; value: string; icon: typeof Building2 }>
 
     return (
         <div className="space-y-3">
             <WidgetMeta
-                updatedAt={updatedAt}
+                updatedAt={null}
+                fetchedAt={fetchedAt}
                 isFetching={(isFetching || dividendsFetching || insiderFetching) && hasData}
                 isCached={isFallback}
                 note="Company profile"
@@ -294,7 +298,7 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                                                 className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
                                             >
                                                 <div>
-                                                    <div className="text-xs font-semibold text-[var(--text-primary)]">{formatDividendValue(dividend)}</div>
+                                                    <div className="text-xs font-semibold text-[var(--text-primary)]">{formatDividendPayout(dividend)}</div>
                                                     <div className="text-[10px] text-[var(--text-muted)]">
                                                         {formatDividendType(dividend.dividend_type || dividend.type)}
                                                         {dividend.dividend_yield !== null && dividend.dividend_yield !== undefined
@@ -329,8 +333,11 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                                 ) : (
                                     <div className="space-y-2">
                                         {insiderDeals.slice(0, 2).map((deal) => {
-                                            const action = deal.deal_action?.toUpperCase() || 'DEAL';
-                                            const isBuy = action.includes('BUY');
+                                            const actionToken = normalizeInsiderAction(deal.deal_action);
+                                            const actionLabel = actionToken ?? 'UNKNOWN';
+                                            const actionClass = actionToken === 'BUY' ? 'text-green-400'
+                                                : actionToken === 'SELL' ? 'text-red-400' : 'text-[var(--text-muted)]';
+                                            const priceText = deal.price_unit === 'VND' ? formatVND(deal.deal_price) : '—';
                                             return (
                                                 <div
                                                     key={deal.id}
@@ -343,11 +350,11 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                                                         <div className="text-[10px] text-[var(--text-muted)]">{deal.insider_position || '—'}</div>
                                                     </div>
                                                     <div className="text-right">
-                                                        <div className={`text-[10px] font-bold ${isBuy ? 'text-green-400' : 'text-red-400'}`}>
-                                                            {action}
+                                                        <div className={`text-[10px] font-bold ${actionClass}`}>
+                                                            {actionLabel}
                                                         </div>
                                                         <div className="text-[10px] text-[var(--text-muted)]">
-                                                            {formatNumber(deal.deal_quantity)} @ {formatVND(deal.deal_price)}
+                                                            {formatNumber(deal.deal_quantity)} @ {priceText}
                                                         </div>
                                                         <div className="text-[10px] text-[var(--text-muted)]">{formatDateOnly(deal.announce_date)}</div>
                                                     </div>

@@ -1,0 +1,13 @@
+[Unit]
+Description=VNIBB scoped unused Docker image retention
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/vnibb/image-retention.env
+WorkingDirectory=/srv/vnibb
+ExecStart=/usr/bin/python3 /srv/vnibb/scripts/oracle/cleanup_images.py --repository ghcr.io/kohnnn/vnibb-api --workdir /app/VCIDataPlatform --rollback-image ${VNIBB_ROLLBACK_IMAGE} --prepared-image ${VNIBB_PREPARED_IMAGE} --keep 2 --apply
+TimeoutStartSec=300
+Nice=19
+IOSchedulingClass=idle

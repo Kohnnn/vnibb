@@ -6,7 +6,8 @@ import { useEffect } from 'react'
 import { useFinancialRatios, useProfile, useScreenerData, useStockQuote } from '@/lib/queries'
 import { latestByFinancialPeriod } from '@/lib/financialPeriods'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
-import { formatDividendYield, formatNumber, formatPercent, formatVND, normalizeDividendYield } from '@/lib/formatters'
+import { resolveMetric } from './utils'
+import { formatDividendYield, formatNumber, formatPercent, formatVND, readDividendYield } from '@/lib/formatters'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -25,28 +26,6 @@ interface StatRowProps {
   label: string
   value: string
   source?: string
-}
-
-type MetricSource = 'Screener' | 'Ratios' | 'Profile+Quote' | 'Quote' | 'Unavailable'
-
-function toNumber(value: unknown): number | null {
-  const parsed = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(parsed)) {
-    return null
-  }
-  return parsed
-}
-
-function resolveMetric(
-  candidates: Array<{ value: unknown; source: MetricSource; positiveOnly?: boolean }>
-): { value: number | null; source: MetricSource } {
-  for (const candidate of candidates) {
-    const parsed = toNumber(candidate.value)
-    if (parsed === null) continue
-    if (candidate.positiveOnly && parsed <= 0) continue
-    return { value: parsed, source: candidate.source }
-  }
-  return { value: null, source: 'Unavailable' }
 }
 
 function StatRow({ label, value, source }: StatRowProps) {
@@ -105,12 +84,20 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
     { value: profileData?.outstanding_shares, source: 'Profile+Quote', positiveOnly: true },
   ])
 
+  // Reported market cap is authoritative. The profile-shares × quote fallback is
+  // valid only when the quote is explicitly priced in VND: an `index_points` or
+  // `unknown` unit is a different scale and would fabricate a market cap.
+  const confirmedVndPrice =
+    quote && quote.price_unit === 'VND' && typeof quote.price === 'number' && Number.isFinite(quote.price) && quote.price > 0
+      ? quote.price
+      : null
+
   const marketCap = resolveMetric([
     { value: stock?.market_cap, source: 'Screener', positiveOnly: true },
     {
       value:
-        outstandingShares.value && quote?.price && quote.price > 0
-          ? outstandingShares.value * quote.price
+        outstandingShares.value && confirmedVndPrice
+          ? outstandingShares.value * confirmedVndPrice
           : null,
       source: 'Profile+Quote',
       positiveOnly: true,
@@ -144,8 +131,8 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
 
   const beta = resolveMetric([{ value: stock?.beta, source: 'Screener' }])
   const dividendYield = resolveMetric([
-    { value: normalizeDividendYield(stock?.dividend_yield), source: 'Screener' },
-    { value: normalizeDividendYield(latestRatio?.dividend_yield), source: 'Ratios' },
+    { value: readDividendYield(stock?.dividend_yield, stock?.ratio_units?.dividend_yield), source: 'Screener' },
+    { value: readDividendYield(latestRatio?.dividend_yield, latestRatio?.ratio_units?.dividend_yield), source: 'Ratios' },
   ])
 
   const exchange =
@@ -177,13 +164,18 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
       apiGroup: '/equity',
       endpoint: '/api/v1/market/screener',
       sourceLabel: 'Screener + profile + ratios',
+      // The screener's `meta.last_data_date` falls back to a store timestamp when
+      // no trade date exists, and the profile/quote/ratio legs expose no as-of at
+      // all — so this multi-source aggregate has no source-proven observation.
+      lastDataDate: null,
+      fetchedAt: screenerUpdatedAt,
       stale: Boolean(error && hasData),
       extra: {
         hasMarketCap: marketCap.value !== null,
         hasVolume: volume.value !== null,
       },
     }))
-  }, [error, hasData, marketCap.value, onDataChange, volume.value])
+  }, [error, hasData, marketCap.value, onDataChange, screenerUpdatedAt, volume.value])
 
   const handleRefresh = () => {
     refetchScreener()
@@ -219,7 +211,8 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
       <div className="h-full flex flex-col">
       <div className="pb-2 border-b border-[var(--border-subtle)]">
         <WidgetMeta
-          updatedAt={screenerUpdatedAt}
+          updatedAt={null}
+          fetchedAt={screenerUpdatedAt}
           isFetching={isFetching && hasData}
           isCached={isFallback}
           sourceLabel="Screener + profile + ratios"

@@ -4,9 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { WidgetWrapper } from './WidgetWrapper';
 import { NotesWidget } from './NotesWidget';
 import { DEFAULT_GROUPS } from '@/types/widget';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 let mockTickerOverride: string | null = null;
 let mockWidgetConfig: Record<string, unknown> = {};
 let mockWidgetType = 'screener';
+const mockSetGroupSymbol = jest.fn();
 const mockUpdateWidget = jest.fn((_dashboard: string, _tab: string, _id: string, patch: { config?: Record<string, unknown> }) => {
   if (patch.config) mockWidgetConfig = patch.config;
 });
@@ -22,7 +24,7 @@ jest.mock('@/contexts/WidgetGroupContext', () => ({
     groups: DEFAULT_GROUPS,
     getColorForGroup: () => '#fff',
     getSymbolForGroup: (group: string) => group === 'A' ? 'FPT' : 'VCI',
-    setGroupSymbol: jest.fn(),
+    setGroupSymbol: mockSetGroupSymbol,
     tickerOverrideFor: (id: string) => id === 'screener' ? mockTickerOverride : null,
     setWidgetTickerOverride: (_id: string, symbol: string) => { mockTickerOverride = symbol; },
     clearWidgetTickerOverride: () => { mockTickerOverride = null; },
@@ -33,8 +35,8 @@ jest.mock('@/lib/queries', () => ({ useProfile: () => ({ data: undefined }) }));
 jest.mock('@/lib/dashboardIntelligence', () => ({ getWidgetLayoutInsight: () => null }));
 jest.mock('@/lib/analytics', () => ({ ANALYTICS_EVENTS: {}, captureAnalyticsEvent: jest.fn() }));
 jest.mock('@/hooks/useWidgetSymbolLink', () => ({ useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }) }));
-jest.mock('./TickerCombobox', () => ({ TickerCombobox: ({ isOpen, onSelect }: { isOpen: boolean; onSelect: (symbol: string) => void }) => isOpen ? <button type="button" onClick={() => onSelect('NASDAQ:MSFT')}>Pick NASDAQ:MSFT</button> : null }));
-beforeEach(() => { mockTickerOverride = null; mockWidgetConfig = {}; mockWidgetType = 'screener'; mockUpdateWidget.mockClear(); });
+jest.mock('./TickerCombobox', () => ({ TickerCombobox: ({ isOpen, onSelect }: { isOpen: boolean; onSelect: (symbol: string) => void }) => isOpen ? <button type="button" onClick={() => onSelect(mockWidgetType === 'tradingview_chart' ? 'NASDAQ:MSFT' : 'VNM')}>Pick {mockWidgetType === 'tradingview_chart' ? 'NASDAQ:MSFT' : 'VNM'}</button> : null }));
+beforeEach(() => { mockTickerOverride = null; mockWidgetConfig = {}; mockWidgetType = 'screener'; mockUpdateWidget.mockClear(); mockSetGroupSymbol.mockClear(); });
 
 const FilterContext = createContext({ filter: '', saveFilter: (_value: string) => {} });
 
@@ -289,6 +291,33 @@ test('changing a detached TradingView chart ticker remains local', async () => {
   expect(onSymbolChange).not.toHaveBeenCalled();
 });
 
+test('changing a detached native widget ticker updates its local content without broadcasting to peers', async () => {
+  mockWidgetConfig = { symbol: 'FPT', tickerScope: 'override', timeframe: '1Y' };
+  mockTickerOverride = 'FPT';
+  const user = userEvent.setup();
+  const onSymbolChange = jest.fn();
+  function NativeContent({ symbol }: { symbol?: string }) {
+    return <output aria-label="Native content ticker">{symbol}</output>;
+  }
+  render(<>
+    <WidgetWrapper id="screener" title="Native widget" widgetType="screener" dashboardId="dashboard" tabId="tab" symbol="VCI" showTickerSelector onSymbolChange={onSymbolChange}>
+      <NativeContent />
+    </WidgetWrapper>
+    <WidgetWrapper id="global-peer" title="Global peer" widgetType="screener" dashboardId="dashboard" tabId="tab" symbol="VCI">
+      <output aria-label="Peer ticker" />
+    </WidgetWrapper>
+  </>);
+  expect(screen.getByRole('status', { name: 'Native content ticker' })).toHaveTextContent('FPT');
+  await user.click(screen.getByTitle('Select widget ticker'));
+  await user.click(screen.getByRole('button', { name: 'Pick VNM' }));
+  expect(screen.getByRole('status', { name: 'Native content ticker' })).toHaveTextContent('VNM');
+  expect(mockWidgetConfig).toEqual({ symbol: 'VNM', tickerScope: 'override', timeframe: '1Y' });
+  expect(mockTickerOverride).toBe('VNM');
+  expect(mockSetGroupSymbol).not.toHaveBeenCalled();
+  expect(onSymbolChange).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: /Ticker group: Global, current ticker VCI/ })).toBeInTheDocument();
+});
+
 test('an unsaved widget draft stays in its one live editor across maximize and restore', async () => {
   const user = userEvent.setup();
   function DraftEditor() {
@@ -344,4 +373,26 @@ test('the widget menu opens scoped requirements and limitations and closes again
 
   await user.click(within(panel).getByRole('button', { name: 'Close widget requirements' }));
   expect(screen.queryByRole('region', { name: 'Widget requirements and limitations' })).not.toBeInTheDocument();
+});
+
+test('wrapper badges use source age while preserving retrieval and cache lineage', async () => {
+  const now = jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-08T03:00:00Z').getTime());
+  const payload = buildWidgetRuntime({
+    empty: false, apiGroup: '/news', endpoint: '/news/market', sourceLabel: 'Stored published articles',
+    lastDataDate: '2026-09-21T15:00:00Z', fetchedAt: '2026-10-08T03:00:00Z', cached: true,
+  });
+  try {
+    const user = userEvent.setup();
+    render(<WidgetWrapper id="screener" title="News" widgetType="screener" dashboardId="dashboard" tabId="tab" data={payload}>
+      <output />
+    </WidgetWrapper>);
+
+    expect(screen.queryByRole('button', { name: 'Data status: Live' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Data status: Stale' }));
+    expect(screen.getByText('Source as of')).toBeInTheDocument();
+    expect(screen.getByText('Fetched at')).toBeInTheDocument();
+    expect(screen.getByText('Cached snapshot')).toBeInTheDocument();
+  } finally {
+    now.mockRestore();
+  }
 });

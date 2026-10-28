@@ -69,6 +69,8 @@ export function FibonacciWidget({ symbol, onDataChange }: { symbol?: string; onD
   }, [data?.levels])
 
   const hasData = chartData.length > 1 && orderedLevels.length > 0 && Boolean(data)
+  const derivedWithheld = Boolean(data) && !['VND', 'index_points'].includes(data?.price_unit ?? '')
+  const lastDataDate = chartData[chartData.length - 1]?.date ?? null
   const isFallback = Boolean(error && hasData)
 
   const activePeriod = PERIOD_OPTIONS.find((option) => option.days === lookbackDays)?.label || '1Y'
@@ -76,16 +78,17 @@ export function FibonacciWidget({ symbol, onDataChange }: { symbol?: string; onD
   useEffect(() => {
     onDataChange?.(
       buildWidgetRuntime({
-        empty: !hasData,
+        empty: !hasData || derivedWithheld,
         apiGroup: '/technical',
         endpoint: `/analysis/ta/${upperSymbol}/fibonacci?lookback_days=${lookbackDays}&direction=auto`,
         sourceLabel: 'Fibonacci',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate,
+        fetchedAt: dataUpdatedAt,
         stale: isFallback,
-        extra: data?.nearest_level ? { nearestLevel: data.nearest_level } : undefined,
+        extra: !derivedWithheld && data?.nearest_level ? { nearestLevel: data.nearest_level } : undefined,
       }),
     )
-  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, lookbackDays, data?.nearest_level])
+  }, [onDataChange, hasData, derivedWithheld, isFallback, lastDataDate, dataUpdatedAt, upperSymbol, lookbackDays, data?.nearest_level])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Fibonacci levels" icon={<Route size={18} />} />
@@ -116,7 +119,8 @@ export function FibonacciWidget({ symbol, onDataChange }: { symbol?: string; onD
             ))}
           </div>
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={lastDataDate}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note={activePeriod}
@@ -129,6 +133,8 @@ export function FibonacciWidget({ symbol, onDataChange }: { symbol?: string; onD
         <WidgetSkeleton lines={8} />
       ) : error && !hasData ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
+      ) : derivedWithheld ? (
+        <WidgetEmpty message="Fibonacci unavailable: historical price units were not certified." icon={<Route size={18} />} />
       ) : !hasData || !data ? (
         <WidgetEmpty message="No Fibonacci data available." icon={<Route size={18} />} />
       ) : (

@@ -22,7 +22,7 @@ import { useDataSourcesFreshness } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 import type { DataSourceEntry } from '@/lib/api';
 
-function StatusPill({ status }: { status: DataSourceEntry['status'] }) {
+function StatusPill({ status, scope }: { status: DataSourceEntry['status']; scope?: string }) {
   const map: Record<
     DataSourceEntry['status'],
     { label: string; className: string; Icon: typeof CheckCircle2 }
@@ -43,7 +43,7 @@ function StatusPill({ status }: { status: DataSourceEntry['status'] }) {
       Icon: AlertCircle,
     },
     unknown: {
-      label: 'No data',
+      label: 'Unknown',
       className: 'border-slate-500/30 bg-slate-500/10 text-slate-300',
       Icon: HelpCircle,
     },
@@ -57,15 +57,15 @@ function StatusPill({ status }: { status: DataSourceEntry['status'] }) {
       )}
     >
       <Icon size={11} />
-      {label}
+      {scope === 'sync_storage_timestamps' ? `Storage ${label.toLowerCase()}` : scope === 'scheduled_events' ? `Event date ${label.toLowerCase()}` : label}
     </span>
   );
 }
 
 function formatLastUpdated(iso: string | null): string {
-  if (!iso) return '—';
+  if (!iso) return 'Unknown';
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
+  if (Number.isNaN(d.getTime())) return 'Unknown';
   return d.toLocaleString('en-US', {
     month: 'short',
     day: '2-digit',
@@ -93,8 +93,8 @@ export function DataSourcesHealthPanel() {
             Pipeline Health
           </div>
           <div className="mt-0.5 text-[11px] text-[var(--text-muted)]">
-            Per-source freshness for the Vietnam market data pipeline. Polls every
-            10 min.
+            Latest timestamps per scope: observations, stored updates and scheduled events.
+            These do not establish complete coverage; a recent fetch does not establish source freshness. Polls every 10 min.
           </div>
         </div>
         <button
@@ -121,8 +121,9 @@ export function DataSourcesHealthPanel() {
             <thead className="bg-[var(--bg-primary)] text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
               <tr>
                 <th className="px-3 py-2 text-left font-semibold">Source</th>
-                <th className="px-3 py-2 text-left font-semibold">Last sync</th>
-                <th className="px-3 py-2 text-left font-semibold">Age</th>
+                <th className="px-3 py-2 text-left font-semibold">As-of / basis</th>
+                <th className="px-3 py-2 text-left font-semibold">Fetched / crawled</th>
+                <th className="px-3 py-2 text-left font-semibold">Basis age</th>
                 <th className="px-3 py-2 text-left font-semibold">Status</th>
                 <th className="px-3 py-2 text-left font-semibold">Next sync</th>
               </tr>
@@ -135,15 +136,20 @@ export function DataSourcesHealthPanel() {
                     <div className="mt-0.5 text-[10px] leading-4 text-[var(--text-muted)]">
                       {src.description}
                     </div>
+                    {src.scope && <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">Scope: {src.scope.replaceAll('_', ' ')}</div>}
                   </td>
                   <td className="px-3 py-2 align-top font-mono text-[var(--text-secondary)]">
                     {formatLastUpdated(src.last_updated)}
+                    <div className="mt-1 text-[10px] text-[var(--text-muted)]">{src.timestamp_basis ?? 'Timestamp basis unknown'}</div>
+                  </td>
+                  <td className="px-3 py-2 align-top font-mono text-[var(--text-secondary)]">
+                    {formatLastUpdated(src.fetched_at ?? null)}
                   </td>
                   <td className="px-3 py-2 align-top text-[var(--text-secondary)]">
                     {formatAgeDays(src.age_days)}
                   </td>
                   <td className="px-3 py-2 align-top">
-                    <StatusPill status={src.status} />
+                    <StatusPill status={src.status} scope={src.scope} />
                   </td>
                   <td className="px-3 py-2 align-top text-[10px] leading-4 text-[var(--text-muted)]">
                     {src.next_sync ?? '—'}

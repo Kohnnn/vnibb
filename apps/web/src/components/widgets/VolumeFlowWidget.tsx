@@ -57,21 +57,29 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
     enabled: Boolean(upperSymbol),
   })
 
-  const metric = data?.data?.metrics?.volume_delta as
-    | {
-        monthly_avg?: Record<string, number | null>
-        cumulative?: CumulativePoint[]
-        current_20d_cumulative_delta?: number | null
-        strongest_buy_month?: string | null
-        strongest_sell_month?: string | null
-        divergence_months?: number
-      }
-    | undefined
+  const quality = data?.meta
+  // Only a certified unit status admits the derived delta series; an absent or
+  // mixed/unconfirmed status must not render ordinary-looking flow values
+  // (QA #98).
+  const derivedWithheld = Boolean(data) && (!['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+    || Boolean(quality?.unresolved_excluded_dates?.length))
+  const metric = derivedWithheld
+    ? undefined
+    : data?.data?.metrics?.volume_delta as
+      | {
+          monthly_avg?: Record<string, number | null>
+          cumulative?: CumulativePoint[]
+          current_20d_cumulative_delta?: number | null
+          strongest_buy_month?: string | null
+          strongest_sell_month?: string | null
+          divergence_months?: number
+        }
+      | undefined
   const backendError = typeof data?.error === 'string' ? data.error : ''
 
   const monthlyAvg = metric?.monthly_avg || {}
   const monthRows = MONTHS.map((month) => ({ month, value: Number(monthlyAvg[month] ?? 0) }))
-  const cumulativeRows = (metric?.cumulative || [])
+  const cumulativeRows = (metric?.cumulative ||[])
     .filter((row) => Boolean(row?.date))
     .map((row) => ({
       date: row.date,
@@ -118,7 +126,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} delta`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} delta`} align="right" />
         </div>
       </div>
 
@@ -137,7 +145,9 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
         <WidgetEmpty
-          message={backendError || `Insufficient Data: Expected at least 30 sessions, got ${cumulativeRows.length}.`}
+          message={derivedWithheld
+            ? 'Volume flow unavailable: historical price units were not certified.'
+            : backendError || `Insufficient Data: Expected at least 30 sessions, got ${cumulativeRows.length}.`}
           icon={<Waves size={18} />}
           size="compact"
         />

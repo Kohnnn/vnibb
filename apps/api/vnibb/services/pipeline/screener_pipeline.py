@@ -15,9 +15,11 @@ from sqlalchemy import select, and_, func
 from vnibb.core.cache import build_cache_key
 from vnibb.core.cache_constants import PIPELINE_TTL_SCREENER
 from vnibb.core.config import settings
+from vnibb.core.database import async_session_maker
 from vnibb.core.retry import with_retry
 from vnibb.core.vn_sectors import resolve_sector_name
 from vnibb.models.stock import Stock, StockPrice
+from vnibb.core.price_units import normalize_screener_record
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.services.pipeline.base import BasePipeline, get_upsert_stmt
@@ -86,10 +88,10 @@ class ScreenerPipeline(BasePipeline):
         sync_id: Optional[int] = None,
     ) -> int:
         """Sync comprehensive metrics for stocks using vnstock finance.ratio."""
-        from vnibb.providers.vnstock.runtime import get_listing_class, get_vnstock_class
+        from vnibb.providers.vnstock.runtime import create_finance, finance_method_kwargs, validate_source
+        from vnibb.core.ratio_units import ratio_method_kwargs
 
-        Listing = get_listing_class()
-        Vnstock = get_vnstock_class()
+        source = validate_source(settings.vnstock_source)
 
         logger.info("Syncing screener data...")
         loop = asyncio.get_running_loop()
@@ -157,9 +159,10 @@ class ScreenerPipeline(BasePipeline):
                 await self._wait_for_rate_limit("screener")
 
                 def _fetch_sync():
-                    vnstock = Vnstock()
+                    finance = create_finance(symbol, source, "year")
                     try:
-                        df = vnstock.finance.ratios(symbol=symbol)
+                        method = finance.ratio
+                        df = method(**ratio_method_kwargs(method, finance_method_kwargs(method, "year")))
                         return df
                     except Exception as e:
                         logger.debug(f"Ratio fetch failed for {symbol}: {e}")
@@ -224,9 +227,14 @@ class ScreenerPipeline(BasePipeline):
                             "eps": self._parse_float(row.get("eps")),
                             "bvps": self._parse_float(row.get("bvps")),
                             "extended_metrics": extended_metrics,
-                            "source": settings.vnstock_source or "KBS",
+                            "source": settings.vnstock_source or "VCI",
                             "created_at": date.today(),
                         }
+                        values = normalize_screener_record({
+                            **values,
+                            "price_unit": row.get("price_unit", "unknown"),
+                            "price_source": row.get("price_source"),
+                        })
 
                         async with self._get_session() as session:
                             stmt = get_upsert_stmt(
@@ -255,6 +263,6 @@ class ScreenerPipeline(BasePipeline):
         logger.info(f"Synced screener data for {total_synced} symbols")
         return total_synced
 
-    async def _get_session(self):
+    def _get_session(self):
         """Get a database session."""
-        return self._session_factory() if hasattr(self, '_session_factory') else async_session_maker()
+        return async_session_maker()

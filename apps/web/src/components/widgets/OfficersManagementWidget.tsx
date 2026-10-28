@@ -8,6 +8,7 @@ import { useOfficers } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { formatVietnameseTitle, translateVietnameseTitle } from '@/lib/vietnameseTitles';
 
@@ -35,15 +36,18 @@ export function OfficersManagementWidget({ symbol, onDataChange }: OfficersManag
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
     useEffect(() => {
-        onDataChange?.({
-            __widgetRuntime: {
-                layoutHint: {
-                    empty: !hasData,
-                    compactHeight: 3,
-                },
-            },
-        });
-    }, [hasData, onDataChange]);
+        // Officer rows expose no source observation date, so freshness stays
+        // unknown and the query receipt is reported separately.
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/equity',
+            endpoint: `/equity/${symbol}/officers`,
+            sourceLabel: 'Officers and management',
+            lastDataDate: null,
+            fetchedAt: dataUpdatedAt,
+            stale: isFallback,
+        }));
+    }, [dataUpdatedAt, hasData, isFallback, onDataChange, symbol]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view officers" icon={<Briefcase size={18} />} />;
@@ -57,7 +61,8 @@ export function OfficersManagementWidget({ symbol, onDataChange }: OfficersManag
                     <span>{officers.length} executives</span>
                 </div>
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     align="right"

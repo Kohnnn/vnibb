@@ -15,8 +15,7 @@ import pytest
 from vnibb.services.fundamental_valuation import (
     FundamentalInputs,
     ValuationConfig,
-    _canonical_eod_price,
-    _normalize_statement_unit_outliers,
+    _normalize_statement_rows,
     compute_cagr,
     compute_dividend_years,
     compute_fcf_positive,
@@ -27,6 +26,7 @@ from vnibb.services.fundamental_valuation import (
     compute_moat,
     compute_moat_factors,
     compute_valuation_verdict,
+    load_fundamental_inputs,
     to_document,
 )
 
@@ -60,18 +60,15 @@ def _cash_row(
     }
 
 
-def test_normalize_statement_unit_outliers_repairs_fundamental_raw_rows() -> None:
+def test_statement_values_are_not_rescaled_from_magnitude() -> None:
     rows = [
-        {"yearReport": 2022, "revenue": 10_000_000_000, "net_profit_after_tax": 1_000_000_000},
-        {"yearReport": 2023, "revenue": 11_000_000_000, "net_profit_after_tax": 1_100_000_000},
-        {"yearReport": 2024, "revenue": 12_000_000_000_000, "net_profit_after_tax": 1_200_000_000_000},
+        {"yearReport": 2022, "revenue": 10_000_000_000},
+        {"yearReport": 2023, "revenue": 11_000_000_000},
+        {"yearReport": 2024, "revenue": 12_000_000_000_000},
     ]
-
-    normalized = _normalize_statement_unit_outliers(rows)
-
-    assert normalized[2]["revenue"] == 12_000_000_000
-    assert normalized[2]["net_profit_after_tax"] == 1_200_000_000
-    assert rows[2]["revenue"] == 12_000_000_000_000
+    normalized = _normalize_statement_rows([{"raw": row} for row in rows])
+    assert normalized[2]["revenue"] == rows[2]["revenue"]
+    assert normalized[2]["_valuation_unit_lineage"]["revenue"]["scaleToVnd"] is None
 
 
 # --- DCF ---------------------------------------------------------------------
@@ -295,6 +292,9 @@ class TestMoat:
             row["gross_profit"] = 420.0
             row["ebit"] = 160.0
             row["interest_expense"] = -20.0
+            row["unit_metadata"] = {"interest_expense": {
+                "label": "interest_expense", "source_unit": "VND", "value_unit": "VND",
+            }}
 
         score, factors = compute_moat_factors(
             income,
@@ -309,6 +309,71 @@ class TestMoat:
         assert factors["roic"] == pytest.approx(18.0)
         assert factors["roic_spread"] == pytest.approx(6.0)
         assert factors["sector_rank_score"] == pytest.approx(90.0)
+
+    @pytest.mark.parametrize("interest_fields", [
+        {"interest_expense": -20.0},
+        {"interest_expense": -20.0, "unit_metadata": {"interest_expense": {"value_unit": "VND"}}},
+        {"interest_expense": -20.0, "_valuation_unit_lineage": {
+            "interest_expense": {"rawValue": -20.0, "rawUnit": "VND", "scaleToVnd": 1},
+        }},
+        {"interest_expense": -20.0, "unit_metadata": {"interest_expense": {
+            "label": "financial_expenses", "source_unit": "VND", "value_unit": "VND",
+            "unavailable_reason": "ambiguous_interest_expense_semantics",
+        }}},
+        {"finance_cost": -20.0, "unit": "VND"},
+        {"financial_expenses": -20.0, "unit": "VND"},
+    ])
+    def test_unproven_interest_is_not_a_moat_factor(self, interest_fields) -> None:
+        income, balance = self._statements(
+            npats=[180.0] * 5, revenues=[1000.0] * 5, equities=[1000.0] * 5
+        )
+        for row in income:
+            row.update(gross_profit=420.0, ebit=160.0)
+        baseline_score, baseline_factors = compute_moat_factors(
+            income, balance, {"roic": 0.18}, discount_rate=0.12,
+        )
+        income[-1].update(interest_fields)
+
+        score, factors = compute_moat_factors(
+            income, balance, {"roic": 0.18}, discount_rate=0.12,
+        )
+
+        assert "interest_coverage" not in factors
+        assert score == pytest.approx(baseline_score)
+        assert factors == baseline_factors
+        assert factors["gross_margin_avg"] == pytest.approx(42.0)
+        assert factors["roe_avg"] == pytest.approx(18.0)
+        assert factors["roic_spread"] == pytest.approx(6.0)
+
+    @pytest.mark.parametrize("unit", ["VND", "million VND"])
+    @pytest.mark.parametrize("interest_key", ["interest_expense", "interestExpense"])
+    def test_normalized_interest_requires_original_semantics_and_unit(self, unit, interest_key) -> None:
+        income, balance = self._statements(
+            npats=[180.0] * 5, revenues=[1000.0] * 5, equities=[1000.0] * 5
+        )
+        for row in income:
+            row.update(gross_profit=420.0, ebit=160.0, unit=unit)
+            row[interest_key] = -20.0
+
+        _, factors = compute_moat_factors(_normalize_statement_rows([{"raw": row} for row in income]), balance)
+
+        assert factors["interest_coverage"] == pytest.approx(8.0)
+
+    def test_normalization_does_not_override_explicit_interest_rejection(self) -> None:
+        income, balance = self._statements(
+            npats=[180.0] * 5, revenues=[1000.0] * 5, equities=[1000.0] * 5
+        )
+        for row in income:
+            row.update(gross_profit=420.0, ebit=160.0, interest_expense=-20.0, unit="VND")
+            row["unit_metadata"] = {"interest_expense": {
+                "label": "financial_expenses", "source_unit": "VND", "value_unit": "VND",
+                "unavailable_reason": "ambiguous_interest_expense_semantics",
+            }}
+
+        _, factors = compute_moat_factors(_normalize_statement_rows([{"raw": row} for row in income]), balance)
+
+        assert "interest_coverage" not in factors
+        assert factors["gross_margin_avg"] == pytest.approx(42.0)
 
 
 # --- margin of safety --------------------------------------------------------------
@@ -369,6 +434,9 @@ def _happy_inputs() -> FundamentalInputs:
         cash_flows=cash,
         company_name="AAA Corp",
         exchange="HOSE",
+        price_unit="VND",
+        shares_unit="shares",
+        statement_unit="VND",
     )
 
 
@@ -461,7 +529,7 @@ class TestToDocument:
         assert doc["symbol"] == "AAA"
         assert doc["snapshotDate"] == "2026-06-10"
         assert doc["source"] == "vnibb-fundamental-engine"
-        assert doc["schemaVersion"] == 1
+        assert doc["schemaVersion"] == 3
         assert doc["observedAt"] is not None
         assert doc["updatedAt"] is not None
         for key in (
@@ -500,40 +568,171 @@ class TestToDocument:
             "baseFcf": pytest.approx(200.0),
             "growthRate": pytest.approx(0.10, rel=1e-6),
             "horizonYears": 10,
+            "unitQuality": "verified",
+            "comparisonUnavailableReason": None,
+            "unitLineage": {"price": {"unit": "VND"}, "shares": {"unit": "shares"}, "statements": {"unit": "VND"}},
         }
         assert doc["valuationMethod"] == "dcf"
 
 
-# --- EOD price canonicalization ---------------------------------------------------------
+class _PriceCorpus:
+    def __init__(self, prices):
+        self.prices = prices
+
+    async def get_raw_dataset_records(self, _symbol, *, dataset, **_kwargs):
+        if dataset == "company.info":
+            return [{"raw": {"issue_share": 1_000_000, "units": {"issue_share": "shares"}}}]
+        return []
+
+    async def get_eod_prices(self, _symbol, **_kwargs):
+        return self.prices
 
 
-class TestCanonicalEodPrice:
-    def test_thousand_vnd_straggler_coerced_up(self) -> None:
-        # Window is raw VND (~70,800); selected close mis-stored as thousand-VND.
-        window = [70_800.0, 71_000.0, 70_500.0, 69_900.0, 70_200.0]
-        assert _canonical_eod_price(70.8, window) == pytest.approx(70_800.0)
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("record", "expected"),
+    [
+        ({"close": 70.8, "priceUnit": "THOUSAND_VND"}, 70_800),
+        ({"close": 70.8, "source": "vnstock_history:KBS"}, 70_800),
+        ({"close": 80, "priceUnit": "VND"}, 80),
+        ({"close": 70_800, "priceUnit": "VND"}, 70_800),
+    ],
+)
+async def test_valuation_reads_explicit_or_source_backed_vnd(record, expected):
+    inputs = await load_fundamental_inputs("FPT", _PriceCorpus([record]))
 
-    def test_raw_vnd_close_untouched(self) -> None:
-        window = [70_800.0, 71_000.0, 70_500.0, 69_900.0, 70_200.0]
-        assert _canonical_eod_price(70_800.0, window) == pytest.approx(70_800.0)
+    assert inputs.price == pytest.approx(expected)
+    assert inputs.market_cap == pytest.approx(expected * 1_000_000)
 
-    def test_raw_straggler_coerced_down(self) -> None:
-        # Window is thousand-VND (~70.8); selected close mis-stored as raw VND.
-        window = [70.8, 71.0, 70.5, 69.9, 70.2]
-        assert _canonical_eod_price(70_800.0, window) == pytest.approx(70.8)
 
-    def test_real_split_magnitude_ignored(self) -> None:
-        # A genuine ~2x gap (e.g. split) is not a unit error; leave untouched.
-        window = [70_000.0, 71_000.0, 69_000.0, 70_500.0, 70_200.0]
-        assert _canonical_eod_price(35_000.0, window) == pytest.approx(35_000.0)
+@pytest.mark.asyncio
+async def test_valuation_preserves_low_vnd_after_legitimate_split():
+    inputs = await load_fundamental_inputs("LOW", _PriceCorpus([
+        {"close": 100_000, "priceUnit": "VND"},
+        {"close": 100, "priceUnit": "VND", "volume": 50},
+    ]))
 
-    def test_empty_window_passthrough(self) -> None:
-        assert _canonical_eod_price(70.8, []) == pytest.approx(70.8)
+    assert inputs.price == 100
+    assert inputs.volume == 50
+    assert inputs.market_cap == 100_000_000
 
-    def test_zero_anchor_passthrough(self) -> None:
-        assert _canonical_eod_price(70.8, [0.0, 0.0]) == pytest.approx(70.8)
 
-    def test_nonpositive_selected_passthrough(self) -> None:
-        window = [70_800.0, 71_000.0, 70_500.0]
-        assert _canonical_eod_price(0.0, window) == pytest.approx(0.0)
-        assert _canonical_eod_price(-5.0, window) == pytest.approx(-5.0)
+@pytest.mark.asyncio
+async def test_valuation_skips_unknown_units_without_numeric_inference():
+    inputs = await load_fundamental_inputs("FPT", _PriceCorpus([
+        {"close": 80, "priceUnit": "VND"},
+        {"close": 80_000, "source": "vnstock"},
+    ]))
+
+    assert inputs.price == 80
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("record", [{"close": 80_000}, {"close": 1250, "priceUnit": "index_points"}])
+async def test_valuation_does_not_value_unknown_units_or_index_points(record):
+    inputs = await load_fundamental_inputs("FPT", _PriceCorpus([record]))
+
+    assert inputs.price is None
+    assert inputs.market_cap is None
+
+
+@pytest.mark.parametrize("missing", ["price_unit", "shares_unit", "statement_unit"])
+def test_unknown_unit_disables_comparison_with_specific_reason(missing):
+    inputs = _happy_inputs()
+    setattr(inputs, missing, None)
+    snapshot = compute_fundamental_snapshot(inputs)
+    assert snapshot.margin_of_safety is None
+    assert snapshot.valuation_verdict is None
+    assert snapshot.inputs["unit_quality"] == "unknown"
+    assert "unknown" in snapshot.inputs["comparison_unavailable_reason"]
+    if missing != "price_unit":
+        assert snapshot.intrinsic_value is None
+    else:
+        assert snapshot.intrinsic_value is not None
+
+
+@pytest.mark.parametrize("price", [50.0, 59_700_000.0])
+def test_declared_vnd_valuation_is_not_forced_near_price(price):
+    inputs = _happy_inputs()
+    inputs.price = price
+    snapshot = compute_fundamental_snapshot(inputs)
+    # Independent model value: constant 200 VND annual FCF growing from 10%
+    # to 3% over ten years, divided by 100 shares. No price-based rescaling.
+    fcf, present_value = 200.0, 0.0
+    for year in range(1, 11):
+        fcf *= 1 + 0.10 + (0.03 - 0.10) * (year - 1) / 9
+        present_value += fcf / 1.12 ** year
+    expected = (present_value + fcf * 1.03 / 0.09 / 1.12 ** 10) / 100
+    assert snapshot.intrinsic_value == pytest.approx(expected)
+    assert snapshot.price == price
+    assert snapshot.inputs["unit_quality"] == "verified"
+
+
+class _ValuationCorpus(_PriceCorpus):
+    def __init__(self, currency_unit="VND", shares_unit="shares"):
+        super().__init__([{"close": 59_700, "priceUnit": "VND", "time": "2026-06-15"}])
+        self.currency_unit = currency_unit
+        self.shares_unit = shares_unit
+
+    async def get_raw_dataset_records(self, _symbol, *, dataset, **_kwargs):
+        if dataset == "company.info":
+            return [{"raw": {"issued_share": 1_000_000, "industry": "Bank", "units": {"issued_share": self.shares_unit}}}]
+        if dataset == "finance.balance_sheet":
+            return [{"dataset": dataset, "datasetVariant": dataset + ".year", "source": "fixture",
+                     "observedAt": "2026-06-15T00:00:00Z", "raw": {
+                         "yearReport": 2025, "owners_equity": 20_000_000_000,
+                         "total_assets": 30_000_000_000, "currency_unit": self.currency_unit}}]
+        if dataset == "finance.income_statement":
+            return [{"raw": {"yearReport": 2025, "net_profit_after_tax": 2_600_000_000,
+                             "currency_unit": self.currency_unit}}]
+        return []
+
+
+@pytest.mark.asyncio
+async def test_known_price_equity_and_share_units_preserve_rim_value():
+    inputs = await load_fundamental_inputs("VNM", _ValuationCorpus())
+    snapshot = compute_fundamental_snapshot(inputs)
+    # ROE equals the 13% discount rate, hence residual income is zero.
+    assert snapshot.intrinsic_value == pytest.approx(20_000)
+    assert snapshot.price == 59_700
+    assert snapshot.margin_of_safety == -100
+    assert snapshot.inputs["unit_quality"] == "verified"
+    doc = to_document(snapshot, date(2026, 6, 15))
+    assert doc["inputs"]["unitLineage"]["statements"][1]["fields"]["owners_equity"] == {
+        "rawValue": 20_000_000_000, "rawUnit": "VND", "scaleToVnd": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("currency_unit,shares_unit", [(None, "shares"), ("VND", None)])
+async def test_loaded_unknown_units_do_not_publish_intrinsic_or_comparison(currency_unit, shares_unit):
+    inputs = await load_fundamental_inputs("VNM", _ValuationCorpus(currency_unit, shares_unit))
+    snapshot = compute_fundamental_snapshot(inputs)
+    assert snapshot.intrinsic_value is None
+    assert snapshot.margin_of_safety is None
+    assert snapshot.inputs["unit_quality"] == "unknown"
+    assert snapshot.inputs["comparison_unavailable_reason"]
+
+
+@pytest.mark.asyncio
+async def test_statement_conversion_uses_only_declared_currency_scale():
+    corpus = _ValuationCorpus("million VND")
+    records = await corpus.get_raw_dataset_records("VNM", dataset="finance.balance_sheet")
+    records[0]["raw"]["owners_equity"] = 20_000
+    normalized = _normalize_statement_rows(records)
+    assert normalized[0]["owners_equity"] == 20_000_000_000
+    assert records[0]["raw"]["owners_equity"] == 20_000
+
+
+def test_conflicting_same_year_statement_observations_do_not_choose_valuation_truth():
+    records = [
+        {"observedAt": date(2026, 6, 14), "raw": {"yearReport": 2025, "owners_equity": 20_000_000_000, "currency_unit": "VND"}},
+        {"observedAt": date(2026, 6, 15), "raw": {"yearReport": 2025, "owners_equity": 21_000_000_000, "currency_unit": "VND"}},
+    ]
+    inputs = _happy_inputs()
+    inputs.sector = "Bank"
+    inputs.balance_sheets = _normalize_statement_rows(records)
+    snapshot = compute_fundamental_snapshot(inputs)
+    assert snapshot.intrinsic_value is None
+    assert snapshot.margin_of_safety is None
+    assert "no established revision order" in snapshot.inputs["comparison_unavailable_reason"]
+    assert inputs.balance_sheets[0]["_valuation_observations"] == [row["raw"] for row in records]

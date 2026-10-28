@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
+from vnibb.providers.vnstock.runtime import run_reference_provider, validate_source
 from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
@@ -24,19 +25,6 @@ logger = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=10)
 
 
-def _build_source_candidates(preferred_source: str | None) -> list[str]:
-    preferred = (preferred_source or "").strip().upper()
-    if preferred == "KBS":
-        ordered = ("VCI", "MSN", "KBS")
-    else:
-        ordered = (preferred, "VCI", "MSN", "KBS")
-
-    candidates: list[str] = []
-    for source in ordered:
-        normalized = (source or "").strip().upper()
-        if normalized and normalized not in candidates:
-            candidates.append(normalized)
-    return candidates
 
 
 # =============================================================================
@@ -305,6 +293,7 @@ class VnstockTopMoversFetcher:
             List of TopMoverData records
         """
         try:
+            source_name = validate_source(settings.vnstock_source)
 
             def _fetch() -> List[dict]:
                 from vnibb.providers.vnstock.runtime import get_listing_class, get_trading_class
@@ -313,9 +302,9 @@ class VnstockTopMoversFetcher:
                 Trading = get_trading_class()
 
                 group = INDEX_TO_GROUP.get(index, "VN100")
-                last_error: BaseException | None = None
+                last_error: Exception | None = None
 
-                for source in _build_source_candidates(settings.vnstock_source):
+                for source in [source_name]:
                     listing = Listing(source=source)
                     trading = Trading(source=source)
                     symbols = []
@@ -332,7 +321,7 @@ class VnstockTopMoversFetcher:
                                 group,
                                 source,
                             )
-                    except BaseException as exc:
+                    except Exception as exc:
                         last_error = exc
                         logger.warning(
                             "Failed to get symbols for group %s (source=%s): %s", group, source, exc
@@ -353,7 +342,7 @@ class VnstockTopMoversFetcher:
                                 logger.info(
                                     "Got %s symbols from fallback (source=%s)", len(symbols), source
                                 )
-                        except BaseException as exc:
+                        except Exception as exc:
                             last_error = exc
                             logger.warning("Failed to get all_symbols (source=%s): %s", source, exc)
                             continue
@@ -380,18 +369,20 @@ class VnstockTopMoversFetcher:
                         )
                         if records:
                             return records
-                    except BaseException as exc:
+                    except Exception as exc:
                         last_error = exc
                         logger.warning("Price board fetch failed (source=%s): %s", source, exc)
                         continue
 
                 if last_error is not None:
                     logger.error("Top movers upstream failed across all sources: %s", last_error)
+                    raise ProviderError(message=str(last_error) or last_error.__class__.__name__, provider="vnstock") from last_error
                 return []
 
-            loop = asyncio.get_event_loop()
-            # Add a 15 second timeout to the top movers fetch
-            records = await asyncio.wait_for(loop.run_in_executor(_executor, _fetch), timeout=15.0)
+            records = await run_reference_provider(
+                _fetch, timeout=min(15.0, settings.vnstock_timeout),
+                key=("top_movers", source_name, index),
+            )
 
             if not records:
                 logger.warning(f"No records returned for top movers {type}/{index}")
@@ -455,19 +446,20 @@ class VnstockTopMoversFetcher:
             logger.info(f"Returning {len(results)} top movers for {type}/{index}")
             return results
 
-        except BaseException as e:
+        except Exception as e:
             logger.error(f"Top movers fetch failed for {type}/{index}: {e}", exc_info=True)
-            return []
+            raise
 
     @staticmethod
     async def fetch_sector_top_movers(
         type: Literal["gainers", "losers"] = "gainers",
         limit_per_sector: int = 5,
-        source: str = settings.vnstock_source,
+        source: str = "VCI",
     ) -> List[SectorTopMoversData]:
         """
         Fetch top movers grouped by sector/industry.
         """
+        source = validate_source(source)
         try:
 
             def _fetch() -> Tuple[List[dict], dict]:
@@ -477,7 +469,7 @@ class VnstockTopMoversFetcher:
                 Trading = get_trading_class()
 
                 last_error: BaseException | None = None
-                for candidate_source in _build_source_candidates(source):
+                for candidate_source in [source]:
                     listing = Listing(source=candidate_source)
                     trading = Trading(source=candidate_source)
 

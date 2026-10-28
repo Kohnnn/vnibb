@@ -57,7 +57,8 @@ export function StockSplitsWidget({ symbol, onDataChange }: StockSplitsWidgetPro
         }) || [];
 
     const hasData = splitRows.length > 0;
-    const lastSplitDate = splitRows[0]?.effective_date || splitRows[0]?.event_date || splitRows[0]?.record_date || splitRows[0]?.ex_date;
+    // Split dates are action schedules, not source observations, so
+    // freshness stays unknown and the query receipt goes to fetchedAt.
 
     useEffect(() => {
         onDataChange?.(buildWidgetRuntime({
@@ -65,12 +66,13 @@ export function StockSplitsWidget({ symbol, onDataChange }: StockSplitsWidgetPro
             apiGroup: '/equity',
             endpoint: `/equity/${symbol}/events?limit=50`,
             sourceLabel: 'vnstock',
-            lastDataDate: lastSplitDate,
+            lastDataDate: null,
+            fetchedAt: dataUpdatedAt,
             derived: true,
             stale: Boolean(error && hasData),
             extra: { splits: splitRows.length },
         }));
-    }, [error, hasData, lastSplitDate, onDataChange, splitRows.length, symbol]);
+    }, [dataUpdatedAt, error, hasData, onDataChange, splitRows.length, symbol]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view splits" icon={<SplitSquareVertical size={18} />} />;
@@ -80,7 +82,8 @@ export function StockSplitsWidget({ symbol, onDataChange }: StockSplitsWidgetPro
         <div className="h-full flex flex-col">
             <div className="pb-2 border-b border-[var(--border-subtle)]">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     note="Company events"
                     align="right"

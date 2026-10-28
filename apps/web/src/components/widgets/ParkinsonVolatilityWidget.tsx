@@ -63,19 +63,27 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
     enabled: Boolean(upperSymbol),
   })
 
-  const metric = data?.data?.metrics?.parkinson_volatility as
-    | {
-        current_parkinson_vol_30d_pct?: number | null
-        current_close_close_vol_30d_pct?: number | null
-        close_to_park_ratio?: number | null
-        current_regime?: Regime
-        current_regime_z_score?: number | null
-        series?: SeriesPoint[]
-      }
-    | undefined
+  const quality = data?.meta
+  // Only a certified unit status admits the derived volatility series; an
+  // absent or mixed/unconfirmed status must not render ordinary-looking values
+  // (QA #98).
+  const derivedWithheld = Boolean(data) && (!['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+    || Boolean(quality?.unresolved_excluded_dates?.length))
+  const metric = derivedWithheld
+    ? undefined
+    : data?.data?.metrics?.parkinson_volatility as
+      | {
+          current_parkinson_vol_30d_pct?: number | null
+          current_close_close_vol_30d_pct?: number | null
+          close_to_park_ratio?: number | null
+          current_regime?: Regime
+          current_regime_z_score?: number | null
+          series?: SeriesPoint[]
+        }
+      | undefined
   const backendError = typeof data?.error === 'string' ? data.error : ''
 
-  const rows = (metric?.series || []).map((row) => ({
+  const rows = (metric?.series ||[]).map((row) => ({
     date: row.date,
     parkinson: Number(row.parkinson_vol_pct ?? 0),
     closeVol: Number(row.close_close_vol_pct ?? 0),
@@ -94,7 +102,8 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
       apiGroup: '/quant',
       endpoint: `/quant/${upperSymbol}?period=${period}&metrics=parkinson_volatility`,
       sourceLabel: 'Parkinson volatility',
-      lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt,
+      lastDataDate: data?.data?.last_data_date ?? null,
+      fetchedAt: dataUpdatedAt,
       adjustmentMode: data?.data?.adjustment_mode,
       extra: {
         points: rows.length,
@@ -102,7 +111,7 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
         parkinson30dPct: metric?.current_parkinson_vol_30d_pct ?? null,
       },
     }))
-  }, [currentRegime, data?.data?.adjustment_mode, data?.data?.computed_at, data?.data?.last_data_date, dataUpdatedAt, hasData, metric?.current_parkinson_vol_30d_pct, onDataChange, period, rows.length, upperSymbol])
+  }, [currentRegime, data?.data?.adjustment_mode, data?.data?.last_data_date, dataUpdatedAt, hasData, metric?.current_parkinson_vol_30d_pct, onDataChange, period, rows.length, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Parkinson volatility" icon={<Activity size={18} />} />
@@ -128,7 +137,7 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} 30D · ${(data?.data?.adjustment_mode || 'adjusted')} history`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} 30D · ${(data?.data?.adjustment_mode || 'adjusted')} history`} align="right" />
         </div>
       </div>
 
@@ -146,7 +155,13 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
-        <WidgetEmpty message={backendError || 'No volatility data'} icon={<Activity size={18} />} size="compact" />
+        <WidgetEmpty
+          message={derivedWithheld
+            ? 'Parkinson volatility unavailable: historical price units were not certified.'
+            : backendError || 'No volatility data'}
+          icon={<Activity size={18} />}
+          size="compact"
+        />
       ) : (
         <>
           <QuantWarningBanner warning={quantWarning} className="mb-2" />

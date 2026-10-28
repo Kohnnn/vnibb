@@ -21,6 +21,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantRunHistoryPanel } from '@/components/widgets/QuantRunHistoryPanel'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface PairLabWidgetProps {
   symbol: string
@@ -67,15 +68,26 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
   const backendPayload = backendState?.status === 'ok' ? backendState.payload : null
   const backendNotDeployed = backendState?.status === 'not_deployed'
 
+  // Only per-row `price_unit` markers certify each leg; a response-level
+  // `unit_status` cannot certify rows that carry no marker (QA #98).
+  const certifiedLegs = [primaryQuery.data, pairQuery.data].map((response) => {
+    const rows = response?.data ?? []
+    const unitStatus = response?.meta?.unit_status ?? ''
+    const expectedUnit = unitStatus === 'confirmed_vnd' ? 'VND' : 'index_points'
+    return rows.length > 0
+      && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(unitStatus)
+      && rows.every((row) => row.price_unit === expectedUnit)
+  })
+  const derivedWithheld = Boolean(primaryQuery.data || pairQuery.data)
+    && !certifiedLegs.every(Boolean)
+
   const stats = useMemo(() => {
-    if (!effectivePair) return null
+    if (!effectivePair || derivedWithheld) return null
     const a = toDatedCloses(primaryQuery.data?.data || [])
     const b = toDatedCloses(pairQuery.data?.data || [])
     if (!a.length || !b.length) return null
     return computePairStats(a, b)
-  }, [primaryQuery.data, pairQuery.data, effectivePair])
-
-  const hasData = Boolean(stats && stats.series.length)
+  }, [primaryQuery.data, pairQuery.data, effectivePair, derivedWithheld])
   const chartData = useMemo(
     () =>
       (stats?.series || [])
@@ -83,34 +95,44 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
         .map((point) => ({ date: point.date, z: Number((point.spreadZ as number).toFixed(3)) })),
     [stats],
   )
+  const hasData = Boolean(stats && stats.series.length)
 
   const isLoading = (primaryQuery.isLoading || pairQuery.isLoading) && !hasData
   const error = primaryQuery.error || pairQuery.error
   const isFetching = primaryQuery.isFetching || pairQuery.isFetching
 
+  // Both legs are inner-joined on date, so the last aligned point is the
+  // calculation input as-of; receipts only say when we retrieved it.
+  const lastDataDate = stats?.series.at(-1)?.date ?? null
+  const fetchedAt = Math.max(primaryQuery.dataUpdatedAt || 0, pairQuery.dataUpdatedAt || 0) || undefined
+
   useEffect(() => {
-    onDataChange?.({
-      __widgetRuntime: {
-        layoutHint: { empty: !hasData, compactHeight: 5 },
-        provenance: {
-          sourceLabel: 'Pair Lab (derived)',
-          apiGroup: '/equity',
-          endpoint: `/equity/historical?symbols=${upperSymbol},${effectivePair || '?'}`,
-          adjustmentMode: 'adjusted',
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/equity',
+        endpoint: `/equity/historical?symbols=${upperSymbol},${effectivePair || '?'}`,
+        sourceLabel: 'Pair Lab (derived)',
+        lastDataDate,
+        fetchedAt,
+        adjustmentMode: 'adjusted',
+        compactHeight: 5,
+        derived:true,
+        extra: {
+          rows: hasData && stats
+            ? [{
+                symbol_a: upperSymbol,
+                symbol_b: effectivePair,
+                aligned_days: stats.alignedDays,
+                rolling_correlation_63d: stats.currentCorrelation,
+                spread_z_score: stats.currentSpreadZ,
+                ar1_half_life_days: stats.halfLifeDays,
+              }]
+            : [],
         },
-      },
-      rows: hasData && stats
-        ? [{
-            symbol_a: upperSymbol,
-            symbol_b: effectivePair,
-            aligned_days: stats.alignedDays,
-            rolling_correlation_63d: stats.currentCorrelation,
-            spread_z_score: stats.currentSpreadZ,
-            ar1_half_life_days: stats.halfLifeDays,
-          }]
-        : [],
-    })
-  }, [hasData, onDataChange, upperSymbol, effectivePair, stats])
+      }),
+    )
+  }, [effectivePair, fetchedAt, hasData, lastDataDate, onDataChange, stats, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to open the pair lab" icon={<GitCompareArrows size={18} />} />
@@ -207,9 +229,13 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
         <WidgetError error={error as Error} onRetry={() => { void primaryQuery.refetch(); void pairQuery.refetch() }} />
       ) : !hasData ? (
         <WidgetEmpty
-          message="Not enough overlapping history"
+          message={derivedWithheld
+            ? 'Pair Lab unavailable: historical price units were not certified for both symbols.'
+            : 'Not enough overlapping history'}
           icon={<GitCompareArrows size={18} />}
-          detail="Both symbols need at least ~3 months of overlapping adjusted daily bars."
+          detail={derivedWithheld
+            ? 'Unmarked sessions are excluded; each leg needs certified rows to share one price basis.'
+            : 'Both symbols need at least ~3 months of overlapping adjusted daily bars.'}
         />
       ) : (
         <>
@@ -263,6 +289,8 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
 
           <WidgetMeta
             className="px-1 pt-1"
+            updatedAt={lastDataDate}
+            fetchedAt={fetchedAt}
             isFetching={isFetching && hasData}
             note={`${period} adjusted pair history`}
             align="right"

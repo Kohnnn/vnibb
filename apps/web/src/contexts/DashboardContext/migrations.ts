@@ -9,12 +9,18 @@ import { normalizeThesisConfig } from '@/lib/investorWorkflow';
 import {
     GLOBAL_MARKETS_DASHBOARD_ID,
     MAIN_DASHBOARD_ID,
+    QUANT_DASHBOARD_ID,
+    TECHNICAL_DASHBOARD_ID,
     LEGACY_DASHBOARD_NAME_RE,
     LEGACY_SIDEBAR_DASHBOARD_RE,
     LEGACY_MANAGE_TAB_NAME_RE,
     LEGACY_STALE_TAB_RE,
 } from './constants';
-import { createGlobalMarketsDashboard } from './systemDashboards';
+import {
+    createGlobalMarketsDashboard,
+    createQuantSystemDashboard,
+    createTechnicalSystemDashboard,
+} from './systemDashboards';
 
 import {
     TAB_WIDGET_TEMPLATES,
@@ -190,6 +196,32 @@ export const migrateDefaultInvestorHome = (dashboards: Dashboard[]): Dashboard[]
 
     return { ...dashboard, tabs, updatedAt: new Date().toISOString() };
 });
+
+// ============================================================================
+// Migrate Empty System Dashboard Tabs
+// ============================================================================
+
+// #110: the DashboardContext modularization dropped the Technical/Quant tab
+// specs, so the bundled factories emitted zero tabs. A profile that persisted
+// that state (or an empty published template) kept an empty workspace, which
+// rendered "no tabs available" and resolved no remembered tab or `?tab=` deep
+// link. Tabs cannot be deleted from a system dashboard, so an empty tab list is
+// never a deliberate user state: restore the bundled set.
+export const migrateEmptySystemDashboardTabs = (dashboards: Dashboard[]): Dashboard[] => {
+    const bundled: Record<string, Dashboard> = {
+        [TECHNICAL_DASHBOARD_ID]: createTechnicalSystemDashboard(),
+        [QUANT_DASHBOARD_ID]: createQuantSystemDashboard(),
+    };
+
+    return dashboards.map((dashboard) => {
+        if (dashboard.tabs.length > 0) return dashboard;
+
+        const replacement = bundled[dashboard.id];
+        if (!replacement || replacement.tabs.length === 0) return dashboard;
+
+        return { ...dashboard, tabs: replacement.tabs, updatedAt: new Date().toISOString() };
+    });
+};
 
 export const migrateLegacyGlobalMarketsDashboard = (dashboards: Dashboard[]): Dashboard[] => dashboards.map((dashboard) => {
     if (dashboard.id !== GLOBAL_MARKETS_DASHBOARD_ID) return dashboard;

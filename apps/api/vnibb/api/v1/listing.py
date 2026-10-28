@@ -63,7 +63,7 @@ class IndustriesResponse(BaseModel):
     description="Get list of all stock symbols in Vietnam market.",
 )
 async def get_all_symbols(
-    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|VND|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
 
 ) -> SymbolsResponse:
     """Fetch all stock symbols. Cached for 24 hours using database."""
@@ -73,12 +73,16 @@ async def get_all_symbols(
     cache_result = await cache_manager.get_listing_data(source=source)
     
     if cache_result.is_fresh:
-        # Convert Stock models to SymbolData
+        # Convert Stock models to SymbolData. `industry` is carried through when the
+        # cache row has one: dropping it left the Listing Browser's industry filter
+        # with only its "Unclassified" bucket (issue #107). A row with no stored
+        # industry stays null rather than being labelled with a guessed sector.
         data = [
             SymbolData(
                 symbol=stock.symbol,
                 organ_name=stock.company_name,
                 exchange=stock.exchange,
+                industry=stock.industry,
             )
             for stock in cache_result.data
         ]
@@ -115,6 +119,7 @@ async def get_all_symbols(
                     symbol=stock.symbol,
                     organ_name=stock.company_name,
                     exchange=stock.exchange,
+                    industry=stock.industry,
                 )
                 for stock in cache_result.data
             ]
@@ -132,7 +137,7 @@ async def get_all_symbols(
     description="Get symbols categorized by exchange (HOSE, HNX, UPCOM).",
 )
 async def get_symbols_by_exchange(
-    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|VND|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
 
     lang: str = Query(default="en", pattern=r"^(en|vi)$"),
 ) -> ExchangeSymbolsResponse:
@@ -154,7 +159,7 @@ async def get_symbols_by_exchange(
 )
 async def get_symbols_by_group(
     group: str,
-    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|VND|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
 
 ) -> GroupSymbolsResponse:
     """Fetch symbols in an index group."""
@@ -174,7 +179,7 @@ async def get_symbols_by_group(
     description="Get ICB (Industry Classification Benchmark) industry list.",
 )
 async def get_industries(
-    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|VND|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
 
 ) -> IndustriesResponse:
     """Fetch ICB industry classification. Cached for 24 hours using database."""

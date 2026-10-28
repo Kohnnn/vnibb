@@ -24,6 +24,7 @@ import { useQuantRegime } from '@/hooks/useQuantRegime'
 import { useQuantMetrics } from '@/lib/queries'
 import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
+import type { QuantPriceDiagnostics } from '@/lib/api'
 import {
   average,
   scoreDrawdown,
@@ -135,6 +136,10 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
     enabled: Boolean(upperSymbol),
   })
   const regime = useQuantRegime(upperSymbol, { period, enabled: Boolean(upperSymbol) })
+  const quality = quantQuery.data?.meta as QuantPriceDiagnostics | undefined
+  const certifiedUnits = ['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+  const derivedWithheld = !certifiedUnits || Boolean(quality?.unresolved_excluded_dates?.length)
+    || Boolean(quantQuery.data?.error) || regime.derivedWithheld !== false
 
   const metrics = quantQuery.data?.data?.metrics ?? EMPTY_METRICS
   const seasonality = metrics.seasonality as SeasonalityMetric | undefined
@@ -179,7 +184,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
   const compositeRiskScore = Math.round(
     average(radarData.map((item) => item.value).filter((value) => Number.isFinite(value))) || 0,
   )
-  const hasData = radarData.some((item) => item.value > 0) || regime.hasData
+  const hasData = !derivedWithheld && Boolean(quantQuery.data?.data) && (radarData.some((item) => item.value > 0) || regime.hasData)
   const isLoading = (quantQuery.isLoading || regime.isLoading) && !hasData
   const isFetching = quantQuery.isFetching || regime.isFetching
   const error = quantQuery.error || regime.error
@@ -192,18 +197,18 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
       apiGroup: '/quant',
       endpoint: `/quant/${upperSymbol}?period=${period}&metrics=seasonality,volume_delta,sortino,ema_respect,drawdown_recovery,benchmark_risk,calmar`,
       sourceLabel: 'Quant summary',
-      lastDataDate: quantQuery.data?.data?.last_data_date ?? quantQuery.data?.data?.computed_at ?? regime.updatedAt,
+      lastDataDate: quantQuery.data?.data?.last_data_date ?? regime.updatedAt ?? null,
+      fetchedAt: quantQuery.data?.data?.computed_at ?? quantQuery.dataUpdatedAt,
       adjustmentMode: quantQuery.data?.data?.adjustment_mode,
       derived: true,
       extra: {
-        compositeRiskScore,
-        regime: regime.regimeLabel,
-        metrics: Object.keys(metrics).length,
+        metrics: hasData ? Object.keys(metrics).length : 0,
+        ...(hasData ? { compositeRiskScore, regime: regime.regimeLabel } : {}),
       },
     }))
-  }, [compositeRiskScore, hasData, metrics, onDataChange, period, quantQuery.data?.data?.adjustment_mode, quantQuery.data?.data?.computed_at, quantQuery.data?.data?.last_data_date, regime.regimeLabel, regime.updatedAt, upperSymbol])
+  }, [compositeRiskScore, hasData, metrics, onDataChange, period, quantQuery.data?.data?.adjustment_mode, quantQuery.data?.data?.computed_at, quantQuery.data?.data?.last_data_date, quantQuery.dataUpdatedAt, regime.regimeLabel, regime.updatedAt, upperSymbol])
 
-  const exportRows = [
+  const exportRows = hasData ? [
     {
       symbol: upperSymbol,
       period,
@@ -226,7 +231,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
       calmar_ratio: calmar?.calmar_ratio ?? null,
       composite_risk_score: compositeRiskScore,
     },
-  ]
+  ] : []
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view quant summary" icon={<Gauge size={18} />} />
@@ -266,7 +271,8 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
             ))}
           </div>
           <WidgetMeta
-            updatedAt={quantQuery.data?.data?.last_data_date || quantQuery.data?.data?.computed_at || regime.updatedAt}
+            updatedAt={quantQuery.data?.data?.last_data_date ?? regime.updatedAt ?? null}
+            fetchedAt={quantQuery.data?.data?.computed_at ?? quantQuery.dataUpdatedAt}
             isFetching={isFetching && hasData}
             note={`${period} composite view · ${(quantQuery.data?.data?.adjustment_mode || 'adjusted')} history vs ${benchmarkRisk?.benchmark || 'VNINDEX'}`}
             align="right"
@@ -287,6 +293,8 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
           <WidgetSkeleton lines={8} />
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => quantQuery.refetch()} />
+        ) : derivedWithheld && (quantQuery.data || regime.hasData) ? (
+          <WidgetEmpty message="Quant summary unavailable: historical price inputs were not certified or remain unresolved." icon={<Gauge size={18} />} />
         ) : !hasData ? (
           <WidgetEmpty message="Quant summary is not available yet" icon={<Gauge size={18} />} />
         ) : (

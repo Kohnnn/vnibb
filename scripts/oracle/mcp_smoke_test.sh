@@ -4,7 +4,6 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-${1:-http://127.0.0.1:8001}}"
 BASE_URL="${BASE_URL%/}"
 MCP_URL="${MCP_URL:-${BASE_URL}/mcp}"
-
 if [[ -z "${HEALTH_URL:-}" ]]; then
   if [[ "$BASE_URL" =~ :[0-9]+$ ]]; then
     HEALTH_URL="${BASE_URL}/health"
@@ -12,170 +11,55 @@ if [[ -z "${HEALTH_URL:-}" ]]; then
     HEALTH_URL="${BASE_URL}/mcp-health"
   fi
 fi
-
-TIMEOUT="${TIMEOUT:-15}"
+TIMEOUT="${TIMEOUT:-20}"
+SYMBOL="${SYMBOL:-FPT}"
+PERIOD_TYPE="${PERIOD_TYPE:-year}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.oracle.yml}"
-MCP_SHARED_TOKEN="${VNIBB_MCP_SHARED_BEARER_TOKEN:-}"
+ENV_FILE="${ENV_FILE:-deployment/env.oracle}"
 PYTHON_MODE="${PYTHON_MODE:-auto}"
-CURL_BIN="${CURL_BIN:-}"
-NULL_SINK="/dev/null"
-status=0
+SCRIPT_DIR="$(dirname -- "${BASH_SOURCE[0]}")"
+EXPECTED_REVISION="${EXPECTED_REVISION:?Set EXPECTED_REVISION to the exact deployed commit before acceptance}"
+compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
-if [[ -z "$CURL_BIN" ]]; then
-  if command -v curl.exe >/dev/null 2>&1; then
-    CURL_BIN="curl.exe"
-  else
-    CURL_BIN="curl"
-  fi
-fi
-
-if [[ "$CURL_BIN" == "curl.exe" ]]; then
-  NULL_SINK="NUL"
-fi
-
-echo "VNIBB MCP smoke target: ${BASE_URL}"
-
-health_code="$($CURL_BIN -ksS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" "$HEALTH_URL" || true)"
-printf '%-14s %s -> %s\n' "mcp_health" "$HEALTH_URL" "$health_code"
-if [[ "$health_code" != "200" ]]; then
-  status=1
-fi
-
-mcp_code="$($CURL_BIN -ksS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" "$MCP_URL" || true)"
-printf '%-14s %s -> %s\n' "mcp_path" "$MCP_URL" "$mcp_code"
-if [[ "$mcp_code" == "000" ]]; then
-  status=1
-fi
-
-pick_python_mode() {
-  if [[ "$PYTHON_MODE" != "auto" ]]; then
-    printf '%s' "$PYTHON_MODE"
-    return
-  fi
-
-  if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE_FILE" ]]; then
-    if docker compose -f "$COMPOSE_FILE" ps mcp >/dev/null 2>&1; then
-      printf '%s' "container"
-      return
-    fi
-  fi
-
-  for candidate in python python3 py; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-      if "$candidate" -c "import mcp" >/dev/null 2>&1; then
-        printf '%s' "host:${candidate}"
-        return
-      fi
+if [[ "$PYTHON_MODE" == "auto" ]]; then
+  PYTHON_MODE=none
+  for candidate in python3 python py; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import mcp, httpx, jsonschema' >/dev/null 2>&1; then
+      PYTHON_MODE="host:${candidate}"
+      break
     fi
   done
-
-  printf '%s' "none"
-}
-
-run_python_probe() {
-  local mode
-  mode="$(pick_python_mode)"
-
-  if [[ "$mode" == "none" ]]; then
-    echo "MCP probe skipped: no usable Python+mcp client was found"
-    return 1
+  if [[ "$PYTHON_MODE" == "none" ]] && command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]; then
+    if [[ -n "$("${compose[@]}" ps --status running -q mcp)" ]]; then
+      PYTHON_MODE=container
+    fi
   fi
-
-  if [[ "$mode" == "container" ]]; then
-    docker compose -f "$COMPOSE_FILE" exec -T mcp python - "$MCP_URL" "$MCP_SHARED_TOKEN" <<'PY'
-import asyncio
-import json
-import sys
-
-import httpx
-from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
-
-url = sys.argv[1]
-token = sys.argv[2]
-headers = {}
-if token:
-    headers["Authorization"] = f"Bearer {token}"
-
-
-async def main() -> int:
-    async with httpx.AsyncClient(headers=headers, timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
-        async with streamable_http_client(url, http_client=client) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                tools = await session.list_tools()
-                result = await session.call_tool("get_database_status", arguments={})
-                if result.isError:
-                    print("MCP tool call returned an error")
-                    return 1
-                payload = result.structuredContent or {}
-                print(
-                    json.dumps(
-                        {
-                            "status": "ok",
-                            "tool_count": len(tools.tools),
-                            "connectivity": payload.get("connectivity"),
-                        },
-                        indent=2,
-                    )
-                )
-                return 0
-
-
-raise SystemExit(asyncio.run(main()))
-PY
-    return $?
-  fi
-
-  local python_bin
-  python_bin="${mode#host:}"
-  "$python_bin" - "$MCP_URL" "$MCP_SHARED_TOKEN" <<'PY'
-import asyncio
-import json
-import sys
-
-import httpx
-from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
-
-url = sys.argv[1]
-token = sys.argv[2]
-headers = {}
-if token:
-    headers["Authorization"] = f"Bearer {token}"
-
-
-async def main() -> int:
-    async with httpx.AsyncClient(headers=headers, timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
-        async with streamable_http_client(url, http_client=client) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                tools = await session.list_tools()
-                result = await session.call_tool("get_database_status", arguments={})
-                if result.isError:
-                    print("MCP tool call returned an error")
-                    return 1
-                payload = result.structuredContent or {}
-                print(
-                    json.dumps(
-                        {
-                            "status": "ok",
-                            "tool_count": len(tools.tools),
-                            "connectivity": payload.get("connectivity"),
-                        },
-                        indent=2,
-                    )
-                )
-                return 0
-
-
-raise SystemExit(asyncio.run(main()))
-PY
-}
-
-echo "Running MCP initialize + tool probe"
-if ! run_python_probe; then
-  status=1
 fi
 
-exit "$status"
+if [[ "$PYTHON_MODE" == "container" ]]; then
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo "Missing compose interpolation env file: $ENV_FILE" >&2
+    exit 1
+  fi
+  if [[ -z "$("${compose[@]}" ps --status running -q mcp)" ]]; then
+    echo "MCP container is not running; smoke never starts services" >&2
+    exit 1
+  fi
+  command=("${compose[@]}" exec -T)
+  if [[ -n "${VNIBB_MCP_SHARED_BEARER_TOKEN:-}" ]]; then
+    command+=(-e "VNIBB_MCP_SHARED_BEARER_TOKEN=${VNIBB_MCP_SHARED_BEARER_TOKEN}")
+  fi
+  if [[ -n "${SSL_CERT_FILE:-}" ]]; then
+    command+=(-e "SSL_CERT_FILE=${SSL_CERT_FILE}")
+  fi
+  command+=(mcp python)
+elif [[ "$PYTHON_MODE" == host:* ]]; then
+  command=("${PYTHON_MODE#host:}")
+else
+  echo "No Python MCP client. Install apps/api dependencies or use PYTHON_MODE=container with a running MCP service." >&2
+  exit 1
+fi
+
+echo "VNIBB MCP protocol smoke: authenticated read-only acceptance, runtime=${PYTHON_MODE}"
+# Reuse the acceptance client; never echo endpoint credentials or bearer values.
+"${command[@]}" - --mcp-url "$MCP_URL" --health-url "$HEALTH_URL" --symbol "$SYMBOL" --period-type "$PERIOD_TYPE" --timeout "$TIMEOUT" --expected-revision "$EXPECTED_REVISION" --smoke < "${SCRIPT_DIR}/mcp_acceptance.py"

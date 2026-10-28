@@ -65,10 +65,7 @@ test('publishes bounded runtime updates through cold, error, empty, and changed 
   mockDividends({ data: [{ ex_date: '2099-01-01', payment_date: '2099-01-03', cash_dividend: 1000, dividend_type: 'cash' }] })
   rerender(<Parent />)
   expect(publications).toHaveLength(4)
-  expect(publications[3]).toMatchObject({
-    __widgetRuntime: { layoutHint: { empty: false }, provenance: { updatedAt: '2099-01-01' } },
-    events: 2,
-  })
+  expect(publications[3]).toMatchObject({ events: 2 })
   expect(screen.getByText('Dividend Ladder')).toBeInTheDocument()
   expect(screen.getByText('Ex-Date')).toBeInTheDocument()
   expect(screen.getByText('Payment')).toBeInTheDocument()
@@ -80,14 +77,43 @@ test('publishes bounded runtime updates through cold, error, empty, and changed 
   mockDividends({ data: [{ record_date: '2099-02-01', stock_dividend: 10, dividend_type: 'stock' }] })
   rerender(<Parent />)
   expect(publications).toHaveLength(5)
-  expect(publications[4]).toMatchObject({
-    __widgetRuntime: { layoutHint: { empty: false }, provenance: { updatedAt: '2099-02-01' } },
-    events: 1,
-  })
+  expect(publications[4]).toMatchObject({ events: 1 })
   expect(screen.queryByText('Ex-Date')).not.toBeInTheDocument()
   expect(screen.getByText('Record Date')).toBeInTheDocument()
   expect(screen.getByText('Stock')).toBeInTheDocument()
   expect(screen.getByTestId('runtime-events')).toHaveTextContent('1')
   rerender(<Parent />)
   expect(publications).toHaveLength(5)
+})
+
+test.each<[number | null | undefined, string]>([
+  [0.25, 'Cash • 0.25%'],
+  [0, 'Cash • 0.00%'],
+  [1, 'Cash • 1.00%'],
+  [null, 'Cash'],
+  [undefined, 'Cash'],
+])('renders canonical dividend yield %s without scaling or inventing missing values', (dividendYield, label) => {
+  mockDividends({
+    data: [{ ex_date: '2099-01-01', cash_dividend: 1000, dividend_type: 'cash', dividend_yield: dividendYield }],
+  })
+
+  render(<DividendLadderWidget id="dividend-ladder" symbol="VNM" />)
+
+  expect(screen.getByText(label)).toBeInTheDocument()
+  expect(screen.getByText('VND1,000')).toBeInTheDocument()
+  expect(screen.getByText('Ex-Date')).toBeInTheDocument()
+})
+
+test.each([
+  [0, 'stock', '10.00% stock'],
+  [1000, 'mixed', 'VND1,000 + 10.00% stock'],
+] as const)('renders reported stock payout with %s cash (%s)', (cashDividend, type, payout) => {
+  mockDividends({
+    data: [{ ex_date: '2099-01-01', cash_dividend: cashDividend, stock_dividend: 10, type }],
+  })
+
+  render(<DividendLadderWidget id="dividend-ladder" symbol="VNM" />)
+
+  expect(screen.getByText(payout)).toBeInTheDocument()
+  expect(screen.queryByText('VND0')).not.toBeInTheDocument()
 })

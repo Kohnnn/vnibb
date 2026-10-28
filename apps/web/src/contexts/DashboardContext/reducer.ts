@@ -1,6 +1,6 @@
 // Dashboard Reducer - extracted from DashboardContext.tsx
 
-import type { DashboardState, DashboardAction } from './types';
+import type { DashboardState, DashboardAction, DashboardTab } from './types';
 import { autoFitGridItems, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { isEditableDashboardId, canEditDashboard } from './helpers';
 import {
@@ -11,26 +11,57 @@ import {
     INITIAL_FOLDER_ID,
 } from './constants';
 
+// #102: one place decides which tab an active dashboard shows. Every action
+// that changes the active dashboard must resolve its tab in the same dispatch,
+// otherwise the body renders a permanent no-tab spinner and the URL drops its
+// `tab` param. The current tab is kept only when it belongs to the dashboard.
+function resolveActiveTabId(tabs: DashboardTab[], preferredTabId: string | null): string | null {
+    if (preferredTabId && tabs.some((tab) => tab.id === preferredTabId)) {
+        return preferredTabId;
+    }
+    return [...tabs].sort((a, b) => a.order - b.order)[0]?.id ?? null;
+}
+
 // ============================================================================
 // Reducer
 // ============================================================================
 
 export function dashboardReducer(state: DashboardState, action: DashboardAction): DashboardState {
     switch (action.type) {
-        case 'LOAD_STATE':
+        case 'LOAD_STATE': {
+            // #102: restore paths (storage, backend snapshot, the error fallback)
+            // can name a dashboard whose tab id is stale or missing. Normalize
+            // here so no load path can leave the body on a no-tab spinner.
+            const activeDashboard = action.payload.dashboards.find(
+                (d) => d.id === action.payload.activeDashboardId
+            );
             return {
                 ...state,
                 dashboards: action.payload.dashboards,
                 folders: action.payload.folders,
                 activeDashboardId: action.payload.activeDashboardId,
-                activeTabId: action.payload.activeTabId,
+                activeTabId: activeDashboard
+                    ? resolveActiveTabId(activeDashboard.tabs, action.payload.activeTabId)
+                    : action.payload.activeTabId,
             };
+        }
 
-        case 'SET_ACTIVE_DASHBOARD':
+        case 'SET_ACTIVE_DASHBOARD': {
+            // Resolve the tab in the same dispatch as the dashboard change: a
+            // header/workspace click must never leave an active dashboard with
+            // an unresolvable (stale or foreign) activeTabId, which rendered an
+            // indefinite no-tab spinner (#102).
+            const targetDashboard = state.dashboards.find((d) => d.id === action.payload.dashboardId);
+            const requestedTabId = action.payload.tabId;
+            const activeTabId = requestedTabId === undefined
+                ? resolveActiveTabId(targetDashboard?.tabs ?? [], state.activeTabId)
+                : requestedTabId;
             return {
                 ...state,
                 activeDashboardId: action.payload.dashboardId,
+                activeTabId,
             };
+        }
 
         case 'ADD_DASHBOARD':
             return {
@@ -62,15 +93,21 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
                 ),
             };
 
-        case 'DELETE_DASHBOARD':
+        case 'DELETE_DASHBOARD': {
+            const dashboards = state.dashboards.filter((d) => d.id !== action.payload.dashboardId);
+            const deletedActive = state.activeDashboardId === action.payload.dashboardId;
+            const nextActive = deletedActive ? dashboards[0] ?? null : null;
             return {
                 ...state,
-                dashboards: state.dashboards.filter((d) => d.id !== action.payload.dashboardId),
-                activeDashboardId:
-                    state.activeDashboardId === action.payload.dashboardId
-                        ? state.dashboards.find((d) => d.id !== action.payload.dashboardId)?.id || null
-                        : state.activeDashboardId,
+                dashboards,
+                activeDashboardId: deletedActive ? nextActive?.id ?? null : state.activeDashboardId,
+                // #102: deleting the active workspace switches dashboards, so
+                // resolve its tab here too instead of keeping a foreign tab id.
+                activeTabId: deletedActive
+                    ? resolveActiveTabId(nextActive?.tabs ?? [], null)
+                    : state.activeTabId,
             };
+        }
 
         case 'ADD_FOLDER':
             return {
@@ -421,7 +458,13 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
         }
 
         case 'APPLY_SYSTEM_TEMPLATES': {
-            const systemTemplates = action.payload;
+            // #110: a published record can arrive empty or malformed (partial
+            // response, failed publish). Only a template that actually carries a
+            // usable tab list may replace the bundled layout — otherwise an empty
+            // `tabs` array wiped a working system workspace and left it tabless.
+            const systemTemplates = action.payload.filter(
+                (template) => Array.isArray(template.tabs) && template.tabs.length > 0
+            );
             const existingIds = new Set(state.dashboards.map((d) => d.id));
             const merged = state.dashboards.map((d) => {
                 const template = systemTemplates.find((t) => t.id === d.id);
@@ -436,9 +479,22 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
                 };
             });
             const appended = systemTemplates.filter((t) => !existingIds.has(t.id));
+            // #110: an empty or malformed published response must leave the
+            // bundled layout untouched — `appended` is only non-empty when a
+            // record carried a usable tab list (filter above).
+            const dashboards = appended.length > 0 ? [...merged, ...appended] : merged;
+            // #102/#110: published templates arrive after the first paint. A
+            // workspace opened before they landed has no tab to resolve to, so
+            // resolve it here — in the same dispatch — instead of leaving the
+            // body on a no-tab spinner. An already-valid active tab is kept.
+            const activeDashboard = dashboards.find((d) => d.id === state.activeDashboardId);
+            const activeTabId = activeDashboard
+                ? resolveActiveTabId(activeDashboard.tabs, state.activeTabId)
+                : state.activeTabId;
             return {
                 ...state,
-                dashboards: appended.length > 0 ? [...merged, ...appended] : merged,
+                dashboards,
+                activeTabId,
             };
         }
 

@@ -326,7 +326,7 @@ export async function getHistoricalPrices(
         startDate?: string;
         endDate?: string;
         interval?: string;
-        source?: string;
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         signal?: AbortSignal;
     }
@@ -436,6 +436,9 @@ export interface QuoteData {
     value: number | null;
     updatedAt: string | null;
     updated_at?: string | null;
+    price_unit?: 'VND' | 'index_points' | 'unknown';
+    as_of?: string | null;
+    upstream_source?: string | null;
 }
 
 export interface QuoteResponse {
@@ -443,6 +446,12 @@ export interface QuoteResponse {
     data: QuoteData | null;
     cached?: boolean;
     error?: string | null;
+    meta?: {
+        source?: string | null;
+        upstream_source?: string | null;
+        as_of?: string | null;
+        stale?: boolean | null;
+    } | null;
 }
 
 export async function getQuote(symbol: string, signal?: AbortSignal): Promise<QuoteResponse> {
@@ -770,6 +779,9 @@ export interface FreshnessBucket {
     last_data_date: string | null;
     raw_last_data_date?: string | null;
     settled_last_data_date?: string | null;
+    timestamp_basis?: string;
+    scope?: string;
+    fetched_at?: string | null;
     age_days: number | null;
     status: 'fresh' | 'stale' | 'critical' | 'unknown';
     reason?: 'latest_sync_unsettled' | null;
@@ -794,6 +806,9 @@ export interface DataSourceEntry {
     label: string;
     description: string;
     last_updated: string | null;
+    timestamp_basis?: string;
+    scope?: string;
+    fetched_at?: string | null;
     age_days: number | null;
     status: 'fresh' | 'stale' | 'critical' | 'unknown';
     next_sync: string | null;
@@ -972,7 +987,7 @@ export interface ScreenerFilterParams {
     target_upside_min?: number;
     industry?: string;
     limit?: number;
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+    source?: 'VCI';
 
     // Dynamic Filters
     filters?: string; // JSON FilterGroup
@@ -1199,11 +1214,29 @@ export interface TTMSnapshotResponse {
     error?: string | null;
 }
 
+export interface GrowthComparisonDetail {
+    value?: number | null;
+    current?: number | null;
+    previous?: number | null;
+    negative_base?: boolean;
+    transition?: 'loss_to_profit' | 'profit_to_loss' | null;
+    unavailable_reason?: string | null;
+    current_period?: string | null;
+    previous_period?: string | null;
+    basis_status?: 'confirmed' | 'legacy_basis_unconfirmed' | 'incompatible';
+}
+
 export interface GrowthRatesResponse {
     data: {
         symbol: string;
         yoy: Record<string, number | null>;
         qoq: Record<string, number | null>;
+        growth_convention?: 'absolute_prior_denominator';
+        growth_formula?: string;
+        comparisons?: {
+            yoy?: Record<string, GrowthComparisonDetail>;
+            qoq?: Record<string, GrowthComparisonDetail>;
+        };
         as_of: {
             annual?: string | null;
             quarter?: string | null;
@@ -1394,6 +1427,7 @@ export interface DividendRecord {
     issue_year?: number | null;
     year?: number | null;
     annual_dps?: number | null;
+    /** Canonical percent points, computed by the dividends endpoint as annual DPS / VND price * 100. */
     dividend_yield?: number | null;
     description?: string | null;
 }
@@ -1710,7 +1744,7 @@ export async function getSectorsCatalog(options?: {
 export async function getSectorTopMovers(options?: {
     type?: 'gainers' | 'losers';
     limit?: number;
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+    source?: 'VCI';
 
 }): Promise<SectorTopMoversResponse> {
     const params = {
@@ -1751,7 +1785,7 @@ export interface SectorPerformanceResponse {
 }
 
 export async function getSectorPerformance(_options?: {
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+    source?: 'VCI';
 
 }): Promise<SectorPerformanceResponse> {
     return fetchAPI<SectorPerformanceResponse>('/market/sector-performance');
@@ -2146,7 +2180,7 @@ export interface QuantResponse {
     }
     meta?: {
         count?: number
-    }
+    } & QuantPriceDiagnostics
     error?: string | null
 }
 
@@ -2175,6 +2209,7 @@ export interface SeasonalityMatrixResponse {
         hit_rate_pct?: number | null
         current_period?: SeasonalityMatrixRow | null
         warning?: string | null
+        data_quality_note?: string | null
     }
     meta?: {
         count?: number
@@ -2187,7 +2222,7 @@ export interface QuantBacktestRequest {
     as_of_date?: string
     initial_capital?: number
     fee_bps?: number
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+    source?: 'VCI'
     adjustment_mode?: 'raw' | 'adjusted'
     strategy?: {
         type: 'moving_average_crossover'
@@ -2207,6 +2242,34 @@ export interface QuantBacktestTrade {
     return_pct?: number | null
     holding_days?: number | null
     status?: string | null
+}
+
+export interface QuantBasis {
+    include_latest_quote?: boolean
+    period?: string
+    start_date?: string
+    end_date?: string
+    adjustment_mode?: string
+    source?: string
+    objective?: string
+    fast_windows?: number[]
+    slow_windows?: number[]
+    // Server-stated run parameters (issue #106): a backtest and a sweep cell are
+    // only comparable when these match.
+    initial_capital?: number
+    fee_bps?: number
+    execution?: string
+    fast_window?: number
+    slow_window?: number
+    sharpe_convention?: string
+}
+
+export interface QuantPriceDiagnostics {
+    unit_status?: string | null
+    observed_session_count?: number | null
+    excluded_session_count?: number | null
+    excluded_price_unit_dates?: string[] | null
+    unresolved_excluded_dates?: string[] | null
 }
 
 export interface QuantBacktestResponse {
@@ -2229,12 +2292,13 @@ export interface QuantBacktestResponse {
         }
         trades: QuantBacktestTrade[]
         warnings?: string[]
+        basis?: QuantBasis
     }
     meta?: {
         count?: number
         data_points?: number
         last_data_date?: string | null
-    }
+    } & QuantPriceDiagnostics
     error?: string | null
 }
 
@@ -2242,7 +2306,7 @@ export interface QuantSweepRequest {
     period?: QuantPeriod
     initial_capital?: number
     fee_bps?: number
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+    source?: 'VCI'
     adjustment_mode?: 'raw' | 'adjusted'
     fast_windows?: number[]
     slow_windows?: number[]
@@ -2276,12 +2340,13 @@ export interface QuantSweepResponse {
         best?: QuantSweepCell | null
         cells: QuantSweepCell[]
         warnings?: string[]
+        basis?: QuantBasis
     }
     meta?: {
         count?: number
         data_points?: number
         last_data_date?: string | null
-    }
+    } & QuantPriceDiagnostics
     error?: string | null
 }
 
@@ -2290,7 +2355,7 @@ export async function getQuantMetrics(
     options?: {
         period?: QuantPeriod
         metrics?: QuantMetric[]
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+        source?: 'VCI'
         adjustmentMode?: 'raw' | 'adjusted'
     }
 ): Promise<QuantResponse> {
@@ -2310,7 +2375,7 @@ export async function getSeasonalityMatrix(
     options?: {
         granularity?: SeasonalityGranularity
         period?: QuantPeriod
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+        source?: 'VCI'
         adjustmentMode?: 'raw' | 'adjusted'
     }
 ): Promise<SeasonalityMatrixResponse> {
@@ -2394,7 +2459,7 @@ export interface GammaExposurePayload {
 
 export interface GammaExposureResponse {
     data: GammaExposurePayload;
-    meta?: { count?: number };
+    meta?: { count?: number } & QuantPriceDiagnostics;
     error?: string | null;
 }
 
@@ -2487,7 +2552,7 @@ export interface SmartMoneyPayload {
 
 export interface SmartMoneyResponse {
     data: SmartMoneyPayload;
-    meta?: { count?: number };
+    meta?: { count?: number } & QuantPriceDiagnostics;
     error?: string | null;
 }
 
@@ -2588,7 +2653,7 @@ export async function getMarketStructureTests(
     symbol: string,
     options?: {
         period?: QuantPeriod
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+        source?: 'VCI'
         adjustmentMode?: 'raw' | 'adjusted'
     }
 ): Promise<MarketStructureTestsResponse> {
@@ -2607,7 +2672,7 @@ export async function getPairDiagnostics(
     other: string,
     options?: {
         period?: QuantPeriod
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+        source?: 'VCI'
         adjustmentMode?: 'raw' | 'adjusted'
     }
 ): Promise<PairDiagnosticsResponse> {
@@ -2625,7 +2690,7 @@ export async function getGammaExposure(
     symbol: string,
     options?: {
         period?: QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
     }
 ): Promise<GammaExposureResponse> {
@@ -2643,7 +2708,7 @@ export async function getMomentumProfile(
     symbol: string,
     options?: {
         period?: QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
     }
 ): Promise<MomentumProfileResponse> {
@@ -3914,6 +3979,8 @@ export interface ChartDataPoint {
     low: number;
     close: number;
     volume: number;
+    price_unit?: 'VND' | 'index_points' | 'unknown';
+    price_source?: string | null;
 }
 
 export interface ChartDataResponse {

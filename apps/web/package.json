@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit",
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
-    "test:e2e:smoke": "playwright test --project=chromium"
+    "test:e2e:smoke": "playwright test --project=chromium",
+    "qa:live-smoke": "node ./scripts/qa-live-smoke.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.8.0",

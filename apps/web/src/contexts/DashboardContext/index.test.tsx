@@ -1,5 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useLayoutEffect, useRef } from 'react';
 import { NotesWidget } from '@/components/widgets/NotesWidget';
+import { WidgetSettingsModal } from '@/components/modals/WidgetSettingsModal';
+import { GlobalMarketsSymbolProvider } from '@/contexts/GlobalMarketsSymbolContext';
 import type { Dashboard, SystemDashboardTemplateListResponse } from '@/types/dashboard';
 import {
   DashboardProvider,
@@ -64,6 +67,39 @@ function DashboardStateProbe() {
       <button onClick={() => createDashboard({ name: 'Unsaved dashboard' })}>create dashboard</button>
       <button onClick={() => { setActiveDashboard(customDashboard.id); setActiveTab('saved-tab'); }}>open saved tab</button>
       <button onClick={() => { setActiveDashboard('42'); setActiveTab('removed-tab'); }}>open removed cloud tab</button>
+    </>
+  );
+}
+
+function DashboardCatalogueProbe() {
+  const { dashboardCatalogueReady, localStateReady } = useDashboard();
+  return <>
+    <output data-testid="catalogue-ready">{String(dashboardCatalogueReady)}</output>
+    <output data-testid="local-state-ready">{String(localStateReady)}</output>
+  </>;
+}
+
+// #102: enters a workspace from a layout effect — the same position as the
+// URL-restore effect, which runs before the provider's own passive state-ref
+// sync effect. The provider's ref therefore still holds the pre-hydration state
+// when the entry happens, exactly as it does on a real deep link.
+function WorkspaceEntryProbe() {
+  const { localStateReady, setActiveDashboard, state } = useDashboard();
+  const entered = useRef(false);
+  useLayoutEffect(() => {
+    if (!localStateReady || entered.current) return;
+    entered.current =true;
+    setActiveDashboard('default-quant');
+  }, [localStateReady, setActiveDashboard]);
+
+  const quantTabs = state.dashboards.find((dashboard) => dashboard.id === 'default-quant')?.tabs ?? [];
+  const firstByOrder = [...quantTabs].sort((a, b) => a.order - b.order)[0]?.id ?? '';
+
+  return (
+    <>
+      <output data-testid="active-dashboard">{state.activeDashboardId}</output>
+      <output data-testid="active-tab">{state.activeTabId}</output>
+      <output data-testid="quant-first-tab">{firstByOrder}</output>
     </>
   );
 }
@@ -169,6 +205,28 @@ describe('DashboardProvider backend sync flag', () => {
     expect(screen.getByTestId('dashboards')).toHaveTextContent(/dash-/);
   });
 
+  it('selects a valid tab when a workspace is entered before its layout reaches the state ref', async () => {
+    // #102: the deep-link/URL restore runs from a child effect, which fires
+    // before this provider's own state-ref sync effect. Entering a workspace at
+    // that moment therefore resolves no remembered tab even though the
+    // workspace has tabs. Passing that null through as an explicit `tabId` made
+    // the reducer store `activeTabId: null` and the body spun forever; the
+    // workspace must instead fall back to its own tab resolution.
+    // `config` is `as const` (readonly props), so Object.assign keeps the
+    // mutation cast-free.
+    Object.assign(config, { backendSyncEnabled:false });
+    render(
+      <DashboardProvider>
+        <WorkspaceEntryProbe />
+      </DashboardProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('active-dashboard')).toHaveTextContent('default-quant'));
+    const firstQuantTab = screen.getByTestId('quant-first-tab').textContent;
+    expect(firstQuantTab).toBeTruthy();
+    expect(screen.getByTestId('active-tab')).toHaveTextContent(firstQuantTab as string);
+  });
+
   it('moves the active selection to a surviving cloud dashboard when its cached dashboard is deleted', async () => {
     (config as { backendSyncEnabled: boolean }).backendSyncEnabled = true;
     const removed = { ...customDashboard, id: '42', tabs: [{ id: 'removed-tab', name: 'Removed', order: 0, widgets: [] }] };
@@ -209,6 +267,86 @@ describe('DashboardProvider backend sync flag', () => {
     expect(screen.getByTestId('dashboards')).toHaveTextContent('import-copy:Imported local');
   });
 
+  // #102: the cloud snapshot resolves well after mount. It must never move the
+  // user back to `loadedDashboards[0]` when the workspace they navigated to
+  // simply is not part of the snapshot — that reverted both the URL and the open
+  // workspace while its widget tab was still rendering.
+  it('does not revert a live selection to the first cloud dashboard when the snapshot omits it', async () => {
+    (config as { backendSyncEnabled: boolean }).backendSyncEnabled = true;
+    // The saved tab must actually exist on the dashboard, otherwise the tab-id
+    // normalization in LOAD_STATE would legitimately drop it and the assertion
+    // would not be testing the revert it claims to.
+    const liveDashboard = {
+      ...customDashboard,
+      tabs: [{ id: 'saved-tab', name: 'Saved tab', order: 0, widgets: [] }],
+    };
+    const cloud = { ...customDashboard, id: '42', name: 'Cloud dashboard', tabs: [{ id: 'cloud-tab', name: 'Cloud', order: 0, widgets: [] }] };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([liveDashboard, cloud]));
+    window.localStorage.setItem(FOLDERS_KEY, JSON.stringify([]));
+    window.localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_STORAGE_VERSION);
+    window.localStorage.setItem(MIGRATION_VERSION_KEY, String(CURRENT_MIGRATION_VERSION));
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId('dashboards')).toHaveTextContent('custom-restored-dashboard:Restored custom dashboard'));
+
+    // Real live-selection transition, through the harness's own control.
+    fireEvent.click(screen.getByRole('button', { name: 'open saved tab' }));
+    expect(screen.getByTestId('active-dashboard')).toHaveTextContent('custom-restored-dashboard');
+    expect(screen.getByTestId('active-tab')).toHaveTextContent('saved-tab');
+
+    // The snapshot lands later and lists only the cloud workspace.
+    const onLoad = jest.mocked(useLoadFromBackend).mock.calls.at(-1)?.[0];
+    act(() => onLoad?.([cloud]));
+
+    expect(screen.getByTestId('active-dashboard')).toHaveTextContent('custom-restored-dashboard');
+    expect(screen.getByTestId('active-tab')).toHaveTextContent('saved-tab');
+  });
+
+});
+
+describe('DashboardProvider catalogue readiness', () => {
+  const originalBackendSyncEnabled = config.backendSyncEnabled;
+  const mockBackendLoad = jest.mocked(useLoadFromBackend);
+  const mockPublishedTemplates = jest.mocked(getPublishedSystemDashboardTemplates);
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: jest.fn() });
+    Object.assign(config, { backendSyncEnabled: true });
+    mockBackendLoad.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    Object.assign(config, { backendSyncEnabled: originalBackendSyncEnabled });
+    mockBackendLoad.mockReset();
+    jest.clearAllMocks();
+  });
+
+  it('waits for published templates and backend snapshot after local restoration', async () => {
+    const { promise, resolve: finishPublished } = Promise.withResolvers<SystemDashboardTemplateListResponse>();
+    mockPublishedTemplates.mockReturnValue(promise);
+    const view = render(<DashboardProvider><DashboardCatalogueProbe /></DashboardProvider>);
+    expect(screen.getByTestId('local-state-ready')).toHaveTextContent('true');
+    expect(screen.getByTestId('catalogue-ready')).toHaveTextContent('false');
+
+    mockBackendLoad.mockReturnValue(true);
+    view.rerender(<DashboardProvider><DashboardCatalogueProbe /></DashboardProvider>);
+    expect(screen.getByTestId('catalogue-ready')).toHaveTextContent('false');
+
+    await act(async () => { finishPublished({ count: 0, data: [] }); });
+    expect(screen.getByTestId('catalogue-ready')).toHaveTextContent('true');
+  });
+
+  it.each(['empty', 'rejected'] as const)('settles after an %s published response with backend loading disabled', async scenario => {
+    Object.assign(config, { backendSyncEnabled: false });
+    mockBackendLoad.mockReturnValue(true);
+    if (scenario === 'empty') mockPublishedTemplates.mockResolvedValue({ count: 0, data: [] });
+    else mockPublishedTemplates.mockRejectedValue(new Error('unavailable'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    render(<DashboardProvider><DashboardCatalogueProbe /></DashboardProvider>);
+    await waitFor(() => expect(screen.getByTestId('catalogue-ready')).toHaveTextContent('true'));
+    warn.mockRestore();
+  });
 });
 
 describe('DashboardProvider published templates', () => {
@@ -294,6 +432,37 @@ describe('DashboardProvider browser persistence', () => {
   afterEach(() => {
     jest.useRealTimers();
     jest.restoreAllMocks();
+  });
+
+  it.each([
+    ['an explicit local-period opt-out', { periodSyncGroup: null, defaultPeriod: 'Q' }, { periodSyncGroup: null, defaultPeriod: 'Q' }],
+    ['an omitted period group', { defaultPeriod: 'Q' }, { defaultPeriod: 'Q' }],
+  ])('preserves %s when widget settings are saved and reloaded', async (_label, advancedConfig, expectedConfig) => {
+    const existing: Dashboard = {
+      ...customDashboard,
+      tabs: [{ id: 'saved-tab', name: 'Saved tab', order: 0, widgets: [{
+        id: 'local-income', type: 'income_statement', tabId: 'saved-tab', config: {},
+        layout: { i: 'local-income', x: 0, y: 0, w: 12, h: 8 },
+      }] }],
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([existing]));
+
+    const settings = (
+      <DashboardProvider>
+        <GlobalMarketsSymbolProvider>
+          <WidgetSettingsModal isOpen onClose={() => {}} dashboardId={existing.id} tabId="saved-tab" widgetId="local-income" />
+        </GlobalMarketsSymbolProvider>
+      </DashboardProvider>
+    );
+    const { unmount } = render(settings);
+    const rawJson = await screen.findByLabelText('Raw JSON');
+    fireEvent.change(rawJson, { target: { value: JSON.stringify({ ...advancedConfig, unrelated: null }) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(storedDashboards().find((dashboard) => dashboard.id === existing.id)?.tabs[0].widgets[0].config).toEqual(expectedConfig));
+    unmount();
+    render(settings);
+    await waitFor(() => expect(JSON.parse((screen.getByLabelText('Raw JSON') as HTMLTextAreaElement).value)).toEqual(expectedConfig));
   });
 
   it('reloads bottom-placed widgets without changing authored dashboard geometry or config', async () => {

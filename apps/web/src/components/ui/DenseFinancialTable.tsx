@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
 import { Sparkline } from '@/components/ui/Sparkline'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
-import { calculatePercentChange, EMPTY_VALUE } from '@/lib/units'
+import { EMPTY_VALUE, describePercentChange, percentChangeDetail } from '@/lib/units'
 import { cn } from '@/lib/utils'
 
 export interface DenseTableColumn {
@@ -308,12 +308,13 @@ export function DenseFinancialTable({
   }
 
   return (
-    <div className={cn('w-full', className)}>
+    <div className={cn('min-w-0 w-full', className)}>
       <div
         ref={scrollRef}
-        className="overflow-auto"
-        role="listbox"
-        aria-label="Financial statement rows"
+        className="overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-400"
+        role="region"
+        aria-label="Financial statement periods; scroll horizontally for all columns"
+        tabIndex={0}
         onKeyDown={(event) => {
           if (event.key === 'Escape') onSelectionClear?.()
         }}
@@ -335,9 +336,9 @@ export function DenseFinancialTable({
                     column.align === 'left' ? 'text-left' : 'text-right',
                     sortable ? 'cursor-pointer select-none hover:text-[var(--text-primary)]' : '',
                     chartable && isSelectedColumn ? 'text-blue-400' : '',
-                    chartable ? 'focus-visible:outline-2 focus-visible:outline-blue-400' : ''
+                    sortable || chartable ? 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-400' : ''
                   )}
-                  style={column.width ? { minWidth: column.width, width: column.width } : { minWidth: `${yearColumnWidth}px`, width: `${yearColumnWidth}px` }}
+                  style={{ ...(column.width ? { minWidth: column.width, width: column.width } : { minWidth: `${yearColumnWidth}px`, width: `${yearColumnWidth}px` }), scrollMarginLeft: metricColumnWidth }}
                   aria-sort={isActiveSort ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
                   aria-pressed={chartable ? isSelectedColumn : undefined}
                   aria-label={chartable ? `Chart ${column.label}` : undefined}
@@ -376,8 +377,6 @@ export function DenseFinancialTable({
               <Fragment key={row.id}>
                 <tr
                   key={row.id}
-                  role={row.selectable ? 'option' : undefined}
-                  aria-selected={row.selectable ? row.selected === true : undefined}
                   className={cn(
                     'h-6 border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-hover)]',
                     rowIndex % 2 === 1 && !row.isGroup ? 'bg-[var(--bg-secondary)]/25' : '',
@@ -465,12 +464,16 @@ export function DenseFinancialTable({
                         ? asNumber(row.values[comparisonColumnKey])
                         : null
 
-                    const growthPct = showGrowth
-                      ? calculatePercentChange(currentNumber, previousNumber, {
+                    // Share the Growth Bridge's absolute-prior arithmetic without
+                    // implying profitability for non-earnings metrics.
+                    const growthDetail = showGrowth && !row.isGroup
+                      ? percentChangeDetail(currentNumber, previousNumber, {
+                          metricKey: row.id,
                           minimumBase: 0.001,
                           clamp: 'yoy_change',
                         })
                       : null
+                    const growthPct = growthDetail?.change ?? null
 
                     return (
                       <td
@@ -491,17 +494,23 @@ export function DenseFinancialTable({
                       >
                         <div className="flex min-h-[28px] flex-col items-end justify-center gap-0.5">
                           <span className="block leading-4">{displayValue}</span>
-                        {growthPct !== null ? (
+                        {growthPct !== null && growthDetail ? (
                           <span
                             className={cn(
                               'inline-flex rounded px-1 py-0.5 text-[9px] font-semibold leading-none',
-                              growthPct === 0
+                              growthDetail.basis === 'change'
+                                ? 'bg-slate-500/15 text-slate-300'
+                                : growthDetail.hasNegativeBase
+                                ? 'bg-amber-500/15 text-amber-400'
+                                : growthPct === 0
                                 ? 'bg-slate-500/15 text-slate-300'
                                 : growthPct >= 0
                                 ? 'bg-emerald-500/15 text-emerald-500'
                                 : 'bg-rose-500/15 text-rose-500'
                             )}
+                            title={describePercentChange(growthDetail)}
                           >
+                            {growthDetail.label ? `${growthDetail.label} ` : ''}
                             {growthPct >= 0 ? '+' : ''}
                             {growthPct.toFixed(1)}%
                           </span>
@@ -528,6 +537,7 @@ export function DenseFinancialTable({
                         <div className="text-[11px] text-[var(--text-muted)]">Need at least two reported periods to draw a trend.</div>
                       ) : (
                         <div className="h-[120px] w-full">
+                          {footerNote ? <div className="text-[10px] text-[var(--text-muted)]">{footerNote.split(' • ')[0]}</div> : null}
                           <ChartMountGuard className="h-full" minHeight={100} minWidth={120}>
                             <ResponsiveContainer width="100%" height="100%" minWidth={120} minHeight={80}>
                             <AreaChart data={inlineChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -539,7 +549,7 @@ export function DenseFinancialTable({
                                 interval={inlineChartData.length > 12 ? Math.max(1, Math.ceil(inlineChartData.length / 8)) - 1 : 0}
                                 minTickGap={12}
                               />
-                              <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} width={48} />
+                              <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} width={48} tickFormatter={(value) => valueFormatter ? valueFormatter(value, row, visibleColumns[0]?.key || '') : defaultFormatter(value)} />
                               <RechartsTooltip
                                 contentStyle={{
                                   background: 'var(--bg-secondary)',
@@ -547,7 +557,7 @@ export function DenseFinancialTable({
                                   borderRadius: '8px',
                                   fontSize: '11px',
                                 }}
-                                formatter={(value) => [defaultFormatter(Array.isArray(value) ? value[0] : value), row.label]}
+                                formatter={(value) => [valueFormatter ? valueFormatter(Array.isArray(value) ? value[0] : value, row, visibleColumns[0]?.key || '') : defaultFormatter(Array.isArray(value) ? value[0] : value), row.label]}
                               />
                               <Area type="monotone" dataKey="value" stroke="#38bdf8" strokeWidth={2} fill="rgba(56,189,248,0.18)" />
                             </AreaChart>

@@ -98,8 +98,17 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
     const signals = ta?.signals;
     const observedSignalCount = (finite(signals?.buy_count) ?? 0) + (finite(signals?.neutral_count) ?? 0) + (finite(signals?.sell_count) ?? 0);
     const hasData = Boolean(ta && (observedSignalCount > 0 || (finite(signals?.total_indicators) ?? 0) > 0 || signals?.indicators?.length));
+    const quality = ta?.data_quality;
+    const certifiedUnits = ['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '');
+    const derivedWithheld = Boolean(ta) && (!certifiedUnits
+        || Boolean(quality?.unresolved_session_count || quality?.unresolved_excluded_dates?.length)
+        || ['no_data', 'unavailable', 'error', 'unresolved', 'mixed', 'unconfirmed'].includes(quality?.status ?? '')
+        || signals?.overall_signal === 'unavailable');
+    const unavailableReason = !certifiedUnits
+        ? 'Technical summary unavailable: historical price units were not certified.'
+        : signals?.data_quality?.note ?? 'Technical summary unavailable: source quality is unresolved.';
     const isFallback = Boolean(error && hasData);
-    const overallSignal = signals?.overall_signal || 'neutral';
+    const overallSignal = signals?.overall_signal || 'unavailable';
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !ta, { timeoutMs: 8_000 });
     const movingAverageSignals = ta?.moving_averages?.signals
         ? Object.entries(ta.moving_averages.signals).slice(0, 4)
@@ -122,16 +131,17 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
     useEffect(() => {
         onDataChange?.(
             buildWidgetRuntime({
-                empty: !hasData,
+                empty: !hasData || derivedWithheld,
                 apiGroup: '/technical',
                 endpoint: `/analysis/ta/${symbol}/full?timeframe=${timeframe}`,
                 sourceLabel: 'Technical analysis',
-                lastDataDate: dataUpdatedAt,
+                lastDataDate: data?.data_quality?.latest_date ?? null,
+                fetchedAt: dataUpdatedAt,
                 stale: isFallback,
-                extra: hasData ? { overallSignal, signalBias } : undefined,
+                extra: hasData && !derivedWithheld ? { overallSignal, signalBias } : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, timeframe, overallSignal, signalBias]);
+    }, [onDataChange, hasData, derivedWithheld, isFallback, data?.data_quality?.latest_date, dataUpdatedAt, symbol, timeframe, overallSignal, signalBias]);
 
     const timeframeLabel = {
         'D': 'Daily',
@@ -190,12 +200,15 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
                 <WidgetSkeleton lines={6} />
             ) : error && !hasData ? (
                 <WidgetError error={error as Error} onRetry={() => refetch()} />
+            ) : derivedWithheld ? (
+                <WidgetEmpty message={unavailableReason} />
             ) : !hasData ? (
                 <WidgetEmpty message="No technical indicators available." detail="The technical response did not contain usable indicator coverage." />
             ) : (
                 <div className="flex-1 overflow-y-auto px-2.5 py-2 space-y-3 scrollbar-hide text-left">
                     <WidgetMeta
-                        updatedAt={dataUpdatedAt}
+                        updatedAt={data?.data_quality?.latest_date ?? null}
+                        fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
                         note={`${timeframeLabel} · ${finite(ta?.data_quality?.bars) ?? 'unknown'} bars · ${ta?.data_quality?.status ?? 'quality not reported'} · aggregated indicators, not advice`}

@@ -44,7 +44,8 @@ export function SectorRotationRadarWidget({ id, widgetGroup, onRemove, onDataCha
         apiGroup: '/market',
         endpoint: '/market/sector-performance',
         sourceLabel: 'Rotation leaders & laggards',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate: null,
+        fetchedAt: dataUpdatedAt,
         stale: Boolean(error && hasData),
         extra: hasData ? { sectorCount: sectors.length } : undefined,
       }),
@@ -63,7 +64,8 @@ export function SectorRotationRadarWidget({ id, widgetGroup, onRemove, onDataCha
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={null}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={Boolean(error && hasData)}
             note="Rotation leaders & laggards"

@@ -15,7 +15,7 @@ export function useVnstockSource(): VnstockSource {
         const { preferredVnstockSource } = useDataSources();
         return preferredVnstockSource;
     } catch {
-        return 'KBS';
+        return 'VCI';
     }
 }
 
@@ -237,7 +237,11 @@ export function useRatioHistory(
     const period = options?.period || 'year';
     return useQuery({
         queryKey: equityQueryKeys.ratioHistory(symbol, period, ratios, options?.limit),
-        queryFn: () => api.getRatioHistory(symbol, { ratios, period, limit: options?.limit }),
+        queryFn: async () => {
+            const response = await api.getRatioHistory(symbol, { ratios, period, limit: options?.limit });
+            if (response.error) throw new Error(response.error);
+            return response;
+        },
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 60 * 60 * 1000,
     });
@@ -405,6 +409,12 @@ export interface StockQuoteView {
     open: number | null;
     updatedAt: string | null;
     cached: boolean;
+    price_unit?: 'VND' | 'index_points' | 'unknown';
+    error?: string | null;
+    source?: string | null;
+    upstreamSource?: string | null;
+    asOf?: string | null;
+    stale?: boolean | null;
 }
 
 export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Promise<StockQuoteView> {
@@ -435,6 +445,12 @@ export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Pro
         open: quoteData.open ?? quoteData.day_open ?? null,
         updatedAt: quoteData.updatedAt ?? quoteData.updated_at ?? null,
         cached: response.cached ?? false,
+        price_unit: quoteData.price_unit ?? 'unknown',
+        error: response.error ?? null,
+        source: response.meta?.source ?? null,
+        upstreamSource: response.meta?.upstream_source ?? quoteData.upstream_source ?? null,
+        asOf: response.meta?.as_of ?? quoteData.as_of ?? null,
+        stale: response.meta?.stale ?? null,
     };
 }
 
@@ -468,7 +484,7 @@ export const historicalQueryKey = (
         startDate?: string;
         endDate?: string;
         interval?: string;
-        source?: string;
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
     }
 ) => ['historical', symbol, params] as const;
@@ -479,12 +495,12 @@ export function useHistoricalPrices(
         startDate?: string;
         endDate?: string;
         interval?: string;
-        source?: string;
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
 ) {
-    let preferredSource: VnstockSource = 'KBS';
+    let preferredSource: VnstockSource = 'VCI';
 
     try {
         const { preferredVnstockSource } = useDataSources();
@@ -504,7 +520,7 @@ export function useHistoricalPrices(
 
     return useQuery({
         queryKey: historicalQueryKey(symbol, historyParams),
-        queryFn: () => api.getHistoricalPrices(symbol, { ...options, source }),
+        queryFn: ({ signal }) => api.getHistoricalPrices(symbol, { ...options, source, signal }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         gcTime: 15 * 60 * 1000,

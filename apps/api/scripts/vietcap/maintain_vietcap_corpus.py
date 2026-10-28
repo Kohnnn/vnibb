@@ -21,8 +21,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]  # .../vnibb
 WORKSPACE_ROOT = REPO_ROOT.parent
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import vietcap_writers as w  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from vnibb.services import vietcap_ingestion as w  # noqa: E402
 
 
 def load_env_file(path: Path) -> None:

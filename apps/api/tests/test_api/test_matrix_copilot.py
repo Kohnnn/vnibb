@@ -1,9 +1,11 @@
 import json
 import time
 from copy import deepcopy
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
@@ -18,6 +20,9 @@ from vnibb.services.matrix_copilot_context import (
     build_matrix_copilot_context,
 )
 from vnibb.services.matrix_service import resolve_matrix_selection
+
+OWNER = "00000000-0000-4000-8000-000000000020"
+OTHER = "00000000-0000-4000-8000-000000000021"
 
 
 def frozen_record():
@@ -47,7 +52,7 @@ def frozen_record():
             "limitations": ["Missing source field" if index == 0 else "Frozen limitation " + "basis " * 250], "review_state": "unreviewed",
         })
     return {
-        "owner_id": "matrix-owner",
+        "owner_id": OWNER,
         "snapshot": {
             "schema_version": "matrix-v1", "matrix_id": str(uuid4()), "snapshot_id": snapshot_id,
             "revision": "frozen-revision", "created_at": "2025-03-02", "synthetic": False,
@@ -69,6 +74,17 @@ async def matrix_chat(monkeypatch, test_db, test_engine):
     await test_db.commit()
     monkeypatch.setattr(copilot, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False))
     monkeypatch.setattr(settings, "supabase_jwt_secret", "matrix-copilot-test-secret")
+    from vnibb.core import auth
+    monkeypatch.setattr(settings, "supabase_url", "https://matrix-auth.invalid")
+    monkeypatch.setattr(settings, "supabase_anon_key", "disposable-fixture-key")
+    state = {"status": 200}
+    def respond(request):
+        user = jwt.get_unverified_claims(request.headers["authorization"].split(" ", 1)[1])["sub"]
+        return httpx.Response(state["status"], json={"id": user})
+    monkeypatch.setattr(auth, "httpx", SimpleNamespace(
+        AsyncClient=lambda **kwargs: AsyncClient(transport=httpx.MockTransport(respond), **kwargs),
+        RequestError=httpx.RequestError,
+    ))
     monkeypatch.setenv("MATRIX_EXPORT_ALLOWED_SOURCES", "matrix_test")
     monkeypatch.setattr(copilot.ai_context_service, "build_runtime_context", AsyncMock(side_effect=AssertionError("latest data forbidden")))
     monkeypatch.setattr(copilot.ai_runtime_config_service, "get_runtime_config", AsyncMock(return_value={"provider": "openrouter", "model": "test-model"}))
@@ -78,12 +94,17 @@ async def matrix_chat(monkeypatch, test_db, test_engine):
     monkeypatch.setattr(copilot.ai_telemetry_service, "record_response", AsyncMock())
     app = FastAPI()
     app.include_router(copilot.router)
+    app.state.session_authority = state
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        client.session_authority = state
         yield client, record, completion
 
 
-def auth_header(user="matrix-owner"):
-    token = jwt.encode({"sub": user, "email": "test@example.invalid", "exp": int(time.time()) + 300}, settings.supabase_jwt_secret, algorithm="HS256")
+def auth_header(user=OWNER):
+    now = int(time.time())
+    token = jwt.encode({"sub": user, "email": "test@example.invalid", "exp": now + 300, "iat": now,
+                        "iss": "https://matrix-auth.invalid/auth/v1", "aud": "authenticated",
+                        "session_id": str(uuid4())}, settings.supabase_jwt_secret, algorithm="HS256")
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -103,7 +124,7 @@ async def test_matrix_send_reaches_actual_provider_payload_without_truncation(ma
     question = "Which company has the most reliable cash conversion, and why?"
     body["message"] = "Compare the ten frozen selected cells. " + "context " * 235 + question
     assert len(body["message"]) < 2000
-    expected = await resolve_matrix_selection(test_db, "matrix-owner", body["matrix_selection"])
+    expected = await resolve_matrix_selection(test_db, OWNER, body["matrix_selection"])
     response = await client.post("/chat/stream", json=body, headers=auth_header())
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
@@ -131,7 +152,7 @@ async def test_matrix_send_reaches_actual_provider_payload_without_truncation(ma
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("user,status", [(None, 401), ("other-owner", 404)])
+@pytest.mark.parametrize("user,status", [(None, 401), (OTHER, 404)])
 async def test_matrix_send_rejects_unbound_or_wrong_owner(matrix_chat, user, status):
     client, record, completion = matrix_chat
     response = await client.post("/chat/stream", json=request_body(record), headers=auth_header(user) if user else {})
@@ -146,7 +167,7 @@ async def test_matrix_send_rejects_unbound_or_wrong_owner(matrix_chat, user, sta
 async def test_matrix_send_reauthorizes_revoked_selection(matrix_chat, test_db):
     client, record, completion = matrix_chat
     body = request_body(record)
-    await resolve_matrix_selection(test_db, "matrix-owner", body["matrix_selection"])
+    await resolve_matrix_selection(test_db, OWNER, body["matrix_selection"])
     test_db.add(AppKeyValue(key=f"matrix:revoked:{record['snapshot']['snapshot_id']}", value={"revoked": True}))
     await test_db.commit()
     response = await client.post("/chat/stream", json=body, headers=auth_header())
@@ -178,7 +199,7 @@ async def test_matrix_selection_bounds_reject_not_truncate(matrix_chat):
 @pytest.mark.asyncio
 async def test_matrix_context_rejects_oversize_instead_of_silent_truncation(matrix_chat, test_db):
     _, record, _ = matrix_chat
-    packet = await resolve_matrix_selection(test_db, "matrix-owner", request_body(record)["matrix_selection"])
+    packet = await resolve_matrix_selection(test_db, OWNER, request_body(record)["matrix_selection"])
     oversized = deepcopy(packet)
     oversized["snapshot"]["limitations"] = ["x" * MAX_MATRIX_CONTEXT_BYTES]
     with pytest.raises(HTTPException) as error:
@@ -189,7 +210,7 @@ async def test_matrix_context_rejects_oversize_instead_of_silent_truncation(matr
 @pytest.mark.asyncio
 async def test_normal_chat_does_not_require_matrix_auth(matrix_chat, monkeypatch):
     client, _, completion = matrix_chat
-    monkeypatch.setattr(copilot, "get_current_user", AsyncMock(side_effect=AssertionError("normal auth changed")))
+    monkeypatch.setattr(copilot, "require_active_user", AsyncMock(side_effect=AssertionError("normal auth changed")))
     normal_context = AsyncMock(return_value={"source_catalog": [], "market_context": []})
     monkeypatch.setattr(copilot.ai_context_service, "build_runtime_context", normal_context)
     response = await client.post("/chat/stream", json={"message": "Analyze VNM"})
@@ -198,6 +219,17 @@ async def test_normal_chat_does_not_require_matrix_auth(matrix_chat, monkeypatch
     assert response.headers["cache-control"] == "no-cache"
     normal_context.assert_awaited_once()
     completion.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 503])
+async def test_matrix_send_rechecks_logout_and_authority_outage_before_provider(matrix_chat, status):
+    client, record, completion = matrix_chat
+    client.session_authority["status"] = status
+    response = await client.post("/chat/stream", json=request_body(record), headers=auth_header())
+    assert response.status_code == status
+    assert response.headers["cache-control"] == "no-store"
+    completion.assert_not_awaited()
 
 
 @pytest.mark.asyncio

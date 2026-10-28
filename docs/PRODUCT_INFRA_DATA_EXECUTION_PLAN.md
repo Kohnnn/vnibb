@@ -357,7 +357,6 @@ docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run
 BASE_URL=https://<stable-host> bash scripts/oracle/healthcheck.sh
 BASE_URL=https://<stable-host> bash scripts/oracle/smoke_test.sh
 BASE_URL=https://<stable-host> bash scripts/oracle/runtime_verify.sh
-bash scripts/oracle/check_vnstock_premium.sh
 ```
 
 ## Rollback Rules

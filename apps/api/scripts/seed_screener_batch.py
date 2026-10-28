@@ -108,6 +108,7 @@ async def seed_screener_batch(batch_size=100, max_stocks=2000):
                             "roe": record.get('roe'),
                             "roa": record.get('roa'),
                             "price": record.get('price'),
+                            "extended_metrics": {"price_unit": "unknown", "price_source": "vnstock_ratio:VCI"},
                             "volume": record.get('volume'),
                             "exchange": record.get('exchange'),
                             "industry": record.get('industry_name'),

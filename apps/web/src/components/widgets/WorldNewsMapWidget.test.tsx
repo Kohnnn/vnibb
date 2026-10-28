@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { WorldNewsLiveStreamWidget } from '@/components/widgets/WorldNewsLiveStreamWidget'
 import { WorldNewsMapWidget } from '@/components/widgets/WorldNewsMapWidget'
 import { WorldNewsSourcesWidget } from '@/components/widgets/WorldNewsSourcesWidget'
+import { deriveWidgetHealth } from '@/lib/widgetHealth'
 
 jest.mock('@tanstack/react-query', () => ({
   useQuery: jest.fn(),
@@ -100,6 +101,86 @@ describe('WorldNewsMapWidget', () => {
       'href',
       'https://cafef.vn/thi-truong-chung-khoan.rss'
     )
+  })
+
+  test('reports the article observation as as-of, not the query receipt', () => {
+    const onDataChange = jest.fn()
+    mockUseQuery.mockReturnValue({
+      data: {
+        buckets: [
+          {
+            id: 'vn', label: 'Vietnam', region: 'Vietnam', country_code: 'VN', country_name: 'Vietnam',
+            latitude: 16.0544, longitude: 108.2022, article_count: 1, source_count: 1, failed_feed_count: 0,
+            top_category: 'markets', top_sources: ['CafeF Markets'], latest_headline: 'VN-Index extends gains',
+            latest_published_at: '2026-05-01T09:00:00Z', latest_articles: [article],
+          },
+        ],
+        total_articles: 1, source_count: 1, feed_count: 1, failed_feed_count: 0,
+        fetched_at: '2026-05-01T09:01:00Z', region: 'vietnam', category: 'markets', language: null, freshness_hours: 72,
+      },
+      isLoading:false, error: null, refetch: jest.fn(), isFetching:false,
+      dataUpdatedAt: new Date('2026-10-08T12:00:00Z').getTime(),
+    } as any)
+
+    render(<WorldNewsMapWidget id="world-news-map" onDataChange={onDataChange} />)
+
+    const runtime = onDataChange.mock.calls.at(-1)![0].__widgetRuntime.provenance
+    expect(runtime.updatedAt).toBe('2026-05-01T09:00:00.000Z')
+    expect(runtime.fetchedAt).toBe('2026-05-01T09:01:00Z')
+  })
+
+  test('leaves as-of unknown when the bucket carries no observation', () => {
+    const onDataChange = jest.fn()
+    mockUseQuery.mockReturnValue({
+      data: {
+        buckets: [
+          {
+            id: 'vn', label: 'Vietnam', region: 'Vietnam', country_code: 'VN', country_name: 'Vietnam',
+            latitude: 16.0544, longitude: 108.2022, article_count: 1, source_count: 1, failed_feed_count: 0,
+            top_category: 'markets', top_sources: ['CafeF Markets'], latest_headline: 'No date',
+            latest_published_at: null, latest_articles: [{ ...article, published_at: null }],
+          },
+        ],
+        total_articles: 1, source_count: 1, feed_count: 1, failed_feed_count: 0,
+        fetched_at: null, region: 'vietnam', category: 'markets', language: null, freshness_hours: 72,
+      },
+      isLoading:false, error: null, refetch: jest.fn(), isFetching:false,
+      dataUpdatedAt: new Date('2026-10-08T12:00:00Z').getTime(),
+    } as any)
+
+    render(<WorldNewsMapWidget id="world-news-map" onDataChange={onDataChange} />)
+
+    const runtime = onDataChange.mock.calls.at(-1)![0].__widgetRuntime.provenance
+    expect(deriveWidgetHealth(runtime).label).toBe('As-of unknown')
+    expect(runtime.fetchedAt).toBe(new Date('2026-10-08T12:00:00Z').getTime())
+    expect(runtime.warnings?.[0]).toContain('1 of 1')
+  })
+
+  test('marks error-with-data cached and stale without promoting receipt to as-of', () => {
+    const onDataChange = jest.fn()
+    mockUseQuery.mockReturnValue({
+      data: {
+        buckets: [
+          {
+            id: 'vn', label: 'Vietnam', region: 'Vietnam', country_code: 'VN', country_name: 'Vietnam',
+            latitude: 16.0544, longitude: 108.2022, article_count: 1, source_count: 1, failed_feed_count: 0,
+            top_category: 'markets', top_sources: ['CafeF Markets'], latest_headline: 'VN-Index extends gains',
+            latest_published_at: '2026-05-01T09:00:00Z', latest_articles: [article],
+          },
+        ],
+        total_articles: 1, source_count: 1, feed_count: 1, failed_feed_count: 0,
+        fetched_at: '2026-05-01T09:01:00Z', region: 'vietnam', category: 'markets', language: null, freshness_hours: 72,
+      },
+      isLoading:false, error: new Error('map request failed'), refetch: jest.fn(), isFetching:false,
+      dataUpdatedAt: new Date('2026-10-08T12:00:00Z').getTime(),
+    } as any)
+
+    render(<WorldNewsMapWidget id="world-news-map" onDataChange={onDataChange} />)
+
+    const runtime = onDataChange.mock.calls.at(-1)![0].__widgetRuntime.provenance
+    expect(runtime.updatedAt).toBe('2026-05-01T09:00:00.000Z')
+    expect(runtime.cached).toBe(true)
+    expect(runtime.stale).toBe(true)
   })
 })
 

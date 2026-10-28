@@ -14,6 +14,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from vnibb.core.exceptions import ProviderError
+from vnibb.providers.vnstock.runtime import validate_source
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ class PriceBoardData(BaseModel):
 class PriceBoardQueryParams(BaseModel):
     """Query parameters for price board."""
     symbols: List[str]
-    source: str = "KBS"
+    source: str = Field(default="VCI", pattern=r"^VCI$")
 
 
 
@@ -80,7 +81,7 @@ class VnstockPriceBoardFetcher:
     @staticmethod
     async def fetch(
         symbols: List[str],
-        source: str = "KBS",
+        source: str = "VCI",
     ) -> List[PriceBoardData]:
 
         """
@@ -88,60 +89,35 @@ class VnstockPriceBoardFetcher:
 
         Args:
             symbols: List of stock symbols (e.g., ['VNM', 'FPT', 'VIC'])
-            source: Data source (KBS or VCI). KBS is the recommended primary;
-                VCI is used as fallback when KBS is degraded.
+            source: Free VCI data source
 
         Returns:
             List of PriceBoardData records
         """
+        source = validate_source(source)
         if not symbols:
             return []
 
-        # Source fallback chain: try the requested source first, then alternate.
-        # Trading() only accepts {KBS, VCI}.
-        primary = (source or "KBS").upper()
-        if primary not in {"KBS", "VCI"}:
-            primary = "KBS"
-        fallback_chain = [primary]
-        for alt in ("KBS", "VCI"):
-            if alt not in fallback_chain:
-                fallback_chain.append(alt)
+        try:
+            def _fetch():
+                from vnibb.providers.vnstock.runtime import get_trading_class
 
-        records: list = []
-        last_error: Optional[Exception] = None
-        for src in fallback_chain:
-            try:
-                def _fetch(_src: str = src):
-                    from vnibb.providers.vnstock.runtime import get_trading_class
+                Trading = get_trading_class()
+                trading = Trading(source=source)
+                df = trading.price_board(
+                    symbols_list=[s.upper() for s in symbols],
+                    flatten_columns=True,
+                    drop_levels=[0],
+                )
+                return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
 
-                    Trading = get_trading_class()
-                    trading = Trading(source=_src.upper())
-
-                    df = trading.price_board(
-                        symbols_list=[s.upper() for s in symbols],
-                        flatten_columns=True,
-                        drop_levels=[0],
-                    )
-                    return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
-
-                loop = asyncio.get_event_loop()
-                records = await loop.run_in_executor(None, _fetch)
-                if records:
-                    if src != primary:
-                        logger.info(
-                            "Price board recovered via fallback source %s for %d symbols",
-                            src,
-                            len(symbols),
-                        )
-                    break
-            except Exception as e:  # noqa: BLE001
-                last_error = e
-                logger.warning("Price board fetch failed via %s: %s", src, e)
-                continue
+            loop = asyncio.get_event_loop()
+            records = await loop.run_in_executor(None, _fetch)
+        except Exception as e:
+            logger.warning("Price board fetch failed via %s: %s", source, e)
+            raise ProviderError(f"Failed to fetch price board: {e}", "vnstock") from e
 
         if not records:
-            if last_error is not None:
-                raise ProviderError(f"Failed to fetch price board: {last_error}", "vnstock")
             return []
 
         try:
@@ -186,7 +162,7 @@ class VnstockPriceBoardFetcher:
                     ceiling=_coalesce("ceiling", "ceilingPrice", "ceiling_price"),
                     floor=_coalesce("floor", "floorPrice", "floor_price"),
                     reference=_coalesce("reference", "refPrice", "ref_price", "reference_price"),
-                    source=src,
+                    source=source,
                 ))
 
             return result

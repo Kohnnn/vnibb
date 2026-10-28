@@ -63,11 +63,12 @@ export function TopMoversWidget({
       ? `Requested ${mode === 'gainer' ? 'gainers' : 'losers'} unavailable; showing last-session fallback${sessionLabel ? ` (${sessionLabel})` : ''}.`
       : `Requested ${mode === 'gainer' ? 'gainers' : 'losers'} unavailable; showing fallback movers.`
     : null;
-  const sourceUpdatedAt =
-    getLatestTimestampValue([
+  const sourceUpdatedAt = isLastSession
+    ? getLatestTimestampValue([
       data?.updated_at,
-      ...stocks.map((stock) => (stock as { updated_at?: string | null }).updated_at),
-    ]) ?? dataUpdatedAt;
+      ...stocks.map((stock) => 'updated_at' in stock && typeof stock.updated_at === 'string' ? stock.updated_at : null),
+    ]) ?? null
+    : null;
 
   const handleSymbolSelect = (symbol: string) => {
     onSymbolClick?.(symbol);
@@ -82,11 +83,12 @@ export function TopMoversWidget({
         endpoint: `/market/top-movers?type=${mode}&index=VNINDEX&limit=10`,
         sourceLabel: mode === 'gainer' ? 'Top gainers' : 'Top losers',
         lastDataDate: sourceUpdatedAt,
+        fetchedAt: dataUpdatedAt,
         stale: isFallback || isLastSession,
         extra: hasData ? { mode, count: stocks.length, fallback: isFallback, lastSession: isLastSession } : undefined,
       }),
     );
-  }, [hasData, sourceUpdatedAt, isFallback, isLastSession, mode, stocks.length, onDataChange]);
+  }, [hasData, sourceUpdatedAt, dataUpdatedAt, isFallback, isLastSession, mode, stocks.length, onDataChange]);
 
   const toNumber = (value: unknown): number | null => {
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -136,6 +138,7 @@ export function TopMoversWidget({
         <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={sourceUpdatedAt}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback || isLastSession}
             note={

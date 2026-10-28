@@ -6,8 +6,9 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.stock import Stock
+from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.trading import FinancialRatio
 from vnibb.services.cache_manager import CacheResult
 from vnibb.services.comparison_service import ComparisonService, StockMetrics, get_comparison_data
@@ -37,6 +38,8 @@ async def test_get_stock_metrics_backfills_bvps_and_roic_from_financial_ratios(
             fiscal_quarter=None,
             bvps=25_000.0,
             roic=18.5,
+            interest_coverage=8.0,
+            raw_data={"ratio_units": {"roic": "percent"}},
             pb_ratio=1.28,
             updated_at=datetime.utcnow(),
         )
@@ -79,6 +82,7 @@ async def test_get_stock_metrics_backfills_bvps_and_roic_from_financial_ratios(
     assert result.metrics["bvps"] == 25_000.0
     assert result.metrics["roic"] == 18.5
     assert result.metrics["pb"] == 1.28
+    assert result.metrics.get("interest_coverage") is None
 
 
 @pytest.mark.asyncio
@@ -175,7 +179,8 @@ async def test_get_peers_treats_zero_pe_as_missing_and_backfills_snapshot(
             market_cap=900.0,
             pe=12.3,
             roe=14.0,
-            price=28_000.0,
+            price=28.0,
+            extended_metrics={"price_unit": "THOUSAND_VND", "ratio_units": {"roe": "percent"}},
             source="KBS",
             created_at=datetime.utcnow(),
         )
@@ -215,6 +220,7 @@ async def test_get_peers_treats_zero_pe_as_missing_and_backfills_snapshot(
     assert result.count == 1
     assert result.peers[0].symbol == "SSI"
     assert result.peers[0].pe_ratio == pytest.approx(12.3)
+    assert result.peers[0].price == 28_000.0
 
 
 @pytest.mark.asyncio
@@ -316,3 +322,329 @@ async def test_get_comparison_data_derives_missing_metrics_and_sanitizes_negativ
     assert metrics["fcf_yield"] == pytest.approx((130.0 / 2_500.0) * 100)
     assert metrics["ocf_sales"] == pytest.approx((210.0 / 1_200.0) * 100)
     assert metrics["debt_equity"] == pytest.approx(900.0 / 1_100.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "close", "expected_cap"),
+    [
+        ("vnstock_vnd:KBS", 32_000.0, 3_200_000_000_000.0),
+        ("KBS", 32.0, 3_200_000_000_000.0),
+        ("vnstock", 32.0, 3_000_000_000_000.0),
+        ("ohlcv_backfill_full", 32_000.0, 3_000_000_000_000.0),
+    ],
+)
+async def test_market_cap_recompute_requires_known_vnd_price(
+    test_engine, test_db, monkeypatch, source, close, expected_cap
+):
+    test_db.add(Stock(id=1, symbol="VCI", exchange="HOSE"))
+    test_db.add(Company(symbol="VCI", outstanding_shares=100_000_000))
+    test_db.add(StockPrice(
+        id=1, symbol="VCI", stock_id=1, time=date.today(), interval="1D", source=source,
+        open=close, high=close, low=close, close=close, volume=100,
+    ))
+    await test_db.commit()
+    service = ComparisonService()
+
+    async def fake_get_screener_data(*_args, **_kwargs):
+        return CacheResult(
+            data=[ScreenerSnapshot(symbol="VCI", snapshot_date=date.today(), market_cap=3_000_000_000_000)],
+            is_stale=False, cached_at=datetime.utcnow(), hit=True,
+        )
+
+    monkeypatch.setattr(service.cache_manager, "get_screener_data", fake_get_screener_data)
+    monkeypatch.setattr(
+        "vnibb.services.comparison_service.async_session_maker",
+        async_sessionmaker(test_engine, expire_on_commit=False),
+    )
+    result = await service.get_stock_metrics("VCI")
+    assert result.metrics["market_cap"] == pytest.approx(expected_cap)
+
+
+@pytest.mark.asyncio
+async def test_price_performance_excludes_unknown_units_and_preserves_points(monkeypatch):
+    from vnibb.providers.vnstock.equity_historical import EquityHistoricalData
+
+    async def fake_fetch(params):
+        unit = "index_points" if params.symbol == "VNINDEX" else "VND" if params.symbol == "VCI" else "unknown"
+        return [
+            EquityHistoricalData(symbol=params.symbol, time=day, price_unit=unit,
+                                 open=close, high=close, low=close, close=close, volume=100)
+            for day, close in [(date(2026, 9, 1), 100.0), (date(2026, 9, 2), 110.0)]
+        ]
+
+    monkeypatch.setattr("vnibb.providers.vnstock.equity_historical.VnstockEquityHistoricalFetcher.fetch", fake_fetch)
+    result = await ComparisonService().compare_price_performance(["VCI", "VNINDEX", "UNKNOWN"])
+    assert result[-1].values == {"VCI": pytest.approx(110.0), "VNINDEX": pytest.approx(110.0)}
+
+
+def test_normalize_comparison_metric_never_infers_a_magnitude():
+    """#106: stored comparison percents are canonical; no magnitude heuristics.
+
+    The canonical percent values are already scaled (the derived backfill
+    multiplies by 100). A stored fraction must not be silently promoted, and an
+    out-of-bound value is unknown rather than divided down to fit.
+    """
+    from vnibb.services.comparison_service import _normalize_comparison_metric
+
+    # Whole-unit percent stays exactly as stored (fixture unit is whole).
+    assert _normalize_comparison_metric("ocf_sales", 1) == 1
+    assert _normalize_comparison_metric("ocf_sales", 21.5) == 21.5
+    # A fraction is no longer promoted to 100x.
+    assert _normalize_comparison_metric("roe", 0.25) == 0.25
+    # A value above the plausible percent bound is unknown, not rescaled.
+    assert _normalize_comparison_metric("roe", 25_000.0) is None
+    # Non-numeric and missing stay missing.
+    assert _normalize_comparison_metric("roe", None) is None
+    assert _normalize_comparison_metric("roe", "") is None
+
+
+def test_ratio_json_percent_keys_follow_the_writer_fraction_contract():
+    """#106: raw-JSON `ocf_sales`/`fcf_yield` are stored as fractions.
+
+    `_build_ratio_enrichment` writes `operating_cash_flow / revenue` and
+    `free_cash_flow / market_cap`, while the comparison contract declares
+    `format="percent"`. The read site converts by key name so one metric cannot
+    render 100x apart depending on which fallback supplied it. No other key and
+    no column is rescaled.
+    """
+    from types import SimpleNamespace
+
+    from vnibb.services.comparison_service import _metric_from_ratio_row, _ratio_json_metric
+
+    raw_data = {"ocf_sales": 0.001, "fcf_yield": 0.052, "roe": 0.25}
+    assert _ratio_json_metric("ocf_sales", raw_data, "ocfSales") == pytest.approx(0.1)
+    assert _ratio_json_metric("fcf_yield", raw_data, "fcfYield") == pytest.approx(5.2)
+    # A key with no fraction writer keeps its stored magnitude.
+    assert _ratio_json_metric("roe", raw_data) == pytest.approx(0.25)
+
+    row = SimpleNamespace(pe_ratio=12.0, raw_data=raw_data)
+    assert _metric_from_ratio_row(row, "ocf_sales") == pytest.approx(0.1)
+    # A column value is returned as stored, never rescaled.
+    assert _metric_from_ratio_row(row, "pe") == pytest.approx(12.0)
+
+
+def test_ttm_statement_snapshot_requires_consecutive_certified_single_quarters():
+    """#106: a four-row sum is only TTM when the rows are certified consecutive quarters."""
+    from types import SimpleNamespace
+
+    from vnibb.services.comparison_service import _build_statement_snapshot
+
+    def quarter(year: int, quarter_number: int, revenue: float, *, flow_basis="single_quarter", unit="VND"):
+        return SimpleNamespace(
+            fiscal_year=year,
+            fiscal_quarter=quarter_number,
+            revenue=revenue,
+            gross_profit=None,
+            operating_income=None,
+            net_income=None,
+            interest_expense=None,
+            operating_cash_flow=None,
+            free_cash_flow=None,
+            debt_repayment=None,
+            raw_data={"_financial_lineage": {"value_unit": unit, "flow_basis": flow_basis}},
+        )
+
+    # `_load_statement_rows` orders `desc(fiscal_year), desc(fiscal_quarter)`, so the
+    # window arrives newest-first; the TTM guard reads it in that order.
+    consecutive = [
+        quarter(2024, 4, 40.0),
+        quarter(2024, 3, 30.0),
+        quarter(2024, 2, 20.0),
+        quarter(2024, 1, 10.0),
+    ]
+    assert _build_statement_snapshot(consecutive, "income", ttm=True)["revenue"] == pytest.approx(100.0)
+
+    # A cumulative YTD series is not a four-quarter flow; summing it double counts.
+    # Same window, so only the basis guard can reject it.
+    cumulative = [quarter(2024, 4, 400.0, flow_basis="cumulative_ytd"), *consecutive[1:]]
+    assert _build_statement_snapshot(cumulative, "income", ttm=True) is None
+
+    # A legacy row with no certified unit lineage is withheld, not summed.
+    unknown_unit = [quarter(2024, 4, 40.0, unit="unknown"), *consecutive[1:]]
+    assert _build_statement_snapshot(unknown_unit, "income", ttm=True) is None
+
+    # A gap means the window is not four consecutive quarters.
+    gapped = [consecutive[0], consecutive[1], quarter(2023, 2, 20.0), quarter(2023, 1, 10.0)]
+    assert _build_statement_snapshot(gapped, "income", ttm=True) is None
+
+    # The balance sheet is a latest-quarter snapshot in every mode, never a sum.
+    balance = SimpleNamespace(
+        fiscal_year=2024,
+        fiscal_quarter=4,
+        total_assets=1.0,
+        total_liabilities=2.0,
+        total_equity=3.0,
+    )
+    assert _build_statement_snapshot([balance], "balance", ttm=True)["total_assets"] == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interest_metadata", [
+    None,
+    {"value_unit": "VND"},
+    {"value_unit": "VND", "unavailable_reason": "ambiguous_interest_expense_semantics"},
+])
+async def test_comparison_backfill_withholds_unproven_interest_without_losing_other_facts(
+    monkeypatch, interest_metadata
+):
+    from vnibb.services.comparison_service import _build_comparison_backfill
+
+    canonical = {"interest_expense": 30.0, "value_unit": "VND"}
+    if interest_metadata is not None:
+        canonical["unit_metadata"] = {"interest_expense": interest_metadata}
+    income = IncomeStatement(
+        symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+        revenue=1200.0, gross_profit=600.0, operating_income=240.0, net_income=180.0,
+        interest_expense=30.0,
+        raw_data={} if interest_metadata is None else {"_financial_lineage": {
+            "value_unit": "VND", "canonical_data": canonical,
+        }},
+    )
+    balance = BalanceSheet(
+        symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+        total_assets=2000.0, total_liabilities=800.0, total_equity=1200.0,
+    )
+    cash = CashFlow(
+        symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+        operating_cash_flow=210.0, free_cash_flow=130.0, debt_repayment=-40.0,
+    )
+
+    async def load_rows(_symbol, model, *_args, **_kwargs):
+        return {IncomeStatement: [income], BalanceSheet: [balance], CashFlow: [cash]}[model]
+
+    monkeypatch.setattr("vnibb.services.comparison_service._load_statement_rows", load_rows)
+
+    metrics = await _build_comparison_backfill("VNM", "FY", 2500.0)
+
+    assert metrics["interest_coverage"] is None
+    assert metrics["debt_service_coverage"] is None
+    assert metrics["gross_margin"] == pytest.approx(50.0)
+    assert metrics["net_margin"] == pytest.approx(15.0)
+    assert metrics["debt_to_equity"] == pytest.approx(800.0 / 1200.0)
+    assert metrics["ocf_sales"] == pytest.approx(17.5)
+    assert metrics["fcf_yield"] == pytest.approx(5.2)
+
+
+@pytest.mark.parametrize("rejected_quarter", [None, 2])
+def test_ttm_interest_requires_semantic_evidence_in_every_quarter(rejected_quarter):
+    from vnibb.services.comparison_service import _build_statement_snapshot
+
+    rows = []
+    for quarter in (4, 3, 2, 1):
+        metadata = {"label": "interest_expense", "source_unit": "VND", "value_unit": "VND"}
+        if quarter == rejected_quarter:
+            metadata["unavailable_reason"] = "ambiguous_interest_expense_semantics"
+        rows.append(IncomeStatement(
+            symbol="VNM", period=f"2024-Q{quarter}", period_type="quarter",
+            fiscal_year=2024, fiscal_quarter=quarter, revenue=100.0, interest_expense=10.0,
+            raw_data={"_financial_lineage": {
+                "value_unit": "VND", "flow_basis": "single_quarter", "canonical_data": {
+                    "interest_expense": 10.0, "unit_metadata": {"interest_expense": metadata},
+                },
+            }},
+        ))
+
+    snapshot = _build_statement_snapshot(rows, "income", ttm=True)
+
+    assert snapshot["revenue"] == pytest.approx(400.0)
+    if rejected_quarter is None:
+        assert snapshot["interest_expense"] == pytest.approx(40.0)
+    else:
+        assert snapshot["interest_expense"] is None
+
+
+def test_annual_interest_snapshot_accepts_explicit_true_interest_evidence():
+    from vnibb.services.comparison_service import _build_statement_snapshot
+
+    row = IncomeStatement(
+        symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+        interest_expense=30.0, raw_data={"_financial_lineage": {"canonical_data": {
+            "interest_expense": 30.0, "unit_metadata": {"interest_expense": {
+                "label": "interest_expense", "source_unit": "VND", "value_unit": "VND",
+            }},
+        }}},
+    )
+
+    assert _build_statement_snapshot([row], "income", ttm=False)["interest_expense"] == 30.0
+
+
+@pytest.mark.asyncio
+async def test_comparison_does_not_restore_unproven_coverage_from_cached_ratios(
+    test_engine, test_db, monkeypatch
+):
+    test_db.add(Stock(symbol="VNM", exchange="HOSE"))
+    test_db.add(FinancialRatio(
+        id=900, symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+        pe_ratio=12.0, interest_coverage=8.0, raw_data={"debt_service_coverage": 6.0},
+    ))
+    await test_db.commit()
+
+    async def get_stock_metrics(*_args, **_kwargs):
+        return StockMetrics(symbol="VNM", metrics={
+            "interest_coverage": 9.0, "debt_service_coverage": 7.0, "pe": 12.0,
+        })
+
+    async def load_rows(_symbol, model, *_args, **_kwargs):
+        if model is IncomeStatement:
+            return [IncomeStatement(
+                symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+                revenue=1200.0, net_income=180.0, operating_income=240.0, interest_expense=30.0,
+            )]
+        if model is CashFlow:
+            return [CashFlow(
+                symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+                debt_repayment=-40.0,
+            )]
+        return []
+
+    monkeypatch.setattr(
+        "vnibb.services.comparison_service.comparison_service.get_stock_metrics", get_stock_metrics,
+    )
+    monkeypatch.setattr("vnibb.services.comparison_service._load_statement_rows", load_rows)
+    monkeypatch.setattr(
+        "vnibb.services.comparison_service.async_session_maker",
+        async_sessionmaker(test_engine, expire_on_commit=False),
+    )
+
+    metrics = (await get_comparison_data(["VNM"], period="FY"))[0].metrics
+
+    assert metrics["interest_coverage"] is None
+    assert metrics["debt_service_coverage"] is None
+    assert metrics["net_margin"] == pytest.approx(15.0)
+    assert metrics["pe_ratio"] == pytest.approx(12.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interest_expense", [0.0, 30.0])
+async def test_comparison_debt_service_uses_certified_interest_including_zero(
+    monkeypatch, interest_expense
+):
+    from vnibb.services.comparison_service import _build_comparison_backfill
+
+    income = IncomeStatement(
+        symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+        operating_income=240.0, interest_expense=interest_expense,
+        raw_data={"_financial_lineage": {"canonical_data": {
+            "interest_expense": interest_expense, "unit_metadata": {"interest_expense": {
+                "label": "interest_expense", "source_unit": "VND", "value_unit": "VND",
+            }},
+        }}},
+    )
+    cash = CashFlow(
+        symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+        debt_repayment=-40.0,
+    )
+
+    async def load_rows(_symbol, model, *_args, **_kwargs):
+        return {IncomeStatement: [income], BalanceSheet: [], CashFlow: [cash]}[model]
+
+    monkeypatch.setattr("vnibb.services.comparison_service._load_statement_rows", load_rows)
+
+    metrics = await _build_comparison_backfill("VNM", "FY", None)
+
+    assert metrics["debt_service_coverage"] == pytest.approx(240.0 / (interest_expense + 40.0))
+    if interest_expense == 0:
+        assert metrics["interest_coverage"] is None
+    else:
+        assert metrics["interest_coverage"] == pytest.approx(8.0)

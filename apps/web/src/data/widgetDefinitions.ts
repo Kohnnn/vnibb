@@ -287,7 +287,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'transaction_flow',
         name: 'Transaction Flow',
-        description: 'Daily domestic, foreign, and proprietary flow with price overlay',
+        description: 'Observed transaction samples and certified session flow with price overlay',
         category: 'analysis',
         defaultConfig: {},
         defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
@@ -1578,7 +1578,7 @@ interface MappedWidgetCapability {
 }
 
 const MAPPED_WIDGET_CAPABILITIES: Partial<Record<WidgetType, MappedWidgetCapability>> = {
-    ticker_profile: { scope: 'symbol', evidenceKind: 'company_profile', limitation: 'Company profile is descriptive context, not a valuation or investment recommendation.' },
+    ticker_profile: { scope: 'symbol', evidenceKind: 'company_profile', limitation: 'Company profile is descriptive context, not a valuation or investment recommendation. Market capitalization renders only when a source payload declares its currency unit; an undeclared magnitude stays not disclosed.' },
     price_chart: { scope: 'symbol', evidenceKind: 'price_history', limitation: 'VniAgent receives a price-history snapshot, not the full interactive chart, indicators, or a live execution feed.' },
     financial_ratios: { scope: 'symbol', evidenceKind: 'financial_ratios', limitation: 'Available ratios do not establish completeness of statements or comparability across reporting periods.' },
     income_statement: { scope: 'symbol', evidenceKind: 'income_statement', limitation: 'Only available income-statement periods are evidence; missing periods are not zero.' },
@@ -1586,8 +1586,8 @@ const MAPPED_WIDGET_CAPABILITIES: Partial<Record<WidgetType, MappedWidgetCapabil
     cash_flow: { scope: 'symbol', evidenceKind: 'cash_flow', limitation: 'Only available cash-flow periods are evidence; earnings alone do not establish cash conversion.' },
     news_feed: { scope: 'symbol', evidenceKind: 'company_news', limitation: 'Recent-news summaries are not exhaustive coverage or independently verified corporate disclosures.' },
     foreign_trading: { scope: 'symbol', evidenceKind: 'foreign_trading', limitation: 'Foreign-trading summaries describe observed flows, not investor intent or future returns.' },
-    transaction_flow: { scope: 'symbol', evidenceKind: 'order_flow', limitation: 'Order-flow summaries are not a full order book or a trade-execution guarantee.' },
-    insider_trading: { scope: 'symbol', evidenceKind: 'insider_deals', limitation: 'Reported insider transactions may be delayed; absence of records does not establish absence of activity.' },
+    transaction_flow: { scope: 'symbol', evidenceKind: 'order_flow', limitation: 'Observed samples are not daily totals or a full order book. Session totals and domestic residual require explicit complete-session source coverage.' },
+    insider_trading: { scope: 'symbol', evidenceKind: 'insider_deals', limitation: 'Reported insider transactions may be delayed; absence of records does not establish absence of activity. The 90-day money aggregate is withheld unless every classified deal in that window carries VND unit evidence, while counts stay reported.' },
     events_calendar: { scope: 'symbol', evidenceKind: 'company_events', limitation: 'Available company events are not a complete or guaranteed future calendar.' },
     dividend_payment: { scope: 'symbol', evidenceKind: 'dividends', limitation: 'Dividend records do not guarantee future distributions or establish total return.' },
     market_overview: { scope: 'market', evidenceKind: 'market_indices', limitation: 'Market-index snapshots cannot establish fundamentals or prices for a particular company.' },

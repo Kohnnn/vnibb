@@ -17,6 +17,7 @@ import { formatDate } from '@/lib/format';
 import { formatNumber, formatPercent } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { getLatestTimestampValue } from '@/lib/dataFreshness';
 
 interface DerivativesAnalyticsWidgetProps {
   id: string;
@@ -62,7 +63,8 @@ export function DerivativesAnalyticsWidget({ id, onRemove, onDataChange }: Deriv
   const isLoading = (contractsQuery.isLoading || historyQueries.some((query) => query.isLoading)) && !hasData
   const isFetching = contractsQuery.isFetching || historyQueries.some((query) => query.isFetching)
   const error = contractsQuery.error || historyQueries.find((query) => query.error)?.error
-  const updatedAt = Math.max(contractsQuery.dataUpdatedAt, ...historyQueries.map((query) => query.dataUpdatedAt || 0))
+  const sourceUpdatedAt = getLatestTimestampValue(historyQueries.flatMap((query) => query.data?.data.map((row) => row.time) ?? [])) ?? null
+  const fetchedAt = Math.max(contractsQuery.dataUpdatedAt, ...historyQueries.map((query) => query.dataUpdatedAt || 0))
   const pricedContracts = curveRows.filter((row) => row.latestClose !== null).length
   const derivativesHealth: WidgetHealthState | undefined = !hasData && !isLoading && !error
     ? {
@@ -92,10 +94,12 @@ export function DerivativesAnalyticsWidget({ id, onRemove, onDataChange }: Deriv
       apiGroup: '/derivatives',
       endpoint: '/api/v1/derivatives/contracts + /api/v1/derivatives/history/:symbol',
       sourceLabel: 'VNIBB derivatives analytics',
+      lastDataDate: sourceUpdatedAt,
+      fetchedAt,
       derived: true,
       extra: { contracts: curveRows.length, priced: pricedContracts },
     }))
-  }, [curveRows.length, hasData, onDataChange, pricedContracts])
+  }, [curveRows.length, hasData, onDataChange, pricedContracts, sourceUpdatedAt, fetchedAt])
 
   const refresh = () => {
     void contractsQuery.refetch()
@@ -122,7 +126,7 @@ export function DerivativesAnalyticsWidget({ id, onRemove, onDataChange }: Deriv
               <div className="text-[11px] text-[var(--text-secondary)]">Short curve classification from front to far contracts</div>
             </div>
           </div>
-          <WidgetMeta updatedAt={updatedAt} isFetching={isFetching && hasData} note={`${curveRows.length} contracts`} health={derivativesHealth} align="right" />
+          <WidgetMeta updatedAt={sourceUpdatedAt} fetchedAt={fetchedAt} isFetching={isFetching && hasData} note={`${curveRows.length} contracts`} health={derivativesHealth} align="right" />
         </div>
 
         {isLoading ? (

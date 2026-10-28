@@ -183,8 +183,15 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
   const benchmarkLabel = payload?.benchmark || 'VNINDEX'
   const coverage = payload?.coverage
   const selectedSkip = coverage?.skipped_symbols?.find((item) => item.symbol === upperSymbol)
-  const coverageDetail = data?.error || selectedSkip
-    ? `${upperSymbol} has ${selectedSkip?.overlap_days ?? 0} overlapping benchmark days; need at least ${coverage?.min_overlap_days ?? 40}. Refresh Mongo EOD prices or choose a symbol with longer history.`
+  // The backend skips a symbol when any of its stored sessions carry no
+  // confirmed VND unit (`reason: unresolved_price_sessions`). Report that
+  // exclusion reason verbatim instead of attributing it to short overlap
+  // history (QA #98).
+  const selectedExcludedForUnits = selectedSkip?.reason === 'unresolved_price_sessions'
+  const coverageDetail = data?.error || selectedExcludedForUnits
+    ? selectedExcludedForUnits
+      ? `${upperSymbol} is excluded: stored sessions carry no confirmed VND price unit, so no relative-rotation series can be certified.`
+      : `${upperSymbol} has ${selectedSkip?.overlap_days ?? 0} overlapping benchmark days; need at least ${coverage?.min_overlap_days ?? 40}. Refresh Mongo EOD prices or choose a symbol with longer history.`
     : `Need overlapping daily history for ${upperSymbol}, ${benchmarkLabel}, and the comparison universe over the ${coverage?.lookback_days ?? 260}-day lookback. Verify Mongo EOD coverage or try another symbol.`
   const healthState: WidgetHealthState | undefined = (hasData && !hasChartData) || (hasData && Boolean(data?.error))
     ? {
@@ -200,7 +207,8 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
       apiGroup: '/quant',
       endpoint: `/quant/${upperSymbol}/relative-rotation?lookback_days=260`,
       sourceLabel: 'Relative rotation',
-      lastDataDate: dataUpdatedAt,
+      lastDataDate: null,
+      fetchedAt: dataUpdatedAt,
       derived: true,
       extra: {
         universe: universePoints.length,
@@ -222,7 +230,8 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
           <span>Relative Rotation</span>
         </div>
         <WidgetMeta
-          updatedAt={dataUpdatedAt}
+          updatedAt={null}
+          fetchedAt={dataUpdatedAt}
           isFetching={isFetching && hasData}
           health={healthState}
           note="VN30 vs VNINDEX"

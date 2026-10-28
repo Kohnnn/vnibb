@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -35,6 +35,7 @@ import { useDashboard } from '@/contexts/DashboardContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import { cn } from '@/lib/utils';
+import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 
 interface CommandPaletteProps {
   open: boolean;
@@ -47,6 +48,10 @@ interface RenderItem extends CommandPaletteActionItem {
 
 const GLOBAL_MARKETS_DASHBOARD_NAME = 'Global Markets';
 const GLOBAL_MARKETS_TAB_NAME = 'Global Markets';
+
+function getOptionId(listboxId: string, item: CommandPaletteActionItem): string {
+  return `${listboxId}-${encodeURIComponent(`${item.type}:${item.id}`)}`;
+}
 
 function getShortcutModifierLabel(): string {
   if (typeof navigator === 'undefined') return 'Ctrl';
@@ -99,6 +104,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: open, onClose: () => onOpenChange(false) });
+  const shortcutsDialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: open && showShortcutHelp, onClose: () => setShowShortcutHelp(false) });
+  const listboxId = useId();
   const shortcutModifier = getShortcutModifierLabel();
   const {
     state,
@@ -121,7 +129,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     setRecentSearches(readCommandPaletteRecents());
     setSearch('');
     setSelectedIndex(0);
-    requestAnimationFrame(() => inputRef.current?.focus());
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
   }, [open]);
 
   const trimmedSearch = search.trim();
@@ -458,6 +467,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     () => sections.flatMap((section) => section.items.map((item) => ({ ...item, sectionKey: section.key }))),
     [sections],
   );
+  const activeIndex = flatItems.length ? Math.min(selectedIndex, flatItems.length - 1) : -1;
 
   useEffect(() => {
     if (!flatItems.length) {
@@ -468,29 +478,23 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   }, [flatItems]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || showShortcutHelp) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onOpenChange(false);
-        return;
-      }
-
       if (event.key === 'ArrowDown') {
         event.preventDefault();
-        setSelectedIndex((current) => (flatItems.length ? (current + 1) % flatItems.length : 0));
+        setSelectedIndex(flatItems.length ? (activeIndex + 1) % flatItems.length : 0);
         return;
       }
 
       if (event.key === 'ArrowUp') {
         event.preventDefault();
-        setSelectedIndex((current) => (flatItems.length ? (current - 1 + flatItems.length) % flatItems.length : 0));
+        setSelectedIndex(flatItems.length ? (activeIndex - 1 + flatItems.length) % flatItems.length : 0);
         return;
       }
 
       if (event.key === 'Enter') {
-        const selected = flatItems[selectedIndex];
+        const selected = flatItems[activeIndex];
         if (!selected) return;
         event.preventDefault();
         handleSelect(selected);
@@ -499,13 +503,13 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
     document.addEventListener('keydown', handleKeyDown, true);
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [flatItems, open, selectedIndex]);
+  }, [activeIndex, flatItems, open, showShortcutHelp]);
 
   useEffect(() => {
     if (!listRef.current) return;
-    const selected = listRef.current.querySelector<HTMLElement>(`[data-command-item-index="${selectedIndex}"]`);
+    const selected = listRef.current.querySelector<HTMLElement>(`[data-command-item-index="${activeIndex}"]`);
     selected?.scrollIntoView({ block: 'nearest' });
-  }, [selectedIndex]);
+  }, [activeIndex, flatItems]);
 
   const saveRecent = (item: SearchTickerResult) => {
     const next = saveRecentSearch(recentSearches, {
@@ -603,11 +607,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       <button
         type="button"
         aria-label="Close command palette backdrop"
+        tabIndex={-1}
         className="absolute inset-0 cursor-default"
         onClick={() => onOpenChange(false)}
       />
 
-      <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] shadow-2xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Command palette" tabIndex={-1} className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] shadow-2xl">
         <div className="flex items-center gap-3 border-b border-[var(--border-default)] px-4 py-3">
           <CommandIcon className="h-5 w-5 text-[var(--text-muted)]" />
           <input
@@ -619,6 +624,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             }}
             placeholder="Search tickers, crypto, indices, or commands..."
             aria-label="Command palette search"
+            role="combobox"
+            aria-expanded={open}
+            aria-autocomplete="list"
+            aria-controls={listboxId}
+            aria-activedescendant={activeIndex >= 0 ? getOptionId(listboxId, flatItems[activeIndex]) : undefined}
             className="h-11 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
           />
           <button
@@ -631,7 +641,13 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           </button>
         </div>
 
-        <div ref={listRef} className="max-h-[480px] overflow-y-auto px-2 py-2 scrollbar-hide">
+        <div
+          ref={listRef}
+          id={listboxId}
+          role="listbox"
+          aria-label="Command palette results"
+          className="max-h-[480px] overflow-y-auto px-2 py-2 scrollbar-hide"
+        >
           {flatItems.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-[var(--text-muted)]">
               <Search className="h-8 w-8 opacity-30" />
@@ -641,9 +657,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             sections.map((section) => (
               <PaletteSection
                 key={section.key}
+                listboxId={listboxId}
                 query={trimmedSearch}
                 section={section}
-                selectedIndex={selectedIndex}
+                selectedIndex={activeIndex}
                 flatItems={flatItems}
                 onHover={setSelectedIndex}
                 onSelect={handleSelect}
@@ -652,8 +669,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           )}
         </div>
 
-        <div className="flex items-center justify-between border-t border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-4 py-2 text-[10px] text-[var(--text-muted)]">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-4 py-2 text-[10px] text-[var(--text-muted)]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <ShortcutPill label={`${shortcutModifier}+K`} hint="Open" />
             <ShortcutPill label="↑↓" hint="Navigate" />
             <ShortcutPill label="Enter" hint="Select" />
@@ -670,7 +687,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
       {showShortcutHelp ? (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-[rgba(2,6,23,0.64)] p-4">
-          <div className="w-full max-w-md rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-2xl">
+          <div ref={shortcutsDialogRef} role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" tabIndex={-1} className="w-full max-w-md rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm font-bold text-[var(--text-primary)]">
                 <HelpCircle className="h-4 w-4 text-sky-300" />
@@ -709,6 +726,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 }
 
 function PaletteSection({
+  listboxId,
   query,
   section,
   selectedIndex,
@@ -716,6 +734,7 @@ function PaletteSection({
   onHover,
   onSelect,
 }: {
+  listboxId: string;
   query: string;
   section: CommandPaletteSection;
   selectedIndex: number;
@@ -724,8 +743,8 @@ function PaletteSection({
   onSelect: (item: RenderItem) => void;
 }) {
   return (
-    <div className="mb-2">
-      <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+    <div role="group" aria-labelledby={`${listboxId}-${section.key}`} className="mb-2">
+      <div id={`${listboxId}-${section.key}`} className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
         {section.label}
       </div>
       {section.items.map((item) => {
@@ -740,6 +759,11 @@ function PaletteSection({
           <button
             key={`${item.id}:${item.type}`}
             type="button"
+            id={getOptionId(listboxId, item)}
+            role="option"
+            aria-selected={active}
+            tabIndex={-1}
+            onMouseDown={(event) => event.preventDefault()}
             data-command-item-index={flatIndex}
             onMouseEnter={() => flatIndex >= 0 && onHover(flatIndex)}
             onClick={() => onSelect(item as RenderItem)}

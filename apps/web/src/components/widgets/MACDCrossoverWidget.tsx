@@ -73,6 +73,14 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
       }
     | undefined
   const backendError = typeof data?.error === 'string' ? data.error : ''
+  const quality = data?.meta
+  const unitStatus = quality?.unit_status ?? ''
+  const derivedWithheld = Boolean(data?.data) && (!['confirmed_vnd', 'index_points', 'not_applicable'].includes(unitStatus)
+    || Boolean(quality?.unresolved_excluded_dates?.length)
+    || Boolean(backendError))
+  const unavailableReason = unitStatus === 'mixed' || unitStatus === 'unconfirmed'
+    ? 'MACD crossovers unavailable: historical price units were not certified.'
+    : backendError || 'MACD crossovers unavailable: source quality is unresolved.'
 
   const macdSeries = metric?.macd_series || []
   const crossovers = metric?.crossovers || []
@@ -98,7 +106,7 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
     ...crossoverBars.map((row) => Math.max(Math.abs(row.return1m), Math.abs(row.return3m))),
     1
   )
-  const hasData = macdSeries.length > 0 || crossovers.length > 0
+  const hasData = !derivedWithheld && (macdSeries.length > 0 || crossovers.length > 0)
   const quantWarning = extractQuantWarning(data, 'macd_crossovers')
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
@@ -109,12 +117,13 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
         apiGroup: '/quant',
         endpoint: `/quant/${upperSymbol}?metrics=macd_crossovers&period=${period}`,
         sourceLabel: 'MACD crossovers',
-        lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt,
+        lastDataDate: data?.data?.last_data_date ?? null,
+        fetchedAt: dataUpdatedAt,
         adjustmentMode: 'adjusted',
-        extra: metric?.current_state ? { state: metric.current_state, crossovers: crossovers.length } : undefined,
+        extra: hasData && metric?.current_state ? { state: metric.current_state, crossovers: crossovers.length } : undefined,
       }),
     )
-  }, [onDataChange, hasData, upperSymbol, period, data?.data?.last_data_date, data?.data?.computed_at, dataUpdatedAt, metric?.current_state, crossovers.length])
+  }, [onDataChange, hasData, derivedWithheld, upperSymbol, period, data?.data?.last_data_date, dataUpdatedAt, metric?.current_state, crossovers.length])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view MACD crossovers" icon={<ActivitySquare size={18} />} />
@@ -140,7 +149,7 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} EMA(12,26,9)`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} EMA(12,26,9)`} align="right" />
         </div>
       </div>
 
@@ -157,6 +166,8 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
         <WidgetSkeleton lines={8} />
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
+      ) : derivedWithheld ? (
+        <WidgetEmpty message={unavailableReason} icon={<ActivitySquare size={18} />} size="compact" />
       ) : !hasData ? (
         <WidgetEmpty message={backendError || 'No crossover history'} icon={<ActivitySquare size={18} />} size="compact" />
       ) : (

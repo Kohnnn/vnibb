@@ -3,18 +3,14 @@ import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
+from scripts.vietcap import backfill_vietcap
+from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
 MODULE_PATH = Path(__file__).parents[2] / "scripts" / "query_plan_preflight.py"
 SPEC = importlib.util.spec_from_file_location("query_plan_preflight", MODULE_PATH)
 query_plan_preflight = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(query_plan_preflight)
-
-CATALOG_MODULE_PATH = Path(__file__).parents[2] / "scripts" / "backfill_mongo_vnstock_full_catalog.py"
-CATALOG_SPEC = importlib.util.spec_from_file_location("backfill_mongo_vnstock_full_catalog", CATALOG_MODULE_PATH)
-backfill_mongo_vnstock_full_catalog = importlib.util.module_from_spec(CATALOG_SPEC)
-assert CATALOG_SPEC.loader is not None
-sys.modules[CATALOG_SPEC.name] = backfill_mongo_vnstock_full_catalog
-CATALOG_SPEC.loader.exec_module(backfill_mongo_vnstock_full_catalog)
 
 
 def test_plan_stages_detects_nested_collscan() -> None:
@@ -44,22 +40,32 @@ def test_required_mongo_indexes_match_key_order_and_uniqueness() -> None:
     ) == ["idx_tradeDate_desc"]
 
 
-def test_full_catalog_bootstrap_creates_global_latest_date_index_in_key_order() -> None:
+def test_runtime_and_bootstrap_indexes_satisfy_eod_preflight(monkeypatch) -> None:
     class Collection:
-        def __init__(self) -> None:
+        def __init__(self):
             self.indexes = []
 
-        def create_index(self, keys, **options) -> None:
-            self.indexes.append((keys, options))
+        def list_indexes(self):
+            return self.indexes
 
-    class Database:
-        def __getattr__(self, _name):
-            return collection
+        def create_index(self, keys, **options):
+            self.indexes.append({"key": dict(keys), **options})
 
     collection = Collection()
-    backfill_mongo_vnstock_full_catalog._ensure_indexes(Database())
+    service = MongoMarketDataService()
+    monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda _: True))
+    monkeypatch.setattr(service, "_get_collection", lambda _: collection)
 
-    assert ([('tradeDate', -1)], {"name": "idx_tradeDate_desc"}) in collection.indexes
+    service.ensure_eod_indexes()
+
+    class Database:
+        def __getitem__(self, _name):
+            return collection
+
+    backfill_vietcap._ensure_indexes(Database())
+    assert query_plan_preflight.validate_required_indexes(
+        collection.indexes, query_plan_preflight.REQUIRED_MONGO_EOD_INDEXES,
+    ) == []
 
 
 def test_secret_redaction_removes_url_passwords_and_sensitive_query_values() -> None:

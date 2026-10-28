@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useScreenerData, useMetricsHistory, useFinancialRatios, useProfile, useStockQuote, useQuantMetrics } from '@/lib/queries';
-import { formatDividendYield, formatRatio, formatPercent, normalizeDividendYield } from '@/lib/formatters';
-import { formatUnitValue } from '@/lib/units';
+import { formatDividendYield, formatRatio, readDividendYield } from '@/lib/formatters';
+import { formatUnitValue, formatPercent } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { TableSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -78,6 +78,11 @@ function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
 
 import { toNumber, resolveMetric } from './utils';
 
+function formatRatioPercent(value: number | null | undefined): string {
+    if (value === null || value === undefined || !Number.isFinite(value)) return '-';
+    return `${value >= 0 ? '+' : ''}${formatPercent(value, { input: 'percent' })}`;
+}
+
 export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChange }: KeyMetricsWidgetProps) {
     const [activeCategory, setActiveCategory] = useState<MetricsCategory>('valuation');
     const {
@@ -92,11 +97,6 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
 
     const { data: history, isFetching: historyFetching } = useMetricsHistory(symbol, { enabled: !!symbol });
     const { data: ratiosData } = useFinancialRatios(symbol, { period: 'FY', enabled: !!symbol });
-    // QA-v3 F5: Dividend Yield in Key Metrics MARKET tab was reading
-    // 0.00% from the screener snapshot while the Financial Ratios widget
-    // showed TTM=3.00%. Pull a TTM ratios slice so we can resolve from the
-    // same source.
-    const { data: ratiosTtmData } = useFinancialRatios(symbol, { period: 'TTM', enabled: !!symbol });
     const { data: profile } = useProfile(symbol, !!symbol);
     const { data: quote } = useStockQuote(symbol, !!symbol);
     // QA-v3 F6: Beta 63D was already computed for the Quant tab
@@ -112,18 +112,22 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
 
     const stock = screenData?.data?.[0];
     const latestRatio = latestByFinancialPeriod(ratiosData?.data);
-    // QA-v3 F5: Prefer TTM dividend yield from the same Financial Ratios
-    // pipeline that powers the FY/Q/TTM toggle. The screener snapshot
-    // dividend_yield is a stale field that frequently reads 0.00% even
-    // when the TTM is clearly populated.
-    const ttmRatio = (ratiosTtmData?.data || []).find((row) =>
-        String((row as { period?: string }).period || '').toUpperCase() === 'TTM'
-    ) || null;
     // QA-v3 F6: Pull Beta 63D from the same source that powers the
     // Quant tab Risk Dashboard.
     const quantBeta63d = (() => {
-        const benchmarkRisk = (quantMetrics as any)?.data?.metrics?.benchmark_risk;
-        const value = benchmarkRisk?.current_beta_63d;
+        // Beta 63D is derived from the same price frame as the Quant tab. Only a
+        // certified unit status admits it; an absent or mixed/unconfirmed status
+        // must not surface an ordinary-looking risk number (QA #98).
+        const quality = quantMetrics?.meta;
+        const certified = ['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+            && !quality?.unresolved_excluded_dates?.length;
+        if (!certified) return null;
+        // `metrics` is `Record<string, unknown>`: narrow the one field consumed.
+        const benchmarkRisk = quantMetrics?.data?.metrics?.benchmark_risk;
+        if (!benchmarkRisk || typeof benchmarkRisk !== 'object' || !('current_beta_63d' in benchmarkRisk)) {
+            return null;
+        }
+        const value = benchmarkRisk.current_beta_63d;
         return typeof value === 'number' && Number.isFinite(value) ? value : null;
     })();
     const quantWarning = extractQuantWarning(quantMetrics, 'benchmark_risk');
@@ -179,9 +183,8 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
             { value: derivedMarketCap, source: 'Profile+Quote', positiveOnly: true },
         ]),
         dividendYield: resolveMetric([
-            { value: normalizeDividendYield((ttmRatio as any)?.dividend_yield), source: 'Ratios TTM' },
-            { value: normalizeDividendYield(latestRatio?.dividend_yield), source: 'Ratios' },
-            { value: normalizeDividendYield(stock?.dividend_yield), source: 'Screener' },
+            { value: readDividendYield(latestRatio?.dividend_yield, latestRatio?.ratio_units?.dividend_yield), source: 'Ratios' },
+            { value: readDividendYield(stock?.dividend_yield, stock?.ratio_units?.dividend_yield), source: 'Screener' },
         ]),
         beta: resolveMetric([
             { value: quantBeta63d, source: 'Quant 63D' },
@@ -242,7 +245,10 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                 apiGroup: '/screener',
                 endpoint: `/screener/?symbol=${symbol}&limit=1`,
                 sourceLabel: 'Key metrics',
-                lastDataDate: dataUpdatedAt,
+                // Screener meta.last_data_date is a serving/sync receipt (trade date or row
+                // store timestamp), not a reliable source observation; only the query receipt is used.
+                lastDataDate: null,
+                fetchedAt: dataUpdatedAt || null,
                 stale: isFallback,
                 extra: hasData ? { metrics: mergedStock } : undefined,
             }),
@@ -257,15 +263,15 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
         ]
         : activeCategory === 'profitability'
             ? [
-                { label: 'ROE', value: formatPercent(mergedStock?.roe) },
-                { label: 'ROA', value: formatPercent(mergedStock?.roa) },
-                { label: 'Net Margin', value: formatPercent(mergedStock?.net_margin) },
+                { label: 'ROE', value: formatRatioPercent(mergedStock?.roe) },
+                { label: 'ROA', value: formatRatioPercent(mergedStock?.roa) },
+                { label: 'Net Margin', value: formatRatioPercent(mergedStock?.net_margin) },
             ]
             : activeCategory === 'health'
                 ? [
                     { label: 'Debt/Equity', value: formatRatio(mergedStock?.debt_to_equity) },
                     { label: 'Current Ratio', value: formatRatio(mergedStock?.current_ratio) },
-                    { label: 'Gross Margin', value: formatPercent(mergedStock?.gross_margin) },
+                    { label: 'Gross Margin', value: formatRatioPercent(mergedStock?.gross_margin) },
                 ]
                 : [
                     { label: 'Market Cap', value: formatUnitValue(mergedStock?.market_cap, unitConfig) },
@@ -288,7 +294,8 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
         >
             <div className="space-y-2">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt || null}
                     isFetching={(isFetching || historyFetching) && hasData}
                     isCached={isFallback}
                     note={metricMap.marketCap.source === 'Profile+Quote' ? 'Market cap derived from profile shares x quote' : 'Ratios & health'}
@@ -380,11 +387,11 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
 
                             {activeCategory === 'profitability' && (
                                 <div className="space-y-2">
-                                    <MetricRow label="ROE" value={formatPercent(mergedStock?.roe)} sparklineData={history?.roe} source={metricMap.roe.source} />
-                                    <MetricRow label="ROA" value={formatPercent(mergedStock?.roa)} sparklineData={history?.roa} source={metricMap.roa.source} />
-                                    <MetricRow label="ROIC" value={formatPercent(mergedStock?.roic)} source={metricMap.roic.source} />
-                                    <MetricRow label="Net Margin" value={formatPercent(mergedStock?.net_margin)} source={metricMap.netMargin.source} />
-                                    <MetricRow label="Gross Margin" value={formatPercent(mergedStock?.gross_margin)} source={metricMap.grossMargin.source} />
+                                    <MetricRow label="ROE" value={formatRatioPercent(mergedStock?.roe)} sparklineData={history?.roe} source={metricMap.roe.source} />
+                                    <MetricRow label="ROA" value={formatRatioPercent(mergedStock?.roa)} sparklineData={history?.roa} source={metricMap.roa.source} />
+                                    <MetricRow label="ROIC" value={formatRatioPercent(mergedStock?.roic)} source={metricMap.roic.source} />
+                                    <MetricRow label="Net Margin" value={formatRatioPercent(mergedStock?.net_margin)} source={metricMap.netMargin.source} />
+                                    <MetricRow label="Gross Margin" value={formatRatioPercent(mergedStock?.gross_margin)} source={metricMap.grossMargin.source} />
                                 </div>
                             )}
 

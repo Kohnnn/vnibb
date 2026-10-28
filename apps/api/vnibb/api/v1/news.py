@@ -2,7 +2,7 @@
 Market News API Endpoints
 
 Provides access to market news from multiple Vietnamese sources.
-Uses vnstock_news premium package.
+Uses public Vietnamese financial RSS feeds.
 """
 
 import logging
@@ -59,7 +59,11 @@ logger = logging.getLogger(__name__)
 class NewsArticle(BaseModel):
     """News article with AI sentiment."""
 
-    id: int | None = None
+    # Hydrated fallback rows carry a provider-scoped string id ("VNM-0",
+    # news_service.py:432); declaring int-only made /news/feed raise a
+    # ValidationError (HTTP 500) whenever that fallback ran. The web client
+    # already types this as `number | string | null`.
+    id: int | str | None = None
     title: str
     summary: str | None = None
     content: str | None = None
@@ -174,6 +178,9 @@ class MarketSentiment(BaseModel):
 
 class TrendingAnalysis(BaseModel):
     """Trending topics analysis."""
+
+    available: bool = False
+    reason: str | None = "trending_analysis_unavailable"
 
     topics: list[str] = []
     stocks_mentioned: list[str] = []
@@ -382,7 +389,7 @@ async def get_news_feed_api(
         offset=offset,
     )
 
-    if feed.total == 0 and news_crawler._news_available:
+    if feed.total == 0:
         background_tasks.add_task(
             news_crawler.crawl_market_news,
             sources=None,
@@ -471,7 +478,7 @@ async def get_sources() -> dict[str, Any]:
     """Get available news sources."""
     return {
         "sources": news_crawler.SOURCES,
-        "available": news_crawler._news_available,
+        "available": bool(news_crawler.SOURCES),
     }
 
 
@@ -506,7 +513,7 @@ async def get_market_sentiment() -> MarketSentiment:
     "/trending",
     response_model=TrendingAnalysis,
     summary="Get Trending Topics",
-    description="Analyze trending topics from recent news.",
+    description="Topic analysis is unavailable in the free RSS news service.",
 )
 async def get_trending_alias() -> TrendingAnalysis:
     return await get_trending()
@@ -516,7 +523,7 @@ async def get_trending_alias() -> TrendingAnalysis:
     "/news/trending",
     response_model=TrendingAnalysis,
     summary="Get Trending Topics",
-    description="Analyze trending topics from recent news.",
+    description="Topic analysis is unavailable in the free RSS news service.",
 )
 async def get_trending() -> TrendingAnalysis:
     """Get trending topics analysis."""

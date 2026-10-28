@@ -60,6 +60,14 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: I
             return timeB.localeCompare(timeA);
         });
     }, [data]);
+    const lastDataDate = useMemo(() => trades.reduce<string | null>((latest, trade) => {
+        const time = trade.time;
+        if (!time || !/^\d{4}-\d{2}-\d{2}/.test(time)) return latest;
+        const observedAt = new Date(time).getTime();
+        return Number.isFinite(observedAt) && (latest === null || observedAt > new Date(latest).getTime())
+            ? time
+            : latest;
+    }, null), [trades]);
 
     const columns = useMemo((): VirtualizedColumn<any>[] => [
         {
@@ -126,9 +134,13 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: I
                     empty: !hasData,
                     compactHeight: 4,
                 },
+                provenance: {
+                    updatedAt: lastDataDate,
+                    fetchedAt: dataUpdatedAt,
+                },
             },
         });
-    }, [hasData, onDataChange]);
+    }, [hasData, onDataChange, lastDataDate, dataUpdatedAt]);
 
     return (
         <WidgetContainer
@@ -146,7 +158,8 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: I
             <div className="h-full flex flex-col bg-[var(--bg-primary)]">
                 <div className="border-b border-[var(--border-subtle)] px-3 py-2">
                     <WidgetMeta
-                        updatedAt={dataUpdatedAt}
+                        updatedAt={lastDataDate}
+                        fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
                         note="Live tape"

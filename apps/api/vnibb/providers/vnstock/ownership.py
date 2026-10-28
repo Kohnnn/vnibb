@@ -103,10 +103,10 @@ class VnstockOwnershipFetcher:
         try:
 
             def _fetch():
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
 
                 Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=symbol.upper(), source=settings.vnstock_source)
+                stock = Vnstock().stock(symbol=symbol.upper(), source=validate_source(settings.vnstock_source))
                 df = stock.company.ownership()
                 if df is None or len(df) == 0:
                     return []

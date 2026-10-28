@@ -30,10 +30,6 @@ if [[ "${image##*/}" != *:* || "$image" == *@* ]]; then
   exit 1
 fi
 
-if [[ -n "${VNSTOCK_API_KEY_FILE:-}" ]]; then
-  : "${VNSTOCK_INSTALLER_SHA256:?VNSTOCK_INSTALLER_SHA256 is required with VNSTOCK_API_KEY_FILE}"
-  args+=(--secret "id=vnstock_api_key,src=$VNSTOCK_API_KEY_FILE" --build-arg "VNSTOCK_INSTALLER_SHA256=$VNSTOCK_INSTALLER_SHA256")
-fi
 
 metadata_file="$(mktemp)"
 trap 'rm -f "$metadata_file"' EXIT

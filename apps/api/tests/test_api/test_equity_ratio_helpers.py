@@ -1,10 +1,11 @@
 from types import SimpleNamespace
 from datetime import date
+from unittest.mock import AsyncMock
 
 import pytest
 
 from vnibb.api.v1.schemas import StandardResponse
-from vnibb.api.v1.equity import _normalize_statement_unit_outliers, _ratio_has_metric_value, _to_ratio_data
+from vnibb.api.v1.equity import _enrich_financial_statement_rows, _ratio_has_metric_value, _to_ratio_data
 from vnibb.api.v1.equity import _enrich_missing_ratio_metrics
 from vnibb.api.v1.equity import _compute_rolling_high_low, _load_mongo_financial_ratio_rows, _load_mongo_financial_statement_rows
 from vnibb.api.v1.equity import get_fundamental_analysis
@@ -16,6 +17,128 @@ from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
 from vnibb.providers.vnstock.financials import FinancialStatementData
 
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preferred_units,preferred_roe,expected", [
+    ({"roe": "unknown"}, None, None),
+    ({"roe": "percent"}, 0.25, 0.25),
+    ({}, 99.0, None),
+    ({}, None, 25.0),
+    ({"roe": "percent"}, 0.0, 0.0),
+])
+async def test_ratio_endpoint_does_not_resurrect_rejected_merged_metrics(monkeypatch, test_db, client, preferred_units, preferred_roe, expected):
+    from vnibb.api.v1 import equity
+    from vnibb.models.trading import FinancialRatio
+    from vnibb.core import cache
+
+    monkeypatch.setattr(cache, "_memory_cache", {})
+
+    test_db.add(FinancialRatio(id=901, symbol="VNM", period="2024", period_type="year", fiscal_year=2024, roe=25.0, pe_ratio=10.0, raw_data={"ratio_units": {"roe": "percent"}}))
+    await test_db.commit()
+
+    async def mongo_rows(*args, **kwargs):
+        return [FinancialRatioData(symbol="VNM", period="2024", roe=preferred_roe, ratio_units=preferred_units)]
+
+    async def latest_statement(*args, **kwargs):
+        return 0
+
+    async def unchanged(*args, **kwargs):
+        return kwargs["rows"]
+
+    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", mongo_rows)
+    monkeypatch.setattr(equity, "_get_latest_statement_period_key", latest_statement)
+    monkeypatch.setattr(equity, "_enrich_missing_ratio_metrics", unchanged)
+    response = await client.get("/api/v1/equity/VNM/ratios?period=year")
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["roe"] == expected
+    assert row["pe"] == 10.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value,unit,expected", [
+    (0.25, "percent", 0.25),
+    (47.02, "percent", 47.02),
+    (0.0, "percent", 0.0),
+    (47.02, "unknown", None),
+    (0.25, None, None),
+])
+async def test_ratio_endpoint_preserves_declared_dividend_yield_without_scale_guesses(
+    monkeypatch, test_db, value, unit, expected,
+):
+    from vnibb.api.v1 import equity
+    from vnibb.models.trading import FinancialRatio
+
+    units = {"dividend_yield": unit} if unit is not None else {}
+    test_db.add(FinancialRatio(
+        id=902, symbol="FPT", period="2025", period_type="year", fiscal_year=2025,
+        source="vnstock", pe_ratio=14.64,
+        raw_data={"dividend_yield": value, "ratio_units": units,
+                  "provider_evidence": [{"dividendYield": value}]},
+    ))
+    await test_db.commit()
+    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(return_value=[]))
+    monkeypatch.setattr(equity, "_get_latest_statement_period_key", AsyncMock(return_value=0))
+
+    response = await equity.get_financial_ratios.__wrapped__(symbol="FPT", period="year", db=test_db)
+
+    assert response.data[0].dividend_yield == expected
+    assert response.data[0].pe == 14.64
+    assert {"dividendYield": value} in response.data[0].provider_evidence
+
+
+@pytest.mark.asyncio
+async def test_ratio_endpoint_withholds_unverified_statement_and_current_valuation_fallbacks(monkeypatch, test_db):
+    from vnibb.api.v1 import equity
+    from vnibb.models.trading import FinancialRatio
+
+    test_db.add_all([
+        Stock(id=903, symbol="FPT", exchange="HOSE"),
+        Company(id=903, symbol="FPT", outstanding_shares=20),
+        FinancialRatio(id=903, symbol="FPT", period="2020", period_type="year", fiscal_year=2020,
+                       source="vnstock", pe_ratio=0.03),
+        IncomeStatement(id=903, symbol="FPT", period="2020", period_type="year", fiscal_year=2020,
+                        revenue=100, net_income=10, ebitda=20, source="vnstock"),
+        ScreenerSnapshot(id=903, symbol="FPT", snapshot_date=date(2026, 10, 17),
+                         price=100, market_cap=1000),
+    ])
+    await test_db.commit()
+    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(return_value=[]))
+    monkeypatch.setattr(equity, "_get_latest_statement_period_key", AsyncMock(return_value=0))
+
+    response = await equity.get_financial_ratios.__wrapped__(symbol="FPT", period="year", db=test_db)
+
+    row = response.data[0]
+    assert row.pe == 0.03
+    assert (row.ps, row.ev_sales, row.eps, row.net_margin) == (None, None, None, None)
+    assert any(item.get("unavailable_reason") == "unverified_statement_basis" for item in row.provider_evidence)
+
+
+def test_ratio_merge_retains_fallback_cell_evidence():
+    from vnibb.api.v1.equity import _merge_ratio_rows
+
+    fallback = FinancialRatioData(symbol="VNM", period="2024", roe=0.25, roa=0.5, ratio_units={"roe": "percent", "roa": "percent"}, provider_evidence=[{"roe_percent": 0.25}])
+    preferred = FinancialRatioData(symbol="VNM", period="2024", roe=None, ratio_units={"roe": "unknown"}, provider_evidence=[{"roe": 99}])
+    merged = _merge_ratio_rows(preferred, fallback)
+    assert merged.roe is None
+    assert merged.roa == 0.5
+    assert merged.ratio_units == {"roe": "unknown", "roa": "percent"}
+    assert merged.provider_evidence == [{"roe_percent": 0.25}, {"roe": 99}]
+
+@pytest.mark.parametrize("raw,expected", [
+    ({"yearReport": 2025, "pe": 14.64}, 0.25),
+    ({"yearReport": 2025, "pe": 14.64, "dividendYield": 47.02}, None),
+])
+def test_ratio_merge_distinguishes_omitted_yield_from_unit_rejection(raw, expected):
+    from vnibb.api.v1.equity import _merge_ratio_rows
+    from vnibb.providers.vnstock.financial_ratios import FinancialRatiosQueryParams, VnstockFinancialRatiosFetcher
+
+    preferred = VnstockFinancialRatiosFetcher.transform_data(FinancialRatiosQueryParams(symbol="FPT"), [raw])[0]
+    fallback = FinancialRatioData(symbol="FPT", period="2025", dividend_yield=0.25,
+                                 ratio_units={"dividend_yield": "percent"})
+    assert _merge_ratio_rows(preferred, fallback).dividend_yield == expected
+
+
 class FakeMongoMarketDataService:
     enabled = True
 
@@ -23,7 +146,7 @@ class FakeMongoMarketDataService:
         self.rows = rows
         self.requests = []
 
-    async def get_raw_dataset_records(self, symbol, *, dataset, variant=None, limit):
+    async def get_raw_dataset_records_precise(self, symbol, *, dataset, variant=None, limit):
         self.requests.append({"symbol": symbol, "dataset": dataset, "variant": variant, "limit": limit})
         return self.rows
 
@@ -33,7 +156,14 @@ class FakeMongoMarketDataService:
 
 
 @pytest.mark.asyncio
-async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch):
+@pytest.mark.parametrize("snapshot_inputs,valuation_available", [
+    ({}, False),
+    ({"unitQuality": "unknown", "comparisonUnavailableReason": "Price currency/scale is unknown; margin of safety cannot be compared in VND."}, False),
+    ({"unitQuality": "verified", "unitLineage": {"price": {"unit": "unknown"}}}, False),
+    ({"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}, "comparisonUnavailableReason": "Statement currency/scale is unknown."}, False),
+    ({"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}}, True),
+])
+async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch, snapshot_inputs, valuation_available):
     async def fake_profile(symbol, refresh, db):
         return StandardResponse(data={"symbol": symbol, "company_name": "FPT Corp"})
 
@@ -65,6 +195,8 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch):
             "intrinsicValue": 120000,
             "marginOfSafety": 25.0,
             "valuationMethod": "dcf",
+            "price": 90000,
+            "inputs": snapshot_inputs,
             "moat": "wide",
             "roe": 22.5,
             "netMargin": 15.0,
@@ -88,8 +220,17 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch):
     assert response.data["profile"]["company_name"] == "FPT Corp"
     assert response.data["latest_fundamental_snapshot"]["ratio"]["period"] == "2024"
     assert response.data["latest_fundamental_snapshot"]["financials"]["income"]["period"] == "2024"
-    assert response.data["valuation"]["intrinsic_value"] == 120000
-    assert response.data["valuation"]["valuation_method"] == "dcf"
+    if valuation_available:
+        assert response.data["valuation"]["intrinsic_value"] == 120000
+        assert response.data["valuation"]["valuation_method"] == "dcf"
+    else:
+        assert response.data["valuation"] is None
+        assert response.data["section_errors"].pop("valuation")
+    assert response.data["fundamental_snapshot"]["intrinsicValue"] == 120000
+    assert response.data["fundamental_snapshot"]["inputs"] == snapshot_inputs
+    assert response.data["latest_fundamental_snapshot"]["derived"] == (
+        response.data["fundamental_snapshot"] if valuation_available else None
+    )
     assert response.data["competitive_advantage"]["moat"] == "wide"
     assert "ROE 22.5%" in response.data["competitive_advantage"]["reasons"]
     assert response.data["subsidiaries"] == []
@@ -100,17 +241,17 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch):
     assert response.error == "Partial data unavailable"
 
 
-def test_normalize_statement_unit_outliers_repairs_single_1000x_row():
+def test_statement_enrichment_does_not_guess_scale_from_other_periods():
     rows = [
         FinancialStatementData(symbol="FPT", period="Q1-2025", statement_type="balance", total_assets=73_997_673_121_789, cash=5_342_746_710_936),
         FinancialStatementData(symbol="FPT", period="Q2-2025", statement_type="balance", total_assets=81_266_075_455_371, cash=7_755_450_852_909),
         FinancialStatementData(symbol="FPT", period="Q3-2025", statement_type="balance", total_assets=81_601_597_008_000_000, cash=7_755_450_853_000_000),
     ]
 
-    normalized = _normalize_statement_unit_outliers(rows)
+    normalized = _enrich_financial_statement_rows(rows)
 
-    assert normalized[2].total_assets == 81_601_597_008_000
-    assert normalized[2].cash == 7_755_450_853_000
+    assert normalized[2].total_assets == 81_601_597_008_000_000
+    assert normalized[2].cash == 7_755_450_853_000_000
 
 def make_ratio_row(**overrides):
     base = {
@@ -180,18 +321,23 @@ def test_to_ratio_data_reads_ev_sales_from_raw_data_fallback():
 
 @pytest.mark.asyncio
 async def test_load_mongo_financial_statement_rows_transforms_raw_records(monkeypatch):
+    monkeypatch.setattr("vnibb.services.vietcap_financials.load_vietcap_financial_rows", AsyncMock(return_value=[]))
     fake_service = FakeMongoMarketDataService(
         [
             {
+                "providerSource": "VCI",
                 "raw": {
                     "yearReport": 2024,
+                    "_value_unit": "VND",
                     "revenue": 1200.0,
                     "netIncome": 180.0,
                 }
             },
             {
+                "providerSource": "VCI",
                 "raw": {
                     "yearReport": 2023,
+                    "_value_unit": "VND",
                     "revenue": 1000.0,
                     "netIncome": 150.0,
                 }
@@ -211,11 +357,12 @@ async def test_load_mongo_financial_statement_rows_transforms_raw_records(monkey
 
 @pytest.mark.asyncio
 async def test_load_mongo_financial_ratio_rows_transforms_and_filters_raw_records(monkeypatch):
+    monkeypatch.setattr("vnibb.services.vietcap_financials.load_vietcap_financial_rows", AsyncMock(return_value=[]))
     fake_service = FakeMongoMarketDataService(
         [
-            {"raw": {"yearReport": 2024, "quarter": 1, "priceToEarning": 9.2, "priceToBook": 1.4}},
-            {"raw": {"yearReport": 2024, "quarter": 2, "priceToEarning": 9.6, "priceToBook": 1.5}},
-            {"raw": {"yearReport": 2023, "quarter": 1, "priceToEarning": 8.5, "priceToBook": 1.2}},
+            {"providerSource": "VCI", "raw": {"yearReport": 2024, "quarter": 1, "priceToEarning": 9.2, "priceToBook": 1.4}},
+            {"providerSource": "VCI", "raw": {"yearReport": 2024, "quarter": 2, "priceToEarning": 9.6, "priceToBook": 1.5}},
+            {"providerSource": "VCI", "raw": {"yearReport": 2023, "quarter": 1, "priceToEarning": 8.5, "priceToBook": 1.2}},
         ]
     )
     monkeypatch.setattr("vnibb.api.v1.equity.get_mongo_market_data_service", lambda: fake_service)
@@ -233,22 +380,66 @@ async def test_load_mongo_financial_ratio_rows_transforms_and_filters_raw_record
 async def test_compute_rolling_high_low_prefers_mongo_eod(monkeypatch):
     fake_service = FakeMongoMarketDataService(
         [
-            {"high": 10.0, "low": 8.0},
-            {"high": 15.0, "low": 7.5},
-            {"high": 12.0, "low": 9.0},
+            {"high": 10.0, "low": 8.0, "priceUnit": "THOUSAND_VND"},
+            {"high": 15.0, "low": 7.5, "priceUnit": "THOUSAND_VND"},
+            {"high": 12.0, "low": 9.0, "priceUnit": "THOUSAND_VND"},
         ]
     )
     monkeypatch.setattr("vnibb.api.v1.equity.get_mongo_market_data_service", lambda: fake_service)
 
     high, low = await _compute_rolling_high_low(None, "VCI", trading_days=252)  # type: ignore[arg-type]
 
-    assert high == pytest.approx(15.0)
-    assert low == pytest.approx(7.5)
+    assert high == pytest.approx(15_000.0)
+    assert low == pytest.approx(7_500.0)
     assert fake_service.requests[0]["dataset"] == "market_prices_eod"
 
 
 @pytest.mark.asyncio
-async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
+@pytest.mark.parametrize("cost_of_revenue,gross_profit,expected_margin", [
+    (-60.0, None, None),
+    (60.0, None, None),
+    (-60.0, 40.0, 40.0),
+    (-60.0, 0.0, 0.0),
+])
+async def test_enrich_missing_ratio_metrics_requires_reported_gross_profit(
+    test_db, cost_of_revenue, gross_profit, expected_margin,
+):
+    statement = FinancialStatementData(
+        symbol="VNM", period="2024", fiscal_year=2024, statement_type="income", source="fixture",
+        value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+        currency="VND", unit_metadata={
+            name: {"source_unit": "VND", "value_unit": "VND"}
+            for name in ("revenue", "cost_of_revenue", "gross_profit", "operating_income")
+        },
+        revenue=100.0, cost_of_revenue=cost_of_revenue, gross_profit=gross_profit,
+        operating_income=20.0,
+    )
+    test_db.add(IncomeStatement(
+        id=900, symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+        revenue=100.0, cost_of_revenue=cost_of_revenue, gross_profit=gross_profit,
+        operating_income=20.0,
+        raw_data={"_financial_lineage": {
+            "value_unit": "VND", "canonical_data": statement.model_dump(mode="json"),
+        }},
+    ))
+    await test_db.commit()
+
+    enriched = await _enrich_missing_ratio_metrics(
+        "VNM", "year", [FinancialRatioData(symbol="VNM", period="2024")], test_db,
+    )
+    item = enriched[0]
+
+    assert item.operating_margin == pytest.approx(20.0)
+    if expected_margin is None:
+        assert item.gross_margin is None
+        assert "gross_margin" not in item.ratio_units
+    else:
+        assert item.gross_margin == pytest.approx(expected_margin)
+        assert item.ratio_units["gross_margin"] == "percent"
+
+
+@pytest.mark.asyncio
+async def test_enrich_missing_ratio_metrics_computes_certified_statement_metrics_without_current_valuation(test_db):
     test_db.add(
         Company(
             symbol="VNM",
@@ -277,6 +468,19 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
                 cost_of_revenue=700.0,
                 interest_expense=20.0,
                 eps=5.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="VNM", period="2024", fiscal_year=2024, statement_type="income", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    revenue=1200.0, operating_income=180.0, net_income=150.0,
+                    cost_of_revenue=700.0, interest_expense=20.0, eps=5.0,
+                    unit_metadata={
+                        **{name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                            "revenue", "operating_income", "net_income", "cost_of_revenue", "interest_expense",
+                        )},
+                        "interest_expense": {"label": "interest_expense", "source_unit": "VND", "value_unit": "VND"},
+                        "eps": {"source_unit": "VND/share", "value_unit": "VND/share"},
+                    },
+                ).model_dump(mode="json")}},
             ),
             IncomeStatement(
                 id=2,
@@ -287,6 +491,15 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
                 revenue=1000.0,
                 net_income=120.0,
                 eps=4.2,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="VNM", period="2023", fiscal_year=2023, statement_type="income", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={
+                        **{name: {"source_unit": "VND", "value_unit": "VND"} for name in ("revenue", "net_income")},
+                        "eps": {"source_unit": "VND/share", "value_unit": "VND/share"},
+                    },
+                    revenue=1000.0, net_income=120.0, eps=4.2,
+                ).model_dump(mode="json")}},
             ),
             BalanceSheet(
                 id=1,
@@ -302,6 +515,17 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
                 accounts_receivable=240.0,
                 short_term_debt=50.0,
                 long_term_debt=200.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="VNM", period="2024", fiscal_year=2024, statement_type="balance", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "total_assets", "total_liabilities", "total_equity", "cash_and_equivalents",
+                        "inventory", "accounts_receivable", "short_term_debt", "long_term_debt",
+                    )},
+                    total_assets=2000.0, total_liabilities=800.0, total_equity=1200.0,
+                    cash_and_equivalents=100.0, inventory=200.0, accounts_receivable=240.0,
+                    short_term_debt=50.0, long_term_debt=200.0,
+                ).model_dump(mode="json")}},
             ),
             BalanceSheet(
                 id=2,
@@ -311,6 +535,14 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
                 fiscal_year=2023,
                 inventory=180.0,
                 accounts_receivable=220.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="VNM", period="2023", fiscal_year=2023, statement_type="balance", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "inventory", "accounts_receivable",
+                    )},
+                    inventory=180.0, accounts_receivable=220.0,
+                ).model_dump(mode="json")}},
             ),
             CashFlow(
                 id=1,
@@ -323,6 +555,15 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
                 capital_expenditure=-80.0,
                 dividends_paid=-40.0,
                 debt_repayment=-30.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="VNM", period="2024", fiscal_year=2024, statement_type="cashflow", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "operating_cash_flow", "free_cash_flow", "capital_expenditure", "dividends_paid", "debt_repayment",
+                    )},
+                    operating_cash_flow=210.0, free_cash_flow=130.0, capital_expenditure=-80.0,
+                    dividends_paid=-40.0, debt_repayment=-30.0,
+                ).model_dump(mode="json")}},
             ),
         ]
     )
@@ -336,7 +577,8 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
     assert item.asset_turnover == pytest.approx(0.6)
     assert item.inventory_turnover == pytest.approx(700.0 / 190.0)
     assert item.receivables_turnover == pytest.approx(1200.0 / 230.0)
-    assert item.debt_assets == pytest.approx(0.4)
+    assert item.debt_assets == pytest.approx(40.0)
+    assert item.ratio_units["debt_assets"] == "percent"
     assert item.equity_multiplier == pytest.approx(2000.0 / 1200.0)
     assert item.roic == pytest.approx((150.0 / 1400.0) * 100)
     assert item.revenue_growth == pytest.approx(20.0)
@@ -344,10 +586,15 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
     assert item.debt_service_coverage == pytest.approx(3.6)
     assert item.ocf_debt == pytest.approx(0.2625)
     assert item.ocf_sales == pytest.approx(0.175)
-    assert item.ev_sales == pytest.approx((2400.0 + 250.0 - 100.0) / 1200.0)
-    assert item.fcf_yield == pytest.approx(130.0 / 2400.0)
-    assert item.dps == pytest.approx(0.00000002)
-    assert item.dividend_yield == pytest.approx(0.00000002)
+    assert item.pe == 10.0
+    assert item.pb is None
+    assert item.eps is None
+    assert item.bvps is None
+    assert item.ps is None
+    assert item.ev_sales is None
+    assert item.fcf_yield is None
+    assert item.dps is None
+    assert item.dividend_yield is None
     assert item.payout_ratio == pytest.approx((40.0 / 150.0) * 100)
     assert item.peg_ratio == pytest.approx(0.4)
 
@@ -389,6 +636,14 @@ async def test_enrich_missing_ratio_metrics_nulls_bank_only_metrics(test_db):
                 operating_income=120.0,
                 net_income=100.0,
                 interest_expense=15.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="TCB", period="2024", fiscal_year=2024, statement_type="income", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "revenue", "operating_income", "net_income", "interest_expense",
+                    )},
+                    revenue=200.0, operating_income=120.0, net_income=100.0, interest_expense=15.0,
+                ).model_dump(mode="json")}},
             ),
             IncomeStatement(
                 id=11,
@@ -398,6 +653,12 @@ async def test_enrich_missing_ratio_metrics_nulls_bank_only_metrics(test_db):
                 fiscal_year=2023,
                 revenue=150.0,
                 net_income=80.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="TCB", period="2023", fiscal_year=2023, statement_type="income", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in ("revenue", "net_income")},
+                    revenue=150.0, net_income=80.0,
+                ).model_dump(mode="json")}},
             ),
             BalanceSheet(
                 id=10,
@@ -409,6 +670,15 @@ async def test_enrich_missing_ratio_metrics_nulls_bank_only_metrics(test_db):
                 total_liabilities=850.0,
                 total_equity=150.0,
                 cash_and_equivalents=100.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="TCB", period="2024", fiscal_year=2024, statement_type="balance", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "total_assets", "total_liabilities", "total_equity", "cash_and_equivalents",
+                    )},
+                    total_assets=1000.0, total_liabilities=850.0, total_equity=150.0,
+                    cash_and_equivalents=100.0,
+                ).model_dump(mode="json")}},
             ),
             CashFlow(
                 id=10,
@@ -420,6 +690,15 @@ async def test_enrich_missing_ratio_metrics_nulls_bank_only_metrics(test_db):
                 free_cash_flow=80.0,
                 capital_expenditure=-10.0,
                 dividends_paid=-5.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="TCB", period="2024", fiscal_year=2024, statement_type="cashflow", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "operating_cash_flow", "free_cash_flow", "capital_expenditure", "dividends_paid",
+                    )},
+                    operating_cash_flow=90.0, free_cash_flow=80.0, capital_expenditure=-10.0,
+                    dividends_paid=-5.0,
+                ).model_dump(mode="json")}},
             ),
         ]
     )
@@ -433,6 +712,8 @@ async def test_enrich_missing_ratio_metrics_nulls_bank_only_metrics(test_db):
     assert item.roa == pytest.approx(10.0)
     assert item.equity_multiplier == pytest.approx(1000.0 / 150.0)
     assert item.revenue_growth == pytest.approx((200.0 - 150.0) / 150.0 * 100)
+    assert item.pe == 8.0
+    assert item.pb == 1.2
     assert item.ps is None
     assert item.ev_sales is None
     assert item.ebitda is None
@@ -471,7 +752,17 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
                 fiscal_year=2024,
                 revenue=120.0,
                 net_income=30.0,
-                raw_data={"Net Interest Income": 80.0, "Provision for credit losses": -10.0},
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    **FinancialStatementData(
+                        symbol="VCB", period="2024", fiscal_year=2024, statement_type="income", source="fixture",
+                        currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                        unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                            "revenue", "net_income", "net_interest_income", "provision_for_credit_losses",
+                        )},
+                        revenue=120.0, net_income=30.0,
+                    ).model_dump(mode="json"),
+                    "net_interest_income": 80.0, "provision_for_credit_losses": -10.0,
+                }}},
             ),
             IncomeStatement(
                 id=21,
@@ -481,7 +772,17 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
                 fiscal_year=2023,
                 revenue=100.0,
                 net_income=25.0,
-                raw_data={"Net Interest Income": 70.0, "Provision for credit losses": -8.0},
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    **FinancialStatementData(
+                        symbol="VCB", period="2023", fiscal_year=2023, statement_type="income", source="fixture",
+                        currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                        unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                            "revenue", "net_income", "net_interest_income", "provision_for_credit_losses",
+                        )},
+                        revenue=100.0, net_income=25.0,
+                    ).model_dump(mode="json"),
+                    "net_interest_income": 70.0, "provision_for_credit_losses": -8.0,
+                }}},
             ),
             BalanceSheet(
                 id=20,
@@ -493,13 +794,21 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
                 total_liabilities=850.0,
                 total_equity=150.0,
                 accounts_receivable=700.0,
-                raw_data={
-                    "Deposits from customers": 500.0,
-                    "Demand deposits": 150.0,
-                    "Placements with and loans to other credit institutions": 100.0,
-                    "Investment Securities": 200.0,
-                    "Less: Provision for losses on loans and advances to customers": -50.0,
-                },
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    **FinancialStatementData(
+                        symbol="VCB", period="2024", fiscal_year=2024, statement_type="balance", source="fixture",
+                        currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                        unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                            "total_assets", "total_liabilities", "total_equity", "accounts_receivable", "customer_deposits",
+                            "current_account_deposits", "placements_with_banks", "investment_securities_total", "loan_loss_reserve", "gross_loans",
+                        )},
+                        total_assets=1000.0, total_liabilities=850.0, total_equity=150.0,
+                        accounts_receivable=700.0, customer_deposits=500.0,
+                    ).model_dump(mode="json"),
+                    "current_account_deposits": 150.0, "placements_with_banks": 100.0,
+                    "investment_securities_total": 200.0, "loan_loss_reserve": -50.0,
+                    "gross_loans": 700.0,
+                }}},
             ),
             BalanceSheet(
                 id=21,
@@ -511,13 +820,21 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
                 total_liabilities=770.0,
                 total_equity=130.0,
                 accounts_receivable=630.0,
-                raw_data={
-                    "Deposits from customers": 400.0,
-                    "Demand deposits": 120.0,
-                    "Placements with and loans to other credit institutions": 80.0,
-                    "Investment Securities": 150.0,
-                    "Less: Provision for losses on loans and advances to customers": -45.0,
-                },
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": {
+                    **FinancialStatementData(
+                        symbol="VCB", period="2023", fiscal_year=2023, statement_type="balance", source="fixture",
+                        currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                        unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                            "total_assets", "total_liabilities", "total_equity", "accounts_receivable", "customer_deposits",
+                            "current_account_deposits", "placements_with_banks", "investment_securities_total", "loan_loss_reserve", "gross_loans",
+                        )},
+                        total_assets=900.0, total_liabilities=770.0, total_equity=130.0,
+                        accounts_receivable=630.0, customer_deposits=400.0,
+                    ).model_dump(mode="json"),
+                    "current_account_deposits": 120.0, "placements_with_banks": 80.0,
+                    "investment_securities_total": 150.0, "loan_loss_reserve": -45.0,
+                    "gross_loans": 630.0,
+                }}},
             ),
         ]
     )
@@ -535,10 +852,12 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
     assert item.nim == pytest.approx((80.0 / 930.0) * 100)
     assert item.credit_cost == pytest.approx((10.0 / 665.0) * 100)
     assert item.provision_coverage == pytest.approx((50.0 / 700.0) * 100)
+    assert item.pe == 10.0
+    assert item.pb == 1.8
 
 
 @pytest.mark.asyncio
-async def test_enrich_missing_ratio_metrics_backfills_missing_statement_periods(test_db):
+async def test_enrich_missing_ratio_metrics_backfills_certified_statement_periods(test_db):
     test_db.add(Stock(symbol="VNM", exchange="HOSE", industry="Consumer", sector="Staples"))
     test_db.add_all(
         [
@@ -550,6 +869,12 @@ async def test_enrich_missing_ratio_metrics_backfills_missing_statement_periods(
                 fiscal_year=2022,
                 revenue=120.0,
                 net_income=24.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="VNM", period="2022", fiscal_year=2022, statement_type="income", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in ("revenue", "net_income")},
+                    revenue=120.0, net_income=24.0,
+                ).model_dump(mode="json")}},
             ),
             IncomeStatement(
                 id=31,
@@ -559,6 +884,12 @@ async def test_enrich_missing_ratio_metrics_backfills_missing_statement_periods(
                 fiscal_year=2021,
                 revenue=100.0,
                 net_income=20.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="VNM", period="2021", fiscal_year=2021, statement_type="income", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="annual",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in ("revenue", "net_income")},
+                    revenue=100.0, net_income=20.0,
+                ).model_dump(mode="json")}},
             ),
             BalanceSheet(
                 id=30,
@@ -569,6 +900,14 @@ async def test_enrich_missing_ratio_metrics_backfills_missing_statement_periods(
                 total_assets=200.0,
                 total_liabilities=80.0,
                 total_equity=120.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="VNM", period="2022", fiscal_year=2022, statement_type="balance", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "total_assets", "total_liabilities", "total_equity",
+                    )},
+                    total_assets=200.0, total_liabilities=80.0, total_equity=120.0,
+                ).model_dump(mode="json")}},
             ),
             BalanceSheet(
                 id=31,
@@ -579,6 +918,14 @@ async def test_enrich_missing_ratio_metrics_backfills_missing_statement_periods(
                 total_assets=180.0,
                 total_liabilities=70.0,
                 total_equity=110.0,
+                raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": FinancialStatementData(
+                    symbol="VNM", period="2021", fiscal_year=2021, statement_type="balance", source="fixture",
+                    currency="VND", value_unit="VND", consolidation_basis="Consolidated", flow_basis="instantaneous",
+                    unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"} for name in (
+                        "total_assets", "total_liabilities", "total_equity",
+                    )},
+                    total_assets=180.0, total_liabilities=70.0, total_equity=110.0,
+                ).model_dump(mode="json")}},
             ),
         ]
     )
@@ -595,7 +942,8 @@ async def test_enrich_missing_ratio_metrics_backfills_missing_statement_periods(
 
 
 @pytest.mark.asyncio
-async def test_enrich_missing_ratio_metrics_uses_period_end_price_for_valuation(test_db):
+@pytest.mark.parametrize("provider_pe,provider_pb", [(None, None), (12.0, 3.0)])
+async def test_enrich_missing_ratio_metrics_requires_reported_valuation_with_unknown_price_basis(test_db, provider_pe, provider_pb):
     test_db.add(Stock(id=40, symbol="VNM", exchange="HOSE", company_name="Vinamilk"))
     test_db.add(
         Company(
@@ -618,6 +966,7 @@ async def test_enrich_missing_ratio_metrics_uses_period_end_price_for_valuation(
                 close=50.0,
                 volume=1000,
                 interval="1D",
+                source="KBS",
             ),
             StockPrice(
                 id=401,
@@ -630,14 +979,20 @@ async def test_enrich_missing_ratio_metrics_uses_period_end_price_for_valuation(
                 close=80.0,
                 volume=1000,
                 interval="1D",
+                source="KBS",
             ),
         ]
     )
     await test_db.commit()
 
-    rows = [FinancialRatioData(symbol="VNM", period="2022", eps=5_000.0, bvps=20_000.0)]
+    rows = [FinancialRatioData(
+        symbol="VNM", period="2022", eps=5_000.0, bvps=20_000.0,
+        pe=provider_pe, pb=provider_pb,
+    )]
     enriched = await _enrich_missing_ratio_metrics("VNM", "year", rows, test_db)
     item = enriched[0]
 
-    assert item.pe == pytest.approx(10.0)
-    assert item.pb == pytest.approx(2.5)
+    assert item.eps == 5_000.0
+    assert item.bvps == 20_000.0
+    assert item.pe == provider_pe
+    assert item.pb == provider_pb

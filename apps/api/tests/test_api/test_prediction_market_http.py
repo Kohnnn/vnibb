@@ -24,15 +24,27 @@ def _client(handler) -> httpx.AsyncClient:
 
 
 @pytest.mark.asyncio
-async def test_genuine_403_status_is_preserved():
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
+async def test_permanent_client_rejection_preserves_status_without_retry(monkeypatch, status):
+    requests = []
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr("vnibb.services.prediction_market_http.asyncio.sleep", fake_sleep)
+
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(403, text="Forbidden", headers={"content-type": "text/html"})
+        requests.append(request)
+        return httpx.Response(status, text="Rejected", headers={"content-type": "text/html"})
 
     async with _client(handler) as client:
         with pytest.raises(PredictionMarketFetchError) as excinfo:
-            await fetch_json_with_retry(client, "demo", "/x", attempts=1, backoff=0)
-    assert excinfo.value.status == 403
-    assert excinfo.value.source == "demo"
+            await fetch_json_with_retry(client, "predictit", "/x")
+    assert excinfo.value.status == status
+    assert excinfo.value.source == "predictit"
+    assert len(requests) == 1
+    assert slept == []
 
 
 @pytest.mark.asyncio
@@ -107,3 +119,27 @@ async def test_successful_json_is_returned_verbatim():
     async with _client(handler) as client:
         body = await fetch_json_with_retry(client, "demo", "/x", params={"a": 1})
     assert body == {"data": [1, 2, 3]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [408, 429, 500, 503])
+async def test_transient_http_failure_retries_until_success(monkeypatch, status):
+    requests = []
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr("vnibb.services.prediction_market_http.asyncio.sleep", fake_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(status, json={"error": "temporarily unavailable"})
+        return httpx.Response(200, json={"markets": []})
+
+    async with _client(handler) as client:
+        body = await fetch_json_with_retry(client, "demo", "/x", backoff=1)
+    assert body == {"markets": []}
+    assert len(requests) == 2
+    assert slept == [1]

@@ -8,8 +8,16 @@ const historyQuery = jest.mocked(useHistoricalPrices);
 const MarketLab = widgetRegistry.get('market_lab')!.component;
 
 function showMarketLab(rows: object[], error: Error | null) {
+  // Canonical fixture: the widget certifies each row by its own `price_unit`
+  // marker, so the fixture states VND per row plus the matching response-level
+  // status (QA #98).
+  const certifiedRows = rows.map((row) => ({ price_unit: 'VND', ...row }));
   historyQuery.mockReturnValue({
-    data: { data: rows }, isLoading: false, isFetching: false,
+    data: {
+      data: certifiedRows,
+      meta: { count: certifiedRows.length, unit_status: 'confirmed_vnd' },
+    },
+    isLoading:false, isFetching:false,
     error, dataUpdatedAt: 1750000000000, refetch: jest.fn(),
   } as never);
   const onDataChange = jest.fn();

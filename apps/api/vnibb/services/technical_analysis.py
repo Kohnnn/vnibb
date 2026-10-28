@@ -1,11 +1,4 @@
-"""
-Technical Analysis Service using vnstock_ta
-
-Calculates and stores technical indicators for stocks.
-Supports: SMA, EMA, RSI, MACD, Bollinger Bands, Stochastic, ATR, Fibonacci, Support/Resistance.
-
-Uses vnstock_ta premium package when available, falls back to pandas calculations.
-"""
+"""Calculate and store technical indicators using local pandas computations."""
 
 import logging
 from contextvars import ContextVar
@@ -20,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
+from vnibb.core.price_units import history_price_records
 from vnibb.models.technical_indicator import TechnicalIndicator
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
 
@@ -31,32 +25,46 @@ _full_analysis_frame: ContextVar[Any] = ContextVar("full_analysis_frame")
 Timeframe = Literal["D", "W", "M"]
 Signal = Literal["strong_buy", "buy", "neutral", "sell", "strong_sell"]
 
+def normalize_history_frame(
+    frame: pd.DataFrame, *, symbol: str, source: str, provider: Any = None,
+) -> pd.DataFrame:
+    normalized = history_price_records(frame, symbol=symbol, source=source, provider=provider)
+    unresolved_units = sorted(
+        {
+            record.get("price_source") or "unknown"
+            for record in normalized
+            if record["price_unit"] == "unknown"
+        }
+    )
+    if unresolved_units:
+        logger.warning(
+            "Skipping technical history with unknown price units: %s source=%s unresolved=%s",
+            symbol,
+            source,
+            unresolved_units,
+        )
+        excluded = pd.DataFrame()
+        excluded.attrs["unit_exclusion"] = {
+            "reason": "unresolved_price_units",
+            "excluded_count": len(normalized),
+            "unresolved_sources": unresolved_units,
+        }
+        return excluded
+    frame_out = pd.DataFrame(normalized)
+    frame_out.attrs["unit_exclusion"] = None
+    return frame_out
+
+
 
 class TechnicalAnalysisService:
     """
-    Technical analysis calculations using vnstock_ta.
+    Technical analysis calculations using free market history and pandas.
 
     Provides methods for calculating and storing technical indicators.
-    Falls back to pandas-based calculations if vnstock_ta is not available.
     """
 
     def __init__(self):
         self._ta_available = False
-        self._check_vnstock_ta()
-
-    def _check_vnstock_ta(self):
-        """Check if vnstock_ta is available."""
-        try:
-            from vnstock_ta import DataSource, Indicator
-
-            self._ta_available = True
-            logger.info("vnstock_ta premium package detected")
-        except Exception as exc:
-            self._ta_available = False
-            logger.warning(
-                "vnstock_ta unavailable (%s). Using fallback calculations.",
-                exc,
-            )
 
     async def calculate_indicators(
         self,
@@ -75,99 +83,8 @@ class TechnicalAnalysisService:
         Returns:
             Dictionary of indicator values
         """
-        if self._ta_available:
-            return await self._calculate_with_vnstock_ta(symbol, start_date, end_date)
-        else:
-            return await self._calculate_fallback(symbol, start_date, end_date)
+        return await self._calculate_fallback(symbol, start_date, end_date)
 
-    async def _calculate_with_vnstock_ta(
-        self,
-        symbol: str,
-        start_date: date,
-        end_date: date,
-    ) -> Dict[str, Any]:
-        """Calculate using vnstock_ta premium package."""
-        import asyncio
-
-        def _sync_calculate():
-            from vnstock_ta import DataSource, Indicator
-
-            # Get OHLCV data
-            data = DataSource(
-                symbol=symbol,
-                start=start_date.strftime("%Y-%m-%d"),
-                end=end_date.strftime("%Y-%m-%d"),
-                interval="1D",
-                source=settings.vnstock_source,
-            ).get_data()
-
-            if data is None or data.empty:
-                return {}
-
-            # Initialize indicator calculator
-            ta = Indicator(data)
-
-            indicators = {}
-
-            # Moving Averages
-            try:
-                if len(data) >= 20:
-                    indicators["sma_20"] = float(ta.sma(length=20).iloc[-1])
-                if len(data) >= 50:
-                    indicators["sma_50"] = float(ta.sma(length=50).iloc[-1])
-                if len(data) >= 200:
-                    indicators["sma_200"] = float(ta.sma(length=200).iloc[-1])
-                if len(data) >= 12:
-                    indicators["ema_12"] = float(ta.ema(length=12).iloc[-1])
-                if len(data) >= 26:
-                    indicators["ema_26"] = float(ta.ema(length=26).iloc[-1])
-            except Exception as e:
-                logger.warning(f"MA calculation error for {symbol}: {e}")
-
-            # RSI
-            try:
-                if len(data) >= 14:
-                    rsi = ta.rsi(length=14)
-                    if rsi is not None and len(rsi) > 0:
-                        indicators["rsi_14"] = float(rsi.iloc[-1])
-            except Exception as e:
-                logger.warning(f"RSI calculation error for {symbol}: {e}")
-
-            # MACD
-            try:
-                if len(data) >= 26:
-                    macd_df = ta.macd(fast=12, slow=26, signal=9)
-                    if isinstance(macd_df, pd.DataFrame) and len(macd_df) > 0:
-                        indicators["macd"] = float(macd_df["MACD_12_26_9"].iloc[-1])
-                        indicators["macd_signal"] = float(macd_df["MACDs_12_26_9"].iloc[-1])
-                        indicators["macd_hist"] = float(macd_df["MACDh_12_26_9"].iloc[-1])
-            except Exception as e:
-                logger.warning(f"MACD calculation error for {symbol}: {e}")
-
-            # Bollinger Bands
-            try:
-                if len(data) >= 20:
-                    bb_df = ta.bbands(length=20, std=2)
-                    if isinstance(bb_df, pd.DataFrame) and len(bb_df) > 0:
-                        indicators["bb_upper"] = float(bb_df["BBU_20_2.0"].iloc[-1])
-                        indicators["bb_middle"] = float(bb_df["BBM_20_2.0"].iloc[-1])
-                        indicators["bb_lower"] = float(bb_df["BBL_20_2.0"].iloc[-1])
-            except Exception as e:
-                logger.warning(f"Bollinger Bands calculation error for {symbol}: {e}")
-
-            # ATR
-            try:
-                if len(data) >= 14:
-                    atr = ta.atr(length=14)
-                    if atr is not None and len(atr) > 0:
-                        indicators["atr_14"] = float(atr.iloc[-1])
-            except Exception as e:
-                logger.warning(f"ATR calculation error for {symbol}: {e}")
-
-            return indicators
-
-        # Run in thread pool to avoid blocking
-        return await asyncio.to_thread(_sync_calculate)
 
     async def _calculate_fallback(
         self,
@@ -175,14 +92,14 @@ class TechnicalAnalysisService:
         start_date: date,
         end_date: date,
     ) -> Dict[str, Any]:
-        """Fallback calculations using basic vnstock and pandas."""
+        """Calculate indicators using free vnstock history and pandas."""
         import asyncio
 
         def _sync_calculate():
-            from vnibb.providers.vnstock.runtime import get_vnstock_class
+            from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
 
             Vnstock = get_vnstock_class()
-            stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
+            stock = Vnstock().stock(symbol=symbol, source=validate_source(settings.vnstock_source))
 
             df = stock.quote.history(
                 start=start_date.strftime("%Y-%m-%d"),
@@ -190,6 +107,12 @@ class TechnicalAnalysisService:
             )
 
             if df is None or df.empty:
+                return {}
+            df = normalize_history_frame(
+                df, symbol=symbol, source=settings.vnstock_source,
+                provider=stock.quote,
+            )
+            if df.empty:
                 return {}
 
             close = df["close"]
@@ -317,49 +240,79 @@ class TechnicalAnalysisService:
     # NEW: Full Technical Analysis Methods
     # =========================================================================
 
-    async def get_ohlcv_data(
+    async def _load_ohlcv_frame(
         self,
         symbol: str,
         start_date: date,
         end_date: date,
         interval: str = "1D",
     ) -> Optional[pd.DataFrame]:
-        """Fetch OHLCV data for a symbol. Returns None if no data."""
+        """Load cleaned OHLCV without the latest-quote merge.
+
+        Returns ``None`` when no usable rows exist. When every row was dropped
+        for an unresolved price unit, returns an empty frame carrying
+        ``frame.attrs['unit_exclusion']`` so callers can disclose the exact
+        reason without guessing.
+        """
         cached_frame = _full_analysis_frame.get(_missing_full_analysis_frame)
         if cached_frame is not _missing_full_analysis_frame:
             if cached_frame is None:
                 return None
+            if cached_frame.empty or "time" not in cached_frame.columns:
+                empty = cached_frame.copy()
+                empty.attrs["unit_exclusion"] = cached_frame.attrs.get("unit_exclusion")
+                return empty
             start_timestamp = pd.Timestamp(start_date)
             end_timestamp = pd.Timestamp(end_date) + pd.Timedelta(days=1)
-            return cached_frame[
+            window = cached_frame[
                 (cached_frame["time"] >= start_timestamp) & (cached_frame["time"] < end_timestamp)
             ].reset_index(drop=True)
+            window.attrs["unit_exclusion"] = cached_frame.attrs.get("unit_exclusion")
+            return window
 
         import asyncio
 
         def _fetch():
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
 
                 Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
+                stock = Vnstock().stock(symbol=symbol, source=validate_source(settings.vnstock_source))
 
                 df = stock.quote.history(
                     start=start_date.strftime("%Y-%m-%d"),
                     end=end_date.strftime("%Y-%m-%d"),
                     interval=interval,
                 )
-                return df if df is not None and not df.empty else None
+                if df is None or df.empty:
+                    return None
+                return normalize_history_frame(
+                    df, symbol=symbol, source=settings.vnstock_source,
+                    provider=stock.quote,
+                )
             except Exception as e:
                 logger.error(f"Failed to fetch OHLCV for {symbol}: {e}")
                 return None
 
         frame = await asyncio.to_thread(_fetch)
-        if frame is None or frame.empty:
+        if frame is None:
+            return None
+        if frame.empty:
             return frame
+        cleaned = self._clean_ohlcv_frame(frame)
+        cleaned.attrs["unit_exclusion"] = frame.attrs.get("unit_exclusion")
+        return cleaned
 
-        frame = self._clean_ohlcv_frame(frame)
+    async def _merge_latest_quote(
+        self, frame: pd.DataFrame, symbol: str
+    ) -> pd.DataFrame:
+        """Merge the latest quote into an already-loaded history frame.
 
+        The merge is refused unless the quote carries the same confirmed unit as
+        every history row, so an unconfirmed or incompatible quote is never
+        appended as an ordinary session. Entry points that share one frame across
+        many indicators merge once here instead of re-fetching per indicator.
+        """
         try:
             quote, _ = await VnstockStockQuoteFetcher.fetch(
                 symbol=symbol, source=settings.vnstock_source
@@ -371,6 +324,14 @@ class TechnicalAnalysisService:
         quote_price = getattr(quote, "price", None)
         quote_time = getattr(quote, "updated_at", None)
         if quote_price is None or quote_time is None:
+            return frame
+        quote_unit = getattr(quote, "price_unit", "unknown")
+        history_units = set(frame["price_unit"])
+        if quote_unit == "unknown" or history_units != {quote_unit}:
+            logger.warning(
+                "Technical quote merge skipped for incompatible units: %s history=%s quote=%s",
+                symbol, sorted(history_units), quote_unit,
+            )
             return frame
 
         merged = frame.copy()
@@ -408,6 +369,7 @@ class TechnicalAnalysisService:
             ),
             "close": float(quote_price),
             "volume": float(getattr(quote, "volume", None) or last_row.get("volume") or 0),
+            "price_unit": quote_unit,
         }
 
         if quote_day == last_day:
@@ -415,7 +377,30 @@ class TechnicalAnalysisService:
         else:
             merged = pd.concat([merged, pd.DataFrame([appended_row])], ignore_index=True)
 
+        # ``concat`` drops ``attrs``; re-attach the unit-exclusion record so
+        # downstream disclosure still sees why rows were dropped.
+        merged.attrs["unit_exclusion"] = frame.attrs.get("unit_exclusion")
         return merged
+
+    async def get_ohlcv_data(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        interval: str = "1D",
+    ) -> Optional[pd.DataFrame]:
+        """Fetch OHLCV data for a symbol. Returns None if no data."""
+        frame = await self._load_ohlcv_frame(
+            symbol, start_date, end_date, interval=interval
+        )
+        if frame is None or frame.empty:
+            return None
+        if _full_analysis_frame.get(_missing_full_analysis_frame) is not _missing_full_analysis_frame:
+            # A shared full-analysis frame is active, so the entry point already
+            # performed the single latest-quote merge. Re-fetching the quote here
+            # would issue one provider call per indicator.
+            return frame
+        return await self._merge_latest_quote(frame, symbol)
 
     @staticmethod
     def _clean_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -440,14 +425,25 @@ class TechnicalAnalysisService:
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days)
         raw = await self.get_ohlcv_data(symbol, start_date, end_date)
+        cached_frame = _full_analysis_frame.get(_missing_full_analysis_frame)
         if raw is None or raw.empty:
             return {
                 "status": "no_data",
                 "bars": 0,
                 "issues": [f"No OHLCV rows returned for {symbol.upper()}"],
+                "unit_status": "unconfirmed",
+                "unresolved_session_count": int(
+                    (getattr(cached_frame, "attrs", {}).get("unit_exclusion") or {}).get("excluded_count", 0)
+                ),
             }
-        cached_frame = _full_analysis_frame.get(_missing_full_analysis_frame)
         frame = raw if cached_frame is not _missing_full_analysis_frame else self._clean_ohlcv_frame(raw)
+        units = set(frame["price_unit"]) if "price_unit" in frame else set()
+        unit_status = (
+            "confirmed_vnd" if units == {"VND"}
+            else "index_points" if units == {"index_points"}
+            else "mixed" if len(units) > 1
+            else "unconfirmed"
+        )
         issues: List[str] = []
         if len(frame) < 60:
             issues.append(f"Only {len(frame)} clean bars available; most indicators need at least 60.")
@@ -464,6 +460,8 @@ class TechnicalAnalysisService:
             "bars": int(len(frame)),
             "latest_date": latest_date,
             "issues": issues,
+            "unit_status": unit_status,
+            "unresolved_session_count": 0,
         }
 
     async def get_moving_averages(
@@ -500,6 +498,7 @@ class TechnicalAnalysisService:
                 result["signals"][f"ema_{period}"] = ema_signal
 
         result["current_price"] = current_price
+        result["price_unit"] = df.iloc[-1].get("price_unit", "unknown")
         return result
 
     async def get_rsi(
@@ -596,6 +595,7 @@ class TechnicalAnalysisService:
             signal = "neutral"
 
         return {
+            "price_unit": df.iloc[-1].get("price_unit", "unknown"),
             "macd": round(macd_val, 4),
             "signal_line": round(signal_val, 4),
             "histogram": round(hist_val, 4),
@@ -645,6 +645,7 @@ class TechnicalAnalysisService:
             signal = "neutral"
 
         return {
+            "price_unit": df.iloc[-1].get("price_unit", "unknown"),
             "upper": round(upper_val, 2),
             "middle": round(middle_val, 2),
             "lower": round(lower_val, 2),
@@ -776,6 +777,7 @@ class TechnicalAnalysisService:
         )
 
         return {
+            "price_unit": df.iloc[-1].get("price_unit", "unknown"),
             "support": [round(s, 2) for s in support_levels],
             "resistance": [round(r, 2) for r in resistance_levels],
             "current_price": round(current_price, 2),
@@ -827,6 +829,7 @@ class TechnicalAnalysisService:
             levels = {f"{int(r * 100)}%": round(period_low + (diff * r), 2) for r in fib_ratios}
 
         return {
+            "price_unit": df.iloc[-1].get("price_unit", "unknown"),
             "levels": levels,
             "period_high": round(period_high, 2),
             "period_low": round(period_low, 2),
@@ -1004,6 +1007,7 @@ class TechnicalAnalysisService:
         chikou_span = close.shift(-displacement)
 
         return {
+            "price_unit": df.iloc[-1].get("price_unit", "unknown"),
             "tenkan_sen": round(float(tenkan_sen.iloc[-1]), 2)
             if not pd.isna(tenkan_sen.iloc[-1])
             else None,
@@ -1033,9 +1037,27 @@ class TechnicalAnalysisService:
         lookback_days: int = 200,
     ) -> Dict[str, Any]:
         """Aggregate all indicators into a buy/sell signal summary."""
-        # Fetch all indicators in parallel
         import asyncio
+        from datetime import timedelta
 
+        # Resolve the frame once so the unit-exclusion reason is captured
+        # locally (ContextVar writes do not propagate back across asyncio
+        # tasks). When already inside a shared analysis frame, reuse it.
+        exclusion: Optional[Dict[str, Any]] = None
+        frame_token = None
+        cached_frame = _full_analysis_frame.get(_missing_full_analysis_frame)
+        if cached_frame is _missing_full_analysis_frame:
+            end_date = date.today()
+            start_date = end_date - timedelta(days=lookback_days + 26)
+            loaded = await self._load_ohlcv_frame(symbol, start_date, end_date)
+            if loaded is not None and not loaded.empty:
+                # Merge the latest quote exactly once here; the indicators below
+                # reuse this shared frame instead of re-fetching the quote each.
+                loaded = await self._merge_latest_quote(loaded, symbol)
+            exclusion = loaded.attrs.get("unit_exclusion") if loaded is not None else None
+            frame_token = _full_analysis_frame.set(loaded)
+        else:
+            exclusion = cached_frame.attrs.get("unit_exclusion") if cached_frame is not None else None
         ma_task = self.get_moving_averages(symbol, [10, 20, 50, 200], lookback_days)
         rsi_task = self.get_rsi(symbol, 14, lookback_days)
         macd_task = self.get_macd(symbol, 12, 26, 9, lookback_days)
@@ -1044,9 +1066,13 @@ class TechnicalAnalysisService:
         adx_task = self.get_adx(symbol, 14, lookback_days)
         volume_task = self.get_volume_analysis(symbol, 20, lookback_days)
 
-        ma, rsi, macd, bb, stoch, adx, vol = await asyncio.gather(
-            ma_task, rsi_task, macd_task, bb_task, stoch_task, adx_task, volume_task
-        )
+        try:
+            ma, rsi, macd, bb, stoch, adx, vol = await asyncio.gather(
+                ma_task, rsi_task, macd_task, bb_task, stoch_task, adx_task, volume_task
+            )
+        finally:
+            if frame_token is not None:
+                _full_analysis_frame.reset(frame_token)
 
         indicator_signals: List[str] = []
         category_weighted_signals: Dict[str, List[tuple[str, float]]] = {
@@ -1141,10 +1167,12 @@ class TechnicalAnalysisService:
 
         if macd.get("macd") is not None:
             histogram_value = macd.get("histogram")
+            macd_unit = macd.get("price_unit")
+            fade_threshold = 350.0 if macd_unit == "VND" else 0.35 if macd_unit == "index_points" else None
             adjusted_macd_signal = contextualize_signal(
                 signal=macd["signal"],
-                bullish_fade_threshold=-0.35,
-                bearish_fade_threshold=0.35,
+                bullish_fade_threshold=-fade_threshold if fade_threshold is not None else None,
+                bearish_fade_threshold=fade_threshold,
                 raw_value=float(histogram_value) if histogram_value is not None else None,
             )
             add_indicator(
@@ -1202,6 +1230,43 @@ class TechnicalAnalysisService:
         sell_count = indicator_signals.count("sell")
         neutral_count = indicator_signals.count("neutral")
         total = len(indicator_signals)
+
+        if total == 0:
+            # Zero indicators means no directional evidence could be computed.
+            # That does NOT by itself prove an unresolved-unit cause: it may be
+            # insufficient history or a provider outage. Only claim
+            # ``unresolved_price_units`` when a unit exclusion was actually
+            # observed during the fetch; otherwise report insufficient source
+            # data. Return an explicit unavailable contract instead of a
+            # synthetic neutral label or zero-filled score.
+            # ``exclusion`` is captured locally from the resolved frame, not
+            # from any context/global state.
+            if exclusion:
+                reason = "unresolved_price_units"
+                note = (
+                    "Signal summary unavailable: history was excluded because a "
+                    "confirmed price unit could not be resolved "
+                    f"(excluded {exclusion.get('excluded_count', 0)} row(s); "
+                    f"sources: {', '.join(exclusion.get('unresolved_sources', [])) or 'unknown'}); "
+                    "no directional label is emitted."
+                )
+            else:
+                reason = "insufficient_source_data"
+                note = (
+                    "Signal summary unavailable: no sufficient source-backed history "
+                    "was available to compute any indicator; no directional label is emitted."
+                )
+            return {
+                "symbol": symbol.upper(),
+                "overall_signal": "unavailable",
+                "buy_count": 0,
+                "sell_count": 0,
+                "neutral_count": 0,
+                "total_indicators": 0,
+                "indicators": [],
+                "trend_strength": "unavailable",
+                "data_quality": {"status": "no_data", "reason": reason, "note": note},
+            }
 
         category_weights = {"trend": 1.0, "oscillator": 1.0, "volume": 0.6}
         weighted_categories: List[tuple[float, float]] = []
@@ -1276,11 +1341,15 @@ class TechnicalAnalysisService:
             lookback_days = lookback_days * 20  # ~16 years of monthly data
 
         end_date = date.today()
-        frame = await self.get_ohlcv_data(
+        frame = await self._load_ohlcv_frame(
             symbol,
             end_date - timedelta(days=lookback_days + 26),
             end_date,
         )
+        if frame is not None and not frame.empty:
+            # Single latest-quote merge for the whole analysis; the indicator
+            # tasks below share this frame and must not re-fetch the quote.
+            frame = await self._merge_latest_quote(frame, symbol)
         token = _full_analysis_frame.set(frame)
         try:
             quality_task = self.get_data_quality_summary(symbol, lookback_days)
@@ -1315,6 +1384,7 @@ class TechnicalAnalysisService:
 
         return {
             "symbol": symbol.upper(),
+            "price_unit": frame.iloc[-1].get("price_unit", "unknown") if frame is not None and not frame.empty else "unknown",
             "timeframe": timeframe,
             "moving_averages": ma,
             "oscillators": {

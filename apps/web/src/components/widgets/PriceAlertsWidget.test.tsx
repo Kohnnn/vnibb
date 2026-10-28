@@ -35,7 +35,7 @@ describe('PriceAlertsWidget', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     widgetLocation = undefined;
-    socket.mockReturnValue({ isConnected: false, prices: new Map(), lastUpdate: null, marketStatus: null, reconnect: jest.fn() });
+    socket.mockReturnValue({ isConnected: false, isReceiving: false, protocolError: null, prices: new Map(), lastUpdate: null, marketStatus: null, reconnect: jest.fn() });
     Object.defineProperty(window, 'Notification', { configurable: true, value: { permission: 'denied', requestPermission: jest.fn() } });
   });
 
@@ -69,6 +69,23 @@ describe('PriceAlertsWidget', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     expect(screen.getByText('FPT')).toBeInTheDocument();
     expect(screen.getByText(/100/)).toBeInTheDocument();
+  });
+
+  it('does not persist a duplicate of a restored paused rule', () => {
+    const existing = { id: 'one', symbol: 'FPT', condition: 'above', threshold: 100, createdAt: '2026-07-20T00:00:00Z', isActive: false, notificationSent: false };
+    widgetLocation = { dashboardId: 'dashboard', tabId: 'tab', widget: { config: { alerts: [existing] } } };
+    renderWidget('FPT', [existing]);
+    fireEvent.click(screen.getByRole('button', { name: 'Add price alert' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Alert symbol' }), { target: { value: ' fpt ' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Alert threshold' }), { target: { value: '100.0' } });
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+    expect(screen.getByRole('status')).toHaveTextContent('This alert already exists.');
+    expect(screen.getAllByRole('button', { name: 'Resume FPT alert' })).toHaveLength(1);
+    expect(updateWidget).not.toHaveBeenCalled();
+    expect(screen.getByText(/Checks run only while this page is open/)).toBeInTheDocument();
+    expect(screen.getByText(/not server, email, or SMS delivery/)).toBeInTheDocument();
   });
 
   it('names alert actions and keeps them keyboard accessible without hover', () => {

@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field, field_validator
 from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.price_units import PriceUnit, history_price_records, normalize_price_record
+from vnibb.providers.vnstock.runtime import run_reference_provider, validate_source
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +48,9 @@ class EquityHistoricalQueryParams(BaseModel):
         description="Data interval: 1m, 5m, 15m, 30m, 1H, 1D, 1W, 1M",
     )
     source: str = Field(
-        default="KBS",
-        pattern=r"^(KBS|VCI|MSN|FMP)$",
-        description="Data source: KBS (default), VCI, MSN, or FMP (vnstock 4.x)",
+        default="VCI",
+        pattern=r"^VCI$",
+        description="Data source: free VCI",
     )
 
     @field_validator("symbol")
@@ -93,6 +95,11 @@ class EquityHistoricalData(BaseModel):
     low: float = Field(..., description="Lowest price")
     close: float = Field(..., description="Closing price")
     volume: int = Field(..., description="Trading volume")
+    price_unit: PriceUnit = Field(default="unknown", description="Canonical price unit, independent of adjustment mode")
+    price_source: Optional[str] = Field(
+        None,
+        description="Per-row source provenance (e.g. vnstock_vnd:KBS, vnstock_history:VCI, vietcap); never inferred from magnitude",
+    )
 
     # Optional extended fields from vnstock
     value: Optional[float] = Field(None, description="Trading value in VND")
@@ -175,7 +182,7 @@ class VnstockEquityHistoricalFetcher(
         vnstock is synchronous, so we run it in a thread pool executor
         to avoid blocking the async event loop.
         """
-        loop = asyncio.get_event_loop()
+        source = validate_source(query.get("source"))
 
         def _fetch_sync() -> List[dict[str, Any]]:
             """Synchronous fetch wrapped for executor."""
@@ -185,7 +192,7 @@ class VnstockEquityHistoricalFetcher(
                 Vnstock = get_vnstock_class()
                 stock = Vnstock().stock(
                     symbol=query["symbol"],
-                    source=query["source"],
+                    source=source,
                 )
                 df = stock.quote.history(
                     start=query["start"],
@@ -197,8 +204,7 @@ class VnstockEquityHistoricalFetcher(
                     logger.warning(f"No data returned for {query['symbol']}")
                     return []
 
-                # Convert DataFrame to list of dicts
-                return df.to_dict("records")
+                return history_price_records(df, symbol=query["symbol"], source=source, provider=stock.quote)
 
             except Exception as e:
                 logger.error(f"vnstock fetch error for {query['symbol']}: {e}")
@@ -209,15 +215,12 @@ class VnstockEquityHistoricalFetcher(
                 )
 
         try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(None, _fetch_sync),
-                timeout=settings.vnstock_timeout,
+            return await run_reference_provider(
+                _fetch_sync, settings.vnstock_timeout,
+                key=("historical", source, tuple(sorted(query.items()))),
             )
         except asyncio.TimeoutError:
-            raise ProviderTimeoutError(
-                provider="vnstock",
-                timeout=settings.vnstock_timeout,
-            )
+            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
 
     @staticmethod
     def transform_data(
@@ -234,6 +237,7 @@ class VnstockEquityHistoricalFetcher(
 
         for row in data:
             try:
+                row = normalize_price_record(row, symbol=params.symbol, source=row.get("price_source") or f"vnstock_history:{params.source.upper()}")
                 # Handle different column names from different sources
                 time_value = row.get("time") or row.get("date") or row.get("trading_date")
 
@@ -247,14 +251,16 @@ class VnstockEquityHistoricalFetcher(
                     EquityHistoricalData(
                         symbol=params.symbol.upper(),
                         time=time_value,
+                        price_unit=row["price_unit"],
+                        price_source=row.get("price_source"),
                         open=float(row.get("open") or row.get("price") or 0),
                         high=float(row.get("high") or 0),
                         low=float(row.get("low") or 0),
                         close=float(row.get("close") or row.get("price") or 0),
                         volume=int(row.get("volume") or 0),
                         value=float(row["value"]) if row.get("value") else None,
-                        raw_close=float(row.get("close") or row.get("price") or 0),
-                        adjusted_close=float(row["adj_close"]) if row.get("adj_close") else None,
+                        raw_close=float(row.get("raw_close") if row.get("raw_close") is not None else row.get("close") or row.get("price") or 0),
+                        adjusted_close=float(row["adjusted_close"]) if row.get("adjusted_close") is not None else float(row["adj_close"]) if row.get("adj_close") is not None else None,
                     )
                 )
             except (KeyError, ValueError, TypeError) as e:

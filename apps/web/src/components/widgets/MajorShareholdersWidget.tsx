@@ -2,12 +2,15 @@
 
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Users, Building2, User, Globe } from 'lucide-react';
 import { useShareholders } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import type { WidgetDataPayload } from '@/lib/widgetRuntime';
+import { readAdmittedOwnershipPct } from '@/lib/ownershipAnalytics';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface MajorShareholdersWidgetProps {
@@ -39,50 +42,40 @@ function getTypeIcon(type: string | null | undefined) {
     return User;
 }
 
-export function MajorShareholdersWidget({ symbol, onDataChange }: MajorShareholdersWidgetProps) {
-    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useShareholders(symbol, !!symbol);
+export function MajorShareholdersWidget({ symbol: requestedSymbol, onDataChange }: MajorShareholdersWidgetProps) {
+    const symbol = requestedSymbol?.toUpperCase() || '';
+    const { data, isLoading, error: queryError, refetch, isFetching, dataUpdatedAt } = useShareholders(symbol, !!symbol);
+    const error = useMemo(() => queryError || (data?.error ? new Error(data.error) : null), [queryError, data?.error]);
 
-    const shareholders = data?.data || [];
-    const ownershipValues = shareholders
-        .map((holder) => {
-            const value =
-                holder.ownership_pct ??
-                (holder as unknown as Record<string, number | null | undefined>).ownership ??
-                (holder as unknown as Record<string, number | null | undefined>).share_own_percent;
-            return typeof value === 'number' && Number.isFinite(value) ? value : null;
-        })
-        .filter((value): value is number => value !== null);
-    const treatOwnershipAsRatio =
-        ownershipValues.length > 0 && ownershipValues.every((value) => Math.abs(value) <= 1);
+    const shareholders = useMemo(() => (data?.data ?? []).map((holder) => ({
+        ...holder,
+        ownership_pct: readAdmittedOwnershipPct(holder),
+    })), [data?.data]);
     const hasData = shareholders.length > 0;
-    // Only flag "limited disclosure" when (a) we have a single row AND (b)
-    // that row's ownership stake is small. Many issuers genuinely have a
-    // single dominant founder/parent, and showing a yellow warning banner
-    // for those cases is misleading. The threshold (50%) is intentionally
-    // generous so we still flag the foreign-cap pseudo-row case (~30%).
-    const soleHolderPct = ownershipValues.length === 1 ? ownershipValues[0] : null;
-    const soleHolderShare =
-        soleHolderPct !== null
-            ? treatOwnershipAsRatio
-                ? soleHolderPct
-                : soleHolderPct / 100
-            : null;
-    const hasSparseData =
-        shareholders.length === 1 &&
-        (soleHolderShare === null || soleHolderShare < 0.5);
+    const hasUnverifiedOwnership = shareholders.some((holder) => holder.ownership_pct === null);
+    const soleHolderPct = shareholders.length === 1 ? shareholders[0].ownership_pct : null;
+    const hasSparseData = shareholders.length === 1 && (soleHolderPct === null || soleHolderPct < 50);
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
     useEffect(() => {
-        onDataChange?.({
-            __widgetRuntime: {
-                layoutHint: {
-                    empty: !hasData,
-                    compactHeight: 3,
-                },
-            },
-        });
-    }, [hasData, onDataChange]);
+        // Shareholder rows expose no source observation date, so freshness
+        // stays unknown and the query receipt is reported separately.
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/equity',
+            endpoint: `/equity/${symbol}/shareholders`,
+            sourceLabel: 'Major shareholders',
+            lastDataDate: null,
+            fetchedAt: dataUpdatedAt,
+            stale: isFallback,
+            cached: isFallback,
+            coverage: hasData ? hasUnverifiedOwnership ? 'partial' : 'complete' : 'unknown',
+            warnings: hasUnverifiedOwnership ? ['Ownership percentages withheld: explicit source-unit evidence unavailable.'] : [],
+            extra: { shareholders },
+            exportData: shareholders,
+        }));
+    }, [dataUpdatedAt, hasData, hasUnverifiedOwnership, isFallback, onDataChange, shareholders, symbol]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view shareholders" icon={<Users size={18} />} />;
@@ -96,7 +89,8 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
                     <span>{shareholders.length} shareholders</span>
                 </div>
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     align="right"
@@ -161,18 +155,7 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
                                     sh.shares_owned ??
                                     (typeof row.shares === 'number' ? row.shares : null) ??
                                     (typeof row.quantity === 'number' ? row.quantity : null);
-                                const ownershipPctRaw =
-                                    sh.ownership_pct ??
-                                    (typeof row.ownership === 'number' ? row.ownership : null) ??
-                                    (typeof row.share_own_percent === 'number'
-                                        ? row.share_own_percent
-                                        : null);
-                                const ownershipPct =
-                                    ownershipPctRaw !== null &&
-                                    ownershipPctRaw !== undefined &&
-                                    treatOwnershipAsRatio
-                                        ? ownershipPctRaw * 100
-                                        : ownershipPctRaw;
+                                const ownershipPct = sh.ownership_pct;
                                 const missingShares =
                                     sharesOwned === null ||
                                     sharesOwned === undefined ||

@@ -28,7 +28,6 @@ import { ColumnCustomizer } from './screener/ColumnCustomizer';
 import { SavedScreensDropdown, type SavedScreen } from './screener/SavedScreensDropdown';
 import { PerformanceTable } from './screener/PerformanceTable';
 import { ChartGridCard } from './screener/ChartGridCard';
-import { getLatestTimestampValue } from '@/lib/dataFreshness';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { logClientError } from '@/lib/clientLogger';
@@ -415,9 +414,8 @@ export function ScreenerWidget({
 
     useEffect(() => {
         if (!persistedColumns) return;
-        if (JSON.stringify(getActiveColumns()) === JSON.stringify(persistedColumns)) return;
         setColumns(persistedColumns);
-    }, [getActiveColumns, persistedColumns, setColumns]);
+    }, [persistedColumns, setColumns]);
 
     const activeColumnIds = getActiveColumns();
     const visibleColumns = useMemo(() => ALL_COLUMNS.filter((column) => activeColumnIds.includes(column.id)), [activeColumnIds]);
@@ -530,11 +528,6 @@ export function ScreenerWidget({
 
     const isFallback = Boolean(error && hasData && !screenerData?.error);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
-    const sourceUpdatedAt =
-        getLatestTimestampValue([
-            screenerData?.meta?.last_data_date,
-            ...(screenerData?.data ?? []).map((row) => row.updated_at),
-        ]) ?? dataUpdatedAt;
 
     useEffect(() => {
         const clearAlertPoll = () => {
@@ -642,7 +635,8 @@ export function ScreenerWidget({
             apiGroup: '/screener',
             endpoint: '/api/v1/screener',
             sourceLabel: screenerData?.meta?.source ?? 'live',
-            lastDataDate: typeof sourceUpdatedAt === 'string' ? sourceUpdatedAt : undefined,
+            lastDataDate: screenerData?.meta?.last_data_date ?? null,
+            fetchedAt: dataUpdatedAt,
             stale: Boolean(screenerData?.meta?.stale),
             derived: Boolean(search.trim() || serializedFilters),
             extra: {
@@ -656,7 +650,7 @@ export function ScreenerWidget({
                 coreFieldPossibleValues: screenerData?.meta?.visible_field_possible_values ?? 0,
             },
         }))
-    }, [filteredData.length, hasData, market, onDataChange, screenerData?.meta, search, serializedFilters, sort, sourceUpdatedAt]);
+    }, [filteredData.length, hasData, market, onDataChange, screenerData?.meta, search, serializedFilters, sort, dataUpdatedAt]);
 
     const handleSort = useCallback((field: string) => {
         captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
@@ -1075,7 +1069,8 @@ export function ScreenerWidget({
                         ) : null}
                     </div>
                     <WidgetMeta
-                        updatedAt={sourceUpdatedAt}
+                        updatedAt={screenerData?.meta?.last_data_date}
+                        fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={Boolean(screenerData?.meta?.cached) || isFallback}
                         isStale={Boolean(screenerData?.meta?.stale)}

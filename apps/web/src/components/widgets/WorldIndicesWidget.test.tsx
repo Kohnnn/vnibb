@@ -45,6 +45,20 @@ describe('world_indices saved dashboard widget', () => {
     expect(screen.getByText('Cached')).toBeInTheDocument();
   });
 
+  it('does not use receipt time as the source date when observation metadata is missing', async () => {
+    showIndices({ data: [{ symbol: 'SPX', name: 'S&P 500', value: 5200, change_pct: 1 }] }, null);
+    await screen.findByText('S&P 500');
+    expect(screen.getByText('As-of unknown')).toBeInTheDocument();
+    expect(screen.getByText(/^Fetched /)).toBeInTheDocument();
+  });
+
+  it('preserves an index observation independently of the retrieval timestamp', async () => {
+    showIndices({ data: [{ symbol: 'SPX', name: 'S&P 500', value: 5200, change_pct: 1, updated_at: '2026-09-28T12:00:00Z' }] }, null);
+    await screen.findByText('S&P 500');
+    expect(screen.getByText(/^As of 2026-09-28/)).toBeInTheDocument();
+    expect(screen.getByText(/^Fetched /)).toBeInTheDocument();
+  });
+
   it('labels partially available rows when the source reports an error alongside data', async () => {
     showIndices({ data: [{ symbol: 'SPX', name: 'S&P 500', value: 5200, change_pct: -1.25 }], error: 'Source stale' }, null);
     expect(await screen.findByText('S&P 500')).toBeInTheDocument();

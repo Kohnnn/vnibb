@@ -41,6 +41,15 @@ class CashFlowData(BaseModel):
     free_cash_flow: Optional[float] = None
     capital_expenditure: Optional[float] = None
     dividends_paid: Optional[float] = None
+    source: str | None = None
+    raw_data: dict[str, Any] | None = None
+    fiscal_year: int | None = None
+    fiscal_quarter: int | None = None
+    unit_metadata: dict[str, Any] = Field(default_factory=dict)
+    value_unit: str | None = None
+    currency: str | None = None
+    flow_basis: str | None = None
+    consolidation_basis: str | None = None
     
     model_config = {
         "json_schema_extra": {
@@ -73,10 +82,10 @@ class VnstockCashFlowFetcher(BaseFetcher[CashFlowQueryParams, CashFlowData]):
         
         def _fetch_sync() -> List[dict]:
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
 
                 Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
+                stock = Vnstock().stock(symbol=query["symbol"], source=validate_source(settings.vnstock_source))
                 df = stock.finance.cash_flow(period=query.get("period", "year"), lang="en")
                 
                 if df is None or df.empty:
@@ -93,7 +102,7 @@ class VnstockCashFlowFetcher(BaseFetcher[CashFlowQueryParams, CashFlowData]):
                 timeout=settings.vnstock_timeout,
             )
         except asyncio.TimeoutError:
-            raise ProviderTimeoutError(provider="vnstock", timeout=settings.vnstock_timeout)
+            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
     
     @staticmethod
     def transform_data(

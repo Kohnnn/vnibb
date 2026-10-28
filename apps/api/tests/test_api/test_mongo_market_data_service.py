@@ -131,7 +131,7 @@ async def test_eod_reads_limit_logical_days_after_source_deduplication(
 
     assert [row["tradeDate"].date() for row in rows] == [date(2026, 6, 10), date(2026, 6, 11)]
     assert [row["close"] for row in rows] == [25500.0, 26000.0]
-    assert all("source" not in row for row in rows)
+    assert all(row["source"] == "vietcap" for row in rows)
     assert collection.query["symbol"] == "VNM"
     assert collection.cursor.sort_args == ("tradeDate", 1)
     assert collection.cursor.limit_value is None
@@ -139,9 +139,12 @@ async def test_eod_reads_limit_logical_days_after_source_deduplication(
 
 
 @pytest.mark.asyncio
-async def test_get_source_latest_trade_date_returns_none_when_disabled():
+async def test_get_source_latest_trade_date_discloses_disabled(monkeypatch):
+    from vnibb.services.mongo_market_data_service import settings
+    monkeypatch.setattr(settings, "mongodb_enabled", False)
     service = MongoMarketDataService()
-    assert await service.get_source_latest_trade_date("vietcap") is None
+    with pytest.raises(RuntimeError, match="not_configured"):
+        await service.get_source_latest_trade_date("vietcap")
 
 
 @pytest.mark.asyncio
@@ -158,7 +161,7 @@ async def test_get_source_latest_trade_date_uses_source_descending_query(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_get_source_latest_trade_date_returns_none_on_read_error(monkeypatch):
+async def test_get_source_latest_trade_date_discloses_read_error(monkeypatch):
     service = MongoMarketDataService()
     monkeypatch.setattr(
         MongoMarketDataService,
@@ -166,7 +169,8 @@ async def test_get_source_latest_trade_date_returns_none_on_read_error(monkeypat
         lambda *_: (_ for _ in ()).throw(RuntimeError("unavailable")),
     )
 
-    assert await service.get_source_latest_trade_date("vietcap") is None
+    with pytest.raises(RuntimeError, match="query_failed"):
+        await service.get_source_latest_trade_date("vietcap")
 
 
 @pytest.mark.asyncio
@@ -247,6 +251,7 @@ def _bar(day: date, close: float) -> EquityHistoricalData:
     return EquityHistoricalData(
         symbol="VNM",
         time=day,
+        price_unit="VND",
         open=close,
         high=close,
         low=close,
@@ -292,7 +297,7 @@ def test_historical_metadata_reports_internal_gap_and_unit_status(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_partial_mongo_survives_provider_failure_and_fills_from_db(client, monkeypatch):
+async def test_partial_mongo_and_sql_cover_request_without_provider(client, monkeypatch):
     from vnibb.api.v1 import equity
 
     async def fake_mongo(*args, **kwargs):
@@ -307,14 +312,14 @@ async def test_partial_mongo_survives_provider_failure_and_fills_from_db(client,
     async def fake_db(*args, **kwargs):
         return [_bar(date(2026, 6, 9), 11.0), _bar(date(2026, 6, 10), 12.0)]
 
-    async def fail_provider(*args, **kwargs):
-        raise RuntimeError("provider down")
+    from unittest.mock import AsyncMock
+    provider = AsyncMock(side_effect=AssertionError("covered history must not request provider"))
 
     monkeypatch.setattr(equity, "_load_historical_from_mongo", fake_mongo)
     monkeypatch.setattr(equity.CacheManager, "get_historical_prices", fake_cache)
     monkeypatch.setattr(equity, "_load_historical_from_recent_cache", fake_recent)
     monkeypatch.setattr(equity, "_load_historical_from_db", fake_db)
-    monkeypatch.setattr(equity.VnstockEquityHistoricalFetcher, "fetch", fail_provider)
+    monkeypatch.setattr(equity.VnstockEquityHistoricalFetcher, "fetch", provider)
 
     response = await client.get(
         "/api/v1/equity/historical?symbol=VNM&start_date=2026-06-08&end_date=2026-06-10"
@@ -325,7 +330,8 @@ async def test_partial_mongo_survives_provider_failure_and_fills_from_db(client,
     assert [row["time"] for row in payload["data"]] == ["2026-06-08", "2026-06-09", "2026-06-10"]
     assert payload["meta"]["source_counts"] == {"mongo": 1, "db": 2}
     assert payload["meta"]["fallback_used"] is True
-    assert "provider resolution failed" in payload["meta"]["warnings"][0]
+    assert all(row["price_unit"] == "VND" for row in payload["data"])
+    provider.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -374,6 +380,36 @@ async def test_precise_raw_reader_applies_variant_filter(monkeypatch):
         "symbol": "VNM",
         "datasetVariant": "finance.ratio.year",
     }
+
+@pytest.mark.asyncio
+async def test_precise_iq_reader_filters_source_and_keeps_descriptor_evidence(monkeypatch):
+    collection = Collection()
+    service = MongoMarketDataService()
+    monkeypatch.setattr(MongoMarketDataService, "_get_collection", lambda *_: collection)
+    await service.get_raw_dataset_records_precise(
+        "vnm", dataset="finance.income_statement", variant="finance.income_statement.year",
+        source="vietcap",
+    )
+    assert collection.query["source"] == "vietcap"
+    assert collection.query["datasetVariant"] == "finance.income_statement.year"
+    assert collection.projection == {"_id": 0}
+    assert collection.cursor.sort_args == (
+        [("fiscalYear", -1), ("fiscalQuarter", -1), ("updatedAt", -1), ("recordKey", 1)],
+    )
+
+
+@pytest.mark.asyncio
+async def test_precise_iq_reader_does_not_hide_database_failure(monkeypatch):
+    service = MongoMarketDataService()
+    collection = Collection(error=RuntimeError("Mongo unavailable"))
+    monkeypatch.setattr(MongoMarketDataService, "_get_collection", lambda *_: collection)
+    with pytest.raises(RuntimeError, match="query_failed"):
+        await service.get_raw_dataset_records_precise(
+            "vnm", dataset="finance.ratio", source="vietcap",
+        )
+    with pytest.raises(RuntimeError, match="query_failed"):
+        await service.get_raw_dataset_records_precise("vnm", dataset="finance.ratio")
+
 
 
 @pytest.mark.asyncio
@@ -476,23 +512,16 @@ async def test_price_depth_precise_limit_caps_rows_within_newest_batch(monkeypat
     assert [row["price"] for row in rows] == [30000, 30100]
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("dataset", ["equity.price_depth", "futures.price_depth", "crypto.price_depth"])
-@pytest.mark.parametrize("identity", [{}, {"symbol": "SSI"}, {"ticker": "SSI"}, {"symbol": "SSI", "time": "2026-10-01T14:30:00"}])
-async def test_price_depth_catalog_upserts_preserve_levels_and_refresh_batch(monkeypatch, identity, dataset):
-    import pandas as pd
-
-    from scripts import backfill_mongo_vnstock_full_catalog as catalog
-
-    class StoredCursor(Cursor):
-        def sort(self, pairs):
-            for key, direction in reversed(pairs):
-                self.rows.sort(key=lambda row: row[key], reverse=direction == -1)
-            return self
+@pytest.mark.parametrize("writer", ["statement", "ratio"])
+def test_vietcap_raw_upserts_preserve_periods_and_refresh_without_duplicates(writer):
+    from vnibb.services.vietcap_financials import financial_fiscal_basis
+    from vnibb.services.vietcap_ingestion import upsert_ratio_rows, upsert_statement_periods
 
     class UpsertCollection(Collection):
         def bulk_write(self, operations, *, ordered):
+            assert ordered is False
             for operation in operations:
+                assert set(operation._filter) == {"dataset", "symbol", "recordKey"}
                 match = next(
                     (row for row in self.rows if all(row.get(key) == value for key, value in operation._filter.items())),
                     None,
@@ -502,81 +531,116 @@ async def test_price_depth_catalog_upserts_preserve_levels_and_refresh_batch(mon
                     self.rows.append(match)
                 match.update(operation._doc["$set"])
 
-        def find(self, query, projection):
-            return StoredCursor([
-                row for row in self.rows if all(row.get(key) == value for key, value in query.items())
-            ])
-
     collection = UpsertCollection()
-    db = SimpleNamespace(market_vnstock_premium_records=collection)
-    spec = catalog.MANIFEST[dataset]
+    db = {"market_vnstock_premium_records": collection}
     first_batch = datetime(2026, 10, 1, 15)
-    monkeypatch.setattr(catalog, "_now", lambda: first_batch)
-    levels = catalog._frame_rows(pd.DataFrame([
-        {**identity, "price": 30000, "volume": 100, "buy_volume": 60, "sell_volume": 40},
-        {**identity, "price": 29500, "volume": 50, "undefined_volume": 50},
-        {**identity, "price": 30500, "volume": 25},
-    ]))
-    catalog._upsert_raw_rows(db, spec, "SSI", levels, dry_run=False)
-    assert {row["raw"]["price"] for row in collection.rows} == {30000, 29500, 30500}
-    assert len({row["recordKey"] for row in collection.rows}) == 3
-    if dataset != "equity.price_depth":
+    second_batch = datetime(2026, 10, 1, 16)
+    rows = [
+        {"yearReport": 2025, "lengthReport": 5, "value": 100},
+        {"yearReport": 2024, "lengthReport": 5, "value": 50},
+    ]
+
+    def write(raw_rows, received_at, *, dry_run=False):
+        if writer == "ratio":
+            return upsert_ratio_rows(db, "vnm", raw_rows, received_at=received_at, dry_run=dry_run)
+        return upsert_statement_periods(
+            db, "vnm", "finance.income_statement", "INCOME_STATEMENT", {"years": raw_rows},
+            received_at=received_at, dry_run=dry_run,
+        )
+
+    assert write(rows, first_batch, dry_run=True) == 2
+    assert collection.rows == []
+    assert write(rows, first_batch) == 2
+    assert len(collection.rows) == 2
+    assert len({row["recordKey"] for row in collection.rows}) == 2
+    original_keys = {row["raw"]["yearReport"]: row["recordKey"] for row in collection.rows}
+    assert all(row["symbol"] == "VNM" and row["source"] == "vietcap" for row in collection.rows)
+
+    refreshed = [{**rows[0], "value": 120}]
+    assert write(refreshed, second_batch) == 1
+    assert write(refreshed, second_batch) == 1
+    assert len(collection.rows) == 2
+    latest = next(row for row in collection.rows if row["raw"]["yearReport"] == 2025)
+    assert latest["raw"]["lengthReport"] == 5
+    assert financial_fiscal_basis(latest)["periodType"] == "year"
+    assert financial_fiscal_basis(latest)["year"] == 2025
+    assert latest["recordKey"] == original_keys[2025]
+    assert latest["raw"]["value"] == 120
+    assert latest["updatedAt"] == second_batch
+    assert all(row["createdAt"] == first_batch for row in collection.rows)
+    previous = next(row for row in collection.rows if row["raw"]["yearReport"] == 2024)
+    assert financial_fiscal_basis(previous)["periodType"] == "year"
+    assert financial_fiscal_basis(previous)["year"] == 2024
+    assert previous["updatedAt"] == first_batch
+
+
+@pytest.mark.parametrize("failed_section", [None, "BALANCE_SHEET", "RATIO"])
+def test_vietcap_financial_sync_propagates_provider_failure(failed_section):
+    from vnibb.services.vietcap_ingestion import FinancialAcquisitionPartial, sync_symbol_financials
+
+    sections = ("INCOME_STATEMENT", "BALANCE_SHEET", "CASH_FLOW")
+
+    class Client:
+        def get_financial_metrics_map(self, symbol):
+            return {section: [{"field": "opaque", "titleEn": "Unknown"}] for section in sections}
+
+        def get_financial_statement(self, symbol, section):
+            if section == failed_section:
+                raise RuntimeError("provider unavailable")
+            return {"years": [{"yearReport": 2025, "lengthReport": 5}]}
+
+        def get_statistics_financial(self, symbol):
+            if failed_section == "RATIO":
+                raise RuntimeError("provider unavailable")
+            return [{"yearReport": 2025, "ratioType": "ROE", "value": 15}]
+
+    if failed_section:
+        with pytest.raises(FinancialAcquisitionPartial, match="provider unavailable") as raised:
+            sync_symbol_financials({}, Client(), "VNM", com_type="CT", dry_run=True)
+        partial = raised.value
+        missing = "finance.ratio" if failed_section == "RATIO" else "finance.balance_sheet"
+        assert partial.errors == {missing: "provider unavailable"}
+        assert partial.mongo_rows == 3
+        assert len(partial.records) == 3
+        assert "finance.income_statement" in {record["dataset"] for record in partial.records}
+        assert missing not in {record["dataset"] for record in partial.records}
+        assert all("raw" in record and "structured" in record for record in partial.records)
         return
 
+    records = sync_symbol_financials({}, Client(), "VNM", com_type="CT", dry_run=True)
+    assert {record["dataset"] for record in records} == {
+        "finance.income_statement", "finance.balance_sheet", "finance.cash_flow", "finance.ratio",
+    }
+    assert all(record["symbol"] == "VNM" and record["providerSource"] == "vietcap" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_fundamental_reader_withholds_legacy_interest_score_preserving_independent_facts(monkeypatch):
+    documents = [
+        {"symbol": symbol, "schemaVersion": version, "moatScore": 95.0,
+         "moatFactors": {"interest_coverage": 8.0, "gross_margin_avg": 42.0},
+         "roe": 18.0, "netMargin": 15.0, "moat": "wide"}
+        for symbol, version in (("OLD", 2), ("NEW", 3))
+    ]
+
+    class FundamentalCollection:
+        def aggregate(self, _pipeline):
+            return [{"doc": dict(document)} for document in documents]
+
     service = MongoMarketDataService()
-    monkeypatch.setattr(MongoMarketDataService, "_get_collection", lambda *_: collection)
-    out = await service.get_price_depth_precise("ssi", include_provenance=True)
-    assert {row["price"]: row["volume"] for row in out} == {30000: 100, 29500: 50, 30500: 25}
-    assert len({row["recordKey"] for row in out}) == 3
-    capped = await service.get_price_depth_precise("ssi", limit=2)
-    assert [row["price"] for row in capped] == [row["price"] for row in out[:2]]
+    monkeypatch.setattr(service, "_get_collection", lambda _: FundamentalCollection())
 
-    second_batch = datetime(2026, 10, 1, 16)
-    monkeypatch.setattr(catalog, "_now", lambda: second_batch)
-    refreshed = [{**levels[0], "price": "30000.00", "volume": 120}, levels[1]]
-    catalog._upsert_raw_rows(db, spec, "SSI", refreshed, dry_run=False)
-    catalog._upsert_raw_rows(db, spec, "SSI", refreshed, dry_run=False)
-    out = await service.get_price_depth_precise("ssi", include_provenance=True)
-    assert {row["price"]: row["volume"] for row in out} == {30000: 120, 29500: 50}
-    assert all(row["updatedAt"] == second_batch for row in out)
-    assert all(row["createdAt"] == first_batch for row in collection.rows)
-    assert len(collection.rows) == 3
+    snapshots = await service.get_latest_fundamental_snapshots(["OLD", "NEW"])
 
-    third_batch = datetime(2026, 10, 1, 17)
-    monkeypatch.setattr(catalog, "_now", lambda: third_batch)
-    zeroed = [{**raw, "volume": 0} for raw in refreshed]
-    catalog._upsert_raw_rows(db, spec, "SSI", zeroed, dry_run=False)
-    # The older 30500 level remains positive in storage, not in current depth.
-    for include_provenance in (False, True):
-        out = await service.get_price_depth_precise("ssi", limit=1, include_provenance=include_provenance)
-        assert out == []
-
-
-@pytest.mark.parametrize("failed_symbol", [None, "VNM"])
-def test_catalog_run_reports_partial_provider_failure(monkeypatch, capsys, failed_symbol):
-    import json
-    import sys
-
-    from scripts import backfill_mongo_vnstock_full_catalog as catalog
-
-    outcomes = []
-
-    def fetch(symbol):
-        if symbol == failed_symbol:
-            raise RuntimeError("provider unavailable")
-        return [{"price": 30000, "volume": 100}]
-
-    monkeypatch.setattr(sys, "argv", ["catalog", "--symbols", "SSI,VNM", "--datasets", "equity.price_depth"])
-    monkeypatch.setattr(catalog, "_connect_db", lambda: object())
-    monkeypatch.setattr(catalog, "_ensure_indexes", lambda db: None)
-    monkeypatch.setattr(catalog, "_fetcher_for", lambda *args, **kwargs: fetch)
-    monkeypatch.setattr(catalog, "_upsert_raw_rows", lambda db, spec, symbol, rows, **kwargs: len(rows))
-    monkeypatch.setattr(catalog, "_checkpoint", lambda *args: None)
-    monkeypatch.setattr(catalog, "_failure", lambda *args: None)
-    monkeypatch.setattr(catalog, "_mark_run", lambda db, run_id, status, data: outcomes.append(status))
-
-    exit_code = catalog.main()
-    summary = json.loads(capsys.readouterr().out)["datasets"]["equity.price_depth"]
-    assert exit_code == (1 if failed_symbol else 0)
-    assert outcomes[-1] == ("failed" if failed_symbol else "completed")
-    assert summary == {"success": 1 if failed_symbol else 2, "errors": 1 if failed_symbol else 0, "rows": 1 if failed_symbol else 2}
+    assert snapshots["OLD"].get("moatScore") is None
+    assert "interest_coverage" not in snapshots["OLD"]["moatFactors"]
+    assert snapshots["OLD"]["moatFactors"]["gross_margin_avg"] == 42.0
+    assert snapshots["OLD"]["roe"] == 18.0
+    assert snapshots["OLD"]["netMargin"] == 15.0
+    assert snapshots["OLD"]["moat"] is None
+    assert snapshots["NEW"]["moatScore"] == 95.0
+    assert snapshots["NEW"]["moatFactors"]["interest_coverage"] == 8.0
+    assert snapshots["NEW"]["moat"] == "wide"
+    assert documents[0]["moatFactors"]["interest_coverage"] == 8.0
+    assert documents[0]["moatScore"] == 95.0
+    assert documents[0]["moat"] == "wide"

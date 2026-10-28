@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from vnibb.core.database import async_session_maker
+from vnibb.core.price_units import persisted_price_record
 from vnibb.models.market import RsSnapshot
 from vnibb.models.stock import StockPrice
 
@@ -71,9 +72,7 @@ async def take_rs_snapshot(
     target_date = snapshot_date or date.today()
 
     async with async_session_maker() as session:
-        # Pull benchmark close history (we use VNINDEX from `stock_indices`,
-        # but if unavailable we fall back to a representative liquid stock).
-        # Prefer the StockIndex table if VNINDEX is there.
+        # Benchmark closes from StockIndex are index points, not currency.
         from vnibb.models.stock import StockIndex
 
         bench_q = (
@@ -99,18 +98,22 @@ async def take_rs_snapshot(
         upserted = 0
         for symbol in symbols:
             sym_q = (
-                select(StockPrice.time, StockPrice.close)
+                select(StockPrice)
                 .where(
                     StockPrice.symbol == symbol,
                     StockPrice.interval == "1D",
                 )
                 .order_by(StockPrice.time.asc())
             )
-            sym_rows = (await session.execute(sym_q)).all()
+            sym_rows = (await session.execute(sym_q)).scalars().all()
             if not sym_rows:
                 continue
+            prices = [persisted_price_record(row) for row in sym_rows]
+            if any(row["price_unit"] == "unknown" for row in prices):
+                logger.warning("Skipping RS snapshot with unknown price units: %s", symbol)
+                continue
             sym_series = pd.Series(
-                {row.time: float(row.close) for row in sym_rows if row.close is not None}
+                {row["time"]: float(row["close"]) for row in prices if row["close"] is not None}
             ).sort_index()
             sym_returns = sym_series.pct_change().dropna()
 

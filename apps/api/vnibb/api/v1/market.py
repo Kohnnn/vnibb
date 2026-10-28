@@ -11,6 +11,7 @@ import asyncio
 import logging
 import re
 import unicodedata
+from functools import wraps
 from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Literal, Optional
 from collections import defaultdict
@@ -26,6 +27,8 @@ from sqlalchemy import select, func, text
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, get_db
+from vnibb.core.price_units import persisted_price_record, screener_price_record
+from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
@@ -44,12 +47,11 @@ from vnibb.models.financials import IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
-from vnibb.models.technical_indicator import TechnicalIndicator
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.sector_service import SectorService
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
-from vnibb.providers.vnstock import get_vnstock
+from vnibb.providers.vnstock import get_stock
 from vnibb.api.v1.market_heatmap import (
     HeatmapGroupBuilder,
     HeatmapGroupConfig,
@@ -300,6 +302,8 @@ class MarketTopMoversResponse(BaseModel):
     error: Optional[str] = None
     is_last_session: bool = False
     session_label: Optional[str] = None
+    source: str | None = None
+    is_stale: bool | None = None
 
 
 class MarketSectorPerformanceResponse(BaseModel):
@@ -400,9 +404,12 @@ RSS_FEED_URLS: dict[str, list[str]] = {
     "vnexpress": ["https://vnexpress.net/rss/kinh-doanh/chung-khoan.rss"],
 }
 
-WORLD_INDEX_POINT_TIMEOUT_SECONDS = 5
 WORLD_INDEX_FALLBACK_TIMEOUT_SECONDS = 5
-HEATMAP_FETCH_TIMEOUT_SECONDS = 20
+HEATMAP_FETCH_TIMEOUT_SECONDS = 8
+MARKET_PROVIDER_TIMEOUT_SECONDS = 8
+MARKET_ROUTE_TIMEOUT_SECONDS = 12
+MARKET_YAHOO_TIMEOUT_SECONDS = 2
+_market_provider_jobs: dict[tuple, asyncio.Task] = {}
 TOP_MOVER_TYPES = {"gainer", "loser", "volume", "value"}
 MARKET_INDEX_ORDER = ("VNINDEX", "VN30", "HNX", "UPCOM")
 MARKET_INDEX_ALIASES = {
@@ -609,8 +616,7 @@ def _compute_money_flow_metrics(
 
 async def _fetch_benchmark_history_from_provider(start_date: date, end_date: date) -> pd.DataFrame:
     def _load_history() -> pd.DataFrame:
-        stock_manager = get_vnstock()
-        stock = stock_manager.stock(symbol="VNINDEX", source=settings.vnstock_source)
+        stock = get_stock("VNINDEX")
         history = stock.quote.history(
             start=start_date.strftime("%Y-%m-%d"),
             end=end_date.strftime("%Y-%m-%d"),
@@ -651,6 +657,51 @@ def _map_text_to_sector_name(value: Optional[str]) -> Optional[str]:
 
     sector_config = VN_SECTORS.get(sector_id)
     return sector_config.name if sector_config else None
+
+
+def _market_deadline(func):
+    @wraps(func)
+    async def bounded(*args, **kwargs):
+        try:
+            async with asyncio.timeout(MARKET_ROUTE_TIMEOUT_SECONDS):
+                return await func(*args, **kwargs)
+        except TimeoutError as exc:
+            raise HTTPException(status_code=503, detail="Market data deadline exceeded") from exc
+
+    return bounded
+
+
+async def _await_market_provider(key: tuple, loader, timeout: float):
+    task = _market_provider_jobs.get(key)
+    if task is None:
+        if len(_market_provider_jobs) >= 12:
+            raise ProviderError(message="Market acquisition capacity reached", provider="vnstock")
+        task = asyncio.create_task(loader())
+        _market_provider_jobs[key] = task
+
+        def finished(done):
+            if _market_provider_jobs.get(key) is done:
+                _market_provider_jobs.pop(key, None)
+            if not done.cancelled():
+                done.exception()
+
+        task.add_done_callback(finished)
+    # A caller deadline must not permit duplicate acquisition while worker threads run.
+    return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+
+
+async def _fetch_heatmap_screener(params: StockScreenerParams):
+    try:
+        rows = await _await_market_provider(
+            ("heatmap", params.source, params.exchange, params.limit),
+            lambda: VnstockScreenerFetcher.fetch(params),
+            HEATMAP_FETCH_TIMEOUT_SECONDS,
+        )
+        if not rows:
+            raise ProviderError(message="Heatmap screener data unavailable", provider="vnstock")
+        return rows
+    except TimeoutError as exc:
+        raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
 
 
 def _normalize_market_index_code(value: Any) -> str:
@@ -993,14 +1044,6 @@ def _to_float(value: Any) -> Optional[float]:
         return None
 
 
-def _extract_close_from_row(row: dict[str, Any]) -> Optional[float]:
-    for key in ("close", "Close", "value", "price", "last"):
-        parsed = _to_float(row.get(key))
-        if parsed is not None:
-            return parsed
-    return None
-
-
 def _first_non_none(*values: Any) -> Any:
     for value in values:
         if value is not None:
@@ -1179,6 +1222,7 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
         )
     )
     sector = _normalize_text(_first_non_none(payload.get("sector"), payload.get("sector_name")))
+    price_record = screener_price_record({**payload, "symbol": symbol, "price": _first_non_none(payload.get("price"), payload.get("close"))})
 
     return {
         "symbol": symbol,
@@ -1191,7 +1235,8 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
         "exchange": _normalize_text(payload.get("exchange")),
         "industry": industry,
         "sector": sector,
-        "price": _to_float(_first_non_none(payload.get("price"), payload.get("close"))),
+        "price": _to_float(price_record.get("price")) if price_record["price_unit"] != "unknown" else None,
+        "price_unit": price_record["price_unit"],
         "volume": _to_float(payload.get("volume")),
         "market_cap": _to_float(
             _first_non_none(payload.get("market_cap"), payload.get("marketCap"))
@@ -1403,6 +1448,7 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
                 select(
                     StockPrice.symbol.label("symbol"),
                     StockPrice.close.label("close"),
+                    StockPrice.source.label("source"),
                     func.row_number()
                     .over(partition_by=StockPrice.symbol, order_by=StockPrice.time.desc())
                     .label("rn"),
@@ -1412,16 +1458,18 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
             )
             price_rows = (
                 await session.execute(
-                    select(ranked_prices.c.symbol, ranked_prices.c.close, ranked_prices.c.rn).where(
+                    select(ranked_prices).where(
                         ranked_prices.c.rn <= 2
                     )
                 )
-            ).all()
+            ).mappings().all()
 
             price_lookup: Dict[str, Dict[int, float]] = defaultdict(dict)
-            for symbol, close, rn in price_rows:
-                close_value = _to_float(close)
-                if close_value is None:
+            for row in price_rows:
+                price = persisted_price_record(row)
+                symbol, rn = row["symbol"], row["rn"]
+                close_value = _to_float(price.get("close"))
+                if price["price_unit"] == "unknown" or close_value is None:
                     continue
                 price_lookup[_normalize_symbol(symbol)][int(rn)] = close_value
 
@@ -1437,6 +1485,7 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
                     select(
                         ScreenerSnapshot.symbol.label("symbol"),
                         ScreenerSnapshot.price.label("price"),
+                        ScreenerSnapshot.extended_metrics.label("extended_metrics"),
                         func.row_number()
                         .over(
                             partition_by=ScreenerSnapshot.symbol,
@@ -1452,18 +1501,16 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
                 )
                 snapshot_rows = (
                     await session.execute(
-                        select(
-                            ranked_snapshots.c.symbol,
-                            ranked_snapshots.c.price,
-                            ranked_snapshots.c.rn,
-                        ).where(ranked_snapshots.c.rn <= 2)
+                        select(ranked_snapshots).where(ranked_snapshots.c.rn <= 2)
                     )
-                ).all()
+                ).mappings().all()
 
                 snapshot_lookup: Dict[str, Dict[int, float]] = defaultdict(dict)
-                for symbol, price, rn in snapshot_rows:
-                    price_value = _to_float(price)
-                    if price_value is None:
+                for row in snapshot_rows:
+                    price = screener_price_record(row)
+                    symbol, rn = row["symbol"], row["rn"]
+                    price_value = _to_float(price.get("price"))
+                    if price["price_unit"] == "unknown" or price_value is None:
                         continue
                     snapshot_lookup[_normalize_symbol(symbol)][int(rn)] = price_value
 
@@ -1528,8 +1575,10 @@ async def _load_latest_snapshot_metrics(
             for symbol, price, volume, snapshot_date, created_at, extended_metrics in rows:
                 symbol_key = _normalize_symbol(symbol)
                 payload = extended_metrics if isinstance(extended_metrics, dict) else {}
+                price_record = screener_price_record({"symbol": symbol, "price": price, "extended_metrics": payload})
                 metrics_map[symbol_key] = {
-                    "price": _to_float(price),
+                    "price": _to_float(price_record.get("price")) if price_record["price_unit"] != "unknown" else None,
+                    "price_unit": price_record["price_unit"],
                     "volume": _to_float(volume),
                     "change_pct": _extract_snapshot_change_pct(payload),
                     "value": _extract_snapshot_value_traded(payload),
@@ -1562,6 +1611,8 @@ async def _load_latest_ratio_metrics(symbols: List[str]) -> Dict[str, dict[str, 
                 FinancialRatio.debt_to_equity.label("debt_to_equity"),
                 FinancialRatio.revenue_growth.label("revenue_growth"),
                 FinancialRatio.earnings_growth.label("earnings_growth"),
+                FinancialRatio.raw_data.label("raw_data"),
+                FinancialRatio.source.label("source"),
                 func.row_number()
                 .over(
                     partition_by=FinancialRatio.symbol,
@@ -1588,12 +1639,12 @@ async def _load_latest_ratio_metrics(symbols: List[str]) -> Dict[str, dict[str, 
             "pe_ratio": _to_float(row.get("pe_ratio")),
             "pb_ratio": _to_float(row.get("pb_ratio")),
             "ps_ratio": _to_float(row.get("ps_ratio")),
-            "roe": _to_float(row.get("roe")),
-            "roa": _to_float(row.get("roa")),
-            "roic": _to_float(row.get("roic")),
+            "roe": _to_float(admitted_ratio_value(row.get("roe"), "roe", ratio_units=(row.get("raw_data") or {}).get("ratio_units"), source=row.get("source"))),
+            "roa": _to_float(admitted_ratio_value(row.get("roa"), "roa", ratio_units=(row.get("raw_data") or {}).get("ratio_units"), source=row.get("source"))),
+            "roic": _to_float(admitted_ratio_value(row.get("roic"), "roic", ratio_units=(row.get("raw_data") or {}).get("ratio_units"), source=row.get("source"))),
             "debt_to_equity": _to_float(row.get("debt_to_equity")),
-            "revenue_growth": _to_float(row.get("revenue_growth")),
-            "earnings_growth": _to_float(row.get("earnings_growth")),
+            "revenue_growth": _to_float(admitted_ratio_value(row.get("revenue_growth"), "revenue_growth", ratio_units=(row.get("raw_data") or {}).get("ratio_units"), source=row.get("source"))),
+            "earnings_growth": _to_float(admitted_ratio_value(row.get("earnings_growth"), "earnings_growth", ratio_units=(row.get("raw_data") or {}).get("ratio_units"), source=row.get("source"))),
         }
         for row in rows
     }
@@ -1706,6 +1757,16 @@ async def _fetch_market_screener_rows(limit: int = 1500) -> List[dict[str, Any]]
     return screener_rows
 
 
+def _canonical_price_frame(rows: List[Any]) -> pd.DataFrame:
+    prices = []
+    for row in rows:
+        price = persisted_price_record(row)
+        if price["price_unit"] == "unknown":
+            continue
+        prices.append({key: price.get(key) for key in ("symbol", "time", "close")})
+    return pd.DataFrame(prices, columns=["symbol", "time", "close"])
+
+
 async def _load_latest_technical_indicator_map(
     symbols: List[str],
 ) -> Dict[str, Dict[str, Optional[float]]]:
@@ -1714,38 +1775,28 @@ async def _load_latest_technical_indicator_map(
         return {}
 
     async with async_session_maker() as session:
-        ranked_indicators = (
-            select(
-                TechnicalIndicator.symbol.label("symbol"),
-                TechnicalIndicator.calc_date.label("calc_date"),
-                TechnicalIndicator.sma_20.label("sma_20"),
-                TechnicalIndicator.sma_50.label("sma_50"),
-                func.row_number()
-                .over(
-                    partition_by=TechnicalIndicator.symbol,
-                    order_by=TechnicalIndicator.calc_date.desc(),
-                )
-                .label("rn"),
-            )
-            .where(TechnicalIndicator.symbol.in_(unique_symbols))
-            .subquery()
-        )
-
         rows = (
-            (await session.execute(select(ranked_indicators).where(ranked_indicators.c.rn == 1)))
-            .mappings()
-            .all()
-        )
+            await session.execute(
+                select(StockPrice)
+                .where(
+                    StockPrice.symbol.in_(unique_symbols),
+                    StockPrice.interval == "1D",
+                    StockPrice.time >= date.today() - timedelta(days=120),
+                )
+                .order_by(StockPrice.symbol, StockPrice.time)
+            )
+        ).scalars().all()
 
-    return {
-        _normalize_symbol(row.get("symbol")): {
-            "calc_date": _serialize_datetime_like(row.get("calc_date")),
-            "sma_20": _to_float(row.get("sma_20")),
-            "sma_50": _to_float(row.get("sma_50")),
+    frame = _canonical_price_frame(rows)
+    indicators = {}
+    for symbol, group in frame.groupby("symbol"):
+        closes = pd.to_numeric(group["close"], errors="coerce").dropna()
+        indicators[_normalize_symbol(symbol)] = {
+            "calc_date": _serialize_datetime_like(group.iloc[-1]["time"]),
+            "sma_20": float(closes.iloc[-20:].mean()) if len(closes) >= 20 else None,
+            "sma_50": float(closes.iloc[-50:].mean()) if len(closes) >= 50 else None,
         }
-        for row in rows
-        if row.get("symbol")
-    }
+    return indicators
 
 
 async def _load_52_week_range_map(
@@ -1761,26 +1812,25 @@ async def _load_52_week_range_map(
     async with async_session_maker() as session:
         rows = (
             await session.execute(
-                select(
-                    StockPrice.symbol,
-                    func.max(StockPrice.high).label("high_52w"),
-                    func.min(StockPrice.low).label("low_52w"),
-                )
+                select(StockPrice)
                 .where(StockPrice.symbol.in_(unique_symbols))
                 .where(StockPrice.interval == "1D")
                 .where(StockPrice.time >= start_date)
-                .group_by(StockPrice.symbol)
             )
-        ).all()
+        ).scalars().all()
 
-    return {
-        _normalize_symbol(symbol): {
-            "high_52w": _to_float(high_52w),
-            "low_52w": _to_float(low_52w),
-        }
-        for symbol, high_52w, low_52w in rows
-        if symbol
-    }
+    ranges: Dict[str, Dict[str, Optional[float]]] = {}
+    for row in rows:
+        price = persisted_price_record(row)
+        if price["price_unit"] == "unknown":
+            continue
+        values = ranges.setdefault(_normalize_symbol(price["symbol"]), {"high_52w": None, "low_52w": None})
+        high, low = _to_float(price.get("high")), _to_float(price.get("low"))
+        if high is not None:
+            values["high_52w"] = max(values["high_52w"], high) if values["high_52w"] is not None else high
+        if low is not None:
+            values["low_52w"] = min(values["low_52w"], low) if values["low_52w"] is not None else low
+    return ranges
 
 
 def _build_market_breadth_rows(
@@ -1912,6 +1962,8 @@ def _apply_snapshot_metrics_to_movers(
         snapshot_price = metrics.get("price")
         if price_value in (None, 0) and snapshot_price not in (None, 0):
             item["last_price"] = snapshot_price
+            item["price_unit"] = metrics.get("price_unit", "unknown")
+            item["price_change"] = None
             price_value = snapshot_price
 
         volume_value = _to_float(item.get("volume"))
@@ -1996,150 +2048,89 @@ def _has_non_zero_top_mover_signal(payload: List[dict[str, Any]]) -> bool:
     return False
 
 
-async def _build_last_session_top_movers(
-    index: str, mover_type: str, limit: int
-) -> List[dict[str, Any]]:
-    """SQL-backed last-session top-movers fallback (QA-v2 T3).
-
-    The vnstock screener cache and the snapshot-derived path can both
-    produce empty payloads after market close (intraday-rank tables
-    roll over). We resolve this by querying the most recent session in
-    `stock_prices` that has at least 5 distinct symbols with a non-zero
-    close, then computing change% from the previous session's close
-    per symbol. Returned rows include `is_last_session=True` so the
-    UI can label the data as historical.
-    """
-
-    if mover_type not in {"gainer", "loser", "volume", "value"}:
-        return []
-
+@cached(ttl=120, key_prefix="market_retained_mover_inputs")
+async def _load_retained_mover_inputs() -> list[dict[str, Any]]:
     async with async_session_maker() as session:
-        # Find latest trade date that has meaningful coverage. We require
-        # at least 10 distinct symbols (lowered from 30 in QA-v4 D.3 so a
-        # partially loaded post-holiday session still surfaces gainers
-        # rather than going empty).
-        latest_session_row = await session.execute(
-            text(
-                """
-                SELECT trade_date
-                FROM (
-                    SELECT time AS trade_date, COUNT(DISTINCT symbol) AS n
-                    FROM stock_prices
-                    WHERE interval = '1D'
-                    GROUP BY time
-                ) s
-                WHERE n >= 10
-                ORDER BY trade_date DESC
-                LIMIT 1
-                """
-            )
-        )
-        latest_date = latest_session_row.scalar()
+        # Coverage is market-wide; exchange and membership restrictions come later.
+        latest_session = await session.execute(text("""
+            SELECT time FROM stock_prices
+            WHERE interval = '1D'
+            GROUP BY time
+            HAVING COUNT(DISTINCT symbol) >= 10
+            ORDER BY time DESC
+            LIMIT 1
+        """))
+        latest_date = latest_session.scalar()
         if not latest_date:
             return []
 
-        # Pull the latest two sessions for every symbol so we can
-        # compute change %.
-        rows_result = await session.execute(
-            text(
-                """
-                WITH ranked AS (
-                    SELECT
-                        symbol,
-                        time,
-                        close,
-                        volume,
-                        value,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY symbol
-                            ORDER BY time DESC
-                        ) AS rn
-                    FROM stock_prices
-                    WHERE interval = '1D'
-                      AND time <= :latest_date
-                )
-                SELECT symbol, time, close, volume, value, rn
-                FROM ranked
-                WHERE rn <= 2
-                """
-            ),
-            {"latest_date": latest_date},
-        )
-
-        per_symbol: dict[str, dict[str, Any]] = {}
-        for row in rows_result.mappings():
-            symbol = (row["symbol"] or "").upper()
-            if not symbol:
-                continue
-            entry = per_symbol.setdefault(symbol, {"latest": None, "prev": None})
-            if row["rn"] == 1:
-                entry["latest"] = row
-            elif row["rn"] == 2:
-                entry["prev"] = row
-
-        # Optional: filter by index / exchange. We resolve via the
-        # `stocks` table; if an index allow-list isn't available we let
-        # everything through.
-        exchange_allow = TOP_MOVER_INDEX_EXCHANGE.get(index)
-        symbol_to_exchange: dict[str, str] = {}
-        if exchange_allow:
-            ex_rows = await session.execute(
-                select(Stock.symbol, Stock.exchange).where(
-                    Stock.symbol.in_(list(per_symbol.keys()))
-                )
+        result = await session.execute(text("""
+            SELECT current.symbol, current.time, current.close, current.volume,
+                   current.value, current.source, stocks.exchange,
+                   previous.close AS previous_close, previous.source AS previous_source
+            FROM stock_prices AS current
+            LEFT JOIN stocks ON stocks.symbol = current.symbol
+            LEFT JOIN stock_prices AS previous ON previous.id = (
+                SELECT prior.id FROM stock_prices AS prior
+                WHERE prior.symbol = current.symbol AND prior.interval = '1D'
+                  AND prior.time < current.time
+                ORDER BY prior.time DESC
+                LIMIT 1
             )
-            for sym, ex in ex_rows.all():
-                if sym:
-                    symbol_to_exchange[sym.upper()] = (ex or "").upper()
+            WHERE current.interval = '1D' AND current.time = :latest_date
+        """), {"latest_date": latest_date})
+        return [dict(row) for row in result.mappings()]
 
-        rows: List[dict[str, Any]] = []
-        for symbol, parts in per_symbol.items():
-            latest = parts.get("latest")
-            prev = parts.get("prev")
-            if not latest:
-                continue
 
-            if exchange_allow:
-                ex = symbol_to_exchange.get(symbol)
-                if ex not in exchange_allow:
-                    continue
-
-            close = _to_float(latest["close"])
-            prev_close = _to_float(prev["close"]) if prev else None
-            change_pct = None
-            price_change = None
-            if (
-                close is not None
-                and prev_close is not None
-                and prev_close not in (None, 0)
-            ):
-                price_change = close - prev_close
-                change_pct = (price_change / prev_close) * 100.0
-
-            rows.append(
-                {
-                    "symbol": symbol,
-                    "index": index,
-                    "last_price": close,
-                    "price_change": price_change,
-                    "price_change_pct": change_pct,
-                    "volume": _to_float(latest["volume"]),
-                    "value": _to_float(latest["value"]),
-                    "avg_volume_20d": None,
-                    "volume_spike_pct": None,
-                    "updated_at": latest["time"].isoformat()
-                    if hasattr(latest["time"], "isoformat")
-                    else str(latest["time"]),
-                    "is_last_session": True,
-                    "session_label": latest_date.isoformat()
-                    if hasattr(latest_date, "isoformat")
-                    else str(latest_date),
-                }
-            )
-
-    if not rows:
+async def _build_last_session_top_movers(
+    index: str, mover_type: str, limit: int
+) -> List[dict[str, Any]]:
+    if mover_type not in TOP_MOVER_TYPES:
         return []
 
+    vn30_symbols = {
+        symbol.upper()
+        for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
+    } if index == "VN30" else None
+    exchange_allow = TOP_MOVER_INDEX_EXCHANGE.get(index)
+    rows = []
+    for row in await _load_retained_mover_inputs():
+        symbol = str(row.get("symbol") or "").upper()
+        if not symbol or (vn30_symbols is not None and symbol not in vn30_symbols):
+            continue
+        if exchange_allow and str(row.get("exchange") or "").upper() not in exchange_allow:
+            continue
+        latest = persisted_price_record(row)
+        if latest["price_unit"] == "unknown":
+            continue
+        if mover_type in {"volume", "value"} and _to_float(latest.get(mover_type)) is None:
+            continue
+
+        previous = persisted_price_record({
+            "close": row.get("previous_close"), "source": row.get("previous_source"),
+        })
+        close = _to_float(latest.get("close"))
+        previous_close = _to_float(previous.get("close")) if previous["price_unit"] == latest["price_unit"] else None
+        price_change = change_pct = None
+        if close is not None and previous_close not in (None, 0):
+            price_change = _to_float(close - previous_close)
+            change_pct = _to_float((close - previous_close) / previous_close * 100.0)
+        if mover_type in {"gainer", "loser"} and change_pct is None:
+            continue
+        observed = latest["time"]
+        session_label = observed.isoformat() if hasattr(observed, "isoformat") else str(observed)
+        observed_date = _coerce_to_date(observed)
+        rows.append({
+            "symbol": symbol, "index": index,
+            "last_price": close, "price_unit": latest["price_unit"],
+            "price_source": latest.get("price_source"), "source": latest.get("source"),
+            "price_change": price_change, "price_change_pct": change_pct,
+            "volume": _to_float(latest.get("volume")), "value": _to_float(latest.get("value")),
+            "avg_volume_20d": None, "volume_spike_pct": None,
+            "updated_at": session_label, "is_last_session": True,
+            "session_label": session_label,
+            "is_stale": bool(observed_date and observed_date < _expected_latest_trading_day()),
+        })
     return _sort_top_movers(rows, mover_type=mover_type, limit=limit)
 
 
@@ -2181,9 +2172,8 @@ async def _build_snapshot_top_movers(
             else {}
         )
 
-        price = _to_float(
-            _first_non_none(getattr(item, "price", None), extended_metrics.get("price"))
-        )
+        price_record = screener_price_record(item)
+        price = _to_float(price_record.get("price")) if price_record["price_unit"] != "unknown" else None
         volume = _to_float(
             _first_non_none(getattr(item, "volume", None), extended_metrics.get("volume"))
         )
@@ -2196,6 +2186,7 @@ async def _build_snapshot_top_movers(
             {
                 "symbol": symbol,
                 "price": price,
+                "price_unit": price_record["price_unit"],
                 "volume": volume,
                 "change_pct": change_pct,
                 "value": value,
@@ -2225,6 +2216,7 @@ async def _build_snapshot_top_movers(
                 "symbol": row["symbol"],
                 "price_change_pct": row.get("change_pct"),
                 "last_price": row.get("price"),
+                "price_unit": row.get("price_unit"),
                 "volume": row.get("volume"),
                 "value": row.get("value"),
             }
@@ -2252,6 +2244,7 @@ async def _build_snapshot_top_movers(
                 "symbol": row.get("symbol"),
                 "index": index,
                 "last_price": last_price,
+                "price_unit": row.get("price_unit"),
                 "price_change": price_change,
                 "price_change_pct": change_pct,
                 "volume": row.get("volume"),
@@ -2276,59 +2269,14 @@ def _clean_rss_description(raw_description: Optional[str]) -> Optional[str]:
     return plain_text[:280]
 
 
-async def _fetch_world_index_point(symbol: str, name: str) -> Optional[dict[str, Any]]:
-    def _sync_fetch() -> Optional[dict[str, Any]]:
-        vn = get_vnstock()
-        idx = vn.world_index(symbol=symbol, source="MSN")
-        end_date = date.today()
-        start_date = end_date - timedelta(days=14)
-        frame = idx.quote.history(
-            start=start_date.isoformat(), end=end_date.isoformat(), interval="1D"
-        )
-        if frame is None or len(frame.index) == 0:
-            return None
-
-        rows = frame.to_dict(orient="records")
-        if not rows:
-            return None
-
-        latest = rows[-1]
-        latest_value = _extract_close_from_row(latest)
-        if latest_value is None:
-            return None
-
-        previous_value: Optional[float] = None
-        if len(rows) > 1:
-            previous_value = _extract_close_from_row(rows[-2])
-
-        change = latest_value - previous_value if previous_value is not None else 0.0
-        change_pct = (change / previous_value * 100.0) if previous_value not in (None, 0) else 0.0
-
-        return {
-            "symbol": symbol,
-            "name": name,
-            "value": latest_value,
-            "change": change,
-            "change_pct": change_pct,
-            "updated_at": latest.get("time") or latest.get("date"),
-        }
-
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_sync_fetch), timeout=WORLD_INDEX_POINT_TIMEOUT_SECONDS
-        )
-    except Exception as e:
-        logger.debug(f"World index fetch failed for {symbol}: {e}")
-        return None
-
-
 @router.get(
     "/heatmap",
     response_model=HeatmapResponse,
     summary="Get Market Heatmap Data",
     description="Get aggregated market data for treemap visualization. Supports grouping by sector/industry.",
 )
-@cached(ttl=120, key_prefix="market_heatmap")
+@cached(ttl=120, key_prefix="market_heatmap_v2")
+@_market_deadline
 async def get_heatmap_data(
     group_by: str = Query(
         default="sector",
@@ -2383,6 +2331,7 @@ async def get_heatmap_data(
             exchange=exchange,
             limit=limit,
             source=settings.vnstock_source,
+            include_ratios=False,
         )
 
         # Try cache first
@@ -2411,13 +2360,16 @@ async def get_heatmap_data(
                         extended_metrics = (
                             s.extended_metrics if isinstance(s.extended_metrics, dict) else {}
                         )
+                        price_record = screener_price_record(s)
                         screener_data.append(
                             ScreenerData(
                                 symbol=s.symbol,
                                 organ_name=s.company_name,
                                 exchange=s.exchange,
                                 industry_name=s.industry,
-                                price=s.price,
+                                price=price_record.get("price") if price_record["price_unit"] != "unknown" else None,
+                                price_unit=price_record["price_unit"],
+                                price_source=price_record.get("price_source"),
                                 volume=s.volume,
                                 market_cap=s.market_cap,
                                 pe=s.pe,
@@ -2449,13 +2401,7 @@ async def get_heatmap_data(
                 logger.info("Heatmap served from verified screener partition (%d rows)", len(db_rows))
 
         if not screener_data:
-            try:
-                screener_data = await asyncio.wait_for(
-                    VnstockScreenerFetcher.fetch(params),
-                    timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError as exc:
-                raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
+            screener_data = await _fetch_heatmap_screener(params)
             logger.info(f"Fetched {len(screener_data)} stocks from API for heatmap")
 
         # Step 2: Normalize input rows and enrich missing metadata/returns from DB snapshots.
@@ -2501,13 +2447,7 @@ async def get_heatmap_data(
         # fall back to a fresh provider fetch once before returning empty data.
         if cached and not groups:
             logger.info("Cached screener data produced empty heatmap; retrying with fresh fetch")
-            try:
-                screener_data = await asyncio.wait_for(
-                    VnstockScreenerFetcher.fetch(params),
-                    timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError as exc:
-                raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
+            screener_data = await _fetch_heatmap_screener(params)
 
             refreshed_rows = normalize_heatmap_rows(
                 screener_data,
@@ -2583,25 +2523,11 @@ async def get_heatmap_data(
         )
 
     except ProviderTimeoutError as e:
-        logger.warning("Heatmap provider timeout, returning empty payload: %s", e.message)
-        return HeatmapResponse(
-            count=0,
-            group_by=group_by,
-            color_metric=color_metric,
-            size_metric=size_metric,
-            sectors=[],
-            cached=False,
-        )
+        logger.warning("Heatmap provider timeout: %s", e.message)
+        raise HTTPException(status_code=503, detail=e.message) from e
     except ProviderError as e:
-        logger.warning("Heatmap provider error, returning empty payload: %s", e.message)
-        return HeatmapResponse(
-            count=0,
-            group_by=group_by,
-            color_metric=color_metric,
-            size_metric=size_metric,
-            sectors=[],
-            cached=False,
-        )
+        logger.warning("Heatmap provider unavailable: %s", e.message)
+        raise HTTPException(status_code=503, detail=e.message) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -2760,20 +2686,42 @@ async def get_foreign_flow_leaderboard(
 
 
 @router.get("/indices", response_model=MarketIndicesResponse)
-@cached(key_prefix="market_indices")
+@cached(key_prefix="market_indices_v2")
+@_market_deadline
 async def get_market_indices(
     limit: int = Query(default=10, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
 ) -> MarketIndicesResponse:
     db_rows: list[dict[str, Any]] = []
+    owns_read_transaction = not db.in_transaction() and not (db.new or db.dirty or db.deleted)
     try:
         db_rows = await _load_latest_market_indices_from_db(db)
     except Exception as db_error:
+        if not owns_read_transaction:
+            raise
         logger.warning(f"Market indices DB fallback failed: {db_error}")
+    finally:
+        if owns_read_transaction and db.in_transaction():
+            await db.rollback()
+
+    required_codes = MARKET_INDEX_ORDER[: min(limit, len(MARKET_INDEX_ORDER))]
+    stored_codes = {_normalize_market_index_code(row.get("index_name")) for row in db_rows}
+    if all(code in stored_codes for code in required_codes):
+        rows = db_rows[:limit]
+        return MarketIndicesResponse(
+            count=len(rows),
+            data=rows,
+            updated_at=_latest_timestamp([row.get("time") for row in rows]),
+            source="db_fallback",
+        )
 
     try:
-        yahoo_rows = await _fetch_yahoo_market_indices()
-        required_codes = MARKET_INDEX_ORDER[: min(limit, len(MARKET_INDEX_ORDER))]
+        try:
+            yahoo_rows = await _await_market_provider(
+                ("indices", "yahoo"), _fetch_yahoo_market_indices, MARKET_YAHOO_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
+            yahoo_rows = []
         yahoo_codes = {
             code
             for code in (
@@ -2785,10 +2733,14 @@ async def get_market_indices(
 
         provider_rows: list[dict[str, Any]] = []
         if any(code not in yahoo_codes for code in required_codes):
-            indices = await asyncio.wait_for(
-                VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
-                timeout=30,
-            )
+            try:
+                indices = await _await_market_provider(
+                    ("indices", "vnstock"),
+                    lambda: VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
+                    MARKET_PROVIDER_TIMEOUT_SECONDS,
+                )
+            except TimeoutError as exc:
+                raise ProviderTimeoutError("vnstock", MARKET_PROVIDER_TIMEOUT_SECONDS) from exc
             provider_rows = [
                 item.model_dump(mode="json", by_alias=False)
                 if hasattr(item, "model_dump")
@@ -3040,7 +2992,7 @@ async def get_earnings_season(
 
 
 @router.get("/industry-bubble", response_model=IndustryBubbleResponse)
-@cached(ttl=300, key_prefix="industry_bubble")
+@cached(ttl=300, key_prefix="industry_bubble_v2_certified")
 async def get_industry_bubble(
     symbol: str = Query(..., description="Reference symbol used to determine sector"),
     x_metric: str = Query(
@@ -3479,7 +3431,7 @@ async def get_money_flow_trend(
     end_date = date.today()
     start_date = end_date - timedelta(days=max(config["lookback"] * 3, 200))
     prices_result = await db.execute(
-        select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+        select(StockPrice)
         .where(
             StockPrice.symbol.in_(universe_symbols),
             StockPrice.interval == "1D",
@@ -3498,7 +3450,7 @@ async def get_money_flow_trend(
         .order_by(StockIndex.time)
     )
 
-    price_frame = pd.DataFrame(prices_result.all(), columns=["symbol", "time", "close"])
+    price_frame = _canonical_price_frame(prices_result.scalars().all())
     index_frame = pd.DataFrame(index_result.all(), columns=["time", "close_index"])
     if index_frame.empty or len(index_frame.index) < config["lookback"] + 5:
         provider_index_frame = await _fetch_benchmark_history_from_provider(start_date, end_date)
@@ -3522,7 +3474,7 @@ async def get_money_flow_trend(
         })
         if broader_symbols and broader_symbols != universe_symbols:
             broader_result = await db.execute(
-                select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+                select(StockPrice)
                 .where(
                     StockPrice.symbol.in_(broader_symbols[:200]),
                     StockPrice.interval == "1D",
@@ -3531,9 +3483,7 @@ async def get_money_flow_trend(
                 )
                 .order_by(StockPrice.symbol, StockPrice.time)
             )
-            broader_frame = pd.DataFrame(
-                broader_result.all(), columns=["symbol", "time", "close"]
-            )
+            broader_frame = _canonical_price_frame(broader_result.scalars().all())
             if not broader_frame.empty:
                 logger.info(
                     "Money Flow universe broadened from VN30 (%d symbols) to "
@@ -3656,10 +3606,34 @@ async def get_market_top_movers(
     mover_type = _normalize_mover_type(mode or type)
 
     try:
-        movers = await asyncio.wait_for(
-            VnstockTopMoversFetcher.fetch(type=mover_type, index=index, limit=limit),
-            timeout=30,
-        )
+        provider_error = None
+        retained_error = None
+        try:
+            retained = await _build_last_session_top_movers(
+                index=index, mover_type=mover_type, limit=limit
+            )
+        except Exception as exc:
+            retained_error = str(exc) or exc.__class__.__name__
+            logger.warning("Market top movers retained read failed: %s", retained_error)
+            retained = []
+        if retained:
+            sources = {item.get("source") for item in retained}
+            return MarketTopMoversResponse(
+                type=mover_type, index=index, count=len(retained), data=retained,
+                updated_at=_latest_timestamp([item.get("updated_at") for item in retained]),
+                source=next(iter(sources)) if len(sources) == 1 else None,
+                is_stale=any(item.get("is_stale", False) for item in retained),
+                is_last_session=True, session_label=retained[0].get("session_label"),
+            )
+        try:
+            movers = await asyncio.wait_for(
+                VnstockTopMoversFetcher.fetch(type=mover_type, index=index, limit=limit),
+                timeout=30,
+            )
+        except Exception as exc:
+            provider_error = str(exc) or exc.__class__.__name__
+            logger.warning("Market top movers provider failed: %s", provider_error)
+            movers = []
         payload = [
             item.model_dump(mode="json", by_alias=False) if hasattr(item, "model_dump") else item
             for item in movers
@@ -3693,6 +3667,15 @@ async def get_market_top_movers(
             payload = _apply_snapshot_metrics_to_movers(payload, snapshot_metrics)
             payload = _sort_top_movers(payload, mover_type=mover_type, limit=limit)
 
+        if not payload and provider_error:
+            return MarketTopMoversResponse(
+                type=mover_type, index=index, count=0, data=[],
+                error=(
+                    f"{provider_error}; retained fallback failed: {retained_error}"
+                    if retained_error else provider_error
+                ),
+            )
+
         if not payload and mover_type in {"gainer", "loser"}:
             # Graceful fallback: volume movers are generally the most stable upstream feed.
             fallback = await asyncio.wait_for(
@@ -3718,15 +3701,6 @@ async def get_market_top_movers(
                     index=index, mover_type=mover_type, limit=limit
                 )
 
-            if not payload or not _has_non_zero_top_mover_signal(payload):
-                # SQL-backed last-completed-session fallback. Without this
-                # branch the panel returns an empty list whenever the
-                # vnstock provider, snapshot cache, AND screener cache
-                # are all empty after market close (QA-v2 T3).
-                payload = await _build_last_session_top_movers(
-                    index=index, mover_type=mover_type, limit=limit
-                )
-
             if payload:
                 is_last_session_resp = bool(payload and payload[0].get("is_last_session"))
                 session_label = payload[0].get("session_label") if payload else None
@@ -3743,7 +3717,9 @@ async def get_market_top_movers(
                     ),
                     error=(
                         f"Requested '{mover_type}' movers unavailable, returned snapshot-derived "
-                        "fallback"
+                        f"fallback; retained read failed: {retained_error}"
+                        if retained_error else
+                        f"Requested '{mover_type}' movers unavailable, returned snapshot-derived fallback"
                     ),
                     is_last_session=is_last_session_resp,
                     session_label=session_label,
@@ -3757,10 +3733,18 @@ async def get_market_top_movers(
             updated_at=_latest_timestamp(
                 [_first_non_none(item.get("updated_at"), item.get("time")) for item in payload]
             ),
+            error=retained_error,
         )
     except Exception as e:
         logger.warning(f"Market top movers fetch failed: {e}")
-        return MarketTopMoversResponse(type=mover_type, index=index, count=0, data=[], error=str(e))
+        errors = [provider_error]
+        if retained_error:
+            errors.append(f"retained fallback failed: {retained_error}")
+        errors.append(str(e) or e.__class__.__name__)
+        return MarketTopMoversResponse(
+            type=mover_type, index=index, count=0, data=[],
+            error="; ".join(error for error in errors if error),
+        )
 
 
 @router.get("/sector-performance", response_model=MarketSectorPerformanceResponse)
@@ -3875,30 +3859,12 @@ async def get_market_sector_performance(
 @router.get("/world-indices", response_model=WorldIndicesResponse)
 @cached(ttl=300, key_prefix="world_indices")
 async def get_world_indices(limit: int = Query(default=8, ge=1, le=16)) -> WorldIndicesResponse:
-    symbols: list[tuple[str, str]] = [
-        ("DJI", "Dow Jones"),
-        ("SPX", "S&P 500"),
-        ("IXIC", "NASDAQ"),
-        ("N225", "Nikkei 225"),
-        ("HSI", "Hang Seng"),
-        ("FTSE", "FTSE 100"),
-        ("GDAXI", "DAX"),
-        ("STOXX50E", "Euro Stoxx 50"),
-    ]
-
     try:
         yahoo_rows = await _fetch_yahoo_world_indices(limit)
         if yahoo_rows:
             return WorldIndicesResponse(
                 count=len(yahoo_rows), data=yahoo_rows, source="yahoo_finance:world_indices"
             )
-
-        tasks = [_fetch_world_index_point(symbol, name) for symbol, name in symbols[:limit]]
-        fetched = await asyncio.gather(*tasks)
-        rows = [item for item in fetched if item is not None]
-
-        if rows:
-            return WorldIndicesResponse(count=len(rows), data=rows, source="vnstock:world_index")
 
         vn_indices = await asyncio.wait_for(
             VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
@@ -4124,7 +4090,7 @@ async def get_research_rss_feed(
 # hard-codes a small list of broker tickers (SSI/VND/HCM/VCI/MBS/SHS/BSI),
 # which is contradictory because VCI is in that list but its own buckets are
 # sparse. This endpoint returns the actual list of tickers that have
-# non-empty domestic / foreign / proprietary buckets in the last N days, so
+# verified full-session domestic / foreign / proprietary buckets in the last N days, so
 # the widget can render dynamic copy.
 #
 # Cached server-side for 1h to keep the query cheap; the underlying data
@@ -4144,7 +4110,7 @@ class FlowCoverageResponse(BaseModel):
 
 
 @router.get("/flow-coverage", response_model=FlowCoverageResponse)
-@cached(ttl=3600, key_prefix="flow_coverage")
+@cached(ttl=3600, key_prefix="flow_coverage_v2")
 async def get_flow_coverage(
     days: int = Query(30, ge=7, le=120),
     db: AsyncSession = Depends(get_db),
@@ -4164,6 +4130,8 @@ async def get_flow_coverage(
         foreign_net_volume.is_not(None)
         & OrderFlowDaily.proprietary_net_volume.is_not(None)
         & total_net_volume
+        & (OrderFlowDaily.coverage["scope"].as_string() == "full_session")
+        & OrderFlowDaily.coverage["completed_session"].as_boolean().is_(True)
     )
     foreign_join = (
         (ForeignTrading.symbol == OrderFlowDaily.symbol)
@@ -4220,6 +4188,9 @@ async def get_flow_coverage(
 
 class FreshnessBucket(BaseModel):
     label: str
+    timestamp_basis: str
+    scope: str
+    fetched_at: Optional[datetime] = None
     last_data_date: Optional[date] = None
     raw_last_data_date: Optional[date] = None
     settled_last_data_date: Optional[date] = None
@@ -4245,13 +4216,24 @@ def _classify_age(days: Optional[float], stale_threshold: float, critical_thresh
     return "fresh"
 
 
+async def _load_market_news_freshness(
+    db: AsyncSession,
+) -> tuple[Optional[datetime], Optional[datetime]]:
+    from vnibb.models.market_news import MarketNews
+
+    result = await db.execute(
+        select(func.max(MarketNews.published_date), func.max(MarketNews.crawled_at))
+    )
+    published_at, fetched_at = result.one()
+    return published_at, fetched_at
+
+
 @router.get("/freshness", response_model=FreshnessResponse)
 @cached(ttl=300, key_prefix="market_freshness")
 async def get_market_freshness(
     db: AsyncSession = Depends(get_db),
 ) -> FreshnessResponse:
     from vnibb.models.trading import ForeignTrading
-    from vnibb.models.market_news import MarketNews
 
     today = date.today()
 
@@ -4282,28 +4264,7 @@ async def get_market_freshness(
         else None
     )
 
-    news_dt = (
-        await db.execute(
-            select(func.max(MarketNews.published_date)).where(
-                MarketNews.published_date.is_not(None)
-            )
-        )
-    ).scalar_one_or_none()
-
-    # B1 fix — when `published_date` is uniformly NULL across recent rows
-    # (the KBS source URL pattern only contains /YYYY/MM/, so the URL date
-    # parser can't reconstruct the day), the freshness query reports the
-    # last non-null timestamp from months ago even though the crawler is
-    # actively writing new rows every hour. Fall back to MAX(crawled_at)
-    # so the banner reflects "the crawler is working" rather than "news
-    # data is 35 days old". The Settings → Data Sources panel still uses
-    # `published_date` for finer-grained reporting on the underlying gap.
-    news_crawled_dt = (
-        await db.execute(select(func.max(MarketNews.crawled_at)))
-    ).scalar_one_or_none()
-    if news_crawled_dt is not None:
-        if news_dt is None or news_crawled_dt > news_dt:
-            news_dt = news_crawled_dt
+    news_dt, news_crawled_dt = await _load_market_news_freshness(db)
 
     def _age(value) -> Optional[float]:
         if value is None:
@@ -4326,6 +4287,8 @@ async def get_market_freshness(
     buckets = [
         FreshnessBucket(
             label="Daily prices",
+            timestamp_basis="time",
+            scope="daily_observations",
             last_data_date=prices_dt.date() if hasattr(prices_dt, "date") else prices_dt,
             age_days=prices_age,
             status=_classify_age(prices_age, stale_threshold=2, critical_threshold=7),
@@ -4335,6 +4298,8 @@ async def get_market_freshness(
         ),
         FreshnessBucket(
             label="Foreign trading",
+            timestamp_basis="trade_date",
+            scope="validated_trade_dates",
             last_data_date=foreign_dt,
             raw_last_data_date=raw_foreign_dt,
             settled_last_data_date=foreign_dt,
@@ -4349,6 +4314,9 @@ async def get_market_freshness(
         ),
         FreshnessBucket(
             label="Market news",
+            timestamp_basis="published_date",
+            scope="published_articles",
+            fetched_at=news_crawled_dt,
             last_data_date=news_dt.date() if hasattr(news_dt, "date") else news_dt,
             age_days=news_age,
             status=_classify_age(news_age, stale_threshold=1, critical_threshold=3),
@@ -4387,6 +4355,9 @@ class DataSourceEntry(BaseModel):
     key: str
     label: str
     description: str
+    timestamp_basis: str
+    scope: str
+    fetched_at: Optional[datetime] = None
     last_updated: Optional[datetime] = None
     age_days: Optional[float] = None
     status: str  # "fresh" | "stale" | "critical" | "unknown"
@@ -4414,6 +4385,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Powers price charts, correlation matrix, beta 63D, and most quant widgets.",
         "table": "stock_prices",
         "timestamp_column": "time",
+        "scope": "daily_observations",
         "filter": "interval='1D'",
         "stale": 2,
         "critical": 7,
@@ -4425,6 +4397,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Foreign Flow widget and Transaction Flow buckets.",
         "table": "foreign_trading",
         "timestamp_column": "trade_date",
+        "scope": "raw_stored_rows",
         "stale": 2,
         "critical": 7,
         "next_sync": "Daily 09:20 UTC + intraday every 5 min during market hours",
@@ -4435,6 +4408,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Vietnam market news feed (News & Events tab).",
         "table": "market_news",
         "timestamp_column": "published_date",
+        "scope": "published_articles",
         "stale": 1,
         "critical": 3,
         "next_sync": "Every hour at :00 UTC",
@@ -4445,6 +4419,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Per-symbol news cards on Fundamentals tabs.",
         "table": "company_news",
         "timestamp_column": "published_date",
+        "scope": "published_articles",
         "stale": 2,
         "critical": 7,
         "next_sync": "Daily 10:30 UTC supplemental sync",
@@ -4455,6 +4430,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "P/E, ROE, valuation ratios used in screening, peer comparison, and risk dashboard.",
         "table": "financial_ratios",
         "timestamp_column": "updated_at",
+        "scope": "sync_storage_timestamps",
         "stale": 30,
         "critical": 90,
         "next_sync": "Daily 09:00 UTC",
@@ -4470,6 +4446,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         # every later probe in this list report `null`.
         "table": "screener_snapshots",
         "timestamp_column": "snapshot_date",
+        "scope": "stored_snapshots",
         "filter": "rs_rating IS NOT NULL",
         "stale": 2,
         "critical": 7,
@@ -4481,6 +4458,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Screening universe used for peer lookup and quant filters.",
         "table": "screener_snapshots",
         "timestamp_column": "snapshot_date",
+        "scope": "stored_snapshots",
         "stale": 2,
         "critical": 7,
         "next_sync": "Daily 09:00 UTC",
@@ -4491,6 +4469,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Dividends, AGMs, and splits in Events Calendar.",
         "table": "company_events",
         "timestamp_column": "event_date",
+        "scope": "scheduled_events",
         "stale": 14,
         "critical": 60,
         "next_sync": "Daily 10:30 UTC supplemental sync",
@@ -4501,6 +4480,7 @@ _PUBLIC_SOURCES: list[dict[str, Any]] = [
         "description": "Major shareholder disclosures.",
         "table": "shareholders",
         "timestamp_column": "updated_at",
+        "scope": "sync_storage_timestamps",
         "stale": 30,
         "critical": 180,
         "next_sync": "Daily 10:30 UTC supplemental sync",
@@ -4526,14 +4506,18 @@ async def get_data_sources_freshness(
 
     for spec in _PUBLIC_SOURCES:
         last_value: Optional[datetime] = None
+        fetched_at: Optional[datetime] = None
         try:
-            sql = (
-                f'SELECT MAX("{spec["timestamp_column"]}") FROM "{spec["table"]}"'
-            )
-            if spec.get("filter"):
-                sql += f' WHERE {spec["filter"]}'
-            res = await db.execute(text(sql))
-            last_value = res.scalar()
+            if spec["key"] == "market_news":
+                last_value, fetched_at = await _load_market_news_freshness(db)
+            else:
+                sql = (
+                    f'SELECT MAX("{spec["timestamp_column"]}") FROM "{spec["table"]}"'
+                )
+                if spec.get("filter"):
+                    sql += f' WHERE {spec["filter"]}'
+                res = await db.execute(text(sql))
+                last_value = res.scalar()
         except Exception as e:
             logger.warning(
                 "data-sources freshness probe failed for %s: %s", spec["table"], e
@@ -4573,6 +4557,9 @@ async def get_data_sources_freshness(
                 key=spec["key"],
                 label=spec["label"],
                 description=spec["description"],
+                timestamp_basis=spec["timestamp_column"],
+                scope=spec["scope"],
+                fetched_at=fetched_at,
                 last_updated=last_dt,
                 age_days=age_days,
                 status=status,

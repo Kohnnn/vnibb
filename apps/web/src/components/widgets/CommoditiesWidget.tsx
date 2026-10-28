@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { Gem } from 'lucide-react';
 import { useCommodities } from '@/lib/queries';
+import { getLatestTimestampValue } from '@/lib/dataFreshness';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
@@ -16,6 +17,7 @@ export function CommoditiesWidget({ onDataChange }: { onDataChange?: (data: Widg
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useCommodities();
 
     const rows = data?.data || [];
+    const sourceUpdatedAt = getLatestTimestampValue(rows.map((row) => row.time)) ?? null;
     const hasData = rows.length > 0;
     const isFallback = Boolean(data?.error);
 
@@ -26,15 +28,20 @@ export function CommoditiesWidget({ onDataChange }: { onDataChange?: (data: Widg
                     empty: !hasData,
                     compactHeight: 4,
                 },
+                provenance: {
+                    updatedAt: sourceUpdatedAt,
+                    fetchedAt: dataUpdatedAt || null,
+                },
             },
         });
-    }, [hasData, onDataChange]);
+    }, [hasData, sourceUpdatedAt, dataUpdatedAt, onDataChange]);
 
     return (
         <div className="h-full flex flex-col">
             <div className="pb-2 border-b border-[var(--border-subtle)]">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={sourceUpdatedAt}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     note={data?.source || 'vnstock'}

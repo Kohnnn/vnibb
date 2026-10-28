@@ -321,6 +321,7 @@ _CANNED_DOC = {
     "dividendYears": 9,
     "fcfPositive": True,
     "valuationMethod": "dcf",
+    "inputs": {"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}},
 }
 
 
@@ -346,6 +347,21 @@ async def test_enrichment_attaches_fundamental_fields(monkeypatch):
     untouched = result[1]
     assert untouched.intrinsic_value is None
     assert untouched.moat is None
+
+@pytest.mark.asyncio
+async def test_enrichment_withholds_unverified_retained_valuation(monkeypatch):
+    doc = {**_CANNED_DOC, "inputs": {}}
+    svc = _FakeMongoService(docs={"VNM": doc})
+    monkeypatch.setattr(screener_module, "get_mongo_market_data_service", lambda: svc)
+
+    result, outcome = await _apply_fundamental_enrichment([_row("VNM")])
+
+    assert outcome == "ok"
+    assert (result[0].intrinsic_value, result[0].margin_of_safety, result[0].valuation_method) == (None, None, None)
+    assert result[0].moat == "narrow"
+    assert result[0].provider_evidence[-1]["unavailable_reason"]
+    assert result[0].provider_evidence[-1]["dataset"] == "market_fundamental_screener"
+
 
 
 @pytest.mark.asyncio

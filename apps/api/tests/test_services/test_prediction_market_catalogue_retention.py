@@ -202,3 +202,25 @@ async def test_existence_probe_is_false_when_nothing_is_stale(test_db) -> None:
     await test_db.commit()
 
     assert await svc.has_catalogue_debris(test_db, now=NOW) is False
+
+
+@pytest.mark.asyncio
+async def test_oversized_retention_limit_cannot_bypass_batch_ceiling(test_db, monkeypatch) -> None:
+    monkeypatch.setattr(svc, "MARKET_RETENTION_BATCH", 3)
+    test_db.add_all([_market(i, age_days=30) for i in range(5)])
+    await test_db.commit()
+
+    preview = await svc.purge_catalogue_debris(test_db, limit=10**9, now=NOW)
+    assert preview["candidates"] == 3
+    first = await svc.purge_catalogue_debris(test_db, limit=10**9, now=NOW, apply=True)
+    assert first["deleted"] == 3
+    assert await _count(test_db) == 2
+    second = await svc.purge_catalogue_debris(test_db, limit=10**9, now=NOW, apply=True)
+    assert second["deleted"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, -1])
+async def test_nonpositive_retention_limit_is_rejected(test_db, limit) -> None:
+    with pytest.raises(ValueError, match="retention limit must be positive"):
+        await svc.purge_catalogue_debris(test_db, limit=limit, now=NOW, apply=True)

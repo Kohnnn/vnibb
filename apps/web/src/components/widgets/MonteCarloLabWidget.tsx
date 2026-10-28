@@ -36,11 +36,20 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
     enabled: Boolean(upperSymbol),
   })
 
-  const stats = useMemo(() => {
-    const closes = toDatedCloses(data?.data || []).map((bar) => bar.close)
-    return runDrawdownBootstrap(dailyReturns(closes), { horizonDays: horizon })
-  }, [data, horizon])
+  const meta = data?.meta
+  // Only per-row `price_unit` markers certify the series; a response-level
+  // `unit_status` cannot certify rows that carry no marker (QA #98).
+  const expectedUnit = meta?.unit_status === 'confirmed_vnd' ? 'VND' : 'index_points'
+  const certifiedUnits = Boolean(data?.data?.length)
+    && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(meta?.unit_status ?? '')
+    && (data?.data ??[]).every((row) => row.price_unit === expectedUnit)
+  const derivedWithheld = Boolean(data) && !certifiedUnits
 
+  const stats = useMemo(() => {
+    if (derivedWithheld) return null
+    const closes = toDatedCloses(data?.data ||[]).map((bar) => bar.close)
+    return runDrawdownBootstrap(dailyReturns(closes), { horizonDays: horizon })
+  }, [data, horizon, derivedWithheld])
   const hasData = Boolean(stats)
 
   useEffect(() => {
@@ -52,7 +61,8 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
           apiGroup: '/equity',
           endpoint: `/equity/historical?symbol=${upperSymbol}`,
           adjustmentMode: 'adjusted',
-          updatedAt: data?.meta?.last_data_date ?? (dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined),
+          updatedAt: data?.meta?.last_data_date ?? null,
+          fetchedAt: dataUpdatedAt,
         },
       },
       rows: stats
@@ -122,9 +132,13 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
         <WidgetEmpty
-          message="Not enough history to bootstrap"
+          message={derivedWithheld
+            ? 'Monte Carlo unavailable: historical price units were not certified.'
+            : 'Not enough history to bootstrap'}
           icon={<Dices size={18} />}
-          detail="Needs at least 60 adjusted daily returns in the selected period."
+          detail={derivedWithheld
+            ? 'Unmarked sessions are excluded; certified VND rows are required.'
+            : 'Needs at least 60 adjusted daily returns in the selected period.'}
         />
       ) : stats ? (
         <div className="flex-1 overflow-auto px-1">
@@ -188,7 +202,8 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
 
       <WidgetMeta
         className="px-1 pt-1"
-        updatedAt={data?.meta?.last_data_date ?? dataUpdatedAt}
+        updatedAt={data?.meta?.last_data_date}
+        fetchedAt={dataUpdatedAt}
         isFetching={isFetching && hasData}
         align="right"
       />

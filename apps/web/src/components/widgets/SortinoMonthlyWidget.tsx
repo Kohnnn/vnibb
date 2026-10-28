@@ -49,7 +49,15 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
     enabled: Boolean(upperSymbol),
   })
 
-  const metric = (data?.data?.metrics?.sortino ?? (data?.data as Record<string, unknown> | undefined)?.sortino ?? data?.data) as
+  const quality = data?.meta
+  // Only a certified unit status admits the derived risk-adjusted series; an
+  // absent or mixed/unconfirmed status must not render ordinary-looking values
+  // (QA #98).
+  const derivedWithheld = Boolean(data) && (!['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+    || Boolean(quality?.unresolved_excluded_dates?.length))
+  const metric = (derivedWithheld
+    ? undefined
+    : data?.data?.metrics?.sortino ?? (data?.data as Record<string, unknown> | undefined)?.sortino ?? data?.data) as
     | {
         error?: string
         monthly_sortino?: Record<string, number | null>
@@ -113,7 +121,7 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} Sortino vs Sharpe · ${(data?.data?.adjustment_mode || 'adjusted')} history`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} Sortino vs Sharpe · ${(data?.data?.adjustment_mode || 'adjusted')} history`} align="right" />
         </div>
       </div>
 
@@ -133,7 +141,12 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
       ) : metricError && !hasData ? (
         <WidgetEmpty message={metricError} icon={<BarChart3 size={18} />} />
       ) : !hasData ? (
-        <WidgetEmpty message="Insufficient historical data for the selected period" icon={<BarChart3 size={18} />} />
+        <WidgetEmpty
+          message={derivedWithheld
+            ? 'Sortino profile unavailable: historical price units were not certified.'
+            : 'Insufficient historical data for the selected period'}
+          icon={<BarChart3 size={18} />}
+        />
       ) : (
         <>
           <QuantWarningBanner warning={quantWarning} className="mb-2" />

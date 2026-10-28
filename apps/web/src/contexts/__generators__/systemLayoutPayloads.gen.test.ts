@@ -90,13 +90,24 @@ describe('system layout publish payload generator', () => {
             'default-quant': createQuantSystemDashboard(),
             'default-global-markets': createGlobalMarketsDashboard(),
         };
-
-        // Sanity guards: each dashboard must exist and be a valid dashboard object.
-        // The quant dashboard intentionally ships with 0 tabs
-        // (makeSystemDashboard is called without tabTemplates).
+        // #110: the Technical/Quant factories must ship a usable tab set. An
+        // empty list left every profile without a published admin layout on a
+        // "no tabs available" dead end and made `?tab=` deep links unresolvable.
         const quant = dashboards['default-quant'];
-        expect(quant.tabs.length).toBe(0);
+        expect(quant.tabs.map((tab) => tab.id)).toEqual([
+            'tab-default-quant-quant',
+            'tab-default-quant-overview',
+            'tab-default-quant-comparison',
+            'tab-default-quant-market',
+        ]);
 
+        const technical = dashboards['default-technical'];
+        expect(technical.tabs.map((tab) => tab.id)).toEqual([
+            'tab-default-technical-technical',
+            'tab-default-technical-overview',
+            'tab-default-technical-trading',
+            'tab-default-technical-market',
+        ]);
         // Verify main dashboard has widgets across its tabs.
         const main = dashboards['default-fundamental'];
         const mainWidgetTypes = main.tabs.flatMap((tab) => tab.widgets.map((w) => w.type));

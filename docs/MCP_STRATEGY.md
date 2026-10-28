@@ -4,11 +4,13 @@
 
 This page brainstorms how Model Context Protocol (MCP) can be applied to VNIBB in a way that fits the current product shape instead of bolting on a generic AI chat layer.
 
+Deployed boundary: the sidecar is read-only and database-backed. Vietcap IQ is primary for structured financial evidence; free vnstock VCI is the only secondary ingestion/execution source. It never invokes paid/banned providers or starts refresh jobs. Historical non-financial records remain readable with actual provenance and dates, not implicit freshness. The action/admin ideas below are roadmap only. Runtime commands and protocol acceptance are in [VNIBB_MCP_READONLY.md](VNIBB_MCP_READONLY.md) and [VNIBB_MCP_DEPLOYMENT.md](VNIBB_MCP_DEPLOYMENT.md).
+
 The goal is not "AI for everything". The goal is to give agents safe, structured access to VNIBB's existing strengths:
 
 - normalized Vietnam-market data from the FastAPI backend
 - dashboard and widget workflows in the frontend
-- cached and fallback-aware provider logic
+- cached, IQ-primary/free-VCI data with explicit unavailable states
 - the database stack and operational tooling already present in the repo
 
 ## Why MCP fits VNIBB
@@ -19,7 +21,7 @@ VNIBB already has several pieces that map well to MCP:
 - a widget-based research workspace where actions are composable
 - an AI Copilot direction already present in the product
 - the existing read-only MCP server in `apps/api/vnibb/mcp/server.py`
-- a fallback-first backend that is better for agents than raw upstream provider access
+- a database-backed read surface that is safer for agents than raw upstream provider access
 
 This means VNIBB should usually expose MCP over VNIBB services, not over raw `vnstock` calls.
 

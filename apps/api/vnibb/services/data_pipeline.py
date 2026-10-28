@@ -1,13 +1,14 @@
 """
-Data Pipeline Service - Comprehensive VNStock Integration
+Data Pipeline Service - IQ-first scheduled stock acquisition
 
-Batch data synchronization from ALL vnstock Golden Sponsor APIs.
+Vietcap Trading/IQ supplies stock listings and prices; community VCI supplements outages.
 Uses APScheduler for scheduled jobs.
 Supports both PostgreSQL and SQLite dialects.
 """
 
 import asyncio
 import logging
+import math
 import os
 import re
 from contextvars import ContextVar
@@ -42,8 +43,15 @@ from vnibb.core.cache_constants import (
 )
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, engine
+from vnibb.core.insider_units import normalize_deal_action
 from vnibb.core.retry import with_retry
+from vnibb.core.price_units import history_price_records, normalize_price_record, persisted_price_record, persisted_price_source, screener_price_record
+from vnibb.core.ratio_units import admitted_ratio_value, normalize_ratio_payload, ratio_method_kwargs
 from vnibb.core.vn_sectors import resolve_sector_name
+from vnibb.providers.vnstock.runtime import validate_source
+from vnibb.providers.vnstock.reference_fields import identity, parse_datetime, supplied
+from vnibb.services.screener_metadata import screener_metadata_updates
+from vnibb.services.cache_manager import StructuredPersistenceConflict, source_update_condition
 from vnibb.models.alerts import BlockTrade
 from vnibb.models.company import Company, Officer, Shareholder
 from vnibb.models.derivatives import DerivativePrice
@@ -70,8 +78,10 @@ from vnibb.providers.vnstock.financials import (
     FinancialsQueryParams,
     StatementType,
     VnstockFinancialsFetcher,
+    admitted_interest_expense,
 )
 from vnibb.services.data_quality import is_market_business_day
+from vnibb.services.financial_service import admit_statement_rows
 from vnibb.services.prediction_market_retention import retention as prediction_market_retention
 from vnibb.services.realtime_pipeline import is_vietnam_market_open
 
@@ -131,6 +141,8 @@ def get_upsert_stmt(
     values,
     preserve_existing_on_null=(),
     preserve_columns_without=(),
+    update_overrides=None,
+    update_condition=None,
 ):
     """Generate a dialect-specific upsert statement."""
     if engine.dialect.name == "postgresql":
@@ -154,7 +166,9 @@ def get_upsert_stmt(
                 else_=incoming,
             )
         update_values[column.name] = incoming
-    return stmt.on_conflict_do_update(index_elements=index_elements, set_=update_values)
+    if update_overrides is not None:
+        update_values.update(update_overrides(stmt))
+    return stmt.on_conflict_do_update(index_elements=index_elements, set_=update_values, where=update_condition)
 
 
 class RateLimiter:
@@ -184,10 +198,10 @@ class DataPipeline:
         )
         self.global_vnstock_limiter = RateLimiter(calls_per_minute=rps_budget * 60)
         self.reinforcement_vnstock_limiter = RateLimiter(calls_per_minute=reinforcement_rps * 60)
-        self._normal_budget_per_minute = 500
+        self._normal_budget_per_minute = int(rps_budget * 60)
         reinforcement_budget = int(reinforcement_rps * 60)
         self._reinforcement_budget_per_minute = (
-            min(50, reinforcement_budget) if reinforcement_budget > 0 else 0
+            reinforcement_budget if reinforcement_budget > 0 else 0
         )
         self._rate_log_window_start = 0.0
         self._rate_log_normal_calls = 0
@@ -209,9 +223,6 @@ class DataPipeline:
         self.rate_limiters = {
             key: RateLimiter(calls_per_minute=value) for key, value in base_limits.items()
         }
-        if settings.vnstock_api_key:
-            os.environ["VNSTOCK_API_KEY"] = settings.vnstock_api_key
-            logger.info("VNStock API key configured (registration handled at startup)")
 
     async def _record_rate_usage(self, mode: str) -> None:
         now = asyncio.get_event_loop().time()
@@ -295,79 +306,110 @@ class DataPipeline:
         interval: str = "1D",
         bypass_internal_retry: bool = False,
     ) -> pd.DataFrame:
+        from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
+
+        source = validate_source(settings.vnstock_source)
         timeout_seconds = max(float(getattr(settings, "vnstock_timeout", 0) or 0), 1.0)
-        # Source fallback chain: try the configured primary first, then walk
-        # through alternates so a single-source provider regression no longer
-        # blocks the whole sync. Some symbols (eg. delisted, warrants) only
-        # ship via specific sources, and KBS / VCI rotate which one is up.
-        configured = (settings.vnstock_source or "KBS").upper()
-        fallback_sources = [configured]
-        for alt in ("KBS", "VCI"):
-            if alt not in fallback_sources:
-                fallback_sources.append(alt)
 
-        last_error: Optional[Exception] = None
-        for source in fallback_sources:
-            def _fetch_sync(_source: str = source) -> pd.DataFrame:
-                from vnibb.providers.vnstock.runtime import get_quote_class
+        def _fetch_sync() -> pd.DataFrame:
+            quote = get_quote_class()(symbol=symbol, source=source)
+            history_callable = quote.history
+            unwrapped_history = getattr(history_callable, "__wrapped__", None)
+            if bypass_internal_retry and callable(unwrapped_history):
+                frame = unwrapped_history(quote, start=start, end=end, interval=interval)
+            else:
+                frame = history_callable(start=start, end=end, interval=interval)
+            if isinstance(frame, pd.DataFrame):
+                frame = pd.DataFrame(history_price_records(frame, symbol=symbol, source=source, provider=quote, asset_type=getattr(quote, "asset_type", None)))
+            return frame
 
-                Quote = get_quote_class()
-                quote = Quote(symbol=symbol, source=_source)
-                history_callable = quote.history
-                if bypass_internal_retry:
-                    # vnstock retries every exception here, including ValueError payload failures.
-                    unwrapped_history = getattr(history_callable, "__wrapped__", None)
-                    if callable(unwrapped_history):
-                        return unwrapped_history(
-                            quote,
-                            start=start,
-                            end=end,
-                            interval=interval,
-                        )
-                return history_callable(start=start, end=end, interval=interval)
+        frame = await asyncio.wait_for(asyncio.to_thread(_fetch_sync), timeout=timeout_seconds)
+        if frame is None or (bool(frame.empty) if hasattr(frame, "empty") else not bool(frame)):
+            raise ValueError("empty data (VCI)")
+        return frame
 
+    async def _fetch_trading_listing_rows(self, client) -> List[Dict[str, Any]]:
+        from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+
+        try:
+            rows = await asyncio.to_thread(client.get_all_symbols)
+            if rows:
+                return rows
+            raise ValueError("Empty Vietcap Trading listing")
+        except Exception as exc:
+            logger.warning("Vietcap Trading listing unavailable: %s", exc)
+        service = get_mongo_market_data_service()
+        if service.enabled:
+            def read_cached():
+                rows = list(service._get_collection("market_symbols").find({"source": "vietcap"}, {"_id": 0}))
+                records = service._get_collection("market_vnstock_premium_records").find(
+                    {"dataset": "reference.listings", "source": "vietcap"}, {"_id": 0, "raw": 1},
+                )
+                rows.extend(record.get("raw", {}).get("trading") or record.get("raw", {}) for record in records)
+                return rows
             try:
-                df = await asyncio.wait_for(
-                    asyncio.to_thread(_fetch_sync),
-                    timeout=timeout_seconds,
-                )
-                # Defensive empty check: tests / mocks may return non-DataFrame
-                # values; treat anything without rows as success only when it's
-                # a real DataFrame with at least one row, OR a non-None
-                # truthy value (so test mocks that return a sentinel still pass
-                # through unchanged).
-                df_is_empty: bool
-                if df is None:
-                    df_is_empty = True
-                elif hasattr(df, "empty"):
-                    df_is_empty = bool(df.empty)
-                else:
-                    df_is_empty = not bool(df)
+                rows = await asyncio.to_thread(read_cached)
+                if rows:
+                    return rows
+            except Exception as exc:
+                logger.warning("Cached IQ listing unavailable: %s", exc)
+        from vnibb.providers.vnstock.runtime import get_listing_class
 
-                if not df_is_empty:
-                    if source != configured:
-                        logger.info(
-                            "Recovered %s prices from fallback source %s",
-                            symbol,
-                            source,
-                        )
-                    return df
-                # Empty df → try next source rather than treating as error.
-                last_error = ValueError(f"empty data ({source})")
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-                logger.debug(
-                    "Quote history fetch failed for %s via %s: %s",
-                    symbol,
-                    source,
-                    exc,
-                )
-                continue
+        try:
+            listing = get_listing_class()(source=validate_source(settings.vnstock_source))
+            frame = await asyncio.to_thread(listing.symbols_by_exchange)
+            return [{**row, "_listing_source": "VCI"} for row in frame.to_dict(orient="records")] if frame is not None else []
+        except Exception as exc:
+            logger.warning("Free VCI instrument metadata unavailable: %s", exc)
+            return []
 
-        if last_error is not None:
-            raise last_error
-        # Should not reach: every iteration sets last_error or returns df.
-        return pd.DataFrame()
+    async def _fetch_stock_history_frame(self, client, symbol, start, end, *, instrument_type):
+        from vnibb.services.vietcap_ingestion import ohlc_rows_from_gap_chart
+        from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+
+        if str(instrument_type or "").upper() != "STOCK":
+            raise ValueError(f"Price acquisition requires a confirmed stock listing: {symbol}")
+        start_day, end_day = date.fromisoformat(start), date.fromisoformat(end)
+        try:
+            raw = await asyncio.to_thread(
+                client.get_ohlc, symbol, count_back=(end_day - start_day).days + 1,
+                to_epoch=int(datetime.combine(end_day + timedelta(days=1), time.min, ZoneInfo("Asia/Ho_Chi_Minh")).timestamp()),
+            )
+            rows = ohlc_rows_from_gap_chart(symbol, raw, instrument_type="STOCK") if raw else []
+            rows = [row for row in rows if start_day <= row["tradeDate"].date() <= end_day]
+            if not rows:
+                raise ValueError("Vietcap returned no EOD bars in the requested window")
+        except Exception as exc:
+            logger.warning("Vietcap EOD unavailable for %s: %s", symbol, exc)
+            service = get_mongo_market_data_service()
+            rows = []
+            if service.enabled:
+                def read_cached():
+                    return list(service._get_collection("market_prices_eod").find({
+                        "symbol": symbol, "source": "vietcap",
+                        "tradeDate": {"$gte": datetime.combine(start_day, time.min), "$lt": datetime.combine(end_day + timedelta(days=1), time.min)},
+                    }, {"_id": 0}).sort("tradeDate", 1))
+                rows = await asyncio.to_thread(read_cached)
+            if not rows:
+                frame = await self._fetch_quote_history_frame(
+                    symbol=symbol, start=start, end=end, interval="1D", bypass_internal_retry=True,
+                )
+                if any(str(row.get("price_source") or "").upper() not in {"VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI"} for row in frame.to_dict(orient="records")):
+                    raise ValueError(f"Free VCI provenance required for {symbol}") from exc
+                return frame
+        prepared = []
+        for row in rows:
+            values = {field: float(row[field]) for field in ("open", "high", "low", "close", "volume")}
+            if row.get("symbol", symbol) != symbol or not isinstance(row.get("tradeDate"), datetime):
+                raise ValueError(f"Invalid IQ EOD identity for {symbol}")
+            if any(not math.isfinite(value) or value < 0 for value in values.values()) or not values["volume"].is_integer():
+                raise ValueError(f"Invalid IQ OHLCV for {symbol}")
+            if not 0 < values["low"] <= min(values["open"], values["close"]) <= max(values["open"], values["close"]) <= values["high"]:
+                raise ValueError(f"Invalid IQ price range for {symbol}")
+            if row.get("priceUnit", row.get("price_unit")) != "VND":
+                raise ValueError(f"IQ EOD price unit unavailable for {symbol}")
+            prepared.append({**row, "time": row["tradeDate"], "price_unit": "VND", "price_source": "vietcap", "source": "vietcap_vnd"})
+        return pd.DataFrame(prepared).sort_values("time")
 
     async def _ensure_redis(self) -> bool:
         if not settings.redis_url:
@@ -651,34 +693,7 @@ class DataPipeline:
         return None
 
     def _parse_datetime_value(self, value: Any) -> Optional[datetime]:
-        if value is None:
-            return None
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, date):
-            return datetime.combine(value, time.min)
-        if hasattr(pd, "Timestamp") and isinstance(value, pd.Timestamp):
-            return value.to_pydatetime()
-        raw = str(value).strip()
-        if not raw:
-            return None
-        try:
-            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        except ValueError:
-            pass
-        for fmt in (
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%d %H:%M",
-            "%d/%m/%Y %H:%M:%S",
-            "%d/%m/%Y %H:%M",
-            "%Y-%m-%d",
-            "%d/%m/%Y",
-        ):
-            try:
-                return datetime.strptime(raw, fmt)
-            except ValueError:
-                continue
-        return None
+        return parse_datetime(value)
 
     @staticmethod
     def _normalize_market_index_code(value: Any) -> str:
@@ -873,26 +888,68 @@ class DataPipeline:
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
     ) -> int:
-        """Sync all stock symbols."""
+        """Refresh source-backed IQ stock listings; free VCI supplements outages."""
         from vnibb.providers.vnstock.runtime import get_listing_class
+        from vnibb.services.vietcap_client import VietcapClient
+        from vnibb.services.vietcap_financials import persist_vietcap_listings
 
-        Listing = get_listing_class()
+        client = VietcapClient()
+        trading_rows = await self._fetch_trading_listing_rows(client)
+        stock_rows = [row for row in trading_rows if str(row.get("type") or "").upper() == "STOCK"]
+        if stock_rows and any(row.get("_listing_source") != "VCI" for row in stock_rows):
+            try:
+                search_rows = await asyncio.to_thread(client.get_company_search_bar)
+                if not search_rows:
+                    raise ValueError("Empty IQ company descriptions")
+            except Exception as exc:
+                logger.warning("IQ listing descriptions unavailable: %s", exc)
+                search_rows = []
+                if progress is not None:
+                    progress["error_count"] = progress.get("error_count", 0) + 1
+            count = await persist_vietcap_listings(stock_rows, search_rows)
+            rejected = len(stock_rows) - count
+            if rejected:
+                logger.warning("IQ listing persistence rejected %d of %d stock rows", rejected, len(stock_rows))
+                if progress is not None:
+                    progress["error_count"] = progress.get("error_count", 0) + rejected
+            async with async_session_maker() as session:
+                stocks = (await session.execute(select(Stock).where(Stock.symbol.in_([row["symbol"] for row in stock_rows])))).scalars().all()
+                listing_cache = [{"symbol": stock.symbol, "organ_name": stock.company_name, "exchange": stock.exchange, "sector": stock.sector} for stock in stocks]
+            await self._cache_set_json(build_cache_key("vnibb", "listing", "symbols", "VCI"), listing_cache, CACHE_TTL_LISTING)
+            for item in listing_cache:
+                await self._cache_set_json(build_cache_key("vnibb", "listing", "symbol", item["symbol"]), item, CACHE_TTL_LISTING)
+            if progress is not None:
+                progress.setdefault("stage_stats", {})
+                progress["stage_stats"]["stock_list"] = {"success": count, "errors": rejected + (0 if search_rows else 1), "total": len(stock_rows)}
+                progress["success_count"] = progress.get("success_count", 0) + count
+                progress["last_symbol"] = None
+                progress["last_index"] = None
+                if sync_id is not None:
+                    await self._checkpoint(progress, sync_id)
+            return count
 
-        logger.info("Syncing stock list...")
-        listing_source = settings.vnstock_source or "KBS"
-        try:
-            listing = Listing(source=listing_source)
-            df = listing.all_symbols()
-            exchange_df = listing.symbols_by_exchange()
-            industry_df = listing.symbols_by_industries()
-        except SystemExit as exc:
-            logger.warning(f"Listing source {listing_source} aborted: {exc}")
-            return 0
-        except Exception as e:
-            logger.warning(f"Listing source {listing_source} failed: {e}.")
-            return 0
+        listing_source = "VCI"
+        listing = get_listing_class()(source=validate_source(settings.vnstock_source))
+        df = await asyncio.to_thread(listing.all_symbols)
         if df is None or df.empty:
-            return 0
+            raise ValueError("IQ and free VCI listings unavailable")
+        confirmed_symbols = {str(row.get("symbol") or "").upper() for row in stock_rows}
+        df = df[df["symbol"].astype(str).str.upper().isin(confirmed_symbols)]
+        if df.empty:
+            raise ValueError("Free VCI listing has no confirmed stock instruments")
+        exchange_df = pd.DataFrame()
+        industry_df = pd.DataFrame()
+        for method_name in ("symbols_by_exchange", "symbols_by_industries"):
+            try:
+                frame = await asyncio.to_thread(getattr(listing, method_name))
+                if method_name == "symbols_by_exchange":
+                    exchange_df = frame
+                else:
+                    industry_df = frame
+            except Exception as exc:
+                logger.warning("Free VCI listing metadata %s unavailable: %s", method_name, exc)
+                if progress is not None:
+                    progress["error_count"] = progress.get("error_count", 0) + 1
 
         def normalize_text(value: Any) -> Optional[str]:
             if value is None:
@@ -973,7 +1030,7 @@ class DataPipeline:
                     "updated_at": datetime.utcnow(),
                 }
                 try:
-                    stmt = get_upsert_stmt(Stock, ["symbol"], values)
+                    stmt = get_upsert_stmt(Stock, ["symbol"], values, preserve_existing_on_null={"company_name", "industry", "sector", "short_name"})
                     await session.execute(stmt)
                     count += 1
                     cache_batch.append(
@@ -1115,7 +1172,7 @@ class DataPipeline:
         def _extract_listing_metadata(src: str) -> Dict[str, Dict[str, Any]]:
             metadata: Dict[str, Dict[str, Any]] = {}
             try:
-                listing = Listing(source=src)
+                listing = Listing(source=validate_source(src))
                 df = listing.all_symbols()
                 exchange_df = listing.symbols_by_exchange()
                 industry_df = listing.symbols_by_industries()
@@ -1274,7 +1331,7 @@ class DataPipeline:
                     "listed_shares": _parse_float(listed_shares),
                 }
 
-        primary_source = (settings.vnstock_source or "KBS").upper()
+        primary_source = (settings.vnstock_source or "VCI").upper()
         listing_metadata = await loop.run_in_executor(
             None, _extract_listing_metadata, primary_source
         )
@@ -1304,27 +1361,21 @@ class DataPipeline:
             previous_snapshot_date = previous_date_result.scalar()
             if previous_snapshot_date:
                 previous_rows = await session.execute(
-                    select(
-                        ScreenerSnapshot.symbol,
-                        ScreenerSnapshot.company_name,
-                        ScreenerSnapshot.exchange,
-                        ScreenerSnapshot.industry,
-                        ScreenerSnapshot.price,
-                        ScreenerSnapshot.volume,
-                        ScreenerSnapshot.market_cap,
-                        ScreenerSnapshot.trade_date,
-                    ).where(
+                    select(ScreenerSnapshot).where(
                         ScreenerSnapshot.snapshot_date == previous_snapshot_date,
                         ScreenerSnapshot.symbol.in_(deduped_symbols),
                     )
                 )
-                for row in previous_rows.fetchall():
+                for row in previous_rows.scalars().all():
+                    normalized_price = screener_price_record(row)
                     previous_snapshot_fallback[str(row.symbol).upper()] = {
                         "company_name": row.company_name,
                         "exchange": row.exchange,
                         "industry": row.industry,
                         "trade_date": row.trade_date,
-                        "price": row.price,
+                        "price": normalized_price["price"],
+                        "price_unit": normalized_price["price_unit"],
+                        "price_source": normalized_price.get("price_source"),
                         "volume": row.volume,
                         "market_cap": row.market_cap,
                     }
@@ -1342,12 +1393,7 @@ class DataPipeline:
                 .subquery()
             )
             latest_price_rows = await session.execute(
-                select(
-                    StockPrice.symbol,
-                    StockPrice.time,
-                    StockPrice.close,
-                    StockPrice.volume,
-                ).join(
+                select(StockPrice).join(
                     latest_price_subquery,
                     and_(
                         StockPrice.symbol == latest_price_subquery.c.symbol,
@@ -1356,10 +1402,13 @@ class DataPipeline:
                     ),
                 )
             )
-            for row in latest_price_rows.fetchall():
+            for row in latest_price_rows.scalars().all():
+                normalized_price = persisted_price_record(row)
                 latest_price_fallback[str(row.symbol).upper()] = {
                     "trade_date": row.time,
-                    "price": _parse_float(row.close),
+                    "price": _parse_float(normalized_price["close"]),
+                    "price_unit": normalized_price["price_unit"],
+                    "price_source": normalized_price.get("price_source") or row.source,
                     "volume": _parse_float(row.volume),
                 }
 
@@ -1385,7 +1434,7 @@ class DataPipeline:
 
                             def _fetch_ratio_snapshot(sym: str, src: str):
                                 finance = create_finance(sym, src, "year")
-                                kwargs = finance_method_kwargs(finance.ratio, "year")
+                                kwargs = ratio_method_kwargs(finance.ratio, finance_method_kwargs(finance.ratio, "year"))
                                 df = finance.ratio(**kwargs)
                                 if df is None or df.empty:
                                     return None
@@ -1458,21 +1507,32 @@ class DataPipeline:
                                             owners_equity = value
                                     if liabilities is not None and owners_equity not in (None, 0):
                                         ratio_row["de"] = liabilities / owners_equity
+                                    ratio_row = normalize_ratio_payload(ratio_row, records, latest_year)
                                 else:
                                     # Legacy format
                                     ratio_row = df.iloc[0].to_dict()
+                                    ratio_row = normalize_ratio_payload(ratio_row, [ratio_row])
 
                                 try:
                                     end_date = datetime.now()
                                     start_date = end_date - timedelta(days=10)
                                     from vnibb.providers.vnstock.runtime import get_quote_class
-                                    history = get_quote_class()(symbol=sym, source=src).history(
+                                    quote = get_quote_class()(symbol=sym, source=validate_source(src))
+                                    history = quote.history(
                                         start=start_date.strftime("%Y-%m-%d"),
                                         end=end_date.strftime("%Y-%m-%d"),
                                     )
                                     if history is not None and not history.empty:
-                                        latest = history.iloc[-1]
+                                        latest = history_price_records(
+                                            history,
+                                            symbol=sym,
+                                            source=src,
+                                            provider=quote,
+                                            asset_type=getattr(quote, "asset_type", None),
+                                        )[-1]
                                         ratio_row["price"] = latest.get("close")
+                                        ratio_row["price_unit"] = latest["price_unit"]
+                                        ratio_row["price_source"] = latest.get("price_source")
                                         ratio_row["volume"] = latest.get("volume")
                                         ratio_row["trade_date"] = self._parse_date_value(
                                             latest.get("time")
@@ -1514,6 +1574,7 @@ class DataPipeline:
                     listing_row = listing_metadata.get(symbol, {})
                     previous_row = previous_snapshot_fallback.get(symbol, {})
                     latest_price_row = latest_price_fallback.get(symbol, {})
+                    row = normalize_price_record(row, symbol=symbol)
                     row_price = _parse_float(row.get("price"))
                     row_trade_date = self._parse_date_value(
                         row.get("trade_date")
@@ -1524,19 +1585,49 @@ class DataPipeline:
                     previous_price = _parse_float(previous_row.get("price"))
                     previous_volume = _parse_float(previous_row.get("volume"))
                     latest_price = _parse_float(latest_price_row.get("price"))
-                    latest_volume = _parse_float(latest_price_row.get("volume"))
-                    if row_price is not None and row_trade_date is not None:
+                    certified_fallback = next(
+                        (
+                            candidate
+                            for candidate, candidate_price in (
+                                (latest_price_row, latest_price),
+                                (previous_row, previous_price),
+                            )
+                            if candidate_price is not None
+                            and candidate.get("price_unit") in ("VND", "index_points")
+                        ),
+                        None,
+                    )
+                    # Priority stays enrichment > latest > previous. A unit-unknown
+                    # enrichment row only wins when no certified row backs it.
+                    if (
+                        row_price is not None
+                        and row_trade_date is not None
+                        and (row["price_unit"] != "unknown" or certified_fallback is None)
+                    ):
                         price_value = row_price
                         volume_value = row_volume
                         trade_date_value = row_trade_date
-                    elif latest_price is not None:
+                        price_provenance = row
+                    elif latest_price is not None and (
+                        latest_price_row.get("price_unit") != "unknown"
+                        or certified_fallback is None
+                    ):
                         price_value = latest_price
-                        volume_value = latest_volume
+                        volume_value = _parse_float(latest_price_row.get("volume"))
                         trade_date_value = self._parse_date_value(latest_price_row.get("trade_date"))
+                        price_provenance = latest_price_row
+                    elif certified_fallback is not None:
+                        price_value = _parse_float(certified_fallback.get("price"))
+                        volume_value = _parse_float(certified_fallback.get("volume"))
+                        trade_date_value = self._parse_date_value(
+                            certified_fallback.get("trade_date")
+                        )
+                        price_provenance = certified_fallback
                     else:
                         price_value = previous_price
                         volume_value = previous_volume
                         trade_date_value = self._parse_date_value(previous_row.get("trade_date"))
+                        price_provenance = previous_row
                     market_cap_value = (
                         _parse_float(row.get("market_cap"))
                         or _parse_float(row.get("marketCap"))
@@ -1551,14 +1642,14 @@ class DataPipeline:
                     if not shares_for_market_cap:
                         shares_for_market_cap = _parse_float(row.get("shares_outstanding"))
 
-                    if not market_cap_value and shares_for_market_cap and price_value:
+                    if not market_cap_value and shares_for_market_cap and price_value and price_provenance.get("price_unit") == "VND":
                         market_cap_value = float(shares_for_market_cap) * float(price_value)
 
                     extended_metrics = {
                         "debt_to_asset": _parse_float(
-                            row.get("debt_to_asset")
-                            or row.get("debtOnAsset")
-                            or row.get("debt_on_asset")
+                            row.get("debt_assets", row.get("debt_to_asset"))
+                            if "debt_assets" in row.get("ratio_units", {})
+                            else row.get("debt_to_asset") or row.get("debtOnAsset") or row.get("debt_on_asset")
                         ),
                         "days_receivable": _parse_float(
                             row.get("days_receivable")
@@ -1581,6 +1672,15 @@ class DataPipeline:
                     extended_metrics = {
                         key: value for key, value in extended_metrics.items() if value is not None
                     }
+                    extended_metrics.update(
+                        price_unit=price_provenance.get("price_unit", "unknown"),
+                        price_source=price_provenance.get("price_source"),
+                    )
+                    for key in ("ratio_units", "provider_evidence"):
+                        if row.get(key) is not None:
+                            extended_metrics[key] = row[key]
+                    if "debt_assets" in row.get("ratio_units", {}):
+                        extended_metrics["debt_to_asset"] = row.get("debt_assets")
 
                     values = {
                         "symbol": symbol,
@@ -1670,12 +1770,18 @@ class DataPipeline:
                         "source": "vnstock_ratio",
                         "created_at": datetime.utcnow(),
                     }
+                    for metric in row.get("ratio_units", {}):
+                        if metric in ScreenerSnapshot.__table__.c:
+                            values[metric] = row.get(metric)
                     stmt = get_upsert_stmt(
                         ScreenerSnapshot,
                         ["symbol", "snapshot_date"],
                         values,
                         preserve_existing_on_null={"trade_date"},
                         preserve_columns_without=("trade_date", {"price", "volume"}),
+                        update_overrides=lambda stmt: screener_metadata_updates(
+                            stmt, engine.dialect.name, stmt.excluded.trade_date.is_(None)
+                        ),
                     )
                     await session.execute(stmt)
                     count += 1
@@ -1688,6 +1794,8 @@ class DataPipeline:
                         "price": values.get("price"),
                         "volume": values.get("volume"),
                         "market_cap": values.get("market_cap"),
+                        "price_unit": extended_metrics["price_unit"],
+                        "price_source": extended_metrics.get("price_source"),
                     }
 
                     cache_batch.append(
@@ -1701,6 +1809,9 @@ class DataPipeline:
                             ),
                             "company_name": values.get("company_name"),
                             "price": values.get("price"),
+                            "volume": values.get("volume"),
+                            "price_unit": extended_metrics["price_unit"],
+                            "price_source": extended_metrics.get("price_source"),
                             "market_cap": values.get("market_cap"),
                             "pe": values.get("pe"),
                             "pb": values.get("pb"),
@@ -1730,6 +1841,8 @@ class DataPipeline:
 
                 if count % batch_size == 0:
                     await session.commit()
+                    if progress is not None:
+                        progress["committed_count"] = count
                     for item in cache_batch:
                         cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
                         await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
@@ -1780,35 +1893,40 @@ class DataPipeline:
                 ratio_payload = ratio.raw_data if isinstance(ratio.raw_data, dict) else {}
                 changed = False
 
-                if screener_row.revenue_growth is None:
-                    revenue_growth_value = _pick_float(
-                        ratio.revenue_growth,
-                        ratio_payload.get("revenue_growth"),
-                        ratio_payload.get("revenueGrowth"),
+                extended_metrics = dict(screener_row.extended_metrics or {})
+                ratio_units = dict(extended_metrics.get("ratio_units") or {})
+                copied_percentage = False
+                for metric, attribute, aliases in (
+                    ("revenue_growth", "revenue_growth", ("revenue_growth", "revenueGrowth")),
+                    ("earnings_growth", "earnings_growth", ("earnings_growth", "earningsGrowth")),
+                    ("operating_margin", "operating_margin", ("operating_margin", "operatingMargin")),
+                    ("debt_assets", "debt_to_assets", ("debt_assets", "debt_to_assets", "debt_to_asset")),
+                ):
+                    existing_value = (
+                        extended_metrics.get("debt_to_asset") if metric == "debt_assets"
+                        else getattr(screener_row, attribute)
                     )
-                    if revenue_growth_value is not None:
-                        screener_row.revenue_growth = revenue_growth_value
-                        changed = True
-
-                if screener_row.earnings_growth is None:
-                    earnings_growth_value = _pick_float(
-                        ratio.earnings_growth,
-                        ratio_payload.get("earnings_growth"),
-                        ratio_payload.get("earningsGrowth"),
+                    if existing_value is not None:
+                        continue
+                    value = admitted_ratio_value(
+                        _pick_float(getattr(ratio, attribute), *(ratio_payload.get(key) for key in aliases)),
+                        metric, ratio_units=ratio_payload.get("ratio_units"), source=ratio.source,
                     )
-                    if earnings_growth_value is not None:
-                        screener_row.earnings_growth = earnings_growth_value
-                        changed = True
-
-                if screener_row.operating_margin is None:
-                    operating_margin_value = _pick_float(
-                        ratio.operating_margin,
-                        ratio_payload.get("operating_margin"),
-                        ratio_payload.get("operatingMargin"),
-                    )
-                    if operating_margin_value is not None:
-                        screener_row.operating_margin = operating_margin_value
-                        changed = True
+                    if value is None:
+                        continue
+                    if metric == "debt_assets":
+                        extended_metrics["debt_to_asset"] = value
+                    else:
+                        setattr(screener_row, attribute, value)
+                    ratio_units[metric] = "percent"
+                    copied_percentage = changed = True
+                if copied_percentage:
+                    extended_metrics["ratio_units"] = ratio_units
+                    evidence = ratio_payload.get("provider_evidence")
+                    if isinstance(evidence, list):
+                        extended_metrics["provider_evidence"] = [
+                            *(extended_metrics.get("provider_evidence") or []), *evidence,
+                        ]
 
                 if screener_row.dividend_yield is None:
                     dividend_yield_value = _normalize_dividend_yield(
@@ -1823,8 +1941,13 @@ class DataPipeline:
                             ratio_payload.get("dps"),
                             ratio_payload.get("dividends_per_share"),
                         )
-                        price_value = _pick_float(screener_row.price)
-                        if dps_value is not None and price_value not in (None, 0):
+                        normalized_price = screener_price_record(screener_row)
+                        price_value = _pick_float(normalized_price.get("price"))
+                        if (
+                            normalized_price["price_unit"] == "VND"
+                            and dps_value is not None
+                            and price_value not in (None, 0)
+                        ):
                             dividend_yield_value = _normalize_dividend_yield(
                                 (dps_value / price_value) * 100
                             )
@@ -1853,13 +1976,6 @@ class DataPipeline:
                         screener_row.debt_to_equity = debt_to_equity_value
                         changed = True
 
-                debt_to_asset_value = _pick_float(
-                    ratio.debt_to_assets,
-                    ratio_payload.get("debt_assets"),
-                    ratio_payload.get("debt_to_assets"),
-                    ratio_payload.get("debt_to_asset"),
-                )
-                extended_metrics = dict(screener_row.extended_metrics or {})
 
                 def _set_extended_metric(key: str, value: Optional[float]) -> None:
                     nonlocal changed
@@ -1870,7 +1986,6 @@ class DataPipeline:
                     extended_metrics[key] = value
                     changed = True
 
-                _set_extended_metric("debt_to_asset", debt_to_asset_value)
                 _set_extended_metric(
                     "days_receivable",
                     _pick_float(
@@ -1937,6 +2052,8 @@ class DataPipeline:
                     )
                 )
             await session.commit()
+            if progress is not None:
+                progress["committed_count"] = count
             for item in cache_batch:
                 cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
                 await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
@@ -1964,6 +2081,13 @@ class DataPipeline:
             async with async_session_maker() as session:
                 result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1))
                 symbols = [r[0] for r in result.fetchall()]
+
+        from vnibb.core.price_units import is_index_symbol
+        from vnibb.services.vietcap_client import VietcapClient
+
+        client = VietcapClient()
+        trading_rows = await self._fetch_trading_listing_rows(client)
+        metadata = {str(row.get("symbol") or "").upper(): row for row in trading_rows}
 
         resolved_end = end_date or date.today()
         resolved_start = start_date or (resolved_end - timedelta(days=days))
@@ -2048,17 +2172,24 @@ class DataPipeline:
                         range_start_str = range_start.strftime("%Y-%m-%d")
                         range_end_str = range_end.strftime("%Y-%m-%d")
                         active_range = (range_start_str, range_end_str)
-                        range_df = await self._fetch_quote_history_frame(
-                            symbol=symbol,
-                            start=range_start_str,
-                            end=range_end_str,
-                            interval="1D",
-                            bypass_internal_retry=True,
-                        )
+                        if is_index_symbol(symbol):
+                            range_df = await self._fetch_quote_history_frame(
+                                symbol=symbol, start=range_start_str, end=range_end_str,
+                                interval="1D", bypass_internal_retry=True,
+                            )
+                        else:
+                            range_df = await self._fetch_stock_history_frame(
+                                client, symbol, range_start_str, range_end_str,
+                                instrument_type=metadata.get(symbol.upper(), {}).get("type"),
+                            )
                         if range_df is None or range_df.empty:
                             raise RuntimeError(f"Empty price acquisition for {symbol} ({range_start_str} -> {range_end_str})")
 
+                        conflicts = []
+                        range_synced = 0
                         for _, row in range_df.iterrows():
+                            if row.get("price_unit") not in {"VND", "index_points"}:
+                                raise ValueError(f"Unknown price unit for {symbol}")
                             row_time = (
                                 row["time"].date() if hasattr(row["time"], "date") else row["time"]
                             )
@@ -2071,19 +2202,40 @@ class DataPipeline:
                                 "low": float(row["low"]),
                                 "close": float(row["close"]),
                                 "volume": int(row["volume"]),
+                                "value": row.get("value"),
+                                "adj_close": next((row.get(field) for field in ("adj_close", "adjusted_close", "adjClose") if row.get(field) is not None), None),
                                 "interval": "1D",
-                                "source": "vnstock",
+                                "source": "vietcap_vnd" if row.get("source") == "vietcap_vnd" else persisted_price_source(row),
                             }
-                            stmt = get_upsert_stmt(StockPrice, ["symbol", "time", "interval"], val)
-                            await session.execute(stmt)
-
-                        symbol_synced += len(range_df)
-                        latest_candidate = range_df.iloc[-1].to_dict()
-                        latest_row = latest_candidate
+                            stmt = get_upsert_stmt(
+                                StockPrice, ["symbol", "time", "interval"], val,
+                                preserve_existing_on_null={"value"},
+                                update_condition=source_update_condition(StockPrice, val["source"]),
+                            )
+                            result = await session.execute(stmt.returning(StockPrice.id))
+                            affected = len(result.scalars().all())
+                            range_synced += affected
+                            if not affected:
+                                conflicts.append({"symbol": symbol, "time": str(row_time), "interval": "1D"})
+                        await session.commit()
+                        symbol_synced += range_synced
+                        total_synced += range_synced
+                        if progress is not None:
+                            progress["committed_count"] = total_synced
+                        if conflicts:
+                            logger.warning("Price acquisition retained IQ-owned rows for %s: %s", symbol, conflicts)
+                            if progress is not None:
+                                progress["error_count"] = progress.get("error_count", 0) + 1
+                                progress["stage_stats"]["prices"]["errors"] += 1
+                                progress.setdefault("source_conflicts", []).append({"symbol": symbol, "reason": "source_ownership_conflict", "keys": conflicts, "persisted_rows": range_synced})
+                        latest_result = await session.execute(
+                            select(StockPrice).where(StockPrice.symbol == symbol, StockPrice.interval == "1D").order_by(StockPrice.time.desc()).limit(1)
+                        )
+                        latest_stored = latest_result.scalar_one_or_none()
+                        latest_row = persisted_price_record(latest_stored) if latest_stored else None
 
                     await session.commit()
 
-                total_synced += symbol_synced
                 if latest_row:
                     latest_payload = {
                         "symbol": symbol,
@@ -2093,7 +2245,11 @@ class DataPipeline:
                         "low": float(latest_row.get("low")),
                         "close": float(latest_row.get("close")),
                         "volume": int(latest_row.get("volume")),
+                        "value": latest_row.get("value"),
+                        "adj_close": next((latest_row.get(field) for field in ("adj_close", "adjusted_close", "adjClose") if latest_row.get(field) is not None), None),
                         "interval": "1D",
+                        "price_unit": latest_row.get("price_unit", "unknown"),
+                        "price_source": latest_row.get("price_source"),
                     }
                     latest_key = build_cache_key("vnibb", "price", "latest", symbol)
                     await self._cache_set_json(latest_key, latest_payload, CACHE_TTL_PRICE_LATEST)
@@ -2104,14 +2260,7 @@ class DataPipeline:
                         )
                         async with async_session_maker() as session:
                             recent_rows_result = await session.execute(
-                                select(
-                                    StockPrice.time,
-                                    StockPrice.open,
-                                    StockPrice.high,
-                                    StockPrice.low,
-                                    StockPrice.close,
-                                    StockPrice.volume,
-                                )
+                                select(StockPrice)
                                 .where(
                                     StockPrice.symbol == symbol,
                                     StockPrice.interval == "1D",
@@ -2120,17 +2269,8 @@ class DataPipeline:
                                 .order_by(StockPrice.time.asc())
                             )
                             recent_rows = [
-                                {
-                                    "time": row.time.isoformat()
-                                    if hasattr(row.time, "isoformat")
-                                    else row.time,
-                                    "open": float(row.open),
-                                    "high": float(row.high),
-                                    "low": float(row.low),
-                                    "close": float(row.close),
-                                    "volume": int(row.volume),
-                                }
-                                for row in recent_rows_result.fetchall()
+                                {**persisted_price_record(row), "time": row.time.isoformat()}
+                                for row in recent_rows_result.scalars().all()
                             ]
 
                         recent_key = build_cache_key("vnibb", "price", "recent", symbol)
@@ -2341,8 +2481,9 @@ class DataPipeline:
             await session.commit()
             return result.rowcount or 0
 
-    async def run_retention_cleanup(self, include_price_history: bool = True) -> Dict[str, int]:
+    async def run_retention_cleanup(self, include_price_history: bool = False) -> dict[str, int]:
         results: Dict[str, int] = {}
+        failed_labels: list[str] = []
 
         cleanup_actions: List[Tuple[str, Any]] = [
             ("screener_snapshots", self.cleanup_screener_snapshots),
@@ -2364,6 +2505,7 @@ class DataPipeline:
                     results[label] = removed
             except Exception as exc:
                 logger.warning(f"Retention cleanup failed for {label}: {exc}")
+                failed_labels.append(label)
 
         try:
             market_report = await prediction_market_retention(limit=100)
@@ -2371,6 +2513,9 @@ class DataPipeline:
             logger.info("Terminal market retention dry-run (no deletion): %s", market_report)
         except Exception as exc:
             logger.warning("Terminal market retention dry-run failed: %s", exc)
+            failed_labels.append("prediction_market_candidates")
+        if failed_labels:
+            raise RuntimeError("Retention cleanup failed: " + ", ".join(failed_labels))
         return results
 
     async def sync_company_profiles(
@@ -2462,13 +2607,16 @@ class DataPipeline:
                 )
 
                 def acquire_profile(symbol=symbol) -> Dict[str, Any]:
-                    company = get_company_class()(symbol=symbol, source=settings.vnstock_source)
+                    company = get_company_class()(symbol=symbol, source=validate_source(settings.vnstock_source))
                     overview_row: Dict[str, Any] = {}
                     profile_row: Dict[str, Any] = {}
                     errors: list[Exception] = []
                     for method_name, target in (("overview", overview_row), ("profile", profile_row)):
                         try:
-                            frame = getattr(company, method_name)()
+                            method = getattr(company, method_name, None)
+                            if method is None:
+                                continue
+                            frame = method()
                             if frame is not None and not frame.empty:
                                 target.update(frame.iloc[0].to_dict())
                         except Exception as exc:
@@ -2645,12 +2793,14 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["profiles"]["errors"] += 1
+                    progress.setdefault("errors", []).append({"symbol": symbol, "dataset": "profiles", "error": self._describe_provider_exception(exc)})
                 continue
             except Exception as e:
                 logger.debug(f"Failed to sync profile for {symbol}: {e}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["profiles"]["errors"] += 1
+                    progress.setdefault("errors", []).append({"symbol": symbol, "dataset": "profiles", "error": self._describe_provider_exception(e)})
                 continue
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = symbol
@@ -2665,8 +2815,10 @@ class DataPipeline:
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
         statement_types: Optional[List[StatementType | str]] = None,
+        start_year: Optional[int] = None,
+        count: Optional[int] = None,
     ) -> int:
-        """Sync income, balance, and cashflow for specified symbols."""
+        """Acquire independent statements; return symbols with a complete requested window."""
         if not symbols:
             async with async_session_maker() as session:
                 result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1))
@@ -2690,7 +2842,74 @@ class DataPipeline:
         total = 0
 
         normalized_period = "quarter" if period in {"quarter", "Q", "QTR"} else "year"
-        fetch_limit = 8 if normalized_period == "quarter" else 6
+        now = datetime.utcnow()
+        if start_year is not None and (isinstance(start_year, bool) or not isinstance(start_year, int)
+                                       or not 1900 <= start_year <= now.year):
+            raise ValueError("start_year must be a fiscal year between 1900 and the current year")
+        if count is not None and (isinstance(count, bool) or not isinstance(count, int) or count < 1):
+            raise ValueError("count must be a positive integer")
+        if start_year is not None and count is not None:
+            raise ValueError("Specify start_year or count, not both")
+        latest_year = now.year - 1
+        latest_quarter_index = now.year * 4 + (now.month - 1) // 3 - 1
+        if normalized_period == "year":
+            fetch_limit = count or (latest_year - start_year + 1 if start_year is not None else 6)
+            expected_periods = [str(latest_year - offset) for offset in range(max(0, fetch_limit))]
+        else:
+            fetch_limit = count or (latest_quarter_index - start_year * 4 + 1
+                                   if start_year is not None else 40)
+            expected_periods = [f"Q{index % 4 + 1}-{index // 4}"
+                                for index in range(latest_quarter_index,
+                                                   latest_quarter_index - max(0, fetch_limit), -1)]
+        if fetch_limit < 1:
+            raise ValueError("Requested history contains no closed fiscal periods")
+        requested_source_count = ((now.year - start_year + 1)
+                                  * (4 if normalized_period == "quarter" else 1)
+                                  if start_year is not None else fetch_limit)
+        cycle = {
+            "cycle_id": str(uuid4()), "period_type": normalized_period,
+            "history_window": {"start_year": start_year, "count": fetch_limit,
+                               "requested_source_count": requested_source_count,
+                               "latest_closed_period": expected_periods[0]},
+            "expected_symbols": list(symbols), "expected_periods": expected_periods,
+            "outcomes": {}, "attempted_symbols": [], "complete": False,
+        }
+        cycle["expected_symbol_count"] = len(symbols)
+        previous_cycle = progress.get("financial_acquisition") if progress is not None else None
+        cycle["expected_statements"] = [
+            item.value if isinstance(item, StatementType) else str(item).strip().lower()
+            for item in (statement_types or list(StatementType))
+        ]
+        if (start_index and isinstance(previous_cycle, dict)
+                and previous_cycle.get("expected_periods") == expected_periods
+                and previous_cycle.get("expected_symbols") == list(symbols)
+                and previous_cycle.get("expected_statements") == cycle["expected_statements"]
+                and previous_cycle.get("period_type") == normalized_period):
+            cycle = previous_cycle
+            cycle["expected_symbol_count"] = len(symbols)
+            cycle.update(attempted_symbols=[], complete=False)
+        elif start_index:
+            start_index = 0
+        if progress is not None:
+            progress["financial_acquisition"] = cycle
+            for key in ("partial", "persisted_rows", "statement_success", "statement_errors"):
+                progress["stage_stats"]["financials"].setdefault(key, 0)
+
+        cycle.update(status="running", complete=False, persisted_rows=0)
+        async def _persist_receipt(outcome: Dict[str, Any], *, cycle_receipt: bool = False):
+            async with async_session_maker() as session:
+                await session.execute(SyncStatus.__table__.insert().values(
+                    sync_type="financial_cycle" if cycle_receipt else "financial_acquisition",
+                    started_at=now, completed_at=None if outcome["status"] == "running" else datetime.utcnow(),
+                    status=outcome["status"],
+                    success_count=outcome.get("persisted_rows", 0),
+                    error_count=0 if outcome["complete"] or outcome["status"] == "running" else 1,
+                    additional_data=outcome,
+                    errors={"message": outcome["error"]} if outcome.get("error") else None,
+                ))
+                await session.commit()
+
+        await _persist_receipt(cycle, cycle_receipt=True)
 
         def _parse_period_fields(
             raw_period: Any,
@@ -2755,18 +2974,9 @@ class DataPipeline:
                     return parsed
             return None
 
-        def _extract_raw_float(payload: Dict[str, Any], *keys: str) -> Optional[float]:
-            if not payload:
-                return None
-            for key in keys:
-                if key in payload:
-                    parsed = _coerce_float(payload.get(key))
-                    if parsed is not None:
-                        return parsed
-            return None
-
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
+            cycle.setdefault("attempted_symbols", []).append(symbol)
             await self._wait_for_rate_limit("financials")
             try:
                 default_statement_specs = [
@@ -2791,399 +3001,211 @@ class DataPipeline:
                     statement_specs = default_statement_specs
 
                 if not statement_specs:
-                    logger.warning(
-                        "No valid statement types requested for financial sync: %s",
-                        statement_types,
-                    )
-                    continue
+                    raise ValueError(f"No valid statement types requested: {statement_types}")
 
-                symbol_synced = False
-                income_depreciation_lookup: Dict[Tuple[int, int], float] = {}
-                annual_income_depreciation: Dict[int, float] = {}
-                for statement_type, model, cache_slug in statement_specs:
+                symbol_synced = True
+                symbol_persisted_rows = 0
+                cycle["outcomes"][symbol] = {}
+                income_depreciation_lookup: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+                async def _acquire_statement(statement_type, model, cache_slug, outcome):
                     params = FinancialsQueryParams(
                         symbol=symbol,
                         statement_type=statement_type,
                         period=normalized_period,
-                        limit=fetch_limit,
+                        limit=requested_source_count,
                     )
                     raw_items = await VnstockFinancialsFetcher.extract_data(
                         VnstockFinancialsFetcher.transform_query(params)
                     )
                     items = VnstockFinancialsFetcher.transform_data(params, raw_items)
+                    outcome["source_returned_period_count"] = len({
+                        _parse_period_fields(entry.period, entry.raw_data)[0] for entry in items
+                    })
+                    outcome["source_returned_periods"] = sorted({
+                        _parse_period_fields(entry.period, entry.raw_data)[0] for entry in items
+                    })
                     if not items:
                         raise RuntimeError(f"Empty {statement_type.value} acquisition for {symbol}")
 
                     latest_cache_payload: List[Dict[str, Any]] = []
+                    rejected_updates: List[str] = []
+                    committed_periods = {}
                     async with async_session_maker() as session:
-                        for entry in items:
+                        for entry in admit_statement_rows(items, normalized_period):
                             payload = entry.model_dump(mode="json")
-                            if isinstance(entry.raw_data, dict):
-                                raw_payload = dict(entry.raw_data)
-                            else:
-                                raw_payload = dict(payload)
+                            raw_payload = dict(entry.raw_data or {})
+                            canonical = {
+                                key: value for key, value in payload.items() if key != "raw_data"
+                            }
+                            if entry.unavailable_reason or entry.value_unit != "VND":
+                                canonical["unavailable_reason"] = (
+                                    entry.unavailable_reason or "unknown_source_unit"
+                                )
+                                for key, value in canonical.items():
+                                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                                        canonical[key] = None
+
+                            lineage_fields = (
+                                "source", "currency", "value_unit", "unit_metadata",
+                                "aggregation_basis", "source_periods", "unavailable_reason",
+                                "consolidation_basis", "flow_basis",
+                            )
+                            derived: Dict[str, Any] = {}
+                            lineage = {key: canonical.get(key) for key in lineage_fields}
+                            lineage["canonical_data"] = canonical
+                            lineage["derived_data"] = derived
+                            raw_payload["_financial_lineage"] = lineage
 
                             period_value, fiscal_year, fiscal_quarter = _parse_period_fields(
-                                entry.period,
-                                raw_payload,
+                                entry.period, raw_payload
                             )
-
                             common = {
                                 "symbol": symbol,
                                 "period": period_value,
                                 "period_type": normalized_period,
                                 "fiscal_year": fiscal_year,
                                 "fiscal_quarter": fiscal_quarter,
-                                "source": "vnstock",
+                                "source": entry.source or "unknown",
                                 "updated_at": datetime.utcnow(),
                             }
+                            lookup_key = (
+                                fiscal_year, fiscal_quarter or 0,
+                                entry.source, entry.currency, entry.consolidation_basis,
+                                entry.flow_basis, entry.aggregation_basis,
+                                entry.period, tuple(entry.source_periods),
+                            )
 
                             if statement_type == StatementType.INCOME:
-                                operating_expenses = _pick_float(
-                                    _extract_raw_float(
-                                        payload,
-                                        "operating_expenses",
-                                        "operatingExpenses",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "operating_expenses",
-                                        "operatingExpenses",
-                                    ),
-                                )
-                                if operating_expenses is None:
-                                    sga = _coerce_float(entry.selling_general_admin)
-                                    rnd = _coerce_float(entry.research_development)
-                                    if sga is not None or rnd is not None:
-                                        operating_expenses = (sga or 0.0) + (rnd or 0.0)
+                                operating_expenses = _coerce_float(canonical.get("operating_expenses"))
+                                sga = _coerce_float(canonical.get("selling_general_admin"))
+                                rnd = _coerce_float(canonical.get("research_development"))
+                                if operating_expenses is None and sga is not None and rnd is not None:
+                                    operating_expenses = sga + rnd
+                                    derived["operating_expenses"] = {
+                                        "value": operating_expenses,
+                                        "formula": "selling_general_admin + research_development",
+                                        "source_fields": ["selling_general_admin", "research_development"],
+                                    }
 
-                                income_depreciation = _pick_float(
-                                    entry.depreciation,
-                                    _extract_raw_float(
-                                        payload,
-                                        "depreciation",
-                                        "depreciation_and_amortization",
-                                        "depreciation_and_amortisation",
-                                        "khau_hao_tai_san_co_dinh",
-                                        "chi_phi_khau_hao",
-                                        "khau_hao_tscd",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "depreciation",
-                                        "depreciation_and_amortization",
-                                        "depreciation_and_amortisation",
-                                        "khau_hao_tai_san_co_dinh",
-                                        "chi_phi_khau_hao",
-                                        "khau_hao_tscd",
-                                    ),
-                                )
-
-                                lookup_key = (fiscal_year, fiscal_quarter or 0)
+                                income_depreciation = _coerce_float(canonical.get("depreciation"))
                                 if income_depreciation is not None:
-                                    income_depreciation_lookup[lookup_key] = income_depreciation
-                                    annual_income_depreciation[fiscal_year] = income_depreciation
+                                    income_depreciation_lookup[lookup_key] = {
+                                        "value": income_depreciation,
+                                        "period": entry.period,
+                                        "unit_metadata": entry.unit_metadata.get("depreciation", {}),
+                                    }
 
-                                sga_value = _pick_float(
-                                    entry.selling_general_admin,
-                                    _extract_raw_float(
-                                        payload,
-                                        "selling_general_admin",
-                                        "selling_expenses",
-                                        "general_and_administrative_expenses",
-                                        "general_and_admin_expenses",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "selling_general_admin",
-                                        "selling_expenses",
-                                        "general_and_administrative_expenses",
-                                        "general_and_admin_expenses",
-                                    ),
-                                )
-                                research_development_value = _pick_float(
-                                    entry.research_development,
-                                    _extract_raw_float(
-                                        payload,
-                                        "research_development",
-                                        "research_and_development",
-                                        "rd_expense",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "research_development",
-                                        "research_and_development",
-                                        "rd_expense",
-                                    ),
-                                )
-
-                                operating_income_value = _coerce_float(entry.operating_income)
-                                ebitda_value = _coerce_float(entry.ebitda)
-                                if ebitda_value is None:
-                                    if (
-                                        operating_income_value is not None
-                                        and income_depreciation is not None
-                                    ):
-                                        ebitda_value = operating_income_value + abs(
-                                            income_depreciation
-                                        )
-                                        raw_payload["_ebitda_computed_from_operating_income"] = True
-
-                                if sga_value is not None:
-                                    raw_payload["selling_general_admin"] = sga_value
-                                if income_depreciation is not None:
-                                    raw_payload["depreciation"] = income_depreciation
-                                if research_development_value is not None:
-                                    raw_payload["research_development"] = research_development_value
-                                if ebitda_value is not None:
-                                    raw_payload["ebitda"] = ebitda_value
+                                operating_income_value = _coerce_float(canonical.get("operating_income"))
+                                ebitda_value = _coerce_float(canonical.get("ebitda"))
+                                if (
+                                    ebitda_value is None
+                                    and operating_income_value is not None
+                                    and income_depreciation is not None
+                                ):
+                                    ebitda_value = operating_income_value + abs(income_depreciation)
+                                    derived["ebitda"] = {
+                                        "value": ebitda_value,
+                                        "formula": "operating_income + abs(depreciation)",
+                                        "source_fields": ["operating_income", "depreciation"],
+                                    }
 
                                 values = {
                                     **common,
-                                    "revenue": _coerce_float(entry.revenue),
-                                    "cost_of_revenue": _coerce_float(entry.cost_of_revenue),
-                                    "gross_profit": _coerce_float(entry.gross_profit),
+                                    "revenue": _coerce_float(canonical.get("revenue")),
+                                    "cost_of_revenue": _coerce_float(canonical.get("cost_of_revenue")),
+                                    "gross_profit": _coerce_float(canonical.get("gross_profit")),
                                     "operating_expenses": operating_expenses,
                                     "operating_income": operating_income_value,
-                                    "interest_expense": _coerce_float(entry.interest_expense),
-                                    "other_income": _coerce_float(entry.other_income),
+                                    "interest_expense": _coerce_float(canonical.get("interest_expense")),
+                                    "other_income": _coerce_float(canonical.get("other_income")),
                                     "income_before_tax": _pick_float(
-                                        entry.pre_tax_profit,
-                                        entry.profit_before_tax,
-                                        _extract_raw_float(
-                                            payload,
-                                            "pre_tax_profit",
-                                            "profit_before_tax",
-                                            "income_before_tax",
-                                        ),
-                                        _extract_raw_float(
-                                            raw_payload,
-                                            "pre_tax_profit",
-                                            "profit_before_tax",
-                                            "income_before_tax",
-                                        ),
+                                        canonical.get("pre_tax_profit"), canonical.get("profit_before_tax")
                                     ),
-                                    "income_tax": _pick_float(
-                                        entry.tax_expense,
-                                        _extract_raw_float(payload, "tax_expense", "income_tax"),
-                                        _extract_raw_float(
-                                            raw_payload, "tax_expense", "income_tax"
-                                        ),
-                                    ),
-                                    "net_income": _coerce_float(entry.net_income),
+                                    "income_tax": _coerce_float(canonical.get("tax_expense")),
+                                    "net_income": _coerce_float(canonical.get("net_income")),
                                     "ebitda": ebitda_value,
-                                    "eps": _coerce_float(entry.eps),
-                                    "eps_diluted": _coerce_float(entry.eps_diluted),
+                                    "eps": _coerce_float(canonical.get("eps")),
+                                    "eps_diluted": _coerce_float(canonical.get("eps_diluted")),
                                     "raw_data": raw_payload,
                                 }
                             elif statement_type == StatementType.BALANCE:
-                                accounts_payable_value = _pick_float(
-                                    entry.accounts_payable,
-                                    _extract_raw_float(
-                                        payload,
-                                        "accounts_payable",
-                                        "trade_accounts_payable",
-                                        "short_term_trade_accounts_payable",
-                                        "short_term_trade_payable",
-                                        "long_term_trade_payables",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "accounts_payable",
-                                        "trade_accounts_payable",
-                                        "short_term_trade_accounts_payable",
-                                        "short_term_trade_payable",
-                                        "long_term_trade_payables",
-                                    ),
-                                )
-                                goodwill_value = _pick_float(
-                                    entry.goodwill,
-                                    _extract_raw_float(
-                                        payload,
-                                        "goodwill",
-                                        "good_will_bn_vnd",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "goodwill",
-                                        "good_will_bn_vnd",
-                                    ),
-                                )
-                                intangible_assets_value = _pick_float(
-                                    entry.intangible_assets,
-                                    _extract_raw_float(
-                                        payload,
-                                        "intangible_assets",
-                                        "intangible_fixed_assets",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "intangible_assets",
-                                        "intangible_fixed_assets",
-                                    ),
-                                )
-                                if accounts_payable_value is not None:
-                                    raw_payload["accounts_payable"] = accounts_payable_value
-                                if goodwill_value is not None:
-                                    raw_payload["goodwill"] = goodwill_value
-                                if intangible_assets_value is not None:
-                                    raw_payload["intangible_assets"] = intangible_assets_value
-
                                 values = {
                                     **common,
-                                    "total_assets": _coerce_float(entry.total_assets),
-                                    "current_assets": _coerce_float(entry.current_assets),
+                                    "total_assets": _coerce_float(canonical.get("total_assets")),
+                                    "current_assets": _coerce_float(canonical.get("current_assets")),
                                     "cash_and_equivalents": _pick_float(
-                                        entry.cash_and_equivalents,
-                                        entry.cash,
+                                        canonical.get("cash_and_equivalents"), canonical.get("cash")
                                     ),
-                                    "short_term_investments": _pick_float(
-                                        _extract_raw_float(
-                                            payload,
-                                            "short_term_investments",
-                                            "shortTermInvestments",
-                                        ),
-                                        _extract_raw_float(
-                                            raw_payload,
-                                            "short_term_investments",
-                                            "shortTermInvestments",
-                                        ),
-                                    ),
-                                    "accounts_receivable": _coerce_float(entry.accounts_receivable),
-                                    "inventory": _coerce_float(entry.inventory),
-                                    "non_current_assets": _pick_float(
-                                        _extract_raw_float(
-                                            payload,
-                                            "non_current_assets",
-                                            "nonCurrentAssets",
-                                        ),
-                                        _extract_raw_float(
-                                            raw_payload,
-                                            "non_current_assets",
-                                            "nonCurrentAssets",
-                                        ),
-                                    ),
-                                    "fixed_assets": _coerce_float(entry.fixed_assets),
-                                    "total_liabilities": _coerce_float(entry.total_liabilities),
-                                    "current_liabilities": _coerce_float(entry.current_liabilities),
-                                    "accounts_payable": accounts_payable_value,
-                                    "short_term_debt": _coerce_float(entry.short_term_debt),
-                                    "non_current_liabilities": _coerce_float(
-                                        entry.long_term_liabilities
-                                    ),
-                                    "long_term_debt": _coerce_float(entry.long_term_debt),
-                                    "total_equity": _pick_float(entry.total_equity, entry.equity),
-                                    "retained_earnings": _coerce_float(entry.retained_earnings),
-                                    "book_value_per_share": _pick_float(
-                                        _extract_raw_float(
-                                            payload,
-                                            "book_value_per_share",
-                                            "bookValuePerShare",
-                                            "bvps",
-                                        ),
-                                        _extract_raw_float(
-                                            raw_payload,
-                                            "book_value_per_share",
-                                            "bookValuePerShare",
-                                            "bvps",
-                                        ),
-                                    ),
+                                    "short_term_investments": _coerce_float(canonical.get("short_term_investments")),
+                                    "accounts_receivable": _coerce_float(canonical.get("accounts_receivable")),
+                                    "inventory": _coerce_float(canonical.get("inventory")),
+                                    "non_current_assets": _coerce_float(canonical.get("non_current_assets")),
+                                    "fixed_assets": _coerce_float(canonical.get("fixed_assets")),
+                                    "total_liabilities": _coerce_float(canonical.get("total_liabilities")),
+                                    "current_liabilities": _coerce_float(canonical.get("current_liabilities")),
+                                    "accounts_payable": _coerce_float(canonical.get("accounts_payable")),
+                                    "short_term_debt": _coerce_float(canonical.get("short_term_debt")),
+                                    "non_current_liabilities": _coerce_float(canonical.get("long_term_liabilities")),
+                                    "long_term_debt": _coerce_float(canonical.get("long_term_debt")),
+                                    "total_equity": _pick_float(canonical.get("total_equity"), canonical.get("equity")),
+                                    "retained_earnings": _coerce_float(canonical.get("retained_earnings")),
+                                    "book_value_per_share": _coerce_float(canonical.get("book_value_per_share")),
                                     "raw_data": raw_payload,
                                 }
                             else:
-                                net_change = None
+                                depreciation_value = _coerce_float(canonical.get("depreciation"))
                                 if (
-                                    entry.operating_cash_flow is not None
-                                    and entry.investing_cash_flow is not None
-                                    and entry.financing_cash_flow is not None
+                                    depreciation_value is None
+                                    and not canonical.get("unavailable_reason")
+                                    and all(lookup_key[index] is not None for index in (2, 3, 4, 5))
+                                    and lookup_key in income_depreciation_lookup
                                 ):
-                                    net_change = (
-                                        entry.operating_cash_flow
-                                        + entry.investing_cash_flow
-                                        + entry.financing_cash_flow
-                                    )
+                                    supplement = income_depreciation_lookup[lookup_key]
+                                    depreciation_value = supplement["value"]
+                                    derived["depreciation"] = {
+                                        "value": depreciation_value,
+                                        "source_statement": "income",
+                                        "source_fields": ["depreciation"],
+                                        "source_periods": [supplement["period"]],
+                                        "unit_metadata": supplement["unit_metadata"],
+                                    }
 
-                                lookup_key = (fiscal_year, fiscal_quarter or 0)
-                                depreciation_value = _pick_float(
-                                    entry.depreciation,
-                                    _extract_raw_float(
-                                        payload,
-                                        "depreciation",
-                                        "depreciation_and_amortization",
-                                        "depreciation_and_amortisation",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "depreciation",
-                                        "depreciation_and_amortization",
-                                        "depreciation_and_amortisation",
-                                    ),
-                                )
-                                if depreciation_value is None:
-                                    depreciation_value = income_depreciation_lookup.get(lookup_key)
-                                    if depreciation_value is None and fiscal_quarter is not None:
-                                        depreciation_value = annual_income_depreciation.get(
-                                            fiscal_year
-                                        )
-                                    if depreciation_value is not None:
-                                        raw_payload["_depreciation_cross_fill"] = "income_statement"
-
-                                investing_cash_flow_value = _coerce_float(entry.investing_cash_flow)
+                                operating_cash_flow_value = _coerce_float(canonical.get("operating_cash_flow"))
+                                investing_cash_flow_value = _coerce_float(canonical.get("investing_cash_flow"))
+                                financing_cash_flow_value = _coerce_float(canonical.get("financing_cash_flow"))
                                 capital_expenditure_value = _pick_float(
-                                    entry.capital_expenditure,
-                                    entry.capex,
-                                    _extract_raw_float(
-                                        payload,
-                                        "capital_expenditure",
-                                        "capex",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "capital_expenditure",
-                                        "capex",
-                                    ),
+                                    canonical.get("capital_expenditure"), canonical.get("capex")
                                 )
-                                if (
-                                    capital_expenditure_value is None
-                                    and investing_cash_flow_value is not None
-                                ):
-                                    capital_expenditure_value = investing_cash_flow_value
-                                    raw_payload["_capital_expenditure_proxy"] = (
-                                        "investing_cash_flow"
-                                    )
-
-                                free_cash_flow_value = _pick_float(
-                                    entry.free_cash_flow,
-                                    _extract_raw_float(
-                                        payload,
-                                        "free_cash_flow",
-                                        "freecashflow",
-                                        "free_cashflow",
-                                    ),
-                                    _extract_raw_float(
-                                        raw_payload,
-                                        "free_cash_flow",
-                                        "freecashflow",
-                                        "free_cashflow",
-                                    ),
-                                )
-                                operating_cash_flow_value = _coerce_float(entry.operating_cash_flow)
+                                free_cash_flow_value = _coerce_float(canonical.get("free_cash_flow"))
                                 if (
                                     free_cash_flow_value is None
                                     and operating_cash_flow_value is not None
                                     and capital_expenditure_value is not None
+                                    and capital_expenditure_value <= 0
                                 ):
-                                    free_cash_flow_value = (
-                                        operating_cash_flow_value + capital_expenditure_value
-                                    )
-                                    raw_payload["_free_cash_flow_computed"] = True
+                                    free_cash_flow_value = operating_cash_flow_value + capital_expenditure_value
+                                    derived["free_cash_flow"] = {
+                                        "value": free_cash_flow_value,
+                                        "formula": "operating_cash_flow + capital_expenditure",
+                                        "source_fields": ["operating_cash_flow", "capital_expenditure"],
+                                    }
 
-                                if depreciation_value is not None:
-                                    raw_payload["depreciation"] = depreciation_value
-                                if capital_expenditure_value is not None:
-                                    raw_payload["capital_expenditure"] = capital_expenditure_value
-                                if free_cash_flow_value is not None:
-                                    raw_payload["free_cash_flow"] = free_cash_flow_value
+                                net_change = _pick_float(
+                                    canonical.get("net_change_in_cash"), canonical.get("net_cash_flow")
+                                )
+                                if net_change is None and all(value is not None for value in (
+                                    operating_cash_flow_value, investing_cash_flow_value,
+                                    financing_cash_flow_value,
+                                )):
+                                    net_change = (
+                                        operating_cash_flow_value + investing_cash_flow_value
+                                        + financing_cash_flow_value
+                                    )
+                                    derived["net_change_in_cash"] = {
+                                        "value": net_change,
+                                        "formula": "operating_cash_flow + investing_cash_flow + financing_cash_flow",
+                                        "source_fields": ["operating_cash_flow", "investing_cash_flow", "financing_cash_flow"],
+                                    }
 
                                 values = {
                                     **common,
@@ -3191,25 +3213,77 @@ class DataPipeline:
                                     "depreciation": depreciation_value,
                                     "investing_cash_flow": investing_cash_flow_value,
                                     "capital_expenditure": capital_expenditure_value,
-                                    "financing_cash_flow": _coerce_float(entry.financing_cash_flow),
-                                    "dividends_paid": _coerce_float(entry.dividends_paid),
-                                    "debt_repayment": _coerce_float(entry.debt_repayment),
+                                    "financing_cash_flow": financing_cash_flow_value,
+                                    "dividends_paid": _coerce_float(canonical.get("dividends_paid")),
+                                    "debt_repayment": _coerce_float(canonical.get("debt_repayment")),
                                     "free_cash_flow": free_cash_flow_value,
-                                    "net_change_in_cash": _pick_float(
-                                        entry.net_change_in_cash,
-                                        net_change,
-                                    ),
+                                    "net_change_in_cash": net_change,
                                     "raw_data": raw_payload,
                                 }
 
+                            # A provider-rejected metric is unavailable, not absent: deriving
+                            # it from other fields would persist a number the lineage refused.
+                            rejected_fields = {
+                                key
+                                for key, metadata in (canonical.get("unit_metadata") or {}).items()
+                                if isinstance(metadata, dict) and metadata.get("unavailable_reason")
+                            }
+                            for key in rejected_fields:
+                                derived.pop(key, None)
+                                if key in values:
+                                    values[key] = None
+
+                            for key, supplement in derived.items():
+                                canonical[key] = supplement["value"]
+                                canonical["unit_metadata"][key] = {
+                                    **supplement,
+                                    "value_unit": "VND",
+                                    "currency": entry.currency,
+                                    "derived": True,
+                                }
+                            payload = {**canonical, "raw_data": raw_payload}
+
                             stmt = get_upsert_stmt(
-                                model, ["symbol", "period", "period_type"], values
+                                model, ["symbol", "period", "period_type"], values,
+                                update_condition=source_update_condition(model, values["source"]),
                             )
-                            await session.execute(stmt)
+                            result = await session.execute(stmt.returning(model.id))
+                            if not result.scalars().all():
+                                rejected_updates.append(values["period"])
+                            else:
+                                committed_periods[period_value] = {
+                                    "status": "stored", "source": entry.source,
+                                    "unavailable_reason": canonical.get("unavailable_reason"),
+                                    "rejected_metrics": sorted(rejected_fields),
+                                }
 
                             latest_cache_payload.append(payload)
 
+                        stored_receipt = {
+                            **outcome, "status": "running", "complete": False,
+                            "persisted_rows": len(committed_periods),
+                            "period_outcomes": {**outcome["period_outcomes"], **committed_periods,
+                                **{value: {"status": "retained_source_conflict"}
+                                   for value in rejected_updates}},
+                        }
+                        await session.execute(SyncStatus.__table__.insert().values(
+                            sync_type="financial_acquisition", started_at=now, status="running",
+                            success_count=len(committed_periods), error_count=0,
+                            additional_data=stored_receipt,
+                        ))
                         await session.commit()
+                    outcome["persisted_rows"] = len(committed_periods)
+                    outcome["period_outcomes"].update(committed_periods)
+                    for rejected_period in rejected_updates:
+                        outcome["period_outcomes"][rejected_period] = {
+                            "status": "retained_source_conflict",
+                        }
+
+                    if rejected_updates:
+                        raise StructuredPersistenceConflict(
+                            outcome["persisted_rows"],
+                            [{"table": model.__tablename__, "symbol": symbol, "period": entry_period} for entry_period in rejected_updates],
+                        )
 
                     cache_key = build_cache_key(
                         "vnibb", "financials", cache_slug, symbol, normalized_period
@@ -3217,32 +3291,93 @@ class DataPipeline:
                     await self._cache_set_json(
                         cache_key, latest_cache_payload, CACHE_TTL_FINANCIALS
                     )
-                    symbol_synced = True
 
+                for statement_type, model, cache_slug in statement_specs:
+                    outcome = {
+                        "cycle_id": cycle["cycle_id"], "symbol": symbol,
+                        "statement": statement_type.value, "period_type": normalized_period,
+                        "history_window": cycle["history_window"],
+                        "expected_periods": expected_periods,
+                        "period_outcomes": {value: {"status": "missing"} for value in expected_periods},
+                        "source_returned_period_count": 0, "source_returned_periods": [],
+                        "source_limit": "Provider available periods; requested count is not a source guarantee",
+                        "persisted_rows": 0, "status": "failed", "complete": False,
+                    }
+                    try:
+                        await _acquire_statement(statement_type, model, cache_slug, outcome)
+                        outcome["complete"] = all(outcome["period_outcomes"][value]["status"] == "stored"
+                                                  for value in expected_periods)
+                        outcome["status"] = "completed" if outcome["complete"] else "partial"
+                    except (Exception, SystemExit) as exc:
+                        outcome["error"] = str(exc)
+                        outcome["status"] = "partial" if outcome["persisted_rows"] else "failed"
+                        if statement_type == StatementType.INCOME and not outcome["persisted_rows"]:
+                            income_depreciation_lookup.clear()
+                        for value in outcome["period_outcomes"].values():
+                            if value["status"] == "missing":
+                                value.update(status="failed", error=str(exc))
+                        logger.warning("Financial acquisition failed (%s %s %s): %s",
+                                       symbol, normalized_period, statement_type.value, exc)
+                    outcome["missing_periods"] = [value for value in expected_periods
+                                                   if outcome["period_outcomes"][value]["status"] != "stored"]
+                    outcome["source_missing_periods"] = sorted(
+                        set(expected_periods) - set(outcome["source_returned_periods"])
+                    )
+                    outcome["source_shortfall"] = bool(outcome["source_missing_periods"])
+                    outcome["source_exhausted"] = None
+                    try:
+                        await _persist_receipt(outcome)
+                    except (Exception, SystemExit) as exc:
+                        outcome.update(complete=False, status="partial" if outcome["persisted_rows"] else "failed",
+                                       receipt_error=str(exc))
+                        logger.warning("Financial receipt persistence failed (%s %s): %s",
+                                       symbol, statement_type.value, exc)
+                    cycle["outcomes"][symbol][statement_type.value] = outcome
+                    symbol_synced = symbol_synced and outcome["complete"]
+                    symbol_persisted_rows += outcome["persisted_rows"]
+                    if progress is not None:
+                        stats = progress["stage_stats"]["financials"]
+                        stats["persisted_rows"] += outcome["persisted_rows"]
+                        stats["statement_success" if outcome["complete"] else "statement_errors"] += 1
                 if symbol_synced:
                     total += 1
-                    if progress is not None:
-                        progress["success_count"] = progress.get("success_count", 0) + 1
-                        progress["stage_stats"]["financials"]["success"] += 1
-                elif progress is not None:
-                    progress["error_count"] = progress.get("error_count", 0) + 1
-                    progress["stage_stats"]["financials"]["errors"] += 1
-            except SystemExit as exc:
-                logger.warning(f"Financials sync aborted for {symbol}: {exc}")
+                if progress is not None:
+                    key = "success" if symbol_synced else "errors"
+                    progress["stage_stats"]["financials"][key] += 1
+                    counter = "success_count" if symbol_synced else "error_count"
+                    progress[counter] = progress.get(counter, 0) + 1
+                    if not symbol_synced and symbol_persisted_rows:
+                        progress["stage_stats"]["financials"]["partial"] += 1
+            except (Exception, SystemExit) as exc:
+                logger.warning("Financial sync failed (%s %s): %s", symbol, period, exc)
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["financials"]["errors"] += 1
-                continue
-            except Exception as e:
-                logger.warning("Financial sync failed (symbol=%s period=%s): %s", symbol, period, e)
-                if progress is not None:
-                    progress["error_count"] = progress.get("error_count", 0) + 1
-                    progress["stage_stats"]["financials"]["errors"] += 1
-                continue
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = symbol
                 if self._should_checkpoint(idx, len(symbols)):
                     await self._checkpoint(progress, sync_id)
+        # Overall completeness compares admitted symbols against the whole cycle, never the
+        # resumed suffix: a resumed run that re-fails one symbol must not certify the cycle.
+        admitted = sum(bool(cycle["outcomes"].get(symbol)) and all(
+            item["complete"] for item in cycle["outcomes"][symbol].values()
+        ) for symbol in symbols)
+        cycle["complete"] = admitted == cycle["expected_symbol_count"]
+        cycle["cycle_outcome"] = "completed" if cycle["complete"] else "incomplete"
+        cycle["symbol_statuses"] = {
+            symbol: sorted({outcome["status"] for outcome in outcomes.values()})
+            for symbol, outcomes in cycle["outcomes"].items()
+        }
+        cycle["status"] = "completed" if cycle["complete"] else "partial" if any(
+            outcome["persisted_rows"] for outcomes in cycle["outcomes"].values()
+            for outcome in outcomes.values()
+        ) else "failed"
+        cycle["persisted_rows"] = sum(outcome["persisted_rows"]
+                                      for outcomes in cycle["outcomes"].values()
+                                      for outcome in outcomes.values())
+        await _persist_receipt(cycle, cycle_receipt=True)
+        if progress is not None and sync_id is not None:
+            await self._checkpoint(progress, sync_id)
         return total
 
     async def sync_financial_ratios(
@@ -3344,7 +3479,7 @@ class DataPipeline:
             if year is None:
                 return None
             if normalized_period == "quarter":
-                return f"{year}-Q{quarter}" if quarter else None
+                return f"Q{quarter}-{year}" if quarter else None
             return str(year)
 
         async def _seed_ratio_period_rows(session: AsyncSession, symbol_value: str) -> int:
@@ -3411,11 +3546,11 @@ class DataPipeline:
                 }
                 stmt = get_upsert_stmt(
                     FinancialRatio,
-                    ["symbol", "period", "period_type"],
                     values,
+                    update_condition=source_update_condition(FinancialRatio, "derived"),
                 )
-                await session.execute(stmt)
-                created_count += 1
+                result = await session.execute(stmt.returning(FinancialRatio.id))
+                created_count += len(result.scalars().all())
                 existing_periods.add(period_text.upper())
 
             return created_count
@@ -3428,6 +3563,7 @@ class DataPipeline:
                         .where(
                             FinancialRatio.symbol == symbol_value,
                             FinancialRatio.period_type == normalized_period,
+                            source_update_condition(FinancialRatio, None),
                         )
                         .order_by(
                             FinancialRatio.fiscal_year.desc(), FinancialRatio.fiscal_quarter.desc()
@@ -3450,6 +3586,7 @@ class DataPipeline:
                         IncomeStatement.net_income,
                         IncomeStatement.cost_of_revenue,
                         IncomeStatement.interest_expense,
+                        IncomeStatement.raw_data,
                     )
                     .where(
                         IncomeStatement.symbol == symbol_value,
@@ -3512,6 +3649,7 @@ class DataPipeline:
                 net_income,
                 cogs,
                 interest_expense,
+                raw_data,
             ) in income_rows:
                 if year is None:
                     continue
@@ -3521,7 +3659,7 @@ class DataPipeline:
                     "operating_income": _coerce_float(op_income),
                     "net_income": _coerce_float(net_income),
                     "cost_of_revenue": _coerce_float(cogs),
-                    "interest_expense": _coerce_float(interest_expense),
+                    "interest_expense": admitted_interest_expense({"interest_expense": interest_expense, "raw_data": raw_data}),
                 }
                 income_lookup[period_key] = row_value
                 income_annual.setdefault(int(year), row_value)
@@ -3597,30 +3735,27 @@ class DataPipeline:
                     company_raw.get("issue_share"),
                 )
 
-            latest_price = _coerce_float(
-                (
+            price_row = (
+                await session.execute(
+                    select(StockPrice)
+                    .where(StockPrice.symbol == symbol_value)
+                    .order_by(StockPrice.time.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            price_record = persisted_price_record(price_row) if price_row is not None else {}
+            latest_price = _coerce_float(price_record.get("close")) if price_record.get("price_unit") == "VND" else None
+            if latest_price in (None, 0):
+                snapshot_row = (
                     await session.execute(
-                        select(StockPrice.close)
-                        .where(StockPrice.symbol == symbol_value)
-                        .order_by(StockPrice.time.desc())
+                        select(ScreenerSnapshot)
+                        .where(ScreenerSnapshot.symbol == symbol_value, ScreenerSnapshot.price.is_not(None))
+                        .order_by(ScreenerSnapshot.snapshot_date.desc())
                         .limit(1)
                     )
                 ).scalar_one_or_none()
-            )
-            if latest_price in (None, 0):
-                latest_price = _coerce_float(
-                    (
-                        await session.execute(
-                            select(ScreenerSnapshot.price)
-                            .where(
-                                ScreenerSnapshot.symbol == symbol_value,
-                                ScreenerSnapshot.price.is_not(None),
-                            )
-                            .order_by(ScreenerSnapshot.snapshot_date.desc())
-                            .limit(1)
-                        )
-                    ).scalar_one_or_none()
-                )
+                snapshot_record = screener_price_record(snapshot_row) if snapshot_row is not None else {}
+                latest_price = _coerce_float(snapshot_record.get("price")) if snapshot_record.get("price_unit") == "VND" else None
 
             market_cap = None
             if outstanding_shares not in (None, 0) and latest_price not in (None, 0):
@@ -3642,6 +3777,8 @@ class DataPipeline:
 
             changed_count = 0
             for ratio_row in ratio_rows:
+                if ratio_row.source in {"vietcap", "vietcap_vnd"}:
+                    continue
                 year = int(ratio_row.fiscal_year)
                 quarter = (
                     int(ratio_row.fiscal_quarter or 0) if normalized_period == "quarter" else 0
@@ -3757,7 +3894,7 @@ class DataPipeline:
                         denominator += abs(interest_expense)
                     if debt_repayment is not None:
                         denominator += abs(debt_repayment)
-                    if operating_income is not None and denominator > 0:
+                    if operating_income is not None and interest_expense is not None and denominator > 0:
                         raw_payload["debt_service_coverage"] = round(
                             operating_income / denominator,
                             4,
@@ -3814,8 +3951,6 @@ class DataPipeline:
                         raw_payload["dividend_yield"] = round(existing_yield, 4)
                         changed = True
 
-                payout_ratio_value = _pick_float(raw_payload.get("payout_ratio"))
-                eps_value = _pick_float(ratio_row.eps, raw_payload.get("eps"))
 
                 if (
                     ratio_row.bvps is None
@@ -3840,6 +3975,7 @@ class DataPipeline:
                     if invested_capital not in (None, 0):
                         ratio_row.roic = round((net_income / invested_capital) * 100, 4)
                         raw_payload["roic"] = ratio_row.roic
+                        raw_payload.setdefault("ratio_units", {})["roic"] = "percent"
                         changed = True
 
                 if (
@@ -3873,38 +4009,6 @@ class DataPipeline:
                     raw_payload["pb_ratio"] = ratio_row.pb_ratio
                     changed = True
 
-                if (
-                    payout_ratio_value is None
-                    and dps_value not in (None, 0)
-                    and eps_value not in (None, 0)
-                ):
-                    payout_ratio_value = (dps_value / eps_value) * 100
-                    raw_payload["payout_ratio"] = round(payout_ratio_value, 4)
-                    changed = True
-
-                if (
-                    ratio_row.dps is None
-                    and payout_ratio_value not in (None, 0)
-                    and eps_value not in (None, 0)
-                ):
-                    payout_ratio_base = payout_ratio_value
-                    while abs(payout_ratio_base) > 100:
-                        payout_ratio_base /= 100
-
-                    derived_dps = eps_value * (payout_ratio_base / 100)
-                    ratio_row.dps = round(derived_dps, 4)
-                    raw_payload["dps"] = ratio_row.dps
-                    dps_value = ratio_row.dps
-                    changed = True
-
-                if _pick_float(raw_payload.get("payout_ratio")) is None:
-                    if dividends_paid is not None and net_income not in (None, 0):
-                        if net_income > 0:
-                            raw_payload["payout_ratio"] = round(
-                                (abs(dividends_paid) / net_income) * 100,
-                                4,
-                            )
-                            changed = True
 
                 if ratio_row.peg_ratio is None:
                     pe_value = _pick_float(ratio_row.pe_ratio, raw_payload.get("pe"))
@@ -3914,10 +4018,8 @@ class DataPipeline:
                         raw_payload.get("earningsGrowth"),
                     )
                     if pe_value is not None and earnings_growth not in (None, 0):
-                        growth_base = (
-                            earnings_growth if abs(earnings_growth) > 1 else earnings_growth * 100
-                        )
-                        if growth_base > 0:
+                        growth_base = earnings_growth if raw_payload.get("ratio_units", {}).get("earnings_growth") == "percent" else None
+                        if growth_base is not None and growth_base > 0:
                             ratio_row.peg_ratio = round(pe_value / growth_base, 4)
                             raw_payload["peg_ratio"] = ratio_row.peg_ratio
                             changed = True
@@ -3946,6 +4048,8 @@ class DataPipeline:
                             progress["stage_stats"]["financial_ratios"]["errors"] += 1
                         continue
 
+                    persisted_rows = 0
+                    conflicts = []
                     for ratio in ratio_items:
                         period_str = str(ratio.period or "").strip()
                         period_upper = period_str.upper()
@@ -3967,12 +4071,9 @@ class DataPipeline:
                                 fiscal_quarter = int(alt_quarter_match.group(1))
                                 fiscal_year = int(alt_quarter_match.group(2))
 
-                        if not period_str:
-                            period_str = (
-                                f"Q{fiscal_quarter}-{fiscal_year}"
-                                if fiscal_quarter
-                                else str(fiscal_year)
-                            )
+                        period_str = _format_ratio_period(period_str, fiscal_year, fiscal_quarter)
+                        if period_str is None:
+                            raise ValueError("Financial ratio fiscal identity unavailable")
 
                         ratio_payload = ratio.model_dump(mode="json")
 
@@ -4060,13 +4161,20 @@ class DataPipeline:
                             "updated_at": datetime.utcnow(),
                         }
                         stmt = get_upsert_stmt(
-                            FinancialRatio, ["symbol", "period", "period_type"], values
+                            FinancialRatio, ["symbol", "period", "period_type"], values,
+                            update_condition=source_update_condition(FinancialRatio, values["source"]),
                         )
-                        await session.execute(stmt)
+                        result = await session.execute(stmt.returning(FinancialRatio.id))
+                        affected = len(result.scalars().all())
+                        persisted_rows += affected
+                        if affected == 0:
+                            conflicts.append({"table": FinancialRatio.__tablename__, "symbol": symbol, "period": period_str, "period_type": normalized_period})
 
                     await session.flush()
                     enriched_rows = await _enrich_ratio_rows(session, symbol)
                     await session.commit()
+                    if conflicts:
+                        raise StructuredPersistenceConflict(persisted_rows, conflicts)
                     if enriched_rows or seeded_rows:
                         logger.info(
                             "Enriched %d computed ratio rows for %s (%d synthetic periods)",
@@ -4128,6 +4236,10 @@ class DataPipeline:
 
         total = 0
         if progress is not None:
+            for key in ("attempted_count", "succeeded_count", "empty_count", "error_count"):
+                progress.setdefault(key, 0)
+            progress.setdefault("failed_symbols", [])
+            progress.setdefault("errors", [])
             progress.setdefault("stage_stats", {})
             progress["stage"] = "company_news"
             progress["stage_stats"].setdefault(
@@ -4136,57 +4248,79 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self._wait_for_rate_limit("profiles")
+            if progress is not None:
+                progress["attempted_count"] += 1
             try:
+                await self._wait_for_rate_limit("profiles")
                 params = CompanyNewsQueryParams(symbol=symbol, limit=limit)
-                items = await VnstockCompanyNewsFetcher.fetch(params)
+                raw_items = await VnstockCompanyNewsFetcher.extract_data(
+                    VnstockCompanyNewsFetcher.transform_query(params)
+                )
+                items = VnstockCompanyNewsFetcher.transform_data(params, raw_items)
                 if not items:
+                    if progress is not None:
+                        progress["empty_count"] += 1
+                        progress["stage_stats"]["company_news"]["empty"] = progress["stage_stats"]["company_news"].get("empty", 0) + 1
                     continue
+                payloads = [item.model_dump() for item in items]
+                for payload in payloads:
+                    payload["title"] = identity(payload.get("title"), "news")
+                    if self._parse_datetime_value(payload.get("published_at")) is None:
+                        raise ValueError("Invalid news source publication date")
 
                 async with async_session_maker() as session:
-                    for item in items:
-                        payload = item.model_dump()
+                    for payload in payloads:
                         published_dt = self._parse_datetime_value(payload.get("published_at"))
-                        if not published_dt:
-                            published_dt = datetime.combine(self._get_market_date(), time.min)
                         values = {
                             "symbol": symbol,
-                            "title": payload.get("title") or "Untitled",
+                            "title": payload["title"],
                             "summary": payload.get("summary"),
-                            "source": payload.get("source") or settings.vnstock_source,
+                            "source": payload.get("source"),
                             "url": payload.get("url"),
+                            "news_id": payload.get("news_id"),
                             "published_date": published_dt,
                             "created_at": datetime.utcnow(),
                         }
-                        existing = await session.scalar(
-                            select(CompanyNews).where(
-                                CompanyNews.symbol == symbol,
-                                CompanyNews.title == values["title"],
-                                CompanyNews.published_date == published_dt,
-                            )
+                        # Natural-key upsert: repeated source observations of the same
+                        # (symbol, title, published_date) are idempotent, distinct items stay
+                        # separate rows, and unobserved columns keep their stored values.
+                        stmt = get_upsert_stmt(
+                            CompanyNews,
+                            ["symbol", "title", "published_date"],
+                            values,
+                            preserve_existing_on_null={
+                                "summary",
+                                "url",
+                                "news_id",
+                                "rsi",
+                                "rs",
+                                "price",
+                                "price_change",
+                                "price_change_ratio",
+                            },
+                            update_overrides=lambda _stmt: {"created_at": CompanyNews.created_at},
                         )
-                        if existing is None:
-                            session.add(CompanyNews(**values))
-                        else:
-                            existing.summary = values["summary"]
-                            existing.source = values["source"]
-                            existing.url = values["url"]
-                        total += 1
+                        await session.execute(stmt)
                     await session.commit()
+                total += len(items)
 
                 if progress is not None:
+                    progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["company_news"]["success"] += 1
-            except Exception as exc:
+            except (Exception, SystemExit) as exc:
                 logger.debug(f"Company news sync failed for {symbol}: {exc}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["company_news"]["errors"] += 1
+                    progress["failed_symbols"].append(symbol)
+                    progress["errors"].append({"symbol": symbol, "dataset": "company_news", "error": self._describe_provider_exception(exc)})
 
-            if progress is not None and sync_id is not None:
-                progress["last_symbol"] = symbol
-                if self._should_checkpoint(idx, len(symbols)):
-                    await self._checkpoint(progress, sync_id)
+            finally:
+                if progress is not None and sync_id is not None:
+                    progress["last_symbol"] = symbol
+                    if self._should_checkpoint(idx, len(symbols)):
+                        await self._checkpoint(progress, sync_id)
 
         return total
 
@@ -4258,8 +4392,7 @@ class DataPipeline:
                                 "ex_date": div_payload.get("ex_date"),
                                 "record_date": div_payload.get("record_date"),
                                 "payment_date": div_payload.get("payment_date"),
-                                "value": div_payload.get("cash_dividend")
-                                or div_payload.get("dividend_ratio"),
+                                "value": supplied(div_payload, "cash_dividend", "dividend_ratio"),
                                 "description": div_payload.get("content")
                                 or "Dividend event synthesized from dividend history",
                                 "raw_data": div_payload,
@@ -4269,17 +4402,20 @@ class DataPipeline:
                 if not payloads:
                     logger.info(f"No events data for {symbol}")
                     continue
+                for payload in payloads:
+                    payload["event_type"] = identity(payload.get("event_type"), "event type")
+                    payload["event_name"] = identity(payload.get("event_name"), "event")
+                    if self._parse_date_value(payload.get("event_date")) is None:
+                        raise ValueError("Invalid event source date")
 
                 async with async_session_maker() as session:
                     for payload in payloads:
-                        event_type = str(payload.get("event_type") or "event").strip()
+                        event_type = payload["event_type"]
                         event_name = str(payload.get("event_name") or "").strip()
                         event_date = self._parse_date_value(payload.get("event_date"))
                         ex_date = self._parse_date_value(payload.get("ex_date"))
                         record_date = self._parse_date_value(payload.get("record_date"))
                         payment_date = self._parse_date_value(payload.get("payment_date"))
-                        if event_date is None:
-                            event_date = ex_date or record_date or payment_date
 
                         description = payload.get("description")
                         if event_name:
@@ -4306,8 +4442,8 @@ class DataPipeline:
                             values,
                         )
                         await session.execute(stmt)
-                        total += 1
                     await session.commit()
+                total += len(payloads)
 
                 if progress is not None:
                     progress["success_count"] = progress.get("success_count", 0) + 1
@@ -4317,6 +4453,7 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["company_events"]["errors"] += 1
+                    progress.setdefault("errors", []).append({"symbol": symbol, "dataset": "company_events", "error": self._describe_provider_exception(exc)})
 
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = symbol
@@ -4356,6 +4493,10 @@ class DataPipeline:
 
         total = 0
         if progress is not None:
+            for key in ("attempted_count", "succeeded_count", "empty_count", "error_count"):
+                progress.setdefault(key, 0)
+            progress.setdefault("failed_symbols", [])
+            progress.setdefault("errors", [])
             progress.setdefault("stage_stats", {})
             progress["stage"] = "dividends"
             progress["stage_stats"].setdefault(
@@ -4364,10 +4505,15 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
+            if progress is not None:
+                progress["attempted_count"] += 1
             await self._wait_for_rate_limit("profiles")
             try:
                 items = await VnstockDividendsFetcher.fetch(symbol)
                 if not items:
+                    if progress is not None:
+                        progress["empty_count"] += 1
+                        progress["stage_stats"]["dividends"]["empty"] = progress["stage_stats"]["dividends"].get("empty", 0) + 1
                     continue
 
                 async with async_session_maker() as session:
@@ -4397,6 +4543,7 @@ class DataPipeline:
                     await session.commit()
 
                 if progress is not None:
+                    progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["dividends"]["success"] += 1
             except Exception as exc:
@@ -4404,6 +4551,8 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["dividends"]["errors"] += 1
+                    progress["failed_symbols"].append(symbol)
+                    progress.setdefault("errors", []).append({"symbol": symbol, "dataset": "dividends", "error": self._describe_provider_exception(exc)})
 
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = symbol
@@ -4432,6 +4581,16 @@ class DataPipeline:
 
         total = 0
         if progress is not None:
+            progress["acquisition"] = {
+                "scope": "sample",
+                "limit": limit,
+                "source": settings.vnstock_source,
+                "history_complete": False,
+            }
+            for key in ("attempted_count", "succeeded_count", "empty_count", "error_count"):
+                progress.setdefault(key, 0)
+            progress.setdefault("failed_symbols", [])
+            progress.setdefault("errors", [])
             progress.setdefault("stage_stats", {})
             progress["stage"] = "insider_deals"
             progress["stage_stats"].setdefault(
@@ -4440,21 +4599,25 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self._wait_for_rate_limit("profiles")
+            if progress is not None:
+                progress["attempted_count"] += 1
             try:
+                await self._wait_for_rate_limit("profiles")
                 items = await VnstockInsiderDealsFetcher.fetch(symbol, limit=limit)
                 if not items:
+                    if progress is not None:
+                        progress["empty_count"] += 1
+                        progress["stage_stats"]["insider_deals"]["empty"] = progress["stage_stats"]["insider_deals"].get("empty", 0) + 1
                     continue
 
                 async with async_session_maker() as session:
-                    await session.execute(delete(InsiderDeal).where(InsiderDeal.symbol == symbol))
                     for item in items:
                         payload = item.model_dump()
                         announce_date = self._parse_date_value(
                             payload.get("transaction_date") or payload.get("registration_date")
                         )
                         if not announce_date:
-                            announce_date = self._get_market_date()
+                            raise ValueError(f"Insider deal has no valid source date for {symbol}")
                         ownership_before = payload.get("ownership_before")
                         ownership_after = payload.get("ownership_after")
                         deal_ratio = None
@@ -4464,28 +4627,85 @@ class DataPipeline:
                             except (TypeError, ValueError):
                                 deal_ratio = None
 
-                        deal_quantity = payload.get("shares_executed") or payload.get(
-                            "shares_registered"
-                        )
+                        deal_quantity = payload.get("shares_executed")
+                        if deal_quantity is None:
+                            deal_quantity = payload.get("shares_registered")
+                        provider_record_id = payload.get("provider_record_id")
+                        record_hash = payload.get("record_hash")
+                        raw_action = (payload.get("raw_data") or {}).get("action_type_vi")
+                        deal_action = None
+                        direction_stated = False
+                        for candidate in (payload.get("deal_action"), payload.get("transaction_type"), raw_action):
+                            token = normalize_deal_action(candidate)
+                            if token in ("BUY", "SELL"):
+                                deal_action = token
+                                break
+                            if token == "UNKNOWN":
+                                direction_stated = True
+                        if deal_action is None and direction_stated:
+                            deal_action = "UNKNOWN"
+                        payload["acquisition"] = {
+                            "scope": "sample",
+                            "limit": limit,
+                            "returned_count": len(items),
+                            "source": settings.vnstock_source,
+                            "acquired_at": datetime.utcnow().isoformat(),
+                            "provider_record_id": provider_record_id,
+                            "record_hash": record_hash,
+                        }
                         values = {
                             "symbol": symbol,
                             "announce_date": announce_date,
-                            "deal_method": payload.get("transaction_type"),
-                            "deal_action": None,
+                            "deal_method": raw_action or payload.get("transaction_type"),
+                            "deal_action": deal_action,
                             "deal_quantity": deal_quantity,
-                            "deal_price": None,
-                            "deal_value": None,
+                            "deal_price": payload.get("deal_price"),
+                            "deal_value": payload.get("deal_value"),
                             "deal_ratio": deal_ratio,
                             "insider_name": payload.get("insider_name"),
                             "insider_position": payload.get("insider_position"),
                             "raw_data": payload,
                             "created_at": datetime.utcnow(),
                         }
-                        await session.execute(InsiderDeal.__table__.insert().values(values))
-                        total += 1
+                        candidates = (
+                            await session.scalars(
+                                select(InsiderDeal).where(
+                                    InsiderDeal.symbol == symbol,
+                                    InsiderDeal.announce_date == announce_date,
+                                    InsiderDeal.insider_name == values["insider_name"],
+                                )
+                            )
+                        ).all()
+                        existing = None
+                        for candidate in candidates:
+                            candidate_raw = candidate.raw_data or {}
+                            if provider_record_id and candidate_raw.get("provider_record_id") == provider_record_id:
+                                existing = candidate
+                                break
+                            if record_hash and candidate_raw.get("record_hash") == record_hash:
+                                existing = candidate
+                                break
+                        if existing is None and provider_record_id is None and record_hash is None and len(candidates) == 1:
+                            prior = candidates[0]
+                            if (
+                                prior.deal_action == values["deal_action"]
+                                and prior.deal_quantity == values["deal_quantity"]
+                                and prior.deal_price == values["deal_price"]
+                                and prior.deal_value == values["deal_value"]
+                            ):
+                                existing = prior
+                        if existing is None:
+                            session.add(InsiderDeal(**values))
+                            await session.flush()
+                        else:
+                            for key, value in values.items():
+                                if key != "created_at" and value is not None:
+                                    setattr(existing, key, value)
                     await session.commit()
+                total += len(items)
 
                 if progress is not None:
+                    progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["insider_deals"]["success"] += 1
             except Exception as exc:
@@ -4493,11 +4713,14 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["insider_deals"]["errors"] += 1
+                    progress["failed_symbols"].append(symbol)
+                    progress["errors"].append({"symbol": symbol, "dataset": "insider_deals", "error": self._describe_provider_exception(exc)})
 
-            if progress is not None and sync_id is not None:
-                progress["last_symbol"] = symbol
-                if self._should_checkpoint(idx, len(symbols)):
-                    await self._checkpoint(progress, sync_id)
+            finally:
+                if progress is not None and sync_id is not None:
+                    progress["last_symbol"] = symbol
+                    if self._should_checkpoint(idx, len(symbols)):
+                        await self._checkpoint(progress, sync_id)
 
         return total
 
@@ -4523,6 +4746,10 @@ class DataPipeline:
 
         total = 0
         if progress is not None:
+            for key in ("attempted_count", "succeeded_count", "empty_count", "error_count"):
+                progress.setdefault(key, 0)
+            progress.setdefault("failed_symbols", [])
+            progress.setdefault("errors", [])
             progress.setdefault("stage_stats", {})
             progress["stage"] = "shareholders"
             progress["stage_stats"].setdefault(
@@ -4531,17 +4758,25 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self._wait_for_rate_limit("profiles")
+            if progress is not None:
+                progress["attempted_count"] += 1
             try:
+                await self._wait_for_rate_limit("profiles")
                 params = ShareholdersQueryParams(symbol=symbol)
-                items = await VnstockShareholdersFetcher.fetch(params)
+                raw_items = await VnstockShareholdersFetcher.extract_data(
+                    VnstockShareholdersFetcher.transform_query(params)
+                )
+                items = VnstockShareholdersFetcher.transform_data(params, raw_items)
                 if not items:
+                    if progress is not None:
+                        progress["empty_count"] += 1
+                        progress["stage_stats"]["shareholders"]["empty"] = progress["stage_stats"]["shareholders"].get("empty", 0) + 1
                     continue
 
                 async with async_session_maker() as session:
                     company_id = await self._get_or_create_company_id(session, symbol)
                     if not company_id:
-                        continue
+                        raise RuntimeError(f"Company identity unavailable for {symbol}")
                     await session.execute(delete(Shareholder).where(Shareholder.symbol == symbol))
                     for item in items:
                         payload = item.model_dump()
@@ -4556,22 +4791,26 @@ class DataPipeline:
                             "updated_at": datetime.utcnow(),
                         }
                         await session.execute(Shareholder.__table__.insert().values(values))
-                        total += 1
                     await session.commit()
+                total += len(items)
 
                 if progress is not None:
+                    progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["shareholders"]["success"] += 1
-            except Exception as exc:
+            except (Exception, SystemExit) as exc:
                 logger.debug(f"Shareholder sync failed for {symbol}: {exc}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["shareholders"]["errors"] += 1
+                    progress["failed_symbols"].append(symbol)
+                    progress["errors"].append({"symbol": symbol, "dataset": "shareholders", "error": self._describe_provider_exception(exc)})
 
-            if progress is not None and sync_id is not None:
-                progress["last_symbol"] = symbol
-                if self._should_checkpoint(idx, len(symbols)):
-                    await self._checkpoint(progress, sync_id)
+            finally:
+                if progress is not None and sync_id is not None:
+                    progress["last_symbol"] = symbol
+                    if self._should_checkpoint(idx, len(symbols)):
+                        await self._checkpoint(progress, sync_id)
 
         return total
 
@@ -4597,6 +4836,10 @@ class DataPipeline:
 
         total = 0
         if progress is not None:
+            for key in ("attempted_count", "succeeded_count", "empty_count", "error_count"):
+                progress.setdefault(key, 0)
+            progress.setdefault("failed_symbols", [])
+            progress.setdefault("errors", [])
             progress.setdefault("stage_stats", {})
             progress["stage"] = "officers"
             progress["stage_stats"].setdefault(
@@ -4605,24 +4848,34 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self._wait_for_rate_limit("profiles")
+            if progress is not None:
+                progress["attempted_count"] += 1
             try:
+                await self._wait_for_rate_limit("profiles")
                 params = OfficersQueryParams(symbol=symbol)
-                items = await VnstockOfficersFetcher.fetch(params)
+                raw_items = await VnstockOfficersFetcher.extract_data(
+                    VnstockOfficersFetcher.transform_query(params)
+                )
+                items = VnstockOfficersFetcher.transform_data(params, raw_items)
                 if not items:
+                    if progress is not None:
+                        progress["empty_count"] += 1
+                        progress["stage_stats"]["officers"]["empty"] = progress["stage_stats"]["officers"].get("empty", 0) + 1
                     continue
+                payloads = [item.model_dump() for item in items]
+                for payload in payloads:
+                    payload["name"] = identity(payload.get("name"), "officer")
 
                 async with async_session_maker() as session:
                     company_id = await self._get_or_create_company_id(session, symbol)
                     if not company_id:
-                        continue
+                        raise RuntimeError(f"Company identity unavailable for {symbol}")
                     await session.execute(delete(Officer).where(Officer.symbol == symbol))
-                    for item in items:
-                        payload = item.model_dump()
+                    for payload in payloads:
                         values = {
                             "company_id": company_id,
                             "symbol": symbol,
-                            "name": payload.get("name") or "Unknown",
+                            "name": payload["name"],
                             "title": payload.get("position"),
                             "position_type": None,
                             "shares_held": payload.get("shares_owned"),
@@ -4630,22 +4883,26 @@ class DataPipeline:
                             "updated_at": datetime.utcnow(),
                         }
                         await session.execute(Officer.__table__.insert().values(values))
-                        total += 1
                     await session.commit()
+                total += len(items)
 
                 if progress is not None:
+                    progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["officers"]["success"] += 1
-            except Exception as exc:
+            except (Exception, SystemExit) as exc:
                 logger.debug(f"Officer sync failed for {symbol}: {exc}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["officers"]["errors"] += 1
+                    progress["failed_symbols"].append(symbol)
+                    progress["errors"].append({"symbol": symbol, "dataset": "officers", "error": self._describe_provider_exception(exc)})
 
-            if progress is not None and sync_id is not None:
-                progress["last_symbol"] = symbol
-                if self._should_checkpoint(idx, len(symbols)):
-                    await self._checkpoint(progress, sync_id)
+            finally:
+                if progress is not None and sync_id is not None:
+                    progress["last_symbol"] = symbol
+                    if self._should_checkpoint(idx, len(symbols)):
+                        await self._checkpoint(progress, sync_id)
 
         return total
 
@@ -4671,6 +4928,10 @@ class DataPipeline:
 
         total = 0
         if progress is not None:
+            for key in ("attempted_count", "succeeded_count", "empty_count", "error_count"):
+                progress.setdefault(key, 0)
+            progress.setdefault("failed_symbols", [])
+            progress.setdefault("errors", [])
             progress.setdefault("stage_stats", {})
             progress["stage"] = "subsidiaries"
             progress["stage_stats"].setdefault(
@@ -4679,49 +4940,63 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self._wait_for_rate_limit("profiles")
+            if progress is not None:
+                progress["attempted_count"] += 1
             try:
+                await self._wait_for_rate_limit("profiles")
                 params = SubsidiariesQueryParams(symbol=symbol)
-                items = await VnstockSubsidiariesFetcher.fetch(params)
+                raw_items = await VnstockSubsidiariesFetcher.extract_data(
+                    VnstockSubsidiariesFetcher.transform_query(params)
+                )
+                items = VnstockSubsidiariesFetcher.transform_data(params, raw_items)
                 if not items:
+                    if progress is not None:
+                        progress["empty_count"] += 1
+                        progress["stage_stats"]["subsidiaries"]["empty"] = progress["stage_stats"]["subsidiaries"].get("empty", 0) + 1
                     continue
+                payloads = [item.model_dump() for item in items]
+                for payload in payloads:
+                    payload["company_name"] = identity(payload.get("company_name"), "subsidiary")
 
                 async with async_session_maker() as session:
                     await session.execute(delete(Subsidiary).where(Subsidiary.symbol == symbol))
-                    for item in items:
-                        payload = item.model_dump()
+                    for payload in payloads:
                         values = {
                             "symbol": symbol,
-                            "subsidiary_name": payload.get("company_name") or "Unknown",
-                            "subsidiary_symbol": None,
+                            "subsidiary_name": payload["company_name"],
+                            "subsidiary_symbol": payload.get("subsidiary_symbol"),
                             "ownership_pct": payload.get("ownership_pct"),
                             "charter_capital": payload.get("charter_capital"),
-                            "relationship_type": None,
+                            "relationship_type": payload.get("relationship_type"),
                             "business_description": None,
                             "updated_at": datetime.utcnow(),
                         }
                         await session.execute(Subsidiary.__table__.insert().values(values))
-                        total += 1
                     await session.commit()
+                total += len(items)
 
                 if progress is not None:
+                    progress["succeeded_count"] += 1
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["subsidiaries"]["success"] += 1
-            except Exception as exc:
+            except (Exception, SystemExit) as exc:
                 logger.debug(f"Subsidiaries sync failed for {symbol}: {exc}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["subsidiaries"]["errors"] += 1
+                    progress["failed_symbols"].append(symbol)
+                    progress["errors"].append({"symbol": symbol, "dataset": "subsidiaries", "error": self._describe_provider_exception(exc)})
 
-            if progress is not None and sync_id is not None:
-                progress["last_symbol"] = symbol
-                if self._should_checkpoint(idx, len(symbols)):
-                    await self._checkpoint(progress, sync_id)
+            finally:
+                if progress is not None and sync_id is not None:
+                    progress["last_symbol"] = symbol
+                    if self._should_checkpoint(idx, len(symbols)):
+                        await self._checkpoint(progress, sync_id)
 
         return total
 
     async def sync_market_sectors(self) -> int:
-        """Seed market sector master data from VN_SECTORS."""
+        """Refresh static sector definitions from VN_SECTORS by natural key."""
         from vnibb.core.vn_sectors import get_all_sectors
 
         sectors = get_all_sectors()
@@ -4749,6 +5024,102 @@ class DataPipeline:
                 total += 1
             await session.commit()
 
+        return total
+
+    async def sync_sector_performance(self) -> int:
+        """Persist dated screener aggregates; unknown constituent totals stay null."""
+        from vnibb.providers.vnstock.equity_screener import (
+            StockScreenerParams,
+            VnstockScreenerFetcher,
+        )
+        from vnibb.services.sector_service import SectorService
+
+        def metric(row: dict, *keys: str) -> Optional[float]:
+            extended = row.get("extended_metrics")
+            extended = extended if isinstance(extended, dict) else {}
+            for payload in (row, extended):
+                for key in keys:
+                    value = payload.get(key)
+                    if value is None:
+                        continue
+                    try:
+                        number = float(value)
+                    except (TypeError, ValueError):
+                        return None
+                    return number if math.isfinite(number) else None
+            return None
+
+        params = StockScreenerParams(exchange="ALL", limit=2000, source=settings.vnstock_source)
+        items = await VnstockScreenerFetcher.fetch(params)
+        rows = [item.model_dump() if hasattr(item, "model_dump") else dict(item) for item in items or []]
+        dated_rows = [row for row in rows if self._parse_date_value(row.get("trade_date")) is not None]
+        if not dated_rows:
+            async with async_session_maker() as session:
+                latest_date = await session.scalar(select(func.max(ScreenerSnapshot.snapshot_date)))
+                if latest_date is not None:
+                    snapshots = await session.execute(
+                        select(ScreenerSnapshot, Company.industry)
+                        .join(Company, Company.symbol == ScreenerSnapshot.symbol, isouter=True)
+                        .where(ScreenerSnapshot.snapshot_date == latest_date)
+                    )
+                    dated_rows = [
+                        {
+                            "symbol": snapshot.symbol,
+                            "trade_date": snapshot.trade_date,
+                            "price": snapshot.price,
+                            "volume": snapshot.volume,
+                            "industry_name": snapshot.industry or industry,
+                            "extended_metrics": snapshot.extended_metrics,
+                        }
+                        for snapshot, industry in snapshots.all()
+                        if self._parse_date_value(snapshot.trade_date) is not None
+                    ]
+        if not dated_rows:
+            raise ValueError("Sector performance unavailable: no dated screener observations")
+
+        rows_by_date: Dict[date, List[dict]] = {}
+        for row in dated_rows:
+            row["price_change_1d_pct"] = metric(
+                row, "price_change_1d_pct", "change_pct", "change_1d", "changePct", "price_change_pct"
+            )
+            trade_date = self._parse_date_value(row["trade_date"])
+            rows_by_date.setdefault(trade_date, []).append(row)
+
+        total = 0
+        async with async_session_maker() as session:
+            for trade_date, observations in rows_by_date.items():
+                sectors = await SectorService.calculate_sector_performance(observations)
+                for sector in sectors:
+                    members = await SectorService.get_stocks_by_sector(sector.sector_id, observations)
+                    if not members:
+                        continue
+                    volumes = [metric(row, "volume", "total_volume") for row in members]
+                    turnover = [metric(row, "value_traded", "valueTraded", "trading_value", "value", "total_value") for row in members]
+                    changes = [row["price_change_1d_pct"] for row in members]
+                    total_volume = sum(volumes) if all(value is not None and value >= 0 and value.is_integer() for value in volumes) else None
+                    total_value = sum(turnover) if all(value is not None and value >= 0 for value in turnover) else None
+                    values = {
+                        "sector_code": str(sector.sector_id)[:20],
+                        "trade_date": trade_date,
+                        "change_pct": sector.change_pct,
+                        "avg_change_pct": sector.change_pct,
+                        "total_volume": int(total_volume) if total_volume is not None else None,
+                        "total_value": total_value,
+                        "top_gainer_symbol": sector.top_gainer.symbol if sector.top_gainer else None,
+                        "top_gainer_change": sector.top_gainer.change_pct if sector.top_gainer else None,
+                        "top_loser_symbol": sector.top_loser.symbol if sector.top_loser else None,
+                        "top_loser_change": sector.top_loser.change_pct if sector.top_loser else None,
+                        "advance_count": sum(change > 0 for change in changes if change is not None),
+                        "decline_count": sum(change < 0 for change in changes if change is not None),
+                        "unchanged_count": sum(change == 0 for change in changes if change is not None),
+                        "created_at": datetime.utcnow(),
+                    }
+                    await session.execute(get_upsert_stmt(
+                        SectorPerformance, ["sector_code", "trade_date"], values,
+                        update_overrides=lambda _stmt: {"created_at": SectorPerformance.created_at},
+                    ))
+                    total += 1
+            await session.commit()
         return total
 
     async def sync_market_indices(
@@ -4881,19 +5252,26 @@ class DataPipeline:
 
         trade_date = trade_date or self._get_market_date()
 
-        if not symbols:
+        if symbols is None:
             async with async_session_maker() as session:
-                result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1))
-                symbols = [r[0] for r in result.fetchall()]
+                result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1).order_by(Stock.symbol))
+                universe = [row[0] for row in result.fetchall()]
+            from vnibb.services.sync_all_data import FullMarketSync
 
+            async def acquire(symbol, receipt):
+                return await self.sync_foreign_trading(trade_date=trade_date, symbols=[symbol], progress=receipt)
+
+            cycle = await FullMarketSync().run_maintenance_cycle(
+                "foreign_trading_universe", universe, [("foreign_trading", acquire)],
+                240, 0, max_attempts=settings.intraday_symbols_per_run or None,
+            )
+            if progress is not None:
+                progress["foreign_trading_cycle"] = {"complete": cycle.complete, "pending_count": cycle.pending_count, "error_count": cycle.error_count}
+                progress["error_count"] = progress.get("error_count", 0) + cycle.error_count
+            return cycle.synced_count
+        symbols = sorted(set(symbols))
         if not symbols:
             return 0
-
-        if (
-            settings.intraday_symbols_per_run > 0
-            and len(symbols) > settings.intraday_symbols_per_run
-        ):
-            symbols = symbols[: settings.intraday_symbols_per_run]
 
         symbol_exchange: Dict[str, str] = {}
         symbol_chunk_index: Dict[str, int] = {}
@@ -4922,7 +5300,7 @@ class DataPipeline:
 
         batch_size = 50
         total = 0
-        source = settings.vnstock_source or "KBS"
+        source = settings.vnstock_source or "VCI"
         for idx in range(start_index, len(symbols), batch_size):
             batch = symbols[idx : idx + batch_size]
             await self._wait_for_rate_limit("price_board")
@@ -4941,12 +5319,19 @@ class DataPipeline:
                     progress["error_count"] = progress.get("error_count", 0) + len(batch)
                     progress["stage_stats"]["foreign_trading"]["errors"] += len(batch)
                 continue
+            returned_symbols = {record.symbol for record in records if record.symbol in batch}
+            missing_symbols = set(batch) - returned_symbols
+            if progress is not None:
+                progress["error_count"] = progress.get("error_count", 0) + len(missing_symbols)
+                progress["stage_stats"]["foreign_trading"]["errors"] += len(missing_symbols)
+                for missing in missing_symbols:
+                    progress.setdefault("acquisition_outcomes", {})[missing] = {"sql_foreign": {"status": "unavailable", "rows": 0}, "provider": f"vnstock:{source}", "scope": "source_price_board", "requested_session_date": trade_date.isoformat()}
 
             async with async_session_maker() as session:
                 for record in records:
                     payload = record.model_dump()
                     symbol = payload.get("symbol")
-                    if not symbol:
+                    if symbol not in batch:
                         continue
                     buy_vol = payload.get("foreign_buy_vol")
                     sell_vol = payload.get("foreign_sell_vol")
@@ -4997,6 +5382,9 @@ class DataPipeline:
                         progress["stage_stats"]["foreign_trading"]["success"] += 1
 
                 await session.commit()
+            if progress is not None:
+                for acquired in returned_symbols:
+                    progress.setdefault("acquisition_outcomes", {})[acquired] = {"sql_foreign": {"status": "persisted", "rows": 1}, "provider": f"vnstock:{source}", "scope": "source_price_board", "requested_session_date": trade_date.isoformat(), "source_observed_at": None}
 
             if progress is not None and sync_id is not None:
                 progress["last_index"] = idx + len(batch) - 1
@@ -5026,6 +5414,8 @@ class DataPipeline:
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
         limit: Optional[int] = None,
+        live_session: bool = False,
+        retain_ticks: Optional[bool] = None,
     ) -> int:
         """Sync intraday trades and compute daily order flow."""
         trade_date = trade_date or self._get_market_date()
@@ -5059,7 +5449,7 @@ class DataPipeline:
                         )
                 return 0
 
-        if settings.orderflow_at_close_only and not self._is_after_market_close():
+        if not live_session and settings.orderflow_at_close_only and not self._is_after_market_close():
             logger.info("Intraday sync skipped before market close")
             if progress is not None:
                 progress.setdefault("stage_stats", {})
@@ -5104,19 +5494,26 @@ class DataPipeline:
                         )
                 return 0
 
-        if not symbols:
+        if symbols is None:
             async with async_session_maker() as session:
-                result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1))
-                symbols = [r[0] for r in result.fetchall()]
+                result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1).order_by(Stock.symbol))
+                universe = [row[0] for row in result.fetchall()]
+            from vnibb.services.sync_all_data import FullMarketSync
 
+            async def acquire(symbol, receipt):
+                return await self.sync_intraday_trades(trade_date=trade_date, symbols=[symbol], progress=receipt, limit=limit, live_session=live_session, retain_ticks=retain_ticks)
+
+            cycle = await FullMarketSync().run_maintenance_cycle(
+                "intraday_trades_universe", universe, [("intraday_trades", acquire)],
+                240, 0, max_attempts=settings.intraday_symbols_per_run or None, allow_empty=True,
+            )
+            if progress is not None:
+                progress["intraday_trades_cycle"] = {"complete": cycle.complete, "pending_count": cycle.pending_count, "error_count": cycle.error_count}
+                progress["error_count"] = progress.get("error_count", 0) + cycle.error_count
+            return cycle.synced_count
+        symbols = sorted(set(symbols))
         if not symbols:
             return 0
-
-        if (
-            settings.intraday_symbols_per_run > 0
-            and len(symbols) > settings.intraday_symbols_per_run
-        ):
-            symbols = symbols[: settings.intraday_symbols_per_run]
 
         symbol_exchange: Dict[str, str] = {}
         symbol_chunk_index: Dict[str, int] = {}
@@ -5157,40 +5554,36 @@ class DataPipeline:
 
         total = 0
         consecutive_429 = 0
-        store_intraday = settings.store_intraday_trades
+        store_intraday = settings.store_intraday_trades if retain_ticks is None else retain_ticks
         error_counts: Dict[str, int] = {}
         error_samples: List[str] = []
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
             await self._wait_for_rate_limit("intraday")
             try:
-                source = settings.vnstock_source or "KBS"
+                source = settings.vnstock_source or "VCI"
 
-                async def _fetch_intraday() -> List[Dict[str, Any]]:
-                    def _sync_fetch() -> List[Dict[str, Any]]:
+                from vnibb.services.trading_acquisition import acquire_session_trades, persist_trade_stores, persist_mongo_trades, fetch_primary_trades
+
+                def _sync_fetch(symbol=symbol, source=source):
+                    from vnibb.services.vietcap_client import VietcapClient
+                    client = VietcapClient(max_retries=0, timeout_seconds=min(10.0, settings.vnstock_timeout / 2))
+                    def primary_fetch(page_size=500, symbol=symbol):
+                        return fetch_primary_trades(client, symbol, page_size=page_size)
+                    try:
+                        acquired, receipt = acquire_session_trades(primary_fetch, trade_date, limit, session_closed=self._is_after_market_close())
+                        receipt.update(provider="vietcap:Trading", price_multiplier=1, source_price_unit="VND")
+                        return acquired, receipt
+                    except Exception as primary_error:
                         from vnibb.providers.vnstock.runtime import get_vnstock_class
+                        stock = get_vnstock_class()().stock(symbol=symbol, source=validate_source(source))
+                        acquired, receipt = acquire_session_trades(stock.quote.intraday, trade_date, limit, session_closed=self._is_after_market_close())
+                        receipt.update(provider=f"vnstock:{source}", price_multiplier=1000, source_price_unit="thousand_VND", primary_error=type(primary_error).__name__)
+                        return acquired, receipt
+                raw_rows, coverage = await asyncio.wait_for(asyncio.to_thread(_sync_fetch), timeout=settings.vnstock_timeout)
+                coverage.update(raw_dataset="equity.intraday", price_unit="VND", volume_unit="shares", current_depth={"status": "unknown"})
 
-                        Vnstock = get_vnstock_class()
-                        stock = Vnstock().stock(symbol=symbol, source=source)
-                        df = stock.quote.intraday()
-                        if df is None or df.empty:
-                            return []
-                        return df.tail(limit).to_dict("records")
-
-                    loop = asyncio.get_event_loop()
-                    return await asyncio.wait_for(
-                        loop.run_in_executor(None, _sync_fetch),
-                        timeout=settings.vnstock_timeout,
-                    )
-
-                raw_rows = await _fetch_intraday()
-
-                # Always seed defaults from foreign_lookup so OrderFlowDaily
-                # rows have a usable signal even when intraday returns empty.
-                # Previously the entire body was gated by `if not raw_rows`,
-                # which left every column NULL for symbols where the
-                # foreign_trading stage had populated ForeignTrading correctly.
-                rows: List[Dict[str, Any]] = [] if store_intraday else []
+                rows: List[Dict[str, Any]] = []
                 buy_volume = 0
                 sell_volume = 0
                 buy_value = 0.0
@@ -5222,19 +5615,26 @@ class DataPipeline:
 
                     if not trade_time:
                         continue
+                    if trade_time.tzinfo is not None:
+                        from zoneinfo import ZoneInfo
+                        trade_time = trade_time.astimezone(ZoneInfo("Asia/Ho_Chi_Minh")).replace(tzinfo=None)
 
-                    price = raw.get("price") or raw.get("close") or raw.get("gia")
-                    volume = raw.get("volume") or raw.get("khoiLuong")
+                    price = raw.get("price", raw.get("close", raw.get("gia")))
+                    volume = raw.get("volume", raw.get("khoiLuong"))
                     if price is None or volume is None:
                         continue
 
                     try:
-                        price = float(price)
-                        volume = int(volume)
-                    except (TypeError, ValueError):
+                        price = float(price) * coverage["price_multiplier"]
+                        raw_volume = float(volume)
+                        volume = int(raw_volume)
+                        import math
+                        if not math.isfinite(price) or price <= 0 or not math.isfinite(raw_volume) or raw_volume < 0 or raw_volume != volume:
+                            continue
+                    except (TypeError, ValueError, OverflowError):
                         continue
                     match_type = (
-                        raw.get("matchType") or raw.get("action") or raw.get("loaiGiaoDich") or ""
+                        raw.get("match_type") or raw.get("matchType") or raw.get("action") or raw.get("loaiGiaoDich") or ""
                     ).upper()
 
                     if match_type.startswith("B"):
@@ -5247,27 +5647,65 @@ class DataPipeline:
                     if price * volume >= settings.big_order_threshold_vnd:
                         big_order_count += 1
 
-                    if store_intraday:
-                        rows.append(
-                            {
-                                "symbol": symbol,
-                                "trade_time": trade_time,
-                                "price": price,
-                                "volume": volume,
-                                "match_type": match_type or None,
-                                "created_at": datetime.utcnow(),
-                            }
-                        )
+                    rows.append({
+                        "symbol": symbol, "trade_time": trade_time, "price": price,
+                        "volume": volume, "match_type": match_type or None,
+                        "transaction_id": int(raw["id"]) if str(raw.get("id", "")).isdigit() else None,
+                        "created_at": datetime.utcnow(),
+                    })
 
-                if store_intraday and rows:
+                if len(rows) != len(raw_rows):
+                    coverage.update(scope="sampled", status="invalid_trade_rows", completed_session=False, denominator_trade_count=None, session_fraction=None)
+                coverage["observed_trade_count"] = len(rows)
+                has_intraday_data = bool(rows)
+
+                async def write_sql_ticks(symbol=symbol, rows=rows):
                     async with async_session_maker() as session:
-                        await session.execute(IntradayTrade.__table__.insert(), rows)
+                        from collections import Counter
+                        retained = (await session.execute(select(IntradayTrade).where(IntradayTrade.symbol == symbol, IntradayTrade.trade_time >= datetime.combine(trade_date, time.min), IntradayTrade.trade_time < datetime.combine(trade_date + timedelta(days=1), time.min)))).scalars().all()
+                        seen = Counter((row.transaction_id, row.trade_time, row.price, row.volume, row.match_type) for row in retained)
+                        additions = []
+                        for row in rows:
+                            key = (row.get("transaction_id"), row["trade_time"], row["price"], row["volume"], row["match_type"])
+                            if seen[key]:
+                                seen[key] -= 1
+                            else:
+                                additions.append(row)
+                        if additions:
+                            await session.execute(IntradayTrade.__table__.insert(), additions)
                         await session.commit()
-                        total += len(rows)
+                    return len(rows)
 
-                    cache_key = build_cache_key("vnibb", "intraday", "latest", symbol)
-                    cache_payload = [row for row in rows[-100:]]
-                    await self._cache_set_json(cache_key, cache_payload, CACHE_TTL_INTRADAY)
+                async def write_mongo_ticks(symbol=symbol, rows=rows, coverage=coverage):
+                    return await asyncio.to_thread(persist_mongo_trades, symbol, rows, coverage)
+
+                from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+                writers = {}
+                if coverage["status"] == "source_session_mismatch":
+                    coverage.update(
+                        sql_ticks={"status": "skipped", "rows": 0},
+                        mongo_ticks={"status": "skipped", "rows": 0},
+                        sql_flows={"status": "skipped", "rows": 0},
+                    )
+                else:
+                    coverage["sql_ticks"] = {"status": "disabled", "rows": 0}
+                    coverage["mongo_ticks"] = {"status": "disabled", "rows": 0}
+                    if store_intraday:
+                        writers["sql_ticks"] = write_sql_ticks
+                    if get_mongo_market_data_service().enabled:
+                        writers["mongo_ticks"] = write_mongo_ticks
+                    coverage.update(await persist_trade_stores(writers, coverage))
+                total += coverage["sql_ticks"].get("rows", 0)
+                if progress is not None:
+                    progress.setdefault("acquisition_outcomes", {})[symbol] = coverage
+                    if not rows and coverage["status"] == "empty":
+                        progress["empty_count"] = progress.get("empty_count", 0) + 1
+                if coverage["status"] == "source_session_mismatch":
+                    if progress is not None:
+                        progress["error_count"] = progress.get("error_count", 0) + 1
+                        progress["stage_stats"]["intraday_trades"]["errors"] += 1
+                    error_counts["SourceSessionMismatch"] = error_counts.get("SourceSessionMismatch", 0) + 1
+                    continue
 
                 # Build OrderFlowDaily values. We keep zeros (instead of NULL)
                 # when intraday data was present but the calculated bucket was
@@ -5294,20 +5732,28 @@ class DataPipeline:
                     "proprietary_buy_volume": None,
                     "proprietary_sell_volume": None,
                     "proprietary_net_volume": None,
+                    "coverage": coverage,
                     "created_at": datetime.utcnow(),
                     "updated_at": datetime.utcnow(),
                 }
-                # Skip the upsert if we have nothing to record at all (no
-                # intraday + no foreign signal). This keeps the table free
-                # of pure-NULL ghost rows.
-                if not has_intraday_data and not foreign_record:
+                async def write_sql_flow(coverage=coverage, order_flow_values=order_flow_values):
+                    coverage["sql_flows"] = {"status": "persisted", "rows": 1}
+                    async with async_session_maker() as session:
+                        await session.execute(get_upsert_stmt(OrderFlowDaily, ["symbol", "trade_date"], order_flow_values))
+                        await session.commit()
+                    return 1
+
+                coverage.update(await persist_trade_stores({"sql_flows": write_sql_flow}))
+                failures = [store for store in ("sql_flows", "sql_ticks", "mongo_ticks") if coverage.get(store, {}).get("status") == "failed"]
+                if progress is not None and failures:
+                    progress["error_count"] = progress.get("error_count", 0) + 1
+                    progress["stage_stats"]["intraday_trades"]["errors"] += 1
+                if failures:
+                    error_counts["PersistenceError"] = error_counts.get("PersistenceError", 0) + 1
+                if coverage["sql_flows"]["status"] == "failed":
                     continue
-                async with async_session_maker() as session:
-                    stmt = get_upsert_stmt(
-                        OrderFlowDaily, ["symbol", "trade_date"], order_flow_values
-                    )
-                    await session.execute(stmt)
-                    await session.commit()
+                if not store_intraday:
+                    total += 1
 
                 order_flow_payload = {
                     **order_flow_values,
@@ -5414,11 +5860,15 @@ class DataPipeline:
         symbols: Optional[List[str]] = None,
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
+        *,
+        live_session: bool = False,
     ) -> int:
-        """Capture order book snapshots for symbols."""
+        """Persist each symbol's current provider batch; never promise historical replay."""
         from vnibb.providers.vnstock.price_depth import VnstockPriceDepthFetcher
+        from vnibb.services.trading_acquisition import persist_trade_stores
+        from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
-        if settings.orderbook_at_close_only and not self._is_after_market_close():
+        if not live_session and settings.orderbook_at_close_only and not self._is_after_market_close():
             logger.info("Orderbook snapshot skipped before market close")
             if progress is not None:
                 progress.setdefault("stage_stats", {})
@@ -5440,8 +5890,8 @@ class DataPipeline:
                     )
             return 0
 
-        if settings.intraday_require_market_hours and not self._is_market_hours():
-            if not (settings.orderbook_at_close_only and self._is_after_market_close()):
+        if (live_session or settings.intraday_require_market_hours) and not self._is_market_hours():
+            if live_session or not (settings.orderbook_at_close_only and self._is_after_market_close()):
                 logger.info("Orderbook snapshot skipped outside market hours")
                 if progress is not None:
                     progress.setdefault("stage_stats", {})
@@ -5487,47 +5937,45 @@ class DataPipeline:
             )
 
         total = 0
-        snapshot_time = datetime.utcnow()
-        trade_date = snapshot_time.date()
-        source = settings.vnstock_source or "KBS"
-
-        async with async_session_maker() as session:
-            existing = await session.execute(
-                select(func.count(OrderbookSnapshot.id)).where(
-                    func.date(OrderbookSnapshot.snapshot_time) == trade_date
-                )
-            )
-            if (existing.scalar() or 0) > 0:
-                logger.info("Orderbook snapshot already captured for today; skipping")
-                if progress is not None:
-                    progress.setdefault("stage_stats", {})
-                    progress["stage"] = "orderbook_snapshots"
-                    progress["stage_index"] = DAILY_TRADING_STAGES.index("orderbook_snapshots")
-                    progress["stage_stats"]["orderbook_snapshots"] = {
-                        "success": 0,
-                        "errors": 0,
-                        "total": 0,
-                        "skipped": True,
-                        "reason": "already_captured",
-                    }
-                    if sync_id is not None:
-                        await self._checkpoint(
-                            progress,
-                            sync_id,
-                            key=DAILY_TRADING_PROGRESS_KEY,
-                            ttl=DAILY_TRADING_PROGRESS_TTL,
-                        )
-                return 0
+        source = "VCI"
 
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
             await self._wait_for_rate_limit("orderbook")
+            coverage = {
+                "current_depth": {
+                    "scope": "current_batch",
+                    "historical_replay_supported": False,
+                    "status": "unknown",
+                },
+                "sql_depth": {"status": "not_attempted", "rows": 0, "error": None},
+                "mongo_depth": {"status": "not_attempted", "rows": 0, "error": None},
+            }
+            if progress is not None:
+                outcomes = progress.setdefault("acquisition_outcomes", {}).setdefault(symbol, {})
+                outcomes.update(coverage)
+                coverage = outcomes
             try:
                 depth = await VnstockPriceDepthFetcher.fetch(
                     symbol=symbol,
                     source=source,
                 )
-                payload = depth.model_dump()
+                snapshot_time = datetime.utcnow()
+                trade_date = snapshot_time.date()
+                payload = depth.model_dump(mode="json")
+                raw_levels = payload.get("raw_levels")
+                batch_status = "empty" if raw_levels == [] else "current_batch" if raw_levels else "unknown"
+                coverage["current_depth"].update({
+                    "status": batch_status,
+                    "rows": len(raw_levels or []),
+                    "observed_at": payload.get("observed_at"),
+                    "fetched_at": snapshot_time.isoformat(),
+                    "timestamp_meaning": payload.get("timestamp_meaning", "unknown"),
+                    "price_unit": payload.get("price_unit", "unknown"),
+                    "volume_unit": payload.get("volume_unit", "unknown"),
+                })
+                payload["current_depth"] = dict(coverage["current_depth"])
+                payload["latest_session_status"] = batch_status
                 values = {
                     "symbol": symbol,
                     "snapshot_time": snapshot_time,
@@ -5572,10 +6020,54 @@ class DataPipeline:
                     "total_ask_volume": payload.get("total_ask_volume"),
                     "created_at": datetime.utcnow(),
                 }
-                async with async_session_maker() as session:
-                    await session.execute(OrderbookSnapshot.__table__.insert(), values)
-                    await session.commit()
-                    total += 1
+                async def write_sql_depth(values=values):
+                    async with async_session_maker() as session:
+                        await session.execute(OrderbookSnapshot.__table__.insert(), values)
+                        await session.commit()
+                    return 1
+
+                def write_mongo_batch(symbol=symbol, snapshot_time=snapshot_time, payload=payload, coverage=coverage, batch_status=batch_status, raw_levels=raw_levels):
+                    from pymongo import ReplaceOne
+
+                    service = get_mongo_market_data_service()
+                    collection = service._get_collection("market_vnstock_premium_records")
+                    envelope = {
+                        "dataset": "equity.price_depth", "symbol": symbol,
+                        "source": "vnstock", "providerSource": "VCI",
+                        "updatedAt": snapshot_time, "syncedAt": snapshot_time,
+                        "observedAt": payload.get("observed_at"),
+                        "timestampMeaning": payload.get("timestamp_meaning", "unknown"),
+                        "priceUnit": payload.get("price_unit", "unknown"),
+                        "volumeUnit": payload.get("volume_unit", "unknown"),
+                        "coverage": dict(coverage["current_depth"]),
+                        "latestSessionStatus": batch_status,
+                        "historicalReplaySupported": False,
+                    }
+                    operations = []
+                    for index, raw in enumerate(raw_levels or []):
+                        key = f"free-vci:depth:{symbol}:{index}"
+                        operations.append(ReplaceOne(
+                            {"dataset": "equity.price_depth", "symbol": symbol, "recordKey": key},
+                            {**envelope, "recordKey": key, "raw": raw}, upsert=True,
+                        ))
+                    key = f"free-vci:depth:{symbol}:latest-batch"
+                    operations.append(ReplaceOne(
+                        {"dataset": "equity.price_depth", "symbol": symbol, "recordKey": key},
+                        {**envelope, "recordKey": key, "raw": {}, "batchReceipt": True,
+                         "rowCount": len(raw_levels or [])}, upsert=True,
+                    ))
+                    collection.bulk_write(operations, ordered=True)
+                    return len(raw_levels or [])
+
+                async def write_mongo_depth(write_mongo_batch=write_mongo_batch):
+                    return await asyncio.to_thread(write_mongo_batch)
+
+                coverage.update(await persist_trade_stores({
+                    "sql_depth": write_sql_depth, "mongo_depth": write_mongo_depth,
+                }))
+                for store in ("sql_depth", "mongo_depth"):
+                    coverage[store].setdefault("error", None)
+                total += coverage["sql_depth"]["rows"]
 
                 cache_payload = {
                     "symbol": symbol,
@@ -5609,6 +6101,12 @@ class DataPipeline:
                     "ask_1": payload.get("ask_1"),
                     "ask_2": payload.get("ask_2"),
                     "ask_3": payload.get("ask_3"),
+                    "current_depth": dict(coverage["current_depth"]),
+                    "latest_session_status": batch_status,
+                    "observed_at": payload.get("observed_at"),
+                    "timestamp_meaning": payload.get("timestamp_meaning", "unknown"),
+                    "price_unit": payload.get("price_unit", "unknown"),
+                    "volume_unit": payload.get("volume_unit", "unknown"),
                 }
 
                 latest_key = build_cache_key("vnibb", "orderbook", "latest", symbol)
@@ -5624,10 +6122,18 @@ class DataPipeline:
                 await self._cache_set_json(daily_key, cache_payload, CACHE_TTL_ORDERBOOK_DAILY)
 
                 if progress is not None:
-                    progress["success_count"] = progress.get("success_count", 0) + 1
-                    progress["stage_stats"]["orderbook_snapshots"]["success"] += 1
+                    failed = any(coverage[store]["status"] == "failed" for store in ("sql_depth", "mongo_depth"))
+                    counter = "error_count" if failed else "success_count"
+                    progress[counter] = progress.get(counter, 0) + 1
+                    stage_counter = "errors" if failed else "success"
+                    progress["stage_stats"]["orderbook_snapshots"][stage_counter] += 1
             except Exception as exc:
                 logger.warning(f"Orderbook snapshot failed for {symbol}: {exc}")
+                for store in ("sql_depth", "mongo_depth"):
+                    if coverage[store]["status"] == "not_attempted":
+                        coverage[store] = {"status": "failed", "rows": 0, "error": type(exc).__name__}
+                if coverage["current_depth"]["status"] == "unknown":
+                    coverage["current_depth"]["error"] = type(exc).__name__
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["orderbook_snapshots"]["errors"] += 1
@@ -6197,12 +6703,15 @@ class DataPipeline:
                 if cleanup_results:
                     logger.info(f"Retention cleanup results: {cleanup_results}")
 
-                progress["status"] = "completed"
-                await self._update_sync_record(
-                    sync_id, status="completed", additional_data=progress
-                )
+                cycles_complete = all(progress.get(key, {}).get("complete", True) for key in ("foreign_trading_cycle", "intraday_trades_cycle"))
+                failed = bool(progress.get("error_count", 0))
+                progress["complete"] = cycles_complete and not failed
+                progress["status"] = "failed" if failed else "completed" if cycles_complete else "partial"
+                await self._update_sync_record(sync_id, status=progress["status"], additional_data=progress)
                 await self._clear_progress(key=DAILY_TRADING_PROGRESS_KEY)
-                logger.info("✅ Daily trading updates completed successfully.")
+                if failed:
+                    raise RuntimeError("Daily trading acquisition has failed independent outcomes")
+                logger.info("Daily trading updates completed with status=%s", progress["status"])
             except Exception as exc:
                 progress["status"] = "failed"
                 await self._update_sync_record(sync_id, status="failed", additional_data=progress)
@@ -6407,11 +6916,6 @@ class DataPipeline:
                                     sync_id=sync_id,
                                     cache_recent=False,
                                 )
-                                removed = await self.cleanup_price_history()
-                                if removed:
-                                    logger.info(
-                                        f"Pruned {removed} old price rows beyond retention window"
-                                    )
                             except Exception as e:
                                 logger.warning(f"Price sync failed: {e}")
                     elif stage == "indices":
@@ -6455,35 +6959,6 @@ class DataPipeline:
 
 
 # Standalone functions for scheduler
-async def _get_scheduler_priority_symbols(limit: int) -> List[str]:
-    if limit <= 0:
-        return []
-
-    async with async_session_maker() as session:
-        snapshot_result = await session.execute(select(func.max(ScreenerSnapshot.snapshot_date)))
-        latest_snapshot = snapshot_result.scalar()
-
-        if latest_snapshot is not None:
-            rows = await session.execute(
-                select(ScreenerSnapshot.symbol)
-                .where(
-                    ScreenerSnapshot.snapshot_date == latest_snapshot,
-                    ScreenerSnapshot.market_cap.is_not(None),
-                )
-                .order_by(ScreenerSnapshot.market_cap.desc().nullslast())
-                .limit(limit)
-            )
-            symbols = [str(row[0]).upper() for row in rows.fetchall() if row[0]]
-            if symbols:
-                return symbols
-
-        rows = await session.execute(
-            select(Stock.symbol)
-            .where(Stock.is_active == 1)
-            .order_by(Stock.symbol.asc())
-            .limit(limit)
-        )
-        return [str(row[0]).upper() for row in rows.fetchall() if row[0]]
 
 
 async def run_daily_sync():
@@ -6508,25 +6983,6 @@ async def run_hourly_news_sync():
     logger.info(f"Hourly news sync completed with {count} articles")
 
 
-async def run_intraday_sync():
-    """Wrapper for scheduler to run limited market-hours vnstock updates."""
-    if not is_vietnam_market_open():
-        logger.info("Intraday scheduler sync skipped outside active market sessions")
-        return
-    symbols = await _get_scheduler_priority_symbols(settings.scheduler_live_symbols_per_run)
-    if not symbols:
-        logger.info("Intraday sync skipped: no priority symbols available")
-        return
-
-    results: Dict[str, int] = {}
-    results["intraday_trades"] = await data_pipeline.sync_intraday_trades(symbols=symbols)
-    results["orderbook_snapshots"] = await data_pipeline.sync_orderbook_snapshots(symbols=symbols)
-    results["derivative_prices"] = await data_pipeline.sync_derivatives_prices()
-    logger.info(
-        "Intraday scheduler sync completed for %s symbols with results=%s",
-        len(symbols),
-        results,
-    )
 
 
 data_pipeline = DataPipeline()

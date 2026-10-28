@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -7,7 +7,7 @@ from httpx import ASGITransport, AsyncClient
 from vnibb.api.v1.matrix import router
 from vnibb.core.database import get_db
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
-from vnibb.models.stock import Stock
+from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.trading import FinancialRatio
 from vnibb.services import matrix_service
 from vnibb.services.matrix_observations import (
@@ -141,6 +141,46 @@ async def test_each_playbook_builds_real_stored_observations(test_db, playbook, 
             assert metric(cell(built, "MXA", "insurance"), "insurance_premiums")["value"] is None
         if playbook == "securities":
             assert metric(cell(built, "MXA", "securities"), "brokerage_revenue")["value"] is None
+    finally:
+        await test_db.rollback()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source,close,expected_value,expected_unit,state", [
+    ("vnstock_vnd:VCI", 72400, "72400", "VND", "supported"),
+    ("VCI", 72.4, "72400", "VND", "supported"),
+    ("vnstock", 72.4, "72.4", "unknown unit", "non_comparable"),
+])
+async def test_stored_close_uses_certified_source_units_and_daily_interval(
+    test_db, source, close, expected_value, expected_unit, state,
+):
+    try:
+        test_db.add(Stock(id=990001, symbol="MXA", industry="Software", is_active=1))
+        test_db.add(StockPrice(
+            id=995200, stock_id=990001, symbol="MXA", time=date(2024, 12, 30), interval="1D",
+            open=close, high=close, low=close, close=close, volume=100,
+            source=source, created_at=datetime(2025, 1, 1),
+        ))
+        test_db.add(StockPrice(
+            id=995201, stock_id=990001, symbol="MXA", time=date(2024, 12, 31), interval="1W",
+            open=999, high=999, low=999, close=999, volume=100,
+            source="vnstock_vnd", created_at=datetime(2025, 1, 1),
+        ))
+        await test_db.flush()
+
+        built = await build_matrix_observations(test_db, ["MXA"], "nonfinancial", "2024", "year")
+
+        stored = cell(built, "MXA", "stored_close")
+        observed = metric(stored, "close")
+        evidence = next(item for item in built["evidence"] if item["evidence_id"] == observed["evidence_ids"][0])
+        assert stored["state"] == state
+        assert observed["value"] == expected_value
+        assert observed["unit"] == expected_unit
+        assert observed["as_of"] == "2024-12-30"
+        assert evidence["source"] == f"stored.sql.stock_prices:{source}"
+        assert evidence["unit"] == expected_unit
+        assert evidence["value"] == expected_value
+        assert any("Price scale" in limit for limit in evidence["limitations"]) == (state == "non_comparable")
     finally:
         await test_db.rollback()
 

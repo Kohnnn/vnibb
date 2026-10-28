@@ -179,6 +179,33 @@ describe('Matrix Copilot handoff', () => {
         expect(storedContent()).not.toContain('Stale live response');
     });
 
+    test.each([
+        { currentSymbol: 'VNM', activeTabName: 'Cryptocurrencies', workspaceContextKey: 'global:crypto' },
+        { currentSymbol: 'VNM', activeTabName: 'WorldNews', workspaceContextKey: 'other:news' },
+        { currentSymbol: 'FPT', activeTabName: 'WorldNews', workspaceContextKey: 'global:news' },
+    ])('aborts a pending response when workspace context becomes %j', async (nextContext) => {
+        let handlers: StreamHandlers | undefined;
+        let finish: (() => void) | undefined;
+        jest.mocked(consumeCopilotStream).mockImplementation((_response, nextHandlers) => {
+            handlers = nextHandlers;
+            return new Promise<void>((resolve) => { finish = resolve; });
+        });
+        const view = render(<AICopilot isOpen onClose={() => {}} currentSymbol="VNM" activeTabName="WorldNews" workspaceContextKey="global:news" />);
+        fireEvent.change(screen.getByRole('textbox', { name: 'VniAgent message' }), { target: { value: 'Old context question' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        await waitFor(() => expect(handlers).toBeDefined());
+        const signal = jest.mocked(openCopilotChatStream).mock.calls[0][1];
+        view.rerender(<AICopilot isOpen onClose={() => {}} {...nextContext} />);
+        expect(signal?.aborted).toBe(true);
+        await act(async () => {
+            handlers?.onChunk?.('Obsolete context response');
+            handlers?.onDone?.({ done: true, responseMeta });
+            finish?.();
+        });
+        expect(screen.queryByText('Obsolete context response')).not.toBeInTheDocument();
+        expect(storedContent()).not.toContain('Obsolete context response');
+    });
+
     test('New Chat does not archive protected content and clears the selection', async () => {
         render(<AICopilot isOpen onClose={() => {}} currentSymbol="VNM" />);
         stageDraft();

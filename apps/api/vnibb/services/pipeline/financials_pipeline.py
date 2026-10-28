@@ -186,6 +186,7 @@ class FinancialsPipeline(BasePipeline):
                     "operating_income": self._parse_float(record.get("operating_income")),
                     "net_income": self._parse_float(record.get("net_income")),
                     "eps": self._parse_float(record.get("eps")),
+                    "eps_diluted": self._parse_float(record.get("eps_diluted")),
                 })
             elif statement_type == StatementType.BALANCE:
                 values.update({

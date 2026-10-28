@@ -40,6 +40,9 @@ function mockEmptyHistory() {
 }
 
 function mockPartiallyAdjustedHistory() {
+  // Canonical fixture: these widgets certify each row by its own `price_unit`
+  // marker, so the fixture states VND per row alongside the matching
+  // response-level status (QA #98).
   const data = Array.from({ length: 130 }, (_, index) => ({
     symbol: 'FPT',
     time: new Date(Date.UTC(2024, 0, index + 1)).toISOString().slice(0, 10),
@@ -48,12 +51,14 @@ function mockPartiallyAdjustedHistory() {
     low: 99 + index,
     close: 101 + index,
     volume: 1_000 + index,
+    price_unit: 'VND',
   }))
   mockUseHistoricalPrices.mockReturnValue({
     data: {
       data,
       meta: {
         count: data.length,
+        unit_status: 'confirmed_vnd',
         adjustment_mode: 'adjusted',
         adjustment_requested_count: data.length,
         adjustment_applied_count: data.length - 1,

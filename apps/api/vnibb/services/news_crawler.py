@@ -1,17 +1,5 @@
-"""
-News Crawler Service using vnstock_news
+"""Aggregate Vietnamese financial RSS news with optional AI sentiment analysis."""
 
-Aggregates news from multiple Vietnamese news sources.
-Sources: CafeF, VnExpress, VietStock, Tuoi Tre, VnEconomy, etc.
-
-Uses vnstock_news premium package when available; falls back to a free
-RSS crawler when the premium package is missing so the news bucket
-never sits stale just because the premium auto-bootstrap failed.
-Enhanced with AI sentiment analysis.
-"""
-
-import asyncio
-import importlib
 import logging
 import re
 import xml.etree.ElementTree as ET
@@ -33,10 +21,7 @@ logger = logging.getLogger(__name__)
 VIETNAM_TZ = timezone(timedelta(hours=7))
 
 
-# Free-tier RSS feed map. Used when `vnstock_news` (premium) is unavailable
-# so the news pipeline keeps producing fresh rows. Each entry is
-# `(source_label, feed_url)`. Keep these to highly stable, well-maintained
-# Vietnamese financial RSS endpoints.
+# Curated Vietnamese financial RSS endpoints, grouped by source domain.
 FREE_RSS_FEEDS: dict[str, list[str]] = {
     "cafef.vn": [
         "https://cafef.vn/thi-truong-chung-khoan.rss",
@@ -203,36 +188,16 @@ async def _fetch_vnexpress_published_date(url: str) -> datetime | None:
 
 class NewsCrawlerService:
     """
-    Multi-source news aggregation using vnstock_news.
+    Multi-source news aggregation from public RSS feeds.
 
     Crawls news from major Vietnamese financial news sources
     and stores them with AI sentiment analysis for the news feed widget.
     """
 
-    # Supported news sources
-    SOURCES = [
-        "cafef.vn",
-        "vietstock.vn",
-        "vnexpress.net",
-        "tuoitre.vn",
-        "vneconomy.vn",
-        "baodautu.vn",
-        "cafebiz.vn",
-        "thesaigontimes.vn",
-    ]
+    SOURCES = ["cafef.vn", "vietstock.vn", "vnexpress.net", "vneconomy.vn", "baodautu.vn"]
 
     def __init__(self):
         self._news_available = False
-        self._check_vnstock_news()
-
-    def _check_vnstock_news(self):
-        """Check if vnstock_news is available."""
-        try:
-            importlib.import_module("vnstock_news")
-            self._news_available = True
-            logger.info("vnstock_news premium package detected")
-        except ImportError:
-            logger.info("News crawler disabled - vnstock_news not configured")
 
     async def crawl_market_news(
         self,
@@ -254,40 +219,17 @@ class NewsCrawlerService:
         if sources is None:
             sources = self.SOURCES[:3]  # Default to top 3 sources
 
-        if self._news_available:
-            count = await self._crawl_with_vnstock_news(sources, limit)
-            rss_sources = [source for source in sources if source in FREE_RSS_FEEDS]
-            if rss_sources:
-                count += await self._crawl_with_rss(rss_sources, limit)
-
-            # Run sentiment analysis on newly crawled articles
-            if analyze_sentiment and count > 0:
-                await self.analyze_unprocessed_articles(batch_size=20)
-
-            return count
-        else:
-            # Free-tier RSS fallback. We don't want stale news just
-            # because the premium package didn't auto-install. The free
-            # path covers cafef.vn, vietstock.vn, vneconomy.vn, and
-            # baodautu.vn — enough to keep the freshness banner green.
-            logger.info("News crawler: vnstock_news unavailable, falling back to RSS")
-            count = await self._crawl_with_rss(sources, limit)
-            if analyze_sentiment and count > 0:
-                await self.analyze_unprocessed_articles(batch_size=20)
-            return count
+        count = await self._crawl_with_rss(sources, limit)
+        if analyze_sentiment and count > 0:
+            await self.analyze_unprocessed_articles(batch_size=20)
+        return count
 
     async def _crawl_with_rss(
         self,
         sources: list[str] | None,
         limit: int,
     ) -> int:
-        """Free-tier RSS fallback when vnstock_news is unavailable.
-
-        Walks the curated FREE_RSS_FEEDS map, fetches each feed with a
-        short timeout, parses ``item`` elements (RSS 2.0) into article
-        dicts, and dispatches to ``_store_article`` so the upsert path
-        is identical to the premium flow.
-        """
+        """Fetch curated RSS feeds and store articles through the shared upsert path."""
         per_source_limit = max(1, limit // max(len(FREE_RSS_FEEDS), 1))
         target_sources = sources or list(FREE_RSS_FEEDS.keys())
 
@@ -313,7 +255,7 @@ class NewsCrawlerService:
 
             await session.commit()
 
-        logger.info(f"RSS fallback crawled {total} articles across {len(target_sources)} sources")
+        logger.info(f"RSS crawler stored {total} articles across {len(target_sources)} sources")
         return total
 
     async def _fetch_rss_feed(
@@ -389,111 +331,6 @@ class NewsCrawlerService:
             ),
         }
 
-    async def _crawl_with_vnstock_news(
-        self,
-        sources: list[str],
-        limit: int,
-    ) -> int:
-        """Crawl using vnstock_news premium package."""
-
-        def _sync_crawl():
-            from vnstock_news import SITES_CONFIG, EnhancedNewsCrawler
-
-            all_articles = []
-            crawler = EnhancedNewsCrawler()
-            source_aliases = {
-                "thesaigontimes": "ktsg",
-            }
-
-            for source in sources:
-                try:
-                    # Remove .vn/.net suffix for crawler
-                    source_name = source.replace(".vn", "").replace(".net", "")
-                    site_key = source_aliases.get(source_name, source_name)
-                    config = SITES_CONFIG.get(site_key)
-                    if not config:
-                        logger.warning(f"No crawler config found for source: {source_name}")
-                        continue
-
-                    source_urls = []
-                    sitemap_url = config.get("sitemap_url")
-                    if sitemap_url:
-                        source_urls.append(sitemap_url)
-
-                    rss_urls = config.get("rss", {}).get("urls", [])
-                    if rss_urls:
-                        source_urls.extend(rss_urls)
-
-                    if not source_urls:
-                        logger.warning(f"No URLs found for source: {source_name}")
-                        continue
-
-                    df = crawler.fetch_articles(
-                        sources=source_urls,
-                        max_articles=limit,
-                        time_frame="1d",
-                        site_name=site_key,
-                        sort_order="desc",
-                        clean_content=True,
-                    )
-
-                    if df is None or df.empty:
-                        logger.debug(f"No articles found for {source}")
-                        continue
-
-                    # Log column layout once per crawl so future provider
-                    # schema drift (date field renamed) is visible without a
-                    # silent regression of "Unknown time" everywhere again.
-                    try:
-                        logger.debug(
-                            "vnstock_news columns for %s: %s",
-                            source,
-                            list(df.columns),
-                        )
-                    except Exception:  # noqa: BLE001
-                        pass
-
-                    articles = df.to_dict("records")
-                    for article in articles:
-                        article["source"] = source
-                    all_articles.extend(articles)
-                    logger.debug(f"Crawled {len(articles)} articles from {source}")
-
-                except Exception as e:
-                    logger.error(f"Failed to crawl {source}: {e}")
-                    continue
-
-            return all_articles
-
-        # Run crawling in thread pool
-        articles = await asyncio.to_thread(_sync_crawl)
-
-        if not articles:
-            return 0
-
-        # Store articles. We open a SAVEPOINT per article so a single bad
-        # row (constraint violation, oversized text, encoding issue) does
-        # not poison the whole transaction. Without nested savepoints,
-        # the asyncpg driver returns
-        # "InFailedSQLTransactionError: current transaction is aborted"
-        # for every subsequent INSERT after the first failure, dropping
-        # the storage rate to 0/N (QA-v2: market_news kept showing
-        # "Crawled 62 articles · 0 stored" because of this).
-        async with async_session_maker() as session:
-            count = 0
-            for article in articles:
-                try:
-                    async with session.begin_nested():
-                        await self._store_article(session, article)
-                    count += 1
-                except Exception as e:
-                    logger.warning(f"Failed to store article: {e}")
-                    continue
-
-            await session.commit()
-
-        logger.info(f"Crawled and stored {count} market news articles")
-        return count
 
     async def _store_article(
         self,
@@ -501,12 +338,7 @@ class NewsCrawlerService:
         article: dict[str, Any],
     ):
         """Store a single news article."""
-        # Parse published date. The upstream `vnstock_news` provider emits the
-        # publication timestamp under different keys depending on the source
-        # (RSS, sitemap, scraper). Fall back across the full known set so we
-        # never silently write `published_date=NULL` (root cause for the
-        # "Unknown time" bug — every Market News article showed it because
-        # only `pub_date` and `published_date` were tried previously).
+        # Accept publication timestamps from RSS and stored article payloads.
         pub_date_raw = (
             article.get("pub_date")
             or article.get("published_date")
@@ -799,31 +631,8 @@ class NewsCrawlerService:
             return sentiment_analyzer.calculate_market_sentiment(article_dicts)
 
     async def analyze_trending(self) -> dict[str, Any]:
-        """
-        Analyze trending topics from recent news.
-
-        Returns sentiment and topic analysis if vnstock_news is available.
-        """
-        if not self._news_available:
-            return {}
-
-        try:
-            from vnstock_news import TrendingAnalyzer
-
-            def _sync_analyze():
-                analyzer = TrendingAnalyzer()
-                return analyzer.get_trending_topics(days=7)
-
-            trending = await asyncio.to_thread(_sync_analyze)
-
-            return {
-                "topics": trending.get("topics", []),
-                "stocks_mentioned": trending.get("stocks", []),
-                "sentiment": trending.get("sentiment", "neutral"),
-            }
-        except Exception as e:
-            logger.error(f"Trending analysis failed: {e}")
-            return {}
+        """Report unavailable topic analysis; RSS crawling does not provide it."""
+        return {"available": False, "reason": "trending_analysis_unavailable"}
 
 
 # Singleton instance

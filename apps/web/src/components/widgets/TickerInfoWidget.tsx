@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useEffect, useMemo } from 'react';
-import { useStockQuote, useProfile, useScreenerData, useTradingStats, useHistoricalPrices } from '@/lib/queries';
+import { useStockQuote, useProfile, useScreenerData, useHistoricalPrices } from '@/lib/queries';
 import { useUnit } from '@/contexts/UnitContext';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -40,7 +40,6 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     isFetching: profileFetching,
     error: profileError,
     refetch: refetchProfile,
-    dataUpdatedAt: profileUpdatedAt,
   } = useProfile(symbol);
 
   const {
@@ -53,7 +52,6 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     limit: 1,
     enabled: Boolean(symbol),
   });
-  const { data: tradingStats } = useTradingStats(symbol, Boolean(symbol));
   const historyEndDate = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const historyStartDate = useMemo(() => {
     const start = new Date()
@@ -74,12 +72,20 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   const error = quoteError || profileError || screenerError;
   const hasQuote = Boolean(quote?.symbol);
   const isFallback = Boolean(error && hasQuote);
-  const updatedAt = quoteUpdatedAt || profileUpdatedAt;
+  // Source observation only. The TanStack receipt time is reported separately as fetchedAt.
+  const sourceUpdatedAt = quote?.updatedAt ?? null;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasQuote, { timeoutMs: 8_000 })
   const screenerRow = screenerData?.data?.[0]
   const profileData = profile?.data
+  // Strict per-row certification: every history row must carry an explicit `price_unit`
+  // of 'VND'. The response-level `unit_status` is deliberately NOT used to fill a missing
+  // row marker — deployed payloads have been observed reporting confirmed_vnd alongside
+  // mixed-magnitude rows, so metadata alone cannot certify the range.
   const historyRange = useMemo(() => {
-    const rows = oneYearHistory?.data || []
+    const rows = oneYearHistory?.data ?? []
+    if (rows.length === 0 || !rows.every((row) => row.price_unit === 'VND')) {
+      return { high: null as number | null, low: null as number | null }
+    }
     const highs = rows.map((row) => toPositiveNumber(row.high)).filter((value): value is number => value !== null)
     const lows = rows.map((row) => toPositiveNumber(row.low)).filter((value): value is number => value !== null)
     return {
@@ -95,11 +101,12 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
         apiGroup: '/equity',
         endpoint: `/equity/quote?symbol=${symbol}`,
         sourceLabel: 'Quote + profile',
-        lastDataDate: quoteUpdatedAt ?? profileUpdatedAt,
+        lastDataDate: sourceUpdatedAt,
+        fetchedAt: quoteUpdatedAt,
         extra: { quote, profile: profileData, screener: screenerRow },
       }),
     )
-  }, [onDataChange, profileData, quote, screenerRow, hasQuote, symbol, quoteUpdatedAt, profileUpdatedAt])
+  }, [onDataChange, profileData, quote, screenerRow, hasQuote, symbol, quoteUpdatedAt, sourceUpdatedAt])
 
   const handleRetry = () => {
     refetchQuote();
@@ -129,18 +136,20 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   const price = quote?.price
   const change = quote?.change
   const changePct = quote?.changePct
+  const priceDisplayConfig = quote?.price_unit === 'VND' || unitConfig.display !== 'USD'
+    ? unitConfig
+    : { ...unitConfig, display: 'raw' as const }
+  const priceUnitLabel = quote?.price_unit === 'VND'
+    ? unitConfig.display === 'USD' ? 'USD' : 'VND'
+    : quote?.price_unit === 'index_points' ? 'Index points' : 'Price unit unconfirmed'
 
   const screenerMarketCap = toPositiveNumber(screenerRow?.market_cap)
   const profileMarketCap = toPositiveNumber(profileData?.market_cap)
   const sharesOutstanding = toPositiveNumber(profileData?.outstanding_shares)
+  const confirmedVndPrice = quote?.price_unit === 'VND' ? toPositiveNumber(price) : null
   const derivedMarketCap =
-    sharesOutstanding && toPositiveNumber(price)
-      ? sharesOutstanding * (toPositiveNumber(price) || 0)
-      : null
-  // Prefer the backend-computed market cap (full VND) over the locally derived
-  // value, which multiplies shares by the quote price (thousands of VND) and is
-  // therefore ~1000x too small — this caused the "514.71B vs 514.71T" mismatch
-  // with TickerProfileWidget (DEF-06). Order: screener -> profile -> derived.
+    sharesOutstanding && confirmedVndPrice ? sharesOutstanding * confirmedVndPrice : null
+  // Reported market caps take precedence; derive only from an explicitly confirmed VND quote.
   const marketCap = screenerMarketCap ?? profileMarketCap ?? derivedMarketCap
   const marketCapSource = screenerMarketCap
     ? 'Screener'
@@ -168,15 +177,20 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     null
 
   const quoteRow = quote as unknown as Record<string, unknown>
-  const screenerRowRecord = screenerRow as Record<string, unknown> | undefined
-  const tradingStatsRow = tradingStats?.data as unknown as Record<string, unknown> | undefined
 
-  const dayHigh = firstPositiveNumber(quote?.high, quoteRow.day_high, quoteRow.high_price, screenerRowRecord?.high, screenerRowRecord?.day_high)
-  const dayLow = firstPositiveNumber(quote?.low, quoteRow.day_low, quoteRow.low_price, screenerRowRecord?.low, screenerRowRecord?.day_low)
-  const openPrice = firstPositiveNumber(quote?.open, quoteRow.day_open, quoteRow.open_price, screenerRowRecord?.open, screenerRowRecord?.day_open)
-  const previousClose = firstPositiveNumber(quote?.prevClose, quoteRow.prev_close, quoteRow.reference_price, quoteRow.ref_price, screenerRowRecord?.prev_close, screenerRowRecord?.reference_price)
-  const rangeLow = firstPositiveNumber(tradingStats?.data?.low_52w, tradingStatsRow?.['52w_low'], tradingStatsRow?.low52w, screenerRowRecord?.low_52w, screenerRowRecord?.['52w_low'], historyRange.low)
-  const rangeHigh = firstPositiveNumber(tradingStats?.data?.high_52w, tradingStatsRow?.['52w_high'], tradingStatsRow?.high52w, screenerRowRecord?.high_52w, screenerRowRecord?.['52w_high'], historyRange.high)
+  // Day-range fields come from the quote itself (same certified unit). Screener rows and
+  // trading-stats 52w values expose no unit marker, so they never feed these cells.
+
+  const dayHigh = firstPositiveNumber(quote?.high, quoteRow.day_high)
+  const dayLow = firstPositiveNumber(quote?.low, quoteRow.day_low)
+  const openPrice = firstPositiveNumber(quote?.open, quoteRow.day_open)
+  const previousClose = firstPositiveNumber(quote?.prevClose, quoteRow.prev_close, quoteRow.reference_price, quoteRow.ref_price)
+
+  // The 52W range is published only when the strictly VND-certified history bounds and the
+  // displayed quote share the VND unit. Both the range cards and the range bar read these
+  // gated values, so an incompatible range can never be relabelled into another currency.
+  const rangeLow = quote?.price_unit === 'VND' ? historyRange.low : null
+  const rangeHigh = quote?.price_unit === 'VND' ? historyRange.high : null
   const rangePrice = toPositiveNumber(price)
   const hasRange = Boolean(rangeLow && rangeHigh && rangePrice && rangeHigh > rangeLow)
   const rangePosition = hasRange
@@ -188,7 +202,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   const ChangeIcon = changeDirection === 'up' ? TrendingUp : changeDirection === 'down' ? TrendingDown : Activity;
   const changeLabel =
     change !== null && change !== undefined && changePct !== null && changePct !== undefined
-      ? `${changeDirectionLabel} ${change > 0 ? '+' : ''}${change.toLocaleString()} (${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%)`
+      ? `${changeDirectionLabel} ${change > 0 ? '+' : ''}${formatPriceValueForUnit(change, priceDisplayConfig)} (${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%)`
       : '--';
 
   return (
@@ -203,17 +217,20 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     >
       <div className="flex flex-col h-full space-y-2">
         <WidgetMeta
-          updatedAt={updatedAt}
+          updatedAt={sourceUpdatedAt}
+          fetchedAt={quoteUpdatedAt}
           isFetching={isFetching && hasQuote}
           isCached={Boolean(quote?.cached) || isFallback}
           note={
             marketCapSource === 'Derived'
               ? 'Market cap derived from profile shares x quote'
-              : quote?.cached
-                ? 'Cached response'
-                : unitConfig.display === 'USD'
-                  ? 'Price and value fields shown in USD using current FX defaults'
-                  : undefined
+              : quote?.price_unit !== 'VND'
+                ? priceUnitLabel
+                : quote?.cached
+                  ? 'Cached response'
+                  : unitConfig.display === 'USD'
+                    ? 'Price and value fields shown in USD using current FX defaults'
+                    : undefined
           }
           sourceLabel="Quote + profile"
           className="justify-between"
@@ -225,8 +242,9 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               {symbol}
             </span>
             <span className="text-3xl font-black font-mono tracking-tighter text-[var(--text-primary)] tabular-nums drop-shadow-lg">
-              {formatPriceValueForUnit(price, unitConfig)}
+              {formatPriceValueForUnit(price, priceDisplayConfig)}
             </span>
+            <span className="text-[9px] text-[var(--text-muted)]">{priceUnitLabel}</span>
             <div
               className={cn(
                 'flex items-center gap-1.5 text-xs font-bold px-2 py-0.5 rounded-full w-fit border',
@@ -249,13 +267,13 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
 
         <div className="grid grid-cols-2 gap-2">
             {[
-            { label: 'Day High', value: formatPriceValueForUnit(dayHigh, unitConfig) },
-            { label: 'Day Low', value: formatPriceValueForUnit(dayLow, unitConfig) },
-            { label: '52W High', value: formatPriceValueForUnit(rangeHigh, unitConfig) },
-            { label: '52W Low', value: formatPriceValueForUnit(rangeLow, unitConfig) },
+            { label: 'Day High', value: formatPriceValueForUnit(dayHigh, priceDisplayConfig) },
+            { label: 'Day Low', value: formatPriceValueForUnit(dayLow, priceDisplayConfig) },
+            { label: '52W High', value: formatPriceValueForUnit(rangeHigh, priceDisplayConfig) },
+            { label: '52W Low', value: formatPriceValueForUnit(rangeLow, priceDisplayConfig) },
             { label: 'Volume', value: formatNumber(quote?.volume) },
-            { label: 'Prev Close', value: formatPriceValueForUnit(previousClose, unitConfig) },
-            { label: 'Open', value: formatPriceValueForUnit(openPrice, unitConfig) },
+            { label: 'Prev Close', value: formatPriceValueForUnit(previousClose, priceDisplayConfig) },
+            { label: 'Open', value: formatPriceValueForUnit(openPrice, priceDisplayConfig) },
             {
               label: 'Mkt Cap',
               value: formatCompactValueForUnit(marketCap, unitConfig, { decimals: 2 }),
@@ -295,9 +313,9 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               <div className="absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border border-white/50 bg-[var(--bg-primary)] shadow" style={{ left: `calc(${rangePosition}% - 6px)` }} />
             </div>
             <div className="mt-1.5 flex items-center justify-between text-[10px] font-mono text-[var(--text-secondary)] tabular-nums">
-              <span>{formatPriceValueForUnit(rangeLow, unitConfig)}</span>
-              <span className="text-[var(--text-primary)]">{formatPriceValueForUnit(rangePrice, unitConfig)}</span>
-              <span>{formatPriceValueForUnit(rangeHigh, unitConfig)}</span>
+              <span>{formatPriceValueForUnit(rangeLow, priceDisplayConfig)}</span>
+              <span className="text-[var(--text-primary)]">{formatPriceValueForUnit(rangePrice, priceDisplayConfig)}</span>
+              <span>{formatPriceValueForUnit(rangeHigh, priceDisplayConfig)}</span>
             </div>
           </div>
         )}

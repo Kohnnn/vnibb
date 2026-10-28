@@ -37,6 +37,7 @@ def screener_row():
         exchange="HOSE",
         industry_name="Food",
         price=75000,
+        price_unit="VND",
         updated_at=datetime(2026, 3, 14, 15),
     )
 
@@ -57,6 +58,7 @@ def quote_row():
     return StockQuoteData(
         symbol="VNM",
         price=75000,
+        price_unit="VND",
         open=74000,
         high=76000,
         low=73500,
@@ -74,6 +76,7 @@ def historical_row():
         high=76000,
         low=73500,
         close=75000,
+        price_unit="VND",
         volume=1_000_000,
     )
 
@@ -129,8 +132,9 @@ async def test_browser_screener_envelope_keeps_display_identity(client, monkeypa
     assert payload["data"][0]["organ_name"] == "Vinamilk"
 
 
+@pytest.mark.parametrize("stored", [True, False])
 @pytest.mark.asyncio
-async def test_browser_profile_envelope(client, monkeypatch, profile_row):
+async def test_browser_profile_envelope(client, monkeypatch, profile_row, stored, caplog):
     async def override_get_db():
         yield ProfileDatabase()
 
@@ -147,7 +151,7 @@ async def test_browser_profile_envelope(client, monkeypatch, profile_row):
         return None
 
     async def store(*args, **kwargs):
-        return None
+        return stored
 
     monkeypatch.setitem(app.dependency_overrides, get_db, override_get_db)
     monkeypatch.setattr(equity.VnstockEquityProfileFetcher, "fetch", fetch)
@@ -163,6 +167,30 @@ async def test_browser_profile_envelope(client, monkeypatch, profile_row):
     assert payload["meta"]["count"] == 1
     assert payload["data"]["symbol"] == "VNM"
     assert payload["data"]["company_name"] == "Vinamilk"
+    assert payload["meta"]["cache_write_status"] == ("stored" if stored else "failed")
+    assert payload["meta"]["warnings"] == ([] if stored else ["profile_cache_write_failed"])
+    if not stored:
+        assert "Profile cache write failed (symbol=VNM)" in caplog.text
+
+
+@pytest.mark.parametrize("stored", [True, False])
+@pytest.mark.asyncio
+async def test_background_profile_refresh_reports_persistence_result(
+    monkeypatch, profile_row, stored, caplog
+):
+    async def fetch(_params):
+        return [profile_row]
+
+    async def store(*args, **kwargs):
+        return stored
+
+    monkeypatch.setattr(equity.VnstockEquityProfileFetcher, "fetch", fetch)
+    monkeypatch.setattr(equity.CacheManager, "store_profile_data", store)
+    with caplog.at_level("INFO", logger=equity.logger.name):
+        await equity._refresh_profile_cache("VNM")
+
+    assert ("Background profile refresh complete (symbol=VNM)" in caplog.text) is stored
+    assert ("Background profile cache write failed (symbol=VNM)" in caplog.text) is not stored
 
 
 @pytest.mark.asyncio
@@ -199,6 +227,7 @@ async def test_browser_historical_envelope_keeps_legacy_meta(client, monkeypatch
 
     monkeypatch.setattr(equity, "_load_historical_from_mongo", no_rows)
     monkeypatch.setattr(equity, "_load_historical_from_recent_cache", no_rows)
+    monkeypatch.setattr(equity, "_load_historical_from_db", no_rows)
     monkeypatch.setattr(equity.CacheManager, "get_historical_prices", no_cache)
     monkeypatch.setattr(equity.VnstockEquityHistoricalFetcher, "fetch", fetch)
 

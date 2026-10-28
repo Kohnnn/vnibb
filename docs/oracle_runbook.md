@@ -1,5 +1,175 @@
 # Oracle Runbook
 
+## Database recovery and local startup
+
+Inspect the existing production host before changing anything: `hostname`, `df -h`, `docker ps -a` and the mounts on `vnibb-db`, `vnibb-mongo`, `vnibb-redis`. If these are the verified serving containers and are stopped, `docker start vnibb-db vnibb-mongo vnibb-redis` preserves their volumes. Do not create replacement stores, run `down -v`, overwrite credentials, or enable the scheduler before provider routing and database health are verified. SSH approval does not connect an unauthenticated workstation: `tailscale status` must show a running tailnet connection before MagicDNS/SSH can work.
+
+For a separate local development database, create a private environment file outside the repository (mode `0600`) with unique `LOCAL_POSTGRES_PASSWORD` and `LOCAL_MONGO_PASSWORD`. Configure the backend with:
+
+```dotenv
+ENVIRONMENT=development
+DEBUG=true
+DATABASE_URL=postgresql+asyncpg://vnibb:<local-password>@127.0.0.1:55432/vnibb
+DATABASE_URL_SYNC=postgresql+psycopg2://vnibb:<local-password>@127.0.0.1:55432/vnibb
+MONGODB_URL=mongodb://vnibb:<local-password>@127.0.0.1:57017/?authSource=admin
+MONGODB_DATABASE=vnibb-market
+MONGODB_ENABLED=true
+VNSTOCK_RUNTIME_TIER=free
+VNSTOCK_SOURCE=VCI
+CACHE_BACKEND=memory
+REDIS_URL=
+SKIP_SCHEDULER_STARTUP=true
+```
+
+```bash
+docker compose --project-name vnibb-local-data --env-file /private/data.local.env \
+  -f docker-compose.data.local.yml up -d --wait
+# Export backend variables from the private file without printing credentials.
+set -a
+. /private/data.local.env
+set +a
+(cd apps/api && .venv/bin/python -m alembic upgrade head)
+```
+
+Ports bind only to loopback; named volumes survive restarts. This stack is not the production corpus. The local migration observed on 13 October 2026 reached `f8c3a102d679`; adding nullable flow coverage does not certify existing rows or complete market sessions.
+
+### Mongo health-probe reaping and bounded connections
+
+Both data compose files use Docker `init: true` so PID 1 reaps adopted probe children. The health shell `exec`s `mongosh`, uses explicit 2-second server-selection and connection deadlines, and retains Docker's 5-second outer timeout. Credentials, image, volumes and resource limits are unchanged. Apply the fix with an approved Mongo-only recreation (not a restart) to preserve the existing named volume; recreating removes already orphaned probes. Never run `down -v`.
+
+Compose validation (do not publish rendered secrets):
+
+```bash
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml config --quiet
+docker compose --env-file /private/data.local.env -f docker-compose.data.local.yml config --quiet
+```
+
+Run this **disposable local** check before production recreation. It uses the local compose's actual health command, generated temporary credentials, no network, and tmpfs rather than production volumes. It checks a healthy real Mongo probe, a failed connection under the outer deadline, and orphan adoption/reaping; cleanup removes only its generated container.
+
+```bash
+python3 - <<'PY'
+import json, os, secrets, subprocess, time
+
+def run(*args, **kwargs):
+    return subprocess.run(args, check=True, capture_output=True, text=True, **kwargs).stdout.strip()
+
+env = os.environ | {'LOCAL_POSTGRES_PASSWORD': secrets.token_hex(16), 'LOCAL_MONGO_PASSWORD': secrets.token_hex(16)}
+mongo = json.loads(run('docker', 'compose', '-f', 'docker-compose.data.local.yml', 'config', '--format', 'json', env=env))['services']['mongo']
+name = 'vnibb-mongo-reaping-' + secrets.token_hex(6)
+probe = mongo['healthcheck']['test'][1].replace('$$', '$')
+try:
+    run('docker', 'run', '-d', '--name', name, '--init', '--network', 'none',
+        '--tmpfs', '/data/db', '--tmpfs', '/data/configdb',
+        '-e', 'MONGO_INITDB_ROOT_USERNAME=vnibb', '-e', 'MONGO_INITDB_ROOT_PASSWORD=' + env['LOCAL_MONGO_PASSWORD'],
+        '--health-cmd', probe, '--health-interval', '2s', '--health-timeout', '5s', '--health-retries', '20', mongo['image'])
+    for _ in range(60):
+        if run('docker', 'inspect', '--format', '{{.State.Health.Status}}', name) == 'healthy':
+            break
+        time.sleep(1)
+    else:
+        raise AssertionError('disposable Mongo did not become healthy')
+    assert 'init' in run('docker', 'exec', name, 'cat', '/proc/1/comm')
+    started = time.monotonic()
+    failed = subprocess.run(['docker', 'exec', name, 'sh', '-c', probe.replace('127.0.0.1:27017', '127.0.0.1:1')], capture_output=True, timeout=5)
+    assert failed.returncode != 0 and time.monotonic() - started < 5
+    for _ in range(20):
+        run('docker', 'exec', name, 'sh', '-c', '(sleep 0.1 &) ; exit 0')
+    time.sleep(3)
+    processes = run('docker', 'top', name, '-eo', 'pid,ppid,stat,args')
+    assert not any('Z' in line.split()[2] for line in processes.splitlines()[1:]), processes
+    assert run('docker', 'inspect', '--format', '{{.State.Health.Status}}', name) == 'healthy'
+    print('PASS: real probes bounded; PID 1 reaped 20 orphan children; no zombies')
+finally:
+    subprocess.run(['docker', 'rm', '-f', '-v', name], check=True)
+PY
+```
+
+After the approved Mongo recreation, confirm `docker inspect --format '{{.HostConfig.Init}}' vnibb-mongo` reports `true`, health returns `healthy`, and `docker top vnibb-mongo -eo pid,ppid,stat,args` has no zombie or accumulating `mongosh` processes across multiple probe intervals. This is a targeted maintenance operation, separate from application-only rollout commands below.
+
+
+New Vietnamese ingestion uses Vietcap IQ/Trading as primary and free vnstock VCI as the only supplementary provider. Do not enable historical premium mounts, KBS or TCBS routing. Preserve historical release evidence below; its old premium runtime instructions are not the new provider policy.
+
+### Exact frontend origin and screener freshness gates
+
+`CORS_ORIGINS` in the private serving `deployment/env.oracle` overrides source defaults. Preserve the effective approved list and append `https://web.vnibb.xyz` exactly; do not broaden the regex, add a wildcard, or duplicate CORS in Caddy. Save the environment, Compose files, proxy configuration and immutable container identities privately before an approved configuration-only rollout. Recreate only the API with its existing digest and `--no-deps --no-build --pull never`; keep MCP, scheduler, Auth, PostgreSQL, MongoDB, Redis and Caddy unchanged. Roll back using the saved environment and the same API-only command if the gate fails.
+
+Verify the exact FPT income-statement GET and OPTIONS separately for the current origin, both approved Vercel aliases and an unrelated denied origin. Include validation responses and native browser response consumption. Successful CORS transport does not certify financial values or freshness.
+
+Detailed health uses the consumer's certified screener Universe partition and its oldest actual constituent trade date, not independent global maxima. A missing receipt or trade date remains degraded. `screener_expected_session` uses the configured ICT close and `MARKET_HOLIDAY_DATES`; its calendar limitation is explicit, not official exchange-calendar certification. Before declaring recovery, compare the completed exchange session, active Universe membership, successful full-run receipt and every constituent trade date. Keep acquisition failures and stale disclosure visible; do not restamp dates, relax thresholds, fabricate completion markers or rewrite history.
+
+For the QA release, set `PREDICTION_MARKET_POPULATE_ON_STARTUP=false` in the private serving environment before replacing the scheduler. This disables only the immediate restart-population task; normal daily and recurring prediction ingestion remain scheduled. The application default remains `true` for existing installations. Preserve the explicit release setting during rollback so a restart does not introduce an unrequested acquisition.
+
+Auth has a separate native CORS policy. For GoTrue v2.177, map `GOTRUE_CORS_ALLOWED_HEADERS=${GOTRUE_CORS_ALLOWED_HEADERS:-apikey}` into the Auth service and set the matching private environment value. The missing `apikey` allowance can produce OPTIONS 204 without CORS headers and prevent the password POST. Preserve issuer, keys, redirects and the existing GoTrue origin behavior; `GOTRUE_URI_ALLOW_LIST` controls redirects, not CORS. Before an approved Auth-only recreation, save effective configuration and all container identities privately. Recreate only Auth on its retained image with `--no-deps --no-build --pull never`, verify the real sorted browser preflight and genuine password login, and confirm the other seven container identities/images are unchanged. Restore the saved Auth mapping/environment and use the same Auth-only command for rollback. No database restore or broader proxy policy is required.
+
+### Historical pre-release observation (13 October 2026)
+
+Trusted public TLS and authorized read-only MCP were available on 13 October 2026 at `https://129.150.58.64.sslip.io`; `/mcp-health` and API health reported production revision `2c57654277ef5546662afc3cc7ed4a4e355e441e`. Production still reported source `KBS`, so readiness is not proof that the current IQ/free-VCI source policy is deployed. Strict known-host public SSH timed out and Tailscale reported `NeedsLogin`; host deployment, production migration and current backup inspection were not established.
+
+Working-tree acceptance is based on source baseline `552e29678164eba168b90a0b64fff779bac84e55` plus uncommitted changes. That baseline is not a published image identity. Choose the expected revision from the reviewed, published release independently of endpoint responses; never set it to the observed old production revision to make a release gate pass.
+
+Actual local PostgreSQL and MongoDB exports were preserved under `/home/compute_01/.config/vnibb/backups/qa123-20261013T084208Z/` as `postgres.dump`, `mongo.archive.gz` and a SHA-256/size manifest. Export success is not restore proof. Do not restore, downgrade or replace serving volumes as part of read-only acceptance.
+
+### PR #125 production release observed (14 October 2026 UTC)
+
+- Reviewed merge `701004108a0f03d0180cfc3a8eb4495af8d5fbcc` is deployed as `ghcr.io/kohnnn/vnibb-api@sha256:2289546802ea7a91a06417efd336acd297950d743da2d6b5020cf90577763604`, with IQ/Trading primary and free VCI supplementation. The parent's nine-step release gate passed: backend **2,908 / 4 skipped**, frontend **163 suites / 1,104 tests**. API, MCP and scheduler were healthy at that revision; API/scheduler recreation resumed serving at `20:33:23Z`. At `20:34:36Z`, the scheduler reported a running worker, **24 jobs, 0 missed** and an 8.2-second-old heartbeat. Five historical job failures remain recorded; deployment does not erase them.
+- The reviewed plan/index/apply each exited 0. Apply inserted **1,256 income SQL rows, 23,193 reference SQL rows, 6,608 premium records, 6,968 metric maps and 10 profiles**, with actual count deltas verified. All **167,561 prior SQL rows, 1,459,585 premium records, 4 metric maps and 1,732 profiles** remained hash-identical; no prior observation was deleted or overwritten. Script SHA-256 `33a3668cffb2cfbf0d71e72c1e168ba9985d0682f2f2109050eca0e4a415f681`; frozen bundle SHA-256 `247452f5e3e8adf5eafa8c63232655439cbf76f7211e17151570359bb914750f`. Private evidence: `/home/compute_01/.config/vnibb/release-701004108a0f/structured-transfer-evidence-20261015-a.json`.
+- Official MCP SDK over normal public TLS discovered **20 tools, 7 prompts, 5 resources and 1 template**; unauthenticated initialization returned 401 and authenticated SQL/Mongo status reads succeeded. All **27** fresh post-apply named reads passed: explicit EPS reached SQL as `VND/share`, raw records/descriptors remained retained, and unknown monetary units stayed withheld. Annual raw balance/cash and ratio reads remained honestly empty; unknown fiscal dimensions and preserved SQL conflicts were not inferred away. This is scoped read proof, not an all-gate or full-population acceptance claim.
+- Actual production browser reads loaded VNM annual widgets and FY/Q transitions; ANI annual EPS showed **1,909.00 (2018)** and **3,166.00 (2019)** while revenue/net income remained dashes. The validation-degraded banner and stale validation dates remained visible; VNM fundamental-analysis timed out at 20 seconds. Do not claim every widget is healthy.
+- Legacy **62** targets were exactly revalidated (**30 succeeded, 22 empty, 10 failed**) with all originals preserved. The later local reference bound changed **271** receipts (**129 succeeded, 41 empty, 100 failed, 1 deferred**) and retried **0** prior terminal receipts. At `20:26:35Z`, canonical **1,521** symbols still had **7,226** first-pass attempts pending; both first-pass and acquisition completion were false. No second bound ran. These local post-export changes are not claimed in the original production bundle; transfer a later delta before claiming them served. Matrix JWT/session and source-unit prerequisites remain unmet. Detailed checkpoints: [MCP/database QA plan](../mcp-database-qa-plan.md).
+
+### 13 October 2026 concurrent-acquisition containment risk
+
+The concurrent whole-STOCK run observed on 13 October 2026 is a bounded, cancelled-and-contained phase, not evidence of an aggregate one-request-per-second acquisition rate. Concurrent 09:00..09:12 UTC phases overlapped, so the observed request pressure is not additive throughput. Process containment on this host used a child exit and exact PID/fd selection; a `pidwait`-based wait is unsupported here and must not be used to conclude that queued phases ran sequentially. Preserve the existing native and root checkpoints; re-run `resume` with the same checkpoint/source/start/cutoff contract after containment before starting any further acquisition. Existing checkpoints remain valid and no observed run deleted data. The configured per-client floor (one request per second) applies per client/worker and does not by itself bound an aggregate rate; sequential continuation of a queued phase is claimed only after containment is confirmed. Do not add aggregate-rate or full-population claims to release evidence from this run.
+
+The 685 terminal `failed` outcomes from that run were physically audited rather than assumed lost: raw 2,103,267 provider rows, 2,054,978 admitted to SQL, 48,289 rejected (48,195 OHLC bounds, 94 missing/negative/nonfinite), with **zero admitted-valid SQL rows missing across every symbol**; the follow-up 721-failure audit likewise found zero valid-missing. A real new-process admission of AAA returned 4,049 source rows against 4,048 persisted with a single `invalid_ohlc_bounds` rejection, classifying `partial_source_invalid` on an actual database. The writer therefore did not drop valid bars, raw rows remain retained, and the generic full-window error is reclassified as partial/source-invalid rather than valid-bar rejection. The native CLI records this per pair under `price_admission` (`source_rows`, `admitted_rows`, `rejected_rows`, `rejected_reasons`, `persisted_rows` and actual admitted/persisted bounds); a rejected window remains receipted `failed` behind the strict full-returned-window guard, so `resume` retries it and no short window is certified. Admitted persistence is not a claim of market truth, oldest-history coverage or complete exchange sessions.
+
+### Durable population commands
+
+Run from the repository root with private database credentials already loaded. Inventory is provider-free/read-only; `--apply` explicitly permits acquisition and writes. The SQL inventory reflects confirmed active SQL stocks, not every historical instrument or proof of populated datasets.
+
+```bash
+PYTHONPATH=apps/api apps/api/.venv/bin/python scripts/backfill_prices_to_2019.py inventory \
+  --datasets financials,ratios,reference,market,eod
+PYTHONPATH=apps/api apps/api/.venv/bin/python scripts/backfill_prices_to_2019.py resume \
+  --apply --bootstrap-listing --start 2000-01-01 \
+  --datasets financials,ratios,reference,market,eod --max-pairs 50 \
+  --budget-seconds 300 --window-days 30
+```
+
+The root CLI supports `inventory`, `backfill` and `resume`. Applied runs without `--symbols` bootstrap actual Trading-confirmed STOCK listings before selecting the active SQL universe. Cached `--universe-file` input requires explicit `--bootstrap-listing` and retains its source/observation date. Financial acquisition requests closed annual/quarterly periods since `--start`; ratios expose only available provider history; reference and `market` reads remain current/universe-level rather than historical-depth acquisition. EOD catch-up windows are at most 30 calendar days and 50 symbols per run. Its omitted-`--end` default is today minus 7 days, keeping the recent ≤7-day tail with the separate incremental owner while the historical walk covers the older span up to that boundary; pass an explicit `--end` to override it. Receipts, not existing row counts, determine pending and failed work.
+
+`--symbols` selects work, not a smaller SQL maintenance cycle. Per-symbol SQL datasets retain the full active universe in `expected_symbols`; subset runs preserve acquired/failed progress outside the selection, and SQL inventory reports canonical-cycle completion rather than subset completion. `market` retains its universe sentinel scope. The report lists the selection separately as `universe.work_symbols`.
+
+SQL inventory reconciles saved receipts against the current canonical active universe without changing the saved cycle. Newly active symbols are pending even when the saved cycle status is `completed`; removed symbols no longer affect current acquisition completion.
+
+`--datasets` accepts `financials`, `ratios`, `reference`, `market` and `eod` and defaults to all five; request one dataset per bound run when isolating evidence. Financials and ratios retain annual+quarterly stage receipts per symbol; reference issues eight stage receipts per active symbol. `market` is universe-level: existing `sync_market_indices`, `sync_market_sectors` and `sync_sector_performance` write one sentinel receipt for the latest indices plus sector taxonomy/performance, with no historical-depth claim. EOD records one symbol/window pair. Cycle names are `universe_backfill_<dataset>_2000` for historical financials and `..._current` for current-scope datasets.
+
+The bounded root `--max-pairs` attempt budget applies per invocation. Both CLIs distinguish never-attempted work (no receipt, or a `pending` outcome) from terminal outcomes (`succeeded`/`failed`/`empty`). Root inventory additionally reports `deferred_count`, `incomplete_attempt_count` and `first_pass_complete`: zero unattempted alone does not exhaust an interrupted first pass. Use `resume --first-pass-only` to acquire pending/deferred/interrupted pairs without retrying terminal failures; stop only when `first_pass_complete` is true. `pending_count` counts every pair not acquired, including failures; `acquisition_complete` and historical completeness are separate. Never treat process exit 0 or row count as completeness proof.
+
+Legacy empties require an exact audited manifest, not a blanket reset. `resume --apply --datasets reference --revalidate-empty-file /private/pairs.json --max-pairs 62 --budget-seconds 3300` uses the existing strict provider boundary without listing bootstrap. Each manifest row requires `symbol`, `stage`, `expected_last_attempted_at` and `expected_last_succeeded_at`. Only timestamp-matching empty receipts, or interrupted revalidations retaining that original receipt, are attempted; changed/terminal revalidated pairs are skipped. Original evidence remains in `previous_empty_receipts`. Other succeeded/empty pairs remain untouched; failed revalidations are explicit failures, not confirmed empty. Pin normal continuation with explicit SQL-confirmed `--symbols` to avoid a fresh listing bootstrap. Use unique logs and an outer timeout longer than the invocation budget; do not restart a mixed financial/reference launcher merely to resume references.
+
+Before any bounded revalidation request starts, every timestamp-matched target is checkpointed as outstanding, with its original empty evidence retained. Unattempted targets have outcome `pending` and `revalidation_pending: true`; attempt/time bounds cannot certify them as acquired. Resume the same manifest to finish pending/deferred/interrupted targets; successful revalidation clears the marker without duplicating the original evidence.
+
+For native provider-history STOCK acquisition, preserve one checkpoint contract and captured Trading universe across invocations:
+
+```bash
+PYTHONPATH=apps/api apps/api/.venv/bin/python apps/api/scripts/vietcap/backfill_vietcap.py inventory \
+  --symbols STOCK --datasets listing,ohlc --count-back 10000 \
+  --start 2000-01-01 --cutoff 2026-10-13 \
+  --universe-file /private/trading-getAll-envelope.json \
+  --checkpoint-file /private/stock-ohlc-checkpoint.json
+PYTHONPATH=apps/api apps/api/.venv/bin/python apps/api/scripts/vietcap/backfill_vietcap.py resume \
+  --apply --symbols STOCK --datasets listing,ohlc --count-back 10000 \
+  --start 2000-01-01 --cutoff 2026-10-13 --max-pairs 1754 --budget-seconds 3300 \
+  --universe-file /private/trading-getAll-envelope.json \
+  --checkpoint-file /private/stock-ohlc-checkpoint.json
+```
+
+The dated native example uses the observed 1,754-STOCK inventory, including 232 DELISTED instruments; delisted rows persist inactive, while 1,522 listed STOCK form that observation's active set. Do not freeze those counts as an enduring provider guarantee. `backfill` also accepts the same native options; retry `resume` with the same source, start, cutoff, count-back and checkpoint. Successful symbol/dataset pairs skip; empty/failed pairs retry fairly. `--max-pairs` bounds attempts, not universe size, and the time budget stops new pair starts rather than cancelling an in-flight synchronous call. Checkpoint success requires the applicable Mongo/SQL writes; it does not establish full-history or exchange-session completeness. Native `--datasets all` includes `ohlc,financials,ratios,company,shareholders,listing,indices,icb`; support and unit limitations remain dataset-specific.
+
+Read-only native history probes observed MSR `2015-09-17..2026-10-13` (2,766 bars), VCB `2009-06-30..2026-10-13` (4,316) and VNM `2006-01-19..2026-10-13` (5,167). These are returned provider ranges, not verified oldest available dates, all-symbol coverage or complete exchange sessions. Acquisition launched for the whole STOCK scope is not completion evidence. See [Auto Update Strategy](AUTO_UPDATE_STRATEGY.md) for recurring durable-cycle owners; detailed acceptance evidence stays in `mcp-database-qa-plan.md`.
+
+
 ## 1. Provision Oracle VM
 
 ### Recommended shape
@@ -78,7 +248,7 @@ Edit `deployment/env.oracle` and set:
 - `VNIBB_MCP_SHARED_BEARER_TOKEN`
 - `MCP_PUBLIC_BIND=127.0.0.1`
 - `MCP_PUBLIC_PORT=8001`
-- `VNSTOCK_RUNTIME_TIER=free` for the default Vietcap-primary/free-VNStock runtime; use `premium` only with a premium-built image and verified license
+- `VNSTOCK_RUNTIME_TIER=free` and `VNSTOCK_SOURCE=VCI`; paid tiers and alternate source routing are rejected
 - `REDIS_URL` if the cache tier remains enabled
 - `MEMORY_CACHE_MAX_ENTRY_BYTES=1048576` or larger if the cache tier is disabled and microstructure payloads must fit memory fallback
 - `SENTRY_DSN`
@@ -107,7 +277,7 @@ Supabase sign-out removes the session row, so the online Auth check denies subse
 
 Before cutover, clear the formerly stored platform admin key from every operator browser profile/site storage, rotate the formerly browser-exposed key in backend and authorized automation/operational secret stores, and roll all workers. Clearing browser storage is not revocation, and the stored value must never be read out or pasted into analytics, tickets, or chat; verify the old key fails and the rotated key works only on authorized automation/operational routes.
 
-Production remains **BLOCKED** until operator UUID verification, key rotation, authenticated live acceptance (including completed sign-out/revocation), and documented Auth availability/latency operations are recorded. Acceptance must cover allowlisted draft/publish and published reload, non-allowlisted and expired/denied-session rejection, shared-key rejection on interactive routes, and rotated-key automation. See `docs/admin_global_system_layouts.md` for the full rollout checklist.
+Interactive admin production acceptance remains **BLOCKED** until operator UUID verification, key rotation, authenticated live acceptance (including completed sign-out/revocation), and documented Auth availability/latency operations are recorded. Acceptance must cover allowlisted draft/publish and published reload, non-allowlisted and expired/denied-session rejection, shared-key rejection on interactive routes, and rotated-key automation. See `docs/admin_global_system_layouts.md` for the full rollout checklist.
 
 ### 2026-10-04 interrupted-session release recovery
 
@@ -120,16 +290,15 @@ Production remains **BLOCKED** until operator UUID verification, key rotation, a
 - Durable scheduler status reports a running worker and 22 jobs. Startup logs contain prediction-source failures for PredictIt, Limitless and Manifold; durable status also retains `daily_sync` and `financial_ratios_sync` failures. These outcomes remain visible rather than being reported as successful ingestion. API and MCP startup logs had no error lines in the reviewed 15-minute window.
 - Production frontend readiness and a real Fundamental Analyst starter draft passed after backend replacement; no prompt was sent. Frontend deployment remains `dpl_789A8Gc5UziYCD4PxFc23dKPhaVZ`; subsequent documentation-only commits are not backend image revisions.
 
-**2026-10-05 financial-ratio natural-key repair (deployed):** Production
-`financial_ratios` only ever received the primary-key index;
-`uq_financial_ratio_symbol_period` (declared on the `FinancialRatio` model) never
-existed in the `vnibb` database (verified 2026-10-05: `pg_constraint` and
-`pg_indexes` show only `financial_ratios_pkey`). Because every ratio writer emits
-`INSERT ... ON CONFLICT (symbol, period, period_type)`, any natural-key upsert
-against that table fails with `InvalidColumnReferenceError: there is no unique or
-exclusion constraint matching the ON CONFLICT specification`. This is
-stamped-revision drift: no migration ever declared that constraint, and SQLAlchemy
-does not retro-fit model constraints onto an already-created table.
+**2026-10-05 financial-ratio natural-key repair (deployed):** Before the repair,
+a production census found only `financial_ratios_pkey` in `pg_constraint` and
+`pg_indexes` for `financial_ratios`; `uq_financial_ratio_symbol_period` was absent.
+The initial migration, `20260125_0842_1aaa2a1cf198_initial_schema.py:258`, already
+declares `UNIQUE (symbol, period, period_type)`. This establishes live-schema drift,
+not when or why it occurred. Without the constraint, the ratio writer's
+`INSERT ... ON CONFLICT (symbol, period, period_type)` fails with
+`InvalidColumnReferenceError: there is no unique or exclusion constraint matching
+the ON CONFLICT specification`.
 
 This is distinct from the recorded `financial_ratios_sync` durable failure above,
 whose `last_detail` is `exceeded 5400s` (a timeout, not a constraint error). The
@@ -144,16 +313,68 @@ the timeout to the constraint was observed.
 
 ### Build and publish the release image
 
-Build outside OCI. The release image is free-compatible when no premium secret is supplied. For a premium image, use BuildKit's secret mount and provide the installer SHA-256 out of band; never pass the API key with `--build-arg`.
+Build the credential-free image outside OCI. The Docker build rejects discoverable sponsor packages, including `vnii`; never reuse historical premium runtime mounts or supply sponsor installer credentials. Existing dated rollout evidence above is historical, not the current build policy.
 
 ```bash
 export IMAGE_RELEASE_REVISION="$(git rev-parse --verify HEAD)"
-export VNSTOCK_API_KEY_FILE=/secure/path/vnstock-api-key
-export VNSTOCK_INSTALLER_SHA256=<verified-installer-sha256>
 bash scripts/oracle/build_release_image.sh registry.example.com/vnibb/api:<release-tag>
 ```
 
 After publishing, resolve the registry's manifest digest and set `VNIBB_API_IMAGE_REPOSITORY=registry.example.com/vnibb/api` plus `VNIBB_API_IMAGE_DIGEST=sha256:<published-digest>` in `deployment/env.oracle`. Compose joins these fields as `repository@digest`, so a mutable tag cannot enter the release path. The image stores its build revision in `/app/.release-revision`; stale `RELEASE_REVISION` runtime keys cannot override health, logs, or Sentry. The identical image value is used by API, MCP, scheduler, and the one-shot migration service.
+
+Release smoke scripts use normal HTTPS certificate validation. A certificate or trust-chain failure blocks verification; repair the certificate/trust configuration instead of adding `--insecure`. `CURL_CA_BUNDLE` can select an explicitly trusted CA bundle when the deployment uses a private CA.
+
+### Bound local release and CI image storage
+
+Run this on the Docker host **after pulling the prepared immutable release**, after a successful rollout, and after each local CI build batch. Install the approved daily timer below so cleanup also runs when no release occurs. Build/publish off production; this procedure removes accumulated local artifacts, not registry images. Keep the independent rollback digest from the prior verified release, not a tag or a value copied from current health. Both protected images must already resolve locally; a missing prepared/rollback image stops even the plan. Do not substitute the current image for a missing rollback.
+
+```bash
+# Set these from reviewed release records; do not copy the literal placeholders.
+ROLLBACK_IMAGE='ghcr.io/kohnnn/vnibb-api@sha256:<verified-rollback-digest>'
+PREPARED_IMAGE='ghcr.io/kohnnn/vnibb-api@sha256:<reviewed-prepared-digest>'
+retention=(--repository ghcr.io/kohnnn/vnibb-api --workdir /app/VCIDataPlatform
+  --rollback-image "$ROLLBACK_IMAGE" --prepared-image "$PREPARED_IMAGE" --keep 2)
+python3 scripts/oracle/cleanup_images.py "${retention[@]}"
+# Review every full ID, references, WorkingDir and remove/keep decision above.
+# Save both JSON inventories in the private release evidence directory.
+python3 scripts/oracle/cleanup_images.py "${retention[@]}" --apply
+docker system df
+```
+
+The default is **plan only**. Explicit apply inventories full IDs before the first removal, rechecks all container references before each removal, and uses only `docker image rm --no-prune <full-ID>` without force. Mutable tags or digest references are never removal operands. Images with multiple local references are withheld for separate manual review, not automatically untagged. Every running **or stopped** container image, the configured rollback, and the pulled prepared release are protected. Each selected repository retains its newest two additional eligible unused images; the exact `/app/VCIDataPlatform` WorkingDir family retains its newest two **untagged** unused CI images. Unknown families, tagged CI images and images also referenced by an unselected repository are untouched. Count retention, not age, bounds eligible artifacts even during frequent builds. Protected/stopped-container images, multiple-reference images and excluded families can still grow: inspect the printed inventory and resolve those owners explicitly instead of widening scope silently. Pause builds/tag changes while reviewing/applying; Docker removal conflicts fail visibly and must be investigated before rerunning. Do not add `--force` to bypass Docker's guards.
+
+This procedure never removes containers, volumes, build cache, database history or backup sets. Do not replace it with `docker system prune`, `docker image prune -a` or any volume prune. Backup retention remains seven verified sets and is independent of image retention.
+
+#### Install the approved daily native timer
+
+The checked-in service is a bounded oneshot, not a daemon: Docker must be available, the required private environment file must exist, both immutable images must resolve, and failure remains visible in systemd/journal. It applies the same explicit repository and untagged CI WorkingDir scope as the reviewed plan, with a 300-second timeout and idle I/O/low CPU priority. The daily `Persistent=true` timer catches a missed run after boot; installation itself requires operator approval and is not performed by the source changes.
+
+After the plan above has been reviewed, confirm the reviewed checkout/helper is installed at `/srv/vnibb` and `/usr/bin/python3` is available. Install the units and a root-only file with the **actual** protected image values; no default digest is provided:
+
+```bash
+# ROLLBACK_IMAGE and PREPARED_IMAGE must be the reviewed local immutable images above.
+# PREPARED_IMAGE is the image selected by deployment/env.oracle, pulled before enabling.
+sudo install -d -m 0700 /etc/vnibb
+sudo install -m 0600 /dev/null /etc/vnibb/image-retention.env
+printf 'VNIBB_ROLLBACK_IMAGE=%s\nVNIBB_PREPARED_IMAGE=%s\n' \
+  "${ROLLBACK_IMAGE:?Set the verified rollback image}" \
+  "${PREPARED_IMAGE:?Set the pulled deployment image}" | \
+  sudo tee /etc/vnibb/image-retention.env >/dev/null
+sudo install -m 0644 deployment/vnibb-image-retention.service deployment/vnibb-image-retention.timer /etc/systemd/system/
+sudo systemd-analyze verify /etc/systemd/system/vnibb-image-retention.service /etc/systemd/system/vnibb-image-retention.timer
+sudo systemctl daemon-reload
+sudo systemctl start vnibb-image-retention.service
+sudo systemctl status vnibb-image-retention.service --no-pager
+sudo journalctl -u vnibb-image-retention.service -n 30 --no-pager
+sudo systemctl enable --now vnibb-image-retention.timer
+sudo systemctl list-timers vnibb-image-retention.timer --no-pager
+```
+
+The service journal contains the full-ID inventory and successful removals. Treat nonzero/failed units, missing protected images, growing withheld families or a missed daily run as operator failures to investigate, not successful retention. Check `systemctl --failed` and the service journal with routine host monitoring. Bound applies to the selected eligible families, not to live/stopped containers, manually withheld images or unrelated Docker data.
+
+Before a release pull or rollback, stop the timer and wait for any active oneshot to finish (`systemctl is-active vnibb-image-retention.service` must no longer report `active` or `activating`). Pull the new prepared image, update both entries in the root-only environment file from the independently reviewed release/rollback records, rerun the plan, then restart the timer. After successful deployment, leave `VNIBB_PREPARED_IMAGE` at the current selected deployment digest and retain the explicitly verified rollback digest. Never resume the timer with stale rollback/prepared configuration; the file does not auto-read Compose or infer release identity. To suspend automated application, use `sudo systemctl disable --now vnibb-image-retention.timer`; this does not remove images or volumes.
+
+
 
 ### Release the stack
 
@@ -226,16 +447,17 @@ BASE_URL="https://$SITE_HOSTNAME" bash scripts/oracle/healthcheck.sh
 
 ### Health checks
 
+Load `VNIBB_MCP_SHARED_BEARER_TOKEN` from the private secret store without printing it. Export `EXPECTED_REVISION` as the full SHA of the independently reviewed/published target release, not a value copied from production health. A dirty source baseline cannot identify a deployed image. The MCP wrapper requires this value; a mismatch is a failure, not a reason to change the target.
+
 ```bash
 bash scripts/oracle/healthcheck.sh
 bash scripts/oracle/smoke_test.sh
 bash scripts/oracle/runtime_verify.sh
-bash scripts/oracle/mcp_smoke_test.sh
-BASE_URL=http://127.0.0.1:8001 bash scripts/oracle/mcp_smoke_test.sh
+EXPECTED_REVISION="$EXPECTED_REVISION" BASE_URL=http://127.0.0.1:8001 bash scripts/oracle/mcp_smoke_test.sh
 BASE_URL=https://oracle-api.example.com bash scripts/oracle/healthcheck.sh
 CORS_TEST_ORIGIN=https://vnibb.vercel.app BASE_URL=https://oracle-api.example.com bash scripts/oracle/smoke_test.sh
 BASE_URL=https://oracle-api.example.com bash scripts/oracle/runtime_verify.sh
-BASE_URL=https://oracle-api.example.com bash scripts/oracle/mcp_smoke_test.sh
+EXPECTED_REVISION="$EXPECTED_REVISION" BASE_URL=https://oracle-api.example.com bash scripts/oracle/mcp_smoke_test.sh
 ```
 
 Notes:
@@ -244,6 +466,25 @@ Notes:
 - The MCP smoke script now defaults to `http://127.0.0.1:8001`, which matches the host-published `vnibb-mcp` port on OCI.
 - Override `CORS_TEST_ORIGIN` when validating a non-default frontend origin.
 - Set `VNIBB_MCP_SHARED_BEARER_TOKEN` in the shell before running the MCP smoke script against a protected deployment.
+
+### Read-only MCP acceptance gates
+
+The wrapper reuses `scripts/oracle/mcp_acceptance.py` for narrow smoke checks. Full acceptance uses the SDK client, current source-derived schemas/catalogue and actual call ledger; it performs no provider ingestion, Matrix writes, fixture creation or revocation. Run the full audit separately for local and deployed targets, retaining distinct report files and independently selected revision identities:
+
+```bash
+apps/api/.venv/bin/python scripts/oracle/mcp_acceptance.py \
+  --expected-revision "$EXPECTED_REVISION" \
+  --mcp-url https://oracle-api.example.com/mcp \
+  --health-url https://oracle-api.example.com/mcp-health \
+  --report /private/mcp-production-acceptance.json \
+  --identity-url "${SUPABASE_URL%/}/auth/v1/user" \
+  --matrix-fixtures /private/matrix-existing-fixtures.json
+```
+
+For local acceptance, use `--mcp-url http://127.0.0.1:8001/mcp`, `--health-url http://127.0.0.1:8001/health` and a separate report/expected build identity. The eight gates cover OHLC window/session/unit safety; financial period/source/unit/scale/basis; Mongo shape/scope; bounded discovery and schemas; authorization/scope/revision; redaction; verified-user Matrix ownership/selection/denials; and actual large nested results/arguments. Reports distinguish executed and unexecuted identifiers, preserve complete redacted nested responses and record source SHA-256; no advertised call count substitutes for observed execution. Defaults are 30 seconds per request and a finite 1,800-second whole-run deadline. Revision mismatch still permits read auditing but fails release identity.
+
+`VNIBB_MATRIX_OWNER_JWT` and `VNIBB_MATRIX_OTHER_JWT` must be distinct real active user sessions, verified through the issuing Auth `/auth/v1/user` endpoint; optional `VNIBB_MATRIX_AUTH_API_KEY` is supplied only through environment. Existing fixture JSON carries `owner_id`, `other_id`, `positive`, `expected_positive`, `revoked`, `invalid` and `export_denied`; selection arguments use `snapshot_id`/`result_ids`, and `expected_positive` is the exact expected packet. A service key, signing secret or shared deployment bearer cannot replace active user sessions. Missing sessions/fixtures keep mandatory Matrix acceptance BLOCKED. Unknown financial units/basis remain PARTIAL; empty results do not pass content gates, and unsupported TTM/provider-history claims remain separate from successful reads.
+
 
 ### Log review
 
@@ -399,7 +640,7 @@ and `/health/` revision rather than candidate naming to identify production.
 **2026-09-27 fresh-cap follow-up (historical observation):** Kalshi filled
 the historical 10,000-row source quota, refusing new markets. The follow-up
 code counts only fresh eligible contracts toward that quota while retaining
-older catalogue history; the independent 16 GiB physical guard remains.
+older catalogue history; the then-current independent physical guard was 16 GiB.
 At that session, 52 prediction tests and a full backend run (976 passed,
 one skipped) passed. The existing `(source, updated_at DESC, id)` partial
 index served the fresh-cap query without a new migration; catalogue-retention
@@ -424,6 +665,29 @@ scheduler were healthy on digest
 The fresh-cap image above is therefore not currently serving. Do not treat
 the candidate manifest or previous smoke as proof of a live fresh-cap rollout;
 verify the container pin, migration head and actual ingestion after deployment.
+
+**Prediction storage policy hardening (source change, not deployment proof):**
+The catalogue admission ceiling is now **4 GiB**, and the combined daily plus
+intraday snapshot ceiling is **1 GiB**, measured with `pg_total_relation_size`
+including indexes/TOAST plus conservative mutation reserves. Both fail closed;
+an already allocated relation near its ceiling can stop writes even after deletes.
+These are application admission guards, **not filesystem quotas**. Archives,
+WAL, backups, unrelated data and direct-SQL bypasses remain outside them.
+
+The stable `prediction_market_catalogue_retention` job now runs hourly at
+**:40 UTC**, independently of provider ingestion, with the same maximum
+**12 × 5,000 = 60,000 rows per sweep** and 30-minute timeout. Eligibility is
+unchanged: real rows unrefreshed for seven days, excluding inactive-and-closed,
+synthetic and archive-owned rows. Daily history remains 30 days and intraday
+history seven days. Copied observations survive catalogue pruning. A final
+bounded existence probe marks unfinished cleanup `partial`; failure/timeout
+remain distinct. Inspect this job in `/api/v1/data/sync/status` and inventory
+relation allocation and host free space before any operator-approved deletion.
+Prediction-only dry run: `python -m vnibb.services.prediction_market_catalogue_retention --limit 5000`.
+Ordinary deletion only makes PostgreSQL pages reusable; it does not guarantee
+filesystem shrinkage. Do not raise guards, automatically archive terminal rows,
+or run `VACUUM FULL` as a workaround. See [retention policy](data_retention_partitioning.md#prediction-market-storage-limits).
+
 
 The 200 GB boot volume filled; PostgreSQL could not start and Redis AOF writes
 failed with `ENOSPC`. Reclaiming unused build caches and an off-host-verified

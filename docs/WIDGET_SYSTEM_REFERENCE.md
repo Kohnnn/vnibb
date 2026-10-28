@@ -35,6 +35,14 @@ Layout note:
 - Widget-library size badges are derived from that contract so the displayed size matches actual widget insertion behavior.
 - `widgetDefinitions.ts` and `WidgetRegistry.ts` keep mirrored defaults for discoverability, but the layout contract remains the operative source of truth.
 
+## News Association Labels
+
+Company and related-news ranking is rule-based, not a calibrated probability. The UI shows the association reason and `rank N/100`; peer and sector matches are indirect, and a provider-related symbol is provider metadata rather than independent verification.
+
+Ticker matches require complete case-insensitive tokens in article title/body. Company-name matches require the complete stored short name or company name (without its legal prefix), not isolated words such as `high` or `tech`. Exact body mentions remain supported even when the title does not name the ticker. Broad sector context remains explicitly indirect; no score threshold was raised to hide uncertain rows.
+
+The October 2026 investigation of issue #107 confirmed MSR Apple/MDP/air-purifier articles had no MSR/company-name evidence in their primary bodies. Lowercase substring boundaries also allowed VNM football articles to match peer ticker `ANT` inside ordinary words. Provider entity tags, generic industry classifications, and archived article freshness are not certified by these local matching repairs.
+
 ## Canonical Widget IDs
 
 Use canonical IDs in templates, migrations, docs, and runtime logic.
@@ -323,14 +331,24 @@ ManifoldWidget) is now a one-liner.
 
 ### One-shot populate (Phase v2.x)
 
-`apps/api/vnibb/services/populate_prediction_markets.py`
-runs a sequenced pass over every source, falls back to offline seed
-fixtures when a live API is unreachable, fires the nightly + intraday
-snapshot jobs, and backfills the snapshot table when fewer than 100 rows
-exist. It's scheduled by the scheduler boot guard as a one-shot job,
-and exposed via `populate_prediction_markets_now()` so deployments can
-invoke it from a CLI script (see
-`apps/api/vnibb/scripts/populate_prediction_markets.py`).
+`apps/api/vnibb/services/populate_prediction_markets.py` runs a sequenced
+live-provider pass over Polymarket, Kalshi, PredictIt, Limitless and Manifold,
+then attempts nightly and intraday snapshots. Failed providers return a zero
+ingest count and appear in `failed_sources`; outages never insert offline
+fixtures as market observations. Snapshot failures appear in `failed_snapshots`
+as `nightly_snapshot` or `intraday_snapshot`; a successful empty bucket has a zero
+count without a failure label. Both snapshot attempts run even after provider
+failures. The startup scheduler records the returned counts in prediction health
+and marks the guarded job failed if either failure list is nonempty.
+
+Daily (30-day), intraday (seven-day), and stale nonterminal catalogue (seven-day)
+retention remain independent scheduled jobs, so failed fetches do not skip cleanup.
+Catalogue cleanup caps each caller-requested batch at 5,000 rows and rejects
+nonpositive limits; terminal, archived, and synthetic catalogue rows remain protected.
+The general retention sweep attempts every independent cleanup action and terminal
+market dry-run before raising with all failed labels; failures cannot be announced
+as successful cleanup. Terminal market deletion still requires archive-first
+operator approval and verified backup/isolated restore evidence.
 
 ## Dashboard Persistence Hardening (Phase 0)
 
@@ -545,12 +563,18 @@ Widget library UX rules:
 - Widget headers measure available space. Narrow headers retain the title/maximize action and expose remaining controls in a keyboard-accessible panel; menus render outside card clipping and return focus to their trigger.
 - Desktop-only layout editing applies to both pointer and keyboard. Native Tab navigation reaches widget controls; arrow layout shortcuts apply only to the focused widget panel, never a nested control.
 - The Price Chart header and body use the same timeframe/mode domain and persist edits on personal dashboards. Supported modes are candles, line and area; legacy saved values are normalized when read.
+- Native chart crosshairs show admitted-row OHLCV for candle, line and area modes. Unit, selected adjustment mode and returned session/coverage metadata remain visible; absent metadata is Unknown and missing volume is not zero.
 
 ### Local Workspace Backup
 
 Use **Backup workspaces** in the sidebar to download personal dashboard configuration, including tabs, authored layouts, widget configuration, folders, global/A–D ticker groups, and the profile-linked TradingView ticker for dashboards without their own saved ticker. This is distinct from single-layout template export; it does not flatten tabs.
 
 Restore accepts the versioned `vnibb-personal-workspace` JSON format up to 5 MB, validates it, previews names/counts, and imports fresh local copies only after confirmation. Existing dashboards remain unchanged. Imported IDs are excluded from backend synchronization; their ticker groups and linked TradingView ticker are scoped independently of system layouts. Retired widget type aliases are normalized to canonical ids during import so restored widgets resolve in the registry. Invalid versions, unknown widgets, impossible geometry, unsafe configuration and storage failures are reported rather than silently dropping content.
+
+Optional backend dashboard synchronization preserves the native linked
+`globalMarketsSymbol` and global/A–D `widgetGroups` inside `layout_config`, on
+create, update and reload. Older records without those fields retain shared/app
+defaults; imported `import-` copies remain excluded from synchronization.
 
 System/admin layouts, authentication, settings, saved templates and unrelated browser storage are not exported. Widget configuration and user-entered content are included; review a backup before sharing. Known credential keys are rejected, but the backup is not an encrypted vault or a complete browser-profile backup. Notes or artifacts stored outside widget configuration are outside this export.
 
@@ -566,13 +590,19 @@ A promoted widget carries `config.copilotArtifactProvenance` (`artifactId`, `res
 
 A widget's ticker either follows its group or is kept locally. The widget header states which, and switching groups never rewrites a local ticker; "Follow <Group>" returns the widget to the group and adopts the group's *current* ticker. Widgets whose provider links are fixed (the TradingView embeds) never adopt a new ticker on a group change. Ticker scope and period scope are separate channels.
 
+The header ticker picker updates a detached widget locally, including native widgets; linked widgets retain group broadcast behavior. It never changes peers when a local override is active.
+
 ### Table Selection
 
 Dense financial tables expose selectable metric rows and sortable period columns. A supported metric selection charts that series and shows its label in the chart header; clicking a period column continues sorting the table rather than claiming an unchartable period series. Selection is view state and is never persisted into widget config. The active metric selection is included in the widget's runtime payload so the copilot can target it.
 
+Expanded financial-series axes and tooltips use the table's selected currency and scale. TTM tables and snapshots disclose returned source periods, flow-versus-latest-quarter aggregation basis and unsupported EPS reasons; these labels do not certify supplier truth.
+
 ### Research Starters
 
 A starter binds one template to its VniAgent prompt. Applying a starter-bound template shows its purpose and how its widgets handle tickers, seeds the workspace, and primes the agent through the same channel the onboarding walkthrough uses. Templates remain the composition mechanism; there is no second gallery.
+
+Copilot evidence offers outbound links only for HTTP(S) source URLs. Changing workspace, tab, ticker or widget cancels the active stream and discards obsolete callbacks; New Chat also cancels it.
 
 ### Widget Chrome Placement
 
@@ -584,6 +614,11 @@ Widget chrome (view toggles, parameters, period controls) must remain accessible
 - `WidgetMeta` can render explicit health badges such as cached snapshot, stale snapshot, limited history, coverage gap, and awaiting snapshot.
 - `WidgetEmpty` can render the same health labels plus a short explanatory detail line.
 - Use these explicit states when the widget is functioning correctly but the upstream feed is sparse, stale, cached, or not yet published.
+- ATR Regime reports the historical observation date (`freshness_as_of`, then
+  `last_data_date`, then the final bar time), not query receipt time. Missing
+  observation dates remain unknown. Partial coverage, unconfirmed/mixed units,
+  source fallback and refresh failures appear in the existing widget note and
+  runtime/export provenance; receiving old observations now does not make them live.
 
 Current first-wave coverage includes:
 

@@ -8,10 +8,10 @@ import logging
 import math
 import re
 import unicodedata
-from bisect import bisect_right
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Literal, Optional
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -23,8 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.core.cache import build_cache_key, cached, redis_client
 from vnibb.core.config import settings
-from vnibb.core.database import get_db
-from vnibb.core.exceptions import ProviderTimeoutError
+from vnibb.core.database import async_session_factory, get_db
+from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
+from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.company import Company, Shareholder
 
@@ -64,6 +66,7 @@ from vnibb.providers.vnstock.financials import (
     FinancialStatementData,
     StatementType,
     VnstockFinancialsFetcher,
+    admitted_interest_expense,
 )
 from vnibb.providers.vnstock.foreign_trading import (
     ForeignTradingData,
@@ -87,9 +90,13 @@ from vnibb.services.cache_manager import CacheManager
 from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_pipeline import CACHE_TTL_ORDERBOOK, CACHE_TTL_ORDERBOOK_DAILY
 from vnibb.services.data_quality import is_market_business_day
-from vnibb.services.financial_service import get_financials_with_ttm, normalize_statement_period
+from vnibb.services.financial_service import admit_statement_rows, build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
+from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
+from vnibb.services.vietcap_client import VietcapClient
+from vnibb.services.vietcap_financials import persist_vietcap_financials
+from vnibb.services.vietcap_ingestion import FinancialAcquisitionPartial, sync_symbol_financials
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -108,6 +115,16 @@ VN30_PRIORITY_SYMBOLS = {
 class TransactionFlowPoint(BaseModel):
     date: str
     price: Optional[float] = None
+    flow_scope: str = "unknown"
+    coverage: Optional[Dict[str, Any]] = None
+    observed_buy_value: Optional[float] = None
+    observed_sell_value: Optional[float] = None
+    observed_gross_value: Optional[float] = None
+    observed_net_value: Optional[float] = None
+    observed_buy_volume: Optional[int] = None
+    observed_sell_volume: Optional[int] = None
+    observed_volume: Optional[int] = None
+    observed_net_volume: Optional[int] = None
     total_buy_value: Optional[float] = None
     total_sell_value: Optional[float] = None
     total_gross_value: Optional[float] = None
@@ -243,7 +260,12 @@ async def _refresh_profile_cache(symbol: str) -> None:
         if not profile_data:
             logger.warning(f"Profile refresh returned empty data (symbol={symbol})")
             return
-        await cache_manager.store_profile_data(symbol, profile_data.model_dump(mode="json"))
+        stored = await cache_manager.store_profile_data(
+            symbol, profile_data.model_dump(mode="json")
+        )
+        if not stored:
+            logger.warning("Background profile cache write failed (symbol=%s)", symbol)
+            return
         logger.info(f"Background profile refresh complete (symbol={symbol})")
     except BaseException as e:
         if _is_control_flow_exception(e):
@@ -289,7 +311,7 @@ async def _load_financial_statement_fallback(
     )
     if quarter_filter is not None:
         stmt = stmt.where(model.fiscal_quarter == quarter_filter)
-    stmt = stmt.limit(max(limit, 4) if period_upper == "TTM" else limit)
+    stmt = stmt.limit(max(limit, 8) if period_upper == "TTM" else limit)
 
     result = await db.execute(stmt)
     rows = result.scalars().all()
@@ -297,15 +319,7 @@ async def _load_financial_statement_fallback(
     fallback_rows = [
         FinancialStatementData(
             symbol=row.symbol,
-            period=(
-                normalize_statement_period(
-                    row.period,
-                    fiscal_year=row.fiscal_year,
-                    fiscal_quarter=row.fiscal_quarter,
-                    period_type=row.period_type,
-                )
-                or row.period
-            ),
+            period=row.period,
             statement_type=statement_type,
             fiscal_year=row.fiscal_year,
             fiscal_quarter=row.fiscal_quarter,
@@ -374,6 +388,31 @@ async def _load_financial_statement_fallback(
         )
         for row in rows
     ]
+    for index, (row, statement) in enumerate(zip(rows, fallback_rows, strict=True)):
+        raw = getattr(row, "raw_data", None) or {}
+        lineage = raw.get("_financial_lineage") or {}
+        canonical = lineage.get("canonical_data")
+        if isinstance(canonical, dict):
+            restored = FinancialStatementData.model_validate(canonical)
+            stored_identity = (statement.period, statement.fiscal_year, statement.fiscal_quarter)
+            restored_identity = (restored.period, restored.fiscal_year, restored.fiscal_quarter)
+            if _financial_statement_identity(statement) != _financial_statement_identity(restored):
+                restored = admit_statement_rows([restored.model_copy(update={
+                    "period": stored_identity[0], "fiscal_year": restored_identity[1],
+                    "fiscal_quarter": restored_identity[2],
+                })], period)[0]
+                restored.unavailable_reason = "conflicting_fiscal_identity"
+                for name in FinancialStatementData.model_fields:
+                    if name not in {"fiscal_year", "fiscal_quarter"} and isinstance(getattr(restored, name), (int, float)):
+                        setattr(restored, name, None)
+            restored.raw_data = raw
+            fallback_rows[index] = restored
+            statement = restored
+        else:
+            statement.source = getattr(row, "source", None)
+            statement.unit_metadata = {"basis": {"unavailable_reason": "legacy_unit_basis_unconfirmed"}}
+        statement.updated_at = getattr(row, "updated_at", None)
+    fallback_rows = admit_statement_rows(fallback_rows, "quarter" if period_upper == "TTM" else period)
 
     if period_upper == "TTM":
         return _build_ttm_financial_statement_rows(fallback_rows, statement_type=statement_type)
@@ -386,8 +425,9 @@ async def _load_mongo_financial_statement_rows(
     statement_type: str,
     period: str,
     limit: int,
+    records: list[dict[str, Any]] | None = None,
 ) -> list[FinancialStatementData]:
-    """Read raw vnstock financial statement records from Mongo when configured."""
+    """Read descriptor-backed IQ statements before verified free-VCI records."""
 
     dataset_map = {
         "income": "finance.income_statement",
@@ -413,30 +453,68 @@ async def _load_mongo_financial_statement_rows(
     requested_period = str(period or "year").strip().upper()
     normalized_period = "quarter" if requested_period in {"QUARTER", "Q", "Q1", "Q2", "Q3", "Q4", "TTM"} else "year"
     service = get_mongo_market_data_service()
-    if not service.enabled:
+    if not service.enabled and records is None:
         return []
 
-    raw_records = await service.get_raw_dataset_records(
-        symbol,
-        dataset=dataset,
-        variant=_financial_dataset_variant(dataset, requested_period),
-        limit=max(limit * 4, 80),
-    )
-    raw_rows = [row.get("raw") for row in raw_records if isinstance(row.get("raw"), dict)]
-    if not raw_rows:
-        return []
+    from vnibb.services.vietcap_financials import load_vietcap_financial_rows
 
-    rows = VnstockFinancialsFetcher.transform_data(
-        FinancialsQueryParams(
-            symbol=symbol,
-            statement_type=provider_statement_type,
-            period=normalized_period,  # type: ignore[arg-type]
-            limit=min(max(limit, 1), 40),
-        ),
-        raw_rows,
+    read_limit = min(max(limit * 4, 80), 5000)
+    iq_rows = await load_vietcap_financial_rows(
+        symbol, dataset, normalized_period, limit=read_limit, records=records,
     )
+    rows: list[FinancialStatementData] = []
+    for iq_row in iq_rows:
+        payload = iq_row.model_dump()
+        payload["statement_type"] = provider_statement_type.value
+        for source_field, target_field in {
+            "profit_before_tax": "pre_tax_profit", "equity": "total_equity",
+            "cash": "cash_and_equivalents", "receivables": "accounts_receivable",
+            "net_cash_flow": "net_change_in_cash", "capital_expenditure": "capex",
+        }.items():
+            if source_field in payload:
+                payload[target_field] = payload[source_field]
+                if source_field in payload.get("unit_metadata", {}):
+                    payload["unit_metadata"][target_field] = payload["unit_metadata"][source_field]
+        rows.append(FinancialStatementData.model_validate(payload))
+    if not rows:
+        if records is not None:
+            return []
+        raw_records = await service.get_raw_dataset_records_precise(
+            symbol, dataset=dataset, variant=_financial_dataset_variant(dataset, requested_period),
+            limit=read_limit,
+        )
+        raw_rows = []
+        for record in raw_records:
+            raw = record.get("raw")
+            if not isinstance(raw, dict):
+                continue
+            source = str(record.get("providerSource") or record.get("source") or "").upper()
+            if source != "VCI":
+                continue
+            lineage = raw.get("_financial_lineage") or {}
+            if isinstance(lineage.get("canonical_data"), dict):
+                prepared = dict(lineage["canonical_data"])
+                prepared["raw_data"] = raw
+            else:
+                prepared = dict(raw)
+            prepared["_source"] = "VCI"
+            prepared["_source_envelope"] = {key: value for key, value in record.items() if key != "raw"}
+            raw_rows.append(prepared)
+        if not raw_rows:
+            return []
+        rows = VnstockFinancialsFetcher.transform_data(
+            FinancialsQueryParams(
+                symbol=symbol, statement_type=provider_statement_type,
+                period=normalized_period,  # type: ignore[arg-type]
+                limit=min(max(limit, 1), 40),
+            ),
+            raw_rows,
+        )
     if requested_period == "TTM":
-        return _build_ttm_financial_statement_rows(rows, statement_type=statement_type)
+        ttm_rows = _build_ttm_financial_statement_rows(rows, statement_type=provider_statement_type.value)
+        if iq_rows:
+            ttm_rows = [row.model_copy(update={"source": "vietcap"}) for row in ttm_rows]
+        return ttm_rows
     if requested_period in {"Q1", "Q2", "Q3", "Q4"}:
         rows = [row for row in rows if str(row.period or "").upper().startswith(f"{requested_period}-")]
     rows = _sort_financial_statement_rows(rows)
@@ -449,7 +527,7 @@ async def _load_mongo_financial_ratio_rows(
     *,
     limit: int = 80,
 ) -> list[FinancialRatioData]:
-    """Read raw vnstock financial ratio records from Mongo when configured."""
+    """Read descriptor-backed IQ ratios before verified free-VCI records."""
 
     requested_period = str(period or "year").strip().upper()
     normalized_period = "year" if requested_period in {"YEAR", "FY"} else "quarter"
@@ -457,13 +535,25 @@ async def _load_mongo_financial_ratio_rows(
     if not service.enabled:
         return []
 
-    raw_records = await service.get_raw_dataset_records(
-        symbol,
-        dataset="finance.ratio",
-        variant=_financial_dataset_variant("finance.ratio", requested_period),
-        limit=max(limit * 4, 120),
+    from vnibb.services.vietcap_financials import load_vietcap_financial_rows
+
+    read_limit = min(max(limit * 4, 120), 5000)
+    rows = await load_vietcap_financial_rows(symbol, "finance.ratio", normalized_period, limit=read_limit)
+    if rows:
+        rows = [row.model_copy(update={"period": _normalize_ratio_period(row.period) or row.period}) for row in rows]
+        return _filter_ratio_rows_for_period(_dedupe_ratio_rows(rows), period)[-limit:]
+
+    raw_records = await service.get_raw_dataset_records_precise(
+        symbol, dataset="finance.ratio",
+        variant=_financial_dataset_variant("finance.ratio", requested_period), limit=read_limit,
     )
-    raw_rows = [row.get("raw") for row in raw_records if isinstance(row.get("raw"), dict)]
+    raw_rows = [
+        {**record["raw"], "_source": "VCI",
+         "_source_envelope": {key: value for key, value in record.items() if key != "raw"}}
+        for record in raw_records
+        if isinstance(record.get("raw"), dict)
+        and str(record.get("providerSource") or record.get("source") or "").upper() == "VCI"
+    ]
     if not raw_rows:
         return []
 
@@ -502,68 +592,9 @@ async def _load_mongo_financial_ratio_rows(
 
 
 def _build_ttm_financial_statement_rows(
-    rows: list[FinancialStatementData],
-    *,
-    statement_type: str,
+    rows: list[FinancialStatementData], *, statement_type: str
 ) -> list[FinancialStatementData]:
-    quarter_rows = [
-        row for row in _sort_financial_statement_rows(rows) if "Q" in str(row.period or "").upper()
-    ]
-    if not quarter_rows:
-        return []
-
-    latest = quarter_rows[-1]
-    if statement_type in {"balance", "balance_sheet"}:
-        payload = latest.model_dump(mode="json")
-        payload["period"] = "TTM"
-        return [FinancialStatementData.model_validate(payload)]
-
-    source_rows = quarter_rows[-4:]
-    if len(source_rows) < 4:
-        return []
-
-    def sum_metric(field_name: str) -> float | None:
-        values = []
-        for row in source_rows:
-            value = getattr(row, field_name, None)
-            if isinstance(value, (int, float)):
-                values.append(float(value))
-        return sum(values) if values else None
-
-    payload = latest.model_dump(mode="json")
-    payload["period"] = "TTM"
-
-    for field_name in [
-        "revenue",
-        "cost_of_revenue",
-        "gross_profit",
-        "operating_income",
-        "pre_tax_profit",
-        "profit_before_tax",
-        "tax_expense",
-        "interest_expense",
-        "depreciation",
-        "selling_general_admin",
-        "research_development",
-        "other_income",
-        "net_income",
-        "ebitda",
-        "operating_cash_flow",
-        "investing_cash_flow",
-        "financing_cash_flow",
-        "free_cash_flow",
-        "net_change_in_cash",
-        "net_cash_flow",
-        "capex",
-        "capital_expenditure",
-        "dividends_paid",
-        "stock_repurchased",
-        "debt_repayment",
-    ]:
-        payload[field_name] = sum_metric(field_name)
-
-    payload["raw_data"] = latest.raw_data
-    return [FinancialStatementData.model_validate(payload)]
+    return build_ttm_statement_rows(rows, statement_type)
 
 
 def _financial_dataset_variant(dataset: str, period: str) -> str:
@@ -572,81 +603,29 @@ def _financial_dataset_variant(dataset: str, period: str) -> str:
     return f"{dataset}.{suffix}"
 
 
-def _build_ratio_ttm_rows(rows: List[FinancialRatioData]) -> List[FinancialRatioData]:
-    usable_rows = [row for row in rows if _ratio_has_metric_value(row)]
-    ordered_rows = sorted(usable_rows or rows, key=lambda item: _ratio_period_sort_key(item.period))
-    latest = ordered_rows[-1] if ordered_rows else None
-    if latest is None:
-        return []
+# Rejected provider metrics also invalidate the alias columns that mirror them.
+_FINANCIAL_METRIC_ALIASES = {
+    "total_equity": ("equity",),
+    "cash_and_equivalents": ("cash",),
+    "net_change_in_cash": ("net_cash_flow",),
+    "capex": ("capital_expenditure",),
+}
 
-    payload = latest.model_dump(mode="json")
-    payload["period"] = "TTM"
 
-    # QA-v3 F1: Build a real TTM payload by summing the most recent 4
-    # quarterly rows (and inheriting any field that's already present in
-    # the latest row). Without this, EV/EBITDA TTM and EPS TTM remained
-    # null even when 4 quarterly values were available.
-    quarterly_rows = [
-        row
-        for row in ordered_rows
-        if "Q" in str(row.period or "").upper()
-    ]
-    last4 = quarterly_rows[-4:]
+def _field_metric_rejected(item: FinancialStatementData, field_name: str) -> bool:
+    """True when a provider field was explicitly rejected, so it must stay unavailable.
 
-    def _sum_attr(attr: str) -> float | None:
-        values: list[float] = []
-        for row in last4:
-            val = getattr(row, attr, None)
-            if isinstance(val, (int, float)) and val == val:
-                values.append(float(val))
-        return sum(values) if len(values) == 4 else None
-
-    if len(last4) == 4:
-        for attr in ("eps", "dps"):
-            ttm_value = _sum_attr(attr)
-            if ttm_value is not None:
-                payload[attr] = ttm_value
-
-    # If `ev_ebitda` is null on the latest row but we have an annual
-    # entry with a value, inherit it as a working approximation. This
-    # is an explicit fallback rather than a fabricated computation.
-    if not payload.get("ev_ebitda"):
-        for row in reversed(ordered_rows):
-            value = getattr(row, "ev_ebitda", None)
-            if isinstance(value, (int, float)) and value == value and value > 0:
-                payload["ev_ebitda"] = float(value)
-                break
-
-    # DQ remediation 2026-06-08 (DQ-019): the TTM payload was built from a single
-    # latest quarter row, so point-in-time sections (LIQUIDITY/EFFICIENCY/
-    # PROFITABILITY/LEVERAGE/COVERAGE/OCF/GROWTH) that happened to be null on that
-    # one quarter were dropped entirely, leaving TTM showing only VALUATION+DIVIDEND.
-    # Inherit each missing ratio field from the most recent row that carries a value
-    # (most-recent-available convention) so those sections render. Flow-summed metrics
-    # (eps/dps) handled above keep their TTM sums.
-    _ttm_summed = {"eps", "dps"}
-    candidate_fields = [
-        name
-        for name in latest.model_dump(mode="json").keys()
-        if name not in {"period", "symbol"} and name not in _ttm_summed
-    ]
-    for attr in candidate_fields:
-        current = payload.get(attr)
-        if isinstance(current, (int, float)) and current == current:
-            continue  # already populated on the latest row
-        for row in reversed(ordered_rows):
-            value = getattr(row, attr, None)
-            if isinstance(value, (int, float)) and value == value:
-                payload[attr] = float(value)
-                break
-
-    return [FinancialRatioData.model_validate(payload)]
+    A rejected metric is not a missing value: merging or reconstructing it would
+    present a number the provider lineage refused to certify.
+    """
+    metadata = item.unit_metadata.get(field_name)
+    return isinstance(metadata, dict) and bool(metadata.get("unavailable_reason"))
 
 
 def _financial_statement_identity(item: FinancialStatementData) -> tuple[str, int, int]:
-    period_text = normalize_statement_period(getattr(item, "period", "")) or str(
-        getattr(item, "period", "") or ""
-    )
+    period_text = normalize_statement_period(
+        getattr(item, "period", ""), fiscal_year=item.fiscal_year, fiscal_quarter=item.fiscal_quarter,
+    ) or str(getattr(item, "period", "") or "")
     year_match = re.search(r"(20\d{2})", period_text.upper())
     quarter_match = re.search(r"Q([1-4])", period_text.upper())
     fiscal_year = getattr(item, "fiscal_year", None)
@@ -675,15 +654,100 @@ def _merge_financial_statement_rows(
         identity = _financial_statement_identity(item)
         seen.add(identity)
         fallback = fallback_lookup.get(identity)
+        if (identity == ("TTM", 0, 0)
+                and item.unavailable_reason in {"missing_quarterly_source_data", "ttm_calculation_failed"}
+                and not (item.source or item.value_unit or item.source_periods or item.raw_data or item.unit_metadata)):
+            candidates = [candidate for candidate in fallback_rows
+                if candidate.period.upper().startswith("TTM")
+                and (candidate.symbol.upper(), candidate.statement_type) == (item.symbol.upper(), item.statement_type)]
+            if len(candidates) == 1:
+                candidate = admit_statement_rows(candidates, "TTM")[0]
+                if candidate.unavailable_reason and candidate.source_periods and (candidate.raw_data or {}).get("source_rows"):
+                    for field_name in FinancialStatementData.model_fields:
+                        if field_name not in {"fiscal_year", "fiscal_quarter"} and isinstance(getattr(candidate, field_name), (int, float)):
+                            setattr(candidate, field_name, None)
+                    merged.append(candidate)
+                    seen.add(_financial_statement_identity(candidate))
+                    continue
+                if not candidate.unavailable_reason:
+                    fallback = candidate
         if fallback is None:
             merged.append(item)
             continue
+        if (item.symbol.upper(), item.statement_type) != (fallback.symbol.upper(), fallback.statement_type):
+            merged.append(item)
+            continue
+        if (
+            identity[0] == "TTM"
+            and item.unavailable_reason in {"missing_quarterly_source_data", "ttm_calculation_failed"}
+            and not (item.source or item.value_unit or item.source_periods or item.raw_data or item.unit_metadata)
+            and not fallback.unavailable_reason
+            and fallback.source
+            and fallback.value_unit == "VND"
+            and fallback.consolidation_basis is not None
+            and fallback.source_periods
+            and (
+                (fallback.aggregation_basis, fallback.flow_basis) == ("four_quarter_flow_sum", "trailing_twelve_months")
+                or (item.statement_type == "balance" and fallback.aggregation_basis == "latest_quarter_snapshot")
+            )
+        ):
+            merged.append(fallback)
+            seen.add(_financial_statement_identity(fallback))
+            continue
+        snapshot_merge = (item.period.upper().startswith("TTM")
+            and item.statement_type in {"balance", "balance_sheet"}
+            and item.aggregation_basis == "latest_quarter_snapshot")
+        if snapshot_merge:
+            item, fallback = admit_statement_rows([item, fallback], "TTM")
+            if (fallback.aggregation_basis != "latest_quarter_snapshot"
+                    or item.source_periods != fallback.source_periods or item.source != fallback.source):
+                merged.append(item)
+                continue
+        if item.unavailable_reason or fallback.unavailable_reason:
+            merged.append(item)
+            continue
+        primary_basis = {str(value.get("consolidation_basis")) for value in item.unit_metadata.values()}
+        fallback_basis = {str(value.get("consolidation_basis")) for value in fallback.unit_metadata.values()}
+        if (item.source or fallback.source) and (item.value_unit != "VND" or fallback.value_unit != "VND"):
+            merged.append(item)
+            continue
+        if (item.consolidation_basis, item.flow_basis) != (fallback.consolidation_basis, fallback.flow_basis):
+            merged.append(item)
+            continue
+        if item.value_unit != fallback.value_unit or primary_basis != fallback_basis:
+            merged.append(item)
+            continue
+        if snapshot_merge:
+            # Merge the admitted quarter evidence, not the derived snapshot scalars.
+            source = _merge_financial_statement_rows(
+                [FinancialStatementData.model_validate(item.raw_data["source_rows"][0])],
+                [FinancialStatementData.model_validate(fallback.raw_data["source_rows"][0])],
+            )[0]
+            merged.append(source.model_copy(update={
+                "period": item.period, "aggregation_basis": item.aggregation_basis,
+                "source_periods": item.source_periods, "raw_data": {
+                    "primary": item.raw_data, "fallback": fallback.raw_data,
+                    "source_rows": [source.model_dump(mode="json")],
+                },
+            }))
+            continue
+        item = item.model_copy(deep=True)
+        for field_name in FinancialStatementData.model_fields:
+            rejected = item if _field_metric_rejected(item, field_name) else fallback
+            if _field_metric_rejected(rejected, field_name):
+                setattr(item, field_name, None)
+                item.unit_metadata[field_name] = rejected.unit_metadata[field_name]
 
         payload = item.model_dump(mode="json")
         fallback_payload = fallback.model_dump(mode="json")
         for field_name in FinancialStatementData.model_fields:
+            if _field_metric_rejected(item, field_name) or _field_metric_rejected(fallback, field_name):
+                continue
             if payload.get(field_name) is None and fallback_payload.get(field_name) is not None:
                 payload[field_name] = fallback_payload[field_name]
+                if field_name in fallback.unit_metadata:
+                    payload["unit_metadata"][field_name] = fallback.unit_metadata[field_name]
+        payload["raw_data"] = {"primary": item.raw_data, "fallback": fallback.raw_data}
         merged.append(FinancialStatementData.model_validate(payload))
 
     for item in fallback_rows:
@@ -694,48 +758,6 @@ def _merge_financial_statement_rows(
     return merged
 
 
-_STATEMENT_SCALE_FIELDS = {
-    "revenue", "gross_profit", "operating_income", "net_income", "ebitda",
-    "cost_of_revenue", "pre_tax_profit", "profit_before_tax", "tax_expense",
-    "interest_expense", "depreciation", "selling_general_admin", "research_development",
-    "other_income", "total_assets", "total_liabilities", "total_equity",
-    "cash_and_equivalents", "equity", "cash", "inventory", "current_assets",
-    "fixed_assets", "current_liabilities", "long_term_liabilities", "retained_earnings",
-    "short_term_debt", "long_term_debt", "accounts_receivable", "accounts_payable",
-    "customer_deposits", "goodwill", "intangible_assets", "operating_cash_flow",
-    "investing_cash_flow", "financing_cash_flow", "free_cash_flow", "net_change_in_cash",
-    "net_cash_flow", "capex", "capital_expenditure", "dividends_paid", "stock_repurchased",
-    "debt_repayment",
-}
-
-
-def _median_abs(values: list[float]) -> float | None:
-    finite = sorted(abs(value) for value in values if math.isfinite(value) and value != 0)
-    if not finite:
-        return None
-    midpoint = len(finite) // 2
-    if len(finite) % 2:
-        return finite[midpoint]
-    return (finite[midpoint - 1] + finite[midpoint]) / 2
-
-
-def _normalize_statement_unit_outliers(rows: list[FinancialStatementData]) -> list[FinancialStatementData]:
-    if len(rows) < 3:
-        return rows
-    for field_name in _STATEMENT_SCALE_FIELDS:
-        values = [float(getattr(row, field_name)) for row in rows if isinstance(getattr(row, field_name, None), (int, float))]
-        baseline = _median_abs(values)
-        if baseline is None or baseline <= 0:
-            continue
-        for row in rows:
-            value = getattr(row, field_name, None)
-            if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-                continue
-            abs_value = abs(float(value))
-            scaled_abs = abs_value / 1000
-            if abs_value > baseline * 100 and baseline / 5 <= scaled_abs <= baseline * 5:
-                setattr(row, field_name, float(value) / 1000)
-    return rows
 
 
 def _normalize_financial_metric_key(raw_key: Any) -> str:
@@ -760,6 +782,13 @@ def _normalize_financial_metric_key(raw_key: Any) -> str:
 
 def _build_financial_metric_lookup(raw_payload: Any) -> dict[str, Any]:
     if not isinstance(raw_payload, dict):
+        return {}
+    lineage = raw_payload.get("_financial_lineage")
+    if isinstance(lineage, dict):
+        if lineage.get("unavailable_reason") or lineage.get("value_unit") != "VND":
+            return {}
+        raw_payload = lineage.get("canonical_data") or {}
+    elif "provider_rows" in raw_payload or "source_reports" in raw_payload or raw_payload.get("unavailable_reason"):
         return {}
 
     lookup: dict[str, Any] = {}
@@ -917,6 +946,8 @@ def _enrich_financial_statement_rows(
     }
 
     for item in rows:
+        if item.unavailable_reason:
+            continue
         raw_data = item.raw_data if isinstance(item.raw_data, dict) else {}
 
         if item.total_equity is None:
@@ -1095,7 +1126,17 @@ def _enrich_financial_statement_rows(
         ):
             item.ebitda = item.operating_income + abs(item.depreciation)
 
-    return _sort_financial_statement_rows(_normalize_statement_unit_outliers(rows))
+        # A provider-rejected metric is not a missing value. Filling it from a raw
+        # lookup or an accounting identity would publish a number the lineage refused.
+        for metric, metadata in item.unit_metadata.items():
+            if not (isinstance(metadata, dict) and metadata.get("unavailable_reason")):
+                continue
+            if metric in FinancialStatementData.model_fields:
+                setattr(item, metric, None)
+            for alias in _FINANCIAL_METRIC_ALIASES.get(metric, ()):
+                setattr(item, alias, None)
+
+    return _sort_financial_statement_rows(rows)
 
 
 async def _cross_fill_income_statement_rows(
@@ -1127,8 +1168,15 @@ async def _cross_fill_income_statement_rows(
         cashflow_row = cashflow_by_period.get(str(item.period or "").upper())
         if cashflow_row is None:
             continue
+        if item.unavailable_reason or cashflow_row.unavailable_reason or item.value_unit != "VND" or cashflow_row.value_unit != "VND":
+            continue
+        if item.consolidation_basis is None or (item.source, item.consolidation_basis, item.flow_basis) != (
+            cashflow_row.source, cashflow_row.consolidation_basis, cashflow_row.flow_basis):
+            continue
         if item.depreciation is None:
             item.depreciation = _pick_optional_float(item.depreciation, cashflow_row.depreciation)
+            item.unit_metadata["depreciation"] = cashflow_row.unit_metadata.get("depreciation", {})
+            item.raw_data = {"primary": item.raw_data, "depreciation_source": cashflow_row.raw_data}
         if (
             item.ebitda is None
             and item.operating_income is not None
@@ -1272,87 +1320,17 @@ def _apply_adjustment_mode_to_historical_row(
     )
 
 
-def _to_historical_data(row: StockPrice, *, adjustment_mode: str = "raw") -> EquityHistoricalData:
-
-    adjusted_open, adjusted_high, adjusted_low, adjusted_close_value, factor, applied = (
-        _apply_adjustment_mode_to_ohlc(
-            open_value=row.open,
-            high_value=row.high,
-            low_value=row.low,
-            close_value=row.close,
-            adjusted_close=row.adj_close,
-            adjustment_mode=adjustment_mode,
-        )
-    )
-
-    return EquityHistoricalData(
-        symbol=row.symbol,
-        time=row.time,
-        open=adjusted_open,
-        high=adjusted_high,
-        low=adjusted_low,
-        close=adjusted_close_value,
-        volume=row.volume,
-        value=row.value,
-        raw_close=row.close,
-        adjusted_close=row.adj_close,
-        adjustment_factor=factor,
-        adjustment_mode=str(adjustment_mode or "raw").strip().lower() or "raw",
-        adjustment_applied=applied,
-    )
+def _to_historical_data(row: StockPrice, *, adjustment_mode: str = "raw") -> Optional[EquityHistoricalData]:
+    return _to_historical_data_from_payload(persisted_price_record(row), adjustment_mode=adjustment_mode)
 
 
 def _to_historical_data_from_mongo(
     row: dict[str, Any], *, adjustment_mode: str = "raw"
 ) -> Optional[EquityHistoricalData]:
-    time_value = row.get("tradeDate") or row.get("time") or row.get("date")
-    if isinstance(time_value, datetime):
-        parsed_time = time_value.date()
-    elif isinstance(time_value, date):
-        parsed_time = time_value
-    elif isinstance(time_value, str):
-        try:
-            parsed_time = date.fromisoformat(time_value[:10])
-        except ValueError:
-            return None
-    else:
-        return None
-
-    open_value = _coerce_optional_float(row.get("open"))
-    high_value = _coerce_optional_float(row.get("high"))
-    low_value = _coerce_optional_float(row.get("low"))
-    close_value = _coerce_optional_float(row.get("close"))
-    volume_value = _coerce_optional_int(row.get("volume"))
-    adj_close_value = _coerce_optional_float(row.get("adj_close") or row.get("adjClose"))
-
-    if None in {open_value, high_value, low_value, close_value, volume_value}:
-        return None
-
-    adjusted_open, adjusted_high, adjusted_low, adjusted_close_resolved, factor, applied = (
-        _apply_adjustment_mode_to_ohlc(
-            open_value=open_value,
-            high_value=high_value,
-            low_value=low_value,
-            close_value=close_value,
-            adjusted_close=adj_close_value,
-            adjustment_mode=adjustment_mode,
-        )
-    )
-
-    return EquityHistoricalData(
-        symbol=str(row.get("symbol") or "").upper(),
-        time=parsed_time,
-        open=adjusted_open,
-        high=adjusted_high,
-        low=adjusted_low,
-        close=adjusted_close_resolved,
-        volume=volume_value,
-        value=_coerce_optional_float(row.get("value")),
-        raw_close=close_value,
-        adjusted_close=adj_close_value,
-        adjustment_factor=factor,
-        adjustment_mode=str(adjustment_mode or "raw").strip().lower() or "raw",
-        adjustment_applied=applied,
+    return _to_historical_data_from_payload(
+        {**row, "time": row.get("tradeDate") or row.get("time") or row.get("date"),
+         "price_source": row.get("price_source") or row.get("providerSource") or row.get("source")},
+        adjustment_mode=adjustment_mode,
     )
 
 
@@ -1377,7 +1355,7 @@ async def _load_historical_from_db(
     )
 
     rows = (await db.execute(stmt)).scalars().all()
-    return [_to_historical_data(row, adjustment_mode=adjustment_mode) for row in rows]
+    return [item for row in rows if (item := _to_historical_data(row, adjustment_mode=adjustment_mode)) is not None]
 
 
 async def _load_historical_from_mongo(
@@ -1423,12 +1401,16 @@ def _time_to_date(value: Any) -> Optional[date]:
 def _to_historical_data_from_payload(
     doc: dict[str, Any], *, adjustment_mode: str = "raw"
 ) -> Optional[EquityHistoricalData]:
+    try:
+        doc = normalize_price_record(doc)
+    except (TypeError, ValueError):
+        return None
     time_value = _time_to_date(doc.get("time"))
     open_value = _coerce_optional_float(doc.get("open"))
     high_value = _coerce_optional_float(doc.get("high"))
     low_value = _coerce_optional_float(doc.get("low"))
     close_value = _coerce_optional_float(doc.get("close"))
-    adj_close_value = _coerce_optional_float(doc.get("adj_close") or doc.get("adjClose"))
+    adj_close_value = _pick_optional_float(doc.get("adjusted_close"), doc.get("adj_close"), doc.get("adjClose"))
     volume_value = _coerce_optional_int(doc.get("volume"))
 
     if not time_value or None in {open_value, high_value, low_value, close_value, volume_value}:
@@ -1447,6 +1429,8 @@ def _to_historical_data_from_payload(
 
     return EquityHistoricalData(
         symbol=str(doc.get("symbol") or "").upper(),
+        price_unit=doc["price_unit"],
+        price_source=doc.get("price_source"),
         time=time_value,
         open=adjusted_open,
         high=adjusted_high,
@@ -1616,6 +1600,8 @@ async def _load_corporate_actions_for_adjustment(
             str(row.value) if row.value is not None else None,
             row.description,
         )
+        if "value_per_share" in raw_payload or "exercise_ratio" in raw_payload:
+            parsed_cash = None
 
         actions.append(
             {
@@ -1772,6 +1758,9 @@ def _merge_historical_rows(
     for source_name, rows in source_rows:
         source_rank = _HISTORICAL_SOURCE_RANK.get(source_name, len(_HISTORICAL_SOURCE_RANK))
         for row in rows:
+            expected_unit = "index_points" if is_index_symbol(row.symbol) else "VND"
+            if row.price_unit != expected_unit:
+                continue
             row_key = json.dumps(row.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
             candidate = (source_rank, row_key)
             existing = selected.get(row.time)
@@ -1840,16 +1829,28 @@ def _historical_resolution_meta(
                 warnings.append("requested-range boundary gaps detected; exchange-calendar certainty is limited")
         elif not holidays:
             warnings.append("business-day completeness excludes unconfigured exchange holidays")
-    mongo_units = {str(doc.get("priceUnit") or "").strip().upper() for doc in mongo_docs}
+    selected_units = {row.price_unit for row in rows}
     unit_status = (
-        "not_applicable"
-        if not mongo_units
-        else "confirmed_vnd"
-        if mongo_units == {"VND"}
-        else "mixed"
-        if "VND" in mongo_units
+        "not_applicable" if not selected_units or selected_units == {"index_points"}
+        else "confirmed_vnd" if selected_units == {"VND"}
+        else "mixed" if len(selected_units) > 1
         else "unconfirmed"
     )
+    # Session price basis is only claimed when the resolution actually applied
+    # an adjustment. No resolved source contract documents that its stored
+    # history is unadjusted (Vietcap's ``raw`` marker denotes VND denomination,
+    # not an unadjusted series), so an unadjusted read is disclosed as
+    # unverified rather than certified as "raw".
+    if not rows or selected_units == {"index_points"}:
+        session_basis = "not_applicable"
+    elif any(row.adjustment_applied for row in rows):
+        session_basis = "adjusted"
+    else:
+        session_basis = "unverified"
+        warnings.append(
+            "session price basis unverified: no resolved source contract "
+            "documents whether the stored history is back-adjusted"
+        )
     return _historical_adjustment_meta(
         rows,
         adjustment_mode,
@@ -1864,6 +1865,7 @@ def _historical_resolution_meta(
         freshness_as_of=freshness,
         completeness_status=completeness_status,
         unit_status=unit_status,
+        session_basis=session_basis,
         warnings=warnings,
     )
 
@@ -1878,6 +1880,7 @@ async def _load_rolling_price_window(
     start_date = end_date - timedelta(days=max(380, trading_days + 30))
 
     rows = await _load_historical_from_db(db, symbol, start_date, end_date, "1D")
+    rows = [row for row in rows if row.price_unit == "VND"]
 
     if len(rows) > trading_days:
         rows = rows[-trading_days:]
@@ -1898,7 +1901,8 @@ async def _compute_rolling_high_low(
         limit=max(trading_days + 30, 320),
     ) if mongo_service.enabled else []
     if mongo_rows:
-        recent_rows = mongo_rows[-trading_days:]
+        recent_rows = [normalize_price_record(row, symbol=symbol) for row in mongo_rows[-trading_days:]]
+        recent_rows = [row for row in recent_rows if row["price_unit"] == "VND"]
         mongo_highs = [_coerce_optional_float(row.get("high")) for row in recent_rows]
         mongo_lows = [_coerce_optional_float(row.get("low")) for row in recent_rows]
         highs = [value for value in mongo_highs if value is not None]
@@ -1966,20 +1970,27 @@ async def _load_quote_from_price_cache(symbol: str) -> Optional[StockQuoteData]:
 
     if not isinstance(latest_payload, dict):
         return None
+    latest_payload = normalize_price_record(latest_payload, symbol=symbol)
+    if latest_payload["price_unit"] == "unknown":
+        return None
 
     latest_close = _coerce_optional_float(latest_payload.get("close"))
     if latest_close is None:
         return None
 
     normalized_recent = (
-        [row for row in recent_rows if isinstance(row, dict)]
+        [normalize_price_record(row, symbol=symbol) for row in recent_rows if isinstance(row, dict)]
         if isinstance(recent_rows, list)
         else []
     )
     normalized_recent.sort(key=lambda row: str(row.get("time") or ""))
 
     prev_close: Optional[float] = None
-    for row in reversed(normalized_recent[:-1] if len(normalized_recent) > 1 else []):
+    latest_date = _time_to_date(latest_payload.get("time"))
+    for row in reversed(normalized_recent):
+        row_date = _time_to_date(row.get("time"))
+        if row["price_unit"] != latest_payload["price_unit"] or not latest_date or not row_date or row_date >= latest_date:
+            continue
         prev_close = _coerce_optional_float(row.get("close"))
         if prev_close is not None:
             break
@@ -1999,6 +2010,7 @@ async def _load_quote_from_price_cache(symbol: str) -> Optional[StockQuoteData]:
 
     return StockQuoteData(
         symbol=symbol.upper(),
+        price_unit=latest_payload["price_unit"],
         price=latest_close,
         open=_coerce_optional_float(latest_payload.get("open")),
         high=_coerce_optional_float(latest_payload.get("high")),
@@ -2008,6 +2020,8 @@ async def _load_quote_from_price_cache(symbol: str) -> Optional[StockQuoteData]:
         change_pct=round(change_pct, 2) if change_pct is not None else None,
         volume=_coerce_optional_int(latest_payload.get("volume")),
         updated_at=updated_at,
+        as_of=_coerce_meta_datetime(latest_payload.get("time") or latest_payload.get("tradeDate") or latest_payload.get("date")),
+        upstream_source=_pick_optional_text(latest_payload.get("source"), latest_payload.get("price_source")),
     )
 
 
@@ -2023,17 +2037,29 @@ def _serialize_analysis_section(value: Any) -> Any:
     return value
 
 
+# Eleven sequential sections share one SQL session. Reserve time for cancellation
+# and response serialization before the client's existing 20-second deadline.
+FUNDAMENTAL_SECTION_TIMEOUT_SECONDS = 1.25
+
+
 async def _safe_fundamental_section(
     section_errors: dict[str, str],
     section: str,
     loader: Callable[[], Awaitable[Any]],
     default: Any,
 ) -> Any:
+    deadline = asyncio.timeout(FUNDAMENTAL_SECTION_TIMEOUT_SECONDS)
     try:
-        response = await loader()
+        async with deadline:
+            response = await loader()
         if getattr(response, "error", None):
             section_errors[section] = str(response.error)
         return _serialize_analysis_section(getattr(response, "data", response))
+    except TimeoutError as exc:
+        section_errors[section] = (
+            "Section deadline exceeded" if deadline.expired() else str(exc) or "Dependency timed out"
+        )
+        return default
     except BaseException as exc:
         if _is_control_flow_exception(exc):
             raise
@@ -2051,7 +2077,7 @@ async def _load_latest_fundamental_snapshot(symbol: str) -> dict[str, Any] | Non
 
 
 def _build_fundamental_valuation_section(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not snapshot:
+    if not snapshot or fundamental_valuation_unavailable_reason(snapshot):
         return None
     return {
         "intrinsic_value": snapshot.get("intrinsicValue"),
@@ -2206,25 +2232,6 @@ def _resolve_listed_share_count(
     return listed_shares
 
 
-def _price_to_vnd_units(price: Any, dps_hint: Any = None) -> Optional[float]:
-    """
-    Normalize quote/snapshot price to VND units.
-
-    Local datasets can store price in thousands of VND (e.g. 68.2 for 68,200 VND).
-    Dividend and DPS metrics are in VND, so price must be scaled before yield math.
-    """
-    numeric = _coerce_optional_float(price)
-    if numeric in (None, 0):
-        return None
-
-    if abs(numeric) >= 1000:
-        return numeric
-
-    dps_value = _coerce_optional_float(dps_hint)
-    if dps_value is None or abs(dps_value) >= 1:
-        return numeric * 1000.0
-
-    return numeric
 
 
 def _serialize_meta_datetime(value: Any) -> Optional[str]:
@@ -2274,17 +2281,31 @@ def _provider_timeout_budget(reserve_seconds: int = 5) -> float:
     return float(max(1, min(vnstock_timeout, request_timeout - reserve)))
 
 
+def _snapshot_observation_date(snapshot_row: ScreenerSnapshot) -> date:
+    return getattr(snapshot_row, "trade_date", None) or snapshot_row.snapshot_date
+
+
+
 def _build_quote_from_screener_snapshot(
     snapshot_row: ScreenerSnapshot,
     latest_row: Optional[StockPrice] = None,
     previous_row: Optional[StockPrice] = None,
+    *, observation_clock: bool = False,
 ) -> Optional[StockQuoteData]:
     if snapshot_row.price is None:
         return None
+    snapshot = screener_price_record(snapshot_row)
+    if snapshot["price_unit"] == "unknown":
+        return None
+    price = snapshot["price"]
+    latest = persisted_price_record(latest_row) if latest_row else {}
+    previous = persisted_price_record(previous_row) if previous_row else {}
 
     snapshot_metrics = (
         snapshot_row.extended_metrics if isinstance(snapshot_row.extended_metrics, dict) else {}
     )
+    observation_date = _snapshot_observation_date(snapshot_row)
+    trade_date = getattr(snapshot_row, "trade_date", None)
     snapshot_change_pct = _pick_optional_float(
         snapshot_metrics.get("change_1d"),
         snapshot_metrics.get("price_change_1d_pct"),
@@ -2294,57 +2315,67 @@ def _build_quote_from_screener_snapshot(
     snapshot_prev_close = None
     snapshot_change = None
     if snapshot_change_pct not in (None, -100):
-        snapshot_prev_close = snapshot_row.price / (1 + (snapshot_change_pct / 100))
-        snapshot_change = snapshot_row.price - snapshot_prev_close
+        snapshot_prev_close = price / (1 + (snapshot_change_pct / 100))
+        snapshot_change = price - snapshot_prev_close
 
     snapshot_updated_at = (
         _coerce_meta_datetime(snapshot_metrics.get("updated_at"))
         or getattr(snapshot_row, "created_at", None)
         or datetime.combine(snapshot_row.snapshot_date, datetime.min.time())
     )
+    if observation_clock:
+        snapshot_updated_at = datetime.combine(
+            observation_date, datetime.min.time(), tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")
+        )
     latest_row_is_current = bool(
-        latest_row and latest_row.time is not None and latest_row.time >= snapshot_row.snapshot_date
+        latest_row and latest.get("price_unit") == snapshot["price_unit"]
+        and latest_row.time is not None and latest_row.time == observation_date
     )
 
-    # RC-3 (data-quality remediation 2026-06-08): PREV CLOSE is a settled EOD value and
-    # must never be blank after market close. The live-session-derived `snapshot_prev_close`
-    # is null after-hours (no live change_pct). Prefer the actual previous settled close
-    # from StockPrice; fall back to the derived value only when no prior row exists.
-    settled_prev_close = (
-        float(previous_row.close)
-        if previous_row is not None and previous_row.close is not None
-        else None
+    prior_session = observation_date - timedelta(days=1)
+    while prior_session.weekday() >= 5:
+        prior_session -= timedelta(days=1)
+    settled_prev_close = next(
+        (
+            record.get("close")
+            for row, record in ((latest_row, latest), (previous_row, previous))
+            if row is not None
+            and row.time == prior_session
+            and record.get("price_unit") == snapshot["price_unit"]
+        ),
+        None,
     )
     prev_close = settled_prev_close if settled_prev_close is not None else snapshot_prev_close
-    if snapshot_change is None and prev_close is not None:
-        snapshot_change = snapshot_row.price - prev_close
-        if snapshot_change_pct is None and prev_close not in (0, None):
-            snapshot_change_pct = (snapshot_change / prev_close) * 100
+    if prev_close is not None:
+        snapshot_change = price - prev_close
+        snapshot_change_pct = (snapshot_change / prev_close) * 100 if prev_close else None
 
-    # OPEN/HIGH/LOW are session-specific. Only surface them when the settled price row
-    # actually corresponds to (or is newer than) the snapshot session; otherwise leave
-    # them null rather than show stale OHLC that contradicts a fresher snapshot price.
+    # OHLC belongs only to the snapshot's observed trading session.
     return StockQuoteData(
         symbol=str(snapshot_row.symbol or "").upper(),
-        price=snapshot_row.price,
+        price=price,
+        price_unit=snapshot["price_unit"],
         open=(
-            float(latest_row.open)
-            if latest_row_is_current and latest_row.open is not None
+            latest.get("open")
+            if latest_row_is_current
             else None
         ),
         high=(
-            float(latest_row.high)
-            if latest_row_is_current and latest_row.high is not None
+            latest.get("high")
+            if latest_row_is_current
             else None
         ),
         low=(
-            float(latest_row.low) if latest_row_is_current and latest_row.low is not None else None
+            latest.get("low") if latest_row_is_current else None
         ),
         prev_close=prev_close,
         change=snapshot_change,
         change_pct=round(snapshot_change_pct, 2) if snapshot_change_pct is not None else None,
         volume=int(snapshot_row.volume) if snapshot_row.volume is not None else None,
         updated_at=snapshot_updated_at,
+        as_of=datetime.combine(trade_date, datetime.min.time(), tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+        if trade_date else None,
+        upstream_source=_pick_optional_text(snapshot.get("source"), snapshot.get("price_source")),
     )
 
 
@@ -2355,7 +2386,10 @@ async def _load_latest_screener_snapshot_quote(
     snapshot_stmt = (
         select(ScreenerSnapshot)
         .where(ScreenerSnapshot.symbol == symbol)
-        .order_by(ScreenerSnapshot.snapshot_date.desc(), ScreenerSnapshot.created_at.desc())
+        .order_by(
+            func.coalesce(ScreenerSnapshot.trade_date, ScreenerSnapshot.snapshot_date).desc(),
+            ScreenerSnapshot.snapshot_date.desc(), ScreenerSnapshot.created_at.desc(),
+        )
         .limit(1)
     )
     snapshot_row = (await db.execute(snapshot_stmt)).scalar_one_or_none()
@@ -2393,7 +2427,7 @@ def _should_prefer_screener_quote(
 ) -> bool:
     if screener_quote is None:
         return False
-    if primary_quote is None:
+    if primary_quote is None or primary_quote.price is None or primary_quote.price_unit == "unknown":
         return True
 
     primary_timestamp = _quote_effective_timestamp(primary_quote)
@@ -2450,32 +2484,15 @@ async def _load_shareholders_fallback(
             symbol=row.symbol,
             shareholder_name=row.name,
             shares_owned=row.shares_held,
-            ownership_pct=row.ownership_pct,
+            ownership_pct=None,
+            ownership_unit=None,
+            ownership_unit_status="unverified",
+            ownership_source="sql",
+            raw_data={"ownership_pct": row.ownership_pct},
             shareholder_type=row.shareholder_type,
         )
         for row in rows
     ]
-
-
-def _normalize_dividend_yield_percent(value: Any) -> Optional[float]:
-    numeric = _coerce_optional_float(value)
-    if numeric is None:
-        return None
-
-    normalized = numeric
-    if 0 < abs(normalized) < 1:
-        normalized *= 100
-
-    while abs(normalized) > 100:
-        normalized /= 100
-
-    # DQ remediation 2026-06-08: prefer null over a fabricated clamp for implausible
-    # equity dividend yields (>~40%), which are unit/denominator artifacts (see
-    # _normalize_dividend_yield in providers/vnstock/financial_ratios.py).
-    if abs(normalized) > 40:
-        return None
-
-    return normalized
 
 
 def _normalize_ratio_period(
@@ -2576,8 +2593,10 @@ def _filter_ratio_rows_for_period(
         return [row for row in rows if period_upper in str(row.period or "").upper()]
 
     if period_upper == "TTM":
-        ttm_rows = [row for row in rows if "TTM" in str(row.period or "").upper()]
-        return ttm_rows if ttm_rows else _build_ratio_ttm_rows(rows)
+        # Only rows the source itself reports as TTM. The removed helper summed EPS/DPS
+        # over four quarters and inherited stale values for every other ratio, which
+        # fabricated a period no provider supplied (issues #101/#106).
+        return [row for row in rows if "TTM" in str(row.period or "").upper()]
 
     return rows
 
@@ -2594,10 +2613,21 @@ def _merge_ratio_rows(
     preferred: FinancialRatioData,
     fallback: FinancialRatioData,
 ) -> FinancialRatioData:
+    from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
+
     payload = fallback.model_dump(mode="json")
-    for key, value in preferred.model_dump(mode="json").items():
-        if value is not None:
+    preferred_payload = preferred.model_dump(mode="json")
+    for key, value in preferred_payload.items():
+        if key not in {"ratio_units", "provider_evidence"} and value is not None:
             payload[key] = value
+    units = {**fallback.ratio_units, **preferred.ratio_units}
+    for metric in PERCENT_RATIO_FIELDS:
+        if metric in preferred.ratio_units:
+            payload[metric] = preferred_payload[metric]
+        elif preferred_payload[metric] is not None:
+            units[metric] = "unknown"
+    payload["ratio_units"] = units
+    payload["provider_evidence"] = fallback.provider_evidence + preferred.provider_evidence
     return FinancialRatioData.model_validate(payload)
 
 
@@ -2644,7 +2674,7 @@ def _merge_ratio_row_collections(
 
 def _derive_dividend_yield_from_dps(dps: Any, latest_price: Any) -> Optional[float]:
     dps_value = _coerce_optional_float(dps)
-    price_vnd = _price_to_vnd_units(latest_price, dps_hint=dps_value)
+    price_vnd = _coerce_optional_float(latest_price)
     if dps_value is None or price_vnd in (None, 0):
         return None
     return (dps_value / price_vnd) * 100
@@ -2655,21 +2685,10 @@ def _resolve_dividend_yield_percent(
     dps: Any,
     latest_price: Any,
 ) -> Optional[float]:
-    normalized_raw = _normalize_dividend_yield_percent(raw_yield)
-    derived = _derive_dividend_yield_from_dps(dps=dps, latest_price=latest_price)
-
-    if derived is None:
+    normalized_raw = _coerce_optional_float(raw_yield)
+    if normalized_raw is not None:
         return normalized_raw
-    if normalized_raw is None:
-        return derived
-
-    if abs(normalized_raw) > 30 >= abs(derived):
-        return _normalize_dividend_yield_percent(derived)
-
-    if abs(normalized_raw - derived) >= 10:
-        return _normalize_dividend_yield_percent(derived)
-
-    return _normalize_dividend_yield_percent(normalized_raw)
+    return _derive_dividend_yield_from_dps(dps=dps, latest_price=latest_price)
 
 
 def _coerce_iso_date(value: Any) -> Optional[str]:
@@ -2838,9 +2857,8 @@ async def _resolve_profile_market_cap(
                 symbol=symbol,
                 source=settings.vnstock_source,
             )
-            latest_price = _pick_optional_float(
-                latest_price, quote_data.price, quote_data.prev_close
-            )
+            if quote_data.price_unit == "VND":
+                latest_price = _pick_optional_float(latest_price, quote_data.price, quote_data.prev_close)
         except BaseException as exc:
             if _is_control_flow_exception(exc):
                 raise
@@ -2848,7 +2866,7 @@ async def _resolve_profile_market_cap(
                 "Quote fallback failed while resolving market cap for %s: %s", symbol, exc
             )
 
-    latest_price_vnd = _price_to_vnd_units(latest_price, dps_hint=1.0)
+    latest_price_vnd = _coerce_optional_float(latest_price)
 
     if shares_value not in (None, 0) and latest_price_vnd not in (None, 0):
         multiplier = 1.0 if shares_value >= 1_000_000 else 1_000_000.0
@@ -2917,27 +2935,27 @@ async def _get_outstanding_shares(db: AsyncSession, symbol: str) -> Optional[flo
 
 
 async def _get_latest_price(db: AsyncSession, symbol: str) -> Optional[float]:
-    latest_close = (
+    latest_row = (
         await db.execute(
-            select(StockPrice.close)
+            select(StockPrice)
             .where(StockPrice.symbol == symbol)
             .order_by(StockPrice.time.desc())
             .limit(1)
         )
     ).scalar_one_or_none()
-    latest_price = _coerce_optional_float(latest_close)
-    if latest_price not in (None, 0):
-        return latest_price
-
-    latest_snapshot_price = (
+    latest = persisted_price_record(latest_row) if latest_row else {}
+    if latest.get("price_unit") == "VND" and latest.get("close") not in (None, 0):
+        return float(latest["close"])
+    snapshot_row = (
         await db.execute(
-            select(ScreenerSnapshot.price)
+            select(ScreenerSnapshot)
             .where(ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.price.is_not(None))
             .order_by(ScreenerSnapshot.snapshot_date.desc())
             .limit(1)
         )
     ).scalar_one_or_none()
-    return _coerce_optional_float(latest_snapshot_price)
+    snapshot = screener_price_record(snapshot_row) if snapshot_row else {}
+    return _coerce_optional_float(snapshot.get("price")) if snapshot.get("price_unit") == "VND" else None
 
 
 async def _get_latest_financial_row(
@@ -2991,6 +3009,8 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
 
     raw_payload = getattr(row, "raw_data", None)
     raw_data = raw_payload if isinstance(raw_payload, dict) else {}
+    from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
+    ratio_units = dict(raw_data.get("ratio_units") or {})
 
     ev_sales = _coerce_optional_float(getattr(row, "ev_sales", None))
     if ev_sales is None:
@@ -3002,35 +3022,9 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
     if ev_sales is None:
         ev_sales = _coerce_optional_float(raw_data.get("enterpriseValueToSales"))
 
-    # Gross margin backfill: vnstock occasionally omits gross_margin for early
-    # periods (notably 2020-2021) while still publishing operating_margin.
-    # When the underlying income-statement values are present in raw_data we
-    # can derive gross_margin = gross_profit / revenue * 100 ourselves so the
-    # FE doesn't have to render the "Data quality notes" banner for those
-    # periods. Mirrors the logic already used in `comparison_service`.
     gross_margin_value = _pick_optional_float(row.gross_margin, raw_data.get("gross_margin"))
-    if gross_margin_value is None:
-        revenue_value = _coerce_optional_float(
-            raw_data.get("revenue")
-            or raw_data.get("net_revenue")
-            or raw_data.get("netRevenue")
-            or raw_data.get("totalRevenue")
-        )
-        gross_profit_value = _coerce_optional_float(
-            raw_data.get("gross_profit")
-            or raw_data.get("grossProfit")
-        )
-        if (
-            revenue_value is not None
-            and gross_profit_value is not None
-            and abs(revenue_value) > 1e-6
-        ):
-            derived = (gross_profit_value / revenue_value) * 100.0
-            # Guard against absurd values from corrupt raw payloads.
-            if -500.0 <= derived <= 500.0:
-                gross_margin_value = derived
 
-    return FinancialRatioData(
+    result = FinancialRatioData(
         symbol=row.symbol,
         period=period_value,
         pe=_pick_optional_float(row.pe_ratio, raw_data.get("pe"), raw_data.get("priceToEarning")),
@@ -3104,13 +3098,7 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
             "equity_multiplier",
             _coerce_optional_float(raw_data.get("equity_multiplier")),
         ),
-        dividend_yield=_normalize_dividend_yield_percent(
-            getattr(
-                row,
-                "dividend_yield",
-                _coerce_optional_float(raw_data.get("dividend_yield")),
-            )
-        ),
+        dividend_yield=_pick_optional_float(getattr(row, "dividend_yield", None), raw_data.get("dividend_yield")),
         payout_ratio=getattr(
             row,
             "payout_ratio",
@@ -3118,6 +3106,13 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
         ),
         peg_ratio=getattr(row, "peg_ratio", _coerce_optional_float(raw_data.get("peg_ratio"))),
     )
+    result.ratio_units = ratio_units
+    result.provider_evidence = raw_data.get("provider_evidence") or []
+    for metric in PERCENT_RATIO_FIELDS:
+        if ratio_units.get(metric) != "percent":
+            setattr(result, metric, None)
+            result.ratio_units[metric] = "unknown"
+    return result
 
 
 def _ratio_has_metric_value(item: FinancialRatioData) -> bool:
@@ -3178,23 +3173,6 @@ def _extract_year_quarter(period_value: str) -> tuple[Optional[int], Optional[in
     return year, quarter
 
 
-def _resolve_period_end_date(
-    year: int | None, quarter: int | None, normalized_period: str
-) -> date | None:
-    if year is None:
-        return None
-
-    if normalized_period == "quarter" and quarter in {1, 2, 3, 4}:
-        month_day_map = {
-            1: (3, 31),
-            2: (6, 30),
-            3: (9, 30),
-            4: (12, 31),
-        }
-        month, day = month_day_map[int(quarter)]
-        return date(int(year), month, day)
-
-    return date(int(year), 12, 31)
 
 
 def _build_ratio_eps_lookups(
@@ -3276,113 +3254,6 @@ async def _enrich_income_eps_from_ratios(
 
         if eps_value is not None:
             row.eps = eps_value
-
-    return rows
-
-
-async def _enrich_ratio_ev_sales_from_income(
-    symbol: str,
-    period: str,
-    rows: List[FinancialRatioData],
-    db: AsyncSession,
-) -> List[FinancialRatioData]:
-    if not rows:
-        return rows
-
-    missing_rows = [item for item in rows if item.ev_sales is None]
-    if not missing_rows:
-        return rows
-
-    period_upper = str(period or "year").strip().upper()
-    normalized_period = "year" if period_upper in {"YEAR", "FY"} else "quarter"
-
-    stmt = (
-        select(
-            IncomeStatement.fiscal_year,
-            IncomeStatement.fiscal_quarter,
-            IncomeStatement.revenue,
-            IncomeStatement.ebitda,
-        )
-        .where(
-            IncomeStatement.symbol == symbol,
-            IncomeStatement.period_type == normalized_period,
-            IncomeStatement.revenue.is_not(None),
-        )
-        .order_by(desc(IncomeStatement.fiscal_year), desc(IncomeStatement.fiscal_quarter))
-    )
-    income_rows = (await db.execute(stmt)).all()
-    if not income_rows:
-        income_rows = []
-
-    latest_snapshot_date = (
-        await db.execute(select(func.max(ScreenerSnapshot.snapshot_date)))
-    ).scalar()
-    latest_market_cap = None
-    if latest_snapshot_date is not None:
-        latest_market_cap = (
-            await db.execute(
-                select(ScreenerSnapshot.market_cap).where(
-                    ScreenerSnapshot.symbol == symbol,
-                    ScreenerSnapshot.snapshot_date == latest_snapshot_date,
-                    ScreenerSnapshot.market_cap.is_not(None),
-                )
-            )
-        ).scalar_one_or_none()
-    latest_market_cap_value = _coerce_optional_float(latest_market_cap)
-
-    quarterly_metrics: dict[tuple[int, int], tuple[float, float | None]] = {}
-    annual_metrics: dict[int, tuple[float, float | None]] = {}
-    for year, quarter, revenue, ebitda in income_rows:
-        revenue_value = _coerce_optional_float(revenue)
-        if revenue_value in (None, 0):
-            continue
-        ebitda_value = _coerce_optional_float(ebitda)
-        if year is None:
-            continue
-        if quarter is not None and 1 <= int(quarter) <= 4:
-            quarterly_metrics[(int(year), int(quarter))] = (revenue_value, ebitda_value)
-        if int(year) not in annual_metrics:
-            annual_metrics[int(year)] = (revenue_value, ebitda_value)
-
-    for item in rows:
-        if item.ev_sales is not None:
-            continue
-
-        ev_ebitda = _coerce_optional_float(item.ev_ebitda)
-
-        year, quarter = _extract_year_quarter(item.period or "")
-        if year is None:
-            continue
-
-        metrics = None
-        if quarter is not None:
-            metrics = quarterly_metrics.get((year, quarter))
-        if metrics is None:
-            metrics = annual_metrics.get(year)
-        if metrics is None:
-            continue
-
-        revenue_value, ebitda_value = metrics
-        if revenue_value in (None, 0):
-            continue
-
-        computed_ev_sales = None
-        if ev_ebitda is not None and ebitda_value not in (None, 0):
-            # Path A: EV/Sales = (EV/EBITDA) * EBITDA / Revenue. EBITDA and Revenue
-            # come from the same income rows, so units are internally consistent.
-            computed_ev_sales = (ev_ebitda * ebitda_value) / revenue_value
-        elif latest_market_cap_value not in (None, 0):
-            # Path B: market_cap / Revenue. market_cap (screener) and Revenue (KBS-scaled)
-            # can be in different unit scales, which historically produced ~10^3 swings
-            # (DQ EV/Sales 301x). Only accept this fallback when the result is in a
-            # plausible EV/Sales band; otherwise leave null rather than emit a value
-            # that contradicts adjacent periods.
-            candidate = latest_market_cap_value / revenue_value
-            if 0 < candidate <= 60:
-                computed_ev_sales = candidate
-
-        if computed_ev_sales is not None:
-            item.ev_sales = computed_ev_sales
 
     return rows
 
@@ -3478,61 +3349,62 @@ async def _enrich_missing_ratio_metrics(
     normalized_period = "year" if period in {"year", "FY"} else "quarter"
     is_bank_like = await _is_bank_like_symbol(db, symbol)
 
-    income_stmt = (
-        select(
-            IncomeStatement.fiscal_year,
-            IncomeStatement.fiscal_quarter,
-            IncomeStatement.revenue,
-            IncomeStatement.operating_income,
-            IncomeStatement.net_income,
-            IncomeStatement.cost_of_revenue,
-            IncomeStatement.eps,
-            IncomeStatement.interest_expense,
-            IncomeStatement.ebitda,
-            IncomeStatement.income_tax,
-            IncomeStatement.raw_data,
+    support_groups = []
+    for statement_type, supplied in (
+        ("income", income_support_rows), ("balance", balance_support_rows), ("cashflow", cashflow_support_rows),
+    ):
+        retained = await _load_financial_statement_fallback(
+            db=db, symbol=symbol, statement_type=statement_type, period=normalized_period, limit=80,
         )
-        .where(IncomeStatement.symbol == symbol, IncomeStatement.period_type == normalized_period)
-        .order_by(desc(IncomeStatement.fiscal_year), desc(IncomeStatement.fiscal_quarter))
-    )
-    balance_stmt = (
-        select(
-            BalanceSheet.fiscal_year,
-            BalanceSheet.fiscal_quarter,
-            BalanceSheet.total_assets,
-            BalanceSheet.current_assets,
-            BalanceSheet.cash_and_equivalents,
-            BalanceSheet.total_liabilities,
-            BalanceSheet.current_liabilities,
-            BalanceSheet.total_equity,
-            BalanceSheet.book_value_per_share,
-            BalanceSheet.inventory,
-            BalanceSheet.accounts_receivable,
-            BalanceSheet.short_term_debt,
-            BalanceSheet.long_term_debt,
-            BalanceSheet.raw_data,
-        )
-        .where(BalanceSheet.symbol == symbol, BalanceSheet.period_type == normalized_period)
-        .order_by(desc(BalanceSheet.fiscal_year), desc(BalanceSheet.fiscal_quarter))
-    )
-    cashflow_stmt = (
-        select(
-            CashFlow.fiscal_year,
-            CashFlow.fiscal_quarter,
-            CashFlow.operating_cash_flow,
-            CashFlow.free_cash_flow,
-            CashFlow.capital_expenditure,
-            CashFlow.dividends_paid,
-            CashFlow.debt_repayment,
-            CashFlow.depreciation,
-        )
-        .where(CashFlow.symbol == symbol, CashFlow.period_type == normalized_period)
-        .order_by(desc(CashFlow.fiscal_year), desc(CashFlow.fiscal_quarter))
-    )
-
-    income_rows = (await db.execute(income_stmt)).all()
-    balance_rows = (await db.execute(balance_stmt)).all()
-    cashflow_rows = (await db.execute(cashflow_stmt)).all()
+        if supplied:
+            primary_sources = {_financial_statement_identity(item): item.source for item in supplied}
+            retained = [item for item in retained if _financial_statement_identity(item) not in primary_sources
+                        or primary_sources[_financial_statement_identity(item)] == item.source]
+        candidates = admit_statement_rows(_merge_financial_statement_rows(supplied, retained) if supplied else retained, normalized_period)
+        admitted = []
+        rejected = []
+        for statement in candidates:
+            year, quarter = _extract_year_quarter(statement.period)
+            fiscal_conflict = (statement.fiscal_year not in (None, year)
+                               or statement.fiscal_quarter not in (None, quarter)
+                               or (normalized_period == "quarter") != (quarter is not None))
+            if (fiscal_conflict or statement.symbol != symbol or statement.unavailable_reason or statement.value_unit != "VND"
+                or statement.currency != "VND" or not statement.source or statement.consolidation_basis is None
+                or (statement_type != "balance" and statement.flow_basis != ("single_quarter" if normalized_period == "quarter" else "annual"))):
+                rejected.append({"period": statement.period, "source": statement.source,
+                                 "unavailable_reason": statement.unavailable_reason or "unverified_statement_basis"})
+                continue
+            statement = statement.model_copy(deep=True)
+            for metric in FinancialStatementData.model_fields:
+                if _field_metric_rejected(statement, metric):
+                    setattr(statement, metric, None)
+                    for alias in _FINANCIAL_METRIC_ALIASES.get(metric, ()):
+                        setattr(statement, alias, None)
+            admitted.append(statement)
+        support_groups.append(admitted)
+        if rejected:
+            for ratio in rows:
+                ratio.provider_evidence.extend(item for item in rejected if _extract_year_quarter(item["period"]) == _extract_year_quarter(ratio.period or ""))
+        for ratio in rows:
+            if any(getattr(ratio, metric) is None for metric in ("pe", "pb", "ps", "ev_sales", "eps", "bvps", "dps", "dividend_yield")):
+                reason = {"period": ratio.period, "unavailable_reason": "missing_period_matched_valuation_basis"}
+                if reason not in ratio.provider_evidence:
+                    ratio.provider_evidence.append(reason)
+    income_support_rows, balance_support_rows, cashflow_support_rows = support_groups
+    compatible_basis = {}
+    conflicted_periods = set()
+    for group in support_groups:
+        for statement in group:
+            key = _extract_year_quarter(statement.period)
+            basis = (statement.source, statement.consolidation_basis)
+            if key in compatible_basis and compatible_basis[key] != basis:
+                conflicted_periods.add(key)
+            compatible_basis[key] = basis
+    for group in support_groups:
+        group[:] = [statement for statement in group if _extract_year_quarter(statement.period) not in conflicted_periods]
+    for ratio in rows:
+        if _extract_year_quarter(ratio.period or "") in conflicted_periods:
+            ratio.provider_evidence.append({"period": ratio.period, "unavailable_reason": "incompatible_statement_basis"})
 
     existing_periods = {
         str(item.period or "").upper() for item in rows if str(item.period or "").strip()
@@ -3553,10 +3425,7 @@ async def _enrich_missing_ratio_metrics(
         year, quarter = _extract_year_quarter(statement_row.period or "")
         return _serialize_ratio_period(year, quarter)
 
-    derived_periods = {
-        _serialize_ratio_period(year, quarter)
-        for year, quarter, *_rest in [*income_rows, *balance_rows, *cashflow_rows]
-    }
+    derived_periods = set()
     derived_periods.update(
         filter(
             None, (_support_period(statement_row) for statement_row in income_support_rows or [])
@@ -3595,49 +3464,13 @@ async def _enrich_missing_ratio_metrics(
                 merged_metrics[metric_key] = metric_value
         return merged_metrics
 
-    income_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
-    for (
-        year,
-        quarter,
-        revenue,
-        operating_income,
-        net_income,
-        cost_of_revenue,
-        eps,
-        interest_expense,
-        ebitda,
-        income_tax,
-        raw_data,
-    ) in income_rows:
-        if year is None:
-            continue
-        key = (int(year), int(quarter or 0))
-        raw_payload = raw_data if isinstance(raw_data, dict) else {}
-        income_lookup[key] = {
-            "revenue": _coerce_optional_float(revenue),
-            "operating_income": _coerce_optional_float(operating_income),
-            "net_income": _coerce_optional_float(net_income),
-            "cost_of_revenue": _coerce_optional_float(cost_of_revenue),
-            "gross_profit": _pick_optional_float(
-                _lookup_financial_metric(raw_payload, "gross_profit", "grossProfit")
-            ),
-            "eps": _coerce_optional_float(eps),
-            "interest_expense": _coerce_optional_float(interest_expense),
-            "ebitda": _coerce_optional_float(ebitda),
-            "tax_expense": _coerce_optional_float(income_tax),
-            "raw_data": raw_payload,
-            "net_interest_income": _pick_optional_float(
-                _lookup_financial_metric(raw_payload, "net_interest_income")
-            ),
-            "provision_for_credit_losses": _pick_optional_float(
-                _lookup_financial_metric(
-                    raw_payload,
-                    "provision_for_credit_losses",
-                    "credit_loss_provision",
-                )
-            ),
-        }
+    def admitted_raw_metric(statement: FinancialStatementData, metric: str, *aliases: str, unit: str = "VND") -> float | None:
+        from vnibb.services.financial_service import _monetary_evidence_admitted
+        if not _monetary_evidence_admitted(statement.unit_metadata.get(metric), unit):
+            return None
+        return _lookup_financial_metric(statement.raw_data or {}, metric, *aliases)
 
+    income_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
     for statement_row in income_support_rows or []:
         year, quarter = _extract_year_quarter(statement_row.period or "")
         serialized_period = _serialize_ratio_period(year, quarter)
@@ -3649,25 +3482,14 @@ async def _enrich_missing_ratio_metrics(
             "operating_income": _coerce_optional_float(statement_row.operating_income),
             "net_income": _coerce_optional_float(statement_row.net_income),
             "cost_of_revenue": _coerce_optional_float(statement_row.cost_of_revenue),
-            "gross_profit": _pick_optional_float(
-                _coerce_optional_float(getattr(statement_row, "gross_profit", None)),
-                _lookup_financial_metric(statement_row.raw_data or {}, "gross_profit", "grossProfit"),
-            ),
+            "gross_profit": _coerce_optional_float(statement_row.gross_profit),
             "eps": _coerce_optional_float(statement_row.eps),
-            "interest_expense": _coerce_optional_float(statement_row.interest_expense),
+            "interest_expense": admitted_interest_expense(statement_row),
             "ebitda": _coerce_optional_float(statement_row.ebitda),
             "tax_expense": _coerce_optional_float(statement_row.tax_expense),
             "raw_data": statement_row.raw_data or {},
-            "net_interest_income": _pick_optional_float(
-                _lookup_financial_metric(statement_row.raw_data or {}, "net_interest_income")
-            ),
-            "provision_for_credit_losses": _pick_optional_float(
-                _lookup_financial_metric(
-                    statement_row.raw_data or {},
-                    "provision_for_credit_losses",
-                    "credit_loss_provision",
-                )
-            ),
+            "net_interest_income": admitted_raw_metric(statement_row, "net_interest_income"),
+            "provision_for_credit_losses": admitted_raw_metric(statement_row, "provision_for_credit_losses", "credit_loss_provision"),
         }
         income_lookup[key] = (
             _merge_metric_maps(income_lookup[key], support_metrics)
@@ -3680,6 +3502,8 @@ async def _enrich_missing_ratio_metrics(
         year, quarter = key
         prev_key = (year - 1, quarter if normalized_period == "quarter" else 0)
         prev = income_lookup.get(prev_key)
+        if compatible_basis.get((year, quarter or None)) != compatible_basis.get((year - 1, quarter or None)):
+            prev = None
         prev_income_values[key] = (
             None if prev is None else _coerce_optional_float(prev.get("revenue")),
             None if prev is None else _coerce_optional_float(prev.get("net_income")),
@@ -3687,115 +3511,6 @@ async def _enrich_missing_ratio_metrics(
         )
 
     balance_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
-    for (
-        year,
-        quarter,
-        total_assets,
-        current_assets,
-        cash_and_equivalents,
-        total_liabilities,
-        current_liabilities,
-        total_equity,
-        book_value_per_share,
-        inventory,
-        receivables,
-        short_term_debt,
-        long_term_debt,
-        raw_data,
-    ) in balance_rows:
-        if year is None:
-            continue
-        raw_payload = raw_data if isinstance(raw_data, dict) else {}
-        balance_lookup[(int(year), int(quarter or 0))] = {
-            "total_assets": _coerce_optional_float(total_assets),
-            "current_assets": _coerce_optional_float(current_assets),
-            "cash_and_equivalents": _pick_optional_float(
-                _coerce_optional_float(cash_and_equivalents),
-                _lookup_financial_metric(
-                    raw_payload,
-                    "cash_and_equivalents",
-                    "cash_and_cash_equivalents",
-                    "cash_and_cash_equivalents_bn_vnd",
-                    "cash",
-                    "balances_with_the_sbv",
-                ),
-            ),
-            "total_liabilities": _coerce_optional_float(total_liabilities),
-            "current_liabilities": _coerce_optional_float(current_liabilities),
-            "total_equity": _pick_optional_float(
-                _coerce_optional_float(total_equity),
-                _lookup_financial_metric(
-                    raw_payload,
-                    "total_equity",
-                    "equity",
-                    "shareholders_equity",
-                    "owners_equity_bn_vnd",
-                    "owners_equitybn_vnd",
-                    "owner_s_equity_bn_vnd",
-                    "owner_s_equity",
-                    "capital_and_reserves_bn_vnd",
-                ),
-            ),
-            "book_value_per_share": _coerce_optional_float(book_value_per_share),
-            "inventory": _coerce_optional_float(inventory),
-            "accounts_receivable": _coerce_optional_float(receivables),
-            "customer_deposits": _pick_optional_float(
-                _lookup_financial_metric(
-                    raw_payload,
-                    "customer_deposits",
-                    "deposits_from_customers",
-                    "tien_gui_cua_khach_hang",
-                )
-            ),
-            "current_account_deposits": _pick_optional_float(
-                _lookup_financial_metric(
-                    raw_payload,
-                    "current_account_deposits",
-                    "current_accounts",
-                    "demand_deposits",
-                    "non_term_deposits",
-                    "casa",
-                )
-            ),
-            "gross_loans": _pick_optional_float(
-                _lookup_financial_metric(
-                    raw_payload,
-                    "loans_and_advances_to_customers",
-                    "loans_advances_and_finance_leases_to_customers",
-                    "gross_loans",
-                ),
-                _coerce_optional_float(receivables),
-            ),
-            "loan_loss_reserve": _pick_optional_float(
-                _lookup_financial_metric(
-                    raw_payload,
-                    "provisions_for_losses_on_loans_advances_and_finance_leases_to_customers",
-                    "less_provision_for_losses_on_loans_and_advances_to_customers",
-                    "provision_for_loan_losses",
-                    "loan_loss_reserve",
-                )
-            ),
-            "placements_with_banks": _pick_optional_float(
-                _lookup_financial_metric(
-                    raw_payload,
-                    "placements_at_and_loans_to_other_credit_institutions",
-                    "placements_with_and_loans_to_other_credit_institutions",
-                    "placements_at_other_credit_institutions",
-                    "loans_to_other_credit_institutions",
-                )
-            ),
-            "investment_securities_total": _pick_optional_float(
-                _lookup_financial_metric(
-                    raw_payload,
-                    "investment_securities",
-                    "available_for_sales_securities",
-                    "held_to_maturity_securities",
-                )
-            ),
-            "short_term_debt": _coerce_optional_float(short_term_debt),
-            "long_term_debt": _coerce_optional_float(long_term_debt),
-        }
-
     for statement_row in balance_support_rows or []:
         year, quarter = _extract_year_quarter(statement_row.period or "")
         serialized_period = _serialize_ratio_period(year, quarter)
@@ -3815,49 +3530,15 @@ async def _enrich_missing_ratio_metrics(
                 _coerce_optional_float(statement_row.total_equity),
                 _coerce_optional_float(statement_row.equity),
             ),
-            "book_value_per_share": _coerce_optional_float(
-                statement_row.raw_data.get("book_value_per_share")
-            )
-            if isinstance(statement_row.raw_data, dict)
-            else None,
+            "book_value_per_share": admitted_raw_metric(statement_row, "book_value_per_share", unit="VND/share"),
             "inventory": _coerce_optional_float(statement_row.inventory),
             "accounts_receivable": _coerce_optional_float(statement_row.accounts_receivable),
             "customer_deposits": _coerce_optional_float(statement_row.customer_deposits),
-            "current_account_deposits": _pick_optional_float(
-                _lookup_financial_metric(
-                    statement_row.raw_data or {},
-                    "current_account_deposits",
-                    "current_accounts",
-                    "demand_deposits",
-                    "non_term_deposits",
-                    "casa",
-                )
-            ),
-            "gross_loans": _pick_optional_float(
-                _lookup_financial_metric(
-                    statement_row.raw_data or {}, "gross_loans", "loans_and_advances_to_customers"
-                ),
-                _coerce_optional_float(statement_row.accounts_receivable),
-            ),
-            "loan_loss_reserve": _pick_optional_float(
-                _lookup_financial_metric(
-                    statement_row.raw_data or {}, "loan_loss_reserve", "provision_for_loan_losses"
-                )
-            ),
-            "placements_with_banks": _pick_optional_float(
-                _lookup_financial_metric(
-                    statement_row.raw_data or {},
-                    "placements_with_banks",
-                    "placements_at_other_credit_institutions",
-                )
-            ),
-            "investment_securities_total": _pick_optional_float(
-                _lookup_financial_metric(
-                    statement_row.raw_data or {},
-                    "investment_securities_total",
-                    "investment_securities",
-                )
-            ),
+            "current_account_deposits": admitted_raw_metric(statement_row, "current_account_deposits", "current_accounts", "demand_deposits", "non_term_deposits", "casa"),
+            "gross_loans": admitted_raw_metric(statement_row, "gross_loans", "loans_and_advances_to_customers"),
+            "loan_loss_reserve": admitted_raw_metric(statement_row, "loan_loss_reserve", "provision_for_loan_losses"),
+            "placements_with_banks": admitted_raw_metric(statement_row, "placements_with_banks", "placements_at_other_credit_institutions"),
+            "investment_securities_total": admitted_raw_metric(statement_row, "investment_securities_total", "investment_securities"),
             "short_term_debt": _coerce_optional_float(statement_row.short_term_debt),
             "long_term_debt": _coerce_optional_float(statement_row.long_term_debt),
         }
@@ -3872,29 +3553,10 @@ async def _enrich_missing_ratio_metrics(
         year, quarter = key
         prev_key = (year - 1, quarter if normalized_period == "quarter" else 0)
         prev_balance_values[key] = balance_lookup.get(prev_key) or {}
+        if compatible_basis.get((year, quarter or None)) != compatible_basis.get((year - 1, quarter or None)):
+            prev_balance_values[key] = {}
 
     cashflow_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
-    for (
-        year,
-        quarter,
-        operating_cash_flow,
-        free_cash_flow,
-        capital_expenditure,
-        dividends_paid,
-        debt_repayment,
-        depreciation,
-    ) in cashflow_rows:
-        if year is None:
-            continue
-        cashflow_lookup[(int(year), int(quarter or 0))] = {
-            "operating_cash_flow": _coerce_optional_float(operating_cash_flow),
-            "free_cash_flow": _coerce_optional_float(free_cash_flow),
-            "capital_expenditure": _coerce_optional_float(capital_expenditure),
-            "dividends_paid": _coerce_optional_float(dividends_paid),
-            "debt_repayment": _coerce_optional_float(debt_repayment),
-            "depreciation": _coerce_optional_float(depreciation),
-        }
-
     for statement_row in cashflow_support_rows or []:
         year, quarter = _extract_year_quarter(statement_row.period or "")
         serialized_period = _serialize_ratio_period(year, quarter)
@@ -3918,84 +3580,6 @@ async def _enrich_missing_ratio_metrics(
             else support_metrics
         )
 
-    latest_price_stmt = (
-        select(ScreenerSnapshot.price)
-        .where(ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.price.is_not(None))
-        .order_by(ScreenerSnapshot.snapshot_date.desc())
-        .limit(1)
-    )
-    latest_price = _coerce_optional_float(
-        (await db.execute(latest_price_stmt)).scalar_one_or_none()
-    )
-    outstanding_shares = await _get_outstanding_shares(db, symbol)
-    market_cap_stmt = (
-        select(ScreenerSnapshot.market_cap)
-        .where(ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.market_cap.is_not(None))
-        .order_by(ScreenerSnapshot.snapshot_date.desc())
-        .limit(1)
-    )
-    market_cap = _coerce_optional_float((await db.execute(market_cap_stmt)).scalar_one_or_none())
-    if (
-        market_cap in (None, 0)
-        and outstanding_shares not in (None, 0)
-        and latest_price not in (None, 0)
-    ):
-        multiplier = 1.0 if outstanding_shares >= 1_000_000 else 1_000_000.0
-        market_cap = outstanding_shares * multiplier * latest_price
-    if market_cap in (None, 0):
-        market_cap = await _resolve_profile_market_cap(
-            db=db,
-            symbol=symbol,
-            outstanding_shares=outstanding_shares,
-            fallback_market_cap=market_cap,
-        )
-
-    period_end_targets = {
-        (year, quarter or 0): _resolve_period_end_date(year, quarter, normalized_period)
-        for item in rows
-        for year, quarter in [_extract_year_quarter(item.period or "")]
-        if year is not None
-    }
-    period_end_targets = {
-        key: target for key, target in period_end_targets.items() if target is not None
-    }
-    period_price_lookup: dict[tuple[int, int], float | None] = {}
-    period_market_cap_lookup: dict[tuple[int, int], float | None] = {}
-
-    if period_end_targets:
-        max_target = max(period_end_targets.values())
-        price_history_stmt = (
-            select(StockPrice.time, StockPrice.close)
-            .where(
-                StockPrice.symbol == symbol,
-                StockPrice.interval == "1D",
-                StockPrice.time <= max_target,
-            )
-            .order_by(StockPrice.time.asc())
-        )
-        price_history_rows = (await db.execute(price_history_stmt)).all()
-        price_dates = [row.time for row in price_history_rows if row.time is not None]
-        price_closes = [
-            _coerce_optional_float(row.close) for row in price_history_rows if row.time is not None
-        ]
-
-        if price_dates and price_closes:
-            share_multiplier = (
-                1.0
-                if outstanding_shares is not None and outstanding_shares >= 1_000_000
-                else 1_000_000.0
-            )
-            for key, target_date in period_end_targets.items():
-                index = bisect_right(price_dates, target_date) - 1
-                if index < 0:
-                    continue
-                close_value = price_closes[index]
-                period_price_lookup[key] = close_value
-                if close_value not in (None, 0) and outstanding_shares not in (None, 0):
-                    period_market_cap_lookup[key] = (
-                        outstanding_shares * share_multiplier * close_value
-                    )
-
     for item in rows:
         year, quarter = _extract_year_quarter(item.period or "")
         if year is None:
@@ -4004,18 +3588,8 @@ async def _enrich_missing_ratio_metrics(
         income = income_lookup.get(key)
         balance = balance_lookup.get(key)
         cashflow = cashflow_lookup.get(key)
-        if income is None and quarter is not None:
-            income = income_lookup.get((year, 0))
-        if balance is None and quarter is not None:
-            balance = balance_lookup.get((year, 0))
-        if cashflow is None and quarter is not None:
-            cashflow = cashflow_lookup.get((year, 0))
 
-        balance_prev = None
-        if normalized_period == "quarter" and quarter is not None and 1 <= quarter <= 4:
-            balance_prev = balance_lookup.get((year - 1, quarter))
-        if balance_prev is None:
-            balance_prev = balance_lookup.get((year - 1, 0))
+        balance_prev = prev_balance_values.get(key) or {}
 
         revenue = None if income is None else _coerce_optional_float(income.get("revenue"))
         operating_income = (
@@ -4027,6 +3601,10 @@ async def _enrich_missing_ratio_metrics(
         )
         interest_expense = (
             None if income is None else _coerce_optional_float(income.get("interest_expense"))
+        )
+        item.interest_coverage = (
+            operating_income / abs(interest_expense)
+            if operating_income is not None and interest_expense not in (None, 0) else None
         )
         net_interest_income = (
             None if income is None else _coerce_optional_float(income.get("net_interest_income"))
@@ -4153,8 +3731,10 @@ async def _enrich_missing_ratio_metrics(
 
         if item.roe is None and net_income is not None and total_equity not in (None, 0):
             item.roe = (net_income / total_equity) * 100
+            item.ratio_units["roe"] = "percent"
         if item.roa is None and net_income is not None and total_assets not in (None, 0):
             item.roa = (net_income / total_assets) * 100
+            item.ratio_units["roa"] = "percent"
         if (
             not is_bank_like
             and item.roic is None
@@ -4164,6 +3744,7 @@ async def _enrich_missing_ratio_metrics(
             invested_capital = total_equity + (long_term_debt or 0.0)
             if invested_capital not in (None, 0):
                 item.roic = (net_income / invested_capital) * 100
+                item.ratio_units["roic"] = "percent"
         if (
             item.current_ratio is None
             and current_assets not in (None, 0)
@@ -4182,78 +3763,36 @@ async def _enrich_missing_ratio_metrics(
             and current_liabilities not in (None, 0)
         ):
             item.cash_ratio = cash_and_equivalents / current_liabilities
-        if item.eps is None and net_income is not None and outstanding_shares not in (None, 0):
-            item.eps = net_income / outstanding_shares
-        if item.bvps is None:
-            if book_value_per_share not in (None, 0):
-                item.bvps = book_value_per_share
-            elif total_equity is not None and outstanding_shares not in (None, 0):
-                item.bvps = total_equity / outstanding_shares
-        period_price = period_price_lookup.get(key)
-        valuation_price = _pick_optional_float(period_price, latest_price)
-        valuation_market_cap = _pick_optional_float(period_market_cap_lookup.get(key), market_cap)
-        price_vnd = _price_to_vnd_units(valuation_price, dps_hint=item.dps or item.eps)
-        if item.pe is None and price_vnd not in (None, 0) and item.eps not in (None, 0):
-            item.pe = price_vnd / item.eps
-        if item.pb is None and price_vnd not in (None, 0) and item.bvps not in (None, 0):
-            item.pb = price_vnd / item.bvps
-        if (
-            not is_bank_like
-            and item.ps is None
-            and valuation_market_cap not in (None, 0)
-            and revenue not in (None, 0)
-        ):
-            item.ps = valuation_market_cap / revenue
-        if (
-            not is_bank_like
-            and item.ev_sales is None
-            and revenue not in (None, 0)
-            and valuation_market_cap not in (None, 0)
-        ):
-            total_debt = None
-            if short_term_debt is not None or long_term_debt is not None:
-                total_debt = (short_term_debt or 0.0) + (long_term_debt or 0.0)
-            elif total_liabilities is not None:
-                total_debt = total_liabilities
-
-            enterprise_value = valuation_market_cap
-            if total_debt is not None:
-                enterprise_value += total_debt
-            if cash_and_equivalents is not None:
-                enterprise_value -= cash_and_equivalents
-
-            if revenue not in (None, 0):
-                item.ev_sales = enterprise_value / revenue
+        # Historical share counts and price adjustment bases are not retained here;
+        # only source-reported valuations/per-share values can be served safely.
         if (
             item.operating_margin is None
             and revenue not in (None, 0)
             and operating_income is not None
         ):
             item.operating_margin = (operating_income / revenue) * 100
+            item.ratio_units["operating_margin"] = "percent"
         if (
             item.gross_margin is None
             and revenue not in (None, 0)
             and not is_bank_like
         ):
-            # Prefer the explicit gross_profit value (sourced from raw_data
-            # in income_lookup), then fall back to revenue - cost_of_revenue.
+            # Only reported gross profit is safe without an evidenced cost sign convention.
             # Banks/securities firms don't report gross_profit so we skip
             # them via the is_bank_like guard.
             gross_profit_value = (
                 None if income is None else _coerce_optional_float(income.get("gross_profit"))
             )
-            if gross_profit_value is None and cost_of_revenue is not None:
-                gross_profit_value = revenue - cost_of_revenue
             if gross_profit_value is not None:
-                derived_gross_margin = (gross_profit_value / revenue) * 100
-                if -500.0 <= derived_gross_margin <= 500.0:
-                    item.gross_margin = derived_gross_margin
+                item.gross_margin = (gross_profit_value / revenue) * 100
+                item.ratio_units["gross_margin"] = "percent"
         if (
             item.net_margin is None
             and revenue not in (None, 0)
             and net_income is not None
         ):
             item.net_margin = (net_income / revenue) * 100
+            item.ratio_units["net_margin"] = "percent"
         if (
             item.asset_turnover is None
             and revenue not in (None, 0)
@@ -4281,38 +3820,21 @@ async def _enrich_missing_ratio_metrics(
             and total_liabilities not in (None, 0)
             and total_assets not in (None, 0)
         ):
-            item.debt_assets = total_liabilities / total_assets
+            item.debt_assets = (total_liabilities / total_assets) * 100
+            item.ratio_units["debt_assets"] = "percent"
         if (
             item.debt_equity is None
             and total_equity not in (None, 0)
         ):
-            # Prefer interest-bearing debt (short_term + long_term) when both
-            # are reported. Fall back to total_liabilities so the metric is
-            # always populated when equity is known. Banks/securities firms
-            # have separate Debt/Equity caveats so skip them.
+            # Debt/Equity needs reported debt, not an inferred liability proxy.
             short_term_debt_value = (
                 None if balance is None else _coerce_optional_float(balance.get("short_term_debt"))
             )
             long_term_debt_value = (
                 None if balance is None else _coerce_optional_float(balance.get("long_term_debt"))
             )
-            interest_bearing_debt: float | None = None
-            if short_term_debt_value is not None and long_term_debt_value is not None:
-                interest_bearing_debt = short_term_debt_value + long_term_debt_value
-            elif long_term_debt_value is not None:
-                interest_bearing_debt = long_term_debt_value
-            elif short_term_debt_value is not None:
-                interest_bearing_debt = short_term_debt_value
-            debt_basis = (
-                interest_bearing_debt
-                if interest_bearing_debt is not None and interest_bearing_debt > 0
-                else (total_liabilities if total_liabilities is not None else None)
-            )
-            if debt_basis is not None and not is_bank_like:
-                derived_de = debt_basis / total_equity
-                # Guard absurd values from corrupt rows.
-                if -50.0 <= derived_de <= 50.0:
-                    item.debt_equity = derived_de
+            if short_term_debt_value is not None and long_term_debt_value is not None and not is_bank_like:
+                item.debt_equity = (short_term_debt_value + long_term_debt_value) / total_equity
         if (
             item.equity_multiplier is None
             and total_assets not in (None, 0)
@@ -4377,24 +3899,18 @@ async def _enrich_missing_ratio_metrics(
             item.provision_coverage = (abs(loan_loss_reserve) / gross_loans) * 100
 
         prev_revenue, prev_net_income, _prev_eps = prev_income_values.get(key, (None, None, None))
-        if (
-            item.revenue_growth is None
-            and revenue not in (None, 0)
-            and prev_revenue not in (None, 0)
-        ):
-            item.revenue_growth = ((revenue - prev_revenue) / prev_revenue) * 100
-        if (
-            item.earnings_growth is None
-            and net_income not in (None, 0)
-            and prev_net_income not in (None, 0)
-        ):
-            item.earnings_growth = ((net_income - prev_net_income) / prev_net_income) * 100
+        if revenue is not None and prev_revenue is not None:
+            item.revenue_growth = _growth_rate(revenue, prev_revenue)
+            item.ratio_units["revenue_growth"] = "percent"
+        if net_income is not None and prev_net_income is not None:
+            item.earnings_growth = _growth_rate(net_income, prev_net_income)
+            item.ratio_units["earnings_growth"] = "percent"
 
         if item.ebitda is None:
             ebitda_value = ebitda_reported
             if ebitda_value is None and operating_income is not None and depreciation is not None:
                 ebitda_value = operating_income + abs(depreciation)
-            if ebitda_value is None and net_income is not None:
+            if ebitda_value is None and net_income is not None and interest_expense is not None:
                 addbacks = 0.0
                 has_addback = False
                 if tax_expense is not None:
@@ -4411,7 +3927,7 @@ async def _enrich_missing_ratio_metrics(
             if ebitda_value is not None:
                 item.ebitda = ebitda_value
 
-        if item.debt_service_coverage is None and operating_income is not None:
+        if item.debt_service_coverage is None and operating_income is not None and interest_expense is not None:
             debt_service = 0.0
             if interest_expense is not None:
                 debt_service += abs(interest_expense)
@@ -4419,12 +3935,8 @@ async def _enrich_missing_ratio_metrics(
                 debt_service += abs(debt_repayment)
             if debt_service > 0:
                 item.debt_service_coverage = operating_income / debt_service
-        if (
-            item.debt_service_coverage is None
-            and operating_cash_flow is not None
-            and debt_repayment not in (None, 0)
-        ):
-            item.debt_service_coverage = operating_cash_flow / abs(debt_repayment)
+        if interest_expense is None:
+            item.debt_service_coverage = None
 
         if (
             item.ocf_debt is None
@@ -4436,51 +3948,18 @@ async def _enrich_missing_ratio_metrics(
         if item.ocf_sales is None and operating_cash_flow is not None and revenue not in (None, 0):
             item.ocf_sales = operating_cash_flow / revenue
 
-        if (
-            not is_bank_like
-            and item.fcf_yield is None
-            and free_cash_flow is not None
-            and valuation_market_cap not in (None, 0)
-        ):
-            item.fcf_yield = free_cash_flow / valuation_market_cap
 
-        if item.dps is None and dividends_paid is not None and outstanding_shares not in (None, 0):
-            item.dps = abs(dividends_paid) / outstanding_shares
-
-        item.dividend_yield = _resolve_dividend_yield_percent(
-            raw_yield=item.dividend_yield,
-            dps=item.dps,
-            latest_price=valuation_price,
-        )
-
-        if item.dps is None and item.dividend_yield is not None:
-            price_vnd = _price_to_vnd_units(valuation_price, dps_hint=1.0)
-            if price_vnd not in (None, 0):
-                item.dps = (item.dividend_yield / 100) * price_vnd
-
-        if item.dividend_yield is None:
-            item.dividend_yield = _resolve_dividend_yield_percent(
-                raw_yield=None,
-                dps=item.dps,
-                latest_price=valuation_price,
-            )
-
-        if item.payout_ratio is None:
-            if dividends_paid is not None and net_income not in (None, 0) and net_income > 0:
-                item.payout_ratio = (abs(dividends_paid) / net_income) * 100
-            else:
-                dps = _coerce_optional_float(getattr(item, "dps", None))
-                eps = _coerce_optional_float(item.eps)
-                if dps is not None and eps not in (None, 0):
-                    item.payout_ratio = (dps / eps) * 100
+        if item.ratio_units.get("payout_ratio") != "percent":
+            item.payout_ratio = None
+        if item.payout_ratio is None and dividends_paid is not None and net_income not in (None, 0) and net_income > 0:
+            item.payout_ratio = (abs(dividends_paid) / net_income) * 100
+            item.ratio_units["payout_ratio"] = "percent"
 
         if item.peg_ratio is None:
             pe_value = _coerce_optional_float(item.pe)
             growth_value = _coerce_optional_float(item.earnings_growth)
-            if pe_value is not None and growth_value not in (None, 0):
-                growth_base = growth_value if abs(growth_value) > 1 else growth_value * 100
-                if growth_base > 0:
-                    item.peg_ratio = pe_value / growth_base
+            if pe_value is not None and growth_value is not None and growth_value > 0:
+                item.peg_ratio = pe_value / growth_value
 
         if is_bank_like:
             _apply_bank_ratio_normalization(item)
@@ -4489,17 +3968,21 @@ async def _enrich_missing_ratio_metrics(
 
 
 @router.get("/historical", response_model=StandardResponse[list[EquityHistoricalData]])
-@cached(key_prefix="historical_v3")
+@cached(key_prefix="historical_v6_stored_first")
 async def get_historical_prices(
     symbol: str = Query(..., min_length=1, max_length=10),
     start_date: date = Query(default_factory=lambda: date.today() - timedelta(days=365)),
     end_date: date = Query(default_factory=date.today),
     interval: str = Query(default="1D", pattern=r"^(1m|5m|15m|30m|1H|1D|1W|1M)$"),
-    source: str = Query(default="VCI", pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     symbol_upper = symbol.upper()
+    release_read = (
+        isinstance(db, AsyncSession) and not db.in_transaction()
+        and not (db.new or db.dirty or db.deleted)
+    )
     cache_manager = CacheManager(db=db)
     corporate_actions = (
         await _load_corporate_actions_for_adjustment(
@@ -4531,7 +4014,7 @@ async def get_historical_prices(
         allow_stale=True,
     )
     cache_data = (
-        [_to_historical_data(row, adjustment_mode=adjustment_mode) for row in cache_result.data]
+        [item for row in cache_result.data if (item := _to_historical_data(row, adjustment_mode=adjustment_mode)) is not None]
         if cache_result.hit and cache_result.data
         else []
     )
@@ -4549,6 +4032,20 @@ async def get_historical_prices(
         source_rows.append(("recent_cache", recent_cache_data))
         merged, _ = _merge_historical_rows(source_rows)
 
+    if not _historical_rows_cover_request(merged, start_date, end_date, interval):
+        fallback_data = await _load_historical_from_db(
+            db=db,
+            symbol=symbol_upper,
+            start_date=start_date,
+            end_date=end_date,
+            interval=interval,
+            adjustment_mode=adjustment_mode,
+        )
+        source_rows.append(("db", fallback_data))
+        merged, _ = _merge_historical_rows(source_rows)
+
+    if release_read and db.in_transaction():
+        await db.rollback()
     provider_error: Exception | None = None
     if not _historical_rows_cover_request(merged, start_date, end_date, interval):
         try:
@@ -4559,7 +4056,10 @@ async def get_historical_prices(
                 interval=interval,
                 source=source,
             )
-            provider_data = await VnstockEquityHistoricalFetcher.fetch(params)
+            provider_data = await asyncio.wait_for(
+                VnstockEquityHistoricalFetcher.fetch(params),
+                timeout=min(10, _provider_timeout_budget()),
+            )
             source_rows.append(
                 (
                     "provider",
@@ -4580,17 +4080,11 @@ async def get_historical_prices(
             )
         merged, _ = _merge_historical_rows(source_rows)
 
-    if not _historical_rows_cover_request(merged, start_date, end_date, interval):
-        fallback_data = await _load_historical_from_db(
-            db=db,
-            symbol=symbol_upper,
-            start_date=start_date,
-            end_date=end_date,
-            interval=interval,
-            adjustment_mode=adjustment_mode,
-        )
-        source_rows.append(("db", fallback_data))
-        merged, _ = _merge_historical_rows(source_rows)
+
+    expected_unit = "index_points" if is_index_symbol(symbol_upper) else "VND"
+    excluded_count = sum(row.price_unit != expected_unit for _, rows in source_rows for row in rows)
+    if excluded_count:
+        warnings.append(f"Excluded {excluded_count} row(s) with incompatible or unconfirmed price units; legacy provenance may be insufficient.")
 
     if merged:
         merged, source_counts = _merge_historical_rows(source_rows)
@@ -4632,13 +4126,118 @@ async def get_historical_prices(
 
 
 
+async def _load_quote_from_mongo(symbol_upper: str) -> StockQuoteData | None:
+    try:
+        mongo = get_mongo_market_data_service()
+        if not mongo.enabled:
+            return None
+        docs = await mongo.get_latest_eod_prices(symbol_upper, limit=2)
+    except Exception as error:
+        logger.warning("Quote Mongo fallback failed for %s: %s", symbol_upper, error)
+        return None
+    if not docs:
+        return None
+    latest = normalize_price_record(docs[-1], symbol=symbol_upper)
+    if latest["price_unit"] == "unknown":
+        return None
+    previous = normalize_price_record(docs[-2], symbol=symbol_upper) if len(docs) > 1 else None
+    if previous and previous["price_unit"] != latest["price_unit"]:
+        previous = None
+    close = _coerce_optional_float(latest.get("close"))
+    if close is None:
+        return None
+    prev_close = _coerce_optional_float(previous.get("close")) if previous else None
+    change = close - prev_close if prev_close is not None else None
+    return StockQuoteData(
+        symbol=symbol_upper, price_unit=latest["price_unit"], price=close,
+        open=_coerce_optional_float(latest.get("open")),
+        high=_coerce_optional_float(latest.get("high")),
+        low=_coerce_optional_float(latest.get("low")), prev_close=prev_close, change=change,
+        change_pct=round(change / prev_close * 100, 2) if change is not None and prev_close else None,
+        volume=_coerce_optional_int(latest.get("volume")),
+        updated_at=_coerce_meta_datetime(latest.get("tradeDate")),
+        as_of=_coerce_meta_datetime(latest.get("tradeDate") or latest.get("time") or latest.get("date")),
+        upstream_source=_pick_optional_text(latest.get("source"), latest.get("price_source")),
+    )
+
+
+async def _load_quote_from_database(
+    db: AsyncSession, symbol_upper: str, *, observation_clock: bool = False
+) -> StockQuoteData | None:
+    price_rows = (await db.execute(
+        select(StockPrice).where(StockPrice.symbol == symbol_upper)
+        .order_by(StockPrice.time.desc()).limit(2)
+    )).scalars().all()
+    snapshot = (await db.execute(
+        select(ScreenerSnapshot).where(ScreenerSnapshot.symbol == symbol_upper)
+        .order_by(
+            func.coalesce(ScreenerSnapshot.trade_date, ScreenerSnapshot.snapshot_date).desc(),
+            ScreenerSnapshot.snapshot_date.desc(), ScreenerSnapshot.created_at.desc(),
+        ).limit(1)
+    )).scalar_one_or_none()
+    latest_row = price_rows[0] if price_rows else None
+    previous_row = price_rows[1] if len(price_rows) > 1 else None
+    latest = persisted_price_record(latest_row) if latest_row else {}
+    previous = persisted_price_record(previous_row) if previous_row else {}
+    close = latest.get("close") if latest.get("price_unit") in {"VND", "index_points"} else None
+    prev_close = previous.get("close") if close is not None and previous.get("price_unit") == latest.get("price_unit") else None
+    observation_date = _snapshot_observation_date(snapshot) if snapshot is not None else None
+    if (snapshot is not None and snapshot.price is not None and observation_date is not None
+            and (latest_row is None or latest_row.time is None or observation_date > latest_row.time)):
+        quote = _build_quote_from_screener_snapshot(
+            snapshot, latest_row, previous_row, observation_clock=observation_clock
+        )
+        if quote is not None:
+            return quote
+    if latest_row is not None and close is not None:
+        change = close - prev_close if prev_close is not None else None
+        return StockQuoteData(
+            symbol=symbol_upper, price_unit=latest["price_unit"], price=close,
+            open=latest.get("open"), high=latest.get("high"), low=latest.get("low"),
+            prev_close=prev_close, change=change,
+            change_pct=round(change / prev_close * 100, 2) if change is not None and prev_close else None,
+            volume=int(latest_row.volume) if latest_row.volume is not None else None,
+            updated_at=datetime.combine(
+                latest_row.time, datetime.min.time(),
+                tzinfo=ZoneInfo("Asia/Ho_Chi_Minh") if observation_clock else None,
+            ) if latest_row.time else None,
+            as_of=datetime.combine(latest_row.time, datetime.min.time(), tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+            if latest_row.time else None,
+            upstream_source=_pick_optional_text(latest.get("source"), latest.get("price_source")),
+        )
+    return (_build_quote_from_screener_snapshot(snapshot, observation_clock=observation_clock)
+            if snapshot is not None and snapshot.price is not None else None)
+
+
+async def _load_stored_quote(symbol: str) -> tuple[StockQuoteData | None, str | None]:
+    symbol = symbol.strip().upper()
+    if is_index_symbol(symbol):
+        return None, None
+    cached_quote = await _load_quote_from_price_cache(symbol)
+    if cached_quote is not None and cached_quote.price_unit == "VND":
+        return cached_quote, "redis:price_snapshot"
+    try:
+        async with async_session_factory() as db:
+            try:
+                quote = await _load_quote_from_database(db, symbol, observation_clock=True)
+            except Exception:
+                await db.rollback()
+                raise
+        if quote is not None and quote.price_unit == "VND":
+            return quote, "postgres:stored_quote"
+    except Exception as error:
+        logger.warning("Stored quote SQL read failed for %s: %s", symbol, error)
+    quote = await _load_quote_from_mongo(symbol)
+    if quote is not None and quote.price_unit == "VND":
+        return quote, "mongo:market_prices_eod"
+    return None, None
+
+
 @router.get("/{symbol}/quote", response_model=StandardResponse[Optional[StockQuoteData]])
-@cached(ttl=30, key_prefix="quote")
 async def get_quote(
     symbol: str,
-    source: str = Query(default="VCI"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     refresh: bool = Query(default=False),
-    db: AsyncSession = Depends(get_db),
 ):
     symbol_upper = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{3}", symbol_upper):
@@ -4648,187 +4247,84 @@ async def get_quote(
             meta=MetaData(count=0),
             error="Invalid symbol format. Expected a 3-character ticker.",
         )
+    return await _load_quote_response(symbol_upper, source, refresh)
 
 
-    async def _get_mongo_quote() -> StockQuoteData | None:
-        """Build a quote from the canonical Mongo `market_prices_eod` corpus.
+def _quote_response_meta(quote: StockQuoteData, source: str) -> MetaData:
+    observed = quote.as_of
+    if observed is not None and observed.tzinfo is None:
+        observed = observed.replace(tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+    return MetaData(
+        count=1, source=source, upstream_source=quote.upstream_source,
+        as_of=observed.isoformat() if observed else None,
+        stale=(datetime.now(observed.tzinfo) - observed).total_seconds() > 60 if observed else None,
+    )
 
-        Mongo only carries settled EOD bars, so this is used as a fallback when
-        Postgres `StockPrice` is empty/unavailable and as a last resort before
-        returning an unavailable quote. The caller decides freshness; this
-        returns the latest two-bar-derived quote if Mongo has data.
-        """
+
+@cached(ttl=30, key_prefix="quote_v3_delivery")
+async def _load_quote_response(symbol_upper: str, source: str, refresh: bool):
+    async def _get_db_quote() -> StockQuoteData | None:
         try:
-            mongo = get_mongo_market_data_service()
-            if not mongo.enabled:
-                return None
-            docs = await mongo.get_latest_eod_prices(symbol_upper, limit=2)
-        except Exception as mongo_err:  # pragma: no cover - defensive
-            logger.warning("Quote Mongo fallback failed for %s: %s", symbol_upper, mongo_err)
+            async with async_session_factory() as db:
+                return await _load_quote_from_database(db, symbol_upper)
+        except Exception as error:
+            logger.warning("Quote DB fallback failed for %s: %s", symbol_upper, error)
             return None
-
-        if not docs:
-            return None
-
-        # get_eod_prices sorts ascending by tradeDate, so the last element is newest.
-        latest = docs[-1]
-        previous = docs[-2] if len(docs) > 1 else None
-        latest_close = _coerce_optional_float(latest.get("close"))
-        if latest_close is None:
-            return None
-        prev_close = _coerce_optional_float(previous.get("close")) if previous else None
-        change = (
-            latest_close - prev_close
-            if latest_close is not None and prev_close is not None
-            else None
-        )
-        change_pct = (
-            (change / prev_close) * 100
-            if change is not None and prev_close not in (None, 0)
-            else None
-        )
-        trade_date = latest.get("tradeDate")
-        updated_at = _coerce_meta_datetime(trade_date)
-        return StockQuoteData(
-            symbol=symbol_upper,
-            price=latest_close,
-            open=_coerce_optional_float(latest.get("open")),
-            high=_coerce_optional_float(latest.get("high")),
-            low=_coerce_optional_float(latest.get("low")),
-            prev_close=prev_close,
-            change=change,
-            change_pct=round(change_pct, 2) if change_pct is not None else None,
-            volume=_coerce_optional_int(latest.get("volume")),
-            updated_at=updated_at,
-        )
-
-    async def _get_db_quote() -> Optional[StockQuoteData]:
-        try:
-            price_stmt = (
-                select(StockPrice)
-                .where(StockPrice.symbol == symbol_upper)
-                .order_by(StockPrice.time.desc())
-                .limit(2)
-            )
-            price_rows = (await db.execute(price_stmt)).scalars().all()
-
-            snapshot_stmt = (
-                select(ScreenerSnapshot)
-                .where(ScreenerSnapshot.symbol == symbol_upper)
-                .order_by(ScreenerSnapshot.snapshot_date.desc())
-                .limit(1)
-            )
-            snapshot_row = (await db.execute(snapshot_stmt)).scalar_one_or_none()
-
-            latest_row = price_rows[0] if price_rows else None
-            previous_row = price_rows[1] if len(price_rows) > 1 else None
-
-            latest_close = (
-                float(latest_row.close) if latest_row and latest_row.close is not None else None
-            )
-            prev_close = (
-                float(previous_row.close)
-                if previous_row and previous_row.close is not None
-                else None
-            )
-            db_change = (
-                latest_close - prev_close
-                if latest_close is not None and prev_close is not None
-                else None
-            )
-            db_change_pct = (
-                (db_change / prev_close) * 100
-                if db_change is not None and prev_close not in (None, 0)
-                else None
-            )
-
-            latest_price_date = latest_row.time if latest_row else None
-            snapshot_date = snapshot_row.snapshot_date if snapshot_row else None
-            snapshot_is_fresher = bool(
-                snapshot_row
-                and snapshot_row.price is not None
-                and snapshot_date is not None
-                and (latest_price_date is None or snapshot_date > latest_price_date)
-            )
-
-            if snapshot_is_fresher and snapshot_row and snapshot_row.price is not None:
-                return _build_quote_from_screener_snapshot(snapshot_row, latest_row, previous_row)
-
-            if latest_row and latest_close is not None:
-                return StockQuoteData(
-                    symbol=symbol_upper,
-                    price=latest_close,
-                    open=float(latest_row.open) if latest_row.open is not None else None,
-                    high=float(latest_row.high) if latest_row.high is not None else None,
-                    low=float(latest_row.low) if latest_row.low is not None else None,
-                    prev_close=prev_close,
-                    change=db_change,
-                    change_pct=round(db_change_pct, 2) if db_change_pct is not None else None,
-                    volume=int(latest_row.volume) if latest_row.volume is not None else None,
-                    updated_at=(
-                        datetime.combine(latest_row.time, datetime.min.time())
-                        if latest_row.time
-                        else None
-                    ),
-                )
-
-            if snapshot_row and snapshot_row.price is not None:
-                return _build_quote_from_screener_snapshot(snapshot_row)
-        except Exception as db_err:
-            logger.warning(f"Quote DB fallback failed for {symbol_upper}: {db_err}")
-        return None
 
     screener_snapshot_quote: Optional[StockQuoteData] = None
 
     async def _get_screener_snapshot_quote() -> Optional[StockQuoteData]:
         nonlocal screener_snapshot_quote
         if screener_snapshot_quote is None:
-            screener_snapshot_quote = await _load_latest_screener_snapshot_quote(db, symbol_upper)
+            async with async_session_factory() as db:
+                screener_snapshot_quote = await _load_latest_screener_snapshot_quote(db, symbol_upper)
         return screener_snapshot_quote
 
     if not refresh:
         cached_price_quote = await _load_quote_from_price_cache(symbol_upper)
         if cached_price_quote:
-            return StandardResponse(data=cached_price_quote, meta=MetaData(count=1))
+            return StandardResponse(data=cached_price_quote, meta=_quote_response_meta(cached_price_quote, "redis:price_snapshot"))
 
         cached_quote = await _get_db_quote()
         if cached_quote:
-            return StandardResponse(data=cached_quote, meta=MetaData(count=1))
+            return StandardResponse(data=cached_quote, meta=_quote_response_meta(cached_quote, "postgres:stored_quote"))
 
         # Canonical Mongo EOD as a fallback when Postgres has no rows for this
         # symbol (e.g. outside the curated/active universe). Settled bars only,
         # so it sits below the Postgres/intraday path but above live vnstock,
         # which can time out and blank the quote widgets.
-        mongo_quote = await _get_mongo_quote()
+        mongo_quote = await _load_quote_from_mongo(symbol_upper)
         if mongo_quote:
-            return StandardResponse(data=mongo_quote, meta=MetaData(count=1))
+            return StandardResponse(data=mongo_quote, meta=_quote_response_meta(mongo_quote, "mongo:market_prices_eod"))
 
     try:
         data, _ = await asyncio.wait_for(
             VnstockStockQuoteFetcher.fetch(symbol=symbol_upper, source=source),
             timeout=10,
         )
+        if data.price is None or data.price_unit == "unknown":
+            raise ValueError("Quote price or unit unavailable from provider")
+        delivery_source = "vnstock:quote.history"
         screener_quote = await _get_screener_snapshot_quote()
         if _should_prefer_screener_quote(data, screener_quote):
             data = screener_quote
-        if data.price is None:
-            raise ValueError("Quote price unavailable from provider")
-        return StandardResponse(data=data, meta=MetaData(count=1))
+            delivery_source = "postgres:stored_quote"
+        return StandardResponse(data=data, meta=_quote_response_meta(data, delivery_source))
     except Exception:
         logger.warning("Live quote failed for %s", symbol_upper, exc_info=True)
         fallback = await _get_db_quote()
         if fallback:
             return StandardResponse(
                 data=fallback,
-                meta=MetaData(count=1),
+                meta=_quote_response_meta(fallback, "postgres:stored_quote"),
                 error="Live quote unavailable; showing stored price.",
             )
 
-        mongo_fallback = await _get_mongo_quote()
+        mongo_fallback = await _load_quote_from_mongo(symbol_upper)
         if mongo_fallback:
             return StandardResponse(
                 data=mongo_fallback,
-                meta=MetaData(count=1),
+                meta=_quote_response_meta(mongo_fallback, "mongo:market_prices_eod"),
                 error="Live quote unavailable; showing stored price.",
             )
 
@@ -5106,14 +4602,18 @@ async def get_profile(
                 fallback_market_cap=profile_data.market_cap,
             )
 
-            await cache_manager.store_profile_data(
+            stored = await cache_manager.store_profile_data(
                 symbol_upper, profile_data.model_dump(mode="json")
             )
+            if not stored:
+                logger.warning("Profile cache write failed (symbol=%s)", symbol_upper)
             return StandardResponse(
                 data=profile_data,
                 meta=MetaData(
                     count=1,
                     last_data_date=await _get_profile_last_data_date(db, symbol_upper),
+                    cache_write_status="stored" if stored else "failed",
+                    warnings=[] if stored else ["profile_cache_write_failed"],
                 ),
             )
 
@@ -5124,7 +4624,8 @@ async def get_profile(
             raise
         logger.warning("Profile endpoint failed open for %s: %s", symbol_upper, e)
 
-        return StandardResponse(data=None, error=str(e))
+        error = "deadline exceeded" if isinstance(e, TimeoutError) else str(e) or type(e).__name__
+        return StandardResponse(data=None, error=f"Profile unavailable: {error}")
 
 
 @router.get("/{symbol}/fundamental-analysis", response_model=StandardResponse[dict[str, Any]])
@@ -5135,70 +4636,69 @@ async def get_fundamental_analysis(
     symbol_upper = symbol.upper()
     section_errors: dict[str, str] = {}
 
-    profile = await _safe_fundamental_section(
-        section_errors,
-        "profile",
-        lambda: get_profile(symbol=symbol_upper, refresh=False, db=db),
-        None,
-    )
-    ratios = await _safe_fundamental_section(
-        section_errors,
-        "ratios",
-        lambda: get_financial_ratios(symbol=symbol_upper, period="year", db=db),
-        [],
-    )
-    financials = {
-        statement_type: await _safe_fundamental_section(
-            section_errors,
-            f"financials.{statement_type}",
-            lambda statement_type=statement_type: get_financials(
-                symbol=symbol_upper,
-                statement_type=statement_type,
-                period="year",
-                limit=5,
-                db=db,
-            ),
-            [],
+    database_available = True
+
+    async def load_section(section, loader, default, **kwargs):
+        nonlocal database_available
+        uses_database = "db" in kwargs and db is not None
+        if uses_database and not database_available:
+            section_errors[section] = "Database session unavailable"
+            return default
+        # Cached endpoint wrappers shield background loads from cancellation.
+        # The aggregate must own each load before reusing its SQL session.
+        section_loader = getattr(loader, "__wrapped__", loader)
+        result = await _safe_fundamental_section(
+            section_errors, section, lambda: section_loader(**kwargs), default,
         )
-        for statement_type in ("income", "balance", "cashflow")
-    }
-    shareholders = await _safe_fundamental_section(
-        section_errors,
-        "shareholders",
-        lambda: get_shareholders(symbol=symbol_upper, db=db),
-        [],
-    )
-    officers = await _safe_fundamental_section(
-        section_errors,
-        "officers",
-        lambda: get_officers(symbol=symbol_upper),
-        [],
-    )
-    subsidiaries = await _safe_fundamental_section(
-        section_errors,
-        "subsidiaries",
-        lambda: get_subsidiaries(symbol=symbol_upper),
-        [],
-    )
-    news = await _safe_fundamental_section(
-        section_errors,
-        "news",
-        lambda: get_company_news(symbol=symbol_upper, limit=10),
-        [],
-    )
-    events = await _safe_fundamental_section(
-        section_errors,
-        "events",
-        lambda: get_company_events(symbol=symbol_upper, limit=10, db=db),
-        [],
-    )
-    fundamental_snapshot = await _safe_fundamental_section(
-        section_errors,
-        "fundamental_snapshot",
-        lambda: _load_latest_fundamental_snapshot(symbol_upper),
-        None,
-    )
+        if uses_database and section_errors.get(section) == "Section deadline exceeded":
+            try:
+                async with asyncio.timeout(0.25):
+                    await db.rollback()
+            except Exception:
+                database_available = False
+                # Invalidation clears the failed transaction before disposing its
+                # connection, so get_db's final commit cannot reuse it.
+                try:
+                    async with asyncio.timeout(0.25):
+                        await db.invalidate()
+                except Exception as exc:
+                    logger.warning("Fundamental analysis session invalidation failed: %s", exc)
+        return result
+
+    async with asyncio.TaskGroup() as independent:
+        officers_task = independent.create_task(load_section("officers", get_officers, [], symbol=symbol_upper))
+        subsidiaries_task = independent.create_task(load_section("subsidiaries", get_subsidiaries, [], symbol=symbol_upper))
+        news_task = independent.create_task(load_section("news", get_company_news, [], symbol=symbol_upper, limit=10))
+        snapshot_task = independent.create_task(load_section(
+            "fundamental_snapshot", _load_latest_fundamental_snapshot, None, symbol=symbol_upper,
+        ))
+        profile = await load_section(
+            "profile", get_profile, None, symbol=symbol_upper, refresh=False, db=db,
+        )
+        ratios = await load_section(
+            "ratios", get_financial_ratios, [], symbol=symbol_upper, period="year", db=db,
+        )
+        financials = {
+            statement_type: await load_section(
+                f"financials.{statement_type}", get_financials, [],
+                symbol=symbol_upper, statement_type=statement_type, period="year", limit=5, db=db,
+            )
+            for statement_type in ("income", "balance", "cashflow")
+        }
+        shareholders = await load_section(
+            "shareholders", get_shareholders, [], symbol=symbol_upper, db=db,
+        )
+        events = await load_section(
+            "events", get_company_events, [], symbol=symbol_upper, limit=10, db=db,
+        )
+    officers = officers_task.result()
+    subsidiaries = subsidiaries_task.result()
+    news = news_task.result()
+    fundamental_snapshot = snapshot_task.result()
     valuation = _build_fundamental_valuation_section(fundamental_snapshot)
+    valuation_reason = fundamental_valuation_unavailable_reason(fundamental_snapshot)
+    if valuation_reason:
+        section_errors["valuation"] = valuation_reason
     competitive_advantage = _build_competitive_advantage_section(fundamental_snapshot)
 
     latest_ratio = ratios[-1] if isinstance(ratios, list) and ratios else None
@@ -5215,7 +4715,7 @@ async def get_fundamental_analysis(
         "latest_fundamental_snapshot": {
             "ratio": latest_ratio,
             "financials": latest_financials,
-            "derived": fundamental_snapshot,
+            "derived": fundamental_snapshot if not valuation_reason else None,
         },
         "financials": financials,
         "ratios": ratios,
@@ -5234,6 +4734,7 @@ async def get_fundamental_analysis(
 
 
 @router.get("/{symbol}/financials", response_model=StandardResponse[List[FinancialStatementData]])
+@cached(ttl=86400, key_prefix="financials_v5_monetary_admitted", exclude_args=[4])
 async def get_financials(
     symbol: str,
     statement_type: Literal["income", "balance", "cashflow"] = Query("income"),
@@ -5241,6 +4742,7 @@ async def get_financials(
     limit: int = Query(20, ge=1, le=80),
     db: AsyncSession = Depends(get_db),
 ):
+    symbol = symbol.upper().strip()
     statement_model = {
         "income": IncomeStatement,
         "balance": BalanceSheet,
@@ -5251,6 +4753,55 @@ async def get_financials(
         if statement_model is not None
         else None
     )
+    primary_error: Exception | None = None
+    mongo_data: list[FinancialStatementData] = []
+    try:
+        mongo_data = admit_statement_rows(await _load_mongo_financial_statement_rows(
+            symbol=symbol, statement_type=statement_type, period=period, limit=limit,
+        ), period)
+    except Exception as exc:
+        primary_error = exc
+        logger.warning("IQ statement read failed for %s: %s", symbol, exc)
+    try:
+        if not mongo_data or not all(row.source == "vietcap" for row in mongo_data):
+            service = get_mongo_market_data_service()
+            client = VietcapClient()
+            records: list[dict[str, Any]] = []
+            try:
+                company = await asyncio.to_thread(client.get_company_details, symbol)
+                if not (company or {}).get("comTypeCode"):
+                    raise ValueError(f"IQ company type unavailable for {symbol}")
+                records = await asyncio.to_thread(
+                    sync_symbol_financials,
+                    service._get_database() if service.enabled else None,
+                    client, symbol, com_type=(company or {}).get("comTypeCode"),
+                    dry_run=not service.enabled,
+                )
+                if not records:
+                    raise ValueError(f"IQ financial records unavailable for {symbol}")
+            except FinancialAcquisitionPartial as exc:
+                records = exc.records
+                primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+            except Exception as exc:
+                primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+            if records:
+                try:
+                    await persist_vietcap_financials(records, cache_manager=CacheManager(db))
+                except Exception as exc:
+                    primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+                acquired = await _load_mongo_financial_statement_rows(
+                    symbol=symbol, statement_type=statement_type, period=period, limit=limit,
+                    records=records,
+                )
+                mongo_data = _merge_financial_statement_rows(acquired, mongo_data)
+        if mongo_data and all(row.source == "vietcap" for row in mongo_data):
+            return StandardResponse(
+                data=admit_statement_rows(mongo_data, period), meta=MetaData(count=len(mongo_data), last_data_date=last_data_date),
+                error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
+            )
+    except Exception as exc:
+        primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+        logger.warning("IQ statement acquisition failed for %s: %s", symbol, exc)
     try:
         data = await get_financials_with_ttm(
             symbol=symbol,
@@ -5258,6 +4809,7 @@ async def get_financials(
             period=period,
             limit=limit,
         )
+        data = admit_statement_rows(data, period)
         fallback_data = await _load_financial_statement_fallback(
             db=db,
             symbol=symbol,
@@ -5265,14 +4817,13 @@ async def get_financials(
             period=period,
             limit=limit,
         )
-        mongo_data = await _load_mongo_financial_statement_rows(
-            symbol=symbol,
-            statement_type=statement_type,
-            period=period,
-            limit=limit,
-        )
+        fy_legacy_primary = str(period).upper() in {"FY", "YEAR"} and bool(fallback_data)
+        if fy_legacy_primary:
+            # #104: the legacy annual row is primary and the provider row fills gaps.
+            data = _merge_financial_statement_rows(fallback_data, data)
         if data:
-            data = _merge_financial_statement_rows(data, _merge_financial_statement_rows(mongo_data, fallback_data))
+            fill_source = mongo_data if fy_legacy_primary else _merge_financial_statement_rows(mongo_data, fallback_data)
+            data = _merge_financial_statement_rows(data, fill_source)
             data = _enrich_financial_statement_rows(data)
             if statement_type == StatementType.INCOME.value:
                 data = await _cross_fill_income_statement_rows(
@@ -5283,8 +4834,9 @@ async def get_financials(
                     rows=data,
                 )
             return StandardResponse(
-                data=data,
+                data=admit_statement_rows(data, period),
                 meta=MetaData(count=len(data), last_data_date=last_data_date),
+                error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
             )
 
         fallback_data = _merge_financial_statement_rows(mongo_data, fallback_data)
@@ -5299,11 +4851,15 @@ async def get_financials(
                     rows=fallback_data,
                 )
             return StandardResponse(
-                data=fallback_data,
+                data=admit_statement_rows(fallback_data, period),
                 meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
+                error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
             )
 
-        return StandardResponse(data=[], meta=MetaData(count=0, last_data_date=last_data_date))
+        return StandardResponse(
+            data=[], meta=MetaData(count=0, last_data_date=last_data_date),
+            error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
+        )
     except BaseException as e:
         if _is_control_flow_exception(e):
             raise
@@ -5316,6 +4872,7 @@ async def get_financials(
                 period=period,
                 limit=limit,
             )
+            fallback_data = _merge_financial_statement_rows(mongo_data, fallback_data)
             if fallback_data:
                 fallback_data = _enrich_financial_statement_rows(fallback_data)
                 if statement_type == StatementType.INCOME.value:
@@ -5327,17 +4884,21 @@ async def get_financials(
                         rows=fallback_data,
                     )
                 return StandardResponse(
-                    data=fallback_data,
+                    data=admit_statement_rows(fallback_data, period),
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
+                    error=f"IQ financial source unavailable: {primary_error}; VCI supplement unavailable: {e}" if primary_error else f"VCI supplement unavailable: {e}",
                 )
         except Exception as fallback_error:
             logger.warning(f"DB fallback failed for financials {symbol}: {fallback_error}")
 
-        return StandardResponse(data=[], error=f"Data unavailable: {str(e)}")
+        return StandardResponse(
+            data=mongo_data, meta=MetaData(count=len(mongo_data), last_data_date=last_data_date),
+            error=f"Data unavailable: {primary_error}; VCI supplement unavailable: {e}" if primary_error else f"Data unavailable: {e}",
+        )
 
 
 @router.get("/{symbol}/peers")
-@cached(ttl=900, key_prefix="equity_peers")
+@cached(ttl=900, key_prefix="equity_peers_v2_certified")
 async def get_equity_peers(
     symbol: str,
     limit: int = Query(default=10, ge=1, le=20),
@@ -5369,7 +4930,7 @@ async def get_correlation_matrix(
     start_date = end_date - timedelta(days=max(days * 2, days + 30))
 
     prices_result = await db.execute(
-        select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+        select(StockPrice)
         .where(
             StockPrice.symbol.in_(universe_symbols),
             StockPrice.interval == "1D",
@@ -5378,7 +4939,11 @@ async def get_correlation_matrix(
         )
         .order_by(StockPrice.symbol, StockPrice.time)
     )
-    rows = prices_result.all()
+    rows = [persisted_price_record(row) for row in prices_result.scalars().all()]
+    rows = [
+        (row["symbol"], row["time"], row["close"] if row["price_unit"] == "VND" else None)
+        for row in rows
+    ]
     if not rows:
         return StandardResponse(
             data=CorrelationMatrixPayload(
@@ -5395,8 +4960,8 @@ async def get_correlation_matrix(
     frame = pd.DataFrame(rows, columns=["symbol", "time", "close"])
     frame["time"] = pd.to_datetime(frame["time"], errors="coerce").dt.date
     frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
-    frame = frame.dropna(subset=["time", "close"])
-    frame = frame[np.isfinite(frame["close"])]
+    frame = frame.dropna(subset=["time"])
+    frame.loc[~np.isfinite(frame["close"]), "close"] = np.nan
     if frame.empty:
         return StandardResponse(
             data=CorrelationMatrixPayload(
@@ -5416,8 +4981,12 @@ async def get_correlation_matrix(
         observed_prices = prices.groupby("time")["close"].last().sort_index().tail(days + 1)
         if observed_prices.empty:
             continue
-        symbol_last_data_dates[ticker] = observed_prices.index.max()
-        observed_returns = observed_prices.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+        valid_prices = observed_prices.dropna()
+        if not valid_prices.empty:
+            symbol_last_data_dates[ticker] = valid_prices.index.max()
+        observed_returns = (
+            observed_prices.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan).dropna()
+        )
         if not observed_returns.empty:
             return_series[ticker] = observed_returns.tail(days)
 
@@ -5494,7 +5063,7 @@ async def get_correlation_matrix(
 
 
 @router.get("/{symbol}/ttm", response_model=StandardResponse[dict[str, Any]])
-@cached(ttl=3600, key_prefix="equity_ttm")
+@cached(ttl=3600, key_prefix="equity_ttm_v2_interest_admitted")
 async def get_ttm_snapshot(
     symbol: str,
 ):
@@ -5516,6 +5085,9 @@ async def get_ttm_snapshot(
         period="TTM",
         limit=1,
     )
+    income_rows = admit_statement_rows(income_rows, "TTM")
+    balance_rows = admit_statement_rows(balance_rows, "TTM")
+    cashflow_rows = admit_statement_rows(cashflow_rows, "TTM")
 
     payload = {
         "symbol": symbol.upper(),
@@ -5529,7 +5101,23 @@ async def get_ttm_snapshot(
 def _growth_rate(current: Optional[float], previous: Optional[float]) -> Optional[float]:
     if current is None or previous in (None, 0):
         return None
-    return ((current - previous) / previous) * 100
+    if not math.isfinite(current) or not math.isfinite(previous):
+        return None
+    return ((current - previous) / abs(previous)) * 100
+
+def _growth_detail(current: Optional[float], previous: Optional[float]) -> dict[str, Any]:
+    value = _growth_rate(current, previous)
+    transition = None
+    if current is not None and previous is not None:
+        if previous < 0 < current:
+            transition = "loss_to_profit"
+        elif current < 0 < previous:
+            transition = "profit_to_loss"
+    return {"value": value, "current": current, "previous": previous,
+            "negative_base": previous is not None and previous < 0, "transition": transition,
+            "unavailable_reason": "missing_base_or_value" if current is None or previous is None else
+                "zero_base" if previous == 0 else "nonfinite_value" if value is None else None}
+
 
 
 @router.get("/{symbol}/growth", response_model=StandardResponse[dict[str, Any]])
@@ -5576,15 +5164,17 @@ async def get_growth_rates(
         "eps_growth": None,
         "ebitda_growth": None,
     }
+    comparisons: dict[str, dict[str, Any]] = {"yoy": {}, "qoq": {}}
+    same_quarter_prev_year = None
 
-    if len(annual_income) >= 2:
+    if len(annual_income) >= 2 and annual_income[0].fiscal_year == annual_income[1].fiscal_year + 1:
         current, previous = annual_income[0], annual_income[1]
         yoy["revenue_growth"] = _growth_rate(current.revenue, previous.revenue)
         yoy["earnings_growth"] = _growth_rate(current.net_income, previous.net_income)
         yoy["eps_growth"] = _growth_rate(current.eps, previous.eps)
         yoy["ebitda_growth"] = _growth_rate(current.ebitda, previous.ebitda)
 
-    if len(annual_balance) >= 2:
+    if len(annual_balance) >= 2 and annual_balance[0].fiscal_year == annual_balance[1].fiscal_year + 1:
         current, previous = annual_balance[0], annual_balance[1]
         yoy["asset_growth"] = _growth_rate(current.total_assets, previous.total_assets)
 
@@ -5614,11 +5204,38 @@ async def get_growth_rates(
             qoq["ebitda_growth"] = _growth_rate(
                 latest_quarter.ebitda, same_quarter_prev_year.ebitda
             )
+    for scope, current, previous in [
+        ("yoy", annual_income[0] if annual_income else None, annual_income[1] if len(annual_income) > 1 else None),
+        ("qoq", latest_quarter, same_quarter_prev_year),
+    ]:
+        for name, field in [("revenue_growth", "revenue"), ("earnings_growth", "net_income"),
+                            ("eps_growth", "eps"), ("ebitda_growth", "ebitda")]:
+            detail = _growth_detail(getattr(current, field, None), getattr(previous, field, None))
+            detail["current_period"] = getattr(current, "period", None)
+            detail["previous_period"] = getattr(previous, "period", None)
+            if current is not None and previous is not None and current.fiscal_year != previous.fiscal_year + 1:
+                detail.update(value=None, unavailable_reason="non_comparable_periods")
+            current_lineage = (getattr(current, "raw_data", None) or {}).get("_financial_lineage") or {}
+            previous_lineage = (getattr(previous, "raw_data", None) or {}).get("_financial_lineage") or {}
+            detail["basis_status"] = "confirmed" if current_lineage and previous_lineage else "legacy_basis_unconfirmed"
+            detail["source"] = getattr(current, "source", None)
+            for basis_name in ("value_unit", "consolidation_basis", "flow_basis"):
+                current_basis, previous_basis = current_lineage.get(basis_name), previous_lineage.get(basis_name)
+                detail[basis_name] = current_basis
+                if current_basis is not None and previous_basis is not None and current_basis != previous_basis:
+                    detail.update(value=None, unavailable_reason="incompatible_reporting_basis", basis_status="incompatible")
+            (yoy if scope == "yoy" else qoq)[name] = detail["value"]
+            comparisons[scope][name] = detail
+
 
     payload = {
         "symbol": symbol_upper,
         "yoy": yoy,
         "qoq": qoq,
+        "growth_convention": "absolute_prior_denominator",
+        "growth_formula": "((current - previous) / abs(previous)) * 100",
+        "quarter_comparison": "same_quarter_previous_year",
+        "comparisons": comparisons,
         "as_of": {
             "annual": annual_income[0].period if annual_income else None,
             "quarter": latest_quarter.period if latest_quarter else None,
@@ -5642,6 +5259,15 @@ def _build_event_row_from_db(item: CompanyEvent) -> dict[str, Any]:
     """Render a CompanyEvent ORM row as the wire payload returned by the
     upstream provider, so consumers don't need to branch on source."""
     payload = item.raw_data if isinstance(item.raw_data, dict) else {}
+    if payload:
+        try:
+            normalized = VnstockCompanyEventsFetcher.transform_data(
+                CompanyEventsQueryParams(symbol=item.symbol), [payload]
+            )
+            if normalized:
+                payload = normalized[0].model_dump()
+        except ProviderError:
+            pass
     event_date_iso = item.event_date.isoformat() if item.event_date else None
     ex_date_iso = item.ex_date.isoformat() if item.ex_date else None
     record_date_iso = item.record_date.isoformat() if item.record_date else None
@@ -5655,7 +5281,7 @@ def _build_event_row_from_db(item: CompanyEvent) -> dict[str, Any]:
         "record_date": record_date_iso,
         "payment_date": payment_date_iso,
         "description": item.description,
-        "value": payload.get("value") or item.value,
+        "value": payload.get("value") if payload.get("value") is not None else item.value,
         "action_category": payload.get("action_category"),
         "action_subtype": payload.get("action_subtype"),
         "effective_date": (
@@ -5669,12 +5295,7 @@ def _build_event_row_from_db(item: CompanyEvent) -> dict[str, Any]:
 async def _load_company_events_fallback(
     db: AsyncSession, symbol: str, limit: int
 ) -> List[dict[str, Any]]:
-    """DB-backed fallback when the live provider returns nothing.
-
-    Reads from `company_events` and, if still empty, synthesises rows from
-    `dividends` so the Events Calendar widget never blocks empty when the
-    Corporate Actions panel has data.
-    """
+    """Read persisted events, using dividends when no event rows exist."""
     rows: List[dict[str, Any]] = []
     events = (
         (
@@ -5733,46 +5354,44 @@ async def _load_company_events_fallback(
 
 
 @router.get("/{symbol}/events", response_model=StandardResponse[List[Any]])
-@cached(ttl=3600, key_prefix="company_events_v28")
+@cached(ttl=3600, key_prefix="company_events_v29_stored_first")
 async def get_company_events(
     symbol: str,
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     symbol_upper = symbol.upper()
-    provider_error: Optional[str] = None
+    release_read = (
+        isinstance(db, AsyncSession) and not db.in_transaction()
+        and not (db.new or db.dirty or db.deleted)
+    )
     try:
-        data = await VnstockCompanyEventsFetcher.fetch(
-            CompanyEventsQueryParams(symbol=symbol_upper, limit=limit)
-        )
-        if data:
-            return StandardResponse(data=data, meta=MetaData(count=len(data)))
-
-        # Provider returned empty (success path) — fall through to the DB
-        # fallback so the Events Calendar widget never blanks out when
-        # stored corporate-action rows already exist for the symbol.
-        # (QA-v2 F6)
-    except Exception as e:
-        provider_error = str(e)
-        logger.warning(
-            "Company events provider failed (symbol=%s): %s", symbol_upper, e
-        )
-
-    # DB fallback — runs whether the provider raised OR returned empty.
-    try:
-        fallback_rows = await _load_company_events_fallback(
+        stored_rows = await _load_company_events_fallback(
             db=db, symbol=symbol_upper, limit=limit
         )
-        if fallback_rows:
-            return StandardResponse(
-                data=fallback_rows, meta=MetaData(count=len(fallback_rows))
-            )
-    except Exception as fb_err:  # pragma: no cover - defensive
-        logger.warning(
-            "Company events fallback failed (symbol=%s): %s", symbol_upper, fb_err
-        )
+    except Exception as exc:
+        if not release_read:
+            raise
+        logger.warning("Stored company events unavailable for %s: %s", symbol_upper, exc)
+        stored_rows = []
+    finally:
+        if release_read and db.in_transaction():
+            await db.rollback()
+    if stored_rows:
+        return StandardResponse(data=stored_rows, meta=MetaData(count=len(stored_rows)))
 
-    return StandardResponse(data=[], error=provider_error)
+    try:
+        data = await asyncio.wait_for(
+            VnstockCompanyEventsFetcher.fetch(
+                CompanyEventsQueryParams(symbol=symbol_upper, limit=limit)
+            ),
+            timeout=min(10, _provider_timeout_budget()),
+        )
+        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+    except Exception as exc:
+        error = "Company events provider deadline exceeded" if isinstance(exc, TimeoutError) else str(exc)
+        logger.warning("Company events provider failed (symbol=%s): %s", symbol_upper, error)
+        return StandardResponse(data=[], error=error)
 
 
 @router.get("/{symbol}/calendar", response_model=StandardResponse[dict[str, Any]])
@@ -6034,6 +5653,31 @@ def _orderbook_payload_has_prices(payload: dict[str, Any] | None) -> bool:
     return False
 
 
+# Depth acquisition receipts travel with the payload so consumers can tell an
+# explicit empty batch from a fetch that never observed anything. Only pass
+# them through when the source actually carries them; never infer a store
+# outcome that the writer did not record.
+_DEPTH_RECEIPT_KEYS = (
+    "current_depth",
+    "latest_session_status",
+    "observed_at",
+    "timestamp_meaning",
+    "price_unit",
+    "volume_unit",
+    "sql_depth",
+    "mongo_depth",
+)
+
+
+def _is_explicit_empty_depth_batch(payload: dict[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("latest_session_status") == "empty":
+        return True
+    receipt = payload.get("current_depth")
+    return isinstance(receipt, dict) and receipt.get("status") == "empty"
+
+
 def _apply_orderbook_reference_price(
     payload: dict[str, Any],
     reference_price: Any,
@@ -6102,6 +5746,14 @@ def _build_orderbook_payload(
         "last_volume": _depth_value(depth_data, "last_volume"),
         "snapshot_time": snapshot_time,
     }
+    for key in _DEPTH_RECEIPT_KEYS:
+        if isinstance(depth_data, dict):
+            if key in depth_data:
+                payload[key] = depth_data[key]
+        else:
+            value = getattr(depth_data, key, None)
+            if value is not None:
+                payload[key] = value
     return _normalize_orderbook_units(payload)
 
 
@@ -6111,7 +5763,7 @@ def _build_orderbook_payload_from_snapshot(snapshot: OrderbookSnapshot) -> dict[
         snapshot.price_depth or {},
         snapshot_time=_serialize_meta_datetime(snapshot.snapshot_time),
     )
-    if payload.get("entries"):
+    if payload.get("entries") or _is_explicit_empty_depth_batch(payload):
         return payload
 
     entries: List[dict[str, Any]] = []
@@ -6165,6 +5817,8 @@ async def _load_cached_orderbook_payload(symbol: str) -> dict[str, Any] | None:
     )
     if payload.get("entries") and _orderbook_payload_has_prices(payload):
         return payload
+    if _is_explicit_empty_depth_batch(payload):
+        return payload
     return None
 
 
@@ -6201,8 +5855,11 @@ async def _cache_orderbook_payload(symbol: str, payload: dict[str, Any]) -> None
 
 
 async def _get_orderbook_payload(symbol: str, db: AsyncSession) -> dict[str, Any]:
+    # A cached payload may carry an auditable depth receipt even without prices;
+    # _load_cached_orderbook_payload already returned None when the cache held
+    # neither prices nor an explicit batch receipt.
     cached_payload = await _load_cached_orderbook_payload(symbol)
-    if cached_payload is not None and _orderbook_payload_has_prices(cached_payload):
+    if cached_payload is not None:
         return cached_payload
 
     try:
@@ -6313,7 +5970,7 @@ async def get_intraday(symbol: str, limit: int = Query(200, ge=1, le=1000)):
     "/{symbol}/transaction-flow",
     response_model=StandardResponse[TransactionFlowPayload],
 )
-@cached(ttl=120, key_prefix="transaction_flow_v2")
+@cached(ttl=120, key_prefix="transaction_flow_v3")
 async def get_transaction_flow(
     symbol: str,
     days: int = Query(30, ge=5, le=90),
@@ -6336,7 +5993,7 @@ async def get_transaction_flow(
                 days=days,
                 scopes=["total", "domestic", "foreign", "proprietary"],
                 modes=["value", "volume"],
-                note="Domestic flow is derived as total minus foreign minus proprietary.",
+                note="Observed flow is the acquired sample; session totals and domestic derivation require verified full-session coverage.",
                 data=[],
             ),
             meta=MetaData(count=0, symbol=symbol_upper),
@@ -6380,6 +6037,15 @@ async def get_transaction_flow(
     for row in flow_rows:
         price_row = price_map.get(row.trade_date)
         foreign_row = foreign_map.get(row.trade_date)
+        coverage = row.coverage if isinstance(row.coverage, dict) else None
+        full_session = bool(
+            coverage
+            and coverage.get("scope") == "full_session"
+            and coverage.get("completed_session") is True
+        )
+        flow_scope = "full_session" if full_session else (
+            "sampled" if coverage and coverage.get("scope") == "sampled" else "unknown"
+        )
 
         price_value = _finite_float(None if price_row is None else price_row.close)
         total_buy_value = _finite_float(row.buy_value)
@@ -6397,6 +6063,14 @@ async def get_transaction_flow(
             and total_sell_volume is not None
         ):
             total_net_volume = _finite_int(total_buy_volume - total_sell_volume)
+        observed_gross_value = (
+            total_buy_value + total_sell_value
+            if total_buy_value is not None and total_sell_value is not None else None
+        )
+        observed_volume = (
+            total_buy_volume + total_sell_volume
+            if total_buy_volume is not None and total_sell_volume is not None else None
+        )
 
         foreign_net_volume = _finite_int(
             row.foreign_net_volume
@@ -6421,7 +6095,8 @@ async def get_transaction_flow(
 
         domestic_net_volume = None
         if (
-            total_net_volume is not None
+            full_session
+            and total_net_volume is not None
             and foreign_net_volume is not None
             and proprietary_net_volume is not None
         ):
@@ -6431,7 +6106,8 @@ async def get_transaction_flow(
 
         domestic_net_value = None
         if (
-            total_net_value is not None
+            full_session
+            and total_net_value is not None
             and foreign_net_value is not None
             and proprietary_net_value is not None
         ):
@@ -6443,18 +6119,24 @@ async def get_transaction_flow(
             TransactionFlowPoint(
                 date=row.trade_date.isoformat(),
                 price=price_value,
-                total_buy_value=total_buy_value,
-                total_sell_value=total_sell_value,
-                total_gross_value=(total_buy_value or 0.0) + (total_sell_value or 0.0)
-                if total_buy_value is not None or total_sell_value is not None
-                else None,
-                total_net_value=total_net_value,
-                total_buy_volume=total_buy_volume,
-                total_sell_volume=total_sell_volume,
-                total_volume=(total_buy_volume or 0) + (total_sell_volume or 0)
-                if total_buy_volume is not None or total_sell_volume is not None
-                else None,
-                total_net_volume=total_net_volume,
+                flow_scope=flow_scope,
+                coverage=coverage,
+                observed_buy_value=total_buy_value,
+                observed_sell_value=total_sell_value,
+                observed_gross_value=observed_gross_value,
+                observed_net_value=total_net_value,
+                observed_buy_volume=total_buy_volume,
+                observed_sell_volume=total_sell_volume,
+                observed_volume=observed_volume,
+                observed_net_volume=total_net_volume,
+                total_buy_value=total_buy_value if full_session else None,
+                total_sell_value=total_sell_value if full_session else None,
+                total_gross_value=observed_gross_value if full_session else None,
+                total_net_value=total_net_value if full_session else None,
+                total_buy_volume=total_buy_volume if full_session else None,
+                total_sell_volume=total_sell_volume if full_session else None,
+                total_volume=observed_volume if full_session else None,
+                total_net_volume=total_net_volume if full_session else None,
                 foreign_net_value=foreign_net_value,
                 foreign_net_volume=foreign_net_volume,
                 proprietary_net_value=proprietary_net_value,
@@ -6471,7 +6153,7 @@ async def get_transaction_flow(
         days=days,
         scopes=["total", "domestic", "foreign", "proprietary"],
         modes=["value", "volume"],
-        note="Domestic flow is derived as total minus foreign minus proprietary.",
+        note="Observed flow is the acquired sample; session totals and domestic derivation require verified full-session coverage.",
         data=points,
     )
     last_data_date = points[-1].date if points else None
@@ -6654,7 +6336,8 @@ async def get_rating(symbol: str):
 
 @router.get("/{symbol}/financial-ratios", response_model=StandardResponse[List[FinancialRatioData]])
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
-@cached(ttl=86400, key_prefix="ratios_v4")
+# Keep prior scale-guessed responses out of the certified-unit serving path.
+@cached(ttl=86400, key_prefix="ratios_v11_provider_deadline")
 async def get_financial_ratios(
     symbol: str,
     period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
@@ -6662,6 +6345,7 @@ async def get_financial_ratios(
 ):
     symbol_upper = symbol.upper()
     normalized_period = "year" if period in {"year", "FY"} else "quarter"
+    owns_read_transaction = not db.in_transaction() and not (db.new or db.dirty or db.deleted)
     latest_price_time = (
         await db.execute(
             select(func.max(StockPrice.time)).where(
@@ -6674,23 +6358,48 @@ async def get_financial_ratios(
         "symbol": symbol_upper,
         "last_data_date": _serialize_meta_datetime(latest_price_time),
     }
-    db_ratio_rows: List[FinancialRatioData] = []
+    if str(period or "").strip().upper() == "TTM":
+        # Ratio TTM is unsupported: no provider supplies it, and the removed helper
+        # fabricated one by summing EPS/DPS and inheriting stale values for the rest.
+        # State the unsupported period explicitly rather than returning that row
+        # (issues #101/#106).
+        return StandardResponse(
+            data=[],
+            meta=MetaData(count=0, **meta_kwargs),
+            error="TTM ratios are not supported: no source supplies a certified four-quarter ratio basis.",
+        )
+    primary_error: Exception | None = None
     mongo_ratio_rows: List[FinancialRatioData] = []
+    try:
+        mongo_ratio_rows = await _load_mongo_financial_ratio_rows(symbol_upper, period, limit=80)
+        from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
+        for item in mongo_ratio_rows:
+            for metric in PERCENT_RATIO_FIELDS:
+                if item.ratio_units.get(metric) != "percent":
+                    if getattr(item, metric) is not None:
+                        item.ratio_units[metric] = "unknown"
+                    setattr(item, metric, None)
+        if mongo_ratio_rows and all(
+            any(evidence.get("source") == "vietcap" for evidence in row.provider_evidence)
+            and _ratio_has_metric_value(row) for row in mongo_ratio_rows
+        ):
+            return StandardResponse(
+                data=mongo_ratio_rows,
+                meta=MetaData(count=len(mongo_ratio_rows), data_points=len(mongo_ratio_rows), **meta_kwargs),
+            )
+    except Exception as exc:
+        primary_error = exc
+        logger.warning("IQ ratio read failed for %s: %s", symbol_upper, exc)
+    db_ratio_rows: List[FinancialRatioData] = []
     provider_ratio_rows: List[FinancialRatioData] = []
     provider_error: Exception | None = None
+    can_enrich = True
     support_rows = {
         StatementType.INCOME.value: [],
         StatementType.BALANCE.value: [],
         StatementType.CASHFLOW.value: [],
     }
 
-    if normalized_period == "quarter":
-        support_rows = await _load_ratio_statement_support(
-            db=db,
-            symbol=symbol_upper,
-            period=normalized_period,
-            limit=40,
-        )
 
     try:
         stmt = (
@@ -6708,11 +6417,6 @@ async def get_financial_ratios(
     except Exception as db_error:
         logger.warning(f"Ratio DB lookup failed for {symbol_upper}: {db_error}")
 
-    mongo_ratio_rows = await _load_mongo_financial_ratio_rows(
-        symbol_upper,
-        period,
-        limit=80,
-    )
 
     latest_statement_period_key = await _get_latest_statement_period_key(
         db,
@@ -6722,28 +6426,45 @@ async def get_financial_ratios(
     latest_ratio_period_key = _latest_ratio_period_key(db_ratio_rows + mongo_ratio_rows)
     statements_are_newer = latest_statement_period_key > latest_ratio_period_key
 
-    if statements_are_newer and normalized_period == "year":
-        support_rows = await _load_ratio_statement_support(
-            db=db,
-            symbol=symbol_upper,
-            period=normalized_period,
-            limit=20,
-        )
 
     should_fetch_provider = (
         not db_ratio_rows
         or normalized_period == "quarter"
-        or str(period or "").strip().upper() == "TTM"
         or statements_are_newer
     )
     if should_fetch_provider:
         try:
-            provider_ratio_rows = await VnstockFinancialRatiosFetcher.fetch(
-                FinancialRatiosQueryParams(symbol=symbol_upper, period=normalized_period)
-            )
+            async with asyncio.timeout(min(10, _provider_timeout_budget())):
+                if normalized_period == "quarter" or statements_are_newer:
+                    support_rows = await _load_ratio_statement_support(
+                        db=db,
+                        symbol=symbol_upper,
+                        period=normalized_period,
+                        limit=40 if normalized_period == "quarter" else 20,
+                    )
+                provider_ratio_rows = await VnstockFinancialRatiosFetcher.fetch(
+                    FinancialRatiosQueryParams(symbol=symbol_upper, period=normalized_period)
+                )
         except Exception as exc:
             provider_error = exc
+            can_enrich = False
+            if owns_read_transaction and db.in_transaction():
+                try:
+                    await db.rollback()
+                    can_enrich = True
+                except Exception as rollback_error:
+                    logger.warning("Ratio read recovery failed for %s: %s", symbol_upper, rollback_error)
             logger.warning("Provider ratio fetch failed for %s: %s", symbol_upper, exc)
+
+    acquisition_error = None
+    if provider_error is not None:
+        acquisition_error = (
+            "Financial ratio provider deadline exceeded"
+            if isinstance(provider_error, (TimeoutError, ProviderTimeoutError))
+            else f"Financial ratio provider unavailable: {provider_error}"
+        )
+    elif primary_error is not None:
+        acquisition_error = f"IQ financial source unavailable: {primary_error}"
 
     data = _merge_ratio_row_collections(
         provider_ratio_rows,
@@ -6760,24 +6481,30 @@ async def get_financial_ratios(
         )
 
     if data:
-        data = await _enrich_ratio_ev_sales_from_income(
-            symbol=symbol_upper,
-            period=normalized_period,
-            rows=data,
-            db=db,
-        )
-        data = await _enrich_missing_ratio_metrics(
-            symbol=symbol_upper,
-            period=normalized_period,
-            rows=data,
-            db=db,
-            income_support_rows=support_rows.get(StatementType.INCOME.value),
-            balance_support_rows=support_rows.get(StatementType.BALANCE.value),
-            cashflow_support_rows=support_rows.get(StatementType.CASHFLOW.value),
-        )
+        if can_enrich:
+            data = await _enrich_missing_ratio_metrics(
+                symbol=symbol_upper,
+                period=normalized_period,
+                rows=data,
+                db=db,
+                income_support_rows=support_rows.get(StatementType.INCOME.value),
+                balance_support_rows=support_rows.get(StatementType.BALANCE.value),
+                cashflow_support_rows=support_rows.get(StatementType.CASHFLOW.value),
+            )
+        else:
+            for item in data:
+                item.interest_coverage = None
+                # Classification cannot be read safely; withhold fields that may not apply.
+                _apply_bank_ratio_normalization(item)
         data = [item for item in data if VALID_RATIO_PERIOD_RE.match(str(item.period or ""))]
         data = _dedupe_ratio_rows(data)
         data = _filter_ratio_rows_for_period(data, period)
+        from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
+
+        for item in data:
+            for metric in PERCENT_RATIO_FIELDS:
+                if item.ratio_units.get(metric) != "percent":
+                    setattr(item, metric, None)
         usable_data = [item for item in data if _ratio_has_metric_value(item)]
         payload = usable_data if usable_data else data
         if payload:
@@ -6810,6 +6537,7 @@ async def get_financial_ratios(
                     full_ratio_coverage_starts=coverage_starts,
                     **meta_kwargs,
                 ),
+                error=acquisition_error,
             )
 
     await _schedule_critical_reinforcement(
@@ -6817,50 +6545,85 @@ async def get_financial_ratios(
         endpoint="equity.ratios",
         domains=["ratios"],
     )
-    return StandardResponse(data=[], error=str(provider_error) if provider_error else None)
+    return StandardResponse(data=[], error=acquisition_error)
 
 
 @router.get("/{symbol}/ratios/history", response_model=StandardResponse[List[dict[str, Any]]])
-@cached(ttl=86400, key_prefix="ratios_history_v2")
+@cached(ttl=86400, key_prefix="ratios_history_v6_provider_deadline")
 async def get_ratio_history(
     symbol: str,
     ratios: str = Query("pe,pb,ps", description="Comma-separated ratio keys"),
     period: Literal["year", "quarter"] = Query("year"),
     limit: int = Query(20, ge=1, le=60),
+    db: AsyncSession = Depends(get_db),
 ):
     ratio_list = [r.strip() for r in ratios.split(",") if r.strip()]
     if not ratio_list:
         ratio_list = ["pe", "pb", "ps"]
-
-    def period_sort_key(value: str) -> int:
-        if not value:
-            return 0
-        upper = value.upper()
-        year_match = re.search(r"(20\d{2})", upper)
-        year = int(year_match.group(1)) if year_match else 0
-        quarter_match = re.search(r"Q([1-4])", upper)
-        quarter = int(quarter_match.group(1)) if quarter_match else 0
-        return year * 10 + quarter
+    stored_errors: list[str] = []
 
     try:
-        data = await VnstockFinancialRatiosFetcher.fetch(
-            FinancialRatiosQueryParams(symbol=symbol, period=period)
+        data = await _load_mongo_financial_ratio_rows(symbol.upper(), period, limit=limit)
+    except Exception as exc:
+        stored_errors.append(f"Mongo: {exc}")
+        logger.warning("Stored Mongo ratio history unavailable for %s: %s", symbol.upper(), exc)
+        data = []
+    if not data:
+        release_read = (
+            not db.in_transaction() and not (db.new or db.dirty or db.deleted)
         )
+        try:
+            stored = (await db.execute(
+                select(FinancialRatio)
+                .where(FinancialRatio.symbol == symbol.upper(), FinancialRatio.period_type == period)
+                .order_by(desc(FinancialRatio.fiscal_year), desc(FinancialRatio.fiscal_quarter))
+                .limit(limit)
+            )).scalars().all()
+            data = _filter_ratio_rows_for_period(
+                _dedupe_ratio_rows([_to_ratio_data(item) for item in stored]), period
+            )
+        except Exception as exc:
+            if not release_read:
+                raise
+            stored_errors.append(f"SQL: {exc}")
+            logger.warning("Stored SQL ratio history unavailable for %s: %s", symbol.upper(), exc)
+        finally:
+            if release_read and db.in_transaction():
+                await db.rollback()
+    try:
+        if not data:
+            data = await asyncio.wait_for(
+                VnstockFinancialRatiosFetcher.fetch(
+                    FinancialRatiosQueryParams(symbol=symbol.upper(), period=period)
+                ),
+                timeout=min(10, _provider_timeout_budget()),
+            )
+        if not data:
+            return StandardResponse(
+                data=[], meta=MetaData(count=0),
+                error=("Financial ratio history stored source unavailable: " + "; ".join(stored_errors))
+                if stored_errors else None,
+            )
         rows: List[dict[str, Any]] = []
         for item in data:
             row: dict[str, Any] = {"period": item.period or ""}
             for key in ratio_list:
-                row[key] = getattr(item, key, None)
+                row[key] = admitted_ratio_value(getattr(item, key, None), key, ratio_units=getattr(item, "ratio_units", None))
             rows.append(row)
 
-        rows = sorted(rows, key=lambda r: period_sort_key(str(r.get("period", ""))))
+        rows = sorted(rows, key=lambda r: _ratio_period_sort_key(str(r.get("period", ""))))
         return StandardResponse(data=rows[:limit], meta=MetaData(count=min(len(rows), limit)))
-    except Exception as e:
-        return StandardResponse(data=[], error=str(e))
+    except Exception as exc:
+        error = (
+            "Financial ratio history provider deadline exceeded"
+            if isinstance(exc, (TimeoutError, ProviderTimeoutError))
+            else f"Financial ratio history provider unavailable: {exc}"
+        )
+        return StandardResponse(data=[], error=error)
 
 
 @router.get("/{symbol}/metrics/history", response_model=MetricsHistoryResponse)
-@cached(ttl=3600, key_prefix="metrics_history")
+@cached(ttl=3600, key_prefix="metrics_history_v2_certified")
 async def get_metrics_history(
     symbol: str,
     days: int = Query(30, ge=1, le=3650),
@@ -6876,10 +6639,13 @@ async def get_metrics_history(
     def build_series_from_rows(rows: List[Any], metric_key: str, attr: str) -> List[Optional[float]]:
         if not (include_all or metric_key in metrics_list):
             return []
-        # DQ remediation 2026-06-08: preserve nulls instead of coercing missing
-        # values to 0.0. A 0 P/E or 0% ROE is a real, misleading value; pre-coverage
-        # years (e.g. 2012-2019 with valuation-only KBS rows) must render as gaps, not 0.
-        return [_coerce_optional_float(getattr(r, attr, None)) for r in rows]
+        return [
+            _coerce_optional_float(admitted_ratio_value(
+                getattr(row, attr, None), metric_key,
+                ratio_units=(row.extended_metrics or {}).get("ratio_units"),
+            ))
+            for row in rows
+        ]
 
     try:
         from vnibb.models.screener import ScreenerSnapshot
@@ -6942,8 +6708,12 @@ async def get_metrics_history(
     def build_series(metric_key: str, attr: str) -> List[Optional[float]]:
         if not (include_all or metric_key in metrics_list):
             return []
-        # DQ remediation 2026-06-08: preserve nulls (see build_series_from_rows).
-        return [_coerce_optional_float(getattr(r, attr, None)) for r in ordered]
+        return [
+            _coerce_optional_float(admitted_ratio_value(
+                getattr(row, attr, None), metric_key, ratio_units=getattr(row, "ratio_units", None),
+            ))
+            for row in ordered
+        ]
 
     return MetricsHistoryResponse(
         symbol=symbol_upper,
@@ -6983,10 +6753,16 @@ async def get_income_statement(
             period=period,
             limit=limit,
         )
-        if data:
-            data = _merge_financial_statement_rows(data, fallback_data)
-        else:
+        fy_legacy_primary = str(period).upper() in {"FY", "YEAR"} and bool(fallback_data)
+        if fy_legacy_primary:
+            # #104: the legacy annual row is primary and the provider row fills gaps.
+            data = _merge_financial_statement_rows(fallback_data, data)
+        if not data:
             data = fallback_data
+        elif not fy_legacy_primary:
+            # For FY `fallback_data` is already primary above, so merging it again
+            # would apply the same rows twice.
+            data = _merge_financial_statement_rows(data, fallback_data)
         data = _enrich_financial_statement_rows(data)
         data = await _cross_fill_income_statement_rows(
             db=db,
@@ -7155,7 +6931,7 @@ async def get_cash_flow(
 
 
 @router.get("/{symbol}/dividends", response_model=StandardResponse[List[Any]])
-@cached(ttl=86400, key_prefix="dividends")
+@cached(ttl=86400, key_prefix="dividends_v2_stored_first")
 async def get_dividends(
     symbol: str,
     limit: int = Query(50, ge=1, le=200),
@@ -7163,15 +6939,14 @@ async def get_dividends(
 ):
     try:
         symbol_upper = symbol.upper()
-        raw_items = await VnstockDividendsFetcher.fetch(symbol=symbol_upper)
+        provider_error: str | None = None
+        release_read = (
+            isinstance(db, AsyncSession) and not db.in_transaction()
+            and not (db.new or db.dirty or db.deleted)
+        )
         latest_price = await _get_latest_price(db, symbol_upper)
 
         rows: list[dict[str, Any]] = []
-        for item in raw_items:
-            payload = item.model_dump(mode="json", by_alias=False)
-            row = _build_dividend_row_from_payload(symbol_upper, payload)
-            if row:
-                rows.append(row)
 
         if not rows:
             fallback_dividends = (
@@ -7241,6 +7016,24 @@ async def get_dividends(
                 if row:
                     rows.append(row)
 
+        if release_read and db.in_transaction():
+            await db.rollback()
+        if not rows:
+            try:
+                raw_items = await asyncio.wait_for(
+                    VnstockDividendsFetcher.fetch(symbol=symbol_upper),
+                    timeout=min(10, _provider_timeout_budget()),
+                )
+                for item in raw_items:
+                    payload = item.model_dump(mode="json", by_alias=False)
+                    row = _build_dividend_row_from_payload(symbol_upper, payload)
+                    if row:
+                        rows.append(row)
+            except Exception as exc:
+                reason = "provider deadline exceeded" if isinstance(exc, TimeoutError) else str(exc)
+                provider_error = f"VCI dividends unavailable: {reason}"
+                logger.warning("Dividends provider failed for %s: %s", symbol_upper, reason)
+
         rows.sort(
             key=lambda row: row.get("ex_date")
             or row.get("record_date")
@@ -7284,6 +7077,7 @@ async def get_dividends(
                     "payment_date",
                 ),
             ),
+            error=provider_error,
         )
     except Exception as e:
         return StandardResponse(data=[], error=str(e))

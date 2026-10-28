@@ -1,7 +1,9 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
 import { Sidebar } from '@/components/layout/Sidebar'
 import { useDashboard } from '@/contexts/DashboardContext'
+import { createWorkspaceBackup } from '@/lib/workspaceBackup'
 import type {
   Dashboard,
   DashboardFolder,
@@ -61,10 +63,12 @@ function makeDashboard(id: string, name: string, order: number): Dashboard {
   }
 }
 
-function renderSidebarWithDashboards(dashboards: readonly [Dashboard, Dashboard]): void {
+function renderSidebarWithDashboards(
+  dashboards: readonly [Dashboard, Dashboard],
+  folders: DashboardFolder[] = [],
+): void {
   const firstDashboard = dashboards[0]
   const firstTab = firstDashboard.tabs[0] ?? null
-  const emptyFolders: DashboardFolder[] = []
   const fallbackWidget: WidgetInstance = {
     id: 'widget-1',
     type: 'ticker_info',
@@ -81,9 +85,11 @@ function renderSidebarWithDashboards(dashboards: readonly [Dashboard, Dashboard]
 
   mockUseDashboard.mockReturnValue({
     localStateReady: true,
+    dashboardCatalogueReady: true,
+    userNavigationSeq: 0,
     state: {
       dashboards: [...dashboards],
-      folders: emptyFolders,
+      folders,
       activeDashboardId: firstDashboard.id,
       activeTabId: firstTab?.id ?? null,
     },
@@ -148,6 +154,58 @@ describe('Sidebar context menu accessibility', () => {
     window.cancelAnimationFrame = jest.fn()
   })
 
+  test('names the workspace and folder creation control for keyboard users', async () => {
+    const user = userEvent.setup()
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+
+    const create = screen.getByRole('button', { name: 'Create workspace or folder' })
+    create.focus()
+    await user.keyboard('{Enter}')
+
+    expect(screen.getByRole('button', { name: 'Create Dashboard' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'New Folder' })).toBeVisible()
+    expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
+  })
+
+  test.each(['{Enter}', ' '])('selects a workspace with native keyboard activation %s', async (key) => {
+    const user = userEvent.setup()
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+
+    const workspace = screen.getByRole('button', { name: 'Second Workspace' })
+    expect(workspace.tagName).toBe('BUTTON')
+    expect(workspace.querySelector('button, input, [role="button"]')).toBeNull()
+    workspace.focus()
+    await user.keyboard(key)
+
+    expect(mockUseDashboard().setActiveDashboard).toHaveBeenCalledTimes(1)
+    expect(mockUseDashboard().setActiveDashboard).toHaveBeenCalledWith('workspace-2')
+  })
+
+  test.each(['{Enter}', ' '])('tabs to separate workspace actions and opens them with %s', async (key) => {
+    const user = userEvent.setup()
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+
+    const workspace = screen.getByRole('button', { name: 'Second Workspace' })
+    const actions = screen.getByRole('button', { name: 'Workspace actions for Second Workspace' })
+    expect(actions.parentElement?.closest('button, [role="button"], a[href], [tabindex="0"]')).toBeNull()
+    workspace.focus()
+    await user.tab()
+    expect(actions).toHaveFocus()
+    await user.keyboard(key)
+
+    expect(screen.getByRole('menu', { name: 'Workspace actions' })).toBeVisible()
+    expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
+  })
+
   test('opens backup restore without changing the active workspace', () => {
     renderSidebarWithDashboards([
       makeDashboard('workspace-1', 'First Workspace', 0),
@@ -158,6 +216,47 @@ describe('Sidebar context menu accessibility', () => {
     expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Close backup dialog' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  test('reopens a clean backup session and ignores a file still reading when it closed', async () => {
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+    const oldBackup = createWorkspaceBackup({
+      dashboards: [makeDashboard('old-backup', 'Old backup', 0)],
+      folders: [], activeDashboardId: null, activeTabId: null,
+    })
+    const currentBackup = createWorkspaceBackup({
+      dashboards: [makeDashboard('current-backup', 'Current backup', 0)],
+      folders: [], activeDashboardId: null, activeTabId: null,
+    })
+    let finishOldRead!: (text: string) => void
+    const oldRead = new Promise<string>((resolve) => { finishOldRead = resolve })
+    const oldFile = new File([''], 'old.json', { type: 'application/json' })
+    Object.defineProperty(oldFile, 'text', { value: () => oldRead })
+    fireEvent.click(screen.getByRole('button', { name: 'Backup workspaces' }))
+    fireEvent.change(screen.getByLabelText('Restore from a backup file (up to 5 MB)'), { target: { files: [oldFile] } })
+    expect(screen.getByLabelText('Restore from a backup file (up to 5 MB)')).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close backup dialog' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Backup workspaces' }))
+    const input = screen.getByLabelText('Restore from a backup file (up to 5 MB)')
+    expect(input).toBeEnabled()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    const currentFile = new File([''], 'current.json', { type: 'application/json' })
+    Object.defineProperty(currentFile, 'text', { value: () => Promise.resolve(JSON.stringify(currentBackup)) })
+    fireEvent.change(input, { target: { files: [currentFile] } })
+    await screen.findByText('Dashboards: Current backup')
+    await act(async () => { finishOldRead(JSON.stringify(oldBackup)) })
+
+    expect(screen.getByText('Dashboards: Current backup')).toBeInTheDocument()
+    expect(screen.queryByText('Dashboards: Old backup')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close backup dialog' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Backup workspaces' }))
+    expect(screen.queryByText('Import preview')).not.toBeInTheDocument()
+    expect(mockUseDashboard().restoreWorkspace).not.toHaveBeenCalled()
+    expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
   })
 
   test('renders workspace actions inside a menu with menuitem children', () => {
@@ -193,5 +292,55 @@ describe('Sidebar context menu accessibility', () => {
     expect(moveUp).toBeVisible()
     expect(moveUp).toBeDisabled()
     expect(moveUp).toHaveAttribute('aria-disabled', 'true')
+  })
+  test('keeps Space available to workspace name inputs', () => {
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+
+    fireEvent.doubleClick(screen.getByText('First Workspace'))
+    const input = screen.getByRole('textbox', { name: 'Dashboard name' })
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+    input.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
+  })
+
+  test('does not intercept Space on the workspace actions control', () => {
+    renderSidebarWithDashboards([
+      makeDashboard('workspace-1', 'First Workspace', 0),
+      makeDashboard('workspace-2', 'Second Workspace', 1),
+    ])
+
+    const actions = screen.getByRole('button', { name: 'Workspace actions for First Workspace' })
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+    actions.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(mockUseDashboard().setActiveDashboard).not.toHaveBeenCalled()
+  })
+  test('keeps Space available to folder name inputs', () => {
+    const folder: DashboardFolder = {
+      id: 'folder-custom',
+      name: 'Research',
+      order: 0,
+      isExpanded: true,
+    }
+    renderSidebarWithDashboards(
+      [makeDashboard('workspace-1', 'First Workspace', 0), makeDashboard('workspace-2', 'Second Workspace', 1)],
+      [folder],
+    )
+
+    fireEvent.contextMenu(screen.getByText('Research'))
+    const menu = screen.getByRole('menu', { name: 'Folder actions' })
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Rename' }))
+    const input = screen.getByRole('textbox', { name: 'Folder name' })
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+    input.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(mockUseDashboard().toggleFolder).not.toHaveBeenCalled()
   })
 })

@@ -85,19 +85,22 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
   const activeSeries = SERIES.filter((series) => visibleSeries[series.key] !== false)
 
   useEffect(() => {
+    if (error && !hasData) return;
     onDataChange?.(buildWidgetRuntime({
       empty: !hasData,
       apiGroup: '/equity',
       endpoint: `/equity/${symbol}/ratios/history?ratios=pe,pb,ps,ev_ebitda,ev_sales&period=year&limit=60`,
       sourceLabel: 'Ratio history',
-      lastDataDate: rows.at(-1)?.period ?? dataUpdatedAt,
+      lastDataDate: null,
+      fetchedAt: dataUpdatedAt,
+      stale: isFallback,
       extra: {
         periods: rows.length,
         visibleSeries: activeSeries.length,
         focusRecent,
       },
     }));
-  }, [activeSeries.length, dataUpdatedAt, focusRecent, hasData, onDataChange, rows, rows.length, symbol]);
+  }, [activeSeries.length, dataUpdatedAt, error, focusRecent, hasData, isFallback, onDataChange, rows, rows.length, symbol]);
 
   const toggleSeries = (key: string) => {
     setVisibleSeries((current) => ({
@@ -163,7 +166,8 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
               )}
             </div>
             <WidgetMeta
-              updatedAt={dataUpdatedAt}
+              updatedAt={null}
+              fetchedAt={dataUpdatedAt}
               isFetching={isFetching && hasData}
               isCached={isFallback}
               note={focusRecent && canFocus ? `Annual · last ${RECENT_WINDOW}` : 'Annual · full history'}
@@ -172,6 +176,12 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
           </div>
         </div>
         <div className="flex-1 px-2 py-2">
+          {isFallback && (
+            <div role="alert" className="mb-2 text-[10px] text-amber-300">
+              {error?.message} Showing previously received ratio history.{' '}
+              <button type="button" onClick={() => refetch()}>Retry</button>
+            </div>
+          )}
           {isLoading && !hasData ? (
             <WidgetSkeleton variant="chart" />
           ) : error && !hasData ? (

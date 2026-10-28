@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import type { MetricsHistoryResponse, QuantResponse } from '@/lib/api';
 import {
@@ -123,6 +123,7 @@ const screenerData: ScreenerResponse = {
       current_ratio: 1.8,
       market_cap: 123_000,
       dividend_yield: 0.03,
+      ratio_units: { dividend_yield: 'percent' },
       beta: 1.1,
     },
   ],
@@ -172,6 +173,58 @@ describe('KeyMetricsWidget', () => {
     mockUseProfile.mockReturnValue(makeQueryResult(emptyProfileData));
     mockUseStockQuote.mockReturnValue(makeQueryResult(emptyQuoteData));
     mockUseQuantMetrics.mockReturnValue(makeQueryResult(emptyQuantData));
+  });
+
+  it('renders canonical low ratio percentages in cards and metric rows', () => {
+    mockUseFinancialRatios.mockImplementation((_symbol, options) => makeQueryResult<FinancialRatiosResponse>({
+      symbol: 'VCB', count: 1,
+      data: [{ symbol: 'VCB', period: options?.period === 'TTM' ? 'TTM' : '2025', roe: 0.25, roa: -0.25 }],
+    }));
+
+    render(<KeyMetricsWidget id="metrics" symbol="VCB" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Profitability' }));
+    expect(screen.getAllByText('+0.25%')).toHaveLength(2);
+    expect(screen.getAllByText('-0.25%')).toHaveLength(2);
+    expect(screen.queryByText('+25.00%')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['certified ratio takes precedence', 'percent', 0.25, 'percent', '0.25%', 'Ratios'],
+    ['certified zero remains zero', 'percent', 0, 'percent', '0.00%', 'Ratios'],
+    ['unknown ratio falls back to certified screener', 'unknown', 0.25, 'percent', '0.75%', 'Screener'],
+    ['missing ratio units fall back to certified screener', undefined, 0.25, 'percent', '0.75%', 'Screener'],
+    ['unknown units are unavailable', 'unknown', 0.25, 'unknown', '-', undefined],
+    ['missing units are unavailable', undefined, 0.25, undefined, '-', undefined],
+  ] as const)('renders dividend yield when %s', (_name, ratioUnit, ratioYield, screenerUnit, expected, source) => {
+    mockUseFinancialRatios.mockReturnValue(makeQueryResult<FinancialRatiosResponse>({
+      symbol: 'VCB', count: 1,
+      data: [{ symbol: 'VCB', period: '2025', dividend_yield: ratioYield,
+        ratio_units: ratioUnit === undefined ? undefined : { dividend_yield: ratioUnit } }],
+    }));
+    mockUseScreenerData.mockReturnValue(makeQueryResult<ScreenerResponse>({
+      data: [{ ...screenerData.data[0], dividend_yield: 0.75,
+        ratio_units: screenerUnit === undefined ? undefined : { dividend_yield: screenerUnit } }],
+    }));
+
+    render(<KeyMetricsWidget id="metrics" symbol="VCB" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Market' }));
+
+    const yieldRow = screen.getAllByText('Dividend Yield')[1].parentElement!.parentElement!;
+    expect(within(yieldRow).getByText(expected)).toBeInTheDocument();
+    if (source) {
+      expect(within(yieldRow).getByText(source)).toBeInTheDocument();
+      expect(screen.getAllByText(expected)).toHaveLength(2);
+    }
+    expect(screen.queryByText('25.00%')).not.toBeInTheDocument();
+    expect(screen.queryByText('75.00%')).not.toBeInTheDocument();
+  });
+
+  it('renders canonical low screener percentages when ratios are unavailable', () => {
+    render(<KeyMetricsWidget id="metrics" symbol="VCB" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Profitability' }));
+    expect(screen.getAllByText('+0.18%')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Market' }));
+    expect(screen.getAllByText('0.03%')).toHaveLength(2);
   });
 
   it('does not emit repeated runtime payloads when parent rerenders with unchanged metric values', async () => {

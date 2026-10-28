@@ -122,10 +122,11 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }
       endpoint: `/api/v1/equity/${upperSymbol || ':symbol'}/correlation-matrix`,
       sourceLabel: 'VNIBB correlation matrix',
       lastDataDate: lastDataDateStr,
+      fetchedAt: dataUpdatedAt,
       stale: isStaleData,
       extra: { symbol: upperSymbol, days, topN, rows: returnsCount },
     }))
-  }, [days, hasData, isStaleData, lastDataDateStr, onDataChange, returnsCount, topN, upperSymbol])
+  }, [days, dataUpdatedAt, hasData, isStaleData, lastDataDateStr, onDataChange, returnsCount, topN, upperSymbol])
 
   return (
     <WidgetContainer
@@ -177,7 +178,8 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }
               ))}
             </div>
             <WidgetMeta
-              updatedAt={data?.meta?.last_data_date || dataUpdatedAt}
+              updatedAt={lastDataDateStr}
+              fetchedAt={dataUpdatedAt}
               isFetching={isFetching && hasData}
               note={`${payload?.sector || 'Sector'} · ${returnsCount} anchor observations`}
               align="right"

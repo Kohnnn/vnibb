@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.providers.vnstock.reference_fields import identity, supplied
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,9 @@ class SubsidiaryData(BaseModel):
     company_name: Optional[str] = None
     ownership_pct: Optional[float] = None
     charter_capital: Optional[float] = None
+    subsidiary_symbol: Optional[str] = None
+    relationship_type: Optional[str] = None
+    raw_data: Optional[dict[str, Any]] = None
     
     model_config = {
         "json_schema_extra": {
@@ -52,6 +56,7 @@ class VnstockSubsidiariesFetcher(BaseFetcher[SubsidiariesQueryParams, Subsidiary
     
     provider_name = "vnstock"
     requires_credentials = False
+    propagate_provider_errors = True
     
     @staticmethod
     def transform_query(params: SubsidiariesQueryParams) -> dict[str, Any]:
@@ -66,11 +71,10 @@ class VnstockSubsidiariesFetcher(BaseFetcher[SubsidiariesQueryParams, Subsidiary
         
         def _fetch_sync() -> List[dict]:
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import create_reference_company
 
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
-                df = stock.company.subsidiaries()
+                company = create_reference_company(query["symbol"], settings.vnstock_source)
+                df = company.subsidiaries()
                 
                 if df is None or df.empty:
                     return []
@@ -86,7 +90,7 @@ class VnstockSubsidiariesFetcher(BaseFetcher[SubsidiariesQueryParams, Subsidiary
                 timeout=settings.vnstock_timeout,
             )
         except asyncio.TimeoutError:
-            raise ProviderTimeoutError(provider="vnstock", timeout=settings.vnstock_timeout)
+            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
     
     @staticmethod
     def transform_data(
@@ -98,10 +102,13 @@ class VnstockSubsidiariesFetcher(BaseFetcher[SubsidiariesQueryParams, Subsidiary
             try:
                 results.append(SubsidiaryData(
                     symbol=params.symbol.upper(),
-                    company_name=row.get("companyName") or row.get("name") or row.get("tenCongTy"),
-                    ownership_pct=row.get("ownership") or row.get("ratio") or row.get("tyLe"),
-                    charter_capital=row.get("charterCapital") or row.get("vonDieuLe"),
+                    company_name=identity(supplied(row, "organ_name", "company_name", "companyName", "name", "tenCongTy"), "subsidiary"),
+                    ownership_pct=supplied(row, "ownership_pct"),
+                    raw_data=row,
+                    charter_capital=supplied(row, "charter_capital", "charterCapital", "vonDieuLe"),
+                    subsidiary_symbol=supplied(row, "sub_organ_code", "subsidiary_symbol", "sub_symbol"),
+                    relationship_type=supplied(row, "type", "relationship_type"),
                 ))
             except Exception as e:
-                logger.warning(f"Skipping invalid subsidiary row: {e}")
+                raise ProviderError("Invalid subsidiary row", provider="vnstock", cause=e) from e
         return results

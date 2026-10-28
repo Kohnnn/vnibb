@@ -182,7 +182,8 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove, onDataChange }: M
         apiGroup: '/market',
         endpoint: `/market/money-flow-trend?symbol=${upperSymbol}&timeframe=${timeframe}&trail_length=8`,
         sourceLabel: 'Money flow trend',
-        lastDataDate: data?.updated_at || dataUpdatedAt,
+        lastDataDate: data?.updated_at ?? null,
+        fetchedAt: dataUpdatedAt,
         extra: hasData ? { symbol: upperSymbol, timeframe, count: stocks.length } : undefined,
       }),
     );
@@ -257,7 +258,8 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove, onDataChange }: M
               ))}
             </div>
             <WidgetMeta
-              updatedAt={data?.updated_at || dataUpdatedAt}
+              updatedAt={data?.updated_at ?? null}
+              fetchedAt={dataUpdatedAt}
               isFetching={isFetching && hasData}
               note={`${note} · ${topCount === -1 ? 'All names' : `Top ${topCount}`} by ${RANKING_OPTIONS.find((option) => option.id === rankingMetric)?.label}`}
               align="right"

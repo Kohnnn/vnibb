@@ -23,6 +23,8 @@ interface NotesWidgetProps {
     widgetGroup?: WidgetGroupId;
 }
 
+type NotesDraft = { notes: string; thesis: InvestmentThesis };
+
 const emptyThesis: InvestmentThesis = {
     status: 'researching',
     thesis: '',
@@ -51,17 +53,12 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
         }
         return { ...theses, ...persisted.thesesBySymbol };
     }, [id, persisted.thesesBySymbol, state.dashboards]);
-    const [notes, setNotes] = useState('');
-    const [thesis, setThesis] = useState<InvestmentThesis>(emptyThesis);
+    const [drafts, setDrafts] = useState<Record<string, NotesDraft>>({});
+    const notes = drafts[symbol]?.notes ?? persisted.notesBySymbol[symbol] ?? '';
+    const thesis = drafts[symbol]?.thesis ?? persisted.thesesBySymbol[symbol] ?? emptyThesis;
     const [notebookItems, setNotebookItems] = useState<NotebookItem[]>([]);
-    const [isSaved, setIsSaved] = useState(true);
+    const isSaved = !drafts[symbol];
     const [showDueOnly, setShowDueOnly] = useState(false);
-
-    useEffect(() => {
-        setNotes(persisted.notesBySymbol[symbol] || '');
-        setThesis(persisted.thesesBySymbol[symbol] || emptyThesis);
-        setIsSaved(true);
-    }, [persisted, symbol]);
 
     useEffect(() => {
         const refresh = () => setNotebookItems(readNotebookItems());
@@ -107,43 +104,46 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
 
     const save = () => {
         if (!widgetLocation || !canSave) return;
+        const latestPersisted = normalizeThesisConfig(widgetLocation.widget.config);
         updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, {
             config: {
                 ...widgetLocation.widget.config,
-                notesBySymbol: { ...persisted.notesBySymbol, [symbol]: notes },
-                thesesBySymbol: { ...persisted.thesesBySymbol, [symbol]: thesis },
+                notesBySymbol: { ...latestPersisted.notesBySymbol, [symbol]: notes },
+                thesesBySymbol: { ...latestPersisted.thesesBySymbol, [symbol]: thesis },
             },
         });
-        if (isThesisComplete(thesis, availableEvidenceIds) && !isThesisComplete(persisted.thesesBySymbol[symbol] || emptyThesis, availableEvidenceIds)) {
+        if (isThesisComplete(thesis, availableEvidenceIds) && !isThesisComplete(latestPersisted.thesesBySymbol[symbol] || emptyThesis, availableEvidenceIds)) {
             captureAnalyticsEvent(ANALYTICS_EVENTS.thesisCompleted, {
                 source: 'notes_widget',
                 evidence_attached: true,
                 review_date_set: true,
             });
         }
-        setIsSaved(true);
+        setDrafts((current) => {
+            const remaining = { ...current };
+            delete remaining[symbol];
+            return remaining;
+        });
     };
 
-    const clearNote = () => {
-        setNotes('');
-        setIsSaved(false);
+    const updateDraft = (update: (current: NotesDraft) => NotesDraft) => {
+        setDrafts((current) => ({ ...current, [symbol]: update(current[symbol] || { notes, thesis }) }));
     };
 
     const updateThesis = <K extends keyof InvestmentThesis>(key: K, value: InvestmentThesis[K]) => {
-        setThesis((current) => ({ ...current, [key]: value }));
-        setIsSaved(false);
+        updateDraft((current) => ({ ...current, thesis: { ...current.thesis, [key]: value } }));
     };
     const attachEvidence = (itemId: string) => {
         const item = notebookItems.find((entry) => entry.id === itemId);
         if (!item || (thesis.notebookItemIds || []).includes(itemId) || (thesis.notebookItemIds || []).length >= MAX_THESIS_CITATIONS) return;
-        setThesis((current) => ({ ...current, notebookItemIds: [...(current.notebookItemIds || []), itemId],
-            citations: [...(current.citations || []), citeNotebookItem(item)] }));
-        setIsSaved(false);
+        updateDraft((current) => ({ ...current, thesis: { ...current.thesis,
+            notebookItemIds: [...(current.thesis.notebookItemIds || []), itemId],
+            citations: [...(current.thesis.citations || []), citeNotebookItem(item)] } }));
     };
     const detachEvidence = (itemId: string) => {
-        setThesis((current) => ({ ...current, notebookItemIds: current.notebookItemIds?.filter((id) => id !== itemId),
-            citations: current.citations?.filter((citation) => citation.itemId !== itemId) }));
-        setIsSaved(false);
+        updateDraft((current) => ({ ...current, thesis: { ...current.thesis,
+            notebookItemIds: current.thesis.notebookItemIds?.filter((id) => id !== itemId),
+            citations: current.thesis.citations?.filter((citation) => citation.itemId !== itemId) } }));
     };
 
     if (showDueOnly) {
@@ -195,7 +195,7 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
                 <label className="flex items-center gap-1 text-[var(--text-muted)]"><Link2 size={12} />Attach existing research<select value="" disabled={linkedEvidence.length >= MAX_THESIS_CITATIONS} onChange={(event) => { if (event.target.value) attachEvidence(event.target.value); }} className="min-w-0 flex-1 rounded bg-[var(--bg-tertiary)] p-1 text-[var(--text-primary)]" aria-label="Attach browser-local research evidence"><option value="">Select evidence</option>{attachableEvidence.map((item) => <option key={item.id} value={item.id}>{item.symbol ? `${item.symbol} · ` : 'No symbol · '}{item.title}</option>)}</select></label>
                 {attachableEvidence.length === 0 && linkedEvidence.length === 0 && <div className="text-[10px] text-[var(--text-muted)]">No matching browser-local research. Symbol-less items may be selected when available.</div>}
             </div>
-            <div className="flex min-h-0 flex-1 flex-col"><div className="flex items-center justify-between text-xs text-[var(--text-muted)]"><label htmlFor={`${id}-notes`}>Legacy notes</label><button type="button" onClick={clearNote} className="rounded p-1 hover:bg-[var(--bg-tertiary)] hover:text-red-400" aria-label="Clear legacy notes"><Trash2 size={12} /></button></div><textarea id={`${id}-notes`} value={notes} onChange={(event) => { setNotes(event.target.value); setIsSaved(false); }} placeholder={`Write notes about ${symbol}...`} className="mt-1 min-h-16 flex-1 resize-none rounded bg-[var(--bg-tertiary)] p-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500" /></div>
+            <div className="flex min-h-0 flex-1 flex-col"><div className="flex items-center justify-between text-xs text-[var(--text-muted)]"><label htmlFor={`${id}-notes`}>Legacy notes</label><button type="button" onClick={() => updateDraft((current) => ({ ...current, notes: '' }))} className="rounded p-1 hover:bg-[var(--bg-tertiary)] hover:text-red-400" aria-label="Clear legacy notes"><Trash2 size={12} /></button></div><textarea id={`${id}-notes`} value={notes} onChange={(event) => { const value = event.target.value; updateDraft((current) => ({ ...current, notes: value })); }} placeholder={`Write notes about ${symbol}...`} className="mt-1 min-h-16 flex-1 resize-none rounded bg-[var(--bg-tertiary)] p-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500" /></div>
             </fieldset>
         </div>
     );

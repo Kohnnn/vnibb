@@ -7,6 +7,7 @@ import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods
 import type { SeasonalityGranularity } from '@/lib/api'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
@@ -208,6 +209,27 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
   const hasData = rows.length > 0
   const isFallback = Boolean(error && hasData)
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
+  const meta = data?.meta as (NonNullable<typeof data>['meta'] & {
+    unit_status?: string; unresolved_excluded_dates?: string[]; unresolved_session_count?: number;
+    quality_status?: string; unavailable?: boolean; warnings?: string[]; adjustment_warning?: string;
+    fallback_used?: boolean; completeness_status?: string;
+  }) | undefined
+  const RESOLVED_UNIT_STATUSES = ['confirmed_vnd', 'index_points', 'not_applicable']
+  const legacyQualityUnknown = hasData && !RESOLVED_UNIT_STATUSES.includes(meta?.unit_status ?? '')
+  const derivedWithheld = Boolean(data?.error || meta?.unavailable) || legacyQualityUnknown
+    || Boolean(meta?.unit_status && !RESOLVED_UNIT_STATUSES.includes(meta.unit_status))
+    || Boolean(meta?.unresolved_excluded_dates?.length || meta?.unresolved_session_count)
+    || ['unavailable', 'error', 'unresolved', 'unconfirmed', 'mixed'].includes(meta?.quality_status ?? '')
+  const warnings = [
+    payload?.warning, payload?.data_quality_note, data?.error, ...(meta?.warnings ?? []), meta?.adjustment_warning,
+    meta?.fallback_used ? 'Historical source fallback used' : null,
+    meta?.completeness_status === 'partial' ? 'Partial historical coverage' : null,
+    isFallback ? 'Latest seasonality refresh failed; showing previous observations' : null,
+    derivedWithheld ? legacyQualityUnknown
+      ? 'Legacy quality unknown: historical price units were not certified; seasonality metrics withheld.'
+      : 'Seasonality metrics withheld: source quality is unavailable or unresolved.' : null,
+  ].filter((message): message is string => Boolean(message))
+  const quantWarning = warnings.length ? [...new Set(warnings)].join(' · ') : null
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -215,7 +237,8 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
       apiGroup: '/quant',
       endpoint: `/quant/${upperSymbol}/seasonality-matrix?period=${period}&granularity=${granularity}`,
       sourceLabel: 'Seasonality matrix',
-      lastDataDate: payload?.last_data_date ?? dataUpdatedAt,
+      lastDataDate: payload?.last_data_date ?? null,
+      fetchedAt: dataUpdatedAt,
       adjustmentMode: payload?.adjustment_mode,
       extra: {
         rows: rows.length,
@@ -363,7 +386,8 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
             ))}
           </div>
           <WidgetMeta
-            updatedAt={payload?.last_data_date ?? payload?.computed_at ?? dataUpdatedAt}
+            updatedAt={payload?.last_data_date}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note={`${period} ${granularityConfig.note}`}
@@ -371,6 +395,7 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
           />
         </div>
       </div>
+      <QuantWarningBanner warning={quantWarning} className="mb-2" />
 
       <div className="flex-1 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[radial-gradient(circle_at_center,rgba(14,165,233,0.08),transparent_60%)]">
         {timedOut && isLoading && !hasData ? (
@@ -386,8 +411,14 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
           <WidgetSkeleton lines={8} />
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />
-        ) : data?.error && !hasData ? (
-          <WidgetEmpty message={data.error} icon={<CalendarDays size={18} />} />
+        ) : derivedWithheld ? (
+          <WidgetEmpty
+            message="Seasonality metrics withheld"
+            detail={data?.error ?? (legacyQualityUnknown
+              ? 'Legacy quality unknown: historical price units were not certified.'
+              : 'Historical units or excluded sessions remain unresolved.')}
+            icon={<CalendarDays size={18} />}
+          />
         ) : !hasData ? (
           <WidgetEmpty message="Insufficient data for spiral seasonality" icon={<CalendarDays size={18} />} />
         ) : (

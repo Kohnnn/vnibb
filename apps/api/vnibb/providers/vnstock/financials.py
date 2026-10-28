@@ -10,7 +10,7 @@ import logging
 import math
 import re
 import unicodedata
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
 
@@ -27,6 +27,181 @@ logger = logging.getLogger(__name__)
 # income tax, or split SG&A lines) and must be SUMMED rather than overwritten when
 # building period values. Shared by both the pivot and non-pivot transform paths.
 _ADDITIVE_PIVOT_METRICS = {"tax_expense", "selling_general_admin"}
+
+# Per metric, the raw row keys the shared wide-row statement constructor reads after
+# `mapped_metrics`, in the constructor's own argument order. A key is listed whenever it
+# is not mapped for every statement type: those keys used to reach the statement without
+# passing `_normalize_value` and without a lineage entry, so an empty lineage could
+# certify a unitless row as VND, and a key mapped only for another statement type was
+# skipped by that type's first pass while the constructor still read it raw. The alias
+# pass below walks this order, so the selected value is the one the constructor would
+# have selected, independent of input dict order (issue #106).
+_WIDE_ROW_ALIAS_METRICS: dict[str, tuple[str, ...]] = {
+    "revenue": ("revenue", "netRevenue"),
+    "gross_profit": ("grossProfit",),
+    "operating_income": ("operatingProfit", "operatingIncome"),
+    "net_income": ("netIncome", "postTaxProfit"),
+    "ebitda": ("ebitda",),
+    "eps": ("eps", "earningPerShare", "earningsPerShare", "earning_per_share", "basicEps"),
+    "eps_diluted": ("epsDiluted", "dilutedEps"),
+    "cost_of_revenue": ("costOfRevenue", "cost_of_revenue", "costOfGoodsSold"),
+    "pre_tax_profit": ("incomeBeforeTax", "preTaxProfit", "profitBeforeTax"),
+    "tax_expense": ("incomeTax", "taxExpense", "incomeTaxExpense"),
+    "interest_expense": ("interestExpense", "interest_expense"),
+    "depreciation": ("depreciation", "depreciationAndAmortization"),
+    "selling_general_admin": ("sellingGeneralAdmin", "sellingExpenses"),
+    "research_development": ("researchDevelopment", "researchAndDevelopment"),
+    "other_income": ("otherIncome", "other_income"),
+    "total_assets": ("totalAssets", "asset"),
+    "total_liabilities": ("totalLiabilities", "debt"),
+    "total_equity": ("totalEquity", "equity"),
+    "cash_and_equivalents": ("cash", "cashAndCashEquivalents"),
+    "inventory": ("inventory", "inventories"),
+    "current_assets": ("currentAssets", "current_assets"),
+    "fixed_assets": ("fixedAssets", "fixed_assets"),
+    "current_liabilities": ("currentLiabilities", "current_liabilities"),
+    "long_term_liabilities": ("longTermLiabilities", "long_term_liabilities"),
+    "retained_earnings": ("retainedEarnings", "retained_earnings"),
+    "short_term_debt": ("shortTermDebt", "short_term_debt"),
+    "long_term_debt": ("longTermDebt", "long_term_debt"),
+    "accounts_receivable": ("accountsReceivable", "accounts_receivable"),
+    "accounts_payable": ("accountsPayable", "accounts_payable"),
+    "customer_deposits": ("customerDeposits", "customer_deposits"),
+    "goodwill": ("goodwill",),
+    "intangible_assets": ("intangibleAssets", "intangible_assets"),
+    "operating_cash_flow": ("operatingCashFlow", "fromOperating"),
+    "investing_cash_flow": ("investingCashFlow", "fromInvesting"),
+    "financing_cash_flow": ("financingCashFlow", "fromFinancing"),
+    "free_cash_flow": ("freeCashFlow",),
+    "net_change_in_cash": ("netChangeInCash", "net_change_in_cash", "netCashFlow"),
+    "capex": ("capex", "capitalExpenditure"),
+    "dividends_paid": ("dividendsPaid", "dividends_paid"),
+    "stock_repurchased": ("stockRepurchased", "stock_repurchased"),
+    "debt_repayment": ("debtRepayment", "debt_repayment"),
+}
+
+
+_INTEREST_LABELS = {
+    "interest_expense", "interest_expenses", "interestexpense", "interest_cost",
+    "interest_and_similar_expenses", "borrowing_costs", "chi_phi_lai_vay",
+    "chi_phi_tien_lai_vay", "chi_phi_lai_va_cac_khoan_tuong_tu",
+    "interest_expenses_losses_from_loans_and_receivables",
+}
+
+
+def _interest_evidence_admitted(metadata: Any) -> bool:
+    if not isinstance(metadata, dict) or metadata.get("unavailable_reason"):
+        return False
+    components = metadata.get("components")
+    if isinstance(components, list) and components:
+        return all(_interest_evidence_admitted(item) for item in components)
+    labels = [metadata.get("source_label"), metadata.get("label")]
+    descriptors = metadata.get("descriptors") or []
+    for descriptor in descriptors:
+        if isinstance(descriptor, dict):
+            labels.extend(descriptor.get(key) for key in ("fullTitleEn", "fullTitleVi", "titleEn", "titleVi"))
+    normalized = []
+    for label in labels:
+        if not label:
+            continue
+        text = unicodedata.normalize("NFKD", str(label).lower().replace("đ", "d"))
+        text = "".join(char for char in text if not unicodedata.combining(char))
+        text = re.sub(r"\s*\((?:vnd|dong|bn\.?\s*vnd)\)\s*$", "", text)
+        normalized.append(re.sub(r"[^a-z0-9]+", "_", text).strip("_"))
+    unit = metadata.get("unit") or metadata.get("value_unit")
+    original_unit = metadata.get("source_unit") or metadata.get("unitEvidence")
+    return bool(normalized) and all(label in _INTEREST_LABELS for label in normalized) and unit == "VND" and bool(original_unit)
+
+
+def admitted_interest_expense(row: Any) -> float | None:
+    """Read interest only when original field semantics and denomination are evidenced."""
+    def value(name: str, default=None):
+        return row.get(name, default) if isinstance(row, dict) else getattr(row, name, default)
+
+    raw = value("raw_data") or {}
+    lineage = raw.get("_financial_lineage") or {}
+    canonical = lineage.get("canonical_data") or {}
+    metadata = None
+    for fields in (value("unit_metadata") or {}, canonical.get("unit_metadata") or {}, lineage.get("unit_metadata") or {}):
+        if "interest_expense" in fields:
+            metadata = fields["interest_expense"]
+            break
+    number = value("interest_expense")
+    if number is None or not _interest_evidence_admitted(metadata):
+        return None
+    try:
+        number = float(number)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _detach_source_reports(row: dict[str, Any]) -> list[dict[str, Any]]:
+    """Take captured provider reports off a row so raw lineage is kept once per statement."""
+    attrs = row.get("_provider_attrs")
+    if isinstance(attrs, dict):
+        reports = attrs.pop("source_reports", None)
+        if isinstance(reports, list):
+            return reports
+    return []
+
+
+def _collect_source_reports(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    reports: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for row in rows:
+        for report in _detach_source_reports(row):
+            if id(report) not in seen:
+                seen.add(id(report))
+                reports.append(report)
+    return reports
+
+
+def _reports_for_period(reports: list[dict[str, Any]], period: str) -> list[dict[str, Any]]:
+    """Keep only the captured reports whose Head describes this period.
+
+    A provider response carries one Head per period; retaining every page on every
+    period row repeats the same payload once per metric and blows up the response.
+    """
+    normalized = str(period).upper()
+    year = re.search(r"(20\d{2})", normalized)
+    quarter = re.search(r"Q([1-4])", normalized)
+    matched = []
+    for report in reports:
+        for head in report.get("Head") or[]:
+            if year and str(head.get("YearPeriod")) != year.group(1):
+                continue
+            term = str(head.get("TermCode") or head.get("TermNameEN") or "").upper()
+            if quarter and term not in {f"Q{quarter.group(1)}", f"QUARTER {quarter.group(1)}"}:
+                continue
+            matched.append(report)
+            break
+    return matched
+
+
+_PERIOD_COLUMN_PATTERN = re.compile(r"^(?:Q[1-4]-\d{4}|\d{4}(?:-Q[1-4]|Q[1-4])?)$")
+
+
+def _period_provider_rows(rows: list[dict[str, Any]], period: str) -> list[dict[str, Any]]:
+    """Project provider rows down to this period's raw cells.
+
+    The raw table is a full provider response: every period, every metric. Serving it
+    whole on each period row repeats the same table once per period.
+    """
+    period_key = str(period).strip().upper()
+    projected = []
+    for row in rows:
+        cells = {
+            key: value
+            for key, value in row.items()
+            if key != "_provider_attrs"
+            and (
+                str(key).strip().upper() == period_key
+                or not _PERIOD_COLUMN_PATTERN.match(str(key).strip().upper())
+            )
+        }
+        projected.append(cells)
+    return projected
 
 
 class StatementType(str, Enum):
@@ -57,8 +232,7 @@ class FinancialsQueryParams(BaseModel):
     limit: int = Field(
         default=5,
         ge=1,
-        le=40,
-        description="Number of periods to return",
+        description="Number of available source periods to request (source may return fewer)",
     )
 
     @field_validator("symbol")
@@ -88,11 +262,14 @@ class FinancialStatementData(BaseModel):
     symbol: str = Field(..., description="Stock ticker symbol")
     period: str = Field(..., description="Reporting period (e.g., 2024, Q1-2024)")
     statement_type: str = Field(..., description="Statement type")
+    fiscal_year: int | None = None
+    fiscal_quarter: int | None = None
 
     # Common metrics (populated based on statement type)
     revenue: float | None = Field(None, description="Total Revenue")
     gross_profit: float | None = Field(None, description="Gross Profit")
     operating_income: float | None = Field(None, description="Operating Income")
+    operating_expenses: float | None = Field(None, description="Operating Expenses")
     net_income: float | None = Field(None, description="Net Income")
     ebitda: float | None = Field(None, description="EBITDA")
     eps: float | None = Field(None, description="Earnings Per Share")
@@ -111,11 +288,13 @@ class FinancialStatementData(BaseModel):
     total_liabilities: float | None = Field(None, description="Total Liabilities")
     total_equity: float | None = Field(None, description="Total Equity")
     cash_and_equivalents: float | None = Field(None, description="Cash & Equivalents")
+    short_term_investments: float | None = Field(None, description="Short-term Investments")
     equity: float | None = Field(None, description="Equity")
     cash: float | None = Field(None, description="Cash")
     inventory: float | None = Field(None, description="Inventory")
     current_assets: float | None = Field(None, description="Current Assets")
     fixed_assets: float | None = Field(None, description="Fixed Assets")
+    non_current_assets: float | None = Field(None, description="Non-current Assets")
     current_liabilities: float | None = Field(None, description="Current Liabilities")
     long_term_liabilities: float | None = Field(None, description="Long-term Liabilities")
     retained_earnings: float | None = Field(None, description="Retained Earnings")
@@ -126,6 +305,7 @@ class FinancialStatementData(BaseModel):
     customer_deposits: float | None = Field(None, description="Customer Deposits")
     goodwill: float | None = Field(None, description="Goodwill")
     intangible_assets: float | None = Field(None, description="Intangible Assets")
+    book_value_per_share: float | None = Field(None, description="Book Value Per Share")
 
     # Cash Flow specific
     operating_cash_flow: float | None = Field(None, description="Operating Cash Flow")
@@ -145,6 +325,15 @@ class FinancialStatementData(BaseModel):
 
     # Raw data for flexibility
     raw_data: dict[str, Any] | None = Field(None, description="Full raw statement data")
+    source: str | None = None
+    currency: str | None = None
+    value_unit: str | None = None
+    unit_metadata: dict[str, Any] = Field(default_factory=dict)
+    aggregation_basis: str | None = None
+    source_periods: list[str] = Field(default_factory=list)
+    unavailable_reason: str | None = None
+    consolidation_basis: str | None = None
+    flow_basis: str | None = None
 
     updated_at: datetime | None = Field(None, description="Data timestamp")
 
@@ -183,21 +372,12 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 from vnibb.providers.vnstock.runtime import (
                     create_finance,
                     finance_method_kwargs,
-                    get_finance_class,
+                    validate_source,
                 )
-
-                Finance = get_finance_class()
 
                 statement_type = query["statement_type"]
                 period = query["period"]
-                candidate_sources: list[str] = []
-                # KBS is the default runtime source on vnstock 3.5.x, but VCI still
-                # exposes richer financial statement labels/values for many symbols.
-                for source in ["VCI", settings.vnstock_source, "KBS"]:
-                    if source and source not in candidate_sources:
-                        candidate_sources.append(source)
-                if getattr(Finance, "supports_source", True) is False:
-                    candidate_sources = ["default"]
+                candidate_sources = [validate_source(settings.vnstock_source)]
 
                 def _get_statement_method(finance: Any):
                     if statement_type == "income":
@@ -210,14 +390,44 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     raise ValueError(f"Unknown statement type: {statement_type}")
 
                 def _fetch_df(finance: Any, lang: str | None):
-                    method = _get_statement_method(finance)
-                    kwargs = finance_method_kwargs(method, period)
+                    provider = getattr(finance, "_provider", finance)
+                    provider_method = _get_statement_method(provider)
+                    parameters = inspect.signature(provider_method, follow_wrapped=False).parameters
+                    accepts_kwargs = any(item.kind == inspect.Parameter.VAR_KEYWORD for item in parameters.values())
+                    if accepts_kwargs:
+                        parameters = inspect.signature(provider_method).parameters
+                    kwargs = finance_method_kwargs(provider_method, period)
+                    kwargs = {key: value for key, value in kwargs.items() if key in parameters or accepts_kwargs}
+                    for count_key in ("count", "limit"):
+                        if count_key in parameters:
+                            kwargs[count_key] = query["limit"]
                     if lang is None:
                         kwargs.pop("lang", None)
                     elif "lang" in kwargs:
                         kwargs["lang"] = lang
-
-                    return method(**kwargs)
+                    if "display_mode" in parameters:
+                        kwargs["display_mode"] = "all"
+                    if "dropna" in parameters:
+                        kwargs["dropna"] = False
+                    source_reports = []
+                    parser = None
+                    if type(provider).__module__ == "vnstock.explorer.kbs.financial":
+                        parser = provider._parse_financial_response
+                        def capture_response(response, *args, **kwargs):
+                            source_reports.append(response)
+                            return parser(response, *args, **kwargs)
+                        provider._parse_financial_response = capture_response
+                    try:
+                        df = provider_method(**kwargs)
+                    finally:
+                        if parser is not None:
+                            provider._parse_financial_response = parser
+                    if df is not None and parser is not None:
+                        df.attrs["value_unit"] = "VND"
+                        df.attrs["provider_value_multiplier"] = 1000.0
+                        df.attrs["normalization_contract"] = "vnstock.kbs._fetch_series_data: request unit=1000; ValueN * 1000"
+                        df.attrs["source_reports"] = source_reports
+                    return df
 
                 def _score_statement_payload(rows: list[dict[str, Any]]) -> int:
                     if not rows:
@@ -381,7 +591,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
 
                     try:
                         supports_lang = (
-                            "lang" in inspect.signature(_get_statement_method(finance)).parameters
+                            "lang" in inspect.signature(_get_statement_method(getattr(finance, "_provider", finance)), follow_wrapped=False).parameters
                         )
                     except (TypeError, ValueError):
                         supports_lang = False
@@ -414,7 +624,9 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                                 statement_type,
                                 source,
                             )
-                            score = _score_statement_payload(normalized_rows)
+                            params_model = FinancialsQueryParams(symbol=query["symbol"], statement_type=StatementType(statement_type), period=period, limit=query["limit"])
+                            parsed = VnstockFinancialsFetcher.transform_data(params_model, normalized_rows)
+                            score = _score_statement_payload([item.model_dump(mode="json") for item in parsed if not item.unavailable_reason])
                             candidate_payloads.append((source, lang, normalized_rows, score))
                             if score > best_score:
                                 best_rows = normalized_rows
@@ -490,6 +702,10 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                                 if base_item is None:
                                     merged_by_period[identity] = alt_item
                                     continue
+                                base_basis = {str(item.get("consolidation_basis")) for item in base_item.unit_metadata.values()}
+                                alternate_basis = {str(item.get("consolidation_basis")) for item in alt_item.unit_metadata.values()}
+                                if base_item.value_unit != "VND" or alt_item.value_unit != "VND" or base_basis != alternate_basis:
+                                    continue
 
                                 for field_name in supplemental_fields:
                                     if (
@@ -499,16 +715,9 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                                         setattr(
                                             base_item, field_name, getattr(alt_item, field_name)
                                         )
+                                        base_item.unit_metadata[field_name] = alt_item.unit_metadata.get(field_name, {})
 
-                                if isinstance(base_item.raw_data, dict) or isinstance(
-                                    alt_item.raw_data, dict
-                                ):
-                                    merged_raw = {}
-                                    if isinstance(alt_item.raw_data, dict):
-                                        merged_raw.update(alt_item.raw_data)
-                                    if isinstance(base_item.raw_data, dict):
-                                        merged_raw.update(base_item.raw_data)
-                                    base_item.raw_data = merged_raw
+                                base_item.raw_data = {"primary": base_item.raw_data, "supplemental": alt_item.raw_data}
 
                         merged_rows = sorted(
                             merged_by_period.values(),
@@ -516,15 +725,6 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                             reverse=True,
                         )
 
-                    if best_source and best_source != settings.vnstock_source:
-                        logger.info(
-                            "Using richer fallback vnstock source for %s %s: %s (lang=%s score=%s)",
-                            query["symbol"],
-                            statement_type,
-                            best_source,
-                            best_lang,
-                            best_score,
-                        )
                     return [item.model_dump(mode="json") for item in merged_rows]
 
                 if last_error is not None and not candidate_payloads:
@@ -572,10 +772,16 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
 
             records = df.to_dict("records")
 
+            fetched_at = datetime.now(UTC).isoformat()
             # Add metadata
             for record in records:
                 record["_statement_type"] = statement_type
                 record["_source"] = source
+                record["_fetched_at"] = fetched_at
+                record["_provider_attrs"] = dict(getattr(df, "attrs", {}))
+                record["_provider_value_multiplier"] = df.attrs.get("provider_value_multiplier", 1.0)
+                record["_value_unit"] = df.attrs.get("value_unit")
+                record["_normalization_contract"] = df.attrs.get("normalization_contract")
 
             return records
 
@@ -584,7 +790,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
         except TimeoutError as exc:
             raise ProviderTimeoutError(
                 provider="vnstock",
-                timeout=settings.vnstock_timeout,
+                timeout_seconds=settings.vnstock_timeout,
             ) from exc
 
     @staticmethod
@@ -594,6 +800,10 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
     ) -> list[FinancialStatementData]:
         """Transform raw financial data to standardized format."""
         results: list[FinancialStatementData] = []
+        if data and all(row.get("statement_type") and "unit_metadata" in row for row in data):
+            from vnibb.services.financial_service import admit_statement_rows
+
+            return admit_statement_rows([FinancialStatementData.model_validate(row) for row in data], params.period)
 
         def _coerce_number(value: Any) -> float | None:
             if value is None:
@@ -604,7 +814,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 number = float(value)
             except (TypeError, ValueError):
                 return None
-            if math.isnan(number):
+            if not math.isfinite(number):
                 return None
             return number
 
@@ -640,6 +850,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             return sorted(period_cols, key=_period_sort_key)
 
         def _normalize_item_key(raw_key: str) -> str:
+            raw_key = re.sub(r"\s*\((?:Bn\.?\s*VND|VND|đồng)\)\s*$", "", raw_key, flags=re.IGNORECASE)
             cleaned = raw_key.strip().lower().replace("đ", "d").replace("Đ", "D")
             cleaned = (
                 cleaned.replace("&", " and ")
@@ -660,6 +871,77 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     break
                 cleaned = stripped
             return cleaned
+
+        def _report_basis(row: dict[str, Any], period: str) -> dict[str, Any]:
+            normalized = str(period).upper()
+            year = re.search(r"(20\d{2})", normalized)
+            quarter = re.search(r"Q([1-4])", normalized)
+            for report in (row.get("_provider_attrs") or {}).get("source_reports", []):
+                for head in report.get("Head", []):
+                    if not year or str(head.get("YearPeriod")) != year.group(1):
+                        continue
+                    term = str(head.get("TermCode") or head.get("TermNameEN") or "").upper()
+                    if quarter and term not in {f"Q{quarter.group(1)}", f"QUARTER {quarter.group(1)}"}:
+                        continue
+                    scope = next((unit.get("UnitedNameEN") or unit.get("UnitedName") for unit in report.get("Unit", [])
+                                  if unit.get("UnitedCode") == head.get("United")), head.get("United"))
+                    result = {"consolidation_basis": scope, "source_head": head}
+                    if quarter:
+                        q = int(quarter.group(1))
+                        begin = f"{year.group(1)}{(q - 1) * 3 + 1:02d}"
+                        end = f"{year.group(1)}{q * 3:02d}"
+                        if str(head.get("PeriodBegin")) == begin and str(head.get("PeriodEnd")) == end:
+                            result["flow_basis"] = "single_quarter"
+                        elif str(head.get("PeriodBegin")) == f"{year.group(1)}01" and str(head.get("PeriodEnd")) == end:
+                            result["flow_basis"] = "cumulative_ytd"
+                    elif (term in {"FY", "YEAR", "ANNUAL"}
+                          and str(head.get("PeriodBegin")) == f"{year.group(1)}01"
+                          and str(head.get("PeriodEnd")) == f"{year.group(1)}12"):
+                        result["flow_basis"] = "annual"
+                    return result
+            return {"consolidation_basis": row.get("consolidation_basis"), "flow_basis": row.get("flow_basis")}
+
+        def _normalize_value(value: Any, row: dict[str, Any], label: str, metric: str, period: str):
+            source = str(row.get("_source") or "").upper()
+            unit = row.get("_value_unit") or row.get("unit")
+            provider_multiplier = float(row.get("_provider_value_multiplier") or 1)
+            descriptor = str(unit or "").strip().lower()
+            descriptor = unicodedata.normalize("NFKD", descriptor.replace("đ", "d"))
+            descriptor = "".join(char for char in descriptor if not unicodedata.combining(char))
+            factors = {"vnd": 1, "dong": 1, "nghin dong": 1000, "ngan dong": 1000,
+                       "thousand vnd": 1000, "trieu dong": 1_000_000, "million vnd": 1_000_000,
+                       "ty dong": 1_000_000_000, "bn. vnd": 1_000_000_000, "billion vnd": 1_000_000_000}
+            source_factor = factors.get(descriptor)
+            metadata = {"source": source or None, "label": label, "source_unit": unit,
+                        "provider_value": value, "provider_multiplier": provider_multiplier,
+                        "value_unit": "VND/share" if metric in {"eps", "eps_diluted"} else "VND"}
+            metadata.update(_report_basis(row, period))
+            metadata["normalization_contract"] = row.get("_normalization_contract")
+            metadata["source_label"] = row.get("item_en") or row.get("item") or label
+            metadata["fetched_at"] = row.get("_fetched_at")
+            reports = (row.get("_provider_attrs") or {}).get("source_reports", [])
+            head = metadata.get("source_head")
+            if head is not None:
+                for report in reports:
+                    if head not in report.get("Head", []):
+                        continue
+                    for source_rows in report.get("Content", {}).values():
+                        source_row = next((item for item in source_rows if item.get("NameEn") == row.get("item_en")
+                            or item.get("Name") == row.get("item")), None)
+                        if source_row is not None:
+                            metadata["source_record"] = source_row
+                            metadata["raw_value"] = source_row.get(f"Value{head.get('ID')}")
+                            metadata["raw_unit"] = source_row.get("Unit") or "thousand VND (request unit=1000)"
+                            break
+            numeric = _coerce_number(value)
+            if source_factor is None:
+                metadata["unavailable_reason"] = "unknown_source_unit"
+                return None, metadata
+            multiplier = (1 / provider_multiplier if metric in {"eps", "eps_diluted"} else 1.0) if row.get("_normalization_contract") else source_factor / provider_multiplier
+            metadata["normalization_multiplier"] = multiplier
+            metadata.setdefault("raw_value", numeric / provider_multiplier if numeric is not None else None)
+            return numeric * multiplier if numeric is not None else None, metadata
+
 
         def _metric_mapping(statement: str) -> dict[str, str]:
             if statement == StatementType.INCOME.value:
@@ -750,7 +1032,6 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "sales": "revenue",
                     "sales_deductions": "revenue",
                     "financial_income": "other_income",
-                    "financial_expenses": "interest_expense",
                     "general_and_admin_expenses": "selling_general_admin",
                     "other_income_expenses": "other_income",
                     "net_other_income_expenses": "other_income",
@@ -769,7 +1050,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "gia_von_hang_ban": "cost_of_revenue",
                     "lai_gop": "gross_profit",
                     "chi_phi_tien_lai_vay": "interest_expense",
-                    "chi_phi_tai_chinh": "interest_expense",
+                    "chi_phi_lai_vay": "interest_expense",
                     "chi_phi_ban_hang": "selling_general_admin",
                     "chi_phi_quan_ly_dn": "selling_general_admin",
                     "chi_phi_quan_ly_doanh_nghiep": "selling_general_admin",
@@ -988,6 +1269,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
 
             mapping = _metric_mapping(params.statement_type.value)
             period_values: dict[str, dict[str, float | None]] = {p: {} for p in period_cols}
+            period_metadata: dict[str, dict[str, Any]] = {p: {} for p in period_cols}
 
             for row in item_rows:
                 row_keys = {str(k).strip().upper(): k for k in row.keys()}
@@ -1000,27 +1282,37 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     or ""
                 )
                 item_key = _normalize_item_key(str(raw_item))
+                # KBS cash is the cash-only component, not cash plus equivalents.
+                if item_key == "cash" and str(row.get("_source") or "").upper() == "KBS":
+                    continue
                 metric_key = mapping.get(item_key)
                 if not metric_key:
                     continue
-                row_source = str(row.get("_source") or "").upper()
                 for period in period_cols:
                     raw_key = row_keys.get(period.upper())
+                    if raw_key is None:
+                        continue
                     value = row.get(raw_key) if raw_key is not None else None
-                    numeric = _coerce_number(value)
+                    numeric, metadata = _normalize_value(value, row, str(raw_item), metric_key, period)
+                    if numeric is None and _coerce_number(value) is None:
+                        continue
+                    previous_metadata = period_metadata[period].get(metric_key)
+                    if previous_metadata and previous_metadata.get("unavailable_reason") == "conflicting_metric_rows":
+                        continue
+                    if previous_metadata and metric_key not in _ADDITIVE_PIVOT_METRICS and previous_metadata.get("provider_value") != value:
+                        period_values[period][metric_key] = None
+                        period_metadata[period][metric_key] = {"unavailable_reason": "conflicting_metric_rows",
+                                                              "components": [previous_metadata, metadata]}
+                        continue
+                    period_metadata[period][metric_key] = metadata
                     if numeric is not None:
-                        if row_source == "KBS" and metric_key not in {"eps", "eps_diluted"}:
-                            numeric *= 1000
-                        # DQ remediation 2026-06-08: some metrics (tax, SG&A) are split
-                        # across multiple item rows (e.g. current + deferred tax). The
-                        # pivot path previously overwrote, so a 0/absent component zeroed
-                        # the metric (VCI tax = 0.00). Sum these like the non-pivot path.
                         if (
                             metric_key in _ADDITIVE_PIVOT_METRICS
                             and metric_key in period_values[period]
                             and period_values[period][metric_key] is not None
                         ):
                             period_values[period][metric_key] += numeric
+                            metadata["components"] = (previous_metadata.get("components") or [previous_metadata]) + [dict(metadata)]
                         else:
                             period_values[period][metric_key] = numeric
 
@@ -1035,11 +1327,22 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 metrics = period_values.get(period, {})
                 total_equity = metrics.get("total_equity")
                 cash_and_equivalents = metrics.get("cash_and_equivalents")
+                lineage = period_metadata[period]
+                basis = _report_basis(item_rows[0], period)
                 output.append(
                     FinancialStatementData(
                         symbol=params.symbol.upper(),
                         period=str(period),
                         statement_type=params.statement_type.value,
+                        source=str(item_rows[0].get("_source") or "") or None,
+                        currency="VND",
+                        value_unit="VND" if all(item.get("unavailable_reason") != "unknown_source_unit" for item in lineage.values()) else None,
+                        unit_metadata=lineage,
+                        consolidation_basis=basis.get("consolidation_basis"),
+                        flow_basis=basis.get("flow_basis"),
+                        unavailable_reason="unknown_source_unit" if any(item.get("unavailable_reason") == "unknown_source_unit" for item in lineage.values()) else None,
+                        raw_data={"provider_rows": item_rows, "period": period},
+                        updated_at=datetime.now(UTC),
                         revenue=metrics.get("revenue"),
                         gross_profit=metrics.get("gross_profit"),
                         operating_income=metrics.get("operating_income"),
@@ -1088,6 +1391,18 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         debt_repayment=metrics.get("debt_repayment"),
                     )
                 )
+            # The captured HTTP payload is provenance, not a per-period value: project
+            # only this period's raw cells and matching report instead of repeating the
+            # whole provider response inside every metric of every period.
+            source_reports = _collect_source_reports(item_rows)
+            for statement in output:
+                statement.raw_data = {
+                    "provider_rows": _period_provider_rows(item_rows, statement.period),
+                    "period": statement.period,
+                }
+                reports = _reports_for_period(source_reports, statement.period)
+                if reports:
+                    statement.raw_data["source_reports"] = reports
             return output
 
         pivoted = _pivot_statement_rows(data)
@@ -1101,6 +1416,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             try:
                 normalized_row: dict[str, Any] = {}
                 mapped_metrics: dict[str, float] = {}
+                lineage: dict[str, Any] = {}
                 for key, value in row.items():
                     normalized_key = _normalize_item_key(str(key))
                     if not normalized_key:
@@ -1109,7 +1425,16 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     metric_key = statement_mapping.get(normalized_key)
                     if not metric_key:
                         continue
-                    numeric = _coerce_number(value)
+                    numeric, metadata = _normalize_value(value, row, str(key), metric_key, str(row.get("period") or row.get("yearReport") or row.get("year") or ""))
+                    previous = lineage.get(metric_key)
+                    if previous and previous.get("unavailable_reason") == "conflicting_metric_rows":
+                        continue
+                    if previous and metric_key not in additive_metrics and previous.get("provider_value") != value:
+                        mapped_metrics.pop(metric_key, None)
+                        lineage[metric_key] = {"unavailable_reason": "conflicting_metric_rows",
+                                               "components": [previous, metadata]}
+                        continue
+                    lineage[metric_key] = metadata
                     if numeric is None:
                         continue
                     if metric_key in additive_metrics and metric_key in mapped_metrics:
@@ -1144,6 +1469,29 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
 
                 if isinstance(period, (int, float)):
                     period = str(int(period))
+
+                # The constructor below also reads the row keys in
+                # `_WIDE_ROW_ALIAS_METRICS`. Walk them in the constructor's own order so
+                # the selected value does not depend on input dict order, normalize it on
+                # the same unit contract, and record lineage for it, so no populated
+                # metric is certified without unit evidence. The first present alias is
+                # final: a unit-rejected one is not silently replaced by a lower-priority
+                # alias. A metric already supplied by a mapped key keeps its value and
+                # lineage.
+                for alias_metric, alias_keys in _WIDE_ROW_ALIAS_METRICS.items():
+                    if alias_metric in lineage:
+                        continue
+                    for alias_key in alias_keys:
+                        alias_value = row.get(alias_key)
+                        if _coerce_number(alias_value) is None:
+                            continue
+                        alias_numeric, alias_metadata = _normalize_value(
+                            alias_value, row, alias_key, alias_metric, str(period)
+                        )
+                        lineage[alias_metric] = alias_metadata
+                        if alias_numeric is not None:
+                            mapped_metrics[alias_metric] = alias_numeric
+                        break
 
                 statement = FinancialStatementData(
                     symbol=params.symbol.upper(),
@@ -1375,15 +1723,62 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         row.get("debtRepayment"),
                         row.get("debt_repayment"),
                     ),
-                    # Store raw data for flexibility
-                    raw_data=row,
-                    updated_at=datetime.utcnow(),
+                    # Captured provider reports are provenance, not per-row values; the
+                    # statement keeps them once, after basis extraction below.
+                    raw_data=None,
+                    updated_at=datetime.now(UTC),
                 )
+                statement.source = str(row.get("_source") or "") or None
+                statement.currency = "VND"
+                statement.unit_metadata = lineage
+                for metric in lineage:
+                    setattr(statement, metric, mapped_metrics.get(metric))
+                # A populated metric with no lineage entry has no unit evidence, so an
+                # empty or partial `lineage` must not certify the row as VND by vacuous
+                # truth: withhold the value instead (issue #106).
+                for metric in set(statement_mapping.values()):
+                    if getattr(statement, metric, None) is None or metric in lineage:
+                        continue
+                    setattr(statement, metric, None)
+                    lineage[metric] = {"unavailable_reason": "missing_unit_evidence"}
+                statement.value_unit = (
+                    "VND"
+                    if all(not item.get("unavailable_reason") for item in lineage.values())
+                    else None
+                )
+                statement.equity = statement.total_equity
+                statement.cash = statement.cash_and_equivalents
+                statement.profit_before_tax = statement.pre_tax_profit
+                statement.net_cash_flow = statement.net_change_in_cash
+                statement.capital_expenditure = statement.capex
+                basis = _report_basis(row, str(period))
+                statement.consolidation_basis = basis.get("consolidation_basis")
+                statement.flow_basis = basis.get("flow_basis")
+                if any(item.get("unavailable_reason") for item in lineage.values()):
+                    statement.unavailable_reason = "unknown_source_unit"
+                    for metric, metadata in lineage.items():
+                        if metadata.get("unavailable_reason"):
+                            setattr(statement, metric, None)
+                    statement.equity = statement.total_equity
+                    statement.cash = statement.cash_and_equivalents
+                    statement.profit_before_tax = statement.pre_tax_profit
+                    statement.net_cash_flow = statement.net_change_in_cash
+                    statement.capital_expenditure = statement.capex
+                # Captured provider reports are provenance, not per-row values: keep them
+                # once for the statement instead of inside every metric of every row.
+                statement.raw_data = {
+                    key: value for key, value in row.items() if key != "_provider_attrs"
+                }
                 results.append(statement)
 
             except Exception as e:
                 logger.warning(f"Skipping invalid financial row: {e}")
                 continue
+
+        statement_reports = _collect_source_reports(data)
+        if statement_reports:
+            for statement in results:
+                statement.raw_data["source_reports"] = statement_reports
 
         if params.period == "quarter":
             quarter_rows = [
@@ -1392,14 +1787,18 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 if re.search(r"Q[1-4]", str(row.period or "").upper()) is not None
             ]
 
-            deduped_rows: list[FinancialStatementData] = []
-            seen_periods: set[str] = set()
+            grouped: dict[str, list[FinancialStatementData]] = {}
             for row in quarter_rows:
-                normalized_period = str(row.period or "").upper()
-                if normalized_period in seen_periods:
-                    continue
-                seen_periods.add(normalized_period)
-                deduped_rows.append(row)
+                grouped.setdefault(str(row.period).upper(), []).append(row)
+            deduped_rows = []
+            for candidates in grouped.values():
+                comparable = [item.model_dump(exclude={"updated_at", "raw_data"}) for item in candidates]
+                if all(item == comparable[0] for item in comparable):
+                    deduped_rows.append(candidates[0])
+                else:
+                    deduped_rows.append(FinancialStatementData(symbol=params.symbol, period=candidates[0].period,
+                        statement_type=params.statement_type.value, unavailable_reason="conflicting_duplicate_period",
+                        raw_data={"conflicting_rows": [item.model_dump(mode="json") for item in candidates]}))
 
             deduped_rows.sort(key=lambda row: _period_sort_key(str(row.period or "")), reverse=True)
             return deduped_rows[: params.limit]

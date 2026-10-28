@@ -63,46 +63,7 @@ async def seed_index_prices(days: int = 365) -> int:
 
 
 async def seed_screener() -> int:
-    """Seed screener data (84 metrics per stock)."""
-    logger.info("🔄 Seeding screener data...")
-
-    try:
-        # Use the sync_screener_data method from data_pipeline
-        from datetime import datetime
-
-        from sqlalchemy.dialects.sqlite import insert
-        from vnstock import Screener
-
-        from vnibb.models.screener import ScreenerSnapshot
-
-        screener = Screener()
-        df = screener.stock(params={"exchangeName": "HOSE,HNX,UPCOM"}, limit=1700)
-
-        if df is None or df.empty:
-            logger.warning("No screener data returned")
-            return 0
-
-        async with async_session_maker() as session:
-            count = 0
-            for _, row in df.iterrows():
-                stmt = insert(ScreenerSnapshot).values(
-                    symbol=row.get("ticker"),
-                    fetched_at=datetime.utcnow(),
-                    data=row.to_dict(),
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["symbol"],
-                    set_={"fetched_at": datetime.utcnow(), "data": row.to_dict()},
-                )
-                await session.execute(stmt)
-                count += 1
-
-            await session.commit()
-            logger.info(f"✅ Synced {count} screener records")
-            return count
-    except Exception as e:
-        logger.error(f"Screener sync failed: {e}")
-        return 0
+    return await DataPipeline().sync_screener_data()
 
 
 async def seed_company_profiles(

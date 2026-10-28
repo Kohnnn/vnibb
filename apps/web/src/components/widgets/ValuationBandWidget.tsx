@@ -101,12 +101,14 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
   const isFallback = Boolean(error && historyResponse?.data?.length);
 
   useEffect(() => {
+    if (error && !hasData) return;
     onDataChange?.(buildWidgetRuntime({
       empty: !hasData,
       apiGroup: '/equity',
       endpoint: `/equity/${upperSymbol}/ratios/history?ratios=pe,pb,ps,ev_ebitda,ev_sales&period=year&limit=60`,
       sourceLabel: 'Ratio history',
-      lastDataDate: rows.at(-1)?.period ?? dataUpdatedAt,
+      lastDataDate: null,
+      fetchedAt: dataUpdatedAt,
       stale: isFallback,
       extra: {
         periods: rows.length,
@@ -115,7 +117,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
         percentile,
       },
     }));
-  }, [current, dataUpdatedAt, hasData, isFallback, metric, onDataChange, percentile, rows, upperSymbol]);
+  }, [current, dataUpdatedAt, error, hasData, isFallback, metric, onDataChange, percentile, rows, upperSymbol]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view valuation bands" icon={<Sigma size={18} />} />;
@@ -154,7 +156,8 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
             ))}
           </div>
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={null}
+            fetchedAt={dataUpdatedAt}
             isCached={isFallback}
             isFetching={isFetching && hasData}
             note={`Annual · ${seriesValues.length} positive observations · descriptive only`}
@@ -162,6 +165,12 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
             align="right"
           />
         </div>
+        {isFallback && (
+          <div role="alert" className="mb-2 text-[10px] text-amber-300">
+            {error?.message} Showing previously received ratio history.{' '}
+            <button type="button" onClick={() => refetch()}>Retry</button>
+          </div>
+        )}
 
         {timedOut && isLoading && !hasData ? (
           <WidgetError

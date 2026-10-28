@@ -100,7 +100,7 @@ async def test_sector_top_movers_uses_60_second_cache_ttl(monkeypatch):
     monkeypatch.setattr(trading.redis_client, "set_json", set_json)
     monkeypatch.setattr(trading.VnstockTopMoversFetcher, "fetch_sector_top_movers", fetch)
 
-    await trading.get_sector_top_movers(type="gainers", limit=1, source="KBS")
+    await trading.get_sector_top_movers(type="gainers", limit=1, source="VCI")
 
     assert ttls == [60]
 
@@ -110,7 +110,7 @@ async def test_sector_top_movers_uses_60_second_cache_ttl(monkeypatch):
     ("endpoint", "kwargs"),
     [
         (trading.get_top_movers, {"type": "gainer", "index": "VNINDEX", "limit": 1}),
-        (trading.get_sector_top_movers, {"type": "gainers", "limit": 1, "source": "KBS"}),
+        (trading.get_sector_top_movers, {"type": "gainers", "limit": 1, "source": "VCI"}),
     ],
 )
 async def test_trading_movers_return_sanitized_502_on_provider_failure(monkeypatch, endpoint, kwargs):

@@ -2,10 +2,12 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.services import prediction_market_service as service
 from vnibb.services.prediction_market_policy import snapshot_eligibility
@@ -246,6 +248,44 @@ async def test_physical_ceiling_blocks_updates_and_new_rows_without_partial_muta
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("over_limit", [False, True])
+async def test_catalogue_capacity_reserve_accepts_exact_limit_and_refuses_one_byte_over(
+    test_db, monkeypatch, over_limit
+):
+    await service.persist_prediction_markets(test_db, [market("KXREAL-1")])
+    relation_bytes = service.MAX_CATALOGUE_RELATION_BYTES - 2 * 256 * 1024 + int(over_limit)
+    monkeypatch.setattr(service, "_catalogue_storage_bytes", AsyncMock(return_value=relation_bytes))
+    batch = [market("KXREAL-1", question="Refreshed"), market("KXREAL-2")]
+
+    if over_limit:
+        with pytest.raises(service.PredictionMarketAdmissionError, match="storage ceiling"):
+            await service.persist_prediction_markets(test_db, batch)
+    else:
+        assert await service.persist_prediction_markets(test_db, batch) == 2
+
+    rows = (await test_db.execute(select(PredictionMarket).order_by(PredictionMarket.source_id))).scalars().all()
+    assert [(row.source_id, row.question) for row in rows] == (
+        [("KXREAL-1", "Will the policy rate rise?")] if over_limit else
+        [("KXREAL-1", "Refreshed"), ("KXREAL-2", "Will the policy rate rise?")]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["unknown-provider", "Kalshi", " kalshi", "kalshi "])
+async def test_noncanonical_source_rejects_entire_batch_before_existing_refresh(test_db, source):
+    await service.persist_prediction_markets(test_db, [market("KXREAL-1")])
+    with pytest.raises(service.PredictionMarketAdmissionError, match="source"):
+        await service.persist_prediction_markets(test_db, [
+            market("KXREAL-1", question="Should not overwrite"),
+            market("KXUNSUPPORTED-1", source=source),
+        ])
+    rows = (await test_db.execute(select(PredictionMarket))).scalars().all()
+    assert [(row.source, row.source_id, row.question) for row in rows] == [
+        ("kalshi", "KXREAL-1", "Will the policy rate rise?")
+    ]
+
+
+@pytest.mark.asyncio
 async def test_source_cap_is_per_source_and_does_not_count_legacy_kalshi_combos(test_db, monkeypatch):
     monkeypatch.setattr(service, "MAX_SOURCE_MARKETS", 1)
     test_db.add(PredictionMarket(**market("KXMVECROSSCATEGORY-1")))
@@ -287,23 +327,38 @@ async def test_snapshot_eligibility_is_fresh_per_source_and_rejects_inactive(tes
 
 
 @pytest.mark.asyncio
-async def test_storage_ceiling_rejects_existing_updates_without_mutation(test_db, monkeypatch):
+async def test_storage_ceiling_rejects_batch_without_mutating_retained_history(test_db, monkeypatch):
     await service.persist_prediction_markets(test_db, [market("KXREAL-1")])
+    test_db.add(PredictionMarket(**market(
+        "KXHISTORY", active=False, closed=True,
+        updated_at=datetime.utcnow() - timedelta(days=30),
+    )))
+    await test_db.commit()
+
     class _PostgresBind:
         dialect = type("_Dialect", (), {"name": "postgresql"})()
+
     monkeypatch.setattr(test_db, "get_bind", lambda: _PostgresBind())
     real_execute = test_db.execute
+
     async def capped_execute(statement, *args, **kwargs):
         if "pg_advisory_xact_lock" in str(statement):
             return None
         if "pg_total_relation_size" in str(statement):
             class Size:
                 def scalar_one(self):
-                    return service.MAX_CATALOGUE_RELATION_BYTES
+                    # Two mutations would cross 4 GiB by one byte, below the old ceiling.
+                    return 4 * 1024**3 - 2 * 256 * 1024 + 1
             return Size()
         return await real_execute(statement, *args, **kwargs)
+
     monkeypatch.setattr(test_db, "execute", capped_execute)
     with pytest.raises(service.PredictionMarketAdmissionError, match="no markets mutated"):
-        await service.persist_prediction_markets(test_db, [market("KXREAL-1", question="Should not persist")])
-    stored = (await real_execute(select(PredictionMarket))).scalars().one()
-    assert stored.question == "Will the policy rate rise?"
+        await service.persist_prediction_markets(test_db, [
+            market("KXREAL-1", question="Should not persist"), market("KXREAL-2"),
+        ])
+    stored = (await real_execute(select(PredictionMarket))).scalars().all()
+    assert {(row.source_id, row.question, row.active, row.closed) for row in stored} == {
+        ("KXREAL-1", "Will the policy rate rise?", True, False),
+        ("KXHISTORY", "Will the policy rate rise?", False, True),
+    }

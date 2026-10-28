@@ -24,8 +24,12 @@ export interface WidgetRuntimeInput {
   sourceLabel?: string
   /** Compact row height (grid units) when empty. */
   compactHeight?: number
-  /** Last data timestamp from the response (drives "updated" + staleness). */
+  /** Source observation/as-of only. Never pass query receipt or computation time. */
   lastDataDate?: number | string | Date | null
+  /** Retrieval time; does not establish source freshness. */
+  fetchedAt?: number | string | Date | null
+  coverage?: 'complete' | 'partial' | 'unknown'
+  marketClosed?: boolean
   /** Adjustment mode when relevant (e.g. 'adjusted' | 'raw'). */
   adjustmentMode?: string
   /** True when the widget computes its values client-side. */
@@ -33,6 +37,7 @@ export interface WidgetRuntimeInput {
   /** Whether the served data is cached / stale (optional badges). */
   cached?: boolean
   stale?: boolean
+  warnings?: string[]
   /** Extra fields merged into the onDataChange payload (e.g. rows for export). */
   extra?: Record<string, unknown>
   exportData?: unknown
@@ -68,10 +73,14 @@ export function buildWidgetRuntime(input: WidgetRuntimeInput): WidgetDataPayload
     apiGroup: input.apiGroup,
     endpoint: input.endpoint,
     adjustmentMode: input.adjustmentMode,
-    updatedAt: input.lastDataDate ?? undefined,
+    updatedAt: input.lastDataDate ?? null,
+    fetchedAt: input.fetchedAt,
+    coverage: input.coverage,
+    marketClosed: input.marketClosed,
     localOnly: input.derived || undefined,
     cached: input.cached,
     stale: input.stale,
+    warnings: input.warnings,
   }
   return {
     __widgetRuntime: {

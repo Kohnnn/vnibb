@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { Globe, TrendingDown, TrendingUp } from 'lucide-react';
 import { useWorldIndices } from '@/lib/queries';
+import { getLatestTimestampValue } from '@/lib/dataFreshness';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
@@ -16,6 +17,7 @@ export function WorldIndicesWidget({ onDataChange }: { onDataChange?: (data: Wid
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useWorldIndices();
 
     const rows = data?.data || [];
+    const sourceUpdatedAt = getLatestTimestampValue(rows.map((row) => row.updated_at)) ?? null;
     const hasData = rows.length > 0;
     const isFallback = Boolean((data?.error || error) && hasData);
 
@@ -26,15 +28,20 @@ export function WorldIndicesWidget({ onDataChange }: { onDataChange?: (data: Wid
                     empty: !hasData,
                     compactHeight: 4,
                 },
+                provenance: {
+                    updatedAt: sourceUpdatedAt,
+                    fetchedAt: dataUpdatedAt || null,
+                },
             },
         });
-    }, [hasData, onDataChange]);
+    }, [hasData, sourceUpdatedAt, dataUpdatedAt, onDataChange]);
 
     return (
         <div className="h-full flex flex-col">
             <div className="pb-2 border-b border-[var(--border-subtle)]">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={sourceUpdatedAt}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     note={data?.source || 'vnstock'}

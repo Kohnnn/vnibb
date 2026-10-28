@@ -10,7 +10,7 @@ export const queryKeys = {
             startDate?: string;
             endDate?: string;
             interval?: string;
-            source?: string;
+            source?: 'VCI';
             adjustmentMode?: 'raw' | 'adjusted';
         }
     ) => ['historical', symbol, params] as const,
@@ -133,26 +133,26 @@ export const queryKeys = {
     rsGainers: (limit: number, lookbackDays: number) => ['rsGainers', limit, lookbackDays] as const,
 
     // Quant
-    quant: (symbol: string, period: string, metrics: string[], source: string) =>
+    quant: (symbol: string, period: string, metrics: string[], source: 'VCI') =>
         ['quant', symbol, period, metrics.join(','), source] as const,
-    garchVolatility: (symbol: string, period: string, source: string, adjustmentMode: string) =>
+    garchVolatility: (symbol: string, period: string, source: 'VCI', adjustmentMode: string) =>
         ['garchVolatility', symbol, period, source, adjustmentMode] as const,
-    quantBacktest: (symbol: string, period: string, asOfDate: string, fastWindow: number, slowWindow: number, source: string, adjustmentMode: string) =>
+    quantBacktest: (symbol: string, period: string, asOfDate: string, fastWindow: number, slowWindow: number, source: 'VCI', adjustmentMode: string) =>
         ['quantBacktest', symbol, period, asOfDate, fastWindow, slowWindow, source, adjustmentMode] as const,
-    quantSweep: (symbol: string, period: string, fastWindows: number[], slowWindows: number[], objective: string, source: string, adjustmentMode: string) =>
+    quantSweep: (symbol: string, period: string, fastWindows: number[], slowWindows: number[], objective: string, source: 'VCI', adjustmentMode: string) =>
         ['quantSweep', symbol, period, fastWindows.join(','), slowWindows.join(','), objective, source, adjustmentMode] as const,
-    seasonalityMatrix: (symbol: string, granularity: string, period: string, source: string, adjustmentMode: string) =>
+    seasonalityMatrix: (symbol: string, granularity: string, period: string, source: 'VCI', adjustmentMode: string) =>
         ['seasonalityMatrix', symbol, granularity, period, source, adjustmentMode] as const,
-    gammaExposure: (symbol: string, period: string, source: string, adjustmentMode: string) =>
+    gammaExposure: (symbol: string, period: string, source: 'VCI', adjustmentMode: string) =>
         ['gammaExposure', symbol, period, source, adjustmentMode] as const,
-    momentumProfile: (symbol: string, period: string, source: string, adjustmentMode: string) =>
+    momentumProfile: (symbol: string, period: string, source: 'VCI', adjustmentMode: string) =>
         ['momentumProfile', symbol, period, source, adjustmentMode] as const,
     earningsQuality: (symbol: string) => ['earningsQuality', symbol] as const,
     smartMoneyFlow: (symbol: string) => ['smartMoneyFlow', symbol] as const,
     relativeRotation: (symbol: string, lookbackDays: number) =>
         ['relativeRotation', symbol, lookbackDays] as const,
-    marketStructureTests: (symbol: string, period: string, source: string, adjustmentMode: string) =>
+    marketStructureTests: (symbol: string, period: string, source: 'VCI', adjustmentMode: string) =>
         ['marketStructureTests', symbol, period, source, adjustmentMode] as const,
-    pairDiagnostics: (symbol: string, other: string, period: string, source: string, adjustmentMode: string) =>
+    pairDiagnostics: (symbol: string, other: string, period: string, source: 'VCI', adjustmentMode: string) =>
         ['pairDiagnostics', symbol, other, period, source, adjustmentMode] as const,
 };

@@ -36,7 +36,16 @@ export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWid
         startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     });
 
-    const prices = data?.data || [];
+    const historyUnitStatus = data?.meta?.unit_status ?? '';
+    const historyExpectedUnit = historyUnitStatus === 'confirmed_vnd' ? 'VND' : 'index_points';
+    // Only per-row `price_unit` markers certify the series; a response-level
+    // `unit_status` cannot certify rows that carry no marker (QA #98).
+    const historyCertified = (data?.data?.length ?? 0) > 0
+        && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(historyUnitStatus)
+        && (data?.data ??[]).every((row) => row.price_unit === historyExpectedUnit);
+    const derivedWithheld = Boolean(data) && !historyCertified;
+
+    const prices = derivedWithheld ?[] : data?.data || [];
 
     const volumes = prices.map((p) => p.volume || 0);
     const avgVolume = volumes.length > 0 ? volumes.reduce((a, b) => a + b, 0) / volumes.length : 0;
@@ -55,6 +64,8 @@ export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWid
 
     const hasData = prices.length > 0;
     const isFallback = Boolean(error && hasData);
+    const lastDataDate = [data?.meta?.freshness_as_of, data?.meta?.last_data_date, prices.at(-1)?.time]
+        .find((value) => value != null && value !== '' && !Number.isNaN(new Date(value).getTime())) ?? null;
 
     useEffect(() => {
         onDataChange?.(
@@ -63,13 +74,14 @@ export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWid
                 apiGroup: '/equity',
                 endpoint: `/equity/historical?symbol=${symbol}`,
                 sourceLabel: 'Volume analysis (derived)',
-                lastDataDate: dataUpdatedAt,
+                lastDataDate,
+                fetchedAt: dataUpdatedAt,
                 stale: isFallback,
                 derived: true,
                 extra: hasData ? { bars: prices.length, avgVolume } : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, prices.length, avgVolume]);
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, lastDataDate, symbol, prices.length, avgVolume]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view volume" />;
@@ -80,10 +92,14 @@ export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWid
             <div className="flex items-center justify-between px-1 py-1 mb-2">
                 <div className="flex items-center gap-2 text-xs">
                     <BarChart2 size={12} className="text-cyan-400" />
-                    <span className="text-[var(--text-secondary)]">Avg: {formatVolume(avgVolume)}</span>
-                    <span className={volumeChange >= 0 ? 'text-green-400' : 'text-red-400'}>
-                        {volumeChange >= 0 ? '+' : ''}{volumeChange.toFixed(0)}%
+                    <span className="text-[var(--text-secondary)]">
+                        {derivedWithheld ? 'Units not certified' : `Avg: ${formatVolume(avgVolume)}`}
                     </span>
+                    {!derivedWithheld && (
+                        <span className={volumeChange >= 0 ? 'text-green-400' : 'text-red-400'}>
+                            {volumeChange >= 0 ? '+' : ''}{volumeChange.toFixed(0)}%
+                        </span>
+                    )}
                 </div>
                 <button
                     onClick={() => refetch()}
@@ -97,7 +113,8 @@ export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWid
 
             <div className="border-b border-[var(--border-subtle)] pb-2">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={lastDataDate}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     note="30-day volume"
@@ -111,7 +128,12 @@ export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWid
                 ) : error && !hasData ? (
                     <WidgetError error={error as Error} onRetry={() => refetch()} />
                 ) : !hasData ? (
-                    <WidgetEmpty message="No volume data" icon={<BarChart2 size={18} />} />
+                    <WidgetEmpty
+                        message={derivedWithheld
+                            ? 'Volume analysis unavailable: historical price units were not certified.'
+                            : 'No volume data'}
+                        icon={<BarChart2 size={18} />}
+                    />
                 ) : (
                     <div className="space-y-1">
                         {recentData.map((day, i) => {

@@ -30,6 +30,7 @@ from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.core.cache import cached
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
+from vnibb.core.price_units import is_index_symbol, persisted_price_record
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.alerts import BlockTrade
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
@@ -168,7 +169,7 @@ class QuantBacktestRequest(BaseModel):
     as_of_date: date | None = None
     initial_capital: float = Field(default=100_000_000, gt=0, le=1_000_000_000_000)
     fee_bps: float = Field(default=15.0, ge=0, le=100)
-    source: str = Field(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$")
+    source: str = Field(default="VCI", pattern=r"^VCI$", description="Data source: VCI")
     adjustment_mode: Literal["raw", "adjusted"] = "adjusted"
 
 
@@ -176,7 +177,7 @@ class QuantSweepRequest(BaseModel):
     period: str = "5Y"
     initial_capital: float = Field(default=100_000_000, gt=0, le=1_000_000_000_000)
     fee_bps: float = Field(default=15.0, ge=0, le=100)
-    source: str = Field(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$")
+    source: str = Field(default="VCI", pattern=r"^VCI$", description="Data source: VCI")
     adjustment_mode: Literal["raw", "adjusted"] = "adjusted"
     fast_windows: List[int] = Field(default_factory=lambda: [10, 20, 50], min_length=1, max_length=8)
     slow_windows: List[int] = Field(default_factory=lambda: [50, 100, 200], min_length=1, max_length=8)
@@ -200,6 +201,7 @@ class QuantBacktestResponseData(BaseModel):
     equity_curve_summary: Dict[str, Any]
     trades: List[Dict[str, Any]]
     warnings: List[str] = []
+    basis: Dict[str, Any] = {}
 
 
 class QuantSweepResponseData(BaseModel):
@@ -212,6 +214,7 @@ class QuantSweepResponseData(BaseModel):
     best: Dict[str, Any] | None = None
     cells: List[Dict[str, Any]]
     warnings: List[str] = []
+    basis: Dict[str, Any] = {}
 
 
 def _safe_float(value: Any, decimals: int = 4) -> float | None:
@@ -432,21 +435,118 @@ def _normalize_provider_history_rows(
                 adjustment_applied=bool(
                     normalized_mode == "adjusted" and adjusted_close not in (None, 0)
                 ),
+                price_unit=getattr(row, "price_unit", "unknown"),
             )
         )
 
     return normalized_rows
 
 
+def _excluded_historical_dates(*collections: list[EquityHistoricalData]) -> set[date]:
+    return {
+        row.time
+        for collection in collections
+        for row in collection
+        if getattr(row, "price_unit", "unknown")
+        != ("index_points" if is_index_symbol(row.symbol) else "VND")
+    }
+
+
 def _merge_historical_rows(*collections: list[EquityHistoricalData]) -> list[EquityHistoricalData]:
     by_time: dict[date, EquityHistoricalData] = {}
     for collection in collections:
         for row in collection:
+            expected_unit = "index_points" if is_index_symbol(row.symbol) else "VND"
+            if getattr(row, "price_unit", "unknown") != expected_unit:
+                continue
             by_time[row.time] = row
     return [by_time[key] for key in sorted(by_time)]
 
 
+def _build_price_frame_diagnostics(
+    *,
+    rows: list[EquityHistoricalData],
+    excluded_dates: set[date],
+    unresolved_dates: set[date],
+    start_date: date,
+    end_date: date,
+) -> dict[str, Any]:
+    """Source-contract diagnostics for a loaded price frame.
+
+    Records which sessions carried unconfirmed or incompatible price units and
+    how many sessions survived, so consumers can disclose *why* analytics are
+    unavailable instead of emitting neutral zeros or directional labels.
+    """
+    resolved_units = {getattr(row, "price_unit", "unknown") for row in rows}
+    if len(resolved_units) > 1:
+        unit_status = "mixed"
+    elif resolved_units == {"index_points"}:
+        unit_status = "index_points"
+    elif resolved_units == {"VND"}:
+        unit_status = "confirmed_vnd"
+    else:
+        unit_status = "unconfirmed"
+    excluded = sorted(day.isoformat() for day in excluded_dates)
+    unresolved = sorted(day.isoformat() for day in unresolved_dates)
+    return {
+        "requested_start_date": start_date.isoformat(),
+        "requested_end_date": end_date.isoformat(),
+        "observed_session_count": len(rows),
+        "excluded_session_count": len(excluded),
+        "excluded_price_unit_dates": excluded,
+        "unresolved_session_count": len(unresolved),
+        "unresolved_excluded_dates": unresolved,
+        "unit_status": unit_status,
+    }
+
+
+def _summarize_dates(dates: list[str], limit: int = 6) -> str:
+    listed = ", ".join(dates[:limit])
+    return f"{listed}, …" if len(dates) > limit else listed
+
+
+def _build_price_unit_warning(diagnostics: dict[str, Any] | None) -> str | None:
+    if not diagnostics:
+        return None
+    unresolved = list(diagnostics.get("unresolved_excluded_dates") or [])
+    if not unresolved:
+        return None
+    excluded_count = diagnostics.get("excluded_session_count", len(unresolved))
+    return (
+        f"Unavailable: {len(unresolved)} session(s) with unconfirmed or incompatible price units "
+        f"could not be resolved ({_summarize_dates(unresolved)}); "
+        f"{excluded_count} excluded session(s), "
+        f"{diagnostics.get('observed_session_count', 0)} compatible session(s) retained over "
+        f"{diagnostics.get('requested_start_date')}..{diagnostics.get('requested_end_date')}; "
+        "derived analytics withheld."
+    )
+
+
+def _price_diagnostics_meta(frame: pd.DataFrame | None) -> dict[str, Any]:
+    """Meta fields exposing why a price frame failed to resolve.
+
+    Consumers attach these to insufficient-data responses so an unresolved
+    session is disclosed as such instead of appearing as an ordinary gap.
+    """
+    attrs = getattr(frame, "attrs", None)
+    diagnostics = attrs.get("price_diagnostics") if isinstance(attrs, dict) else None
+    if not diagnostics:
+        return {}
+    return {
+        "unit_status": diagnostics.get("unit_status"),
+        "observed_session_count": diagnostics.get("observed_session_count"),
+        "excluded_session_count": diagnostics.get("excluded_session_count"),
+        "excluded_price_unit_dates": diagnostics.get("excluded_price_unit_dates"),
+        "unresolved_excluded_dates": diagnostics.get("unresolved_excluded_dates"),
+    }
+
+
 def _historical_rows_to_frame(rows: list[EquityHistoricalData]) -> pd.DataFrame:
+    rows = [
+        row for row in rows
+        if getattr(row, "price_unit", "unknown")
+        == ("index_points" if is_index_symbol(row.symbol) else "VND")
+    ]
     if not rows:
         return pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
 
@@ -473,117 +573,21 @@ def _historical_rows_to_frame(rows: list[EquityHistoricalData]) -> pd.DataFrame:
     return frame.reset_index(drop=True)
 
 
-# Order-of-magnitude band that cleanly separates a thousand-VND vs raw-VND
-# encoding of the SAME price (a 1000x gap). Real splits/dividends move price by
-# at most ~5x, and VN daily limits cap a single bar at ±15%, so nothing
-# legitimate ever lands inside [200, 5000]; the dead-zone (50, 200) is left
-# untouched and logged so a bad anchor is visible rather than silently rescaled.
-# Quant metrics are all returns/ratios, so the canonical unit only needs to be
-# internally consistent (whichever the recent-bar anchor implies), not a fixed
-# absolute scale.
-_PRICE_UNIT_RESCALE_LOW = 200.0
-_PRICE_UNIT_RESCALE_HIGH = 5000.0
-_PRICE_UNIT_ANCHOR_WINDOW = 60
-# Above the strictest VN daily price limit (UPCOM ±15%); a daily return whose
-# magnitude exceeds this is a data artifact (unit seam, bad tick, split) and is
-# dropped from return-based estimators rather than clipped (clipping biases vol).
-_MAX_SANE_DAILY_RETURN = 0.20
-
-
-def _normalize_price_unit_rows(
-    rows: list[EquityHistoricalData],
-    *,
-    symbol: str = "",
-) -> list[EquityHistoricalData]:
-    """Coerce mixed thousand-VND/raw-VND bars to one consistent unit per row.
-
-    Anchors on the recent-bar median, rescales only ~1000x discrepancies, and
-    leaves ambiguous dead-zone rows untouched. See the module constants above
-    for the rationale behind the rescale band and dead-zone.
-    """
-
-    if len(rows) < 2:
-        return rows
-
-    closes = np.array(
-        [float(r.close) for r in rows if r.close is not None and float(r.close) > 0],
-        dtype=float,
+def _persisted_prices_to_frame(rows: list[Any]) -> pd.DataFrame:
+    records = [persisted_price_record(row) for row in rows]
+    return pd.DataFrame(
+        [
+            {
+                "symbol": record.get("symbol"),
+                "time": record.get("time"),
+                "close": record.get("close") if record["price_unit"] == "VND" else None,
+            }
+            for record in records
+        ],
+        columns=["symbol", "time", "close"],
     )
-    if closes.size < 2:
-        return rows
-
-    anchor = float(np.median(closes[-_PRICE_UNIT_ANCHOR_WINDOW:]))
-    if not np.isfinite(anchor) or anchor <= 0:
-        return rows
-
-    # If the anchor window itself straddles the migration boundary its own
-    # max/min ratio will blow past ~50; flag it so a bad anchor is visible.
-    anchor_window = closes[-_PRICE_UNIT_ANCHOR_WINDOW:]
-    window_spread = float(np.max(anchor_window) / np.min(anchor_window))
-    if window_spread > 50:
-        logger.warning(
-            "Price-unit anchor window for %s is itself mixed-unit (spread=%.1f); "
-            "normalization may be unreliable.",
-            symbol or "?",
-            window_spread,
-        )
-
-    rescaled = 0
-    ambiguous = 0
-    normalized: list[EquityHistoricalData] = []
-    for row in rows:
-        close = float(row.close) if row.close is not None else None
-        if not close or close <= 0:
-            normalized.append(row)
-            continue
-
-        ratio = anchor / close
-        factor: float | None = None
-        if _PRICE_UNIT_RESCALE_LOW <= ratio <= _PRICE_UNIT_RESCALE_HIGH:
-            factor = 1000.0
-        elif (1.0 / _PRICE_UNIT_RESCALE_HIGH) <= ratio <= (1.0 / _PRICE_UNIT_RESCALE_LOW):
-            factor = 1.0 / 1000.0
-        elif 50.0 < ratio < _PRICE_UNIT_RESCALE_LOW or (
-            (1.0 / _PRICE_UNIT_RESCALE_LOW) < ratio < (1.0 / 50.0)
-        ):
-            ambiguous += 1
-
-        if factor is None:
-            normalized.append(row)
-            continue
-
-        rescaled += 1
-        raw_close = row.raw_close
-        normalized.append(
-            row.model_copy(
-                update={
-                    "open": float(row.open) * factor,
-                    "high": float(row.high) * factor,
-                    "low": float(row.low) * factor,
-                    "close": close * factor,
-                    "raw_close": (float(raw_close) * factor) if raw_close is not None else None,
-                }
-            )
-        )
-
-    if rescaled or ambiguous:
-        logger.info(
-            "Price-unit normalization for %s: rescaled=%d ambiguous=%d total=%d anchor=%.1f",
-            symbol or "?",
-            rescaled,
-            ambiguous,
-            len(rows),
-            anchor,
-        )
-
-    return normalized
 
 
-def _sanitize_daily_returns(returns: pd.Series) -> pd.Series:
-    """NaN-out daily returns above the max sane VN move (see constant above)."""
-
-    sanitized = pd.to_numeric(returns, errors="coerce")
-    return sanitized.where(sanitized.abs() <= _MAX_SANE_DAILY_RETURN)
 
 
 async def _merge_latest_quote_into_frame(
@@ -602,6 +606,9 @@ async def _merge_latest_quote_into_frame(
         return frame, None
 
     quote_price = getattr(quote, "price", None)
+    expected_unit = "index_points" if is_index_symbol(symbol) else "VND"
+    if getattr(quote, "price_unit", "unknown") != expected_unit:
+        return frame, "Skipped latest quote with unknown or incompatible price units."
     quote_time = getattr(quote, "updated_at", None)
     if quote_price is None or quote_time is None:
         return frame, None
@@ -612,6 +619,7 @@ async def _merge_latest_quote_into_frame(
     if getattr(quote_timestamp, "tzinfo", None) is not None:
         quote_timestamp = quote_timestamp.tz_localize(None)
 
+    diagnostics = frame.attrs.get("price_diagnostics")
     merged = frame.copy().sort_values("time").reset_index(drop=True)
     last_row = merged.iloc[-1]
     quote_date = quote_timestamp.normalize()
@@ -641,9 +649,13 @@ async def _merge_latest_quote_into_frame(
 
     if quote_date == last_date:
         merged.loc[merged.index[-1], list(latest_row.keys())] = list(latest_row.values())
+        if diagnostics is not None:
+            merged.attrs["price_diagnostics"] = diagnostics
         return merged, "Merged latest quote into current session calculations."
 
     merged = pd.concat([merged, pd.DataFrame([latest_row])], ignore_index=True)
+    if diagnostics is not None:
+        merged.attrs["price_diagnostics"] = diagnostics
     return merged, "Appended latest quote snapshot to quant calculations."
 
 
@@ -674,6 +686,7 @@ async def _load_quant_frame_with_warning(
             source=source,
         )
     return frame, _merge_warnings(
+        _build_price_unit_warning(frame.attrs.get("price_diagnostics")),
         _build_period_warning(frame, start_date, period),
         _build_staleness_warning(frame, end_date),
         latest_quote_warning,
@@ -708,10 +721,7 @@ async def _load_benchmark_frame(
 
     frame = pd.DataFrame(rows, columns=["time", "close"]) if rows else pd.DataFrame()
     if frame.empty:
-        candidate_sources: list[str] = []
-        for candidate in [source, settings.vnstock_source, "VCI", "KBS"]:
-            if candidate and candidate not in candidate_sources:
-                candidate_sources.append(candidate)
+        candidate_sources = ["VCI"]
 
         for candidate in candidate_sources:
             try:
@@ -733,6 +743,10 @@ async def _load_benchmark_frame(
                 )
                 continue
 
+            provider_rows = [
+                row for row in provider_rows
+                if getattr(row, "price_unit", "unknown") == "index_points"
+            ]
             if provider_rows:
                 frame = pd.DataFrame(
                     [{"time": row.time, "close": row.close} for row in provider_rows]
@@ -1366,6 +1380,7 @@ async def _get_quant_metric_alias_response(
                 symbol=symbol_upper,
                 data_points=observed_points,
                 last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+                **_price_diagnostics_meta(frame),
             ),
             error=(
                 f"Insufficient Data: Expected at least {min_points_required} sessions, "
@@ -1400,6 +1415,7 @@ async def _get_quant_metric_alias_response(
                 symbol=symbol_upper,
                 data_points=observed_points,
                 last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+                **_price_diagnostics_meta(frame),
             ),
             error=str(exc),
         )
@@ -1422,6 +1438,7 @@ async def _get_quant_metric_alias_response(
             symbol=symbol_upper,
             data_points=observed_points,
             last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            **_price_diagnostics_meta(frame),
         ),
     )
 
@@ -1665,32 +1682,35 @@ async def _load_price_frame(
             logger.warning("Quant price frame query failed for %s: %s", symbol, exc)
         rows = []
 
-    # Merge Mongo with Postgres immediately so the staleness check below sees the
-    # freshest available bar across both stores (Mongo wins ties by recency since
-    # _merge_historical_rows is last-write-by-time and we pass Postgres last).
-    if mongo_rows:
-        rows = _merge_historical_rows(mongo_rows, rows)
+    excluded_dates = _excluded_historical_dates(mongo_rows, rows)
+    rows = _merge_historical_rows(mongo_rows, rows)
+    unresolved_dates = excluded_dates - {row.time for row in rows}
 
-    if not rows:
+    if not rows or unresolved_dates:
         recent_cache_rows = await _load_historical_from_recent_cache(
             symbol=symbol,
-            start_date=start_date,
-            end_date=end_date,
+            start_date=min(unresolved_dates) if rows and unresolved_dates else start_date,
+            end_date=max(unresolved_dates) if rows and unresolved_dates else end_date,
             interval="1D",
             adjustment_mode="raw",
         )
+        excluded_dates.update(_excluded_historical_dates(recent_cache_rows))
         rows = _merge_historical_rows(rows, recent_cache_rows)
+        unresolved_dates = excluded_dates - {row.time for row in rows}
 
     frame = _historical_rows_to_frame(rows)
     latest_db_timestamp = _resolve_frame_last_timestamp(frame)
-    needs_provider_refresh = frame.empty
-    provider_start_date = start_date
+    needs_provider_refresh = frame.empty or bool(unresolved_dates)
+    provider_start_date = min(unresolved_dates) if unresolved_dates and not frame.empty else start_date
 
     if latest_db_timestamp is not None:
         latest_db_date = latest_db_timestamp.date()
         if (end_date - latest_db_date).days >= QUANT_STALE_DAYS_THRESHOLD:
             needs_provider_refresh = True
             provider_start_date = max(start_date, latest_db_date - timedelta(days=30))
+
+    if unresolved_dates:
+        provider_start_date = min(provider_start_date, min(unresolved_dates))
 
     if needs_provider_refresh:
         try:
@@ -1712,13 +1732,37 @@ async def _load_price_frame(
             adjustment_mode="raw",
         )
         rows = _merge_historical_rows(rows, normalized_provider_rows)
+        excluded_dates.update(_excluded_historical_dates(normalized_provider_rows))
+        unresolved_dates = excluded_dates - {row.time for row in rows}
 
-    if not rows:
-        return _historical_rows_to_frame(rows)
+    if unresolved_dates:
+        logger.warning(
+            "Quant price history for %s has unresolved excluded sessions: %s",
+            symbol,
+            ", ".join(day.isoformat() for day in sorted(unresolved_dates)),
+        )
+        frame = _historical_rows_to_frame([])
+        frame.attrs["price_diagnostics"] = _build_price_frame_diagnostics(
+            rows=rows,
+            excluded_dates=excluded_dates,
+            unresolved_dates=unresolved_dates,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        return frame
 
-    rows = _normalize_price_unit_rows(rows, symbol=symbol)
-    rows = _apply_corporate_action_adjustments(rows, corporate_actions, normalized_mode)
-    return _historical_rows_to_frame(rows)
+    if rows:
+        rows = _apply_corporate_action_adjustments(rows, corporate_actions, normalized_mode)
+
+    frame = _historical_rows_to_frame(rows)
+    frame.attrs["price_diagnostics"] = _build_price_frame_diagnostics(
+        rows=rows,
+        excluded_dates=excluded_dates,
+        unresolved_dates=set(),
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return frame
 
 
 def _compute_volume_delta(frame: pd.DataFrame) -> Dict[str, Any]:
@@ -2291,7 +2335,7 @@ def _compute_garch_volatility(frame: pd.DataFrame) -> Dict[str, Any]:
     if len(enriched) < 250:
         return _empty_garch_payload()
 
-    enriched["return_pct"] = _sanitize_daily_returns(enriched["close"].pct_change()) * 100
+    enriched["return_pct"] = pd.to_numeric(enriched["close"].pct_change(), errors="coerce") * 100
     enriched = enriched.dropna(subset=["return_pct"]).reset_index(drop=True)
     returns = enriched["return_pct"].to_numpy(dtype=float)
     returns = returns[np.isfinite(returns)]
@@ -2835,7 +2879,7 @@ def _grade_from_quality_score(score: float | None) -> str:
 async def get_gamma_exposure_proxy(
     symbol: str,
     period: str = Query(default="3Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2867,7 +2911,7 @@ async def get_gamma_exposure_proxy(
                 "bands": [],
                 "data_quality_note": warning,
             },
-            meta=MetaData(count=0),
+            meta=MetaData(count=0, symbol=symbol_upper, **_price_diagnostics_meta(frame)),
             error="Insufficient historical data for gamma proxy.",
         )
 
@@ -2914,14 +2958,17 @@ async def get_gamma_exposure_proxy(
     }
     if warning:
         payload["data_quality_note"] = f"{payload['data_quality_note']} {warning}".strip()
-    return StandardResponse(data=payload, meta=MetaData(count=len(band_rows)))
+    return StandardResponse(
+        data=payload,
+        meta=MetaData(count=len(band_rows), symbol=symbol_upper, **_price_diagnostics_meta(frame)),
+    )
 
 
 @router.get("/{symbol}/momentum", response_model=StandardResponse[Dict[str, Any]])
 async def get_momentum_profile(
     symbol: str,
     period: str = Query(default="3Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2991,8 +3038,9 @@ async def get_momentum_profile(
                 "last_data_date": last_data_timestamp,
                 "returns_pct": {},
                 "peer_distribution": [],
+                "data_quality_note": warning,
             },
-            meta=MetaData(count=0),
+            meta=MetaData(count=0, symbol=symbol_upper, **_price_diagnostics_meta(frame)),
             error="Insufficient historical data for momentum profile.",
         )
 
@@ -3019,7 +3067,7 @@ async def get_momentum_profile(
 
         if peer_symbols:
             peer_prices_result = await db.execute(
-                select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+                select(StockPrice)
                 .where(
                     and_(
                         StockPrice.symbol.in_(peer_symbols),
@@ -3031,18 +3079,17 @@ async def get_momentum_profile(
                 .order_by(StockPrice.symbol, StockPrice.time)
             )
 
-            peer_frame = pd.DataFrame(
-                peer_prices_result.all(),
-                columns=["symbol", "time", "close"],
-            )
+            peer_frame = _persisted_prices_to_frame(peer_prices_result.scalars().all())
             if not peer_frame.empty:
                 peer_frame["close"] = pd.to_numeric(peer_frame["close"], errors="coerce")
-                peer_frame = peer_frame.dropna(subset=["close"])
 
                 momentum_map: Dict[str, float] = {}
                 for peer_symbol, group in peer_frame.groupby("symbol"):
-                    peer_closes = group.sort_values("time")["close"].tolist()
-                    if len(peer_closes) <= 252 or peer_closes[-253] == 0 or peer_closes[-22] == 0:
+                    peer_closes = group.sort_values("time")["close"].tail(253)
+                    if len(peer_closes) <= 252 or peer_closes.isna().any():
+                        continue
+                    peer_closes = peer_closes.tolist()
+                    if peer_closes[-253] == 0 or peer_closes[-22] == 0:
                         continue
 
                     peer_r12 = ((peer_closes[-1] / peer_closes[-253]) - 1) * 100
@@ -3099,7 +3146,10 @@ async def get_momentum_profile(
     }
     if warning:
         payload["data_quality_note"] = warning
-    return StandardResponse(data=payload, meta=MetaData(count=len(peer_distribution)))
+    return StandardResponse(
+        data=payload,
+        meta=MetaData(count=len(peer_distribution), **_price_diagnostics_meta(frame)),
+    )
 
 
 @router.get("/{symbol}/earnings-quality", response_model=StandardResponse[Dict[str, Any]])
@@ -3444,7 +3494,14 @@ async def get_smart_money_flow(
         "synthetic_block_bias": spike_bias,
         "block_trades": merged_events,
     }
-    return StandardResponse(data=payload, meta=MetaData(count=len(merged_events)))
+    return StandardResponse(
+        data=payload,
+        meta=MetaData(
+            count=len(merged_events),
+            symbol=symbol_upper,
+            **_price_diagnostics_meta(price_frame),
+        ),
+    )
 
 
 @router.get("/{symbol}/relative-rotation", response_model=StandardResponse[Dict[str, Any]])
@@ -3465,7 +3522,7 @@ async def get_relative_rotation(
     universe_symbols.add(symbol_upper)
 
     prices_result = await db.execute(
-        select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+        select(StockPrice)
         .where(
             and_(
                 StockPrice.symbol.in_(sorted(universe_symbols)),
@@ -3488,7 +3545,7 @@ async def get_relative_rotation(
         .order_by(StockIndex.time)
     )
 
-    price_frame = pd.DataFrame(prices_result.all(), columns=["symbol", "time", "close"])
+    price_frame = _persisted_prices_to_frame(prices_result.scalars().all())
     index_frame = pd.DataFrame(index_result.all(), columns=["time", "close_index"])
 
     if price_frame.empty or index_frame.empty:
@@ -3511,13 +3568,17 @@ async def get_relative_rotation(
         )
 
     price_frame["close"] = pd.to_numeric(price_frame["close"], errors="coerce")
-    price_frame = price_frame.dropna(subset=["close"])
     index_frame["close_index"] = pd.to_numeric(index_frame["close_index"], errors="coerce")
     index_frame = index_frame.dropna(subset=["close_index"])
 
     universe_points: List[Dict[str, Any]] = []
     skipped_symbols: List[Dict[str, Any]] = []
     for stock_symbol, group in price_frame.groupby("symbol"):
+        if group["close"].isna().any():
+            skipped_symbols.append(
+                {"symbol": stock_symbol, "reason": "unresolved_price_sessions"}
+            )
+            continue
         merged = group.merge(index_frame, on="time", how="inner")
         if len(merged) < min_overlap_days:
             skipped_symbols.append(
@@ -3602,7 +3663,7 @@ async def get_relative_rotation(
 async def get_volume_flow_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3620,7 +3681,7 @@ async def get_volume_flow_metric(
 async def get_seasonality_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3638,7 +3699,7 @@ async def get_seasonality_metric(
 async def get_rsi_seasonal_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3656,7 +3717,7 @@ async def get_rsi_seasonal_metric(
 async def get_bollinger_squeeze_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3674,7 +3735,7 @@ async def get_bollinger_squeeze_metric(
 async def get_atr_regime_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3692,7 +3753,7 @@ async def get_atr_regime_metric(
 async def get_sortino_monthly_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3710,7 +3771,7 @@ async def get_sortino_monthly_metric(
 async def get_macd_crossover_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3728,7 +3789,7 @@ async def get_macd_crossover_metric(
 async def get_parkinson_volatility_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3746,7 +3807,7 @@ async def get_parkinson_volatility_metric(
 async def get_garch_volatility_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3764,7 +3825,7 @@ async def get_garch_volatility_metric(
 async def get_ema_respect_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3782,7 +3843,7 @@ async def get_ema_respect_metric(
 async def get_drawdown_recovery_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3800,7 +3861,7 @@ async def get_drawdown_recovery_metric(
 async def get_benchmark_risk_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3818,7 +3879,7 @@ async def get_benchmark_risk_metric(
 async def get_gap_analysis_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3836,7 +3897,7 @@ async def get_gap_analysis_metric(
 async def get_market_structure_tests_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="adjusted", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3855,7 +3916,7 @@ async def get_pair_diagnostics(
     symbol: str,
     other: str,
     period: str = Query(default="3Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="adjusted", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3977,6 +4038,23 @@ async def run_quant_backtest(
         equity_curve_summary=equity_curve_summary,
         trades=trades,
         warnings=warnings,
+        # Issue #106: a backtest and a sweep cell are comparable only when every
+        # parameter, date, fee and Sharpe convention matches, so the basis states
+        # all of them instead of leaving equivalence to assumption.
+        basis={
+            "include_latest_quote": False,
+            "period": period_upper,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "adjustment_mode": adjustment_mode,
+            "source": request.source,
+            "initial_capital": request.initial_capital,
+            "fee_bps": request.fee_bps,
+            "execution": "next_session_open",
+            "fast_window": request.strategy.fast_window,
+            "slow_window": request.strategy.slow_window,
+            "sharpe_convention": "mean(daily_returns)/std(daily_returns,ddof=1)*sqrt(252), risk_free=0",
+        },
     )
     return StandardResponse(
         data=payload,
@@ -3985,6 +4063,7 @@ async def run_quant_backtest(
             symbol=symbol_upper,
             data_points=equity_curve_summary["data_points"],
             last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            **_price_diagnostics_meta(frame),
         ),
     )
 
@@ -4028,6 +4107,7 @@ async def run_quant_sweep(
         source=request.source,
         period=period_upper,
         adjustment_mode=adjustment_mode,
+        include_latest_quote=False,
     )
     last_data_timestamp = _resolve_frame_last_timestamp(frame)
 
@@ -4075,6 +4155,24 @@ async def run_quant_sweep(
         best=best,
         cells=cells,
         warnings=unique_warnings,
+        basis={
+            "include_latest_quote": False,
+            "period": period_upper,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "adjustment_mode": adjustment_mode,
+            "source": request.source,
+            "objective": request.objective,
+            "fast_windows": fast_windows,
+            "slow_windows": slow_windows,
+            # Same settled-session rule as the backtest endpoint: no merged quote,
+            # same fee/capital/execution/Sharpe convention, so a cell is directly
+            # comparable to a backtest run at the same parameters (issue #106).
+            "initial_capital": request.initial_capital,
+            "fee_bps": request.fee_bps,
+            "execution": "next_session_open",
+            "sharpe_convention": "mean(daily_returns)/std(daily_returns,ddof=1)*sqrt(252), risk_free=0",
+        },
     )
     return StandardResponse(
         data=payload,
@@ -4083,6 +4181,7 @@ async def run_quant_sweep(
             symbol=symbol_upper,
             data_points=len(frame.index),
             last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            **_price_diagnostics_meta(frame),
         ),
     )
 
@@ -4100,7 +4199,7 @@ async def get_quant_metrics(
         ),
     ),
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -4161,6 +4260,7 @@ async def get_quant_metrics(
                 symbol=symbol_upper,
                 data_points=observed_points,
                 last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+                **_price_diagnostics_meta(frame),
             ),
             error=(
                 f"Insufficient Data: Expected at least {min_points_required} sessions, "
@@ -4211,6 +4311,7 @@ async def get_quant_metrics(
             symbol=symbol_upper,
             data_points=observed_points,
             last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            **_price_diagnostics_meta(frame),
         ),
     )
 
@@ -4295,5 +4396,6 @@ async def get_seasonality_matrix(
             symbol=symbol_upper,
             data_points=len(payload.rows),
             last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            **(_price_diagnostics_meta(frame) if granularity_value != "hourly" else {}),
         ),
     )

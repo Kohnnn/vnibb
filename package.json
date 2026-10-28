@@ -25,6 +25,20 @@
         "pg": "^8.20.0",
         "turbo": "^2.0.0"
     },
+    "pnpm": {
+        "packageExtensions": {
+            "@tanstack/react-query@5": {
+                "peerDependencies": {
+                    "@types/react": "*"
+                },
+                "peerDependenciesMeta": {
+                    "@types/react": {
+                        "optional": true
+                    }
+                }
+            }
+        }
+    },
     "engines": {
         "node": ">=18"
     },

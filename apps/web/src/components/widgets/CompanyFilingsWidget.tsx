@@ -71,6 +71,8 @@ export function CompanyFilingsWidget({ symbol, onDataChange }: CompanyFilingsWid
     const events = data?.data || [];
     const hasData = events.length > 0;
     const isFallback = Boolean(error && hasData);
+    // Company-event rows expose no source publication/as-of field; event_date
+    // and ex/record/payment dates are action schedules, not observations.
 
     useEffect(() => {
         onDataChange?.(
@@ -79,7 +81,8 @@ export function CompanyFilingsWidget({ symbol, onDataChange }: CompanyFilingsWid
                 apiGroup: '/equity',
                 endpoint: `/equity/${symbol}/events`,
                 sourceLabel: 'Corporate events',
-                lastDataDate: dataUpdatedAt,
+                lastDataDate: null,
+                fetchedAt: dataUpdatedAt,
                 stale: isFallback,
                 extra: { count: events.length },
             }),
@@ -94,7 +97,8 @@ export function CompanyFilingsWidget({ symbol, onDataChange }: CompanyFilingsWid
         <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
             <div className="pb-2 border-b border-[var(--border-color)]/70">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     note="Corporate events"

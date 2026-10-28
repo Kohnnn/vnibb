@@ -53,9 +53,13 @@ export function SimilarStocksWidget({ symbol, widgetGroup, onDataChange }: Simil
             apiGroup: '/comparison',
             endpoint: `/api/v1/comparison/peers/${upperSymbol || ':symbol'}`,
             sourceLabel: 'VNIBB peer companies',
+            // Peer rows expose no source observation date, so freshness stays
+            // unknown and the query receipt is reported separately.
+            lastDataDate: null,
+            fetchedAt: dataUpdatedAt,
             extra: { symbol: upperSymbol, count: peers.length },
         }))
-    }, [hasData, onDataChange, peers.length, upperSymbol]);
+    }, [dataUpdatedAt, hasData, onDataChange, peers.length, upperSymbol]);
 
     if (!upperSymbol) {
         return <WidgetEmpty message="Select a symbol to view peers" icon={<Users size={18} />} />;
@@ -69,7 +73,8 @@ export function SimilarStocksWidget({ symbol, widgetGroup, onDataChange }: Simil
                     <span>Similar to {upperSymbol}</span>
                 </div>
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
                     align="right"

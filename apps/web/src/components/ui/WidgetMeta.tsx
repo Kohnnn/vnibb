@@ -31,6 +31,7 @@ const liveBadgeStyle = {
 
 interface WidgetMetaProps {
   updatedAt?: number | string | Date | null;
+  fetchedAt?: number | string | Date | null;
   isFetching?: boolean;
   isCached?: boolean;
   isStale?: boolean;
@@ -44,6 +45,7 @@ interface WidgetMetaProps {
 function getHealthBadgePresentation(health: WidgetHealthState) {
   switch (health.status) {
     case 'awaiting_update':
+    case 'unknown':
       return { icon: Clock, style: infoBadgeStyle }
     case 'cached':
       return { icon: Database, style: warningBadgeStyle }
@@ -61,14 +63,13 @@ function getHealthBadgePresentation(health: WidgetHealthState) {
 
 function toDate(value?: number | string | Date | null): Date | null {
   if (!value) return null;
-  if (value instanceof Date) return value;
-  if (typeof value === 'number') return new Date(value);
-  const parsed = new Date(value);
+  const parsed = value instanceof Date ? value : new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 export function WidgetMeta({
   updatedAt,
+  fetchedAt,
   isFetching = false,
   isCached = false,
   isStale = false,
@@ -81,6 +82,8 @@ export function WidgetMeta({
   const updatedDate = toDate(updatedAt);
   const updatedLabel = updatedDate ? formatAbsoluteTimestamp(updatedDate) : null;
   const exactTime = updatedDate ? formatTime(updatedDate, true) : null;
+  const fetchedDate = toDate(fetchedAt);
+  const fetchedLabel = fetchedDate ? formatAbsoluteTimestamp(fetchedDate) : null;
 
   const healthPresentation = health ? getHealthBadgePresentation(health) : null
 
@@ -92,10 +95,14 @@ export function WidgetMeta({
         className
       )}
     >
-      {updatedLabel && (
-        <span className="inline-flex items-center gap-1" title={exactTime ? `Updated ${exactTime}` : undefined}>
-          <Clock size={10} className="text-[var(--text-muted)]" />
-          <span suppressHydrationWarning>Updated {updatedLabel}</span>
+      <span className="inline-flex items-center gap-1" title={exactTime ? `As of ${exactTime}` : undefined}>
+        <Clock size={10} className="text-[var(--text-muted)]" />
+        <span suppressHydrationWarning>{updatedLabel ? `As of ${updatedLabel}` : 'As-of unknown'}</span>
+      </span>
+
+      {fetchedLabel && (
+        <span suppressHydrationWarning title="Retrieval time does not establish source freshness">
+          Fetched {fetchedLabel}
         </span>
       )}
 

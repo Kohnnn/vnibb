@@ -16,6 +16,7 @@ export function useLoadingTimeout(
 ): UseLoadingTimeoutResult {
   const { timeoutMs = 15_000, enabled = true } = options
   const [timedOut, setTimedOut] = useState(false)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     if (!enabled || !isLoading) {
@@ -28,11 +29,14 @@ export function useLoadingTimeout(
     }, timeoutMs)
 
     return () => window.clearTimeout(timeoutId)
-  }, [enabled, isLoading, timeoutMs])
+  }, [attempt, enabled, isLoading, timeoutMs])
 
   return {
     timedOut,
-    resetTimeout: () => setTimedOut(false),
+    resetTimeout: () => {
+      setTimedOut(false)
+      setAttempt((value) => value + 1)
+    },
   }
 }
 

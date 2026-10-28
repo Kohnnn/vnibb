@@ -57,6 +57,13 @@ describe('widget utils', () => {
       expect(toNumber('hello')).toBeNull();
       expect(toNumber(null)).toBeNull();
       expect(toNumber(undefined)).toBeNull();
+      // `Number('')`/`Number([])`/`Number(false)` all coerce to 0, which turned a
+      // missing provider metric into a real-looking zero (issue #106).
+      expect(toNumber('')).toBeNull();
+      expect(toNumber('   ')).toBeNull();
+      expect(toNumber([])).toBeNull();
+      expect(toNumber(false)).toBeNull();
+      expect(toNumber({})).toBeNull();
     });
 
     test('parses numeric strings including zero and negatives', () => {

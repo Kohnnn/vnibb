@@ -146,7 +146,16 @@ export function AmihudIlliquidityWidget({ symbol, onDataChange }: AmihudIlliquid
   )
 
   const candles = (data?.data || []) as OHLCData[]
-  const dailyAmihud = calculateAmihudSeries(candles)
+  const meta = data?.meta
+  // Only per-row `price_unit` markers certify the series; a response-level
+  // `unit_status` cannot certify rows that carry no marker (QA #98).
+  const expectedUnit = meta?.unit_status === 'confirmed_vnd' ? 'VND' : 'index_points'
+  const certifiedUnits = candles.length > 0
+    && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(meta?.unit_status ?? '')
+    && (data?.data ??[]).every((row) => row.price_unit === expectedUnit)
+  const derivedWithheld = Boolean(data) && !certifiedUnits
+  const lastDataDate = meta?.freshness_as_of ?? meta?.last_data_date ?? candles[candles.length - 1]?.time ?? null
+  const dailyAmihud = derivedWithheld ?[] : calculateAmihudSeries(candles)
   const rolling20 = rollingMean(dailyAmihud, 20)
   const hasData = rolling20.length > 20
   const isFallback = Boolean(error && hasData)
@@ -169,13 +178,14 @@ export function AmihudIlliquidityWidget({ symbol, onDataChange }: AmihudIlliquid
         apiGroup: '/equity',
         endpoint: `/equity/historical?symbol=${upperSymbol}`,
         sourceLabel: 'Amihud illiquidity (derived)',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate,
+        fetchedAt: dataUpdatedAt,
         stale: isFallback,
         derived: true,
         extra: hasData ? { current, liquidity: liquidityState.label } : undefined,
       }),
     )
-  }, [onDataChange, hasData, isFallback, dataUpdatedAt, upperSymbol, current, liquidityState.label])
+  }, [onDataChange, hasData, isFallback, lastDataDate, dataUpdatedAt, upperSymbol, current, liquidityState.label])
 
   if (!upperSymbol) {
     return (
@@ -204,7 +214,8 @@ export function AmihudIlliquidityWidget({ symbol, onDataChange }: AmihudIlliquid
             ))}
           </div>
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={lastDataDate}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note={`${period} • 20D mean`}
@@ -227,6 +238,12 @@ export function AmihudIlliquidityWidget({ symbol, onDataChange }: AmihudIlliquid
           <WidgetSkeleton lines={8} />
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />
+        ) : derivedWithheld ? (
+          <WidgetEmpty
+            message="Amihud illiquidity unavailable: historical price units were not certified."
+            icon={<Droplets size={18} />}
+            size="compact"
+          />
         ) : !hasData ? (
           <WidgetEmpty message="Not enough history to compute Amihud ratio" icon={<Droplets size={18} />} size="compact" />
         ) : (

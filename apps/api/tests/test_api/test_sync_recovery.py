@@ -2,6 +2,7 @@ import asyncio
 import sys
 import types
 from datetime import date
+from itertools import count
 from threading import Event
 
 import pandas as pd
@@ -98,7 +99,7 @@ async def test_guarded_ratio_job_records_failed_partial_and_complete(test_engine
 
 
 @pytest.mark.asyncio
-async def test_modular_sponsor_finance_is_used_without_legacy_wrapper(monkeypatch):
+async def test_modular_community_finance_is_used_without_legacy_wrapper(monkeypatch):
     calls = []
 
     class Finance:
@@ -108,12 +109,13 @@ async def test_modular_sponsor_finance_is_used_without_legacy_wrapper(monkeypatc
         def ratio(self, period, lang="en"):
             return pd.DataFrame([{"period": "2025", "pe": 12.0}])
 
-    module = types.ModuleType("vnstock_data")
+    module = types.ModuleType("vnstock")
     module.Finance = Finance
-    monkeypatch.setitem(sys.modules, "vnstock_data", module)
+    monkeypatch.setitem(sys.modules, "vnstock", module)
+    monkeypatch.setattr(scheduler.settings, "vnstock_source", "VCI")
     rows = await VnstockFinancialRatiosFetcher.extract_data({"symbol": "VNM", "period": "year"})
     assert rows[0]["pe"] == 12.0
-    assert calls and all(symbol == "VNM" for symbol, _ in calls)
+    assert calls == [("VNM", "VCI")]
 
 
 @pytest.mark.asyncio
@@ -135,6 +137,51 @@ async def test_timed_out_provider_never_queues_duplicate_thread(monkeypatch):
     finally:
         release.set()
         await asyncio.wrap_future(runtime._financial_future)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("financial", [False, True])
+async def test_identical_provider_retries_share_real_executor_until_completion(monkeypatch, financial):
+    release = Event()
+    entered = Event()
+    calls = []
+    key = ("financial_ratios" if financial else "historical", "VNM", "VCI", "year")
+    runner = runtime.run_financial_provider if financial else runtime.run_reference_provider
+    executor = runtime._financial_executor if financial else asyncio.get_running_loop()
+    method = "submit" if financial else "run_in_executor"
+    submit = getattr(executor, method)
+    submissions = []
+
+    def counted_submit(*args, **kwargs):
+        submissions.append(1)
+        return submit(*args, **kwargs)
+
+    def blocked():
+        calls.append(1)
+        entered.set()
+        release.wait(2)
+        return [12]
+
+    monkeypatch.setattr(executor, method, counted_submit)
+    try:
+        for _ in range(2):
+            with pytest.raises(TimeoutError):
+                await runner(blocked, 0.01, key=key)
+        assert entered.is_set()
+        assert len(submissions) == len(calls) == 1
+        recovery = asyncio.create_task(runner(blocked, 1, key=key))
+        await asyncio.sleep(0)
+        release.set()
+        assert await recovery == [12]
+        assert len(submissions) == len(calls) == 1
+        assert await runner(lambda: [13], 1, key=key) == [13]
+        assert len(submissions) == 2
+    finally:
+        release.set()
+        if financial and runtime._financial_future is not None:
+            await asyncio.wrap_future(runtime._financial_future)
+        elif not financial:
+            await asyncio.gather(*list(runtime._reference_jobs.values()), return_exceptions=True)
 
 
 def test_configured_closures_are_not_missing_price_gaps(monkeypatch):
@@ -160,6 +207,94 @@ async def test_ratio_timeout_is_not_reported_as_derived_acquisition(monkeypatch)
     assert progress["error_count"] == 1
     assert progress["stage_stats"]["financial_ratios"]["success"] == 0
 
+
+
+@pytest.mark.asyncio
+async def test_secondary_ratio_refresh_preserves_iq_values_and_evidence(test_engine, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from vnibb.models.trading import FinancialRatio
+    from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
+    from vnibb.services import data_pipeline as pipeline_module
+
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr("vnibb.services.data_pipeline.async_session_maker", sessions)
+    monkeypatch.setattr("vnibb.services.data_pipeline.engine", test_engine)
+    evidence = {"structured": {"values": {"eps": 42}, "fiscalBasis": {"consolidation": "unknown"}}}
+    async with sessions() as session:
+        session.add(FinancialRatio(id=901001, symbol="IQZ", period="2025", period_type="year", fiscal_year=2025,
+                                   source="vietcap", eps=42, raw_data=evidence))
+        await session.commit()
+    upsert = pipeline_module.get_upsert_stmt
+    fresh_ids = count(902001)
+
+    def sqlite_upsert(model, keys, values, **kwargs):
+        return upsert(model, keys, {**values, "id": next(fresh_ids)}, **kwargs)
+
+    monkeypatch.setattr(pipeline_module, "get_upsert_stmt", sqlite_upsert)
+    provider_row = FinancialRatioData(symbol="IQZ", period="2025", eps=99)
+    monkeypatch.setattr(VnstockFinancialRatiosFetcher, "extract_data", AsyncMock(return_value=[provider_row]))
+    monkeypatch.setattr(VnstockFinancialRatiosFetcher, "transform_data", lambda query, rows: rows)
+    pipeline = DataPipeline()
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", AsyncMock())
+    progress = {}
+
+    assert await pipeline.sync_financial_ratios(symbols=["IQZ"], period="year", progress=progress) == 0
+    assert progress["stage_stats"]["financial_ratios"]["errors"] == 1
+    async with sessions() as session:
+        row = (await session.scalars(select(FinancialRatio).where(FinancialRatio.symbol == "IQZ"))).one()
+        assert row.source == "vietcap"
+        assert row.eps == 42
+        assert row.raw_data == evidence
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "statement_type, metric",
+    [("income", "revenue"), ("balance", "total_assets"), ("cashflow", "operating_cash_flow")],
+)
+async def test_secondary_statement_refresh_preserves_iq_rows_and_reports_conflict(
+    test_engine, monkeypatch, statement_type, metric
+):
+    from unittest.mock import AsyncMock
+
+    from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+    from vnibb.providers.vnstock.financials import FinancialStatementData, VnstockFinancialsFetcher
+    from vnibb.services import data_pipeline as pipeline_module
+
+    models = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow}
+    model = models[statement_type]
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr("vnibb.services.data_pipeline.async_session_maker", sessions)
+    monkeypatch.setattr("vnibb.services.data_pipeline.engine", test_engine)
+    async with sessions() as session:
+        session.add(model(id=901002, symbol="IQZ", period="2025", period_type="year", fiscal_year=2025,
+                          source="vietcap", **{metric: 42}))
+        await session.commit()
+    upsert = pipeline_module.get_upsert_stmt
+    fresh_ids = count(903001)
+
+    def sqlite_upsert(upsert_model, keys, values, **kwargs):
+        return upsert(upsert_model, keys, {**values, "id": next(fresh_ids)}, **kwargs)
+
+    monkeypatch.setattr(pipeline_module, "get_upsert_stmt", sqlite_upsert)
+
+    entry = FinancialStatementData(symbol="IQZ", period="2025", statement_type=statement_type, source="VCI",
+                                   currency="VND", value_unit="VND", **{metric: 99})
+    monkeypatch.setattr(VnstockFinancialsFetcher, "extract_data", AsyncMock(return_value=[entry]))
+    monkeypatch.setattr(VnstockFinancialsFetcher, "transform_data", lambda params, rows: rows)
+    pipeline = DataPipeline()
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", AsyncMock())
+    progress = {}
+
+    assert await pipeline.sync_financials(symbols=["IQZ"], period="year", progress=progress,
+                                          statement_types=[statement_type], count=1) == 0
+    assert progress["stage_stats"]["financials"]["errors"] == 1
+    assert progress["stage_stats"]["financials"]["success"] == 0
+    assert progress["error_count"] == 1
+    async with sessions() as session:
+        row = (await session.scalars(select(model).where(model.symbol == "IQZ"))).one()
+        assert row.source == "vietcap"
+        assert getattr(row, metric) == 42
 
 @pytest.mark.asyncio
 async def test_cancelled_cycle_keeps_acquired_symbols_and_pending_metadata(test_engine, monkeypatch):
@@ -249,11 +384,13 @@ async def test_statement_all_language_fallbacks_only_when_fields_need_supplement
 
         def income_statement(self, period, lang="en"):
             languages.append(lang)
-            return pd.DataFrame([{
+            frame = pd.DataFrame([{
                 "period": "2025", "revenue": 100, "net_income": 10,
                 "selling_general_admin": 2, "depreciation": 1,
                 "research_development": 1, "ebitda": 20,
             }])
+            frame.attrs["value_unit"] = "VND"
+            return frame
 
     monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
     rows = await VnstockFinancialsFetcher.extract_data({
@@ -261,6 +398,67 @@ async def test_statement_all_language_fallbacks_only_when_fields_need_supplement
     })
     assert rows
     assert languages and all(language == "en" for language in languages)
+
+
+@pytest.mark.asyncio
+async def test_statement_dispatches_supported_keywords_to_underlying_provider(monkeypatch):
+    from vnibb.providers.vnstock.financials import VnstockFinancialsFetcher
+    calls = []
+
+    class Provider:
+        def balance_sheet(self, period, display_mode="std"):
+            calls.append(display_mode)
+            frame = pd.DataFrame([{"item_id": "total_assets", "2026-Q2": 55_677_822_007_000}])
+            frame.attrs["value_unit"] = "VND"
+            return frame
+
+    class Adapter:
+        def __init__(self, **kwargs):
+            self._provider = Provider()
+
+        def balance_sheet(self, period):
+            raise AssertionError("Adapter wrapper must not reject underlying provider keywords")
+
+    monkeypatch.setattr(runtime, "get_finance_class", lambda: Adapter)
+    rows = await VnstockFinancialsFetcher.extract_data({
+        "symbol": "VNM", "statement_type": "balance", "period": "quarter", "limit": 4,
+    })
+    assert calls and all(mode == "all" for mode in calls)
+    assert rows[0]["total_assets"] == 55_677_822_007_000
+
+
+@pytest.mark.asyncio
+async def test_statement_respects_wrapped_provider_actual_signature(monkeypatch):
+    from functools import wraps
+
+    from vnibb.providers.vnstock.financials import VnstockFinancialsFetcher
+    calls = []
+
+    def original(self, period, display_mode="std"):
+        calls.append(display_mode)
+        frame = pd.DataFrame([{"item_id": "total_assets", "2026-Q2": 55_677_822_007_000}])
+        frame.attrs["value_unit"] = "VND"
+        return frame
+
+    @wraps(original)
+    def quota_wrapper(self, period, show_log=False):
+        calls.append("quota_wrapper")
+        return original(self, period)
+
+    class Provider:
+        balance_sheet = quota_wrapper
+
+    class Adapter:
+        def __init__(self, **kwargs):
+            self._provider = Provider()
+
+    monkeypatch.setattr(runtime, "get_finance_class", lambda: Adapter)
+    rows = await VnstockFinancialsFetcher.extract_data({
+        "symbol": "VNM", "statement_type": "balance", "period": "quarter", "limit": 4,
+    })
+    assert calls and "quota_wrapper" in calls
+    assert "all" not in calls
+    assert rows[0]["total_assets"] == 55_677_822_007_000
 
 
 @pytest.mark.asyncio
@@ -292,7 +490,7 @@ async def test_unsuccessful_daily_stage_reaches_guarded_failure(test_engine, mon
 
 
 @pytest.mark.asyncio
-async def test_sponsor_constructor_period_is_preserved_for_quarter_ratios(monkeypatch):
+async def test_community_constructor_period_is_preserved_for_quarter_ratios(monkeypatch):
     periods = []
 
     class Finance:
@@ -302,30 +500,31 @@ async def test_sponsor_constructor_period_is_preserved_for_quarter_ratios(monkey
         def ratio(self, lang="en"):
             return pd.DataFrame([{"period": "2025-Q4", "pe": 12}])
 
-    module = types.ModuleType("vnstock_data")
+    module = types.ModuleType("vnstock")
     module.Finance = Finance
-    monkeypatch.setitem(sys.modules, "vnstock_data", module)
+    monkeypatch.setitem(sys.modules, "vnstock", module)
+    monkeypatch.setattr(scheduler.settings, "vnstock_source", "VCI")
     rows = await VnstockFinancialRatiosFetcher.extract_data({"symbol": "VNM", "period": "quarter"})
     assert rows
     assert periods and all(period == "quarter" for period in periods)
 
 
 @pytest.mark.asyncio
-async def test_unified_sponsor_without_source_does_not_repeat_default_provider(monkeypatch):
+async def test_community_finance_does_not_repeat_ratio_call(monkeypatch):
     calls = []
 
-    class Equity:
+    class Finance:
+        def __init__(self, symbol, source):
+            assert (symbol, source) == ("VNM", "VCI")
+
         def ratio(self, period):
             calls.append(period)
             return pd.DataFrame([{"period": "2025-Q4", "pe": 12}])
 
-    class Fundamental:
-        def equity(self, symbol):
-            return Equity()
-
-    module = types.ModuleType("vnstock_data")
-    module.Fundamental = Fundamental
-    monkeypatch.setitem(sys.modules, "vnstock_data", module)
+    community = types.ModuleType("vnstock")
+    community.Finance = Finance
+    monkeypatch.setitem(sys.modules, "vnstock", community)
+    monkeypatch.setattr(scheduler.settings, "vnstock_source", "VCI")
     rows = await VnstockFinancialRatiosFetcher.extract_data({"symbol": "VNM", "period": "quarter"})
     assert rows
     assert calls == ["quarter"]
@@ -416,7 +615,9 @@ async def test_screener_modular_quote_and_failed_rerun_preserve_certified_row(te
             quote_calls.append(symbol)
 
         def history(self, **kwargs):
-            return pd.DataFrame([{"time": datetime.utcnow(), "close": 123, "volume": 456}])
+            frame = pd.DataFrame([{"time": datetime.utcnow(), "close": 123, "volume": 456}])
+            frame.attrs["price_unit"] = "VND"
+            return frame
 
     async def pace(bucket):
         return None

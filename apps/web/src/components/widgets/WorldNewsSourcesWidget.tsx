@@ -179,8 +179,12 @@ function WorldNewsSourcesWidgetComponent({
         apiGroup: '/news',
         endpoint: '/news/world/sources',
         sourceLabel: 'World news source registry',
-        lastDataDate: dataUpdatedAt,
+        // The registry carries source metadata only: no publication observation
+        // exists, so as-of stays unknown instead of borrowing the query receipt.
+        lastDataDate: null,
+        fetchedAt: dataUpdatedAt,
         stale: Boolean(error && hasData),
+        cached: Boolean(error && hasData),
         extra: { count: sources.length },
       }),
     );
@@ -206,7 +210,8 @@ function WorldNewsSourcesWidgetComponent({
               Source Registry
             </div>
             <WidgetMeta
-              updatedAt={dataUpdatedAt}
+              updatedAt={null}
+              fetchedAt={dataUpdatedAt}
               isFetching={(isFetching || isHealthFetching) && hasData}
               isCached={Boolean(error && hasData)}
               note={sourceNote}

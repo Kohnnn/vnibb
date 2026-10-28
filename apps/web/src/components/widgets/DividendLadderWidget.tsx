@@ -9,7 +9,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useDividends } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatTimestamp } from '@/lib/format';
-import { formatPercent, formatVND } from '@/lib/formatters';
+import { formatDividendPayout, formatDividendYield } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 
 const EMPTY_DIVIDENDS: DividendRecord[] = [];
@@ -28,22 +28,6 @@ interface DividendEvent {
   payoutLabel: string;
   payoutType: string;
   dividendYield: number | null | undefined;
-}
-
-function formatPayout(row: DividendRecord): string {
-  if (row.cash_dividend !== null && row.cash_dividend !== undefined) {
-    return formatVND(row.cash_dividend)
-  }
-  if (row.stock_dividend !== null && row.stock_dividend !== undefined) {
-    return `${row.stock_dividend.toFixed(2)}% stock`
-  }
-  if (row.dividend_ratio !== null && row.dividend_ratio !== undefined) {
-    return String(row.dividend_ratio)
-  }
-  if (row.value !== null && row.value !== undefined) {
-    return formatVND(row.value)
-  }
-  return '-'
 }
 
 function formatDividendType(type: string | null | undefined): string {
@@ -70,7 +54,7 @@ export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: Div
     const all: DividendEvent[] = [];
 
     dividends.forEach((dividend) => {
-      const payoutLabel = formatPayout(dividend)
+      const payoutLabel = formatDividendPayout(dividend)
       const payoutType = formatDividendType(dividend.dividend_type || dividend.type)
       const dividendYield = dividend.dividend_yield
 
@@ -118,6 +102,8 @@ export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: Div
 
   const displayEvents = upcoming.length > 0 ? upcoming : events;
   const hasData = displayEvents.length > 0;
+  // Dividend ex/record/payment dates are action schedules, not source
+  // observations, so freshness stays unknown and receipts go to fetchedAt.
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -125,11 +111,12 @@ export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: Div
       apiGroup: '/equity',
       endpoint: `/equity/${symbol}/dividends`,
       sourceLabel: 'vnstock',
-      lastDataDate: displayEvents[0]?.date,
+      lastDataDate: null,
+      fetchedAt: dataUpdatedAt,
       stale: Boolean(error && hasData),
       extra: { events: displayEvents.length },
     }));
-  }, [displayEvents, error, hasData, onDataChange, symbol]);
+  }, [dataUpdatedAt, displayEvents, error, hasData, onDataChange, symbol]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view dividends" />;
@@ -148,7 +135,8 @@ export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: Div
       <div aria-label="Dividend ladder timeline" className="h-full flex flex-col bg-[var(--bg-primary)]">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={null}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={Boolean(error && hasData)}
             note={upcoming.length > 0 ? 'Upcoming events' : 'Latest events'}
@@ -181,7 +169,7 @@ export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: Div
                     <div className="text-[10px] text-[var(--text-muted)]">
                       {event.payoutType}
                       {event.dividendYield !== null && event.dividendYield !== undefined
-                        ? ` • ${formatPercent(event.dividendYield)}`
+                        ? ` • ${formatDividendYield(event.dividendYield)}`
                         : ''}
                     </div>
                   </div>

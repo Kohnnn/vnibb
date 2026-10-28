@@ -166,6 +166,7 @@ services:
     image: mongo:7
     container_name: vnibb-mongo
     restart: unless-stopped
+    init: true
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in deployment/env.oracle}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in deployment/env.oracle}
@@ -177,7 +178,7 @@ services:
     pids_limit: ${MONGO_PIDS_LIMIT:-256}
     logging: *docker-logging
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'quit(db.adminCommand({ ping: 1 }).ok ? 0 : 2)'"]
+      test: ["CMD-SHELL", "exec mongosh 'mongodb://127.0.0.1:27017/?serverSelectionTimeoutMS=2000&connectTimeoutMS=2000' --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'quit(db.adminCommand({ ping: 1 }).ok ? 0 : 2)'"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -219,8 +220,10 @@ services:
       GOTRUE_DB_NAMESPACE: auth
       GOTRUE_SITE_URL: ${GOTRUE_SITE_URL:-https://vnibb-web.vercel.app}
       GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST:-https://vnibb-web.vercel.app/**}
+      GOTRUE_CORS_ALLOWED_HEADERS: ${GOTRUE_CORS_ALLOWED_HEADERS:-apikey}
       GOTRUE_DISABLE_SIGNUP: ${GOTRUE_DISABLE_SIGNUP:-false}
       GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET:?Set SUPABASE_JWT_SECRET in deployment/env.oracle}
+      GOTRUE_JWT_ISSUER: ${SUPABASE_URL:?Set SUPABASE_URL in deployment/env.oracle}/auth/v1
       GOTRUE_JWT_EXP: ${GOTRUE_JWT_EXP:-3600}
       GOTRUE_JWT_ADMIN_ROLES: service_role
       GOTRUE_JWT_AUD: authenticated

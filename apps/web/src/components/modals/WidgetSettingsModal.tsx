@@ -84,8 +84,8 @@ function buildAdvancedConfigDraft(config: WidgetConfig, fields: TradingViewSetti
 
 function pruneConfig(config: WidgetConfig): WidgetConfig {
     return Object.fromEntries(
-        Object.entries(config).filter(([, value]) => {
-            if (value === undefined || value === null) return false;
+        Object.entries(config).filter(([key, value]) => {
+            if (value === undefined || value === null) return key === 'periodSyncGroup' && value === null;
             if (typeof value === 'string') return value.trim().length > 0;
             if (Array.isArray(value)) return value.length > 0;
             return true;

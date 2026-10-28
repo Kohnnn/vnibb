@@ -1,5 +1,5 @@
-import { rowsToCSV } from './exportWidget';
-import { getWidgetExportData } from './widgetRuntime';
+import { provenanceToMarkdown, rowsToCSV } from './exportWidget';
+import { buildWidgetRuntime, getWidgetExportData } from './widgetRuntime';
 
 describe('getWidgetExportData', () => {
   it('prefers runtime rows over widget metadata', () => {
@@ -9,6 +9,45 @@ describe('getWidgetExportData', () => {
       metric: 'net_volume',
       __widgetRuntime: { exportData: rows },
     })).toEqual(rows);
+  });
+});
+
+describe('historical warnings provenance', () => {
+  it('preserves warnings through the shared runtime and readable export metadata', () => {
+    const warnings = ['Partial historical coverage', 'Historical price units unconfirmed'];
+    const payload = buildWidgetRuntime({
+      empty: false,
+      apiGroup: '/equity',
+      endpoint: '/equity/historical?symbol=FPT',
+      lastDataDate: '2024-02-09',
+      warnings,
+    });
+
+    expect(payload).toEqual(expect.objectContaining({
+      __widgetRuntime: expect.objectContaining({
+        provenance: expect.objectContaining({ updatedAt: '2024-02-09', warnings }),
+      }),
+    }));
+    expect(provenanceToMarkdown({ warnings, capturedAt: '2026-10-05T10:00:00Z' }))
+      .toContain('- Warnings: Partial historical coverage · Historical price units unconfirmed');
+  });
+});
+
+describe('source and retrieval provenance', () => {
+  it('keeps old source data stale in exported metadata after a new fetch', () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-08T03:00:00Z').getTime());
+    try {
+      const markdown = provenanceToMarkdown({
+        updatedAt: '2026-09-21T15:00:00Z', fetchedAt: '2026-10-08T03:00:00Z',
+        cached: true, coverage: 'partial', capturedAt: '2026-10-08T03:00:00Z',
+      });
+      expect(markdown).toContain('- Source as of: 2026-09-21T15:00:00.000Z');
+      expect(markdown).toContain('- Fetched at: 2026-10-08T03:00:00.000Z');
+      expect(markdown).toContain('- Coverage: partial');
+      expect(markdown).toContain('- Data status: Stale');
+    } finally {
+      now.mockRestore();
+    }
   });
 });
 

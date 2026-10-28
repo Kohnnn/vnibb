@@ -58,6 +58,7 @@ export interface QuantRuntimeInput {
   sourceLabel?: string
   apiGroup?: string
   response?: QuantResponseLike
+  fetchedAt?: number | string | Date | null
   /** Override adjustment mode when the widget computes it client-side. */
   adjustmentMode?: string
   /** Mark client-derived widgets so the chip reflects local computation. */
@@ -82,8 +83,51 @@ export function buildQuantRuntime(input: QuantRuntimeInput): Record<string, unkn
     endpoint: input.endpoint,
     sourceLabel: input.sourceLabel ?? (input.derived ? 'Quant (derived)' : 'Quant metrics'),
     lastDataDate,
+    fetchedAt: input.fetchedAt ?? data?.computed_at ?? null,
     adjustmentMode,
     derived: input.derived,
     extra: input.extra,
   })
+}
+
+export interface QuantBasisLike {
+  include_latest_quote?: boolean | null
+  period?: string | null
+  start_date?: string | null
+  end_date?: string | null
+  adjustment_mode?: string | null
+  source?: string | null
+  fee_bps?: number | null
+  initial_capital?: number | null
+  execution?: string | null
+  sharpe_convention?: string | null
+  fast_window?: number | null
+  slow_window?: number | null
+  fast_windows?: number[] | null
+  slow_windows?: number[] | null
+}
+
+/**
+ * One-line disclosure of the session/parameter basis the server actually used.
+ *
+ * Issue #106: a backtest Sharpe and a sweep cell are only comparable when their
+ * dates, data basis and adjustment match, so each widget states the basis instead
+ * of leaving the reader to assume equivalence. Returns null when the response
+ * carries no basis, so a caller never asserts a basis the server did not state.
+ */
+export function describeQuantBasis(basis?: QuantBasisLike | null): string | null {
+  if (!basis || typeof basis !== 'object') return null
+  const parts: string[] = []
+  if (basis.start_date && basis.end_date) parts.push(`sessions ${basis.start_date}..${basis.end_date}`)
+  if (basis.include_latest_quote ===false) parts.push('latest quote excluded')
+  else if (basis.include_latest_quote ===true) parts.push('latest quote merged')
+  if (basis.adjustment_mode) parts.push(`${basis.adjustment_mode} history`)
+  if (basis.source) parts.push(`source ${basis.source}`)
+  if (typeof basis.fee_bps === 'number') parts.push(`fee ${basis.fee_bps} bps`)
+  if (typeof basis.initial_capital === 'number') parts.push(`capital ${basis.initial_capital}`)
+  if (basis.execution) parts.push(basis.execution.replace(/_/g, ' '))
+  if (typeof basis.fast_window === 'number' && typeof basis.slow_window === 'number') parts.push(`windows ${basis.fast_window}/${basis.slow_window}`)
+  if (basis.fast_windows?.length && basis.slow_windows?.length) parts.push(`grid ${basis.fast_windows.join('/')} × ${basis.slow_windows.join('/')}`)
+  if (basis.sharpe_convention) parts.push(basis.sharpe_convention)
+  return parts.length > 0 ? parts.join(' · ') : null
 }

@@ -1,5 +1,7 @@
+import ast
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -154,11 +156,37 @@ def test_compose_requires_repository_and_digest_separately() -> None:
     assert "VNIBB_API_IMAGE:" not in compose
 
 
-def test_retired_premium_bootstrap_fails_after_guidance() -> None:
-    script = (ROOT / "scripts/oracle/bootstrap_vnstock_premium.sh").read_text(
-        encoding="utf-8"
-    )
+def test_free_release_image_never_imports_or_installs_paid_modules() -> None:
+    dockerfile = (ROOT / "apps/api/Dockerfile").read_text(encoding="utf-8")
+    script = (ROOT / "scripts/oracle/build_release_image.sh").read_text(encoding="utf-8")
 
-    assert "Retired:" in script
-    assert "deployment/env.oracle" in script
-    assert script.rstrip().endswith("exit 1")
+    for setting in ("VNSTOCK_RUNTIME_TIER=free", "VNSTOCK_SOURCE=VCI", "VNSTOCK_RUNTIME_INSTALL=0"):
+        assert setting in dockerfile
+    for forbidden in ("--secret", "VNSTOCK_API_KEY", "VNSTOCK_PREMIUM", "vnstock-installer", "install_paid_packages"):
+        assert forbidden not in dockerfile
+        assert forbidden not in script
+
+    guard = next(line for line in dockerfile.splitlines() if line.startswith("RUN python -c ") and "find_spec" in line)
+    code = shlex.split(guard)[-1]
+    tree = ast.parse(code)
+    paid_modules = {"vnstock_data", "vnstock_ta", "vnstock_pipeline", "vnstock_news", "vnii"}
+    declared_modules = next(
+        ast.literal_eval(node.value)
+        for node in tree.body
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "modules" for target in node.targets)
+    )
+    assert set(declared_modules) == paid_modules
+    assert "find_spec(name) is not None" in code
+    assert "assert not present" in code
+    imports = [node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))]
+    assert len(imports) == 1
+    assert isinstance(imports[0], ast.ImportFrom)
+    assert imports[0].module == "importlib.util"
+    assert [alias.name for alias in imports[0].names] == ["find_spec"]
+    assert "__import__" not in code
+    assert "import_module" not in code
+
+
+def test_retired_premium_scripts_are_removed_without_shims() -> None:
+    assert not (ROOT / "scripts/oracle/bootstrap_vnstock_premium.sh").exists()
+    assert not (ROOT / "scripts/oracle/check_vnstock_premium.sh").exists()

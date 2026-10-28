@@ -75,6 +75,14 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
     return { buy, sell, net: buy - sell }
   }, [trades])
 
+  const receivedTrades = data ?? []
+  const lastDataDate = receivedTrades.reduce<string | null>((latest, trade) => {
+    const observedAt = new Date(trade.trade_time).getTime()
+    return Number.isFinite(observedAt) && (latest === null || observedAt > new Date(latest).getTime())
+      ? trade.trade_time
+      : latest
+  }, null)
+
   const hasData = trades.length > 0
 
   useEffect(() => {
@@ -86,7 +94,8 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
           sourceLabel: 'Block-trade tape',
           apiGroup: '/insider',
           endpoint: '/insider/block-trades',
-          updatedAt: dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined,
+          updatedAt: lastDataDate,
+          fetchedAt: dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined,
         },
       },
       rows: trades.map((trade) => ({
@@ -101,7 +110,7 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
         min_value_bn: threshold,
       })),
     })
-  }, [trades, hasData, onDataChange, dataUpdatedAt, threshold, error])
+  }, [trades, hasData, onDataChange, dataUpdatedAt, lastDataDate, threshold, error])
 
   if (error && !data) return <WidgetError error={error as Error} onRetry={() => refetch()} />
 
@@ -229,6 +238,8 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
 
       <WidgetMeta
         className="px-1 pt-1"
+        updatedAt={lastDataDate}
+        fetchedAt={dataUpdatedAt}
         isFetching={isFetching && hasData}
         sourceLabel="Latest 100 block trades"
         align="right"

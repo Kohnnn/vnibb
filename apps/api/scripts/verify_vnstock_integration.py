@@ -122,7 +122,8 @@ def test_vnstock_apis():
     print_section("3. VNSTOCK API TESTS")
     
     from vnibb.core.config import settings
-    default_source = getattr(settings, 'vnstock_source', 'KBS')
+    from vnibb.providers.vnstock.runtime import validate_source
+    default_source = validate_source(getattr(settings, 'vnstock_source', 'VCI'))
     print(f"  Using data source: {default_source}\n")
     
     results = {}
@@ -179,7 +180,7 @@ def test_vnstock_apis():
     print("\n  Testing Screener API...")
     try:
         from vnstock import Screener
-        screener = Screener()
+        screener = Screener(source=default_source)
         df = screener.stock(params={"exchangeName": "HOSE"}, limit=100)
         results["screener_stock"] = len(df) if df is not None else 0
         print(f"    ✓ screener.stock(): {len(df)} stocks with 84 metrics")

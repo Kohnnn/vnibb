@@ -22,6 +22,8 @@ from typing import Any, Awaitable, Callable, Optional, TypeVar, Union, Dict, Lis
 
 import redis.asyncio as redis
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from vnibb.core.config import settings
 from vnibb.core.cache_constants import (
@@ -160,8 +162,6 @@ def cached(
                     continue
                 # Skip FastAPI dependencies
                 from fastapi import Request, Response, BackgroundTasks
-                from sqlalchemy.orm import Session
-                from sqlalchemy.ext.asyncio import AsyncSession
 
                 if isinstance(v, (Request, Response, BackgroundTasks, Session, AsyncSession)):
                     continue
@@ -221,9 +221,7 @@ def cached(
                     except Exception as redis_err:
                         redis_available = False
                         logger.warning(f"Redis error, falling back to memory: {redis_err}")
-                if not redis_available:
-                    return await get_mem_cache()
-                return None
+                return await get_mem_cache()
 
             try:
                 cached_data = await load_cached_value()
@@ -269,6 +267,12 @@ def cached(
                         _record_cache_outcome(key_prefix, "store_error")
                 return result
 
+            # A request-owned session must not escape into a shielded task.
+            if any(isinstance(arg, (Session, AsyncSession)) for arg in args) or any(
+                isinstance(value, (Session, AsyncSession)) for value in kwargs.values()
+            ):
+                return await load_and_store()
+
             async with _inflight_cache_loads_lock:
                 task = _inflight_cache_loads.get(cache_key)
                 if task is None:
@@ -301,6 +305,7 @@ class RedisClient:
     """
 
     SCAN_BATCH_SIZE = 100
+    POOL_WAIT_TIMEOUT_SECONDS = 1.0
 
     def __init__(
         self,
@@ -311,6 +316,7 @@ class RedisClient:
         self.max_connections = max_connections
         self._pool: Optional[redis.ConnectionPool] = None
         self._client: Optional[redis.Redis] = None
+        self._lifecycle_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         """Initialize Redis connection pool."""
@@ -325,26 +331,34 @@ class RedisClient:
             logger.warning("Redis URL is empty; skipping Redis connection")
             return
 
-        if self._pool is None:
-            self._pool = redis.ConnectionPool.from_url(
+        async with self._lifecycle_lock:
+            if self._client is not None:
+                return
+            pool = redis.BlockingConnectionPool.from_url(
                 self.url,
                 max_connections=self.max_connections,
+                timeout=self.POOL_WAIT_TIMEOUT_SECONDS,
                 decode_responses=True,
             )
-            self._client = redis.Redis(connection_pool=self._pool)
-            # Test connection
-            await self._client.ping()
+            client = redis.Redis(connection_pool=pool)
+            try:
+                await client.ping()
+            except BaseException:
+                await client.aclose(close_connection_pool=True)
+                raise
+            self._pool = pool
+            self._client = client
             logger.info("Redis connection established")
 
     async def disconnect(self) -> None:
         """Close Redis connection pool."""
-        if self._client:
-            await self._client.close()
+        async with self._lifecycle_lock:
+            client = self._client
             self._client = None
-        if self._pool:
-            await self._pool.disconnect()
             self._pool = None
-            logger.info("Redis connection closed")
+            if client is not None:
+                await client.aclose(close_connection_pool=True)
+                logger.info("Redis connection closed")
 
     @property
     def client(self) -> redis.Redis:
@@ -447,13 +461,16 @@ class RedisClient:
                 if isinstance(value, BaseModel):
                     value = value.model_dump(mode="json")
                 serialized[key] = json.dumps(value, default=str)
-            await self.client.mset(serialized)
-            if ttl_value:
-                for key in values.keys():
-                    await self.client.expire(key, ttl_value)
+            async with self.client.pipeline(transaction=True) as pipeline:
+                for key, value in serialized.items():
+                    if ttl_value < 0:
+                        pipeline.delete(key)
+                    else:
+                        pipeline.set(key, value, ex=ttl_value or None)
+                await pipeline.execute()
             return True
         except (redis.RedisError, RuntimeError) as e:
-            logger.warning(f"Redis MSET error: {e}")
+            logger.warning(f"Redis batch SET error: {e}")
             return False
 
     async def get_model(self, key: str, model_class: type[T]) -> Optional[T]:

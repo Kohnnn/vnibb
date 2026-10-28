@@ -20,20 +20,27 @@ export function ResearchShareControls({ buildBundle }: { buildBundle: () => Rese
 
     useEffect(() => {
         let active = true;
-        requestGeneration.current += 1;
+        const generation = ++requestGeneration.current;
         setShares([]);
         setPreview(null);
         setConfirmed(false);
         setRecipients('');
         setError('');
         setBusy(false);
-        if (signedIn) void listResearchShares().then((result) => { if (active) setShares(result); }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : 'Share history unavailable.'); });
+        if (signedIn) void listResearchShares().then((result) => {
+            if (!active) return;
+            setShares((current) => {
+                if (!current.length) return result;
+                const currentIds = new Set(current.map((share) => share.share_id));
+                return [...current, ...result.filter((share) => !currentIds.has(share.share_id))];
+            });
+        }).catch((cause: unknown) => { if (active && generation === requestGeneration.current) setError(cause instanceof Error ? cause.message : 'Share history unavailable.'); });
         return () => { active = false; requestGeneration.current += 1; };
     }, [signedIn, user?.id]);
 
     async function create() {
         if (!signedIn || !preview || !confirmed) return;
-        const generation = requestGeneration.current;
+        let generation = requestGeneration.current;
         setBusy(true);
         setError('');
         try {
@@ -41,6 +48,7 @@ export function ResearchShareControls({ buildBundle }: { buildBundle: () => Rese
             if (!recipientIds.length || recipientIds.length > 20 || recipientIds.some((id) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))) throw new Error('Enter 1–20 recipient account UUIDs.');
             const share = await createResearchShare(preview.bundle, recipientIds, new Date(Date.now() + days * 86400000).toISOString());
             if (generation !== requestGeneration.current) return;
+            generation = ++requestGeneration.current;
             setShares((current) => [share, ...current]);
             setPreview(null);
             setConfirmed(false);
@@ -50,12 +58,13 @@ export function ResearchShareControls({ buildBundle }: { buildBundle: () => Rese
 
     async function revoke(id: string) {
         if (!signedIn) return;
-        const generation = requestGeneration.current;
+        let generation = requestGeneration.current;
         setBusy(true);
         setError('');
         try {
             await revokeResearchShare(id);
             if (generation !== requestGeneration.current) return;
+            generation = ++requestGeneration.current;
             setShares((current) => current.map((share) => share.share_id === id ? { ...share, revoked_at: new Date().toISOString() } : share));
         } catch (cause) { if (generation === requestGeneration.current) setError(cause instanceof Error ? cause.message : 'Could not revoke share.'); }
         finally { if (generation === requestGeneration.current) setBusy(false); }

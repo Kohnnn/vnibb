@@ -35,8 +35,8 @@ const DEFAULTS = {
 export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
 
-  const { data: ttm, isLoading: ttmLoading } = useTTMSnapshot(upperSymbol, Boolean(upperSymbol))
-  const { data: quote } = useStockQuote(upperSymbol, Boolean(upperSymbol))
+  const { data: ttm, isLoading: ttmLoading, dataUpdatedAt: ttmUpdatedAt } = useTTMSnapshot(upperSymbol, Boolean(upperSymbol))
+  const { data: quote, dataUpdatedAt: quoteUpdatedAt } = useStockQuote(upperSymbol, Boolean(upperSymbol))
 
   // Seed base FCF from TTM cash flow (operating cash flow minus capex), with
   // graceful fallbacks. All values are user-editable below.
@@ -50,7 +50,16 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
     return null
   }, [ttm])
 
-  const currentPrice = quote?.price ?? null
+  const rawPrice = quote?.price ?? null
+  const quotePriceUnit = quote?.price_unit
+  // The DCF intrinsic value is denominated in VND. Only an explicitly
+  // VND-confirmed quote may feed the upside comparison and reverse-DCF solve;
+  // `index_points` / `unknown` quotes are a different scale and would fabricate
+  // a meaningless per-share comparison.
+  const comparableVndPrice =
+    quotePriceUnit === 'VND' && typeof rawPrice === 'number' && Number.isFinite(rawPrice) && rawPrice > 0
+      ? rawPrice
+      : null
 
   const [baseFcf, setBaseFcf] = useState<number>(0)
   const [growthRate, setGrowthRate] = useState(DEFAULTS.growthRate)
@@ -93,24 +102,28 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
 
   const result = useMemo(() => runDcf(assumptions), [assumptions])
   const impliedGrowth = useMemo(
-    () => (currentPrice ? solveImpliedGrowth(assumptions, currentPrice) : null),
-    [assumptions, currentPrice],
+    () => (comparableVndPrice ? solveImpliedGrowth(assumptions, comparableVndPrice) : null),
+    [assumptions, comparableVndPrice],
   )
 
   const upside =
-    currentPrice && currentPrice > 0 && result.intrinsicPerShare !== null
-      ? ((result.intrinsicPerShare - currentPrice) / currentPrice) * 100
+    comparableVndPrice && result.intrinsicPerShare !== null
+      ? ((result.intrinsicPerShare - comparableVndPrice) / comparableVndPrice) * 100
       : null
 
   useEffect(() => {
     onDataChange?.({
       __widgetRuntime: {
-        layoutHint: { empty: false, compactHeight: 7 },
+        layoutHint: { empty:false, compactHeight: 7 },
         provenance: {
           sourceLabel: 'Valuation Lab (user assumptions + TTM)',
           apiGroup: '/equity',
           endpoint: `/equity/${upperSymbol}/ttm`,
-          localOnly: true,
+          // Source observation is not exposed by the TTM/quote endpoints, so the
+          // as-of stays unknown; only the retrieval receipt is recorded.
+          updatedAt: null,
+          fetchedAt: Math.max(ttmUpdatedAt || 0, quoteUpdatedAt || 0) || null,
+          localOnly:true,
         },
       },
       assumptions,
@@ -118,12 +131,13 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
         intrinsicPerShare: result.intrinsicPerShare,
         enterpriseValue: result.enterpriseValue,
         equityValue: result.equityValue,
-        currentPrice,
+        currentPrice: rawPrice,
+        priceUnit: quotePriceUnit,
         upsidePct: upside,
         impliedGrowth,
       },
     })
-  }, [onDataChange, upperSymbol, assumptions, result, currentPrice, upside, impliedGrowth])
+  }, [onDataChange, upperSymbol, assumptions, result, rawPrice, quotePriceUnit, upside, impliedGrowth, ttmUpdatedAt, quoteUpdatedAt])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to value" icon={<Calculator size={18} />} />
@@ -145,7 +159,7 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
         {/* Headline result */}
         <div className="grid grid-cols-3 gap-2">
           <Result label="Intrinsic / share" value={result.intrinsicPerShare} />
-          <Result label="Current price" value={currentPrice} />
+          <Result label="Current price" value={rawPrice} />
           <Result
             label="Upside"
             value={upside}
@@ -153,6 +167,12 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
             tone={upside === null ? undefined : upside >= 0 ? 'text-emerald-400' : 'text-red-400'}
           />
         </div>
+
+        {rawPrice !== null && rawPrice > 0 && quotePriceUnit !== 'VND' && (
+          <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 px-2 py-1 text-[10px] text-[var(--text-muted)]">
+            Quote unit {quotePriceUnit === 'index_points' ? 'index points' : 'unconfirmed'}: current price is excluded from upside and reverse DCF because DCF values are in VND.
+          </div>
+        )}
 
         {result.warning && (
           <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
@@ -202,7 +222,7 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
         </p>
       </div>
 
-      <WidgetMeta className="px-1 pt-1" sourceLabel="TTM + user assumptions" align="right" />
+      <WidgetMeta updatedAt={null} fetchedAt={Math.max(ttmUpdatedAt || 0, quoteUpdatedAt || 0) || null} className="px-1 pt-1" sourceLabel="TTM + user assumptions" align="right" />
     </div>
   )
 }

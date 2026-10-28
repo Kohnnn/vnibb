@@ -1,4 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import type { UseQueryResult } from '@tanstack/react-query';
+import type { FinancialRatiosResponse } from '@/types/equity';
+import type { ScreenerResponse } from '@/types/screener';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { useFinancialRatios, useProfile, useScreenerData } from '@/lib/queries';
 import { PriceChartWidget } from '@/components/widgets/PriceChartWidget';
@@ -56,7 +59,7 @@ describe('PriceChartWidget', () => {
     mockUseScreenerData.mockReturnValue({
       ...mockQueryDefaults(),
       data: {
-        data: [{ symbol: 'FPT', pe: 18.5, pb: 3.2, roe: 0.18, dividend_yield: 0.03 }],
+        data: [{ ticker: 'FPT', pe: 18.5, pb: 3.2, roe: 0.18, dividend_yield: 0.03, ratio_units: { dividend_yield: 'percent' } }],
       },
     } as any);
     mockUseProfile.mockReturnValue({
@@ -65,13 +68,43 @@ describe('PriceChartWidget', () => {
     } as any);
     mockUseFinancialRatios.mockReturnValue({
       ...mockQueryDefaults(),
-      data: [{ period: 'FY2024', pe: 18.5, pb: 3.2, roe: 0.18, dividend_yield: 0.03 }],
+      data: { symbol: 'FPT', count: 1, data: [{ symbol: 'FPT', period: '2024', pe: 18.5, pb: 3.2, roe: 0.18, dividend_yield: 0.03, ratio_units: { dividend_yield: 'percent' } }] },
     } as any);
 
     render(<PriceChartWidget id="chart-1" symbol="FPT" />);
 
     expect(screen.getByTestId('tradingview-chart')).toBeInTheDocument();
     expect(screen.getByText('Fundamentals Snapshot')).toBeInTheDocument();
+  });
+
+  test.each([
+    ['certified ratio takes precedence', 'percent', 0.25, 'percent', '0.25%'],
+    ['certified zero remains zero', 'percent', 0, 'percent', '0.00%'],
+    ['unknown ratio falls back to certified screener', 'unknown', 0.25, 'percent', '0.75%'],
+    ['missing ratio units fall back to certified screener', undefined, 0.25, 'percent', '0.75%'],
+    ['unknown units are unavailable', 'unknown', 0.25, 'unknown', '-'],
+    ['missing units are unavailable', undefined, 0.25, undefined, '-'],
+  ] as const)('renders dividend yield when %s', (_name, ratioUnit, ratioYield, screenerUnit, expected) => {
+    // These query fixtures omit React Query state that the component never reads.
+    const ratiosQuery = {
+      ...mockQueryDefaults(),
+      data: { symbol: 'FPT', count: 1, data: [{ symbol: 'FPT', period: '2025', dividend_yield: ratioYield,
+        ratio_units: ratioUnit === undefined ? undefined : { dividend_yield: ratioUnit } }] },
+    } as unknown as UseQueryResult<FinancialRatiosResponse, Error>;
+    const screenerQuery = {
+      ...mockQueryDefaults(),
+      data: { data: [{ ticker: 'FPT', pe: 18.5, dividend_yield: 0.75,
+        ratio_units: screenerUnit === undefined ? undefined : { dividend_yield: screenerUnit } }] },
+    } as unknown as UseQueryResult<ScreenerResponse, Error>;
+    mockUseFinancialRatios.mockReturnValue(ratiosQuery);
+    mockUseScreenerData.mockReturnValue(screenerQuery);
+
+    render(<PriceChartWidget id="chart-1" symbol="FPT" />);
+
+    const yieldCard = screen.getByText('Dividend Yield').parentElement!;
+    expect(within(yieldCard).getByText(expected)).toBeInTheDocument();
+    expect(screen.queryByText('25.00%')).not.toBeInTheDocument();
+    expect(screen.queryByText('75.00%')).not.toBeInTheDocument();
   });
 
   test('renders loading skeleton while metrics are loading', () => {

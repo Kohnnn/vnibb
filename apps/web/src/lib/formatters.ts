@@ -39,6 +39,25 @@ export function formatVND(value: number | null | undefined, options?: {
     return `${sign}${prefix}${absValue.toFixed(decimals)}`;
 }
 
+export function formatDividendPayout(row: {
+    cash_dividend?: number | null;
+    stock_dividend?: number | null;
+    dividend_ratio?: number | string | null;
+    value?: number | null;
+}): string {
+    const cash = row.cash_dividend;
+    const stock = row.stock_dividend;
+    if (cash != null && cash !== 0 && stock != null && stock !== 0) {
+        return `${formatVND(cash)} + ${stock.toFixed(2)}% stock`;
+    }
+    if (stock != null && stock !== 0) return `${stock.toFixed(2)}% stock`;
+    if (cash != null) return formatVND(cash);
+    if (stock != null) return `${stock.toFixed(2)}% stock`;
+    if (row.dividend_ratio != null) return String(row.dividend_ratio);
+    if (row.value != null) return formatVND(row.value);
+    return '-';
+}
+
 /**
  * Format a percentage value
  * Example: 0.1523 → "15.23%", -0.05 → "-5.00%"
@@ -54,23 +73,16 @@ export function formatPercent(value: number | null | undefined, decimals = 2): s
     return `${percent >= 0 ? '+' : ''}${formatted}%`;
 }
 
-export function normalizeDividendYield(value: number | null | undefined): number | null {
-    if (value === null || value === undefined) return null;
-    if (!Number.isFinite(value) || value < 0) return null;
-
-    let percent = Math.abs(value) <= 1 ? value * 100 : value;
-    if (percent > 100 && percent / 100 <= 50) {
-        percent /= 100;
-    }
-
-    return percent <= 50 ? percent : null;
+export function readDividendYield(value: unknown, unit: unknown): number | null {
+    if (unit !== 'percent') return null;
+    if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null;
+    const percent = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(percent) && percent >= 0 ? percent : null;
 }
 
 export function formatDividendYield(value: number | null | undefined, decimals = 2): string {
-    const percent = normalizeDividendYield(value);
-    if (percent === null) return '-';
-
-    return `${percent.toFixed(decimals)}%`;
+    if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return '-';
+    return `${value.toFixed(decimals)}%`;
 }
 
 /**

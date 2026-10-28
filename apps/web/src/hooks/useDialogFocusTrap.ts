@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from 'react'
 
+const activeDialogs: HTMLElement[] = []
+
 const FOCUSABLE_SELECTOR = [
   'a[href]',
   'button:not([disabled])',
@@ -28,6 +30,10 @@ export function useDialogFocusTrap<T extends HTMLElement>({
   onClose?: () => void
 }) {
   const dialogRef = useRef<T | null>(null)
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
 
   useEffect(() => {
     if (!enabled || typeof document === 'undefined' || typeof window === 'undefined') {
@@ -43,7 +49,11 @@ export function useDialogFocusTrap<T extends HTMLElement>({
       ? document.activeElement
       : null
 
+    activeDialogs.push(dialog)
+    const isTopDialog = () => activeDialogs[activeDialogs.length - 1] === dialog
+
     const focusDialog = () => {
+      if (!isTopDialog()) return
       const firstFocusable = getFocusableElements(dialog)[0]
       ;(firstFocusable || dialog).focus({ preventScroll: true })
     }
@@ -51,10 +61,11 @@ export function useDialogFocusTrap<T extends HTMLElement>({
     const focusTimeout = window.setTimeout(focusDialog, 0)
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && onClose) {
+      if (!isTopDialog()) return
+      if (event.key === 'Escape' && onCloseRef.current) {
         event.preventDefault()
         event.stopPropagation()
-        onClose()
+        onCloseRef.current()
         return
       }
 
@@ -88,7 +99,7 @@ export function useDialogFocusTrap<T extends HTMLElement>({
     }
 
     const handleFocusIn = (event: FocusEvent) => {
-      if (event.target instanceof Node && !dialog.contains(event.target)) {
+      if (isTopDialog() && event.target instanceof Node && !dialog.contains(event.target)) {
         focusDialog()
       }
     }
@@ -100,11 +111,13 @@ export function useDialogFocusTrap<T extends HTMLElement>({
       window.clearTimeout(focusTimeout)
       dialog.removeEventListener('keydown', handleKeyDown)
       document.removeEventListener('focusin', handleFocusIn)
-      if (previouslyFocused && document.contains(previouslyFocused)) {
+      const wasTopDialog = isTopDialog()
+      activeDialogs.splice(activeDialogs.lastIndexOf(dialog), 1)
+      if (wasTopDialog && previouslyFocused && document.contains(previouslyFocused)) {
         previouslyFocused.focus({ preventScroll: true })
       }
     }
-  }, [enabled, onClose])
+  }, [enabled])
 
   return dialogRef
 }

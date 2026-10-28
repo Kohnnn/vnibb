@@ -9,11 +9,11 @@ jest.mock('@/lib/queries', () => ({
 }));
 
 jest.mock('@/components/ui/WidgetContainer', () => ({
-  WidgetContainer: ({ children, headerActions }: { children: React.ReactNode; headerActions?: React.ReactNode }) => <div>{headerActions}{children}</div>,
+  WidgetContainer: ({ children, headerActions, exportData }: { children: React.ReactNode; headerActions?: React.ReactNode; exportData?: unknown }) => <div>{headerActions}{children}<output data-testid="financial-export">{JSON.stringify(exportData)}</output></div>,
 }));
 
 jest.mock('@/components/ui/WidgetMeta', () => ({
-  WidgetMeta: () => null,
+  WidgetMeta: ({ isCached }: { isCached?: boolean }) => isCached ? <span>Cached snapshot</span> : null,
 }));
 
 jest.mock('@/components/ui/widget-skeleton', () => ({
@@ -72,10 +72,10 @@ const statementResponse = {
   ],
 };
 
-function renderWidget() {
+function renderWidget(onDataChange?: (data: WidgetDataPayload) => void) {
   return render(
     <UnitProvider>
-      <FinancialRatiosWidget id="ratios-1" symbol="FPT" />
+      <FinancialRatiosWidget id="ratios-1" symbol="FPT" onDataChange={onDataChange} />
     </UnitProvider>,
   );
 }
@@ -100,6 +100,102 @@ describe('FinancialRatiosWidget period columns', () => {
     jest.clearAllMocks();
     mockUseFinancialRatios.mockReturnValue(queryResult(ratiosResponse));
     mockUseIncomeStatement.mockReturnValue(queryResult(statementResponse));
+  });
+
+  test('discloses the primary failure while retaining fallback ratios and stale metadata', async () => {
+    const warning = 'Vietcap IQ unavailable; showing stored VCI ratios.';
+    const onDataChange = jest.fn();
+    mockUseFinancialRatios.mockReturnValue(queryResult({ ...ratiosResponse, error: warning }));
+
+    renderWidget(onDataChange);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(warning);
+    expect(screen.getByText('Cached snapshot')).toBeInTheDocument();
+    await waitFor(() => expect(rowValues(screen.getByText(/^P\/E$/i))).toContain('18.40'));
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      __widgetRuntime: expect.objectContaining({ provenance: expect.objectContaining({ stale: true }) }),
+    }));
+  });
+
+  test('discloses an HTTP timeout while retaining ratios and their original receipt time', async () => {
+    const message = 'Request timed out after 30 seconds. The server is slow or unavailable.';
+    const onDataChange = jest.fn();
+    mockUseFinancialRatios.mockReturnValue({
+      ...queryResult(ratiosResponse, new Error(message)),
+      dataUpdatedAt: 1792726551022,
+    });
+
+    renderWidget(onDataChange);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
+    expect(screen.getByText('Cached snapshot')).toBeInTheDocument();
+    await waitFor(() => expect(rowValues(screen.getByText(/^P\/E$/i))).toContain('18.40'));
+    expect(screen.queryByText('No ratio data for FPT')).not.toBeInTheDocument();
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      __widgetRuntime: expect.objectContaining({
+        provenance: expect.objectContaining({
+          updatedAt: null, fetchedAt: 1792726551022, stale: true, warnings: [message],
+        }),
+      }),
+    }));
+  });
+
+  test('shows the response failure instead of an ordinary empty state when no ratios are usable', () => {
+    const warning = 'Vietcap IQ ratios unavailable and no stored ratios exist.';
+    mockUseFinancialRatios.mockReturnValue(queryResult({ data: [], error: warning }));
+
+    renderWidget();
+
+    expect(screen.getByText(warning)).toBeInTheDocument();
+    expect(screen.queryByText('No ratio data for FPT')).not.toBeInTheDocument();
+  });
+
+  test('renders canonical low percentage points without magnitude conversion', async () => {
+    mockUseFinancialRatios.mockReturnValue(queryResult({
+      symbol: 'FPT', count: 1, data: [{ period: '2025', roe: 0.25, dividend_yield: 0.25,
+        ratio_units: { roe: 'percent', dividend_yield: 'percent' } }],
+    }));
+    mockUseIncomeStatement.mockReturnValue(queryResult(undefined));
+
+    renderWidget();
+
+    await waitFor(() => expect(rowValues(screen.getByText('ROE'))).toContain('0.25%'));
+    expect(rowValues(screen.getByText('Dividend Yield'))).toContain('0.25%');
+    expect(screen.queryByText('25.00%')).not.toBeInTheDocument();
+  });
+
+  test('withholds dividend yield when its source unit is unknown', () => {
+    mockUseFinancialRatios.mockReturnValue(queryResult({ data: [{ period: '2025', pe: 14.64,
+      dividend_yield: 0.25, ratio_units: { dividend_yield: 'unknown' } }] }));
+    mockUseIncomeStatement.mockReturnValue(queryResult(undefined));
+    renderWidget();
+    expect(screen.queryByText('Dividend Yield')).not.toBeInTheDocument();
+    expect(screen.queryByText('25.00%')).not.toBeInTheDocument();
+  });
+
+  test.each([
+    ['percent', 0.25, '0.25%'],
+    ['percent', 0, '0.00%'],
+    ['percent', 632.57, '632.57%'],
+    ['fraction', 0.25, null],
+    ['unknown', 0.25, null],
+    [undefined, 0.25, null],
+  ])('admits payout only as canonical percent (%s, %s)', (unit, value, expected) => {
+    mockUseFinancialRatios.mockReturnValue(queryResult({ data: [{ period: '2025', pe: 14.64,
+      payout_ratio: value, ratio_units: unit === undefined ? {} : { payout_ratio: unit } }] }));
+    mockUseIncomeStatement.mockReturnValue(queryResult(undefined));
+    const onDataChange = jest.fn();
+    renderWidget(onDataChange);
+    if (expected === null) {
+      expect(screen.queryByText('Payout Ratio')).not.toBeInTheDocument();
+      expect(JSON.parse(screen.getByTestId('financial-export').textContent!)[0].payout_ratio).toBeNull();
+      expect(onDataChange.mock.calls.at(-1)?.[0].data[0].payout_ratio).toBeNull();
+    } else {
+      expect(rowValues(screen.getByText('Payout Ratio'))).toContain(expected);
+      expect(JSON.parse(screen.getByTestId('financial-export').textContent!)[0].payout_ratio).toBe(value);
+      expect(onDataChange.mock.calls.at(-1)?.[0].data[0].payout_ratio).toBe(value);
+    }
+    expect(screen.queryByText('25.00%')).not.toBeInTheDocument();
   });
 
   // The columns are the statement panels' window verbatim — same headings, same newest-only
@@ -163,7 +259,7 @@ describe('FinancialRatiosWidget period columns', () => {
     expect(mockUseIncomeStatement).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'year', enabled: true }));
   });
 
-  test('shows TTM ratios after switching from FY with cached annual statement headings', async () => {
+  test('discloses unsupported TTM instead of showing cached or latest-period ratios', async () => {
     mockUseFinancialRatios.mockImplementation((_symbol, options) => queryResult(
       options?.period === 'TTM'
         ? { symbol: 'FPT', count: 1, data: [{ period: 'TTM-2026', pe: 22.75 }] }
@@ -175,9 +271,10 @@ describe('FinancialRatiosWidget period columns', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'TTM' }));
 
-    await waitFor(() => expect(headerLabels()).toContain('TTM 2026'));
-    expect(rowValues(screen.getByText(/^P\/E$/i))).toContain('22.75');
-    expect(screen.queryByText('No renderable ratio metrics for FPT')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('TTM ratios are not supported')).toBeInTheDocument());
+    expect(headerLabels()).toEqual([]);
+    expect(screen.queryByText('22.75')).not.toBeInTheDocument();
+    expect(mockUseFinancialRatios).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'TTM', enabled: false }));
     expect(mockUseIncomeStatement).toHaveBeenCalledWith('FPT', expect.objectContaining({ enabled: false }));
   });
 });

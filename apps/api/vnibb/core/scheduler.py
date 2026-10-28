@@ -137,6 +137,14 @@ async def get_job_status(session) -> dict:
                          if row["last_outcome"] in {"failed", "timeout"}},
     }
 
+class HistoricalCatchupIncomplete(RuntimeError):
+    """Only bounded acquisition counters may enter the public scheduler receipt."""
+
+    def __init__(self, summary):
+        counters = ("failed", "empty", "primary_failures", "fallbacks", "succeeded", "pending")
+        super().__init__("Mongo historical catch-up " + " ".join(f"{key}={int(summary.get(key, 0))}" for key in counters))
+
+
 DAILY_SYNC_TIMEOUT_SECONDS = 2 * 60 * 60
 DAILY_TRADING_TIMEOUT_SECONDS = 2 * 60 * 60
 SUPPLEMENTAL_SYNC_TIMEOUT_SECONDS = 90 * 60
@@ -160,7 +168,7 @@ DATA_QUALITY_TIMEOUT_SECONDS = 15 * 60
 # gets a much longer budget than any provider-backed job.
 RETENTION_CLEANUP_TIMEOUT_SECONDS = 45 * 60
 # Catalogue debris drains in ``MARKET_RETENTION_BATCH`` chunks. The sweep
-# re-runs daily and resumes where it stopped, so a large backlog clears over
+# re-runs hourly and resumes where it stopped, so a large backlog clears over
 # several cycles instead of holding one long transaction.
 PREDICTION_MARKET_CATALOGUE_RETENTION_TIMEOUT_SECONDS = 30 * 60
 PREDICTION_MARKET_CATALOGUE_RETENTION_BATCHES = 12
@@ -283,7 +291,8 @@ async def _run_guarded_job(
             elapsed = (datetime.utcnow() - started_at).total_seconds()
             pending = sum(getattr(stage, "pending_count", 0) for stage in stages)
             if any(getattr(stage, "complete", True) is False for stage in stages):
-                await _record_job_outcome(job_name, "partial", f"progress saved; pending acquisitions={pending}")
+                detail = f"progress saved; pending acquisitions={pending}" if pending else "progress saved; work remains"
+                await _record_job_outcome(job_name, "partial", detail)
                 return
             await _record_job_outcome(job_name, "ok", f"completed in {elapsed:.1f}s")
             logger.info("%s completed in %.1fs", job_name, elapsed)
@@ -303,7 +312,8 @@ async def _run_guarded_job(
             raise
         except Exception as exc:
             elapsed = (datetime.utcnow() - started_at).total_seconds()
-            await _record_job_outcome(job_name, "failed", type(exc).__name__)
+            detail = str(exc) if isinstance(exc, HistoricalCatchupIncomplete) else type(exc).__name__
+            await _record_job_outcome(job_name, "failed", detail)
             logger.error(
                 "%s failed after %.1fs: %s",
                 job_name,
@@ -342,10 +352,9 @@ def configure_scheduler():
     from vnibb.services.data_pipeline import (
         run_daily_trading_sync,
         run_hourly_news_sync,
-        run_intraday_sync,
     )
     from vnibb.services.data_quality import run_scheduled_data_quality_check
-    from vnibb.services.realtime_pipeline import get_realtime_pipeline
+    from vnibb.services.realtime_pipeline import get_realtime_pipeline, run_intraday_sync
     from vnibb.services.sync_all_data import run_daily_market_sync, run_supplemental_company_sync
 
     scheduler = get_scheduler()
@@ -490,19 +499,22 @@ def configure_scheduler():
     logger.info("Scheduled: nightly_price_backfill at 10:00 UTC (5:00 PM VNT)")
 
     # =========================================================================
-    # Mongo EOD Daily Sync - 5:15 PM VNT (10:15 AM UTC)
-    # Advances the canonical Mongo `market_prices_eod` corpus, which otherwise
-    # only ever moved via operator-run backfill scripts. Runs after the Postgres
-    # daily sync + nightly backfill so upstream is warm. Bounded rolling window
-    # keeps it cheap; idempotent upserts keyed on (symbol, tradeDate, source).
+    # Vietcap IQ Daily Sync - 5:15 PM VNT (10:15 AM UTC)
+    # Refreshes listings, bounded recent EOD, and the oldest 50 stock financial
+    # symbols. Writes source envelopes plus admitted PostgreSQL observations.
+    # Free VCI EOD is supplementary; primary failures remain failed outcomes.
+    # Existing natural keys and archived source records remain intact.
     # =========================================================================
     async def guarded_mongo_eod_sync():
         from vnibb.services.mongo_eod_sync import run_mongo_eod_sync
 
         async def sync_and_check_outcome():
             summary = await run_mongo_eod_sync()
-            if summary["failures"]:
-                raise RuntimeError(f"Mongo EOD sync completed with {summary['failures']} failed symbols")
+            if summary["failures"] or summary.get("primary_failures", 0):
+                raise RuntimeError(
+                    f"Mongo IQ sync completed with {summary['failures']} failures and "
+                    f"{summary.get('primary_failures', 0)} unavailable primary EOD requests"
+                )
 
         await _run_guarded_job(
             "mongo_eod_sync",
@@ -514,13 +526,62 @@ def configure_scheduler():
         guarded_mongo_eod_sync,
         trigger=CronTrigger(hour=10, minute=15, timezone="UTC"),
         id="mongo_eod_sync",
-        name="Mongo EOD Daily Sync",
+        name="Mongo Vietcap IQ Daily Sync",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
         misfire_grace_time=300,
     )
     logger.info("Scheduled: mongo_eod_sync at 10:15 UTC (5:15 PM VNT)")
+
+    async def guarded_mongo_eod_catchup():
+        from vnibb.services.mongo_eod_sync import run_mongo_eod_catchup
+        from vnibb.services.sync_all_data import SyncResult
+
+        async def catchup_and_check_outcome():
+            summary = await run_mongo_eod_catchup(max_symbols=50, window_days=30)
+            failed = int(summary.get("failed", 0))
+            empty = int(summary.get("empty", 0))
+            primary_failures = int(summary.get("primary_failures", 0))
+            pending = int(summary.get("pending", 0))
+            if failed or empty or primary_failures:
+                raise HistoricalCatchupIncomplete(summary)
+            return SyncResult(
+                failed == 0 and empty == 0, int(summary.get("succeeded", 0)), failed + empty,
+                0, [], bool(summary.get("complete", False)), pending,
+            )
+
+        await _run_guarded_job("mongo_eod_catchup", catchup_and_check_outcome, MONGO_EOD_SYNC_TIMEOUT_SECONDS)
+
+    # Separate historical owner: at most 50 symbols × one 30-day window daily.
+    scheduler.add_job(
+        guarded_mongo_eod_catchup,
+        trigger=CronTrigger(hour=12, minute=15, timezone="UTC"),
+        id="mongo_eod_catchup",
+        name="Mongo Vietcap IQ Historical Catch-up",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    logger.info("Scheduled: mongo_eod_catchup at 12:15 UTC (7:15 PM VNT)")
+
+    async def guarded_iq_reference_sync():
+        from vnibb.services.sync_all_data import run_iq_reference_sync
+
+        await _run_guarded_job("iq_reference_sync", run_iq_reference_sync, 11 * 60)
+
+    scheduler.add_job(
+        guarded_iq_reference_sync,
+        trigger=CronTrigger(hour=14, minute=15, timezone="UTC"),
+        id="iq_reference_sync",
+        name="Vietcap IQ Reference Continuation",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    logger.info("Scheduled: iq_reference_sync at 14:15 UTC (9:15 PM VNT)")
 
     # =========================================================================
     # Prediction Market Ingestion - Every 5 minutes during market hours
@@ -780,8 +841,8 @@ def configure_scheduler():
 
     # =========================================================================
     # Supplemental Company Sync - After close / off hours
-    # Rotates shareholders, officers, subsidiaries, and broad company news.
-    # Weekend runs process a broader universe.
+    # Full active-universe reference/news/insider continuation with durable receipts.
+    # Weekend capacity increases without resetting progression.
     # =========================================================================
     scheduler.add_job(
         guarded_supplemental_company_sync,
@@ -876,10 +937,9 @@ def start_scheduler():
 
 
 def _maybe_populate_prediction_markets_on_startup() -> None:
-    """Run a one-shot prediction-market populate if the scheduler is starting
-    up and the snapshot tables are still empty. Schedules itself via
-    APScheduler so it doesn't block the boot loop.
-    """
+    """Optionally enqueue restart-only population without changing recurring jobs."""
+    if not settings.prediction_market_populate_on_startup:
+        return
     scheduler = get_scheduler()
 
     async def _populate_now() -> None:
@@ -888,15 +948,16 @@ def _maybe_populate_prediction_markets_on_startup() -> None:
             populate_prediction_markets_now,
         )
 
-        global _last_populate_at, _last_populate_counts
-
         async def _runner() -> None:
+            global _last_populate_at, _last_populate_counts
+
             async with async_session_maker() as session:
                 counts = await populate_prediction_markets_now(session)
             _last_populate_at = datetime.utcnow()
             _last_populate_counts = counts
-            if counts["failed_sources"]:
-                raise RuntimeError("Prediction-market sources failed: " + ", ".join(counts["failed_sources"]))
+            failed_steps = counts["failed_sources"] + counts["failed_snapshots"]
+            if failed_steps:
+                raise RuntimeError("Prediction-market population failed: " + ", ".join(failed_steps))
 
         await _run_guarded_job(
             "populate_prediction_markets_on_startup",
@@ -931,15 +992,15 @@ def schedule_retention_cleanup() -> None:
     so tables grew without bound: ``prediction_markets`` reached 13 M rows /
     9.3 GB, and unbounded reads against it OOM-killed the scheduler every 15
     minutes. Running it nightly at 19:10 UTC (02:10 VNT, after the daily sync
-    window and before the 03:30 host-time backup) keeps the corpus bounded and
-    the backup size predictable.
+    window and before the 03:30 host-time backup) keeps non-price tables bounded.
+    Price history is preserved unless a manual cleanup explicitly includes it.
     """
     from apscheduler.triggers.cron import CronTrigger
 
     from vnibb.services.data_pipeline import data_pipeline
 
     async def _run() -> None:
-        removed = await data_pipeline.run_retention_cleanup(include_price_history=True)
+        removed = await data_pipeline.run_retention_cleanup()
         if removed:
             logger.info("Retention cleanup removed rows: %s", removed)
         else:
@@ -966,24 +1027,26 @@ def schedule_retention_cleanup() -> None:
 
 
 def schedule_prediction_market_catalogue_retention() -> None:
-    """Drain unreadable ``prediction_markets`` debris nightly.
+    """Drain unreadable ``prediction_markets`` debris hourly.
 
     The ingest upserts on ``(source, source_id)`` and never deletes, so every
     contract a provider has since delisted stays forever. Reads only ever serve
     rows refreshed within ``MARKET_FRESHNESS`` inside ``SNAPSHOT_SOURCE_LIMIT``
     per source, which makes the rest provably unreadable while still costing
     disk and index maintenance. This sweep deletes that complement in bounded
-    batches, resuming nightly until the backlog is gone.
+    batches, resuming hourly until the backlog is gone.
     """
     from apscheduler.triggers.cron import CronTrigger
 
     from vnibb.core.database import async_session_maker
     from vnibb.services.prediction_market_catalogue_retention import (
+        has_catalogue_debris,
         purge_catalogue_debris,
     )
     from vnibb.services.prediction_market_policy import MARKET_RETENTION_BATCH
+    from vnibb.services.sync_all_data import SyncResult
 
-    async def _run() -> None:
+    async def _run() -> SyncResult:
         total = 0
         for _ in range(PREDICTION_MARKET_CATALOGUE_RETENTION_BATCHES):
             async with async_session_maker() as session:
@@ -993,7 +1056,10 @@ def schedule_prediction_market_catalogue_retention() -> None:
             # of re-probing a table that has nothing left to remove.
             if receipt["candidates"] < MARKET_RETENTION_BATCH:
                 break
-        logger.info("prediction_market_catalogue_retention removed rows: %s", total)
+        async with async_session_maker() as session:
+            pending = await has_catalogue_debris(session)
+        logger.info("prediction_market_catalogue_retention removed rows: %s; debris_pending=%s", total, pending)
+        return SyncResult(True, total, 0, 0, [], complete=not pending)
 
     async def guarded_prediction_market_catalogue_retention() -> None:
         await _run_guarded_job(
@@ -1005,14 +1071,14 @@ def schedule_prediction_market_catalogue_retention() -> None:
     scheduler = get_scheduler()
     scheduler.add_job(
         guarded_prediction_market_catalogue_retention,
-        trigger=CronTrigger(hour=19, minute=40, timezone="UTC"),
+        trigger=CronTrigger(minute=40, timezone="UTC"),
         id="prediction_market_catalogue_retention",
-        name="Prediction market catalogue retention (daily 19:40 UTC)",
+        name="Prediction market catalogue retention (hourly at :40 UTC)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
     )
-    logger.info("Scheduled: prediction_market_catalogue_retention daily at 19:40 UTC")
+    logger.info("Scheduled: prediction_market_catalogue_retention hourly at :40 UTC")
 
 
 async def shutdown_scheduler() -> bool:

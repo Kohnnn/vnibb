@@ -40,7 +40,8 @@ export function ValuationWidget({ symbol, onDataChange }: ValuationWidgetProps) 
         apiGroup: '/screener',
         endpoint: '/screener/?limit=10',
         sourceLabel: 'Peer snapshot',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate: null,
+        fetchedAt: dataUpdatedAt,
         stale: isFallback,
         extra: peerData ? { peers: peerData.data } : undefined,
       }),
@@ -61,7 +62,8 @@ export function ValuationWidget({ symbol, onDataChange }: ValuationWidgetProps) 
   return (
     <div className="p-4 flex flex-col h-full space-y-3 overflow-hidden">
       <WidgetMeta
-        updatedAt={dataUpdatedAt}
+        updatedAt={null}
+        fetchedAt={dataUpdatedAt}
         isFetching={isFetching && hasData}
         isCached={isFallback}
         note="Peer snapshot"

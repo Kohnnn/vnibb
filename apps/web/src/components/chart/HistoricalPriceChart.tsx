@@ -32,6 +32,14 @@ function formatShortDate(value: string) {
   return `${date.getMonth() + 1}/${String(date.getFullYear()).slice(-2)}`
 }
 
+type CertifiedHistoryUnit = 'VND' | 'index_points'
+
+const PRICE_AXIS_LABELS: Record<CertifiedHistoryUnit, { raw: string; adjusted: string }> = {
+  VND: { raw: 'VND', adjusted: 'Adj. VND' },
+  index_points: { raw: 'Index points', adjusted: 'Adj. Index points' }
+}
+
+
 interface HistoricalPriceChartProps {
   symbol: string
   timeframe?: keyof typeof TIMEFRAME_DAYS
@@ -72,6 +80,19 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
     () => buildChartEventMarkers(companyEventsQuery.data?.data || [], rows, timeframe === '5Y' ? 12 : 8),
     [companyEventsQuery.data?.data, rows, timeframe]
   )
+  // Only per-row markers certify the series. The response-level `unit_status` is
+  // deliberately NOT used to fill a missing marker: deployed payloads have been
+  // observed reporting `confirmed_vnd` alongside mixed-magnitude rows, so metadata
+  // alone cannot certify the axis. A series that is not uniformly certified is
+  // refused whole — dropping the unmarked bars and joining the survivors would
+  // fabricate continuity across the excluded sessions.
+  const historyUnit = useMemo<CertifiedHistoryUnit | null>(() => {
+    if (rows.length === 0) return null
+    const first = rows[0].price_unit
+    if (first !== 'VND' && first !== 'index_points') return null
+    return rows.every((row) => row.price_unit === first) ? first : null
+  }, [rows])
+
 
   if (historyQuery.isLoading && !hasData) {
     return <WidgetSkeleton variant="chart" />
@@ -83,6 +104,15 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
 
   if (!hasData) {
     return <WidgetEmpty message="No historical price data available." />
+  }
+
+  if (historyUnit === null) {
+    return (
+      <WidgetEmpty
+        message="Historical price unit unconfirmed."
+        detail="Unmarked sessions are excluded from the chart; certified VND or index-point rows are required."
+      />
+    )
   }
 
   return (
@@ -134,7 +164,7 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
               axisLine={false}
               tickLine={false}
               domain={['auto', 'auto']}
-              label={{ value: adjustmentMode === 'adjusted' ? 'Adj. VND' : 'VND', angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 10 }}
+              label={{ value: PRICE_AXIS_LABELS[historyUnit][adjustmentMode], angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 10 }}
             />
             <Tooltip
               contentStyle={{ background: 'var(--bg-tooltip)', border: '1px solid var(--border-default)', fontSize: '11px' }}

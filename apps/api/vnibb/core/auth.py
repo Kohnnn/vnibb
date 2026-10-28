@@ -152,7 +152,8 @@ async def _require_verified_session(authorization: str | None, max_ttl_seconds: 
         if payload.get("is_anonymous") is True:
             raise AuthError("Anonymous sessions are not permitted")
         user_id = str(UUID(payload["sub"]))
-        UUID(payload["session_id"])
+        if UUID(payload["session_id"]).int == 0:
+            raise ValueError("Nil session identity")
         issued_at, expires_at = payload["iat"], payload["exp"]
         if (type(issued_at) is not int or type(expires_at) is not int
                 or issued_at > time() or expires_at <= issued_at

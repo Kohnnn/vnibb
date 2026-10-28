@@ -1,17 +1,21 @@
 import { render, screen, act, waitFor } from '@testing-library/react';
-import { useIncomeStatement, useBalanceSheet, useCashFlow, useFinancialRatios } from '@/lib/queries';
+import { useIncomeStatement, useBalanceSheet, useCashFlow, useFinancialRatios, useProfile } from '@/lib/queries';
 import { FinancialsWidget } from '@/components/widgets/FinancialsWidget';
+import { FinancialSnapshotWidget } from '@/components/widgets/FinancialSnapshotWidget';
 import { UnitProvider } from '@/contexts/UnitContext';
+import type { UseQueryResult } from '@tanstack/react-query';
+import type { EquityProfileResponse, IncomeStatementResponse, FinancialRatiosResponse } from '@/types/equity';
 
 jest.mock('@/lib/queries', () => ({
   useIncomeStatement: jest.fn(),
   useBalanceSheet: jest.fn(),
   useCashFlow: jest.fn(),
   useFinancialRatios: jest.fn(),
+  useProfile: jest.fn(),
 }));
 
 jest.mock('@/components/ui/WidgetContainer', () => ({
-  WidgetContainer: ({ children }: { children: any }) => <div>{children}</div>,
+  WidgetContainer: ({ children, exportData }: { children: React.ReactNode; exportData?: unknown }) => <div>{children}<output data-testid="financial-export">{JSON.stringify(exportData)}</output></div>,
 }));
 
 jest.mock('@/components/ui/WidgetMeta', () => ({
@@ -26,6 +30,7 @@ const mockUseIncomeStatement = useIncomeStatement as jest.MockedFunction<typeof 
 const mockUseBalanceSheet = useBalanceSheet as jest.MockedFunction<typeof useBalanceSheet>;
 const mockUseCashFlow = useCashFlow as jest.MockedFunction<typeof useCashFlow>;
 const mockUseFinancialRatios = useFinancialRatios as jest.MockedFunction<typeof useFinancialRatios>;
+const mockUseProfile = useProfile as jest.MockedFunction<typeof useProfile>;
 
 // Mock data for income statement (period format: '2024' for FY mode)
 const mockIncomeResponse = {
@@ -34,12 +39,16 @@ const mockIncomeResponse = {
   data: [
     {
       period: '2024',
+      currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated', flow_basis: 'annual',
+      unit_metadata: { revenue: { source_unit: 'VND', value_unit: 'VND' }, net_income: { source_unit: 'VND', value_unit: 'VND' } },
       revenue: 150_000_000_000_000,
       net_income: 12_000_000_000_000,
       fiscal_year: '2024',
     },
     {
       period: '2023',
+      currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated', flow_basis: 'annual',
+      unit_metadata: { revenue: { source_unit: 'VND', value_unit: 'VND' }, net_income: { source_unit: 'VND', value_unit: 'VND' } },
       revenue: 130_000_000_000_000,
       net_income: 10_000_000_000_000,
       fiscal_year: '2023',
@@ -79,6 +88,7 @@ describe('FinancialsWidget', () => {
     mockUseBalanceSheet.mockReturnValue(makeQueryResult(undefined) as any);
     mockUseCashFlow.mockReturnValue(makeQueryResult(undefined) as any);
     mockUseFinancialRatios.mockReturnValue(makeQueryResult(undefined) as any);
+    mockUseProfile.mockReturnValue(makeQueryResult(undefined) as unknown as UseQueryResult<EquityProfileResponse, Error>);
   });
 
   test('shows loading skeleton while income statement is loading', () => {
@@ -123,6 +133,18 @@ describe('FinancialsWidget', () => {
     });
 
     expect(mockUseFinancialRatios).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'FY', enabled: true }));
+  });
+
+  test.each([['percent', '0.25%'], ['unknown', '—']])('preserves declared dividend percent and withholds %s units', async (unit, expected) => {
+    // The existing query fixture supplies the settled fields consumed by this widget.
+    const result = makeQueryResult({ data: [{ period: '2025', pe: 14.64,
+      dividend_yield: 0.25, ratio_units: { dividend_yield: unit } }] }) as unknown as UseQueryResult<FinancialRatiosResponse, Error>;
+    mockUseFinancialRatios.mockReturnValue(result);
+    renderWithProviders(<FinancialsWidget id="fin-yield" symbol="FPT" />);
+    act(() => screen.getByRole('button', { name: /ratios/i }).click());
+    const row = screen.getByText('Dividend Yield').closest('tr');
+    await waitFor(() => expect(row).toHaveTextContent(expected));
+    expect(row).not.toHaveTextContent('25.00%');
   });
 
   test('shows error state when query fails', () => {
@@ -269,5 +291,129 @@ describe('FinancialsWidget', () => {
       const headers = Array.from(headerRow.querySelectorAll('th')).map((th) => th.textContent?.trim() ?? '');
       expect(headers).toEqual(['Metric', '2018', '2019']);
     });
+  });
+  test('uses backend TTM statements and discloses unsupported ratio TTM', async () => {
+    // The fixture supplies only the fields consumed by the widget, not React Query internals.
+    const result = makeQueryResult({ symbol: 'FPT', count: 1, data: [{ period: 'TTM', revenue: 15,
+      currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated', flow_basis: 'trailing_twelve_months',
+      aggregation_basis: 'four_quarter_flow_sum', source_periods: ['Q4-2025', 'Q3-2025', 'Q2-2025', 'Q1-2025'],
+      unit_metadata: { revenue: { components: Array.from({ length: 4 }, () => ({ value_unit: 'VND', source_unit: 'VND' })),
+        source_periods: ['Q4-2025', 'Q3-2025', 'Q2-2025', 'Q1-2025'], aggregation_basis: 'four_quarter_flow_sum' } },
+    }] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>;
+    mockUseIncomeStatement.mockReturnValue(result);
+    renderWithProviders(<FinancialsWidget id="financial-ttm" symbol="FPT" config={{ periodSyncGroup: null }} />);
+    act(() => screen.getByRole('button', { name: 'TTM' }).click());
+    expect(mockUseIncomeStatement).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'TTM', enabled: true }));
+    await waitFor(() => expect(document.querySelector('thead')).toHaveTextContent('TTM'));
+    expect(screen.getByText('Revenue').closest('tr')).toHaveTextContent('15.00');
+    act(() => screen.getByRole('button', { name: /ratios/i }).click());
+    expect(screen.getByText('TTM ratios are not supported')).toBeInTheDocument();
+    expect(mockUseFinancialRatios).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'TTM', enabled: false }));
+    expect(document.querySelector('table')).toBeNull();
+  });
+
+  test('keeps cost comparisons neutral and earnings labels consistent in the table and note', () => {
+    // Only the statement fields consumed by the widget are needed in this fixture.
+    const result = makeQueryResult({ symbol: 'FPT', count: 2, data: [
+      { period: '2024', currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated', flow_basis: 'annual', cost_of_revenue: -10, net_income: -10,
+        unit_metadata: { cost_of_revenue: { source_unit: 'VND', value_unit: 'VND' }, net_income: { source_unit: 'VND', value_unit: 'VND' } } },
+      { period: '2025', currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated', flow_basis: 'annual', cost_of_revenue: -15, net_income: -5,
+        unit_metadata: { cost_of_revenue: { source_unit: 'VND', value_unit: 'VND' }, net_income: { source_unit: 'VND', value_unit: 'VND' } } },
+    ] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>;
+    mockUseIncomeStatement.mockReturnValue(result);
+    renderWithProviders(<FinancialsWidget id="financial-language" symbol="FPT" config={{ periodSyncGroup: null }} />);
+
+    const costRow = screen.getByText('Cost of Revenue').closest('tr')!;
+    expect(costRow).toHaveTextContent('-50.0%');
+    expect(costRow).not.toHaveTextContent(/profit|loss/i);
+    expect(screen.getByText('Net Income').closest('tr')).toHaveTextContent('loss narrowed +50.0%');
+    expect(screen.getByText(/Growth divides by the absolute prior-period value/)).toHaveTextContent('(loss narrowed)');
+    expect(screen.queryByText(/loss widened/)).not.toBeInTheDocument();
+  });
+
+  test('keeps rejected interest unavailable despite raw aliases while admitting revenue', () => {
+    const result = makeQueryResult({ symbol: 'FPT', count: 1, data: [{
+      period: '2025',
+      currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated', flow_basis: 'annual',
+      revenue: 120_000_000_000,
+      interest_expense: null,
+      unit_metadata: { revenue: { source_unit: 'VND', value_unit: 'VND' }, interest_expense: { unavailable_reason: 'Interest expense unit is unverified' } },
+      raw_data: { interest_expense: 90_000_000_000, interestExpense: 90_000_000_000, chi_phi_lai_vay: 90_000_000_000 },
+    }] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>;
+    mockUseIncomeStatement.mockReturnValue(result);
+
+    renderWithProviders(<FinancialsWidget id="financial-rejected-interest" symbol="FPT" config={{ periodSyncGroup: null }} />);
+
+    const interestCells = screen.getByText('Interest Expense').closest('tr')!.querySelectorAll('td');
+    const revenueCells = screen.getByText('Revenue').closest('tr')!.querySelectorAll('td');
+    expect(interestCells[1]).toHaveTextContent(/^—$/);
+    expect(revenueCells[1]).toHaveTextContent('120.00');
+  });
+
+  test.each([
+    ['missing row evidence', {}],
+    ['conflicting currency', { currency: 'USD' }],
+    ['missing field evidence', { unit_metadata: {} }],
+    ['conflicting field unit', { unit_metadata: { revenue: { source_unit: 'VND', value_unit: 'USD' } } }],
+    ['missing consolidation', { consolidation_basis: undefined }],
+    ['missing flow', { flow_basis: undefined }],
+    ['conflicting flow', { flow_basis: 'single_quarter' }],
+  ])('withholds uncertified monetary rows from display and runtime (%s)', (_reason, override) => {
+    const onDataChange = jest.fn();
+    const certified = { period: '2025', currency: 'VND', value_unit: 'VND',
+      consolidation_basis: 'consolidated', flow_basis: 'annual', revenue: 120_000_000_000,
+      unit_metadata: { revenue: { source_unit: 'VND', value_unit: 'VND' } } };
+    const row = _reason === 'missing row evidence'
+      ? { period: '2025', revenue: certified.revenue }
+      : { ...certified, ...override };
+    mockUseIncomeStatement.mockReturnValue(makeQueryResult({ data: [{ ...certified, period: '2024', revenue: 1 }, row] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>);
+    renderWithProviders(<FinancialsWidget id="financial-unverified-money" symbol="FPT" config={{ periodSyncGroup: null }} onDataChange={onDataChange} />);
+    expect(Array.from(screen.getByText('Revenue').closest('tr')!.querySelectorAll('td')).at(-1)).toHaveTextContent(/^—$/);
+    expect(JSON.stringify(onDataChange.mock.calls.at(-1)?.[0])).not.toContain('120000000000');
+    expect(JSON.parse(screen.getByTestId('financial-export').textContent!)).toContainEqual(expect.objectContaining({ period: '2025', revenue: null }));
+  });
+
+  test.each([[0, '0.00'], [120_000_000_000, '120.00']])('renders admitted monetary value %s without a raw fallback', (revenue, expected) => {
+    mockUseIncomeStatement.mockReturnValue(makeQueryResult({ data: [{ period: '2025', currency: 'VND', value_unit: 'VND',
+      consolidation_basis: 'consolidated', flow_basis: 'annual', revenue,
+      unit_metadata: { revenue: { source_unit: 'VND', value_unit: 'VND' } },
+      raw_data: { interest_expense: 90_000_000_000, financial_expenses: 90_000_000_000 },
+    }] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>);
+    renderWithProviders(<FinancialsWidget id="financial-certified-money" symbol="FPT" config={{ periodSyncGroup: null }} />);
+    expect(screen.getByText('Revenue').closest('tr')!.querySelectorAll('td')[1]).toHaveTextContent(expected);
+    expect(screen.getByText('Interest Expense').closest('tr')!.querySelectorAll('td')[1]).toHaveTextContent(/^—$/);
+  });
+
+  test('snapshot shares strict monetary and payout values with runtime export', () => {
+    const onDataChange = jest.fn();
+    mockUseIncomeStatement.mockReturnValue(makeQueryResult({ data: [{ period: '2025', currency: 'VND', value_unit: 'VND',
+      consolidation_basis: 'consolidated', flow_basis: 'annual', revenue: 120_000_000_000, interest_expense: 90_000_000_000,
+      unit_metadata: { revenue: { source_unit: 'VND', value_unit: 'VND' } },
+      raw_data: { financial_expenses: 80_000_000_000 },
+    }] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>);
+    mockUseFinancialRatios.mockReturnValue(makeQueryResult({ data: [{ period: '2025', payout_ratio: 0.25,
+      ratio_units: { payout_ratio: 'percent' } }] }) as unknown as UseQueryResult<FinancialRatiosResponse, Error>);
+    renderWithProviders(<FinancialSnapshotWidget id="snapshot-admission" symbol="FPT" onDataChange={onDataChange} />);
+    expect(screen.getByText('Revenue').closest('tr')).toHaveTextContent('120.00');
+    expect(screen.getByText('Interest Expense').closest('tr')).toHaveTextContent('—');
+    expect(screen.getByText('Financial Expenses').closest('tr')).toHaveTextContent('—');
+    expect(screen.getByText('DPS/EPS (%)').closest('tr')).toHaveTextContent('0.3%');
+    const published = onDataChange.mock.calls.at(-1)?.[0].data.find((row: { section: string }) => row.section === 'Profit & Loss');
+    expect(published).toEqual(expect.objectContaining({ revenue: 120_000_000_000, interest_expense: null, financial_expenses: null, payout_ratio: 0.25 }));
+    expect(JSON.parse(screen.getByTestId('financial-export').textContent!)).toContainEqual(published);
+  });
+
+  test('excludes conflicting fiscal rows instead of overwriting their values', async () => {
+    // The fixture supplies only the fields consumed by the widget, not React Query internals.
+    const result = makeQueryResult({ symbol: 'FPT', count: 3, data: [
+      { period: '2020', currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated', flow_basis: 'annual', revenue: 10, unit_metadata: { revenue: { source_unit: 'VND', value_unit: 'VND' } } },
+      { period: '2020', currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated', flow_basis: 'annual', revenue: 20, unit_metadata: { revenue: { source_unit: 'VND', value_unit: 'VND' } } },
+      { period: '2021', currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated', flow_basis: 'annual', revenue: 30, unit_metadata: { revenue: { source_unit: 'VND', value_unit: 'VND' } } },
+    ] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>;
+    mockUseIncomeStatement.mockReturnValue(result);
+    renderWithProviders(<FinancialsWidget id="financial-conflict" symbol="FPT" config={{ periodSyncGroup: null }} />);
+    expect(screen.getByText(/1 conflicting periods excluded/)).toBeInTheDocument();
+    expect(screen.queryByText('2020')).not.toBeInTheDocument();
+    expect(screen.getByText('2021')).toBeInTheDocument();
   });
 });

@@ -5,7 +5,6 @@ Provides access to dividend payment history.
 Uses vnstock company.dividends() method.
 """
 
-import asyncio
 import logging
 import math
 from typing import List, Optional
@@ -14,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
+from vnibb.providers.vnstock.runtime import run_reference_provider
 
 logger = logging.getLogger(__name__)
 
@@ -119,48 +119,26 @@ class VnstockDividendsFetcher:
                 return "dividend" in event_type
 
             def _fetch():
-                try:
-                    from vnstock_data.api.company import Company
+                from vnibb.providers.vnstock.runtime import get_company_class, validate_source
 
-                    company = Company(source="VCI", symbol=symbol.upper())
-                    df_events = company.events(event_type=2)
-                    if df_events is not None and len(df_events) > 0:
-                        records = df_events.to_dict(orient="records")
-                        return [r for r in records if _is_dividend_record(r)]
-                except Exception as e:
-                    logger.debug(f"VCI dividends events failed for {symbol}: {e}")
-
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
-
-                Vnstock = get_vnstock_class()
-
-                def _fetch_source(source: str):
-                    stock = Vnstock().stock(symbol=symbol.upper(), source=source)
-                    if not hasattr(stock.company, "dividends"):
-                        raise AttributeError("dividends not supported")
-                    df = stock.company.dividends()
+                company = get_company_class()(symbol=symbol.upper(), source=validate_source(settings.vnstock_source))
+                if hasattr(company, "dividends"):
+                    df = company.dividends()
                     if df is not None and len(df) > 0:
                         return df.to_dict(orient="records")
-                    df_events = stock.company.events() if hasattr(stock.company, "events") else None
+                if hasattr(company, "events"):
+                    df_events = company.events()
                     if df_events is not None and len(df_events) > 0:
-                        records = df_events.to_dict(orient="records")
-                        dividend_records = [r for r in records if _is_dividend_record(r)]
-                        if dividend_records:
-                            return dividend_records
-                    return []
-
-                source = settings.vnstock_source
-                try:
-                    records = _fetch_source(source)
-                    if records:
-                        return records
-                except Exception as e:
-                    logger.debug(f"{source} dividends failed for {symbol}: {e}")
+                        return [r for r in df_events.to_dict(orient="records") if _is_dividend_record(r)]
+                elif not hasattr(company, "dividends"):
+                    raise AttributeError("Dividends are unavailable in free VCI")
 
                 return []
 
-            loop = asyncio.get_event_loop()
-            records = await loop.run_in_executor(None, _fetch)
+            records = await run_reference_provider(
+                _fetch, settings.vnstock_timeout,
+                key=("dividends", symbol.upper(), settings.vnstock_source),
+            )
 
             result = []
             for r in records:

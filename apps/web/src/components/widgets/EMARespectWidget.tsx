@@ -64,7 +64,13 @@ export function EMARespectWidget({ symbol, onDataChange }: EMARespectWidgetProps
     | undefined
   const backendError = typeof data?.error === 'string' ? data.error : ''
 
-  const rows = metric?.ema_levels || []
+  const quality = data?.meta
+  // Only a certified unit status admits the EMA level table; an absent or
+  // mixed/unconfirmed status must not render ordinary-looking price levels
+  // (QA #98).
+  const derivedWithheld = Boolean(data) && (!['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+    || Boolean(quality?.unresolved_excluded_dates?.length))
+  const rows = derivedWithheld ?[] : metric?.ema_levels || []
   const hasData = rows.length > 0
   const quantWarning = extractQuantWarning(data, 'ema_respect')
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
@@ -75,13 +81,14 @@ export function EMARespectWidget({ symbol, onDataChange }: EMARespectWidgetProps
       apiGroup: '/quant',
       endpoint: `/quant/${upperSymbol}?period=${period}&metrics=ema_respect&adjustment_mode=adjusted`,
       sourceLabel: 'vnstock',
-      lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at,
+      lastDataDate: data?.data?.last_data_date ?? null,
+      fetchedAt: dataUpdatedAt,
       adjustmentMode: data?.data?.adjustment_mode ?? 'adjusted',
       derived: true,
       stale: Boolean(error && hasData),
       extra: { period },
     }))
-  }, [data?.data?.adjustment_mode, data?.data?.computed_at, data?.data?.last_data_date, error, hasData, onDataChange, period, upperSymbol])
+  }, [data?.data?.adjustment_mode, data?.data?.last_data_date, dataUpdatedAt, error, hasData, onDataChange, period, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view EMA respect" icon={<Rows3 size={18} />} />
@@ -107,7 +114,7 @@ export function EMARespectWidget({ symbol, onDataChange }: EMARespectWidgetProps
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} EMA20/50/200`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} EMA20/50/200`} align="right" />
         </div>
       </div>
 
@@ -125,7 +132,13 @@ export function EMARespectWidget({ symbol, onDataChange }: EMARespectWidgetProps
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
-        <WidgetEmpty message={backendError || 'No EMA interaction data'} icon={<Rows3 size={18} />} size="compact" />
+        <WidgetEmpty
+          message={derivedWithheld
+            ? 'EMA respect unavailable: historical price units were not certified.'
+            : backendError || 'No EMA interaction data'}
+          icon={<Rows3 size={18} />}
+          size="compact"
+        />
       ) : (
         <>
           <QuantWarningBanner warning={quantWarning} className="mb-2" />

@@ -92,6 +92,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:4000",
         "https://vnibb-web.vercel.app",
         "https://vnibb.vercel.app",
+        "https://web.vnibb.xyz",
         "https://script.google.com",
         "https://googleusercontent.com",
         "https://accounts.google.com",
@@ -169,19 +170,20 @@ class Settings(BaseSettings):
     scheduler_lock_mode: str = "best_effort"
     scheduler_lock_key_prefix: str = "vnibb:scheduler-lock"
     scheduler_lock_ttl_margin_seconds: int = Field(default=60, ge=1, le=3600)
+    prediction_market_populate_on_startup: bool = True
     realtime_streaming_lease_seconds: int = Field(default=8 * 60 * 60, ge=60, le=24 * 60 * 60)
     realtime_streaming_stop_timeout_seconds: int = Field(default=15, ge=1, le=300)
 
     # ==========================================================================
     # VNStock Provider
     # ==========================================================================
-    vnstock_api_key: Optional[str] = None  # Golden Sponsor API key
+    vnstock_api_key: Optional[str] = None  # Retained for deployment compatibility; not a paid runtime selector
     vnstock_runtime_tier: str = "free"
-    vnstock_source: str = "KBS"  # vnstock 4.x sources: KBS, VCI, MSN, FMP
+    vnstock_source: str = "VCI"
     vnstock_timeout: int = Field(default=25, ge=1)  # Request timeout in seconds
-    vnstock_rate_limit_rps: float = 500 / 60  # Global vnstock request budget (500/min)
-    vnstock_reinforcement_rps: float = 50 / 60  # Reserved reinforcement budget (50/min)
-    vnstock_calls_per_minute: Optional[int] = None  # Override per-operation limits
+    vnstock_rate_limit_rps: float = 18 / 60  # Guest allowance: 20/min shared with reinforcement
+    vnstock_reinforcement_rps: float = 2 / 60
+    vnstock_calls_per_minute: Optional[int] = 20  # Per-operation ceiling; global budgets still apply
     big_order_threshold_vnd: float = 10_000_000_000
     intraday_limit: int = 500
     intraday_symbols_per_run: int = 200
@@ -518,37 +520,17 @@ class Settings(BaseSettings):
     @classmethod
     def validate_vnstock_runtime_tier(cls, v: str) -> str:
         tier = (v or "free").strip().lower()
-        if tier not in {"free", "premium"}:
-            raise ValueError("VNSTOCK_RUNTIME_TIER must be 'free' or 'premium'")
+        if tier != "free":
+            raise ValueError("VNSTOCK_RUNTIME_TIER must be 'free'; paid runtimes are disabled")
         return tier
 
     @field_validator("vnstock_source")
     @classmethod
     def validate_vnstock_source(cls, v: str) -> str:
-        """Validate and normalize configured vnstock source.
-
-        vnstock 4.x supports KBS, VCI, MSN, FMP for quote history (verified on
-        the deployed 4.0.4 runtime: `Supported sources: KBS, VCI, MSN, FMP`).
-        TCBS (pre-3.5) and DNSE (pre-4.x) were removed; map the legacy values to
-        a working source instead of crashing at fetch time.
-        """
-        normalized = (v or "KBS").strip().upper()
-        if normalized in {"TCBS", "DNSE"}:
-            logger.warning(
-                "VNSTOCK_SOURCE=%s is no longer supported in vnstock 4.x. Using KBS.",
-                normalized,
-            )
-            return "KBS"
-
-        valid_sources = {"KBS", "VCI", "MSN", "FMP"}
-        if normalized not in valid_sources:
-            logger.warning(
-                "Invalid VNSTOCK_SOURCE '%s'. Falling back to KBS. Allowed values: %s",
-                v,
-                ", ".join(sorted(valid_sources)),
-            )
-            return "KBS"
-
+        """Accept only the approved free VCI source at the configuration boundary."""
+        normalized = (v or "VCI").strip().upper()
+        if normalized != "VCI":
+            raise ValueError("VNSTOCK_SOURCE must be 'VCI'; alternate sources are disabled")
         return normalized
 
     @model_validator(mode="after")

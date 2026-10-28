@@ -6,10 +6,7 @@ ticker so Quant widgets (Seasonality, Sortino Monthly, Drawdown Recovery,
 Risk Dashboard) have a meaningful 5Y window. Today most VN tickers only
 have data from 2024-01-02 forward.
 
-Source priority:
-  1. vnstock_data Golden Sponsor (premium, fast bulk fetch)
-  2. vnstock free tier (slower per-symbol)
-  3. CafeF/VietStock scraper (last resort, manual)
+Source: free vnstock VCI only.
 
 Targets:
   - PostgreSQL `stock_prices` (canonical)
@@ -30,22 +27,28 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 # Ensure the script is runnable both via `python -m vnibb.scripts.*` and
 # direct invocation when launched from the apps/api root.
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+if str(Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from vnibb.core.database import async_session_maker
+from vnibb.core.price_units import (
+    history_price_records,
+    normalize_price_record,
+    persisted_price_source,
+)
 from vnibb.models.stock import Stock, StockPrice
+from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
 
 logger = logging.getLogger("ohlcv_backfill")
 
@@ -124,17 +127,15 @@ async def _list_target_symbols() -> list[tuple[int, str]]:
     return out
 
 
-def _fetch_premium(symbol: str, start_date: date, end_date: date) -> list[dict[str, Any]] | None:
-    """Use vnstock_data Golden Sponsor to fetch daily OHLCV.
 
-    Returns a list of dicts with keys (time, open, high, low, close, volume).
-    Returns None on failure so the caller can fall back to vnstock free.
-    """
+
+def _fetch_vci(symbol: str, start_date: date, end_date: date) -> list[dict[str, Any]] | None:
+    """Fetch daily OHLCV from free VCI, returning None when unavailable."""
 
     try:
-        from vnstock_data import Quote  # type: ignore
-
-        quote = Quote(symbol=symbol)
+        Quote = get_quote_class()
+        source = validate_source("VCI")
+        quote = Quote(symbol=symbol, source=source)
         df = quote.history(
             start=start_date.isoformat(),
             end=end_date.isoformat(),
@@ -142,6 +143,10 @@ def _fetch_premium(symbol: str, start_date: date, end_date: date) -> list[dict[s
         )
         if df is None or len(df) == 0:
             return []
+        import pandas as pd
+        df = pd.DataFrame(history_price_records(df, symbol=symbol, source=source, provider=quote, asset_type=getattr(quote, "asset_type", None)), index=df.index)
+        if (df["price_unit"] == "unknown").any():
+            return None
         df = df.rename(columns={c: c.lower() for c in df.columns})
         if "time" not in df.columns:
             if "date" in df.columns:
@@ -163,48 +168,15 @@ def _fetch_premium(symbol: str, start_date: date, end_date: date) -> list[dict[s
                     "low": float(row["low"]) if "low" in row else None,
                     "close": float(row["close"]) if "close" in row else None,
                     "volume": int(row["volume"]) if "volume" in row else 0,
+                    "value": row.get("value"),
+                    "adj_close": next((row.get(field) for field in ("adj_close", "adjusted_close", "adjclose") if row.get(field) is not None), None),
+                    "price_unit": row.get("price_unit"),
+                    "price_source": row.get("price_source"),
                 }
             )
         return records
     except Exception as exc:  # noqa: BLE001
-        logger.debug("Premium fetch failed for %s: %s", symbol, exc)
-        return None
-
-
-def _fetch_free(symbol: str, start_date: date, end_date: date) -> list[dict[str, Any]] | None:
-    try:
-        from vnstock import Vnstock  # type: ignore
-
-        stock = Vnstock().stock(symbol=symbol, source="VCI")
-        df = stock.quote.history(
-            start=start_date.isoformat(),
-            end=end_date.isoformat(),
-        )
-        if df is None or len(df) == 0:
-            return []
-        df = df.rename(columns={c: c.lower() for c in df.columns})
-        if "time" not in df.columns and "date" in df.columns:
-            df = df.rename(columns={"date": "time"})
-        records: list[dict[str, Any]] = []
-        for _, row in df.iterrows():
-            t = row.get("time")
-            if hasattr(t, "isoformat"):
-                t = t.isoformat()
-            elif hasattr(t, "strftime"):
-                t = t.strftime("%Y-%m-%d")
-            records.append(
-                {
-                    "time": str(t)[:10],
-                    "open": float(row["open"]) if "open" in row else None,
-                    "high": float(row["high"]) if "high" in row else None,
-                    "low": float(row["low"]) if "low" in row else None,
-                    "close": float(row["close"]) if "close" in row else None,
-                    "volume": int(row["volume"]) if "volume" in row else 0,
-                }
-            )
-        return records
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Free fetch failed for %s: %s", symbol, exc)
+        logger.debug("VCI fetch failed for %s: %s", symbol, exc)
         return None
 
 
@@ -216,6 +188,9 @@ async def _persist_postgres(stock_id: int, symbol: str, records: list[dict[str, 
     inserted = 0
     async with async_session_maker() as session:
         for record in records:
+            record = normalize_price_record(record, symbol=symbol)
+            if record["price_unit"] not in {"VND", "index_points"}:
+                raise ValueError(f"Unknown price unit for {symbol}")
             t = record.get("time")
             if not t:
                 continue
@@ -232,8 +207,10 @@ async def _persist_postgres(stock_id: int, symbol: str, records: list[dict[str, 
                 "low": record["low"],
                 "close": record["close"],
                 "volume": int(record.get("volume") or 0),
+                "value": record.get("value"),
+                "adj_close": record.get("adj_close"),
                 "interval": "1D",
-                "source": "ohlcv_backfill_full",
+                "source": persisted_price_source(record),
             }
             stmt = (
                 pg_insert(StockPrice)
@@ -246,6 +223,9 @@ async def _persist_postgres(stock_id: int, symbol: str, records: list[dict[str, 
                         "low": row["low"],
                         "close": row["close"],
                         "volume": row["volume"],
+                        "source": row["source"],
+                        "value": func.coalesce(row["value"], StockPrice.value),
+                        "adj_close": row["adj_close"],
                     },
                 )
             )
@@ -281,6 +261,9 @@ async def _persist_mongo(symbol: str, records: list[dict[str, Any]]) -> int:
 
     docs = []
     for record in records:
+        record = normalize_price_record(record, symbol=symbol)
+        if record["price_unit"] not in {"VND", "index_points"}:
+            raise ValueError(f"Unknown price unit for {symbol}")
         t = record.get("time")
         if not t:
             continue
@@ -293,7 +276,11 @@ async def _persist_mongo(symbol: str, records: list[dict[str, Any]]) -> int:
                 "low": record.get("low"),
                 "close": record.get("close"),
                 "volume": int(record.get("volume") or 0),
-                "source": "ohlcv_backfill_full",
+                "value": record.get("value"),
+                "adj_close": record.get("adj_close"),
+                "source": persisted_price_source(record),
+                "price_unit": record["price_unit"],
+                "price_source": record.get("price_source"),
             }
         )
     if not docs:
@@ -323,11 +310,9 @@ async def _process_symbol(
     start_date: date,
     end_date: date,
 ) -> tuple[int, int, str | None]:
-    """Run premium → free fallback. Returns (postgres_n, mongo_n, error)."""
+    """Fetch VCI history. Returns (postgres_n, mongo_n, error)."""
 
-    records = await asyncio.to_thread(_fetch_premium, symbol, start_date, end_date)
-    if records is None:
-        records = await asyncio.to_thread(_fetch_free, symbol, start_date, end_date)
+    records = await asyncio.to_thread(_fetch_vci, symbol, start_date, end_date)
     if records is None:
         return 0, 0, "fetch_failed"
     if not records:

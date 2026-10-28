@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.cache import cached
 from vnibb.core.database import get_db
+from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.core.vn_sectors import get_all_sectors, get_sector_by_id
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
@@ -283,7 +284,7 @@ async def list_sectors(
 
 
 @router.get("/{sector}/stocks")
-@cached(ttl=300, key_prefix="sector_stocks")
+@cached(ttl=300, key_prefix="sector_stocks_v2_certified")
 async def get_sector_stocks(
     sector: str,
     limit: int = Query(default=50, ge=1, le=200),
@@ -312,6 +313,7 @@ async def get_sector_stocks(
             ScreenerSnapshot.pb,
             ScreenerSnapshot.roe,
             ScreenerSnapshot.revenue_growth,
+            ScreenerSnapshot.extended_metrics,
         )
         .join(
             ScreenerSnapshot,
@@ -396,8 +398,8 @@ async def get_sector_stocks(
             "market_cap": row.market_cap,
             "pe": row.pe,
             "pb": row.pb,
-            "roe": row.roe,
-            "revenue_growth": row.revenue_growth,
+            "roe": admitted_ratio_value(row.roe, "roe", ratio_units=(row.extended_metrics or {}).get("ratio_units")),
+            "revenue_growth": admitted_ratio_value(row.revenue_growth, "revenue_growth", ratio_units=(row.extended_metrics or {}).get("ratio_units")),
             "change_pct": change_pct_map.get(str(row.symbol).strip().upper()),
         }
         for row in rows

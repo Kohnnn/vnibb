@@ -347,9 +347,9 @@ async def sync_prices(
         description="Refresh Redis latest/recent price caches after sync",
     ),
     source: str = Query(
-        default=settings.vnstock_source,
-        pattern=r"^(KBS|VCI|MSN|FMP)$",
-        description="vnstock source to use for historical backfills",
+        default="VCI",
+        pattern=r"^VCI$",
+        description="vnstock VCI source for historical backfills",
     ),
     fill_missing_gaps: bool = Query(
         default=False,
@@ -813,12 +813,18 @@ async def sync_mongo_eod(
 
     try:
         summary = await run_mongo_eod_sync(window_days=window_days)
+        failures = summary.get("failures", 0)
+        primary_failures = summary.get("primary_failures", 0)
+        persisted = sum(summary.get(key, 0) for key in ("rows", "listings", "financials"))
+        status = "failed" if failures and not persisted else "degraded" if failures or primary_failures else "success"
         return SyncResponse(
-            status="success",
+            status=status,
             message=(
-                f"Mongo EOD sync completed: {summary['symbols']} symbols, "
-                f"{summary['rows']} rows upserted, {summary['failures']} failures"
+                f"Mongo EOD sync {status}: {summary['symbols']} symbols, "
+                f"{summary['rows']} rows upserted, {failures} failures, "
+                f"{primary_failures} primary failures, {summary.get('fallbacks', 0)} VCI fallbacks"
             ),
+            count=summary["rows"],
         )
     except Exception as e:
         logger.error(f"Mongo EOD sync failed: {e}")

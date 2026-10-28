@@ -44,6 +44,16 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
     Boolean(upperSymbol)
   )
 
+  const quality = data?.meta as (NonNullable<typeof data>['meta'] & {
+    unit_status?: string | null
+    unresolved_excluded_dates?: string[] | null
+  }) | undefined
+  // The flow score's volume-spike component is derived from the price frame.
+  // When that frame carries no certified unit, the backend silently drops those
+  // events, so the composite directional label would rest on partial evidence
+  // (QA #98). Foreign/block monetary values do not use the price frame and stay.
+  const priceBasisDegraded = Boolean(data) && (!['confirmed_vnd', 'index_points', 'not_applicable'].includes(quality?.unit_status ?? '')
+    || Boolean(quality?.unresolved_excluded_dates?.length))
   const payload = data?.data
   const flowScore = payload?.flow_score ?? 0
   const blockTrades = payload?.block_trades ?? []
@@ -55,14 +65,16 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
       apiGroup: '/quant',
       endpoint: `/api/v1/quant/${upperSymbol}/smart-money-flow`,
       sourceLabel: 'Foreign + block signals',
+      lastDataDate: null,
+      fetchedAt: dataUpdatedAt || payload?.computed_at || null,
       derived: true,
       stale: Boolean(error && hasData),
       extra: {
-        flowScore,
+        flowScore: priceBasisDegraded ? null : flowScore,
         blockTradeCount: blockTrades.length,
       },
     }))
-  }, [blockTrades.length, error, flowScore, hasData, onDataChange, upperSymbol])
+  }, [blockTrades.length, dataUpdatedAt, error, flowScore, hasData, onDataChange, payload?.computed_at, priceBasisDegraded, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view smart money flow" icon={<Landmark size={18} />} />
@@ -76,7 +88,8 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
           <span>Smart Money Flow</span>
         </div>
         <WidgetMeta
-          updatedAt={dataUpdatedAt}
+          updatedAt={null}
+          fetchedAt={dataUpdatedAt || payload?.computed_at || null}
           isFetching={isFetching && hasData}
           note="Foreign + block signals"
           align="right"
@@ -93,10 +106,19 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
         <>
           <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
             <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Flow Regime</div>
-            <div className={`text-lg font-semibold ${smartMoneyTone(flowScore)}`}>
-              {smartMoneyLabel(payload?.net_institutional || 'neutral', flowScore)}
-            </div>
-            <div className="text-[10px] text-[var(--text-secondary)]">Score: {flowScore} / 3</div>
+            {priceBasisDegraded ? (
+              <div className="text-[10px] text-[var(--text-secondary)]">
+                Flow regime unavailable: historical price units were not certified, so the
+                volume-spike component of the composite score cannot be evaluated.
+              </div>
+            ) : (
+              <>
+                <div className={`text-lg font-semibold ${smartMoneyTone(flowScore)}`}>
+                  {smartMoneyLabel(payload?.net_institutional || 'neutral', flowScore)}
+                </div>
+                <div className="text-[10px] text-[var(--text-secondary)]">Score: {flowScore} / 3</div>
+              </>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-[10px] mb-2">

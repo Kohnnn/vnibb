@@ -14,6 +14,8 @@ export interface EquityHistoricalData {
   adjustment_factor?: number | null;
   adjustment_mode?: 'raw' | 'adjusted';
   adjustment_applied?: boolean;
+  price_unit?: 'VND' | 'index_points' | 'unknown';
+  price_source?: string | null;
 }
 
 export interface EquityHistoricalResponse {
@@ -21,6 +23,19 @@ export interface EquityHistoricalResponse {
   meta?: {
     count: number;
     last_data_date?: string | null;
+    freshness_as_of?: string | null;
+    requested_start_date?: string | null;
+    requested_end_date?: string | null;
+    returned_start_date?: string | null;
+    returned_end_date?: string | null;
+    logical_day_count?: number | null;
+    completeness_status?: 'complete' | 'partial' | 'unknown' | null;
+    unit_status?: 'confirmed_vnd' | 'mixed' | 'unconfirmed' | 'not_applicable' | null;
+    session_basis?: 'adjusted' | 'unverified' | 'not_applicable' | null;
+    source_mode?: string | null;
+    source_counts?: Record<string, number> | null;
+    fallback_used?: boolean | null;
+    warnings?: string[] | null;
     adjustment_mode?: 'raw' | 'adjusted';
     adjustment_requested_count?: number;
     adjustment_applied_count?: number;
@@ -61,8 +76,8 @@ export interface CompanyNewsData {
   symbol: string;
   title: string;
   source?: string;
-  published_at?: string;
-   published_date?: string;
+  published_at?: string | null;
+  published_date?: string | null;
   url?: string;
   summary?: string;
   category?: string;
@@ -71,6 +86,7 @@ export interface CompanyNewsData {
   ai_summary?: string | null;
   relevance_score?: number | null;
   matched_symbols?: string[];
+  match_reason?: string | null;
   is_market_wide_fallback?: boolean;
 }
 
@@ -151,7 +167,7 @@ export interface FundamentalValuation {
   ps?: number | null;
   ev_ebitda?: number | null;
   as_of?: string | null;
-  inputs?: Record<string, number | string | string[] | null | undefined> | null;
+  inputs?: Record<string, unknown> | null;
   source?: string | null;
   note?: string | null;
 }
@@ -197,7 +213,12 @@ export interface ShareholderData {
   symbol: string;
   shareholder_name?: string;
   shares_owned?: number;
-  ownership_pct?: number;
+  ownership_pct?: number | null;
+  ownership_unit?: 'percent' | null;
+  ownership_unit_status?: 'explicit' | 'unverified';
+  ownership_source_field?: string | null;
+  ownership_source?: string | null;
+  raw_data?: Record<string, unknown> | null;
   shareholder_type?: string;
 }
 
@@ -205,6 +226,7 @@ export interface ShareholdersResponse {
   symbol: string;
   count: number;
   data: ShareholderData[];
+  error?: string | null;
 }
 
 export interface OfficerData {
@@ -279,6 +301,7 @@ export interface FinancialRatioData {
   earnings_growth?: number;
   dps?: number;
   dividend_yield?: number;
+  ratio_units?: Record<string, string | undefined> | null;
   payout_ratio?: number;
   peg_ratio?: number;
 }
@@ -287,6 +310,7 @@ export interface FinancialRatiosResponse {
   symbol: string;
   count: number;
   data: FinancialRatioData[];
+  error?: string | null;
   meta?: {
     count?: number;
     data_points?: number;
@@ -336,9 +360,45 @@ export interface ForeignTradingResponse {
   error?: string | null;
 }
 
+export interface TransactionFlowPersistenceCoverage {
+  status?: 'persisted' | 'failed' | 'disabled' | 'empty' | 'not_attempted';
+  rows?: number | null;
+  error?: string | null;
+}
+
+export interface TransactionFlowCoverage {
+  scope?: 'full_session' | 'sampled' | 'unknown';
+  status?: string | null;
+  completed_session?: boolean;
+  observed_trade_count?: number | null;
+  observed_window_start?: string | null;
+  observed_window_end?: string | null;
+  session_date?: string | null;
+  requested_session_date?: string | null;
+  denominator_trade_count?: number | null;
+  session_fraction?: number | null;
+  provider?: string | null;
+  price_unit?: string | null;
+  volume_unit?: string | null;
+  sql_flows?: TransactionFlowPersistenceCoverage | null;
+  sql_ticks?: TransactionFlowPersistenceCoverage | null;
+  mongo_ticks?: TransactionFlowPersistenceCoverage | null;
+  current_depth?: string | null;
+}
+
 export interface TransactionFlowPoint {
   date: string;
   price?: number | null;
+  flow_scope?: 'full_session' | 'sampled' | 'unknown';
+  coverage?: TransactionFlowCoverage | null;
+  observed_buy_value?: number | null;
+  observed_sell_value?: number | null;
+  observed_gross_value?: number | null;
+  observed_net_value?: number | null;
+  observed_buy_volume?: number | null;
+  observed_sell_volume?: number | null;
+  observed_volume?: number | null;
+  observed_net_volume?: number | null;
   total_buy_value?: number | null;
   total_sell_value?: number | null;
   total_gross_value?: number | null;
@@ -422,6 +482,10 @@ export interface BalanceSheetData {
   period?: string;
   updated_at?: string;
   raw_data?: Record<string, unknown>;
+  // Set by the API when the provider lineage refused to certify the row; every
+  // numeric field is null in that case, which is not the same as a reported zero
+  // (issue #103).
+  unavailable_reason?: string | null;
   total_assets?: number;
   current_assets?: number;
   fixed_assets?: number;
@@ -454,6 +518,7 @@ export interface IncomeStatementData {
   period?: string;
   updated_at?: string;
   raw_data?: Record<string, unknown>;
+  unavailable_reason?: string | null;
   revenue?: number;
   cost_of_revenue?: number;
   gross_profit?: number;
@@ -494,6 +559,7 @@ export interface CashFlowData {
   dividends_paid?: number;
   debt_repayment?: number;
   stock_repurchased?: number;
+  unavailable_reason?: string | null;
 }
 
 export interface CashFlowResponse {

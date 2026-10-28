@@ -44,6 +44,16 @@ class IncomeStatementData(BaseModel):
     tax_expense: Optional[float] = None
     net_income: Optional[float] = None
     eps: Optional[float] = None
+    eps_diluted: Optional[float] = None
+    source: str | None = None
+    raw_data: dict[str, Any] | None = None
+    fiscal_year: int | None = None
+    fiscal_quarter: int | None = None
+    unit_metadata: dict[str, Any] = Field(default_factory=dict)
+    value_unit: str | None = None
+    currency: str | None = None
+    flow_basis: str | None = None
+    consolidation_basis: str | None = None
 
     model_config = {
         "json_schema_extra": {
@@ -76,10 +86,10 @@ class VnstockIncomeStatementFetcher(BaseFetcher[IncomeStatementQueryParams, Inco
 
         def _fetch_sync() -> List[dict]:
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
 
                 Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
+                stock = Vnstock().stock(symbol=query["symbol"], source=validate_source(settings.vnstock_source))
                 df = stock.finance.income_statement(period=query.get("period", "year"), lang="en")
 
                 if df is None or df.empty:
@@ -98,7 +108,7 @@ class VnstockIncomeStatementFetcher(BaseFetcher[IncomeStatementQueryParams, Inco
                 timeout=settings.vnstock_timeout,
             )
         except asyncio.TimeoutError:
-            raise ProviderTimeoutError(provider="vnstock", timeout=settings.vnstock_timeout)
+            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
 
     @staticmethod
     def transform_data(
@@ -125,6 +135,8 @@ class VnstockIncomeStatementFetcher(BaseFetcher[IncomeStatementQueryParams, Inco
                         or row.get("earningsPerShare")
                         or row.get("earning_per_share")
                         or row.get("eps"),
+                        eps_diluted=next((row[key] for key in ("eps_diluted", "epsDiluted", "dilutedEps")
+                                          if row.get(key) is not None), None),
                     )
                 )
             except Exception as e:

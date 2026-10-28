@@ -26,7 +26,7 @@ from vnibb.services.prediction_market_policy import (
 
 logger = logging.getLogger(__name__)
 SNAPSHOT_RETENTION_DAYS = 30
-SNAPSHOT_STORAGE_CEILING_BYTES = 4 * 1024**3
+SNAPSHOT_STORAGE_CEILING_BYTES = 1024**3
 # Account for bounded row payloads and newly allocated heap/index pages in
 # each batch, including a first insert into an empty relation.
 SNAPSHOT_RESERVED_ROW_BYTES = 32 * 1024

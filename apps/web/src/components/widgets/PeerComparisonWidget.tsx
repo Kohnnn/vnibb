@@ -295,10 +295,12 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
             apiGroup: '/comparison',
             endpoint: '/api/v1/comparison/stocks',
             sourceLabel: 'VNIBB peer comparison',
+            lastDataDate: null,
+            fetchedAt: dataUpdatedAt || null,
             derived: true,
             extra: { symbols: peers.length, period, metrics: normalizedMetrics.length },
         }))
-    }, [hasData, normalizedMetrics.length, onDataChange, peers.length, period]);
+    }, [dataUpdatedAt, hasData, normalizedMetrics.length, onDataChange, peers.length, period]);
 
     const allMetricValues = useMemo(() => {
         if (!Object.keys(comparisonData).length) return {};
@@ -465,10 +467,17 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                             <th className="text-right py-2 px-2 font-medium min-w-[84px] text-amber-400/80 border-l border-[var(--border-subtle)]">
                                 <div className="flex flex-col">
                                     <button type="button" onClick={() => handleSort('sector')} className="inline-flex items-center justify-end gap-1 hover:text-amber-300">
-                                    <span>Sector Avg</span>
+                                    <span>Peer Avg</span>
                                         {sortIndicator('sector')}
                                     </button>
-                                    <span className="text-[8px] font-normal opacity-60">Excludes N/A</span>
+                                    {/* Loaded-peer mean, not the API's industry cohort: the
+                                        comparison API does compute `sector_averages` over the
+                                        screener cohort, but this widget only renders the symbols
+                                        the user loaded, so the column is labelled for what it
+                                        actually averages (issue #106). */}
+                                    <span className="text-[8px] font-normal opacity-60" title="Arithmetic mean of the peers loaded in this widget, excluding values reported as N/A">
+                                        Loaded peers only
+                                    </span>
                                 </div>
                             </th>
                         </tr>
@@ -520,6 +529,11 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                         })}
                     </tbody>
                 </table>
+                <p className="px-2 py-1.5 text-[9px] leading-4 text-[var(--text-muted)]">
+                    Peer Avg is the arithmetic mean of the peers loaded above (n shown per metric), not a
+                    sector/industry cohort. Percent metrics are shown as reported by the comparison API; the
+                    provider unit basis is not independently verified.
+                </p>
             </div>
         );
     };
@@ -671,7 +685,8 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
 
                 <div className="flex items-center gap-2">
                     <WidgetMeta
-                        updatedAt={dataUpdatedAt}
+                        updatedAt={null}
+                        fetchedAt={dataUpdatedAt || null}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
                         note={`Period ${period}`}
@@ -826,7 +841,13 @@ function formatCellValue(value: any, format: string, unitConfig: UnitConfig) {
         case 'currency':
             return formatCompactValueForUnit(value, { ...unitConfig, decimalPlaces: 1 });
         case 'percent':
-            return formatPercent(value, { decimals: 1, input: 'auto', clamp: 'margin' });
+            // The API declares `format: "percent"` for these metrics
+            // (models/comparison.py), so the number is already a percent. The previous
+            // `input: 'auto'` + `clamp: 'margin'` applied a second magnitude guess: a
+            // raw 1 rendered as "100.0%", thefalse-confidence read in issue #106.
+            // Percent cells now show the value as reported; the footer discloses that
+            // the provider unit basis is not independently verified.
+            return formatPercent(value, { decimals: 1, input: 'percent' });
         case 'large_number':
             return formatCompactValueForUnit(value, { ...unitConfig, decimalPlaces: 1 });
         case 'ratio':

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
@@ -15,6 +15,10 @@ interface WorkspaceBackupModalProps {
 }
 
 export function WorkspaceBackupModal({ isOpen, onClose }: WorkspaceBackupModalProps) {
+    return isOpen ? <WorkspaceBackupSession onClose={onClose} /> : null;
+}
+
+function WorkspaceBackupSession({ onClose }: { onClose: () => void }) {
     const { exportWorkspace, restoreWorkspace } = useDashboard();
     const { getSharedGroups } = useWidgetGroups();
     const { appGlobalMarketsSymbol } = useGlobalMarketsSymbol();
@@ -22,9 +26,9 @@ export function WorkspaceBackupModal({ isOpen, onClose }: WorkspaceBackupModalPr
     const [error, setError] = useState<string | null>(null);
     const [status, setStatus] = useState<string | null>(null);
     const [reading, setReading] = useState(false);
-    const dialogRef = useDialogFocusTrap<HTMLElement>({ enabled: isOpen, onClose });
-
-    if (!isOpen) return null;
+    const fileReadGeneration = useRef(0);
+    useEffect(() => () => { fileReadGeneration.current += 1; }, []);
+    const dialogRef = useDialogFocusTrap<HTMLElement>({ enabled: true, onClose });
 
     const handleExport = () => {
         setError(null);
@@ -48,6 +52,7 @@ export function WorkspaceBackupModal({ isOpen, onClose }: WorkspaceBackupModalPr
     };
 
     const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
+        const generation = ++fileReadGeneration.current;
         setBackup(null);
         setError(null);
         setStatus(null);
@@ -56,12 +61,17 @@ export function WorkspaceBackupModal({ isOpen, onClose }: WorkspaceBackupModalPr
         setReading(true);
         try {
             if (file.size > MAX_WORKSPACE_BACKUP_BYTES) throw new Error('Workspace backup exceeds the 5 MB import limit.');
-            setBackup(parseWorkspaceBackup(await file.text()));
+            const raw = await file.text();
+            if (generation !== fileReadGeneration.current) return;
+            setBackup(parseWorkspaceBackup(raw));
         } catch (cause) {
+            if (generation !== fileReadGeneration.current) return;
             setError(cause instanceof Error ? cause.message : 'Could not read workspace backup.');
         } finally {
-            setReading(false);
-            event.target.value = '';
+            if (generation === fileReadGeneration.current) {
+                setReading(false);
+                event.target.value = '';
+            }
         }
     };
 

@@ -199,6 +199,7 @@ class OrderFlowDaily(Base):
 
     big_order_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     block_trade_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    coverage: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X, Settings as SettingsIcon, Database, Bell, Palette, RotateCcw, Shield, Sparkles } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { Switch } from '@/components/ui/switch';
 import { AICopilotTelemetryReview } from '@/components/admin/AICopilotTelemetryReview';
 import { DataSourcesHealthPanel } from '@/components/settings/DataSourcesHealthPanel';
@@ -533,7 +534,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   const decimalOptions = [0, 1, 2, 3];
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm animate-in fade-in duration-200">
       <div
         ref={dialogRef}
@@ -570,6 +571,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
         {/* Content */}
         <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-modal)]">
+        <label htmlFor="settings-section-select" className="sr-only">Settings section</label>
+        <select
+          id="settings-section-select"
+          value={activeTab}
+          onChange={event => setActiveTab(event.target.value as SettingTab)}
+          className="md:hidden mx-4 mt-4 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          {tabs.map(tab => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
+        </select>
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)]">
             <h3 className="text-lg font-bold text-[var(--text-primary)]">
@@ -1126,7 +1136,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">vnstock Data Source</h4>
                   <div className="grid grid-cols-2 gap-2">
-                    {(['KBS', 'VCI', 'MSN', 'FMP'] as VnstockSource[]).map(src => (
+                    {(['VCI'] as VnstockSource[]).map(src => (
                       <button
                         key={src}
                         onClick={() => {
@@ -1147,7 +1157,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       </button>
                     ))}
                   </div>
-                  <p className="text-[10px] text-[var(--text-muted)] mt-2">KBS is the recommended default for vnstock 4.x (KBS, VCI, MSN, FMP)</p>
+                  <p className="text-[10px] text-[var(--text-muted)] mt-2">Vietcap IQ is the primary source; free VCI is the only secondary provider. Previous selections are migrated to VCI.</p>
                 </div>
 
                 {/* Phase 2 of the QA evaluation remediation plan: per-source
@@ -1844,7 +1854,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

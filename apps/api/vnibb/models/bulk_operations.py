@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.core.price_units import normalize_screener_record
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ class BulkScreenerOperations:
                     if "created_at" not in record:
                         record["created_at"] = datetime.utcnow()
                     
-                    batch_data.append(record)
+                    batch_data.append(normalize_screener_record(record))
                 
                 try:
                     # PostgreSQL INSERT ON CONFLICT
@@ -163,7 +164,7 @@ class BulkScreenerOperations:
         try:
             # Process in batches
             for i in range(0, len(records), batch_size):
-                batch = records[i:i + batch_size]
+                batch = [normalize_screener_record(record) for record in records[i:i + batch_size]]
                 
                 stmt = insert(ScreenerSnapshot).values(batch)
                 result = await session.execute(stmt)

@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { memo, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ExternalLink, Globe2, Layers3, MapPin, Radio, Rss, X } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -10,6 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatTimestamp } from '@/lib/format';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
+import { newsObservationProvenance } from '@/lib/newsTime';
 import {
   getWorldNewsMap,
   type WorldNewsCategory,
@@ -324,6 +325,29 @@ function WorldNewsMapWidgetComponent({
     latest_articles: bucket.latest_articles.map((article) => article.url).join(', '),
   }));
 
+  // Aggregation uses only the observation metadata the API provides per bucket
+  // (`latest_published_at`); buckets without it stay unknown rather than falling
+  // back to the query receipt.
+  const observation = useMemo(
+    () => newsObservationProvenance(
+      // Only buckets that actually carry articles can contribute a source date;
+      // empty buckets would otherwise inflate the unknown-row count.
+      buckets
+        .filter((bucket) => bucket.article_count > 0)
+        .map((bucket) => ({ published_at: bucket.latest_published_at })),
+    ),
+    [buckets],
+  );
+  const fetchedAt = data?.fetched_at ?? dataUpdatedAt;
+  // Feed failures the envelope reports degrade coverage even when buckets look current.
+  const coverage = data?.failed_feed_count ? ('partial' as const) : observation.coverage;
+  const warnings = [
+    observation.warning,
+    data?.failed_feed_count
+      ? `${data.failed_feed_count} of ${data.feed_count} RSS feeds failed on the last fetch`
+      : undefined,
+  ].filter((value): value is string => Boolean(value));
+
   useEffect(() => {
     onDataChange?.(
       buildWidgetRuntime({
@@ -331,12 +355,26 @@ function WorldNewsMapWidgetComponent({
         apiGroup: '/news',
         endpoint: '/news/world/map',
         sourceLabel: 'World news map',
-        lastDataDate: dataUpdatedAt,
+        lastDataDate: observation.lastDataDate,
+        fetchedAt,
+        coverage,
         stale: isFallback,
+        cached: isFallback,
+        warnings: warnings.length ? warnings : undefined,
         extra: { count: buckets.length, articles: data?.total_articles || 0 },
       }),
     );
-  }, [onDataChange, hasData, dataUpdatedAt, isFallback, buckets.length, data?.total_articles]);
+  }, [
+    onDataChange,
+    hasData,
+    fetchedAt,
+    isFallback,
+    buckets.length,
+    data?.total_articles,
+    observation.lastDataDate,
+    coverage,
+    warnings,
+  ]);
 
   useEffect(() => {
     const nextBuckets = data?.buckets || [];
@@ -395,7 +433,8 @@ function WorldNewsMapWidgetComponent({
               Live Coverage Map
             </div>
             <WidgetMeta
-              updatedAt={dataUpdatedAt}
+              updatedAt={observation.lastDataDate}
+              fetchedAt={fetchedAt}
               isFetching={isFetching && hasData}
               isCached={isFallback}
               note={sourceNote}

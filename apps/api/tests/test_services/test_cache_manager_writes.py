@@ -1,10 +1,12 @@
 """Persistence regressions for atomic cache writer upserts."""
 
 from datetime import date, datetime
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import ProgrammingError
 from vnibb.models.company import Company
 from vnibb.models.stock import Stock
 from vnibb.services.cache_manager import CacheManager
@@ -53,6 +55,20 @@ async def test_listing_conflict_preserves_created_at_and_sparse_existing_fields(
     await test_db.commit()
 
 @pytest.mark.asyncio
+async def test_iq_delisting_changes_only_explicit_confirmed_symbol(test_db):
+    suffix = uuid4().hex[:7].upper()
+    old, untouched = f"D{suffix}", f"U{suffix}"
+    test_db.add_all([Stock(symbol=old, exchange="HOSE", is_active=1), Stock(symbol=untouched, exchange="HOSE", is_active=1)])
+    await test_db.commit()
+    assert await CacheManager(test_db).store_listing_data([{ "symbol": old, "exchange": "DELISTED", "is_active": 0}], source="vietcap") == 1
+    test_db.expire_all()
+    rows = (await test_db.execute(select(Stock).where(Stock.symbol.in_([old, untouched])))).scalars().all()
+    assert {row.symbol: row.is_active for row in rows} == {old: 0, untouched: 1}
+    await test_db.execute(Stock.__table__.delete().where(Stock.symbol.in_([old, untouched])))
+    await test_db.commit()
+
+
+@pytest.mark.asyncio
 async def test_profile_sparse_update_preserves_existing_fields_and_normalizes_values(test_db):
     symbol = f"P{uuid4().hex[:7]}".upper()
     created_at = datetime(2020, 1, 1)
@@ -88,3 +104,22 @@ async def test_profile_sparse_update_preserves_existing_fields_and_normalizes_va
     assert company.created_at == created_at
     await test_db.execute(Company.__table__.delete().where(Company.symbol == symbol))
     await test_db.commit()
+
+
+@pytest.mark.asyncio
+async def test_profile_rejected_upsert_rolls_back_and_reports_failure(test_db, monkeypatch):
+    execute = AsyncMock(side_effect=ProgrammingError(
+        "INSERT INTO companies", {},
+        RuntimeError("no unique or exclusion constraint matching the ON CONFLICT specification"),
+    ))
+    rollback = AsyncMock(wraps=test_db.rollback)
+    commit = AsyncMock(wraps=test_db.commit)
+    monkeypatch.setattr(test_db, "execute", execute)
+    monkeypatch.setattr(test_db, "rollback", rollback)
+    monkeypatch.setattr(test_db, "commit", commit)
+
+    assert await CacheManager(test_db).store_profile_data(
+        "VNM", {"company_name": "Vinamilk"}
+    ) is False
+    rollback.assert_awaited_once()
+    commit.assert_not_awaited()

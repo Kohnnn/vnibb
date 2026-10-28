@@ -19,18 +19,28 @@ export function toPositiveNumber(value: unknown): number | null {
   return parsed;
 }
 
-/** Parse any value to a finite number. Returns null for non-numeric or non-finite values. */
+/**
+ * Parse a value to a finite number. Returns null for non-finite values and for
+ * anything that is not a number or a non-blank numeric string.
+ *
+ * `Number(null) === 0`, `Number(undefined) === NaN` and `Number('') === 0`, so
+ * coercing blindly turns a missing provider metric into a real-looking 0 (issue
+ * #106: MSR screener P/E 0 / P/B 0 while the ratios source held 2394.64/2.22).
+ * Missing stays missing; it never becomes a magnitude.
+ */
 export function toNumber(value: unknown): number | null {
-  // Must check for null/undefined first since Number(null) === 0 and
-  // Number(undefined) === NaN — both would pass the isFinite check below.
-  if (value === null || value === undefined) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value !== 'string') {
     return null;
   }
-  const parsed = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(parsed)) {
+  const trimmed = value.trim();
+  if (!trimmed) {
     return null;
   }
-  return parsed;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 /** Return the first finite (non-null, non-undefined, Number.isFinite) value. */

@@ -6,6 +6,7 @@
 
 import { logClientError } from './clientLogger';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from './pollingPolicy';
+import { shouldRetryQuery } from './queryRetry';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from './api';
 import { queryKeys } from './queries/legacy';
@@ -27,13 +28,13 @@ export function useHistoricalPrices(
         startDate?: string;
         endDate?: string;
         interval?: string;
-        source?: string;
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
 ) {
     // Get the preferred source from context, but allow override via options
-    let preferredSource: VnstockSource = 'KBS';
+    let preferredSource: VnstockSource = 'VCI';
 
     try {
         const { preferredVnstockSource } = useDataSources();
@@ -53,7 +54,7 @@ export function useHistoricalPrices(
 
     return useQuery({
         queryKey: queryKeys.historical(symbol, historyParams),
-        queryFn: () => api.getHistoricalPrices(symbol, { ...options, source }),
+        queryFn: ({ signal }) => api.getHistoricalPrices(symbol, { ...options, source, signal }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000, // Increase to 5 minutes
         gcTime: 15 * 60 * 1000,   // Cache for 15 minutes
@@ -183,7 +184,11 @@ export function useRatioHistory(
     const period = options?.period || 'year';
     return useQuery({
         queryKey: queryKeys.ratioHistory(symbol, period, ratios, options?.limit),
-        queryFn: () => api.getRatioHistory(symbol, { ratios, period, limit: options?.limit }),
+        queryFn: async () => {
+            const response = await api.getRatioHistory(symbol, { ratios, period, limit: options?.limit });
+            if (response.error) throw new Error(response.error);
+            return response;
+        },
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 60 * 60 * 1000,
     });
@@ -432,7 +437,7 @@ export function useScreenerData(options?: {
     target_upside_min?: number;
     industry?: string;
     limit?: number;
-    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+    source?: 'VCI';
     // Dynamic filters (new)
     filters?: string; // JSON encoded FilterGroup
     sort?: string;    // Multi-sort string: "field:order,field2:order2"
@@ -455,7 +460,7 @@ export function useScreenerData(options?: {
     enabled?: boolean;
 }) {
     // Get the preferred source from context, but allow override via options
-    let preferredSource: VnstockSource = 'KBS';
+    let preferredSource: VnstockSource = 'VCI';
 
     try {
         const { preferredVnstockSource } = useDataSources();
@@ -971,6 +976,12 @@ export interface StockQuoteView {
     open: number | null;
     updatedAt: string | null;
     cached: boolean;
+    price_unit?: 'VND' | 'index_points' | 'unknown';
+    error?: string | null;
+    source?: string | null;
+    upstreamSource?: string | null;
+    asOf?: string | null;
+    stale?: boolean | null;
 }
 
 export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Promise<StockQuoteView> {
@@ -1001,6 +1012,12 @@ export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Pro
         open: quoteData.open ?? quoteData.day_open ?? null,
         updatedAt: quoteData.updatedAt ?? quoteData.updated_at ?? null,
         cached: response.cached ?? false,
+        price_unit: quoteData.price_unit ?? 'unknown',
+        error: response.error ?? null,
+        source: response.meta?.source ?? null,
+        upstreamSource: response.meta?.upstream_source ?? quoteData.upstream_source ?? null,
+        asOf: response.meta?.as_of ?? quoteData.as_of ?? null,
+        stale: response.meta?.stale ?? null,
     };
 }
 
@@ -1232,7 +1249,7 @@ export function useQuantMetrics(
     options?: {
         period?: api.QuantPeriod;
         metrics?: api.QuantMetric[];
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1278,7 +1295,7 @@ export function useGarchVolatility(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1325,7 +1342,7 @@ export function useQuantBacktest(
         slowWindow?: number;
         initialCapital?: number;
         feeBps?: number;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1368,7 +1385,7 @@ export function useQuantSweep(
         objective?: api.QuantSweepRequest['objective'];
         initialCapital?: number;
         feeBps?: number;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1405,7 +1422,7 @@ export function useSeasonalityMatrix(
     options?: {
         granularity?: api.SeasonalityGranularity;
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1429,7 +1446,7 @@ export function useGammaExposure(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1452,7 +1469,7 @@ export function useMomentumProfile(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1467,7 +1484,11 @@ export function useMomentumProfile(
         queryFn: () => api.getMomentumProfile(symbol, { period, source, adjustmentMode }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
-        retry: 2,
+        // #109: a fixed `retry: 2` overrode the global policy, so deterministic
+        // failures (400/404/429) were retried twice with exponential backoff —
+        // "Try Again" looked dead and success looked delayed. Use the shared
+        // policy: retry only transient errors, stop on deterministic ones.
+        retry: shouldRetryQuery,
     });
 }
 
@@ -1486,7 +1507,7 @@ export function usePairDiagnostics(
     other: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1519,7 +1540,7 @@ export function useMarketStructureTests(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        source?: 'VCI';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }

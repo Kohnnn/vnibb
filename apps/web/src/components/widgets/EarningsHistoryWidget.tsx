@@ -47,7 +47,9 @@ export function EarningsHistoryWidget({ symbol, onDataChange }: EarningsHistoryW
                 apiGroup: '/equity',
                 endpoint: `/equity/${symbol}/income-statement?period=quarter&limit=8`,
                 sourceLabel: 'Earnings history',
-                lastDataDate: dataUpdatedAt,
+                // Statement rows carry fiscal labels + store `updated_at` only; no source observation date.
+                lastDataDate: null,
+                fetchedAt: dataUpdatedAt || null,
                 stale: Boolean(error && hasData),
                 extra: hasData ? { quarters: rows.length } : undefined,
             }),
@@ -62,7 +64,8 @@ export function EarningsHistoryWidget({ symbol, onDataChange }: EarningsHistoryW
         <div className="h-full flex flex-col">
             <div className="pb-2 border-b border-[var(--border-subtle)]">
                 <WidgetMeta
-                    updatedAt={dataUpdatedAt}
+                    updatedAt={null}
+                    fetchedAt={dataUpdatedAt || null}
                     isFetching={isFetching && hasData}
                     note="Latest first"
                     align="right"

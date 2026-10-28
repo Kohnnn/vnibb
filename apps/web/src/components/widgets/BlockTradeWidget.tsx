@@ -58,6 +58,12 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
   } = useBlockTrades({ symbol, limit: 50 });
 
   const trades = data || [];
+  const lastDataDate = trades.reduce<string | null>((latest, trade) => {
+    const observedAt = new Date(trade.trade_time).getTime();
+    return Number.isFinite(observedAt) && (latest === null || observedAt > new Date(latest).getTime())
+      ? trade.trade_time
+      : latest;
+  }, null);
   const hasData = trades.length > 0;
   const isMissingData = trades.length === 0;
   const isFallback = Boolean(error && hasData);
@@ -84,9 +90,13 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
           empty: filteredTrades.length === 0,
           compactHeight: 4,
         },
+        provenance: {
+          updatedAt: lastDataDate,
+          fetchedAt: dataUpdatedAt,
+        },
       },
     });
-  }, [filteredTrades.length, onDataChange]);
+  }, [filteredTrades.length, onDataChange, lastDataDate, dataUpdatedAt]);
 
   return (
     <div className="h-full flex flex-col">
@@ -98,7 +108,8 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
         </div>
         <div className="flex items-center gap-2">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={lastDataDate}
+            fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note="Large trades"

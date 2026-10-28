@@ -48,10 +48,10 @@ class TokenBucketRateLimiter:
 
 
 main_limiter = TokenBucketRateLimiter(
-    rps=getattr(settings, "vnstock_rate_limit_rps", 500 / 60),
+    rps=getattr(settings, "vnstock_rate_limit_rps", 18 / 60),
     name="main",
 )
 reinforce_limiter = TokenBucketRateLimiter(
-    rps=getattr(settings, "vnstock_reinforcement_rps", 50 / 60),
+    rps=getattr(settings, "vnstock_reinforcement_rps", 2 / 60),
     name="reinforce",
 )

@@ -54,8 +54,8 @@ expect_ok() {
   local code
   local body
 
-  body="$("$CURL_BIN" -ksS --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
-  code="$("$CURL_BIN" -ksS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
+  body="$("$CURL_BIN" -sS --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
+  code="$("$CURL_BIN" -sS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
   printf '%-18s %s -> %s\n' "$label" "${BASE_URL}${path}" "$code"
   if [[ "$code" != "200" ]]; then
     status=1
@@ -81,7 +81,7 @@ expect_json_field() {
   local field="$3"
   local body
 
-  body="$("$CURL_BIN" -ksS --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
+  body="$("$CURL_BIN" -sS --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
   if [[ -z "$body" ]]; then
     printf '%-18s %s -> empty\n' "$label" "${BASE_URL}${path}"
     status=1
@@ -116,7 +116,7 @@ expect_ok "screener" "/api/v1/screener/?limit=5"
 expect_ok "microstructure" "/api/v1/microstructure/VNM?lookback_days=7"
 
 echo "Checking CORS preflight"
-cors_headers="$("$CURL_BIN" -ksS -D - -o "$NULL_SINK" --max-time "$TIMEOUT" \
+cors_headers="$("$CURL_BIN" -sS -D - -o "$NULL_SINK" --max-time "$TIMEOUT" \
   -X OPTIONS "${BASE_URL}/api/v1/equity/VNM/profile" \
   -H "Origin: ${CORS_TEST_ORIGIN}" \
   -H "Access-Control-Request-Method: GET" || true)"
