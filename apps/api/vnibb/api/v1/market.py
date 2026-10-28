@@ -3288,7 +3288,10 @@ async def get_industry_bubble(
         y=sum(y_values) / len(y_values) if y_values else None,
     )
 
-    updated_at = _latest_timestamp([row.get("updated_at") for row in sector_rows])
+    point_symbols = {point.symbol for point in points}
+    updated_at = _latest_timestamp(
+        [row.get("updated_at") for row in sector_rows if row.get("symbol") in point_symbols]
+    )
     return IndustryBubbleResponse(
         sector=sector_name,
         reference_symbol=reference_symbol,

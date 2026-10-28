@@ -242,7 +242,7 @@ async def test_industry_bubble_reference_refresh_selects_useful_peer_observation
                 "market_cap_provenance": provenance, "snapshot_date": as_of}
 
     async def provider(_params):
-        return [provider_cap_row("FPT", 100.0, "2026-10-24"),
+        return [provider_cap_row("FPT", 100.0, "2026-10-23"),
                 provider_cap_row("CMG", provider_cap, "2026-10-24")]
 
     async def ratios(_symbols):
