@@ -54,6 +54,9 @@ So the remaining work is **not** a backlog of unimplemented features. It is:
   Verify: the unique index exists on the live collection and a duplicate insert
   is rejected.
 
+  Historical note: the sponsored full-catalog script named below was removed;
+  this paragraph records the original finding, not a current ingestion option.
+
   A unique index on `(symbol, tradeDate, source)` is created in *backfill scripts*
   (`scripts/vietcap/backfill_vietcap.py:459`,
   `scripts/backfill_mongo_vnstock_full_catalog.py:509,522`) but **not** in
