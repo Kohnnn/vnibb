@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Generic, List, Optional, TypeVar
 
-from sqlalchemy import Float, and_, case, func, or_, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import JSON, Date, Float, String, and_, case, cast, func, literal_column, or_, select, update
+from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,20 +63,23 @@ def snapshot_session_coverage(
     coverage = session_coverage(record, row.symbol, expected_session)
     if coverage is None:
         return None
+    trade_date = _coerce_date(row.trade_date)
+    if row.trade_date is not None and trade_date is None:
+        return None
     try:
         observed_at = datetime.fromisoformat(record["observed_at"].replace("Z", "+00:00"))
         current_utc = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
         if observed_at.tzinfo is None or observed_at > current_utc:
             return None
-        if row.trade_date is not None and row.trade_date > expected_session:
+        if trade_date is not None and trade_date > expected_session:
             return None
         if coverage != "traded":
             if row.volume != 0:
                 return None
             if row.price is None:
-                return coverage if row.trade_date is None else None
+                return coverage if trade_date is None else None
             if (
-                row.trade_date is None or row.trade_date >= expected_session
+                trade_date is None or trade_date >= expected_session
                 or not math.isfinite(row.price) or row.price <= 0
                 or metrics.get("price_unit") != "VND"
                 or metrics.get("price_source") not in _QUALIFIED_RETAINED_PRICE_SOURCES
@@ -85,7 +88,7 @@ def snapshot_session_coverage(
             return coverage
         match = record["raw"]["matchPrice"]
         if (
-            row.trade_date != expected_session
+            trade_date != expected_session
             or metrics.get("price_unit") != "VND"
             or metrics.get("price_source") != "vietcap_vnd"
             or row.price is None or not math.isfinite(row.price) or row.price <= 0
@@ -595,6 +598,36 @@ class CacheManager:
             # the retention sweep, not by an incidental request-path write.
             dialect_name = session.get_bind().dialect.name
             dialect_insert = insert if dialect_name == "postgresql" else sqlite_insert
+            # INSERT has no outer SELECT to auto-correlate; refer to its conflict target directly.
+            stored_symbol = literal_column("screener_snapshots.symbol", String)
+            stored_date = literal_column("screener_snapshots.snapshot_date", Date)
+            stored_metrics = literal_column("screener_snapshots.extended_metrics", JSON)
+            receipt = SyncStatus.additional_data
+            expected = receipt["expected_symbols"]
+            if dialect_name == "postgresql":
+                expected = cast(expected, JSONB)
+                expected = case((func.jsonb_typeof(expected) == "array", expected), else_=cast("[]", JSONB))
+                members = func.jsonb_array_elements_text(expected).table_valued("value")
+                expected_count = func.jsonb_array_length(expected)
+            else:
+                members = func.json_each(expected).table_valued("value")
+                expected_count = func.json_array_length(expected)
+            member_matches = select(members.c.value).where(
+                members.c.value == stored_symbol,
+            ).correlate(SyncStatus).exists()
+            stored_session = stored_metrics["market_session"]
+            admitted_session = select(SyncStatus.id).select_from(SyncStatus).where(
+                SyncStatus.sync_type == "screener_universe", SyncStatus.status == "completed",
+                SyncStatus.error_count == 0, SyncStatus.completed_at.is_not(None),
+                receipt["snapshot_date"].as_string() == cast(stored_date, String),
+                receipt["market_session_date"].as_string() == stored_session["session_date"].as_string(),
+                cast(receipt["expected_count"].as_string(), String) == cast(expected_count, String),
+                SyncStatus.success_count == expected_count, expected_count > 0,
+                stored_session["source"].as_string() == "vietcap",
+                stored_session["scope"].as_string() == "vietcap_board",
+                stored_session["symbol"].as_string() == stored_symbol,
+                member_matches,
+            ).exists()
             for values in prep_data:
                 stmt = dialect_insert(ScreenerSnapshot).values(**values)
                 update_cols = {
@@ -603,12 +636,12 @@ class CacheManager:
                     if k not in ["symbol", "snapshot_date", "source"]
                 }
                 quote_missing = stmt.excluded.price.is_(None)
-                for column in ("trade_date", "volume"):
+                for column in ("price", "trade_date", "volume", "created_at"):
+                    preserve = quote_missing | admitted_session if column in {"trade_date", "volume"} else admitted_session
                     update_cols[column] = case(
-                        (quote_missing, ScreenerSnapshot.__table__.c[column]),
-                        else_=update_cols[column],
+                        (preserve, ScreenerSnapshot.__table__.c[column]), else_=update_cols[column],
                     )
-                update_cols.update(screener_metadata_updates(stmt, dialect_name, quote_missing))
+                update_cols.update(screener_metadata_updates(stmt, dialect_name, quote_missing | admitted_session))
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["symbol", "snapshot_date"], set_=update_cols
                 )

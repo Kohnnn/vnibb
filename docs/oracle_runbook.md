@@ -97,6 +97,18 @@ Verify the exact FPT income-statement GET and OPTIONS separately for the current
 
 Detailed health reads the same certified screener Universe partition as consumers. Legacy partitions retain the oldest-actual-trade-date gate. Typed session receipts additionally require exact current active membership and independently revalidated raw provider records; every new record is scoped `vietcap_board`. A provider-board zero-volume/suspension observation may have no actual price, so missing prices and historical trade dates are reported separately from provider session coverage. They must never become zero prices or current trade dates. Provider-only coverage keeps whole-market readiness degraded because odd-lot/put-through completeness is unproved. Completed-session calculations use the official HOSE/HNX 2026 closure notices and January 2 amendment plus additive `MARKET_HOLIDAY_DATES`; other years remain unverified. Before recovery, require exchange-session authority, complete segment coverage, source-use permission, exact active membership, a genuine full-run receipt and independently admitted constituent observations. New `acquire_sessions=True` materialization is opt-in and is not enabled by the daily worker without source-use authorization; private captured-source replay is not public-serving permission.
 
+`sync_screener_data` publishes snapshot changes and the Universe receipt in one PostgreSQL transaction; twenty-row checkpoints do not commit snapshot batches. A failed/incomplete same-day rerun rolls back its snapshot savepoint when a prior admitted partition exists, while independently valid Mongo observations and daily `StockPrice` rows remain durable. A complete current-session recovery may replace the old same-day partition atomically; there is no blanket daily freeze or duplicate run-key schema. Per-symbol savepoints isolate real PostgreSQL constraint failures. Before the receipt, read back the exact retained request/session envelope, immutable qualified record, snapshot session and matching traded OHLCV/source/stock identity; hold the stock membership table against changes through commit. No-trade/suspended actual prices remain nullable. Identical replay preserves snapshot/price IDs, `created_at`, lineage and receipt count; absent ratio-unit markers stay absent. Redis publication happens only after a complete database commit; an unavailable cache cannot certify or expose a partial database cohort.
+
+Mid-publication checkpoints record outcome stats without advancing `last_index` or `last_symbol`: those snapshots are not durable until the final commit. Cancellation therefore retries the uncommitted retained-data run rather than skipping rolled-back rows. A preexisting cursor skips only same-day prefix rows whose price, date, unit and source pass the publication base validation; missing or invalid members retry with the remaining tail. Valid committed prefix rows are not rewritten, and successful final publication clears the cursor.
+
+Default SQLite regression runs explicitly start a root transaction and leave the successful publication savepoint open until the final session commit; releasing a root savepoint early would make cancellation unable to restore the previous cohort. Run the default cancellation regressions without `POSTGRES_CONTRACT`: `PYTHONPATH=apps/api python -m pytest apps/api/tests/test_api/test_sync_recovery.py -q -k 'resumed_base_and_marker_commit_atomically or cancelled_final_commit_keeps_previous_same_day_admitted_cohort'`.
+
+Request-path `CacheManager.store_screener_data` may enrich ratios but must not replace the quote, volume, actual trade date, price-unit/source evidence, raw session record or creation lineage of a typed admitted member. The atomic upsert guard requires a completed, error-free typed receipt matching the stored snapshot/session dates and symbol membership; unrelated, legacy and differently dated receipts do not claim ownership. A quote-less refresh also leaves existing session metadata intact rather than merging `market_session=None`. This does not freeze legacy price updates or certify missing prices. Run `PYTHONPATH=apps/api python -m pytest apps/api/tests/test_api/test_sync_recovery.py apps/api/tests/test_services/test_market_session_readers.py apps/api/tests/test_services/test_screener_snapshot_ownership.py -q` without `POSTGRES_CONTRACT`; with the disposable PostgreSQL contract environment, run `PYTHONPATH=apps/api python -m pytest apps/api/tests/test_contract/test_postgres_release_contract.py -q -k 'screener_quote_base or request_refresh_preserves_admitted'`.
+
+Ownership is evaluated against the actual conflicting Screener Snapshot, not any other admitted row in the table. A completed receipt may commit after request preparation, so ownership deliberately has no request-start-time cutoff; this conservative write guard does not admit a future receipt for reads. Native regressions cover a paused request followed by publication, a request waiting on the publisher's real table lock, and mixed admitted/legacy batches. No additional request-writer table lock is required by the observed PostgreSQL lock-wait case.
+
+Offline publication regression recipe (disposable loopback stores only): export `POSTGRES_CONTRACT=1`, `POSTGRES_CONTRACT_DATABASE_URL=$DATABASE_URL` and `MONGODB_CONTRACT_URL=$MONGODB_URL`, then run `PYTHONPATH=apps/api python -m pytest apps/api/tests/test_services/test_session_admission_contract.py -q`. The suite seeds synthetic board responses at the provider boundary and exercises fifty-row interruption, real price/snapshot constraints, raw/envelope/price loss, active membership drift, incomplete/complete recovery, replay identity and cache failure. Its complete-cohort case captures the real admitted reader, PostgreSQL `to_jsonb` dates and retained Mongo evidence, including rejected empty/unrelated/mismatched envelopes. This does not acquire provider data or authorize a scheduler/recovery rollout.
+
 For the QA release, set `PREDICTION_MARKET_POPULATE_ON_STARTUP=false` in the private serving environment before replacing the scheduler. This disables only the immediate restart-population task; normal daily and recurring prediction ingestion remain scheduled. The application default remains `true` for existing installations. Preserve the explicit release setting during rollback so a restart does not introduce an unrequested acquisition.
 
 Auth has a separate native CORS policy. For GoTrue v2.177, map `GOTRUE_CORS_ALLOWED_HEADERS=${GOTRUE_CORS_ALLOWED_HEADERS:-apikey}` into the Auth service and set the matching private environment value. The missing `apikey` allowance can produce OPTIONS 204 without CORS headers and prevent the password POST. Preserve issuer, keys, redirects and the existing GoTrue origin behavior; `GOTRUE_URI_ALLOW_LIST` controls redirects, not CORS. Before an approved Auth-only recreation, save effective configuration and all container identities privately. Recreate only Auth on its retained image with `--no-deps --no-build --pull never`, verify the real sorted browser preflight and genuine password login, and confirm the other seven container identities/images are unchanged. Restore the saved Auth mapping/environment and use the same Auth-only command for rollback. No database restore or broader proxy policy is required.
@@ -864,3 +876,84 @@ Recommended VNIBB guardrails:
 Pass/fail rule:
 - PASS: all five checks are within thresholds
 - FAIL: any single threshold is exceeded or paid shape usage appears
+
+## Read-only database readiness census (#167)
+
+Use the existing preflight command's explicit census mode, with private runtime
+credentials already loaded and an independently pinned serving revision:
+
+```bash
+umask 077
+PYTHONPATH=apps/api python apps/api/scripts/query_plan_preflight.py \
+  --readiness-census --expected-revision "$EXPECTED_REVISION" \
+  --mongo-max-time-ms 3000 --output-json "$PRIVATE_EVIDENCE/census.private.json"
+```
+
+This mode skips every HTTP benchmark, provider import/acquisition and cache refresh.
+Do not pass `--api-base-url`, `--require-screener`, or `--output-markdown`. With
+`--output-json`, the command exclusively creates a mode-0600 file and prints only
+aggregate counts; without it, stdout contains private per-symbol evidence. Keep
+that evidence outside the repository. A zero exit means capture succeeded, **not**
+that the database is ready. Connection/query errors fail capture, not missing-data
+counts. It does not install indexes, run migrations, materialize or publish rows.
+
+PostgreSQL uses read-only transactions, 5-second statement/1-second lock deadlines
+and rollback; serving price/snapshot reads are planner-first and reject sequential
+scans. Mongo reads use existing index hints and `maxTimeMS`; Redis uses only bounded
+`GETRANGE` and `TTL` on known pipeline keys. SQL membership is recounted before/after
+capture and the revision is checked for drift. The cross-store window is explicitly
+non-atomic. Receipt/envelope capture fails rather than silently truncating above
+1,000 records. Calendar-based expected completion is not exchange finality evidence.
+
+Admitted-reader scalar summaries are captured before rolling back the read-only transaction. Session validation accepts SQL dates and their JSON encoding without rewriting the captured records. Received-envelope linkage requires the exact retained raw board row, requested symbol and expected session; a requested-symbol label alone is not lineage evidence.
+
+On a serving host, retain strict known-host SSH verification and the existing
+identity. Inspect sanitized Docker identities before/after; do not print container
+environment variables. If the new command is not deployed, stream the reviewed
+`scripts/readiness_census.py` source into `docker exec -i vnibb-api python -B -`
+and invoke `readiness_census(EXPECTED_REVISION, 3000)` there, capturing stdout to a
+private local file. This executes the same census without copying files into the
+container, deploying, calling consumer GETs, or writing a datastore. Never bypass
+SSH host-key checks or use consumer endpoints that can populate caches.
+
+### Captured production aggregates, 26 October 2026
+
+Actual retained-store capture: **12:26:27–12:26:32 UTC**, revision
+`229d7a54b4aec6622bbaec92680a60ae48b729b2`, expected session `2026-10-26`.
+Active membership was recounted as **1,519** (HOSE 412 / HNX 302 / UPCOM 805),
+ordered-symbol SHA-256
+`0f18c347a7a931f159e5becba361dc3d1907efcbe437a090f897742dee361207`.
+
+| Observation | Count |
+| --- | ---: |
+| Durable SQL price rows / snapshot rows, all history | 1,414,178 / 318,202 |
+| Active symbols with a retained SQL price / snapshot | 1,519 / 1,519 |
+| Current actual SQL trade dates, price and snapshot | 872 / 872 |
+| Snapshots materialized today / older snapshots | 1,464 / 55 |
+| Active symbols with retained Mongo EOD / current EOD | 1,517 / 810 |
+| Current received batch envelopes / qualified Mongo board documents | 0 / 0 |
+| Independently qualified embedded SQL sessions | 0 |
+| Durable Universe completion receipts, all history | 0 |
+| Existing Redis screener / latest-price keys | 1,464 / 0 |
+| Receipt-admitted Universe / qualified session count | 0 / 0 |
+
+All 1,519 symbols lack a retained current board/session proof and completion receipt;
+647 actual SQL trade dates are older than the expected session. Fifty-five retained
+SQL price/snapshot rows have uncertified units (snapshot source proof is also absent).
+Two symbols lack Mongo EOD; 133 latest Mongo/SQL price dates differ; 234 same-date
+Mongo EOD records lack the required raw/unit evidence. These are distinct overlapping
+reasons, not a single missing-row count. Existing Redis screener numeric/date values
+match their SQL snapshots; no consumer request was made to refill absent keys.
+
+The public `CacheManager.get_screener_data(source=None)` reader was called directly
+inside a read-only transaction: miss, zero admitted rows,
+`verified_universe_unavailable`. Durable rows are not admitted coverage. This capture
+contained zero null snapshot prices; the earlier isolated replay's 647 null prices
+was different evidence and was neither copied nor changed. Provider-scope-only health
+degradation and null-price semantics remain unchanged. No readiness recovery, source
+permission, acquisition, scheduler or deployment claim follows from this census.
+
+Detailed per-symbol JSON, raw envelopes, receipt decisions, query plan, command-source
+hash and unchanged before/after API/PostgreSQL/Mongo/Redis identities are retained
+privately under the implementation evidence directory's `census-167/`. No credentials
+or per-symbol raw records belong in this runbook.

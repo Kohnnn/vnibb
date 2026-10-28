@@ -140,7 +140,7 @@ class VietcapClient:
         data = self._request("GET", url, TRADING_BASE)
         return data if isinstance(data, list) else []
 
-    def get_price_board(self, symbols: list[str]) -> list[dict]:
+    def get_price_board(self, symbols: list[str], *, validate_membership: bool = True) -> Any:
         if not isinstance(symbols, list) or any(not isinstance(symbol, str) or not symbol.strip() for symbol in symbols):
             raise ValueError("Price board symbols must be nonempty strings")
         requested = list(dict.fromkeys(symbol.strip().upper() for symbol in symbols))
@@ -148,6 +148,9 @@ class VietcapClient:
             return []
         url = f"{TRADING_BASE}/api/price/symbols/getList"
         rows = self._request("POST", url, TRADING_BASE, json_body={"symbols": requested})
+        if not validate_membership:
+            # Admission retains the received response before inspecting row identity.
+            return rows
         if not isinstance(rows, list):
             raise ValueError("Invalid price board response")
         returned = []
