@@ -12,7 +12,7 @@ from sqlalchemy.engine import make_url
 
 from scripts.verify_database import FINANCIAL_DATASETS
 from vnibb.core.financial_sources import ADMITTED_FINANCIAL_SOURCES
-from vnibb.mcp.server import _serialize_row
+from vnibb.mcp.server import _serialize_row, serialize_data_value
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 
 MODELS = {"income_statements": IncomeStatement, "balance_sheets": BalanceSheet, "cash_flows": CashFlow}
@@ -62,7 +62,7 @@ def summarize_row(row, model):
     try:
         if not row.get("period"):
             raise ValueError("Missing period bypasses MCP admission")
-        served = _serialize_row(row, model=model)
+        served = serialize_data_value(_serialize_row(row, model=model))
         unavailable = served.get("unavailable_metrics", {})
         result["status"] = "evaluated"
         result["row_reason"] = served.get("unavailable_reason")

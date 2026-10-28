@@ -76,6 +76,26 @@ def test_consumer_rejects_conflicting_source_and_quarter_basis(tmp_path):
     assert quarterly["fields"]["revenue"]["reason"] != "missing_value"
 
 
+@pytest.mark.parametrize("value", [float("inf"), float("-inf")])
+def test_nonfinite_stored_value_is_consumer_fault(tmp_path, value):
+    path = tmp_path / "inventory.db"
+    engine = create_engine(f"sqlite:///{path}")
+    for model in MODELS.values():
+        model.__table__.create(engine)
+    with engine.begin() as conn:
+        conn.execute(insert(MODELS["income_statements"].__table__),
+                     {"id": 1, **row(raw=lineage(), revenue=value)})
+    engine.dispose()
+
+    report = inventory(f"sqlite:///{path}", ["FPT"], ["2025"])
+    result = cell(report, "income_statements", "FPT", "2025")["rows"][0]
+    assert result["status"] == "consumer_fault"
+    assert result["error_type"] == "ValueError"
+    assert result["fields"]["revenue"] == {
+        "stored": True, "admitted": None, "reason": "consumer_fault",
+    }
+
+
 @pytest.mark.parametrize("symbols,periods", [("FPT,FPT", "2025"), ("FPT", "2025,2025"),
                                             ("FPT", "FY2025"), ("", "2025")])
 def test_scope_requires_explicit_valid_unique_identities(symbols, periods):
