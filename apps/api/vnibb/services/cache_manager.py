@@ -131,7 +131,10 @@ def source_update_condition(model, source: str | None):
         return model.source == source
     if source == "vietcap_vnd":
         return model.source.in_(("vietcap", "vietcap_vnd"))
-    return or_(model.source.is_(None), model.source.not_in(("vietcap", "vietcap_vnd")))
+    excluded = ("vietcap", "vietcap_vnd", "issuer_report") if model.__tablename__ in {
+        "income_statements", "balance_sheets", "cash_flows", "financial_ratios"
+    } else ("vietcap", "vietcap_vnd")
+    return or_(model.source.is_(None), model.source.not_in(excluded))
 
 
 def _retains_financial_evidence(existing: Any, incoming: Any) -> bool:
@@ -1111,7 +1114,7 @@ class CacheManager:
                     source = values.get("source")
                     allowed = (existing.source == "vietcap" if source == "vietcap" else
                                existing.source in {"vietcap", "vietcap_vnd"} if source == "vietcap_vnd" else
-                               existing.source not in {"vietcap", "vietcap_vnd"})
+                               existing.source not in {"vietcap", "vietcap_vnd", "issuer_report"})
                     if not allowed:
                         conflicts.append({"table": model.__tablename__, **{key: values[key] for key in keys}})
                         continue
@@ -1167,6 +1170,8 @@ class CacheManager:
         models = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow, "ratio": FinancialRatio}
         if statement_type not in models or period not in {"year", "quarter"}:
             raise ValueError("Unsupported financial statement or period")
+        if source == "issuer_report":
+            raise ValueError("issuer_report persistence is not enabled")
         model = models[statement_type]
         aliases = {
             "operating_expense": "operating_expenses", "profit_before_tax": "income_before_tax",

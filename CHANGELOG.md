@@ -13,6 +13,8 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Prevent SQLite screener publication deadlocks by saving interim progress without a competing SQL writer and committing acquired daily prices before snapshot publication; interruption retains independent prices and never advances the uncommitted snapshot cursor.
+- Remove three sponsor-only Mongo backfill and discovery scripts accidentally restored by integration. Free VCI and Vietcap workflows are unchanged; source-use authorization remains a separate prerequisite for acquisition and publication.
 - MCP financial collection, latest and snapshot readers withhold issuer-report rows until field-bound evidence and ownership-safe persistence are implemented; the previous four-key evidence check was insufficient. Legacy V46 EPS and all-target writes now fail explicitly before any database work rather than reporting a successful zero-row repair. Issuer recovery and production cutover remain unverified.
 - Dashboard widget toolbars measure their containing cells to avoid compact-layout oscillation; native ticker-group selections no longer change Global. Listing Browser controls have accessible names, and mobile header tools wrap within the viewport.
 - Market-cap serving preserves observation lineage and withholds unsupported or conflicting values instead of guessing units or share counts. Income EPS enrichment requires matching fiscal and source evidence; RSS parsing retains ordinary leaf-element text and original publication dates. These source changes do not establish production data readiness or source-use rights.

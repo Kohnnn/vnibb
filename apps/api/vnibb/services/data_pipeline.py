@@ -1526,6 +1526,44 @@ class DataPipeline:
                 stats["errors"] = max(0, stats["errors"] - prior_errors) + len(session_errors)
                 stats["base_errors"] = len(session_errors)
 
+        price_write_errors: dict[str, Exception] = {}
+        for symbol, market_session in market_sessions.items():
+            if market_session["status"] != "traded":
+                continue
+            try:
+                match = market_session["raw"]["matchPrice"]
+                price_values = {
+                    "stock_id": stock_metadata[symbol]["stock_id"], "symbol": symbol, "time": expected_session,
+                    "open": match["openPrice"], "high": match["highest"], "low": match["lowest"],
+                    "close": match["matchPrice"], "volume": int(match["accumulatedVolume"]),
+                    "interval": "1D", "source": "vietcap_vnd",
+                }
+                async with async_session_maker.begin() as price_session:
+                    existing_price = await price_session.scalar(select(StockPrice).where(
+                        StockPrice.symbol == symbol, StockPrice.time == expected_session,
+                        StockPrice.interval == "1D",
+                    ).with_for_update())
+                    if existing_price is not None and (
+                        existing_price.source not in {"vietcap", "vietcap_vnd"}
+                        or any(getattr(existing_price, field) != value for field, value in price_values.items() if field != "source")
+                    ):
+                        raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
+                    if existing_price is None or existing_price.source != "vietcap_vnd":
+                        price_stmt = get_upsert_stmt(
+                            StockPrice, ["symbol", "time", "interval"], price_values,
+                            preserve_existing_on_null={"value", "adj_close"},
+                            update_overrides=lambda stmt: {"created_at": StockPrice.created_at},
+                            update_condition=and_(
+                                source_update_condition(StockPrice, "vietcap_vnd"),
+                                *(getattr(StockPrice, field) == value for field, value in price_values.items() if field != "source"),
+                            ),
+                        )
+                        price_result = await price_session.execute(price_stmt.returning(StockPrice.id))
+                        if not price_result.scalars().all():
+                            raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
+            except Exception as exc:
+                price_write_errors[symbol] = exc
+
         async with async_session_maker() as session:
             if engine.dialect.name == "postgresql":
                 await session.execute(text("LOCK TABLE screener_snapshots IN SHARE ROW EXCLUSIVE MODE"))
@@ -1740,29 +1778,8 @@ class DataPipeline:
                                 "close": match["matchPrice"], "volume": int(match["accumulatedVolume"]),
                                 "interval": "1D", "source": "vietcap_vnd",
                             }
-                            async with async_session_maker.begin() as price_session:
-                                existing_price = await price_session.scalar(select(StockPrice).where(
-                                    StockPrice.symbol == symbol, StockPrice.time == expected_session,
-                                    StockPrice.interval == "1D",
-                                ).with_for_update())
-                                if existing_price is not None and (
-                                    existing_price.source not in {"vietcap", "vietcap_vnd"}
-                                    or any(getattr(existing_price, field) != value for field, value in price_values.items() if field != "source")
-                                ):
-                                    raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
-                                if existing_price is None or existing_price.source != "vietcap_vnd":
-                                    price_stmt = get_upsert_stmt(
-                                        StockPrice, ["symbol", "time", "interval"], price_values,
-                                        preserve_existing_on_null={"value", "adj_close"},
-                                        update_overrides=lambda stmt: {"created_at": StockPrice.created_at},
-                                        update_condition=and_(
-                                            source_update_condition(StockPrice, "vietcap_vnd"),
-                                            *(getattr(StockPrice, field) == value for field, value in price_values.items() if field != "source"),
-                                        ),
-                                    )
-                                    price_result = await price_session.execute(price_stmt.returning(StockPrice.id))
-                                    if not price_result.scalars().all():
-                                        raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
+                            if symbol in price_write_errors:
+                                raise price_write_errors[symbol]
                             price_cache_batch.append({
                                 **price_values, "time": expected_session.isoformat(), "price_unit": "VND",
                                 "price_source": "vietcap_vnd", "raw": market_session["raw"],
@@ -2086,10 +2103,9 @@ class DataPipeline:
                         stats = progress["stage_stats"]["screener"]
                         stats["base_errors"] = stats.get("base_errors", 0) + 1
 
-                if count and count % batch_size == 0:
-                    # Checkpoint outcome stats, not a resume cursor for uncommitted snapshots.
-                    if progress is not None and sync_id is not None:
-                        await self._checkpoint(progress, sync_id)
+                if count and count % batch_size == 0 and progress is not None and sync_id is not None:
+                    # Uncommitted outcomes have no durable resume cursor; avoid a second SQL writer.
+                    await self._save_progress(progress)
 
 
             backfilled_rows = 0
@@ -3382,6 +3398,8 @@ class DataPipeline:
                         VnstockFinancialsFetcher.transform_query(params)
                     )
                     items = VnstockFinancialsFetcher.transform_data(params, raw_items)
+                    if any(item.source == "issuer_report" for item in items):
+                        raise ValueError("issuer_report persistence is not enabled")
                     outcome["source_returned_period_count"] = len({
                         _parse_period_fields(entry.period, entry.raw_data)[0] for entry in items
                     })
