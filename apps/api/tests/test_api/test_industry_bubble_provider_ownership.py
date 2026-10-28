@@ -176,8 +176,26 @@ async def test_industry_bubble_retained_points_do_not_wait_for_owned_provider(
             timed_out = await pending
             assert timed_out.status_code == 503
             bubble_inputs.extend([
-                {"symbol": "FPT", "industry": "technology", "market_cap": 100.0},
-                {"symbol": "CMG", "industry": "technology", "market_cap": 200.0},
+                {
+                    "symbol": "FPT", "industry": "technology",
+                    **market.resolve_market_cap({
+                        "market_cap": 100.0, "market_cap_source": "fixture:cap",
+                        "market_cap_unit": "VND", "market_cap_currency": "VND",
+                        "market_cap_as_of": "2026-10-26", "outstanding_shares": 100,
+                        "shares_unit": "shares", "shares_as_of": "2026-10-26",
+                        "shares_source": "fixture:shares", "share_basis": "outstanding",
+                    }, source="fixture:cap"),
+                },
+                {
+                    "symbol": "CMG", "industry": "technology",
+                    **market.resolve_market_cap({
+                        "market_cap": 200.0, "market_cap_source": "fixture:cap",
+                        "market_cap_unit": "VND", "market_cap_currency": "VND",
+                        "market_cap_as_of": "2026-10-26", "outstanding_shares": 100,
+                        "shares_unit": "shares", "shares_as_of": "2026-10-26",
+                        "shares_source": "fixture:shares", "share_basis": "outstanding",
+                    }, source="fixture:cap"),
+                },
             ])
 
             async def ratios(_symbols):
