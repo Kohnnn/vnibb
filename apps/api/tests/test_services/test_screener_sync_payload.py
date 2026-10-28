@@ -701,7 +701,7 @@ async def test_pipeline_session_acquisition_is_opt_in_and_clears_unqualified_quo
         def utcnow(cls):
             return observed.replace(tzinfo=None)
 
-    def board(self, symbols):
+    def board(self, symbols, **kwargs):
         calls.append(symbols)
         return [{
             "listingInfo": {
@@ -720,11 +720,24 @@ async def test_pipeline_session_acquisition_is_opt_in_and_clears_unqualified_quo
     monkeypatch.setattr(data_pipeline_module, "async_session_maker", sessions)
     monkeypatch.setattr(data_pipeline_module, "datetime", FrozenDateTime)
     monkeypatch.setattr(VietcapClient, "get_price_board", board)
-    monkeypatch.setattr("vnibb.services.mongo_market_data_service.get_mongo_market_data_service", lambda: SimpleNamespace(enabled=False))
+    retained = SimpleNamespace(
+        retain_price_board_envelope=lambda *args: None,
+        retain_market_sessions=lambda records: {record["symbol"]: record for record in records},
+        verified_market_sessions=lambda records, envelopes: set(records),
+    )
+    monkeypatch.setattr("vnibb.services.mongo_market_data_service.get_mongo_market_data_service", lambda: retained)
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_cache_set_json", cached)
     async with sessions.begin() as session:
-        session.add_all([Stock(symbol="AAA", is_active=1), Stock(symbol="BBB", is_active=1)])
+        stocks = [Stock(symbol="AAA", is_active=1), Stock(symbol="BBB", is_active=1)]
+        session.add_all(stocks)
+        await session.flush()
+        session.add(StockPrice(
+            id=1,
+            stock_id=stocks[1].id, symbol="BBB", time=session_date - timedelta(days=3),
+            open=20000, high=20000, low=20000, close=20000, volume=5,
+            interval="1D", source="vietcap_vnd",
+        ))
         session.add_all([
             ScreenerSnapshot(symbol="AAA", snapshot_date=session_date, trade_date=session_date, price=10000, volume=5, pe=12, extended_metrics={"price_unit": "VND", "price_source": "unverified", "ratio_units": {"roe": "percent"}, "market_session": {"raw": {"obsolete": True}}}),
             ScreenerSnapshot(symbol="BBB", snapshot_date=session_date, trade_date=session_date - timedelta(days=3), price=20000, volume=5, extended_metrics={"price_unit": "VND", "price_source": "vietcap_vnd"}),
@@ -747,7 +760,7 @@ async def test_pipeline_session_acquisition_is_opt_in_and_clears_unqualified_quo
         assert typed[0]["market_session_date"] == session_date.isoformat()
         assert typed[0]["expected_symbols"] == ["AAA", "BBB"]
 
-    def unavailable(self, symbols):
+    def unavailable(self, symbols, **kwargs):
         raise RuntimeError("source unavailable")
 
     monkeypatch.setattr(VietcapClient, "get_price_board", unavailable)

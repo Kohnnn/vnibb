@@ -213,3 +213,141 @@ async def test_screener_quote_base_preserves_ratio_metadata_on_postgres(test_db,
         await test_db.execute(StockPrice.__table__.delete().where(StockPrice.symbol == symbol))
         await test_db.execute(Stock.__table__.delete().where(Stock.symbol == symbol))
         await test_db.commit()
+
+
+@pytest.mark.postgres_contract
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refresh", [
+    "quote_less", "changed_quote", "changed_session", "concurrent_publication", "locked_publication", "mixed_ownership",
+])
+async def test_postgres_request_refresh_preserves_admitted_session(test_db, monkeypatch, refresh):
+    from datetime import UTC
+
+    from vnibb.models.screener import ScreenerSnapshot
+    from vnibb.models.sync_status import SyncStatus
+    from vnibb.providers.vnstock.equity_screener import ScreenerData
+    from vnibb.services import cache_manager
+    from vnibb.services.market_session import qualify_market_session
+
+    minute = [0]
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def utcnow(cls):
+            return cls(2026, 10, 26, 9, minute[0])
+
+    monkeypatch.setattr(cache_manager, "datetime", FrozenDateTime)
+    symbol = f"S{uuid4().hex[:8]}".upper()
+    legacy_symbol = f"{symbol}L"
+    session_date = date(2026, 10, 26)
+    observed = datetime(2026, 10, 26, 8, 12, tzinfo=UTC)
+    raw = {
+        "listingInfo": {
+            "symbol": symbol, "ticker": symbol, "stockType": "STOCK", "type": "STOCK",
+            "isDelisted": 0, "tradingDate": "2026-10-26", "receivedTime": "2026-10-26T01:44:00Z",
+            "tradingStatus": "TRADING_ACTIVATED", "tradingStatusCode": "20", "securityStatus": "N",
+        },
+        "bidAsk": {"symbol": symbol, "session": "ENDED", "time": "2026-10-26T08:00:00Z", "receivedTime": "2026-10-26T08:00:03Z"},
+        "matchPrice": {
+            "symbol": symbol, "session": "ENDED", "time": "2026-10-26T08:00:00Z", "receivedTime": "2026-10-26T08:00:03Z",
+            "matchPrice": 10000, "openPrice": 10000, "highest": 11000, "lowest": 9000, "accumulatedVolume": 100,
+        },
+    }
+    evidence = qualify_market_session(raw, symbol, session_date, observed)
+    assert evidence is not None
+    receipt = SyncStatus(
+        sync_type="screener_universe", status="completed", error_count=0, success_count=1,
+        completed_at=observed.replace(tzinfo=None),
+        additional_data={"snapshot_date": session_date.isoformat(), "market_session_date": session_date.isoformat(),
+                         "expected_symbols": [symbol], "expected_count": 1},
+    )
+    row = ScreenerSnapshot(
+        symbol=symbol, snapshot_date=session_date, trade_date=session_date,
+        price=10000, volume=100, source="vietcap_vnd", created_at=observed.replace(tzinfo=None),
+        extended_metrics={"price_unit": "VND", "price_source": "vietcap_vnd", "market_session": evidence},
+    )
+    try:
+        payload = ScreenerData(symbol=symbol, pe=12).model_dump()
+        if refresh in {"changed_quote", "concurrent_publication", "locked_publication", "mixed_ownership"}:
+            payload.update(price=20000, volume=200, trade_date=session_date)
+        elif refresh == "changed_session":
+            payload["market_session"] = {**evidence, "session_date": "2026-10-23"}
+        if refresh == "concurrent_publication":
+            entered, release = asyncio.Event(), asyncio.Event()
+            sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
+            async with sessions() as writer:
+                execute = writer.execute
+
+                async def paused_execute(*args, **kwargs):
+                    entered.set()
+                    await release.wait()
+                    return await execute(*args, **kwargs)
+
+                monkeypatch.setattr(writer, "execute", paused_execute)
+                refresh_task = asyncio.create_task(CacheManager(db=writer).store_screener_data([payload], source="VCI"))
+                try:
+                    await asyncio.wait_for(entered.wait(), timeout=5)
+                    minute[0] = 1
+                    receipt.completed_at = FrozenDateTime.utcnow()
+                    test_db.add_all([Stock(symbol=symbol, is_active=1), row, receipt])
+                    await test_db.commit()
+                finally:
+                    release.set()
+                    result = await refresh_task
+                assert result == 1
+        elif refresh == "locked_publication":
+            sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
+            async with sessions() as writer:
+                writer_pid = await writer.scalar(text("SELECT pg_backend_pid()"))
+                await test_db.execute(text("LOCK TABLE screener_snapshots IN SHARE ROW EXCLUSIVE MODE"))
+                test_db.add_all([Stock(symbol=symbol, is_active=1), row, receipt])
+                await test_db.flush()
+                refresh_task = asyncio.create_task(CacheManager(db=writer).store_screener_data([payload], source="VCI"))
+
+                async def wait_for_writer_lock():
+                    while not await test_db.scalar(text(
+                        "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid=:pid "
+                        "AND relation='screener_snapshots'::regclass AND NOT granted)"
+                    ), {"pid": writer_pid}):
+                        await asyncio.sleep(0.01)
+
+                try:
+                    await asyncio.wait_for(wait_for_writer_lock(), timeout=5)
+                    assert not refresh_task.done()
+                finally:
+                    await test_db.commit()
+                    result = await refresh_task
+                assert result == 1
+        else:
+            test_db.add_all([Stock(symbol=symbol, is_active=1), row, receipt])
+            if refresh == "mixed_ownership":
+                test_db.add(ScreenerSnapshot(
+                    symbol=legacy_symbol, snapshot_date=session_date, trade_date=session_date,
+                    price=9000, volume=90, source="legacy",
+                    extended_metrics={"price_unit": "VND", "price_source": "vnstock_vnd:VCI"},
+                ))
+            await test_db.commit()
+            admitted = await CacheManager(db=test_db).get_screener_data(symbol=symbol, source=None, allow_stale=False)
+            assert admitted.hit and not admitted.is_stale
+            payloads = [payload]
+            if refresh == "mixed_ownership":
+                payloads.append({"symbol": legacy_symbol, "price": 11000, "volume": 110, "trade_date": session_date, "pe": 13})
+            assert await CacheManager(db=test_db).store_screener_data(payloads, source="VCI") == len(payloads)
+            if refresh == "mixed_ownership":
+                legacy = (await test_db.scalars(select(ScreenerSnapshot).where(ScreenerSnapshot.symbol == legacy_symbol))).one()
+                await test_db.refresh(legacy)
+                assert (legacy.price, legacy.volume, legacy.pe) == (11000, 110, 13)
+        await test_db.refresh(row)
+        cached = await CacheManager(db=test_db).get_screener_data(symbol=symbol, source=None, allow_stale=False)
+        assert cached.hit and not cached.is_stale
+        assert (row.price, row.volume, row.trade_date, row.pe) == (10000, 100, session_date, 12)
+        assert row.created_at == observed.replace(tzinfo=None)
+        assert row.extended_metrics["market_session"] == evidence
+        assert row.extended_metrics["price_unit"] == "VND"
+        assert row.extended_metrics["price_source"] == "vietcap_vnd"
+    finally:
+        await test_db.execute(ScreenerSnapshot.__table__.delete().where(ScreenerSnapshot.symbol.in_([symbol, legacy_symbol])))
+        if receipt.id is not None:
+            await test_db.execute(SyncStatus.__table__.delete().where(SyncStatus.id == receipt.id))
+        await test_db.execute(Stock.__table__.delete().where(Stock.symbol == symbol))
+        await test_db.commit()
