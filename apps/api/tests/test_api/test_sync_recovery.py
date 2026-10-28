@@ -891,6 +891,7 @@ async def test_file_sqlite_acquired_sessions_keep_prices_on_interruption(tmp_pat
     from copy import deepcopy
     from datetime import UTC, datetime
 
+    from sqlalchemy import BigInteger, Integer
     from sqlalchemy.ext.asyncio import create_async_engine
     from vnibb.core.database import Base
     from vnibb.models.stock import Stock, StockPrice
@@ -941,7 +942,14 @@ async def test_file_sqlite_acquired_sessions_keep_prices_on_interruption(tmp_pat
     pipeline = DataPipeline()
     try:
         async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
+            # Mirror the migration's SQLite INTEGER variant so inserts generate price IDs.
+            price_id = StockPrice.__table__.c.id
+            original_type = price_id.type
+            price_id.type = BigInteger().with_variant(Integer, "sqlite")
+            try:
+                await connection.run_sync(Base.metadata.create_all)
+            finally:
+                price_id.type = original_type
         async with sessions.begin() as session:
             session.add_all([Stock(symbol=symbol, is_active=1) for symbol in symbols])
         sync_id = await pipeline._create_sync_record("full", "sqlite-acquire", 1)
@@ -949,6 +957,7 @@ async def test_file_sqlite_acquired_sessions_keep_prices_on_interruption(tmp_pat
         original_save = pipeline._save_progress
 
         async def interrupt_after_batch(data, *args, **kwargs):
+            assert data["stage_stats"]["screener"]["success"] >= 20
             raise asyncio.CancelledError()
 
         monkeypatch.setattr(pipeline, "_save_progress", interrupt_after_batch)

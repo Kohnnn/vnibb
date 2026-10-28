@@ -284,10 +284,11 @@ async def test_interrupted_same_day_rerun_preserves_admitted_cohort(admission_st
     class Interrupted(BaseException):
         pass
 
-    async def interrupt_checkpoint(*args, **kwargs):
+    async def interrupt_progress(progress, *args, **kwargs):
+        assert progress["stage_stats"]["screener"]["success"] == 20
         raise Interrupted()
 
-    monkeypatch.setattr(pipeline, "_checkpoint", interrupt_checkpoint)
+    monkeypatch.setattr(pipeline, "_save_progress", interrupt_progress)
     with pytest.raises(Interrupted):
         await pipeline.sync_screener_data(enrich_ratios=False, progress={}, sync_id=123)
     async with stores.sessions() as session:
@@ -425,11 +426,12 @@ async def test_same_day_recovery_replaces_only_a_complete_cohort(admission_store
     if failure == "missing":
         rows.pop()
     if failure == "active_membership":
-        async def deactivate_after_materialization(*args, **kwargs):
+        async def deactivate_after_materialization(progress, *args, **kwargs):
+            assert progress["stage_stats"]["screener"]["success"] >= 20
             async with stores.sessions.begin() as session:
                 await session.execute(text("UPDATE stocks SET is_active = 0 WHERE symbol = 'B49'"))
 
-        monkeypatch.setattr(pipeline, "_checkpoint", deactivate_after_materialization)
+        monkeypatch.setattr(pipeline, "_save_progress", deactivate_after_materialization)
     monkeypatch.setattr(VietcapClient, "get_price_board", lambda *args, **kwargs: deepcopy(rows))
     await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress={}, sync_id=123 if failure == "active_membership" else None)
     async with stores.sessions() as session:
