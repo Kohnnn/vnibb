@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { formatAbsoluteTimestamp } from '@/lib/format';
 import type { UseQueryResult } from '@tanstack/react-query';
@@ -214,4 +214,33 @@ test('a delayed local echo cannot undo a newer external search', () => {
   widgets[0].config = widgetConfig;
   rerender(<ScreenerWidget id="screener-1" config={widgetConfig} />);
   expect(screen.getByLabelText('Filter screener results')).toHaveValue('FPT');
+});
+
+test('performance view shows names and returns while keeping unavailable rows last in both sort directions', () => {
+  mockUseScreenerData.mockReturnValue({
+    data: { data: [
+      { ticker: 'AAA', company_name: 'Unavailable Company', price: null, change_1d: null },
+      { ticker: 'BBB', organ_name: 'Flat Company', price: 25000, change_1d: 0, perf_1w: 1.25 },
+      { ticker: 'CCC', company_name: 'Declining Company', price: 10000, change_1d: -2.5 },
+    ] },
+    isLoading: false,
+    isFetching: false,
+    error: null,
+    dataUpdatedAt: 0,
+    refetch: jest.fn(),
+  } as unknown as UseQueryResult<ScreenerResponse>);
+
+  render(<ScreenerWidget id="screener-1" config={{ viewMode: 'performance' }} />);
+
+  const table = screen.getByRole('table');
+  const symbols = () => within(table).getAllByRole('button', { name: /^View / }).map(button => button.textContent);
+  const flatRow = screen.getByRole('button', { name: 'View BBB' }).closest('tr')!;
+  expect(within(flatRow).getByText('Flat Company')).toBeInTheDocument();
+  expect(within(flatRow).getByText('25,000')).toBeInTheDocument();
+  expect(within(flatRow).getByText('0.00%')).toBeInTheDocument();
+  expect(within(flatRow).getByText('+1.25%')).toBeInTheDocument();
+  expect(symbols()).toEqual(['BBBFlat Company', 'CCCDeclining Company', 'AAAUnavailable Company']);
+
+  fireEvent.click(within(table).getByRole('columnheader', { name: '1D' }));
+  expect(symbols()).toEqual(['CCCDeclining Company', 'BBBFlat Company', 'AAAUnavailable Company']);
 });

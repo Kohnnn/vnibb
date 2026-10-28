@@ -25,6 +25,7 @@ from vnibb.core.cache import build_cache_key, cached, redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_factory, get_db
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
 from vnibb.core.ratio_units import admitted_ratio_value
@@ -1781,7 +1782,7 @@ def _historical_rows_cover_request(
 ) -> bool:
     if (interval or "1D").upper() != "1D":
         return bool(rows)
-    holidays = {date.fromisoformat(value) for value in settings.market_holiday_dates}
+    holidays = OFFICIAL_MARKET_HOLIDAYS | {date.fromisoformat(value) for value in settings.market_holiday_dates}
     returned_dates = {row.time for row in rows}
     return all(
         cursor in returned_dates
@@ -1810,7 +1811,7 @@ def _historical_resolution_meta(
     )
     completeness_status = "unknown"
     if normalized_interval == "1D":
-        holidays = {date.fromisoformat(value) for value in settings.market_holiday_dates}
+        holidays = OFFICIAL_MARKET_HOLIDAYS | {date.fromisoformat(value) for value in settings.market_holiday_dates}
         expected_dates = [
             cursor
             for cursor in (start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1))
@@ -1829,7 +1830,7 @@ def _historical_resolution_meta(
                 warnings.append("internal business-day gaps detected; exchange-calendar certainty is limited")
             else:
                 warnings.append("requested-range boundary gaps detected; exchange-calendar certainty is limited")
-        elif not holidays:
+        elif not all(market_calendar_metadata(day)["verified"] for day in (start_date, end_date)):
             warnings.append("business-day completeness excludes unconfigured exchange holidays")
     selected_units = {row.price_unit for row in rows}
     unit_status = (

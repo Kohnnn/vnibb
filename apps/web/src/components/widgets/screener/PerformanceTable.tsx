@@ -26,7 +26,7 @@ const TIMEFRAME_COLUMNS = [
   { key: 'perf_6m', label: '6M' },
   { key: 'perf_ytd', label: 'YTD' },
   { key: 'perf_1y', label: '1Y' },
-];
+] as const;
 
 interface PerformanceTableProps {
   data: PerformanceData[];
@@ -35,16 +35,18 @@ interface PerformanceTableProps {
 }
 
 export function PerformanceTable({ data, onSymbolClick, onAddToWatchlist }: PerformanceTableProps) {
-  const [sortColumn, setSortColumn] = useState<string>('perf_1d');
+  const [sortColumn, setSortColumn] = useState<typeof TIMEFRAME_COLUMNS[number]['key']>('perf_1d');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   const sortedData = [...data].sort((a, b) => {
-    const aVal = a[sortColumn as keyof PerformanceData] as number || 0;
-    const bVal = b[sortColumn as keyof PerformanceData] as number || 0;
+    const aVal = a[sortColumn];
+    const bVal = b[sortColumn];
+    if (aVal === null) return bVal === null ? 0 : 1;
+    if (bVal === null) return -1;
     return sortDirection === 'desc' ? bVal - aVal : aVal - bVal;
   });
 
-  const toggleSort = (column: string) => {
+  const toggleSort = (column: typeof sortColumn) => {
     if (sortColumn === column) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
     } else {
@@ -99,7 +101,7 @@ export function PerformanceTable({ data, onSymbolClick, onAddToWatchlist }: Perf
                 {row.price == null ? '—' : row.price.toLocaleString()}
               </td>
               {TIMEFRAME_COLUMNS.map(col => {
-                const value = row[col.key as keyof PerformanceData] as number | null;
+                const value = row[col.key];
                 const isPositive = value !== null && value > 0;
                 const isNegative = value !== null && value < 0;
 
