@@ -5128,19 +5128,22 @@ async def get_growth_rates(
 
     annual_income_stmt = (
         select(IncomeStatement)
-        .where(IncomeStatement.symbol == symbol_upper, IncomeStatement.period_type == "year")
+        .where(IncomeStatement.symbol == symbol_upper, IncomeStatement.period_type == "year",
+               or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"))
         .order_by(desc(IncomeStatement.fiscal_year))
         .limit(2)
     )
     annual_balance_stmt = (
         select(BalanceSheet)
-        .where(BalanceSheet.symbol == symbol_upper, BalanceSheet.period_type == "year")
+        .where(BalanceSheet.symbol == symbol_upper, BalanceSheet.period_type == "year",
+               or_(BalanceSheet.source.is_(None), BalanceSheet.source != "issuer_report"))
         .order_by(desc(BalanceSheet.fiscal_year))
         .limit(2)
     )
     quarterly_income_stmt = (
         select(IncomeStatement)
-        .where(IncomeStatement.symbol == symbol_upper, IncomeStatement.period_type == "quarter")
+        .where(IncomeStatement.symbol == symbol_upper, IncomeStatement.period_type == "quarter",
+               or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"))
         .order_by(desc(IncomeStatement.fiscal_year), desc(IncomeStatement.fiscal_quarter))
         .limit(8)
     )
@@ -5185,6 +5188,7 @@ async def get_growth_rates(
                 IncomeStatement.period_type == "quarter",
                 IncomeStatement.fiscal_year == latest_quarter.fiscal_year - 1,
                 IncomeStatement.fiscal_quarter == latest_quarter.fiscal_quarter,
+                or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
             )
             .limit(1)
         )

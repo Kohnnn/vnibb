@@ -305,7 +305,7 @@ async def selected_matrix_periods(db, anchor_symbol: str, symbols: list[str]) ->
 
 
 async def _stored_periods(db, symbols: list[str]) -> dict:
-    rows = (await db.execute(select(IncomeStatement.symbol, IncomeStatement.period_type, IncomeStatement.fiscal_year, IncomeStatement.fiscal_quarter).where(IncomeStatement.symbol.in_(symbols), IncomeStatement.fiscal_year.between(2000, datetime.now(UTC).year), or_(IncomeStatement.period_type == "year", and_(IncomeStatement.period_type == "quarter", IncomeStatement.fiscal_quarter.between(1, 4))), or_(IncomeStatement.net_income.is_not(None), IncomeStatement.revenue.is_not(None))).distinct())).all()
+    rows = (await db.execute(select(IncomeStatement.symbol, IncomeStatement.period_type, IncomeStatement.fiscal_year, IncomeStatement.fiscal_quarter).where(IncomeStatement.symbol.in_(symbols), IncomeStatement.fiscal_year.between(2000, datetime.now(UTC).year), or_(IncomeStatement.period_type == "year", and_(IncomeStatement.period_type == "quarter", IncomeStatement.fiscal_quarter.between(1, 4))), or_(IncomeStatement.net_income.is_not(None), IncomeStatement.revenue.is_not(None)), or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report")).distinct())).all()
     available = {symbol: {"year": set(), "quarter": set()} for symbol in symbols}
     for row in rows:
         period = str(row.fiscal_year) if row.period_type == "year" else f"{row.fiscal_year}-Q{row.fiscal_quarter}"
@@ -341,6 +341,7 @@ async def _load_rows(db, symbols: list[str], year: int, quarter: int | None, per
     rows = {symbol: {} for symbol in symbols}
     for table in MODELS:
         query = select(table).where(table.symbol.in_(symbols), table.period_type == period_type, table.fiscal_year.in_([year, year - 1]))
+        query = query.where(or_(table.source.is_(None), table.source != "issuer_report"))
         query = query.where(table.fiscal_quarter == quarter) if quarter else query.where(or_(table.fiscal_quarter.is_(None), table.fiscal_quarter == 0))
         found = (await db.execute(query.order_by(table.updated_at.desc(), table.id.desc()))).scalars().all()
         for row in found:

@@ -15,7 +15,7 @@ import unicodedata
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
@@ -263,7 +263,10 @@ async def _load_statement_rows(
     limit: int,
 ) -> List[Any]:
     async with async_session_maker() as session:
-        stmt = select(model).where(model.symbol == symbol, model.period_type == period_type)
+        stmt = select(model).where(
+            model.symbol == symbol, model.period_type == period_type,
+            or_(model.source.is_(None), model.source != "issuer_report"),
+        )
         if requested_quarter is not None and hasattr(model, "fiscal_quarter"):
             stmt = stmt.where(model.fiscal_quarter == requested_quarter)
 
@@ -638,6 +641,7 @@ class ComparisonService:
                     await session.execute(
                         select(FinancialRatio)
                         .where(FinancialRatio.symbol == symbol)
+                        .where(or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"))
                         .order_by(
                             desc(FinancialRatio.fiscal_year),
                             desc(FinancialRatio.fiscal_quarter),
@@ -1297,6 +1301,7 @@ class ComparisonService:
                             )
                             .where(FinancialRatio.symbol.in_(fallback_targets))
                             .where(FinancialRatio.period_type == "year")
+                            .where(or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"))
                             .order_by(
                                 FinancialRatio.symbol,
                                 desc(FinancialRatio.fiscal_year),
@@ -1419,6 +1424,7 @@ class ComparisonService:
                             await session.execute(
                                 select(FinancialRatio)
                                 .where(FinancialRatio.symbol.in_(sector_symbols))
+                                .where(or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"))
                                 .order_by(
                                     FinancialRatio.symbol.asc(),
                                     FinancialRatio.fiscal_year.desc(),
@@ -1596,6 +1602,7 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
                         .where(
                             FinancialRatio.symbol == symbol,
                             FinancialRatio.period_type == ratio_period,
+                            or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
                         )
                         .order_by(
                             desc(FinancialRatio.fiscal_year),
