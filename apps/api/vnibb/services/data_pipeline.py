@@ -1450,6 +1450,15 @@ class DataPipeline:
             from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
             from vnibb.services.vietcap_client import VietcapClient
 
+            # Persist the acquisition fence before any independently committed prices.
+            async with async_session_maker.begin() as session:
+                session.add(SyncStatus(
+                    sync_type="screener_session_acquisition", status="running",
+                    started_at=datetime.utcnow(), success_count=0, error_count=0,
+                    additional_data={"market_session_date": expected_session.isoformat(),
+                                     "expected_symbols": sorted(deduped_symbols)},
+                ))
+
             client = VietcapClient()
             mongo = get_mongo_market_data_service()
             seen_symbols: set[str] = set()
@@ -2322,6 +2331,25 @@ class DataPipeline:
                     ScreenerSnapshot.symbol.in_(expected_symbols),
                 )
             )).all()
+            acquisition_fences = []
+            certified_sessions: set[tuple[str, str]] = set()
+            if not acquire_sessions:
+                acquisition_fences = (await session.scalars(select(SyncStatus).where(
+                    SyncStatus.sync_type == "screener_session_acquisition",
+                ))).all()
+                for receipt in prior_receipts:
+                    metadata = receipt.additional_data or {}
+                    session_date = metadata.get("market_session_date")
+                    receipt_symbols = metadata.get("expected_symbols")
+                    if isinstance(session_date, str) and isinstance(receipt_symbols, list):
+                        certified_sessions.update((symbol, session_date) for symbol in receipt_symbols if isinstance(symbol, str))
+            fenced_sessions = {
+                (symbol, metadata["market_session_date"])
+                for fence in acquisition_fences
+                if isinstance((metadata := fence.additional_data or {}).get("market_session_date"), str)
+                and isinstance(metadata.get("expected_symbols"), list)
+                for symbol in metadata["expected_symbols"] if isinstance(symbol, str)
+            } - certified_sessions
             valid_base_symbols = set()
             for snapshot in snapshot_rows:
                 quote = screener_price_record(snapshot)
@@ -2345,7 +2373,13 @@ class DataPipeline:
                             and retained_price.stock_id == stock_metadata[snapshot.symbol]["stock_id"]
                         )
                 else:
-                    valid = _valid_base_quote(quote, snapshot.trade_date)
+                    session_marker = (snapshot.extended_metrics or {}).get("market_session")
+                    marker_date = session_marker.get("session_date") if isinstance(session_marker, dict) else None
+                    valid = (
+                        _valid_base_quote(quote, snapshot.trade_date)
+                        and (snapshot.symbol, snapshot.trade_date.isoformat() if snapshot.trade_date else None) not in fenced_sessions
+                        and (not session_marker or (snapshot.symbol, marker_date) in certified_sessions)
+                    )
                 if valid:
                     valid_base_symbols.add(snapshot.symbol)
             if acquire_sessions:
