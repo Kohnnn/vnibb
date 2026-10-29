@@ -2371,12 +2371,27 @@ class DataPipeline:
                     SyncStatus.additional_data["market_session_date"].as_string().in_(relevant_dates),
                 ))).all()
             if not acquire_sessions:
-                for receipt in prior_receipts:
-                    metadata = receipt.additional_data or {}
-                    session_date = metadata.get("market_session_date")
-                    receipt_symbols = metadata.get("expected_symbols")
-                    if isinstance(session_date, str) and isinstance(receipt_symbols, list):
-                        certified_sessions.update((symbol, session_date) for symbol in receipt_symbols if isinstance(symbol, str))
+                marker_dates = {
+                    (snapshot.extended_metrics or {}).get("market_session", {}).get("session_date")
+                    for snapshot in snapshot_rows
+                    if isinstance(snapshot.extended_metrics, dict)
+                    and isinstance(snapshot.extended_metrics.get("market_session"), dict)
+                } - {None}
+                session_dates = relevant_dates | marker_dates
+                if session_dates:
+                    for receipt in (await session.scalars(select(SyncStatus).where(
+                        SyncStatus.sync_type == "screener_universe", SyncStatus.status == "completed",
+                        SyncStatus.error_count == 0,
+                        SyncStatus.additional_data["market_session_date"].as_string().in_(session_dates),
+                    ))).all():
+                        metadata = receipt.additional_data or {}
+                        session_date = metadata.get("market_session_date")
+                        receipt_symbols = metadata.get("expected_symbols")
+                        if isinstance(session_date, str) and isinstance(receipt_symbols, list):
+                            certified_sessions.update(
+                                (symbol, session_date) for symbol in receipt_symbols
+                                if isinstance(symbol, str) and symbol in expected_symbols
+                            )
             fenced_sessions = {
                 (symbol, metadata["market_session_date"])
                 for fence in acquisition_fences
