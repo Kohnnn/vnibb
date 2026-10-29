@@ -106,6 +106,60 @@ async def test_comparison_backfill_excludes_issuer_ratios_and_statement_rows(leg
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("period", ["FY", "Q2", "TTM"])
+@pytest.mark.parametrize("balance_match,cash_match", [(False, False), (False, True), (True, False), (True, True)])
+@pytest.mark.parametrize("zero", [False, True])
+async def test_comparison_backfill_requires_matching_fiscal_periods(
+    legacy_db, monkeypatch, period, balance_match, cash_match, zero
+):
+    income_periods = [(2025, 2), (2025, 1), (2024, 4), (2024, 3)] if period == "TTM" else [(2025, 2 if period == "Q2" else None)]
+    older_periods = (
+        [(2025, 1), (2024, 4), (2024, 3), (2024, 2)] if period == "TTM"
+        else [(2024, 2 if period == "Q2" else None)]
+    )
+    cash_periods = income_periods if cash_match else older_periods
+    balance_periods = income_periods if balance_match else older_periods
+    period_type = "year" if period == "FY" else "quarter"
+    count = len(income_periods)
+    interest_metadata = {"label": "interest_expense", "source_unit": "VND", "value_unit": "VND"}
+    for index, (year, quarter) in enumerate(income_periods):
+        legacy_db.add(IncomeStatement(
+            id=index + 1, symbol="FPT", period=f"{year}-{quarter}", period_type=period_type,
+            fiscal_year=year, fiscal_quarter=quarter, source="vietcap",
+            revenue=100, operating_income=0 if zero else 40, interest_expense=10,
+            raw_data={"_financial_lineage": {"value_unit": "VND", "flow_basis": "single_quarter",
+                "canonical_data": {"interest_expense": 10, "unit_metadata": {"interest_expense": interest_metadata}}}},
+        ))
+    for index, (year, quarter) in enumerate(cash_periods):
+        legacy_db.add(CashFlow(
+            id=index + 1, symbol="FPT", period=f"{year}-{quarter}", period_type=period_type,
+            fiscal_year=year, fiscal_quarter=quarter, source="vietcap",
+            operating_cash_flow=0 if zero else 20, debt_repayment=10,
+            raw_data={"_financial_lineage": {"value_unit": "VND", "flow_basis": "single_quarter"}},
+        ))
+    year, quarter = balance_periods[0]
+    legacy_db.add(BalanceSheet(
+        id=1, symbol="FPT", period=f"{year}-{quarter}", period_type=period_type,
+        fiscal_year=year, fiscal_quarter=quarter, source="vietcap", total_assets=200,
+    ))
+    year, quarter = income_periods[0]
+    legacy_db.add(CashFlow(
+        id=100, symbol="FPT", period=f"{year}-{quarter}-issuer", period_type=period_type,
+        fiscal_year=year, fiscal_quarter=quarter, source="issuer_report", operating_cash_flow=99,
+    ))
+    await legacy_db.commit()
+    monkeypatch.setattr(comparison_service.comparison_service, "get_stock_metrics", AsyncMock(
+        return_value=comparison_service.StockMetrics(symbol="FPT", metrics={}),
+    ))
+    monkeypatch.setattr("vnibb.providers.vnstock.financial_ratios.VnstockFinancialRatiosFetcher.fetch", AsyncMock(return_value=[]))
+
+    result = (await comparison_service.get_comparison_data(["FPT"], period=period))[0]
+    assert result.metrics["asset_turnover"] == (count / 2 if balance_match else None)
+    assert result.metrics["ocf_sales"] == ((0 if zero else 20) if cash_match else None)
+    assert result.metrics["debt_service_coverage"] == ((0 if zero else 2) if cash_match else None)
+
+
+@pytest.mark.asyncio
 async def test_issuer_only_ratio_keeps_provider_fallback(legacy_db, monkeypatch):
     legacy_db.add(ratio("FPT", 2025, "issuer_report", 99))
     await legacy_db.commit()

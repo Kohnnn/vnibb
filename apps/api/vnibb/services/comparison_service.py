@@ -253,6 +253,22 @@ def _consecutive_quarter_rows(rows: List[Any]) -> bool:
         ordinals.append(int(year) * 4 + int(quarter))
     return all(left == right + 1 for left, right in zip(ordinals, ordinals[1:], strict=False))
 
+def _statement_periods_match(
+    left: List[Any], right: List[Any], period_type: str, *, ttm: bool = False
+) -> bool:
+    count = 4 if ttm else 1
+    if len(left) < count or len(right) < count:
+        return False
+    for left_row, right_row in zip(left[:count], right[:count], strict=True):
+        year = getattr(left_row, "fiscal_year", None)
+        if year is None or year != getattr(right_row, "fiscal_year", None):
+            return False
+        if period_type == "quarter":
+            quarter = getattr(left_row, "fiscal_quarter", None)
+            if quarter not in (1, 2, 3, 4) or quarter != getattr(right_row, "fiscal_quarter", None):
+                return False
+    return True
+
 
 async def _load_statement_rows(
     symbol: str,
@@ -305,6 +321,8 @@ async def _build_comparison_backfill(
     ) or {}
     current_balance = _build_statement_snapshot(balance_rows, "balance", ttm=use_ttm) or {}
     current_cash = _build_statement_snapshot(cash_rows, "cash", ttm=use_ttm) or {}
+    income_balance_match = _statement_periods_match(income_rows, balance_rows, period_type)
+    income_cash_match = _statement_periods_match(income_rows, cash_rows, period_type, ttm=use_ttm)
 
     revenue = current_income.get("revenue")
     gross_profit = current_income.get("gross_profit")
@@ -341,7 +359,7 @@ async def _build_comparison_backfill(
         backfill["operating_margin"] = (operating_income / revenue) * 100
     if revenue not in (None, 0) and net_income is not None:
         backfill["net_margin"] = (net_income / revenue) * 100
-    if revenue not in (None, 0) and total_assets not in (None, 0):
+    if income_balance_match and revenue is not None and total_assets not in (None, 0):
         backfill["asset_turnover"] = revenue / total_assets
     if total_liabilities not in (None, 0) and total_assets not in (None, 0):
         backfill["debt_assets"] = (total_liabilities / total_assets) * 100
@@ -349,13 +367,14 @@ async def _build_comparison_backfill(
         backfill["debt_to_equity"] = total_liabilities / total_equity
     if operating_income is not None and interest_expense not in (None, 0):
         backfill["interest_coverage"] = operating_income / abs(interest_expense)
-    if operating_income is not None and interest_expense is not None:
+    if (operating_income is not None and interest_expense is not None
+            and (debt_repayment is None or income_cash_match)):
         debt_service = abs(interest_expense)
         if debt_repayment not in (None, 0):
             debt_service += abs(debt_repayment)
         if debt_service > 0:
             backfill["debt_service_coverage"] = operating_income / debt_service
-    if operating_cash_flow is not None and revenue not in (None, 0):
+    if income_cash_match and operating_cash_flow is not None and revenue not in (None, 0):
         backfill["ocf_sales"] = (operating_cash_flow / revenue) * 100
     if free_cash_flow is not None and market_cap not in (None, 0):
         backfill["fcf_yield"] = (free_cash_flow / market_cap) * 100
