@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.api.v1.schemas import MetaData, StandardResponse
@@ -309,7 +309,11 @@ async def _load_financial_statement_fallback(
 
     stmt = (
         select(model)
-        .where(model.symbol == symbol_upper, model.period_type == normalized_period)
+        .where(
+            model.symbol == symbol_upper,
+            model.period_type == normalized_period,
+            or_(model.source.is_(None), model.source != "issuer_report"),
+        )
         .order_by(model.fiscal_year.desc(), model.fiscal_quarter.desc())
     )
     if quarter_filter is not None:
@@ -6401,6 +6405,7 @@ async def get_financial_ratios(
             .where(
                 FinancialRatio.symbol == symbol_upper,
                 FinancialRatio.period_type == normalized_period,
+                or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
             )
             .order_by(desc(FinancialRatio.fiscal_year), desc(FinancialRatio.fiscal_quarter))
         )
@@ -6569,7 +6574,11 @@ async def get_ratio_history(
         try:
             stored = (await db.execute(
                 select(FinancialRatio)
-                .where(FinancialRatio.symbol == symbol.upper(), FinancialRatio.period_type == period)
+                .where(
+                    FinancialRatio.symbol == symbol.upper(),
+                    FinancialRatio.period_type == period,
+                    or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
+                )
                 .order_by(desc(FinancialRatio.fiscal_year), desc(FinancialRatio.fiscal_quarter))
                 .limit(limit)
             )).scalars().all()
