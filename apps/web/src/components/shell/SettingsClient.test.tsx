@@ -28,6 +28,10 @@ jest.mock('@/lib/userPreferences', () => ({
   resetDashboardWalkthroughPreference: jest.fn(),
 }));
 
+jest.mock('@/components/settings/DataSourcesHealthPanel', () => ({
+  DataSourcesHealthPanel: () => <div>Pipeline Health</div>,
+}));
+
 describe('SettingsClient', () => {
   it('shows only controls that persist immediately', () => {
     render(<SettingsClient />);
@@ -42,5 +46,11 @@ describe('SettingsClient', () => {
     expect(screen.queryByText('Dark Mode')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('API Endpoint')).not.toBeInTheDocument();
     expect(screen.queryByText('Security')).not.toBeInTheDocument();
+  });
+
+  it('renders the pipeline health panel the freshness banner links to', () => {
+    render(<SettingsClient />);
+
+    expect(screen.getByText('Pipeline Health')).toBeInTheDocument();
   });
 });

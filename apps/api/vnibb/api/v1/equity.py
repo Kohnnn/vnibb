@@ -28,7 +28,7 @@ from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
-from vnibb.core.ratio_units import admitted_ratio_value
+from vnibb.core.ratio_units import admitted_ratio_value, declared_ratio_value
 from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.company import Company, Shareholder
@@ -2979,7 +2979,7 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
 
     raw_payload = getattr(row, "raw_data", None)
     raw_data = raw_payload if isinstance(raw_payload, dict) else {}
-    from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
+    from vnibb.core.ratio_units import FRACTION_RATIO_FIELDS, PERCENT_RATIO_FIELDS
     ratio_units = dict(raw_data.get("ratio_units") or {})
 
     ev_sales = _coerce_optional_float(getattr(row, "ev_sales", None))
@@ -3081,6 +3081,14 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
     for metric in PERCENT_RATIO_FIELDS:
         if ratio_units.get(metric) != "percent":
             setattr(result, metric, None)
+            result.ratio_units[metric] = "unknown"
+    # `fcf_yield`/`ocf_sales` are stored as fractions by the enrichment writer and
+    # are absent from `PERCENT_RATIO_FIELDS`; admit them through their declaration.
+    for metric in FRACTION_RATIO_FIELDS:
+        setattr(result, metric, declared_ratio_value(
+            getattr(result, metric, None), metric, ratio_units=ratio_units,
+        ))
+        if getattr(result, metric, None) is None:
             result.ratio_units[metric] = "unknown"
     return result
 
@@ -3906,6 +3914,7 @@ async def _enrich_missing_ratio_metrics(
 
         if item.ocf_sales is None and operating_cash_flow is not None and revenue not in (None, 0):
             item.ocf_sales = operating_cash_flow / revenue
+            item.ratio_units["ocf_sales"] = "fraction"
 
 
         if item.ratio_units.get("payout_ratio") != "percent":

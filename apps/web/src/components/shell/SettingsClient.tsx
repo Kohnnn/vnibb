@@ -5,6 +5,7 @@ import { ArrowLeft, Database, HardDrive, RotateCcw, Settings } from 'lucide-reac
 import { useRouter } from 'next/navigation';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { Button } from '@/components/ui/button';
+import { DataSourcesHealthPanel } from '@/components/settings/DataSourcesHealthPanel';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { resetDashboardWalkthroughPreference } from '@/lib/userPreferences';
 
@@ -106,6 +107,10 @@ export default function SettingsPage() {
                 </button>
               ))}
             </div>
+          </section>
+
+          <section>
+            <DataSourcesHealthPanel />
           </section>
         </div>
       </main>

@@ -311,6 +311,36 @@ def test_to_ratio_data_prefers_quarter_metadata_over_bare_year():
     assert result.period == "Q1-2024"
 
 
+
+@pytest.mark.parametrize(
+    ("units", "stored_yield", "stored_sales", "expected_yield", "expected_sales"),
+    [
+        # The enrichment writer's fraction declaration converts once.
+        ({"fcf_yield": "fraction", "ocf_sales": "fraction"}, 0.052, 0.25, 5.2, 25.0),
+        # A provider-declared percent is already canonical.
+        ({"fcf_yield": "percent", "ocf_sales": "percent"}, 5.2, 2.0, 5.2, 2.0),
+        # No declaration means no unit evidence; both are withheld.
+        ({}, 5.2, 2.0, None, None),
+        ({"fcf_yield": "unknown", "ocf_sales": "conflict"}, 5.2, 2.0, None, None),
+    ],
+)
+def test_ratio_endpoint_admits_fraction_metrics_by_declared_unit(
+    units, stored_yield, stored_sales, expected_yield, expected_sales,
+):
+    """The ratios endpoint must not publish an undeclared magnitude.
+
+    `fcf_yield`/`ocf_sales` sit outside `PERCENT_RATIO_FIELDS`, so a percent-only
+    admission loop left them untouched and the widget guessed scale from magnitude.
+    """
+    row = make_ratio_row(
+        raw_data={"fcf_yield": stored_yield, "ocf_sales": stored_sales, "ratio_units": units},
+    )
+
+    result = _to_ratio_data(row)
+
+    assert result.fcf_yield == (None if expected_yield is None else pytest.approx(expected_yield))
+    assert result.ocf_sales == (None if expected_sales is None else pytest.approx(expected_sales))
+
 def test_ratio_has_metric_value_returns_false_for_empty_row():
     item = FinancialRatioData(symbol="VNM", period="2024")
     assert _ratio_has_metric_value(item) is False
