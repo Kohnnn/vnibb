@@ -189,7 +189,7 @@ def run_backup(tmp_path):
         staging_removal_fails=False,
         staged_archive_short=False,
         keep_sets=7,
-        host_free_bytes=None,
+        host_free_bytes=ROOMY_AVAILABLE,
         prune_fails=False,
         stamp=None,
     ):
