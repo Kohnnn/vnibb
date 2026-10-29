@@ -16,7 +16,7 @@ from typing import Any, List, Literal, Optional
 
 import pandas as pd
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.api.v1.schemas import MetaData, StandardResponse
@@ -731,6 +731,7 @@ async def _enrich_screener_metrics(
                     .where(
                         FinancialRatio.symbol.in_(fundamental_symbols),
                         FinancialRatio.period_type == "year",
+                        or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
                     )
                     .order_by(
                         FinancialRatio.symbol.asc(),
@@ -757,6 +758,7 @@ async def _enrich_screener_metrics(
                 .where(
                     IncomeStatement.symbol.in_(fundamental_symbols),
                     IncomeStatement.period_type == "year",
+                    or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
                 )
                 .order_by(IncomeStatement.symbol.asc(), IncomeStatement.fiscal_year.desc())
             )
@@ -785,6 +787,7 @@ async def _enrich_screener_metrics(
                 .where(
                     BalanceSheet.symbol.in_(fundamental_symbols),
                     BalanceSheet.period_type == "year",
+                    or_(BalanceSheet.source.is_(None), BalanceSheet.source != "issuer_report"),
                 )
                 .order_by(BalanceSheet.symbol.asc(), BalanceSheet.fiscal_year.desc())
             )
@@ -801,7 +804,11 @@ async def _enrich_screener_metrics(
         cashflow_rows = (
             await db.execute(
                 select(CashFlow.symbol, CashFlow.dividends_paid)
-                .where(CashFlow.symbol.in_(fundamental_symbols), CashFlow.period_type == "year")
+                .where(
+                    CashFlow.symbol.in_(fundamental_symbols),
+                    CashFlow.period_type == "year",
+                    or_(CashFlow.source.is_(None), CashFlow.source != "issuer_report"),
+                )
                 .order_by(CashFlow.symbol.asc(), CashFlow.fiscal_year.desc())
             )
         ).all()
