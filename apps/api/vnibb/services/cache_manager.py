@@ -137,6 +137,15 @@ def source_update_condition(model, source: str | None):
     return or_(model.source.is_(None), model.source.not_in(excluded))
 
 
+async def lock_ratio_writes(session: AsyncSession, symbol: str, period: str) -> None:
+    if session.get_bind().dialect.name == "postgresql":
+        await session.execute(
+            select(func.pg_advisory_xact_lock(func.hashtextextended(
+                f"vnibb:financial_ratios:{symbol.upper()}:{period}", 0
+            )))
+        )
+
+
 def _retains_financial_evidence(existing: Any, incoming: Any) -> bool:
     if existing is None:
         return True
@@ -1099,6 +1108,9 @@ class CacheManager:
         session = await self._get_session()
         own_session = self._db is None
         try:
+            if model.__tablename__ == "financial_ratios":
+                for symbol, period in sorted({(row["symbol"].upper(), row["period_type"]) for row in rows}):
+                    await lock_ratio_writes(session, symbol, period)
             dialect_insert = insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
             count = 0
             conflicts = []
