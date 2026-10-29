@@ -54,7 +54,7 @@ from vnibb.providers.vnstock.runtime import validate_source
 from vnibb.providers.vnstock.reference_fields import identity, parse_datetime, supplied
 from vnibb.services.screener_metadata import reconcile_snapshot_cap, screener_metadata_updates
 from vnibb.core.screener_shares import resolve_screener_shares
-from vnibb.services.cache_manager import StructuredPersistenceConflict, snapshot_session_coverage, source_update_condition
+from vnibb.services.cache_manager import StructuredPersistenceConflict, lock_ratio_writes, snapshot_session_coverage, source_update_condition
 from vnibb.services.market_session import expected_market_session, qualify_market_session
 from vnibb.models.alerts import BlockTrade
 from vnibb.models.company import Company, Officer, Shareholder
@@ -3936,11 +3936,12 @@ class DataPipeline:
                     "source": "derived",
                     "updated_at": datetime.utcnow(),
                 }
-                stmt = get_upsert_stmt(
-                    FinancialRatio,
-                    ["symbol", "period", "period_type"],
-                    values,
-                    update_condition=source_update_condition(FinancialRatio, "derived"),
+                if session.get_bind().dialect.name == "postgresql":
+                    from sqlalchemy.dialects.postgresql import insert
+                else:
+                    from sqlalchemy.dialects.sqlite import insert
+                stmt = insert(FinancialRatio).values(values).on_conflict_do_nothing(
+                    index_elements=["symbol", "period", "period_type"]
                 )
                 result = await session.execute(stmt.returning(FinancialRatio.id))
                 created_count += len(result.scalars().all())
@@ -4438,6 +4439,7 @@ class DataPipeline:
                 ratio_items = VnstockFinancialRatiosFetcher.transform_data(params, raw_items)
 
                 async with async_session_maker() as session:
+                    await lock_ratio_writes(session, symbol, normalized_period)
                     seeded_rows = await _seed_ratio_period_rows(session, symbol)
                     if not ratio_items and seeded_rows == 0:
                         if progress is not None:
