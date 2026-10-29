@@ -13,6 +13,7 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Equity SQL statement fallback and ratio fallback/history selection withhold issuer-report rows before ordering and limits, without excluding legacy NULL sources. Other readers and writers remain outside this partial fence; issuer persistence and production cutover remain blocked.
 - Remove the retired Oracle premium bootstrap and check scripts restored by integration; release images continue to use free VCI without paid modules.
 - WebSocket send, price-cycle and subscription-wakeup deadlines now preserve external cancellation when work completes concurrently, preventing shutdown and closed-session tests from hanging without changing timeout limits or retained observation clocks.
 - Identical screener replays preserve snapshot and receipt identity when a retained quote has no market-cap evidence; real carried-forward capitalization and conflicting share evidence remain subject to reconciliation.
