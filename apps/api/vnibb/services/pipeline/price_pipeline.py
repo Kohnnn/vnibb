@@ -6,12 +6,11 @@ Handles synchronization of stock price data from vnstock providers.
 
 import asyncio
 import logging
-from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import date, timedelta
+from typing import Any
 
 import pandas as pd
-from sqlalchemy import select, update, and_
-
+from sqlalchemy import select, update
 from vnibb.core.cache import build_cache_key
 from vnibb.core.cache_constants import (
     PIPELINE_TTL_PRICE_LATEST,
@@ -19,6 +18,7 @@ from vnibb.core.cache_constants import (
     RECENT_PRICE_DAYS,
 )
 from vnibb.core.config import settings
+from vnibb.core.database import async_session_maker
 from vnibb.core.retry import with_retry
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.services.pipeline.base import BasePipeline, get_upsert_stmt
@@ -35,8 +35,8 @@ class PricePipeline(BasePipeline):
     @staticmethod
     def _describe_provider_exception(exc: BaseException) -> str:
         """Describe a provider exception with full chain."""
-        parts: List[str] = []
-        current: Optional[BaseException] = exc
+        parts: list[str] = []
+        current: BaseException | None = exc
         seen: set[int] = set()
 
         while current is not None and id(current) not in seen:
@@ -46,7 +46,7 @@ class PricePipeline(BasePipeline):
                 f"{type(current).__name__}: {message}" if message else type(current).__name__
             )
 
-            next_exc: Optional[BaseException] = None
+            next_exc: BaseException | None = None
             last_attempt = getattr(current, "last_attempt", None)
             exception_getter = getattr(last_attempt, "exception", None)
             if callable(exception_getter):
@@ -81,7 +81,7 @@ class PricePipeline(BasePipeline):
             if alt not in fallback_sources:
                 fallback_sources.append(alt)
 
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
         for source in fallback_sources:
             def _fetch_sync(_source: str = source) -> pd.DataFrame:
                 from vnibb.providers.vnstock.runtime import get_quote_class
@@ -138,13 +138,13 @@ class PricePipeline(BasePipeline):
     @with_retry(max_retries=3)
     async def sync_daily_prices(
         self,
-        symbols: List[str] = None,
+        symbols: list[str] | None = None,
         days: int = 30,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         fill_missing_gaps: bool = False,
-        progress: Optional[Dict[str, Any]] = None,
-        sync_id: Optional[int] = None,
+        progress: dict[str, Any] | None = None,
+        sync_id: int | None = None,
         cache_recent: bool = True,
     ) -> int:
         """Sync historical prices for specified symbols."""
@@ -184,9 +184,9 @@ class PricePipeline(BasePipeline):
         total_synced = 0
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
-            active_range: Optional[Tuple[str, str]] = None
+            active_range: tuple[str, str] | None = None
             try:
-                fetch_ranges: List[Tuple[date, date]] = [(resolved_start, resolved_end)]
+                fetch_ranges: list[tuple[date, date]] = [(resolved_start, resolved_end)]
                 existing_dates: set[date] = set()
 
                 async with self._get_session() as session:
@@ -232,7 +232,7 @@ class PricePipeline(BasePipeline):
                             if not fetch_ranges:
                                 fetch_ranges = [(resolved_start, resolved_end)]
 
-                latest_row: Optional[Dict[str, Any]] = None
+                latest_row: dict[str, Any] | None = None
                 symbol_synced = 0
                 async with self._get_session() as session:
                     stock_id_result = await session.execute(
@@ -427,6 +427,6 @@ class PricePipeline(BasePipeline):
 
         return total_synced
 
-    async def _get_session(self):
+    def _get_session(self):
         """Get a database session."""
-        return self._session_factory() if hasattr(self, '_session_factory') else async_session_maker()
+        return self._session_factory() if hasattr(self, "_session_factory") else async_session_maker()

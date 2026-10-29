@@ -2,7 +2,6 @@ from datetime import date
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock

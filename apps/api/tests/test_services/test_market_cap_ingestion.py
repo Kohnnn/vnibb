@@ -1,7 +1,6 @@
 import asyncio
-from uuid import uuid4
-
 from datetime import datetime
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -9,12 +8,15 @@ from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from vnibb.core.market_cap import resolve_market_cap
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.sync_status import SyncStatus
-from vnibb.providers.vnstock.equity_profile import EquityProfileData, EquityProfileQueryParams, VnstockEquityProfileFetcher
+from vnibb.providers.vnstock.equity_profile import (
+    EquityProfileData,
+    EquityProfileQueryParams,
+    VnstockEquityProfileFetcher,
+)
 from vnibb.providers.vnstock.equity_screener import StockScreenerParams, VnstockScreenerFetcher
 from vnibb.services.cache_manager import CacheManager
 

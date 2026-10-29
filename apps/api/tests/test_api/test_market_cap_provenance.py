@@ -1,7 +1,6 @@
 from datetime import date
 
 import pytest
-
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 
 
@@ -69,7 +68,10 @@ def test_null_primary_fields_preserve_populated_certified_aliases():
 
 
 def test_profile_provider_admits_sourced_share_alias_when_primary_is_null():
-    from vnibb.providers.vnstock.equity_profile import EquityProfileQueryParams, VnstockEquityProfileFetcher
+    from vnibb.providers.vnstock.equity_profile import (
+        EquityProfileQueryParams,
+        VnstockEquityProfileFetcher,
+    )
 
     row = certified_cap()
     row.update(outstanding_shares=None, shares_outstanding=1_152_231_925)
@@ -316,7 +318,10 @@ async def test_explicit_sparse_profile_refresh_retains_stored_share_lineage(clie
     from sqlalchemy import select
     from vnibb.models.company import Company
     from vnibb.models.stock import Stock, StockPrice
-    from vnibb.providers.vnstock.equity_profile import EquityProfileData, VnstockEquityProfileFetcher
+    from vnibb.providers.vnstock.equity_profile import (
+        EquityProfileData,
+        VnstockEquityProfileFetcher,
+    )
 
     day = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date() - timedelta(days=1)
     shares = {"outstanding_shares": 100, "shares_unit": "shares", "shares_as_of": day.isoformat(),
@@ -379,9 +384,13 @@ async def test_profile_ignores_future_price_before_selecting_valid_quote(client,
 async def test_refresh_reconciles_stored_and_incoming_profile_caps(client, test_db, monkeypatch):
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
+
     from vnibb.models.company import Company
     from vnibb.models.stock import Stock
-    from vnibb.providers.vnstock.equity_profile import EquityProfileData, VnstockEquityProfileFetcher
+    from vnibb.providers.vnstock.equity_profile import (
+        EquityProfileData,
+        VnstockEquityProfileFetcher,
+    )
 
     day = (datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date() - timedelta(days=1)).isoformat()
     old = certified_cap(1000, as_of=day)
@@ -407,6 +416,7 @@ async def test_refresh_reconciles_stored_and_incoming_profile_caps(client, test_
 async def test_profile_does_not_attach_raw_metadata_to_mismatched_column(client, test_db):
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
+
     from vnibb.models.company import Company
     from vnibb.models.stock import Stock
 
@@ -429,6 +439,7 @@ async def test_profile_does_not_attach_raw_metadata_to_mismatched_column(client,
 async def test_profile_selects_valid_snapshot_before_future_snapshot(client, test_db):
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
+
     from vnibb.models.company import Company
     from vnibb.models.screener import ScreenerSnapshot
     from vnibb.models.stock import Stock
@@ -456,9 +467,13 @@ async def test_profile_selects_valid_snapshot_before_future_snapshot(client, tes
 async def test_profile_refresh_preserves_incoming_and_stored_share_conflicts(client, test_db, monkeypatch):
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
+
     from vnibb.models.company import Company
     from vnibb.models.stock import Stock
-    from vnibb.providers.vnstock.equity_profile import EquityProfileQueryParams, VnstockEquityProfileFetcher
+    from vnibb.providers.vnstock.equity_profile import (
+        EquityProfileQueryParams,
+        VnstockEquityProfileFetcher,
+    )
 
     day = (datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date() - timedelta(days=1)).isoformat()
     old = certified_cap(1000, as_of=day)
@@ -492,9 +507,13 @@ async def test_profile_refresh_preserves_incoming_and_stored_share_conflicts(cli
 async def test_failed_refresh_reconciles_stored_and_incoming_caps(client, test_db, monkeypatch):
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
+
     from vnibb.models.company import Company
     from vnibb.models.stock import Stock
-    from vnibb.providers.vnstock.equity_profile import EquityProfileData, VnstockEquityProfileFetcher
+    from vnibb.providers.vnstock.equity_profile import (
+        EquityProfileData,
+        VnstockEquityProfileFetcher,
+    )
     from vnibb.services.cache_manager import CacheManager
 
     day = (datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date() - timedelta(days=1)).isoformat()

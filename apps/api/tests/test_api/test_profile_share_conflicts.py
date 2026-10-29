@@ -1,5 +1,8 @@
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
-from vnibb.providers.vnstock.equity_profile import EquityProfileQueryParams, VnstockEquityProfileFetcher
+from vnibb.providers.vnstock.equity_profile import (
+    EquityProfileQueryParams,
+    VnstockEquityProfileFetcher,
+)
 
 
 def profile(row):

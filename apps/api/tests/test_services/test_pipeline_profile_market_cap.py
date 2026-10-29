@@ -4,13 +4,12 @@ import pandas as pd
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
+from vnibb.core.market_cap import resolve_market_cap
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.providers.vnstock import runtime
-from vnibb.core.market_cap import resolve_market_cap
-from vnibb.services.cache_manager import CacheManager
 from vnibb.services import data_pipeline as data_pipeline_module
+from vnibb.services.cache_manager import CacheManager
 from vnibb.services.data_pipeline import DataPipeline
 
 
