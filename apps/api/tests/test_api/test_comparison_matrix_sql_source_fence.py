@@ -108,7 +108,7 @@ async def test_comparison_backfill_excludes_issuer_ratios_and_statement_rows(leg
 @pytest.mark.asyncio
 @pytest.mark.parametrize("period", ["FY", "Q2", "TTM"])
 @pytest.mark.parametrize("balance_match,cash_match", [(False, False), (False, True), (True, False), (True, True)])
-@pytest.mark.parametrize("zero", [False, True])
+@pytest.mark.parametrize("zero", ["none", "cash_and_operating_income", "revenue"])
 async def test_comparison_backfill_requires_matching_fiscal_periods(
     legacy_db, monkeypatch, period, balance_match, cash_match, zero
 ):
@@ -126,7 +126,8 @@ async def test_comparison_backfill_requires_matching_fiscal_periods(
         legacy_db.add(IncomeStatement(
             id=index + 1, symbol="FPT", period=f"{year}-{quarter}", period_type=period_type,
             fiscal_year=year, fiscal_quarter=quarter, source="vietcap",
-            revenue=100, operating_income=0 if zero else 40, interest_expense=10,
+            revenue=0 if zero == "revenue" else 100,
+            operating_income=0 if zero == "cash_and_operating_income" else 40, interest_expense=10,
             raw_data={"_financial_lineage": {"value_unit": "VND", "flow_basis": "single_quarter",
                 "canonical_data": {"interest_expense": 10, "unit_metadata": {"interest_expense": interest_metadata}}}},
         ))
@@ -134,7 +135,7 @@ async def test_comparison_backfill_requires_matching_fiscal_periods(
         legacy_db.add(CashFlow(
             id=index + 1, symbol="FPT", period=f"{year}-{quarter}", period_type=period_type,
             fiscal_year=year, fiscal_quarter=quarter, source="vietcap",
-            operating_cash_flow=0 if zero else 20, debt_repayment=10,
+            operating_cash_flow=0 if zero == "cash_and_operating_income" else 20, debt_repayment=10,
             raw_data={"_financial_lineage": {"value_unit": "VND", "flow_basis": "single_quarter"}},
         ))
     year, quarter = balance_periods[0]
@@ -154,9 +155,14 @@ async def test_comparison_backfill_requires_matching_fiscal_periods(
     monkeypatch.setattr("vnibb.providers.vnstock.financial_ratios.VnstockFinancialRatiosFetcher.fetch", AsyncMock(return_value=[]))
 
     result = (await comparison_service.get_comparison_data(["FPT"], period=period))[0]
-    assert result.metrics["asset_turnover"] == (count / 2 if balance_match else None)
-    assert result.metrics["ocf_sales"] == ((0 if zero else 20) if cash_match else None)
-    assert result.metrics["debt_service_coverage"] == ((0 if zero else 2) if cash_match else None)
+    assert result.metrics["asset_turnover"] == ((0 if zero == "revenue" else count / 2) if balance_match else None)
+    assert result.metrics["ocf_sales"] == (
+        (0 if zero == "cash_and_operating_income" else 20)
+        if cash_match and zero != "revenue" else None
+    )
+    assert result.metrics["debt_service_coverage"] == (
+        (0 if zero == "cash_and_operating_income" else 2) if cash_match else None
+    )
 
 
 @pytest.mark.asyncio
