@@ -13,6 +13,7 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Align the PostgreSQL company-index migration contract with current share handling: competing writes still preserve one company and withhold unsupported zero shares, without assuming raw payload or market-cap provenance defaults.
 - Remove the retired Oracle premium bootstrap and check scripts restored by integration; release images continue to use free VCI without paid modules.
 - WebSocket send, price-cycle and subscription-wakeup deadlines now preserve external cancellation when work completes concurrently, preventing shutdown and closed-session tests from hanging without changing timeout limits or retained observation clocks.
 - Identical screener replays preserve snapshot and receipt identity when a retained quote has no market-cap evidence; real carried-forward capitalization and conflicting share evidence remain subject to reconciliation.
