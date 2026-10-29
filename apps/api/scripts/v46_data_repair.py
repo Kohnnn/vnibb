@@ -475,16 +475,17 @@ async def _backfill_ev_sales(batch_size: int) -> int:
             )
         ).all()
 
-        quarterly_metrics: dict[tuple[str, int, int], int] = {}
-        annual_metrics: dict[tuple[str, int], int] = {}
-        for income_id, symbol, year, quarter, revenue in income_rows:
+        quarterly_metrics: dict[tuple[str, int, int], tuple[int, float, float | None]] = {}
+        annual_metrics: dict[tuple[str, int], tuple[int, float, float | None]] = {}
+        for income_id, symbol, year, quarter, revenue, ebitda in income_rows:
             rev = _to_float(revenue)
             if rev is None or rev == 0:
                 continue
+            metric = (income_id, rev, _to_float(ebitda))
             if year and quarter:
-                quarterly_metrics[(symbol, year, quarter)] = income_id
+                quarterly_metrics[(symbol, year, quarter)] = metric
             if year and (symbol, year) not in annual_metrics:
-                annual_metrics[(symbol, year)] = income_id
+                annual_metrics[(symbol, year)] = metric
 
         latest_snapshot_date = (
             await session.execute(select(func.max(ScreenerSnapshot.snapshot_date)))
@@ -515,28 +516,33 @@ async def _backfill_ev_sales(batch_size: int) -> int:
         )
 
         updated = 0
+        income_owned: dict[int, bool] = {}
         for index, row in enumerate(ratio_rows, start=1):
             year, quarter = _extract_year_quarter(row.period, row.fiscal_year, row.fiscal_quarter)
             if year is None:
                 continue
 
-            income_id = None
+            metrics = None
             if quarter is not None:
-                income_id = quarterly_metrics.get((row.symbol, year, quarter))
-            if income_id is None:
-                income_id = annual_metrics.get((row.symbol, year))
-            if income_id is None:
+                metrics = quarterly_metrics.get((row.symbol, year, quarter))
+            if metrics is None:
+                metrics = annual_metrics.get((row.symbol, year))
+            if metrics is None:
                 continue
-            income = (await session.execute(
-                select(IncomeStatement).where(
-                    IncomeStatement.id == income_id,
-                    or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
-                ).with_for_update().execution_options(populate_existing=True)
-            )).scalar_one_or_none()
-            if income is None:
-                continue
-            revenue = _to_float(income.revenue)
-            if revenue in (None, 0):
+            income_id, revenue, ebitda = metrics
+            if not income_owned.get(income_id):
+                income = (await session.execute(
+                    select(IncomeStatement.revenue, IncomeStatement.ebitda).where(
+                        IncomeStatement.id == income_id,
+                        IncomeStatement.revenue.is_not(None),
+                        IncomeStatement.revenue != 0,
+                        or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
+                    ).with_for_update()
+                )).one_or_none()
+                income_owned[income_id] = income is not None
+                if income is not None:
+                    revenue, ebitda = _to_float(income.revenue), _to_float(income.ebitda)
+            if not income_owned[income_id] or revenue in (None, 0):
                 continue
 
             raw = row.raw_data if isinstance(row.raw_data, dict) else {}
@@ -545,7 +551,6 @@ async def _backfill_ev_sales(batch_size: int) -> int:
             )
             if enterprise_value is None:
                 ev_ebitda = _to_float(row.ev_ebitda)
-                ebitda = _to_float(income.ebitda)
                 if ev_ebitda is not None and ebitda not in (None, 0):
                     enterprise_value = ev_ebitda * ebitda
             if enterprise_value is None:
@@ -564,7 +569,10 @@ async def _backfill_ev_sales(batch_size: int) -> int:
             updated += len(result.scalars().all())
 
             if index % batch_size == 0:
+                # Release income locks before the next batch; a concurrent writer draining
+                # a reverse-order income list would otherwise form a wait cycle.
                 await session.commit()
+                income_owned.clear()
 
         await session.commit()
         return updated
