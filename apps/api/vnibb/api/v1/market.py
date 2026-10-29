@@ -25,7 +25,7 @@ from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, or_, text
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, get_db
@@ -1687,6 +1687,7 @@ async def _load_latest_ratio_metrics(symbols: List[str]) -> Dict[str, dict[str, 
                 .label("rn"),
             )
             .where(FinancialRatio.symbol.in_(unique_symbols))
+            .where(or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"))
             .subquery()
         )
 
@@ -1734,6 +1735,7 @@ async def _load_latest_income_revenue(symbols: List[str]) -> Dict[str, Optional[
                 .label("rn"),
             )
             .where(IncomeStatement.symbol.in_(unique_symbols))
+            .where(or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"))
             .subquery()
         )
         rows = (
@@ -2942,6 +2944,7 @@ async def get_earnings_season(
             .label("rn"),
         )
         .where(IncomeStatement.period_type == "quarter")
+        .where(or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"))
         .subquery()
     )
 
@@ -2985,6 +2988,7 @@ async def get_earnings_season(
             IncomeStatement.eps,
         )
         .where(IncomeStatement.period_type == "quarter")
+        .where(or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"))
         .where(IncomeStatement.symbol.in_(symbols))
         .where(IncomeStatement.fiscal_year.in_(previous_years))
         .where(IncomeStatement.fiscal_quarter.in_(previous_quarters))
