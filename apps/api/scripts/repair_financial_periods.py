@@ -26,10 +26,12 @@ SAFE_FIXES: tuple[SqlFix, ...] = (
         sql="""
         UPDATE income_statements
         SET period_type = 'year', fiscal_quarter = NULL
-        WHERE id IN (
+        WHERE (source IS NULL OR source != 'issuer_report')
+          AND id IN (
             SELECT q.id
             FROM income_statements q
             WHERE lower(coalesce(q.period_type, '')) = 'quarter'
+              AND (q.source IS NULL OR q.source != 'issuer_report')
               AND q.fiscal_quarter IS NULL
               AND q.period ~ '^20\\d{2}$'
               AND q.fiscal_year = CAST(q.period AS integer)
@@ -47,10 +49,12 @@ SAFE_FIXES: tuple[SqlFix, ...] = (
         sql="""
         UPDATE balance_sheets
         SET period_type = 'year', fiscal_quarter = NULL
-        WHERE id IN (
+        WHERE (source IS NULL OR source != 'issuer_report')
+          AND id IN (
             SELECT q.id
             FROM balance_sheets q
             WHERE lower(coalesce(q.period_type, '')) = 'quarter'
+              AND (q.source IS NULL OR q.source != 'issuer_report')
               AND q.fiscal_quarter IS NULL
               AND q.period ~ '^20\\d{2}$'
               AND q.fiscal_year = CAST(q.period AS integer)
@@ -68,10 +72,12 @@ SAFE_FIXES: tuple[SqlFix, ...] = (
         sql="""
         UPDATE cash_flows
         SET period_type = 'year', fiscal_quarter = NULL
-        WHERE id IN (
+        WHERE (source IS NULL OR source != 'issuer_report')
+          AND id IN (
             SELECT q.id
             FROM cash_flows q
             WHERE lower(coalesce(q.period_type, '')) = 'quarter'
+              AND (q.source IS NULL OR q.source != 'issuer_report')
               AND q.fiscal_quarter IS NULL
               AND q.period ~ '^20\\d{2}$'
               AND q.fiscal_year = CAST(q.period AS integer)
@@ -90,6 +96,7 @@ SAFE_FIXES: tuple[SqlFix, ...] = (
         UPDATE financial_ratios
         SET period = regexp_replace(period, '^(20\\d{2})-Q([1-4])$', 'Q\\2-\\1')
         WHERE period ~ '^20\\d{2}-Q[1-4]$'
+          AND (source IS NULL OR source != 'issuer_report')
         """,
     ),
 )
