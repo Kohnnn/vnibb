@@ -871,5 +871,6 @@ async def test_promotion_commit_failure_keeps_failed_symbol_unfenced(admission_s
     # AAA's promotion rolled back: still legacy, and never named in a fence.
     assert sources["AAA"] == "vietcap"
     assert "AAA" not in fenced
-    # BBB, promoted after the failed commit, is durable and fenced.
+    # BBB, promoted after the failed commit, is promoted and fenced.
+    assert sources["BBB"] == "vietcap_vnd"
     assert fenced == {"BBB"}
