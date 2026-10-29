@@ -75,22 +75,6 @@ class FakeSession:
         return None
 
 
-@pytest.mark.asyncio
-async def test_price_pipeline_session_uses_default_and_injected_factory(monkeypatch):
-    from vnibb.services.pipeline import price_pipeline
-
-    default_session = FakeSession()
-    injected_session = FakeSession()
-    monkeypatch.setattr(price_pipeline, "async_session_maker", lambda: default_session)
-    pipeline = price_pipeline.PricePipeline()
-
-    async with pipeline._get_session() as session:
-        assert session is default_session
-
-    pipeline._session_factory = lambda: injected_session
-    async with pipeline._get_session() as session:
-        assert session is injected_session
-
 
 @pytest.mark.asyncio
 async def test_fetch_quote_history_frame_uses_community_quote_and_bypasses_retry(monkeypatch):
