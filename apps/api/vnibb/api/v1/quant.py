@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Historical loaders are owned by ``vnibb.api.v1.equity`` and re-exported here
@@ -3179,6 +3179,7 @@ async def get_earnings_quality(
         .where(
             IncomeStatement.symbol == symbol_upper,
             IncomeStatement.fiscal_quarter.isnot(None),
+            or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
         )
         .order_by(IncomeStatement.fiscal_year.desc(), IncomeStatement.fiscal_quarter.desc())
         .limit(12)
@@ -3192,6 +3193,7 @@ async def get_earnings_quality(
         .where(
             CashFlow.symbol == symbol_upper,
             CashFlow.fiscal_quarter.isnot(None),
+            or_(CashFlow.source.is_(None), CashFlow.source != "issuer_report"),
         )
         .order_by(CashFlow.fiscal_year.desc(), CashFlow.fiscal_quarter.desc())
         .limit(12)
@@ -3205,6 +3207,7 @@ async def get_earnings_quality(
         .where(
             BalanceSheet.symbol == symbol_upper,
             BalanceSheet.fiscal_quarter.isnot(None),
+            or_(BalanceSheet.source.is_(None), BalanceSheet.source != "issuer_report"),
         )
         .order_by(BalanceSheet.fiscal_year.desc(), BalanceSheet.fiscal_quarter.desc())
         .limit(12)
