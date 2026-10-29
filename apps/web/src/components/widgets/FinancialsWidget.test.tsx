@@ -407,6 +407,9 @@ describe('FinancialsWidget', () => {
     ['unknown unit', { outstanding_shares: 850.1, shares_as_of: '2025-12-31' }, 850.1, 'Unavailable', null],
     ['unverified statement count', null, 850.1, 'Unavailable', null],
     ['different observation date', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2026-12-31' }, null, 'Unavailable', null],
+    ['invalid observation date', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2025-02-30' }, null, 'Unavailable', null],
+    ['uncertified observation', { outstanding_shares: 100, shares_unit: 'shares', shares_as_of: '2025-12-31' }, null, 'Unavailable', null],
+    ['certified timestamp', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2025-12-31T00:00:00+07:00' }, null, '0.000100', 0.0001],
     ['certified small count', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2025-12-31' }, null, '0.000100', 0.0001],
   ])('snapshot share row preserves evidence for %s', (_name, profile, directShares, expected, exported) => {
     const onDataChange = jest.fn();
