@@ -604,3 +604,58 @@ async def test_rejected_complete_membership_cannot_be_promoted_by_legacy_sync(ad
         previous = await CacheManager(db=session).get_screener_data(allow_stale=True)
         assert previous.hit and previous.is_stale
         assert [(row.id, row.symbol, row.price, row.trade_date, row.extended_metrics) for row in previous.data] == original
+
+
+@pytest.mark.asyncio
+async def test_failed_board_fetch_preserves_independent_same_session_legacy_prices(admission_stores, monkeypatch):
+    stores = admission_stores
+    symbols = ["AAA", "BBB"]
+    async with stores.sessions.begin() as session:
+        stocks = [Stock(symbol=symbol, is_active=1) for symbol in symbols]
+        session.add_all(stocks)
+        await session.flush()
+        session.add_all([
+            StockPrice(stock_id=stock.id, symbol=stock.symbol, time=SESSION,
+                       open=10000, high=12000, low=9000, close=11000, volume=100,
+                       interval="1D", source="vietcap_vnd")
+            for stock in stocks
+        ])
+    monkeypatch.setattr(VietcapClient, "get_price_board", lambda *args, **kwargs: [])
+    pipeline = DataPipeline()
+    pipeline.cache_writes_enabled = False
+    progress = {}
+    assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress=progress) == 0
+    assert progress["session_errors"] == symbols
+    assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=False) == 2
+    async with stores.sessions() as session:
+        result = await CacheManager(db=session).get_screener_data()
+        assert result.hit and not result.is_stale
+        assert {row.symbol for row in result.data} == set(symbols)
+        assert all(row.price == 11000 and row.trade_date == SESSION for row in result.data)
+
+
+@pytest.mark.asyncio
+async def test_interrupted_board_acquisition_cannot_promote_inserted_prices(admission_stores, monkeypatch):
+    stores = admission_stores
+    symbols = [f"B{index:02d}" for index in range(20)]
+    async with stores.sessions.begin() as session:
+        session.add_all([Stock(symbol=symbol, is_active=1) for symbol in symbols])
+    monkeypatch.setattr(VietcapClient, "get_price_board", lambda *args, **kwargs: [board_row(symbol) for symbol in symbols])
+    pipeline = DataPipeline()
+    pipeline.cache_writes_enabled = False
+
+    class Interrupted(BaseException):
+        pass
+
+    async def interrupt_progress(*args, **kwargs):
+        raise Interrupted()
+
+    monkeypatch.setattr(pipeline, "_save_progress", interrupt_progress)
+    with pytest.raises(Interrupted):
+        await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress={}, sync_id=123)
+    await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=False)
+    async with stores.sessions() as session:
+        assert not (await CacheManager(db=session).get_screener_data()).hit
+        assert not (await session.scalars(select(SyncStatus).where(
+            SyncStatus.sync_type == "screener_universe", SyncStatus.status == "completed"
+        ))).all()

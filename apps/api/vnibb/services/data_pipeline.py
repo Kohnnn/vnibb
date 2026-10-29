@@ -1450,15 +1450,6 @@ class DataPipeline:
             from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
             from vnibb.services.vietcap_client import VietcapClient
 
-            # Persist the acquisition fence before any independently committed prices.
-            async with async_session_maker.begin() as session:
-                session.add(SyncStatus(
-                    sync_type="screener_session_acquisition", status="running",
-                    started_at=datetime.utcnow(), success_count=0, error_count=0,
-                    additional_data={"market_session_date": expected_session.isoformat(),
-                                     "expected_symbols": sorted(deduped_symbols)},
-                ))
-
             client = VietcapClient()
             mongo = get_mongo_market_data_service()
             seen_symbols: set[str] = set()
@@ -1536,6 +1527,7 @@ class DataPipeline:
                 stats["base_errors"] = len(session_errors)
 
         price_write_errors: dict[str, Exception] = {}
+        acquisition_fence_id = None
         for symbol, market_session in market_sessions.items():
             if market_session["status"] != "traded":
                 continue
@@ -1548,6 +1540,40 @@ class DataPipeline:
                     "interval": "1D", "source": "vietcap_vnd",
                 }
                 async with async_session_maker.begin() as price_session:
+                    if engine.dialect.name == "postgresql":
+                        await price_session.execute(text("LOCK TABLE screener_snapshots IN SHARE ROW EXCLUSIVE MODE"))
+                        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+                    else:
+                        await price_session.execute(text("BEGIN IMMEDIATE"))
+                        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+                    inserted = await price_session.scalar(
+                        dialect_insert(StockPrice).values(price_values).on_conflict_do_nothing(
+                            index_elements=["symbol", "time", "interval"],
+                        ).returning(StockPrice.id)
+                    )
+                    if inserted is not None:
+                        if acquisition_fence_id is None:
+                            fence = SyncStatus(
+                                sync_type="screener_session_acquisition", status="partial",
+                                started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
+                                success_count=1, error_count=0,
+                                additional_data={"market_session_date": expected_session.isoformat(),
+                                                 "expected_symbols": [symbol]},
+                            )
+                            price_session.add(fence)
+                            await price_session.flush()
+                            fence_id = fence.id
+                            await price_session.commit()
+                            acquisition_fence_id = fence_id
+                        else:
+                            fence = await price_session.get(SyncStatus, acquisition_fence_id, with_for_update=True)
+                            fence.additional_data = {
+                                **fence.additional_data,
+                                "expected_symbols": [*fence.additional_data["expected_symbols"], symbol],
+                            }
+                            fence.success_count += 1
+                            fence.completed_at = datetime.utcnow()
+                        continue
                     existing_price = await price_session.scalar(select(StockPrice).where(
                         StockPrice.symbol == symbol, StockPrice.time == expected_session,
                         StockPrice.interval == "1D",
@@ -1557,7 +1583,9 @@ class DataPipeline:
                         or any(getattr(existing_price, field) != value for field, value in price_values.items() if field != "source")
                     ):
                         raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
-                    if existing_price is None or existing_price.source != "vietcap_vnd":
+                    if existing_price is None:
+                        raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
+                    if existing_price.source != "vietcap_vnd":
                         price_stmt = get_upsert_stmt(
                             StockPrice, ["symbol", "time", "interval"], price_values,
                             preserve_existing_on_null={"value", "adj_close"},
@@ -2334,9 +2362,14 @@ class DataPipeline:
             acquisition_fences = []
             certified_sessions: set[tuple[str, str]] = set()
             if not acquire_sessions:
-                acquisition_fences = (await session.scalars(select(SyncStatus).where(
-                    SyncStatus.sync_type == "screener_session_acquisition",
-                ))).all()
+                relevant_dates = {
+                    snapshot.trade_date.isoformat() for snapshot in snapshot_rows if snapshot.trade_date
+                }
+                if relevant_dates:
+                    acquisition_fences = (await session.scalars(select(SyncStatus).where(
+                        SyncStatus.sync_type == "screener_session_acquisition",
+                        SyncStatus.additional_data["market_session_date"].as_string().in_(relevant_dates),
+                    ))).all()
                 for receipt in prior_receipts:
                     metadata = receipt.additional_data or {}
                     session_date = metadata.get("market_session_date")
