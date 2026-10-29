@@ -809,3 +809,67 @@ async def test_promoted_legacy_price_is_fenced_by_its_acquisition(admission_stor
         ))).all()
         reader = await CacheManager(db=session).get_screener_data()
         assert not reader.hit or reader.is_stale
+
+
+@pytest.mark.asyncio
+async def test_promotion_commit_failure_keeps_failed_symbol_unfenced(admission_stores, monkeypatch):
+    """A promotion that dies at COMMIT must not leave a certified symbol behind.
+
+    The fence is written inside the promotion transaction, so a deferred
+    constraint failure at COMMIT rolls back the promotion and its fence
+    together. The next symbol in the loop must still promote and be fenced.
+    """
+    stores = admission_stores
+    symbols = ["AAA", "BBB"]
+    async with stores.sessions.begin() as session:
+        stocks = [Stock(symbol=symbol, is_active=1) for symbol in symbols]
+        session.add_all(stocks)
+        await session.flush()
+        session.add_all([
+            StockPrice(stock_id=stock.id, symbol=stock.symbol, time=SESSION,
+                       open=10000, high=12000, low=9000, close=11000, volume=100,
+                       interval="1D", source="vietcap")
+            for stock in stocks
+        ])
+
+    # A deferred constraint trigger fires at COMMIT, after the fence flush.
+    async with stores.sessions.begin() as session:
+        await session.execute(text(
+            "CREATE FUNCTION reject_promotion() RETURNS trigger AS $$ "
+            "BEGIN IF NEW.symbol = 'AAA' THEN "
+            "RAISE EXCEPTION 'rejected at commit'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql"
+        ))
+        await session.execute(text(
+            "CREATE CONSTRAINT TRIGGER reject_promotion AFTER INSERT OR UPDATE ON stock_prices "
+            "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION reject_promotion()"
+        ))
+
+    pipeline = DataPipeline()
+    pipeline.cache_writes_enabled = False
+    rows = [board_row(symbol) for symbol in symbols]
+    monkeypatch.setattr(VietcapClient, "get_price_board", lambda *args, **kwargs: deepcopy(rows))
+
+    # The board is incomplete, so both prices exist only as legacy rows and the
+    # loop takes the promotion branch for each.
+    progress = {}
+    await pipeline.sync_screener_data(
+        enrich_ratios=False, acquire_sessions=True, progress=progress,
+    )
+
+    async with stores.sessions() as session:
+        fenced = {
+            symbol
+            for fence in (await session.scalars(select(SyncStatus).where(
+                SyncStatus.sync_type == "screener_session_acquisition",
+            ))).all()
+            for symbol in fence.additional_data["expected_symbols"]
+        }
+        sources = dict((await session.execute(
+            select(StockPrice.symbol, StockPrice.source).where(StockPrice.time == SESSION)
+        )).all())
+
+    # AAA's promotion rolled back: still legacy, and never named in a fence.
+    assert sources["AAA"] == "vietcap"
+    assert "AAA" not in fenced
+    # BBB, promoted after the failed commit, is durable and fenced.
+    assert fenced == {"BBB"}

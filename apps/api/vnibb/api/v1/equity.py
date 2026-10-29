@@ -28,7 +28,7 @@ from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
-from vnibb.core.ratio_units import admit_ratio_units, admitted_ratio_value
+from vnibb.core.ratio_units import ADMITTED_RATIO_FIELDS, admit_ratio_units, admitted_ratio_value
 from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.company import Company, Shareholder
@@ -6337,7 +6337,7 @@ async def get_rating(symbol: str):
 @router.get("/{symbol}/financial-ratios", response_model=StandardResponse[List[FinancialRatioData]])
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
 # Keep prior scale-guessed responses out of the certified-unit serving path.
-@cached(ttl=86400, key_prefix="ratios_v11_provider_deadline")
+@cached(ttl=86400, key_prefix="ratios_v12_provider_deadline")
 async def get_financial_ratios(
     symbol: str,
     period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
@@ -6386,8 +6386,10 @@ async def get_financial_ratios(
             any(evidence.get("source") == "vietcap" for evidence in row.provider_evidence)
             and _ratio_has_metric_value(row) for row in mongo_ratio_rows
         ):
+            # The early return skips the final gate, so admit here too; the
+            # rows feeding `_merge_ratio_rows` stay untouched on purpose.
             return StandardResponse(
-                data=mongo_ratio_rows,
+                data=[admit_ratio_units(item) for item in mongo_ratio_rows],
                 meta=MetaData(count=len(mongo_ratio_rows), data_points=len(mongo_ratio_rows), **meta_kwargs),
             )
     except Exception as exc:
@@ -6550,7 +6552,7 @@ async def get_financial_ratios(
 
 
 @router.get("/{symbol}/ratios/history", response_model=StandardResponse[List[dict[str, Any]]])
-@cached(ttl=86400, key_prefix="ratios_history_v6_provider_deadline")
+@cached(ttl=86400, key_prefix="ratios_history_v7_provider_deadline")
 async def get_ratio_history(
     symbol: str,
     ratios: str = Query("pe,pb,ps", description="Comma-separated ratio keys"),
@@ -6611,9 +6613,15 @@ async def get_ratio_history(
             )
         rows: List[dict[str, Any]] = []
         for item in data:
-            row: dict[str, Any] = {"period": item.period or ""}
+            # Admit through the shared site so `fcf_yield`/`ocf_sales` cannot
+            # publish an undeclared magnitude here either; idempotent for rows
+            # that already passed a gate upstream.
+            admitted = admit_ratio_units(item)
+            row: dict[str, Any] = {"period": admitted.period or ""}
             for key in ratio_list:
-                row[key] = admitted_ratio_value(getattr(item, key, None), key, ratio_units=getattr(item, "ratio_units", None))
+                row[key] = getattr(admitted, key, None) if key in ADMITTED_RATIO_FIELDS else admitted_ratio_value(
+                    getattr(admitted, key, None), key, ratio_units=admitted.ratio_units,
+                )
             rows.append(row)
 
         rows = sorted(rows, key=lambda r: _ratio_period_sort_key(str(r.get("period", ""))))

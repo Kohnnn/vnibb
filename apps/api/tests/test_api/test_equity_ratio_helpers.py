@@ -404,6 +404,38 @@ def test_ratio_has_metric_value_returns_true_for_zero_and_positive_values():
     assert _ratio_has_metric_value(item) is True
 
 
+@pytest.mark.asyncio
+async def test_ratio_endpoint_admits_on_vietcap_early_return(monkeypatch, test_db, client):
+    """The certified-IQ early return skips the final gate, so it admits itself.
+
+    VCI stamps non-percent ratio fields `"ratio"`; those must not publish the raw
+    magnitude while the same row returns `None` through the final gate.
+    """
+    from vnibb.api.v1 import equity
+    from vnibb.core import cache
+
+    monkeypatch.setattr(cache, "_memory_cache", {})
+    stored = FinancialRatioData(
+        symbol="VNM", period="2024", ocf_sales=0.175, fcf_yield=0.052,
+        ratio_units={"ocf_sales": "ratio", "fcf_yield": "ratio"},
+        provider_evidence=[{"source": "vietcap"}],
+    )
+    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(return_value=[stored]))
+    monkeypatch.setattr(equity, "_get_latest_statement_period_key", AsyncMock(return_value=0))
+    # The provider must never run: otherwise the final gate could produce the
+    # same `None` and this test would not prove the early return admits.
+    monkeypatch.setattr(
+        equity.VnstockFinancialRatiosFetcher, "fetch",
+        AsyncMock(side_effect=AssertionError("certified IQ rows must bypass the provider")),
+    )
+
+    response = await client.get("/api/v1/equity/VNM/ratios?period=year")
+
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["ocf_sales"] is None
+    assert row["fcf_yield"] is None
+
 def test_to_ratio_data_reads_ev_sales_from_raw_data_fallback():
     row = make_ratio_row(raw_data={"evToSales": 3.25})
     result = _to_ratio_data(row)
