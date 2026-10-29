@@ -22,6 +22,9 @@ jest.mock('@/components/ui/widget-states', () => ({
 }));
 
 jest.mock('@/components/ui/WidgetMeta', () => ({ WidgetMeta: () => null }));
+jest.mock('@/contexts/SymbolLinkContext', () => ({ useSymbolLink: () => ({ setGlobalSymbol: jest.fn() }) }));
+jest.mock('@/contexts/WidgetGroupContext', () => ({ useWidgetGroups: () => ({ setGroupSymbol: jest.fn(), tickerOverrideFor: () => null }) }));
+jest.mock('@/hooks/useDashboardWidget', () => ({ useDashboardWidget: () => null }));
 
 const mockUseSymbols = useSymbols as jest.Mock;
 const mockUseSymbolsByGroup = useSymbolsByGroup as jest.Mock;
