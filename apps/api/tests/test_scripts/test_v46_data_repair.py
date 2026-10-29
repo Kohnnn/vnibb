@@ -1,15 +1,19 @@
 import argparse
+import asyncio
 import importlib.util
+import os
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
-from sqlalchemy import MetaData, select, update
+from sqlalchemy import MetaData, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.sql.dml import Update
 
 from vnibb.models.financials import IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.trading import FinancialRatio
+from vnibb.services.cache_manager import CacheManager
 
 path = Path(__file__).resolve().parents[2] / "scripts/v46_data_repair.py"
 spec = importlib.util.spec_from_file_location("v46_data_repair", path)
@@ -127,3 +131,78 @@ async def test_ev_sales_rechecks_income_ownership_before_use(monkeypatch):
         row = (await session.execute(select(FinancialRatio))).scalar_one()
         assert row.ev_sales is None
     await engine.dispose()
+
+
+@pytest.mark.postgres_contract
+@pytest.mark.skipif(os.environ.get("POSTGRES_CONTRACT") != "1", reason="requires disposable PostgreSQL")
+@pytest.mark.asyncio
+async def test_ev_sales_repair_and_reverse_order_income_writer_do_not_deadlock(monkeypatch):
+    from conftest import postgres_contract_database_url
+
+    admin = create_async_engine(postgres_contract_database_url())
+    schema = f"ev_sales_lock_{uuid4().hex}"
+    engine = None
+    try:
+        async with admin.begin() as connection:
+            await connection.execute(text(f"CREATE SCHEMA {schema}"))
+        engine = create_async_engine(
+            postgres_contract_database_url(),
+            connect_args={"server_settings": {"search_path": schema, "lock_timeout": "5000"}},
+        )
+        metadata = MetaData()
+        for model in (IncomeStatement, FinancialRatio, ScreenerSnapshot):
+            model.__table__.to_metadata(metadata)
+        async with engine.begin() as connection:
+            await connection.run_sync(metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            for identifier, year in enumerate((2024, 2025), 1):
+                common = dict(id=identifier, symbol="FPT", period=str(year), period_type="year", fiscal_year=year)
+                session.add(IncomeStatement(**common, source="vnstock", revenue=100))
+                session.add(FinancialRatio(**common, source="vnstock", raw_data={"enterprise_value": 200}))
+            await session.commit()
+
+        repair_has_first = asyncio.Event()
+        writer_has_second = asyncio.Event()
+
+        class RepairSession(AsyncSession):
+            async def execute(self, statement, *args, **kwargs):
+                descriptions = getattr(statement, "column_descriptions", ())
+                if descriptions and descriptions[0].get("entity") is FinancialRatio:
+                    statement = statement.order_by(FinancialRatio.id)
+                result = await super().execute(statement, *args, **kwargs)
+                if getattr(statement, "_for_update_arg", None) is not None and not repair_has_first.is_set():
+                    repair_has_first.set()
+                    await asyncio.wait_for(writer_has_second.wait(), 5)
+                return result
+
+        class WriterSession(AsyncSession):
+            async def execute(self, statement, *args, **kwargs):
+                result = await super().execute(statement, *args, **kwargs)
+                if getattr(statement, "_for_update_arg", None) is not None and not writer_has_second.is_set():
+                    writer_has_second.set()
+                return result
+
+        monkeypatch.setattr(repair, "async_session_maker", async_sessionmaker(
+            engine, class_=RepairSession, expire_on_commit=False,
+        ))
+
+        async def write_income():
+            await asyncio.wait_for(repair_has_first.wait(), 5)
+            async with WriterSession(engine, expire_on_commit=False) as session:
+                return await CacheManager(session).store_financial_data(
+                    "FPT", "income", "year",
+                    [{"period": str(year), "fiscal_year": year, "revenue": 100} for year in (2025, 2024)],
+                    source="vnstock",
+                )
+
+        assert await asyncio.wait_for(asyncio.gather(repair._backfill_ev_sales(500), write_income()), 10) == [2, 2]
+        async with sessions() as session:
+            ratios = (await session.execute(select(FinancialRatio).order_by(FinancialRatio.id))).scalars().all()
+            assert [ratio.ev_sales for ratio in ratios] == [2, 2]
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        async with admin.begin() as connection:
+            await connection.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        await admin.dispose()
