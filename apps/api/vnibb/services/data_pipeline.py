@@ -2361,15 +2361,16 @@ class DataPipeline:
             )).all()
             acquisition_fences = []
             certified_sessions: set[tuple[str, str]] = set()
+            relevant_dates = (
+                {expected_session.isoformat()} if acquire_sessions else
+                {snapshot.trade_date.isoformat() for snapshot in snapshot_rows if snapshot.trade_date}
+            )
+            if relevant_dates:
+                acquisition_fences = (await session.scalars(select(SyncStatus).where(
+                    SyncStatus.sync_type == "screener_session_acquisition",
+                    SyncStatus.additional_data["market_session_date"].as_string().in_(relevant_dates),
+                ))).all()
             if not acquire_sessions:
-                relevant_dates = {
-                    snapshot.trade_date.isoformat() for snapshot in snapshot_rows if snapshot.trade_date
-                }
-                if relevant_dates:
-                    acquisition_fences = (await session.scalars(select(SyncStatus).where(
-                        SyncStatus.sync_type == "screener_session_acquisition",
-                        SyncStatus.additional_data["market_session_date"].as_string().in_(relevant_dates),
-                    ))).all()
                 for receipt in prior_receipts:
                     metadata = receipt.additional_data or {}
                     session_date = metadata.get("market_session_date")
@@ -2382,7 +2383,8 @@ class DataPipeline:
                 if isinstance((metadata := fence.additional_data or {}).get("market_session_date"), str)
                 and isinstance(metadata.get("expected_symbols"), list)
                 for symbol in metadata["expected_symbols"] if isinstance(symbol, str)
-            } - certified_sessions
+                if symbol not in metadata.get("certified_symbols", [])
+            }
             valid_base_symbols = set()
             for snapshot in snapshot_rows:
                 quote = screener_price_record(snapshot)
@@ -2443,6 +2445,20 @@ class DataPipeline:
                 and {snapshot.symbol for snapshot in snapshot_rows} == expected_symbols
                 and valid_base_symbols == expected_symbols
             )
+            if publish_cohort and acquire_sessions:
+                traded_symbols = {
+                    symbol for symbol in valid_base_symbols if market_sessions[symbol]["status"] == "traded"
+                }
+                for fence in acquisition_fences:
+                    metadata = fence.additional_data or {}
+                    if metadata.get("market_session_date") != expected_session.isoformat():
+                        continue
+                    members = metadata.get("expected_symbols")
+                    if not isinstance(members, list):
+                        continue
+                    certified = set(metadata.get("certified_symbols", [])) | (set(members) & traded_symbols)
+                    if certified:
+                        fence.additional_data = {**metadata, "certified_symbols": sorted(certified)}
             current_snapshots = {row["symbol"]: dict(row) for row in (await session.execute(
                 select(*ScreenerSnapshot.__table__.c).where(ScreenerSnapshot.snapshot_date == today)
             )).mappings()}

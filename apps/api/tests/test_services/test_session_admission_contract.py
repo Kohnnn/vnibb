@@ -659,3 +659,42 @@ async def test_interrupted_board_acquisition_cannot_promote_inserted_prices(admi
         assert not (await session.scalars(select(SyncStatus).where(
             SyncStatus.sync_type == "screener_universe", SyncStatus.status == "completed"
         ))).all()
+
+
+@pytest.mark.asyncio
+async def test_old_no_trade_receipt_cannot_certify_later_rejected_traded_price(admission_stores, monkeypatch):
+    stores = admission_stores
+    symbols = ["AAA", "BBB"]
+    no_trade = board_row("AAA")
+    no_trade["matchPrice"].update(openPrice=None, highest=0, lowest=0, matchPrice=0, accumulatedVolume=0)
+    assert (await run_board(stores, monkeypatch, symbols, [no_trade, board_row("BBB")]))[0] == 2
+    async with stores.sessions() as session:
+        before = await CacheManager(db=session).get_screener_data()
+        assert before.hit and not before.is_stale
+        original = {row.symbol: (row.id, row.price, row.trade_date, deepcopy(row.extended_metrics)) for row in before.data}
+        assert original["AAA"][1:3] == (None, None)
+        receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+        original_receipts = [(row.id, deepcopy(row.additional_data)) for row in receipts]
+        assert len(original_receipts) == 1
+
+    deleted = stores.mongo.market_vnstock_premium_records.delete_one({
+        "dataset": "equity.price_board", "symbol": "AAA", "session_date": SESSION.isoformat(),
+    })
+    assert deleted.deleted_count == 1
+    monkeypatch.setattr(VietcapClient, "get_price_board", lambda *args, **kwargs: [board_row("AAA"), board_row("BBB"), {}])
+    pipeline = DataPipeline()
+    pipeline.cache_writes_enabled = False
+    progress = {}
+    assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress=progress) == 2
+    assert not progress["session_input_complete"]
+    async with stores.sessions() as session:
+        price = await session.scalar(select(StockPrice).where(StockPrice.symbol == "AAA", StockPrice.time == SESSION))
+        assert price is not None and price.close == 11000
+
+    await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=False)
+    async with stores.sessions() as session:
+        receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+        assert [(row.id, row.additional_data) for row in receipts] == original_receipts
+        after = await CacheManager(db=session).get_screener_data()
+        assert after.hit and not after.is_stale
+        assert {row.symbol: (row.id, row.price, row.trade_date, row.extended_metrics) for row in after.data} == original

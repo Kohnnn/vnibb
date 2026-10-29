@@ -13,7 +13,7 @@ live in `docs/`.
 
 ## [Unreleased]
 
-- Retained-data screener syncs cannot certify prices inserted by an uncompleted board acquisition: each new price and its provenance fence commit together under the publication lock. A matching completed session receipt permits reuse; pre-existing independently valid legacy prices are not fenced. Interrupted acquisitions may require a successful acquired cohort before legacy publication can resume.
+- Retained-data screener syncs cannot certify prices inserted by an uncompleted board acquisition: each new price and its provenance fence commit together under the publication lock. A completed acquired cohort certifies only the fence members it actually verified, atomically with publication; an older same-session receipt cannot certify a later price. Pre-existing independently valid legacy prices are not fenced.
 - Pipeline screener backfill and ratio seeding/enrichment, admin financial samples and freshness, and period-repair targets withhold issuer-report rows while retaining legacy NULL sources. PostgreSQL ratio seeding uses insert-only conflicts, and cooperating sync/cache writers serialize per symbol after provider I/O; other writers remain outside this partial safeguard. Issuer persistence and production cutover remain blocked.
 - Remove two obsolete ingestion implementations restored by integration; the existing `DataPipeline` and Vietcap ingestion paths remain canonical.
 - Listing Browser normalizes company names from the API wire format and selects the widget's ticker group without broadcasting detached selections. Certified year-end shares accept supported timestamps, and comparison backfills withhold cross-statement ratios when fiscal periods differ.
