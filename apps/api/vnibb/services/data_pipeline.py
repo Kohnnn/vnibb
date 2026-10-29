@@ -2139,7 +2139,10 @@ class DataPipeline:
                 ratio = (
                     await session.execute(
                         select(FinancialRatio)
-                        .where(FinancialRatio.symbol == screener_row.symbol)
+                        .where(
+                            FinancialRatio.symbol == screener_row.symbol,
+                            or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
+                        )
                         .order_by(
                             FinancialRatio.fiscal_year.desc(),
                             FinancialRatio.fiscal_quarter.desc(),
@@ -3874,7 +3877,9 @@ class DataPipeline:
                 source_rows = (
                     await session.execute(
                         select(model.period, model.fiscal_year, model.fiscal_quarter).where(
-                            model.symbol == symbol_value, model.period_type == normalized_period
+                            model.symbol == symbol_value,
+                            model.period_type == normalized_period,
+                            or_(model.source.is_(None), model.source != "issuer_report"),
                         )
                     )
                 ).all()
@@ -3904,6 +3909,7 @@ class DataPipeline:
                         select(FinancialRatio.period).where(
                             FinancialRatio.symbol == symbol_value,
                             FinancialRatio.period_type == normalized_period,
+                            or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
                         )
                     )
                 )
@@ -3932,6 +3938,7 @@ class DataPipeline:
                 }
                 stmt = get_upsert_stmt(
                     FinancialRatio,
+                    ["symbol", "period", "period_type"],
                     values,
                     update_condition=source_update_condition(FinancialRatio, "derived"),
                 )
@@ -3954,6 +3961,7 @@ class DataPipeline:
                         .order_by(
                             FinancialRatio.fiscal_year.desc(), FinancialRatio.fiscal_quarter.desc()
                         )
+                        .with_for_update()
                     )
                 )
                 .scalars()
@@ -3977,6 +3985,7 @@ class DataPipeline:
                     .where(
                         IncomeStatement.symbol == symbol_value,
                         IncomeStatement.period_type == normalized_period,
+                        or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
                     )
                     .order_by(
                         IncomeStatement.fiscal_year.desc(), IncomeStatement.fiscal_quarter.desc()
@@ -4001,6 +4010,7 @@ class DataPipeline:
                     .where(
                         BalanceSheet.symbol == symbol_value,
                         BalanceSheet.period_type == normalized_period,
+                        or_(BalanceSheet.source.is_(None), BalanceSheet.source != "issuer_report"),
                     )
                     .order_by(BalanceSheet.fiscal_year.desc(), BalanceSheet.fiscal_quarter.desc())
                 )
@@ -4020,6 +4030,7 @@ class DataPipeline:
                     .where(
                         CashFlow.symbol == symbol_value,
                         CashFlow.period_type == normalized_period,
+                        or_(CashFlow.source.is_(None), CashFlow.source != "issuer_report"),
                     )
                     .order_by(CashFlow.fiscal_year.desc(), CashFlow.fiscal_quarter.desc())
                 )

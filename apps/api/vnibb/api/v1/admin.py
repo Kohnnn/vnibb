@@ -117,6 +117,7 @@ FRESHNESS_TABLES = [
     "company_news",
     "company_events",
 ]
+FINANCIAL_TABLES = {"income_statements", "balance_sheets", "cash_flows", "financial_ratios"}
 ADMIN_QUERY_MAX_ROWS = 500
 ADMIN_QUERY_TIMEOUT_MS = 2_000
 _ADMIN_QUERY_START = re.compile(r"^\s*(?:SELECT|WITH)\b", re.IGNORECASE)
@@ -756,6 +757,7 @@ async def _collect_reinforcement_candidates(db: AsyncSession, limit: int) -> lis
                     SELECT symbol
                     FROM financial_ratios
                     WHERE symbol IS NOT NULL
+                      AND (source IS NULL OR source != 'issuer_report')
                       AND (
                         dps IS NULL
                         OR dividend_yield IS NULL
@@ -927,14 +929,15 @@ async def get_freshness_summary(db: AsyncSession = Depends(get_db)):
 
     for table_name in targets:
         quoted_table = _quote_identifier(table_name)
-        count_result = await db.execute(text(f"SELECT COUNT(*) FROM {quoted_table}"))
+        source_filter = " WHERE (source IS NULL OR source != 'issuer_report')" if table_name in FINANCIAL_TABLES else ""
+        count_result = await db.execute(text(f"SELECT COUNT(*) FROM {quoted_table}{source_filter}"))
         row_count = int(count_result.scalar() or 0)
 
         updated_at_column = await _discover_timestamp_column(db, table_name)
         latest_value = None
         if updated_at_column:
             ts_result = await db.execute(
-                text(f'SELECT MAX("{updated_at_column}") FROM {quoted_table}')
+                text(f'SELECT MAX("{updated_at_column}") FROM {quoted_table}{source_filter}')
             )
             latest_value = ts_result.scalar()
 
@@ -1459,7 +1462,7 @@ async def get_table_sample(
         raise HTTPException(status_code=404, detail="Table not found")
     try:
         quoted_table = _quote_identifier(table_name)
-        where_clause = ""
+        conditions = ["(source IS NULL OR source != 'issuer_report')"] if table_name in FINANCIAL_TABLES else []
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if search:
             schema = await get_table_schema(table_name, db)
@@ -1469,10 +1472,11 @@ async def get_table_sample(
                 if "TEXT" in str(c["type"]).upper() or "CHAR" in str(c["type"]).upper()
             ]
             if text_cols:
-                where_clause = " WHERE " + " OR ".join(
+                conditions.append("(" + " OR ".join(
                     [f'LOWER(CAST("{col}" AS TEXT)) LIKE :s' for col in text_cols]
-                )
+                ) + ")")
                 params["s"] = f"%{search.lower()}%"
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
 
         query = f"SELECT * FROM {quoted_table}{where_clause} LIMIT :limit OFFSET :offset"
         result = await db.execute(text(query), params)
@@ -1595,8 +1599,9 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
         try:
             if not await _table_exists(db, table):
                 continue
+            source_filter = " WHERE (source IS NULL OR source != 'issuer_report')" if table in FINANCIAL_TABLES else ""
             res = await db.execute(
-                text(f"SELECT MAX({date_col}) as last_update, COUNT(*) as count FROM {table}")
+                text(f"SELECT MAX({date_col}) as last_update, COUNT(*) as count FROM {table}{source_filter}")
             )
             row = res.mappings().first()
             last_update = row["last_update"] if row else None
