@@ -1153,7 +1153,7 @@ export async function saveAdminSystemDashboardTemplate(
 
 export interface SymbolsResponse {
     count: number;
-    data: Array<{ symbol: string; organ_name: string; exchange?: string | null; industry?: string | null }>;
+    data: Array<{ symbol: string; organ_name: string | null; exchange?: string | null; industry?: string | null }>;
 }
 
 export interface IndustriesResponse {
@@ -1185,9 +1185,10 @@ export interface TrendingAnalysisResponse {
 }
 
 export async function getSymbols(options?: { limit?: number }): Promise<SymbolsResponse> {
-    return fetchAPI<SymbolsResponse>('/listing/symbols', {
+    const response = await fetchAPI<Omit<SymbolsResponse, 'data'> & { data: Array<Omit<SymbolsResponse['data'][number], 'organ_name'> & { organName?: string | null; organ_name?: string | null }> }>('/listing/symbols', {
         params: { limit: options?.limit },
     });
+    return { ...response, data: response.data.map(({ organName, ...item }) => ({ ...item, organ_name: organName ?? item.organ_name ?? null })) };
 }
 
 export async function getSymbolsByExchange(exchange: 'HOSE' | 'HNX' | 'UPCOM'): Promise<SymbolsResponse> {

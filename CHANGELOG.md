@@ -13,7 +13,10 @@ live in `docs/`.
 
 ## [Unreleased]
 
-- Restore price pipeline database sessions for default and injected factories; session context managers are no longer returned as unawaited coroutines.
+- Retained-data screener syncs cannot certify prices inserted by an uncompleted board acquisition: each new price and its provenance fence commit together under the publication lock. A completed acquired cohort certifies only the fence members it actually verified, atomically with publication; an older same-session receipt cannot certify a later price. Pre-existing independently valid legacy prices are not fenced.
+- Pipeline screener backfill and ratio seeding/enrichment, admin financial samples and freshness, and period-repair targets withhold issuer-report rows while retaining legacy NULL sources. PostgreSQL ratio seeding uses insert-only conflicts, and cooperating sync/cache writers serialize per symbol after provider I/O; other writers remain outside this partial safeguard. Issuer persistence and production cutover remain blocked.
+- Remove two obsolete ingestion implementations restored by integration; the existing `DataPipeline` and Vietcap ingestion paths remain canonical.
+- Listing Browser normalizes company names from the API wire format and selects the widget's ticker group without broadcasting detached selections. Certified year-end shares accept supported timestamps, and comparison backfills withhold cross-statement ratios when fiscal periods differ.
 - Align the PostgreSQL company-index migration contract with current share handling: competing writes still preserve one company and withhold unsupported zero shares, without assuming raw payload or market-cap provenance defaults.
 - Equity SQL statement fallback and ratio fallback/history selection withhold issuer-report rows before ordering and limits, without excluding legacy NULL sources. Other readers and writers remain outside this partial fence; issuer persistence and production cutover remain blocked.
 - Remove the retired Oracle premium bootstrap and check scripts restored by integration; release images continue to use free VCI without paid modules.

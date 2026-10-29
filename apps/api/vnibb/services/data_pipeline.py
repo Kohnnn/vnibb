@@ -54,7 +54,7 @@ from vnibb.providers.vnstock.runtime import validate_source
 from vnibb.providers.vnstock.reference_fields import identity, parse_datetime, supplied
 from vnibb.services.screener_metadata import reconcile_snapshot_cap, screener_metadata_updates
 from vnibb.core.screener_shares import resolve_screener_shares
-from vnibb.services.cache_manager import StructuredPersistenceConflict, snapshot_session_coverage, source_update_condition
+from vnibb.services.cache_manager import StructuredPersistenceConflict, lock_ratio_writes, snapshot_session_coverage, source_update_condition
 from vnibb.services.market_session import expected_market_session, qualify_market_session
 from vnibb.models.alerts import BlockTrade
 from vnibb.models.company import Company, Officer, Shareholder
@@ -1527,6 +1527,7 @@ class DataPipeline:
                 stats["base_errors"] = len(session_errors)
 
         price_write_errors: dict[str, Exception] = {}
+        acquisition_fence_id = None
         for symbol, market_session in market_sessions.items():
             if market_session["status"] != "traded":
                 continue
@@ -1539,6 +1540,40 @@ class DataPipeline:
                     "interval": "1D", "source": "vietcap_vnd",
                 }
                 async with async_session_maker.begin() as price_session:
+                    if engine.dialect.name == "postgresql":
+                        await price_session.execute(text("LOCK TABLE screener_snapshots IN SHARE ROW EXCLUSIVE MODE"))
+                        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+                    else:
+                        await price_session.execute(text("BEGIN IMMEDIATE"))
+                        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+                    inserted = await price_session.scalar(
+                        dialect_insert(StockPrice).values(price_values).on_conflict_do_nothing(
+                            index_elements=["symbol", "time", "interval"],
+                        ).returning(StockPrice.id)
+                    )
+                    if inserted is not None:
+                        if acquisition_fence_id is None:
+                            fence = SyncStatus(
+                                sync_type="screener_session_acquisition", status="partial",
+                                started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
+                                success_count=1, error_count=0,
+                                additional_data={"market_session_date": expected_session.isoformat(),
+                                                 "expected_symbols": [symbol]},
+                            )
+                            price_session.add(fence)
+                            await price_session.flush()
+                            fence_id = fence.id
+                            await price_session.commit()
+                            acquisition_fence_id = fence_id
+                        else:
+                            fence = await price_session.get(SyncStatus, acquisition_fence_id, with_for_update=True)
+                            fence.additional_data = {
+                                **fence.additional_data,
+                                "expected_symbols": [*fence.additional_data["expected_symbols"], symbol],
+                            }
+                            fence.success_count += 1
+                            fence.completed_at = datetime.utcnow()
+                        continue
                     existing_price = await price_session.scalar(select(StockPrice).where(
                         StockPrice.symbol == symbol, StockPrice.time == expected_session,
                         StockPrice.interval == "1D",
@@ -1548,7 +1583,9 @@ class DataPipeline:
                         or any(getattr(existing_price, field) != value for field, value in price_values.items() if field != "source")
                     ):
                         raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
-                    if existing_price is None or existing_price.source != "vietcap_vnd":
+                    if existing_price is None:
+                        raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
+                    if existing_price.source != "vietcap_vnd":
                         price_stmt = get_upsert_stmt(
                             StockPrice, ["symbol", "time", "interval"], price_values,
                             preserve_existing_on_null={"value", "adj_close"},
@@ -2139,7 +2176,10 @@ class DataPipeline:
                 ratio = (
                     await session.execute(
                         select(FinancialRatio)
-                        .where(FinancialRatio.symbol == screener_row.symbol)
+                        .where(
+                            FinancialRatio.symbol == screener_row.symbol,
+                            or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
+                        )
                         .order_by(
                             FinancialRatio.fiscal_year.desc(),
                             FinancialRatio.fiscal_quarter.desc(),
@@ -2319,6 +2359,47 @@ class DataPipeline:
                     ScreenerSnapshot.symbol.in_(expected_symbols),
                 )
             )).all()
+            acquisition_fences = []
+            certified_sessions: set[tuple[str, str]] = set()
+            relevant_dates = (
+                {expected_session.isoformat()} if acquire_sessions else
+                {snapshot.trade_date.isoformat() for snapshot in snapshot_rows if snapshot.trade_date}
+            )
+            if relevant_dates:
+                acquisition_fences = (await session.scalars(select(SyncStatus).where(
+                    SyncStatus.sync_type == "screener_session_acquisition",
+                    SyncStatus.additional_data["market_session_date"].as_string().in_(relevant_dates),
+                ))).all()
+            if not acquire_sessions:
+                marker_dates = {
+                    (snapshot.extended_metrics or {}).get("market_session", {}).get("session_date")
+                    for snapshot in snapshot_rows
+                    if isinstance(snapshot.extended_metrics, dict)
+                    and isinstance(snapshot.extended_metrics.get("market_session"), dict)
+                } - {None}
+                session_dates = relevant_dates | marker_dates
+                if session_dates:
+                    for receipt in (await session.scalars(select(SyncStatus).where(
+                        SyncStatus.sync_type == "screener_universe", SyncStatus.status == "completed",
+                        SyncStatus.error_count == 0,
+                        SyncStatus.additional_data["market_session_date"].as_string().in_(session_dates),
+                    ))).all():
+                        metadata = receipt.additional_data or {}
+                        session_date = metadata.get("market_session_date")
+                        receipt_symbols = metadata.get("expected_symbols")
+                        if isinstance(session_date, str) and isinstance(receipt_symbols, list):
+                            certified_sessions.update(
+                                (symbol, session_date) for symbol in receipt_symbols
+                                if isinstance(symbol, str) and symbol in expected_symbols
+                            )
+            fenced_sessions = {
+                (symbol, metadata["market_session_date"])
+                for fence in acquisition_fences
+                if isinstance((metadata := fence.additional_data or {}).get("market_session_date"), str)
+                and isinstance(metadata.get("expected_symbols"), list)
+                for symbol in metadata["expected_symbols"] if isinstance(symbol, str)
+                if symbol not in metadata.get("certified_symbols", [])
+            }
             valid_base_symbols = set()
             for snapshot in snapshot_rows:
                 quote = screener_price_record(snapshot)
@@ -2342,7 +2423,13 @@ class DataPipeline:
                             and retained_price.stock_id == stock_metadata[snapshot.symbol]["stock_id"]
                         )
                 else:
-                    valid = _valid_base_quote(quote, snapshot.trade_date)
+                    session_marker = (snapshot.extended_metrics or {}).get("market_session")
+                    marker_date = session_marker.get("session_date") if isinstance(session_marker, dict) else None
+                    valid = (
+                        _valid_base_quote(quote, snapshot.trade_date)
+                        and (snapshot.symbol, snapshot.trade_date.isoformat() if snapshot.trade_date else None) not in fenced_sessions
+                        and (not session_marker or (snapshot.symbol, marker_date) in certified_sessions)
+                    )
                 if valid:
                     valid_base_symbols.add(snapshot.symbol)
             if acquire_sessions:
@@ -2373,6 +2460,20 @@ class DataPipeline:
                 and {snapshot.symbol for snapshot in snapshot_rows} == expected_symbols
                 and valid_base_symbols == expected_symbols
             )
+            if publish_cohort and acquire_sessions:
+                traded_symbols = {
+                    symbol for symbol in valid_base_symbols if market_sessions[symbol]["status"] == "traded"
+                }
+                for fence in acquisition_fences:
+                    metadata = fence.additional_data or {}
+                    if metadata.get("market_session_date") != expected_session.isoformat():
+                        continue
+                    members = metadata.get("expected_symbols")
+                    if not isinstance(members, list):
+                        continue
+                    certified = set(metadata.get("certified_symbols", [])) | (set(members) & traded_symbols)
+                    if certified:
+                        fence.additional_data = {**metadata, "certified_symbols": sorted(certified)}
             current_snapshots = {row["symbol"]: dict(row) for row in (await session.execute(
                 select(*ScreenerSnapshot.__table__.c).where(ScreenerSnapshot.snapshot_date == today)
             )).mappings()}
@@ -3874,7 +3975,9 @@ class DataPipeline:
                 source_rows = (
                     await session.execute(
                         select(model.period, model.fiscal_year, model.fiscal_quarter).where(
-                            model.symbol == symbol_value, model.period_type == normalized_period
+                            model.symbol == symbol_value,
+                            model.period_type == normalized_period,
+                            or_(model.source.is_(None), model.source != "issuer_report"),
                         )
                     )
                 ).all()
@@ -3904,6 +4007,7 @@ class DataPipeline:
                         select(FinancialRatio.period).where(
                             FinancialRatio.symbol == symbol_value,
                             FinancialRatio.period_type == normalized_period,
+                            or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
                         )
                     )
                 )
@@ -3930,10 +4034,12 @@ class DataPipeline:
                     "source": "derived",
                     "updated_at": datetime.utcnow(),
                 }
-                stmt = get_upsert_stmt(
-                    FinancialRatio,
-                    values,
-                    update_condition=source_update_condition(FinancialRatio, "derived"),
+                if session.get_bind().dialect.name == "postgresql":
+                    from sqlalchemy.dialects.postgresql import insert
+                else:
+                    from sqlalchemy.dialects.sqlite import insert
+                stmt = insert(FinancialRatio).values(values).on_conflict_do_nothing(
+                    index_elements=["symbol", "period", "period_type"]
                 )
                 result = await session.execute(stmt.returning(FinancialRatio.id))
                 created_count += len(result.scalars().all())
@@ -3954,6 +4060,7 @@ class DataPipeline:
                         .order_by(
                             FinancialRatio.fiscal_year.desc(), FinancialRatio.fiscal_quarter.desc()
                         )
+                        .with_for_update()
                     )
                 )
                 .scalars()
@@ -3977,6 +4084,7 @@ class DataPipeline:
                     .where(
                         IncomeStatement.symbol == symbol_value,
                         IncomeStatement.period_type == normalized_period,
+                        or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
                     )
                     .order_by(
                         IncomeStatement.fiscal_year.desc(), IncomeStatement.fiscal_quarter.desc()
@@ -4001,6 +4109,7 @@ class DataPipeline:
                     .where(
                         BalanceSheet.symbol == symbol_value,
                         BalanceSheet.period_type == normalized_period,
+                        or_(BalanceSheet.source.is_(None), BalanceSheet.source != "issuer_report"),
                     )
                     .order_by(BalanceSheet.fiscal_year.desc(), BalanceSheet.fiscal_quarter.desc())
                 )
@@ -4020,6 +4129,7 @@ class DataPipeline:
                     .where(
                         CashFlow.symbol == symbol_value,
                         CashFlow.period_type == normalized_period,
+                        or_(CashFlow.source.is_(None), CashFlow.source != "issuer_report"),
                     )
                     .order_by(CashFlow.fiscal_year.desc(), CashFlow.fiscal_quarter.desc())
                 )
@@ -4427,6 +4537,7 @@ class DataPipeline:
                 ratio_items = VnstockFinancialRatiosFetcher.transform_data(params, raw_items)
 
                 async with async_session_maker() as session:
+                    await lock_ratio_writes(session, symbol, normalized_period)
                     seeded_rows = await _seed_ratio_period_rows(session, symbol)
                     if not ratio_items and seeded_rows == 0:
                         if progress is not None:

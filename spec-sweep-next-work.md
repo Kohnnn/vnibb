@@ -40,15 +40,15 @@ So the remaining work is **not** a backlog of unimplemented features. It is:
   - it takes no archive, so the delete is unrecoverable;
   - it never bumps `schemaVersion`.
 
-  A safe, archive-backed, source-aware replacement **already exists**:
-  `apps/api/scripts/vietcap/vietcap_writers.py:353`
+  A safe, archive-backed, source-aware replacement **already exists** in the canonical
+  `vnibb.services.vietcap_ingestion` module.
   `reconcile_eod_source(db, symbol, *, dry_run: bool)`. The unsafe script was
   simply never retired in its favor — which is exactly what
   `V1_6_1_BACKEND_DATA_EXECUTION_PLAN.md` Phase 2 left as "pending".
 
-  Fix: add the `--dry-run`/`--apply` gate and source precedence, or delete the
-  script and point callers at `reconcile_eod_source`. Do not leave two tools that
-  both claim to dedup the same collection.
+  Fix: the replacement uses dry-run by default and source precedence. Retire the
+  unsafe duplicate script; do not leave two tools that both claim to dedup the
+  same collection.
 
 - [x] **Task 2: Make Mongo EOD uniqueness a service-layer invariant.** →
   Verify: the unique index exists on the live collection and a duplicate insert
