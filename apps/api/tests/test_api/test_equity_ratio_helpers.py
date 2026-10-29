@@ -147,6 +147,27 @@ def test_ratio_merge_distinguishes_omitted_yield_from_unit_rejection(raw, expect
     assert _merge_ratio_rows(preferred, fallback).dividend_yield == expected
 
 
+@pytest.mark.parametrize("metric", ["ocf_sales", "fcf_yield"])
+def test_ratio_merge_cannot_lend_percent_to_an_undeclared_fraction(metric):
+    """A preferred row without unit evidence must not inherit the fallback's unit.
+
+    Provider rows never declare `ocf_sales`/`fcf_yield`, so without the merge
+    fix the fallback's stamped `percent` survived the overlay and the raw
+    fraction 0.052 was published as "0.05%".
+    """
+    from vnibb.api.v1.equity import _merge_ratio_rows
+
+    fallback = FinancialRatioData(
+        symbol="VNM", period="2024", **{metric: 5.2}, ratio_units={metric: "percent"},
+    )
+    preferred = FinancialRatioData(symbol="VNM", period="2024", **{metric: 0.052})
+
+    merged = _merge_ratio_rows(preferred, fallback)
+
+    assert getattr(merged, metric) is not None
+    assert merged.ratio_units[metric] != "percent"
+
+
 class FakeMongoMarketDataService:
     enabled = True
 
@@ -340,6 +361,38 @@ def test_ratio_endpoint_admits_fraction_metrics_by_declared_unit(
 
     assert result.fcf_yield == (None if expected_yield is None else pytest.approx(expected_yield))
     assert result.ocf_sales == (None if expected_sales is None else pytest.approx(expected_sales))
+    for metric, expected in (("fcf_yield", expected_yield), ("ocf_sales", expected_sales)):
+        if expected is not None:
+            assert result.ratio_units[metric] == "percent"
+        elif metric in units:
+            # A declaration that fails admission stays visible as `unknown`.
+            assert result.ratio_units[metric] == "unknown"
+        else:
+            # Withholding without evidence claims no unit at all.
+            assert metric not in result.ratio_units
+
+
+def test_admit_ratio_units_is_idempotent_across_publication_points():
+    """A fraction must be scaled once no matter how many admission passes run.
+
+    The Mongo ratio path and the final payload gate both publish rows, and the
+    enrichment writer stores `ocf_sales` as `ocf/revenue` (a fraction). Two
+    passes must yield 17.5, never 1750.
+    """
+    from vnibb.core.ratio_units import admit_ratio_units
+
+    item = FinancialRatioData(
+        symbol="VNM", period="2024", ocf_sales=0.175, fcf_yield=0.052,
+        ratio_units={"ocf_sales": "fraction", "fcf_yield": "fraction"},
+    )
+
+    admit_ratio_units(item)
+    admit_ratio_units(item)
+
+    assert item.ocf_sales == pytest.approx(17.5)
+    assert item.fcf_yield == pytest.approx(5.2)
+    assert item.ratio_units["ocf_sales"] == "percent"
+    assert item.ratio_units["fcf_yield"] == "percent"
 
 def test_ratio_has_metric_value_returns_false_for_empty_row():
     item = FinancialRatioData(symbol="VNM", period="2024")

@@ -28,7 +28,7 @@ from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
-from vnibb.core.ratio_units import admitted_ratio_value, declared_ratio_value
+from vnibb.core.ratio_units import admit_ratio_units, admitted_ratio_value
 from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.company import Company, Shareholder
@@ -2601,7 +2601,7 @@ def _merge_ratio_rows(
     preferred: FinancialRatioData,
     fallback: FinancialRatioData,
 ) -> FinancialRatioData:
-    from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
+    from vnibb.core.ratio_units import ADMITTED_RATIO_FIELDS
 
     payload = fallback.model_dump(mode="json")
     preferred_payload = preferred.model_dump(mode="json")
@@ -2609,7 +2609,7 @@ def _merge_ratio_rows(
         if key not in {"ratio_units", "provider_evidence"} and value is not None:
             payload[key] = value
     units = {**fallback.ratio_units, **preferred.ratio_units}
-    for metric in PERCENT_RATIO_FIELDS:
+    for metric in ADMITTED_RATIO_FIELDS:
         if metric in preferred.ratio_units:
             payload[metric] = preferred_payload[metric]
         elif preferred_payload[metric] is not None:
@@ -2979,7 +2979,6 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
 
     raw_payload = getattr(row, "raw_data", None)
     raw_data = raw_payload if isinstance(raw_payload, dict) else {}
-    from vnibb.core.ratio_units import FRACTION_RATIO_FIELDS, PERCENT_RATIO_FIELDS
     ratio_units = dict(raw_data.get("ratio_units") or {})
 
     ev_sales = _coerce_optional_float(getattr(row, "ev_sales", None))
@@ -3078,19 +3077,9 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
     )
     result.ratio_units = ratio_units
     result.provider_evidence = raw_data.get("provider_evidence") or []
-    for metric in PERCENT_RATIO_FIELDS:
-        if ratio_units.get(metric) != "percent":
-            setattr(result, metric, None)
-            result.ratio_units[metric] = "unknown"
-    # `fcf_yield`/`ocf_sales` are stored as fractions by the enrichment writer and
-    # are absent from `PERCENT_RATIO_FIELDS`; admit them through their declaration.
-    for metric in FRACTION_RATIO_FIELDS:
-        setattr(result, metric, declared_ratio_value(
-            getattr(result, metric, None), metric, ratio_units=ratio_units,
-        ))
-        if getattr(result, metric, None) is None:
-            result.ratio_units[metric] = "unknown"
-    return result
+    # One admission site for both percent and fraction fields; see
+    # `admit_ratio_units` for why repeated passes cannot double-convert.
+    return admit_ratio_units(result)
 
 
 def _ratio_has_metric_value(item: FinancialRatioData) -> bool:
@@ -6383,6 +6372,9 @@ async def get_financial_ratios(
     mongo_ratio_rows: List[FinancialRatioData] = []
     try:
         mongo_ratio_rows = await _load_mongo_financial_ratio_rows(symbol_upper, period, limit=80)
+        # Percent-only here, before merging: `_merge_ratio_rows` reads a present
+        # `ratio_units` key as "this source has evidence", so fraction cells stay
+        # untouched until the single final admission pass.
         from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
         for item in mongo_ratio_rows:
             for metric in PERCENT_RATIO_FIELDS:
@@ -6511,12 +6503,9 @@ async def get_financial_ratios(
         data = [item for item in data if VALID_RATIO_PERIOD_RE.match(str(item.period or ""))]
         data = _dedupe_ratio_rows(data)
         data = _filter_ratio_rows_for_period(data, period)
-        from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
-
-        for item in data:
-            for metric in PERCENT_RATIO_FIELDS:
-                if item.ratio_units.get(metric) != "percent":
-                    setattr(item, metric, None)
+        # Covers percent and fraction fields; idempotent, so rows admitted
+        # earlier in this request are already stamped `percent`.
+        data = [admit_ratio_units(item) for item in data]
         usable_data = [item for item in data if _ratio_has_metric_value(item)]
         payload = usable_data if usable_data else data
         if payload:

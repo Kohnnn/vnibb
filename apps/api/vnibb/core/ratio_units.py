@@ -53,6 +53,40 @@ def declared_ratio_value(
     return None
 
 
+ADMITTED_RATIO_FIELDS = PERCENT_RATIO_FIELDS | FRACTION_RATIO_FIELDS
+
+
+def admit_ratio_units(item: Any, fields: frozenset[str] = ADMITTED_RATIO_FIELDS) -> Any:
+    """Admit every declared ratio cell once and stamp the canonical unit.
+
+    Idempotent: an admitted cell is stamped `percent`, so a second pass is a
+    no-op. That lets every publication point call this without knowing whether
+    an earlier one already ran, which is why no row can be scaled twice.
+    """
+    units = getattr(item, "ratio_units", None)
+    units = {} if units is None else dict(units)
+    for metric in fields:
+        declared = units.get(metric)
+        if declared == "percent":
+            continue
+        if declared == "fraction" and getattr(item, metric, None) is not None:
+            admitted = declared_ratio_value(
+                getattr(item, metric, None), metric, ratio_units=units,
+            )
+            setattr(item, metric, admitted)
+            # A failed conversion keeps the declaration visible as `unknown`.
+            units[metric] = "unknown" if admitted is None else "percent"
+            continue
+        # No declaration means no unit evidence: withhold the value without
+        # inventing a `ratio_units` entry, because merge treats a present key
+        # as "this source has evidence" and would resurrect the cell.
+        setattr(item, metric, None)
+        if declared is not None:
+            units[metric] = "unknown"
+    item.ratio_units = units
+    return item
+
+
 
 def _identity(key: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(key).lower()).strip("_")
