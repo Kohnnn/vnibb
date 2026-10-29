@@ -81,8 +81,7 @@ Two bugs were fixed here:
 
    **The source is clean** — this was an export artifact, not an upstream bug. Checked
    live: 0 documents in Mongo are missing `priceUnit`, and a 1,500-document sample of
-   `vnstock-data` rows found 0 with a Vietcap twin. `reconcile_eod_source`
-   (`apps/api/scripts/vietcap/vietcap_writers.py:353`) is working; the export snapshot
+   `vnibb.services.vietcap_ingestion.reconcile_eod_source` is working; the export snapshot
    simply caught rows it had not yet reconciled.
 
    Note for anyone copying this collection out: the Mongo unique index is
