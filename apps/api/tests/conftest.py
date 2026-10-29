@@ -1,6 +1,7 @@
 import asyncio
 import ipaddress
 import os
+import re
 import sys
 from collections.abc import AsyncGenerator
 from time import time
@@ -39,9 +40,16 @@ sys.modules["vnstock"] = mock_vnstock
 
 os.environ["ENVIRONMENT"] = "test"
 if POSTGRES_CONTRACT:
-    os.environ["DATABASE_URL"] = postgres_contract_database_url()
+    contract_url = postgres_contract_database_url()
+    os.environ["DATABASE_URL"] = contract_url
+    # Pin both URLs: settings.database_url_sync falls back to DATABASE_URL, but an
+    # ambient DATABASE_URL_SYNC (a real .env) would otherwise reach the live node.
+    os.environ["DATABASE_URL_SYNC"] = re.sub(
+        r"^postgresql(?:\+asyncpg)?://", "postgresql+psycopg2://", contract_url
+    )
 else:
     os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+    os.environ.pop("DATABASE_URL_SYNC", None)
 os.environ["REDIS_URL"] = ""
 os.environ["REDIS_HOST"] = ""
 os.environ["REDIS_PORT"] = "0"
