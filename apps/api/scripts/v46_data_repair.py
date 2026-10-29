@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
@@ -463,26 +463,28 @@ async def _backfill_ev_sales(batch_size: int) -> int:
         income_rows = (
             await session.execute(
                 select(
+                    IncomeStatement.id,
                     IncomeStatement.symbol,
                     IncomeStatement.fiscal_year,
                     IncomeStatement.fiscal_quarter,
                     IncomeStatement.revenue,
-                    IncomeStatement.ebitda,
-                ).where(IncomeStatement.revenue.is_not(None))
+                ).where(
+                    IncomeStatement.revenue.is_not(None),
+                    or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
+                )
             )
         ).all()
 
-        quarterly_metrics: dict[tuple[str, int, int], tuple[float, float | None]] = {}
-        annual_metrics: dict[tuple[str, int], tuple[float, float | None]] = {}
-        for symbol, year, quarter, revenue, ebitda in income_rows:
+        quarterly_metrics: dict[tuple[str, int, int], int] = {}
+        annual_metrics: dict[tuple[str, int], int] = {}
+        for income_id, symbol, year, quarter, revenue in income_rows:
             rev = _to_float(revenue)
             if rev is None or rev == 0:
                 continue
-            ebitda_value = _to_float(ebitda)
             if year and quarter:
-                quarterly_metrics[(symbol, year, quarter)] = (rev, ebitda_value)
+                quarterly_metrics[(symbol, year, quarter)] = income_id
             if year and (symbol, year) not in annual_metrics:
-                annual_metrics[(symbol, year)] = (rev, ebitda_value)
+                annual_metrics[(symbol, year)] = income_id
 
         latest_snapshot_date = (
             await session.execute(select(func.max(ScreenerSnapshot.snapshot_date)))
@@ -504,7 +506,10 @@ async def _backfill_ev_sales(batch_size: int) -> int:
             }
 
         ratio_rows = (
-            (await session.execute(select(FinancialRatio).where(FinancialRatio.ev_sales.is_(None))))
+            (await session.execute(select(FinancialRatio).where(
+                FinancialRatio.ev_sales.is_(None),
+                or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
+            )))
             .scalars()
             .all()
         )
@@ -515,13 +520,22 @@ async def _backfill_ev_sales(batch_size: int) -> int:
             if year is None:
                 continue
 
-            metrics = None
+            income_id = None
             if quarter is not None:
-                metrics = quarterly_metrics.get((row.symbol, year, quarter))
-            if metrics is None:
-                metrics = annual_metrics.get((row.symbol, year))
-
-            revenue = metrics[0] if metrics else None
+                income_id = quarterly_metrics.get((row.symbol, year, quarter))
+            if income_id is None:
+                income_id = annual_metrics.get((row.symbol, year))
+            if income_id is None:
+                continue
+            income = (await session.execute(
+                select(IncomeStatement).where(
+                    IncomeStatement.id == income_id,
+                    or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
+                ).with_for_update().execution_options(populate_existing=True)
+            )).scalar_one_or_none()
+            if income is None:
+                continue
+            revenue = _to_float(income.revenue)
             if revenue in (None, 0):
                 continue
 
@@ -531,7 +545,7 @@ async def _backfill_ev_sales(batch_size: int) -> int:
             )
             if enterprise_value is None:
                 ev_ebitda = _to_float(row.ev_ebitda)
-                ebitda = metrics[1] if metrics else None
+                ebitda = _to_float(income.ebitda)
                 if ev_ebitda is not None and ebitda not in (None, 0):
                     enterprise_value = ev_ebitda * ebitda
             if enterprise_value is None:
@@ -539,8 +553,15 @@ async def _backfill_ev_sales(batch_size: int) -> int:
             if enterprise_value is None:
                 continue
 
-            row.ev_sales = enterprise_value / revenue
-            updated += 1
+            result = await session.execute(
+                update(FinancialRatio).where(
+                    FinancialRatio.id == row.id,
+                    FinancialRatio.ev_sales.is_(None),
+                    or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
+                ).values(ev_sales=enterprise_value / revenue)
+                .returning(FinancialRatio.id)
+            )
+            updated += len(result.scalars().all())
 
             if index % batch_size == 0:
                 await session.commit()
