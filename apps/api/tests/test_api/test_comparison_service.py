@@ -776,26 +776,41 @@ def test_normalize_comparison_metric_never_infers_a_magnitude():
     assert _normalize_comparison_metric("roe", "") is None
 
 
-def test_ratio_json_percent_keys_follow_the_writer_fraction_contract():
-    """#106: raw-JSON `ocf_sales`/`fcf_yield` are stored as fractions.
+def test_ratio_json_percent_keys_follow_the_writer_unit_declaration():
+    """#106: `ocf_sales`/`fcf_yield` convert only when the writer declared a unit.
 
-    `_build_ratio_enrichment` writes `operating_cash_flow / revenue` and
-    `free_cash_flow / market_cap`, while the comparison contract declares
-    `format="percent"`. The read site converts by key name so one metric cannot
-    render 100x apart depending on which fallback supplied it. No other key and
-    no column is rescaled.
+    `_enrich_ratio_rows` writes `operating_cash_flow / revenue` and
+    `free_cash_flow / market_cap` and records `ratio_units[...] = "fraction"`,
+    while the comparison contract declares `format="percent"`. Reading follows
+    that declaration: a fraction converts once, a declared percent is already
+    canonical, and an undeclared or conflicting unit is withheld rather than
+    guessed (#106). No other key and no column is rescaled.
     """
     from types import SimpleNamespace
 
     from vnibb.services.comparison_service import _metric_from_ratio_row, _ratio_json_metric
 
-    raw_data = {"ocf_sales": 0.001, "fcf_yield": 0.052, "roe": 0.25}
-    assert _ratio_json_metric("ocf_sales", raw_data, "ocfSales") == pytest.approx(0.1)
-    assert _ratio_json_metric("fcf_yield", raw_data, "fcfYield") == pytest.approx(5.2)
-    # A key with no fraction writer keeps its stored magnitude.
-    assert _ratio_json_metric("roe", raw_data) == pytest.approx(0.25)
+    fraction = {
+        "ocf_sales": 0.001, "fcf_yield": 0.052, "roe": 0.25,
+        "ratio_units": {"ocf_sales": "fraction", "fcf_yield": "fraction"},
+    }
+    assert _ratio_json_metric("ocf_sales", fraction, "ocfSales") == pytest.approx(0.1)
+    assert _ratio_json_metric("fcf_yield", fraction, "fcfYield") == pytest.approx(5.2)
+    # An undeclared key is withheld here too; downstream admission already
+    # withholds percent fields without a `percent` marker.
+    assert _ratio_json_metric("roe", fraction) is None
 
-    row = SimpleNamespace(pe_ratio=12.0, raw_data=raw_data)
+    percent = {"ocf_sales": 2, "fcf_yield": 2, "ratio_units": {"ocf_sales": "percent", "fcf_yield": "percent"}}
+    assert _ratio_json_metric("ocf_sales", percent) == pytest.approx(2)
+    assert _ratio_json_metric("fcf_yield", percent) == pytest.approx(2)
+
+    # Undeclared, unknown and conflicting units are withheld, never assumed.
+    assert _ratio_json_metric("ocf_sales", {"ocf_sales": 2}) is None
+    assert _ratio_json_metric("ocf_sales", {"ocf_sales": 2, "ratio_units": {}}) is None
+    assert _ratio_json_metric("ocf_sales", {"ocf_sales": 2, "ratio_units": {"ocf_sales": "unknown"}}) is None
+    assert _ratio_json_metric("ocf_sales", {"ocf_sales": 2, "ratio_units": {"ocf_sales": "conflict"}}) is None
+
+    row = SimpleNamespace(pe_ratio=12.0, raw_data=fraction)
     assert _metric_from_ratio_row(row, "ocf_sales") == pytest.approx(0.1)
     # A column value is returned as stored, never rescaled.
     assert _metric_from_ratio_row(row, "pe") == pytest.approx(12.0)
@@ -1025,3 +1040,109 @@ async def test_comparison_debt_service_uses_certified_interest_including_zero(
         assert metrics["interest_coverage"] is None
     else:
         assert metrics["interest_coverage"] == pytest.approx(8.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_yield", "provider_sales", "expected_yield", "expected_sales"),
+    [
+        # Whole percent declared by the provider is already canonical.
+        (2.0, 2.0, 2.0, 2.0),
+        # No declaration means no unit evidence: both are withheld.
+        (None, None, None, None),
+    ],
+)
+async def test_comparison_withholds_provider_fraction_metrics_without_a_unit(
+    test_engine, test_db, monkeypatch, provider_yield, provider_sales,
+    expected_yield, expected_sales,
+):
+    """#106: a provider-supplied `fcf_yield`/`ocf_sales` needs a declared unit.
+
+    The provider model carries these values but no unit, so publishing them
+    as-is would guess a magnitude at the endpoint. Only a record that declares
+    the unit may be published.
+    """
+    from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
+
+    async def fake_get_stock_metrics(*_args, **_kwargs):
+        return StockMetrics(symbol="VCI", metrics={"pe": 10})
+
+    async def fake_fetch_ratios(*_args, **_kwargs):
+        payload = {"symbol": "VCI", "period": "2024", "pe_ratio": 10.0}
+        if provider_yield is not None:
+            payload["fcf_yield"] = provider_yield
+            payload["ocf_sales"] = provider_sales
+            payload["ratio_units"] = {"fcf_yield": "percent", "ocf_sales": "percent"}
+        return [FinancialRatioData(**payload)]
+
+    monkeypatch.setattr(
+        "vnibb.services.comparison_service.comparison_service.get_stock_metrics",
+        fake_get_stock_metrics,
+    )
+    monkeypatch.setattr(
+        "vnibb.providers.vnstock.financial_ratios.VnstockFinancialRatiosFetcher.fetch",
+        fake_fetch_ratios,
+    )
+    # SQLite's aiosqlite driver cannot serve the concurrent statement loads;
+    # this case is about metric admission, not statement reading.
+    async def load_rows(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr("vnibb.services.comparison_service._load_statement_rows", load_rows)
+    monkeypatch.setattr(
+        "vnibb.services.comparison_service.async_session_maker",
+        async_sessionmaker(test_engine, expire_on_commit=False),
+    )
+
+    metrics = (await get_comparison_data(["VCI"]))[0].metrics
+
+    assert metrics["fcf_yield"] == expected_yield
+    assert metrics["ocf_sales"] == expected_sales
+
+
+@pytest.mark.asyncio
+async def test_comparison_publishes_db_fraction_metrics_after_unit_admission(
+    test_engine, test_db, monkeypatch,
+):
+    """#106: a stored row's fraction declaration survives to the endpoint.
+
+    `_metric_from_ratio_row` converts a declared fraction once; the endpoint must
+    not re-admit those already-canonical values and drop them for lacking units.
+    """
+    test_db.add(FinancialRatio(
+        id=900, symbol="VCI", period="2024", period_type="year", fiscal_year=2024,
+        pe_ratio=10.0,
+        raw_data={
+            "ocf_sales": 0.25, "fcf_yield": 0.052,
+            "ratio_units": {"ocf_sales": "fraction", "fcf_yield": "fraction"},
+        },
+    ))
+    await test_db.commit()
+
+    async def fake_get_stock_metrics(*_args, **_kwargs):
+        return StockMetrics(symbol="VCI", metrics={})
+
+    async def fake_fetch_ratios(*_args, **_kwargs):
+        return []
+
+    async def load_rows(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "vnibb.services.comparison_service.comparison_service.get_stock_metrics",
+        fake_get_stock_metrics,
+    )
+    monkeypatch.setattr(
+        "vnibb.providers.vnstock.financial_ratios.VnstockFinancialRatiosFetcher.fetch",
+        fake_fetch_ratios,
+    )
+    monkeypatch.setattr("vnibb.services.comparison_service._load_statement_rows", load_rows)
+    monkeypatch.setattr(
+        "vnibb.services.comparison_service.async_session_maker",
+        async_sessionmaker(test_engine, expire_on_commit=False),
+    )
+
+    metrics = (await get_comparison_data(["VCI"]))[0].metrics
+
+    assert metrics["ocf_sales"] == pytest.approx(25.0)
+    assert metrics["fcf_yield"] == pytest.approx(5.2)

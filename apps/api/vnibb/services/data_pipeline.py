@@ -1528,6 +1528,37 @@ class DataPipeline:
 
         price_write_errors: dict[str, Exception] = {}
         acquisition_fence_id = None
+
+        async def record_acquisition(price_session: AsyncSession, symbol: str, *, commit_new: bool) -> None:
+            """Name `symbol` in the acquisition fence for the acquired session.
+
+            A newly created fence is committed only when `commit_new` is set. A
+            promotion writes its fence in the same transaction as the promotion
+            itself, so an interrupted promotion cannot leave a certified symbol
+            behind.
+            """
+            nonlocal acquisition_fence_id
+            if acquisition_fence_id is None:
+                fence = SyncStatus(
+                    sync_type="screener_session_acquisition", status="partial",
+                    started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
+                    success_count=1, error_count=0,
+                    additional_data={"market_session_date": expected_session.isoformat(),
+                                     "expected_symbols": [symbol]},
+                )
+                price_session.add(fence)
+                await price_session.flush()
+                acquisition_fence_id = fence.id
+                if commit_new:
+                    await price_session.commit()
+                return
+            fence = await price_session.get(SyncStatus, acquisition_fence_id, with_for_update=True)
+            fence.additional_data = {
+                **fence.additional_data,
+                "expected_symbols": [*fence.additional_data["expected_symbols"], symbol],
+            }
+            fence.success_count += 1
+            fence.completed_at = datetime.utcnow()
         for symbol, market_session in market_sessions.items():
             if market_session["status"] != "traded":
                 continue
@@ -1552,27 +1583,7 @@ class DataPipeline:
                         ).returning(StockPrice.id)
                     )
                     if inserted is not None:
-                        if acquisition_fence_id is None:
-                            fence = SyncStatus(
-                                sync_type="screener_session_acquisition", status="partial",
-                                started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
-                                success_count=1, error_count=0,
-                                additional_data={"market_session_date": expected_session.isoformat(),
-                                                 "expected_symbols": [symbol]},
-                            )
-                            price_session.add(fence)
-                            await price_session.flush()
-                            fence_id = fence.id
-                            await price_session.commit()
-                            acquisition_fence_id = fence_id
-                        else:
-                            fence = await price_session.get(SyncStatus, acquisition_fence_id, with_for_update=True)
-                            fence.additional_data = {
-                                **fence.additional_data,
-                                "expected_symbols": [*fence.additional_data["expected_symbols"], symbol],
-                            }
-                            fence.success_count += 1
-                            fence.completed_at = datetime.utcnow()
+                        await record_acquisition(price_session, symbol, commit_new=True)
                         continue
                     existing_price = await price_session.scalar(select(StockPrice).where(
                         StockPrice.symbol == symbol, StockPrice.time == expected_session,
@@ -1598,6 +1609,7 @@ class DataPipeline:
                         price_result = await price_session.execute(price_stmt.returning(StockPrice.id))
                         if not price_result.scalars().all():
                             raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
+                        await record_acquisition(price_session, symbol, commit_new=False)
             except Exception as exc:
                 price_write_errors[symbol] = exc
 
@@ -4405,6 +4417,7 @@ class DataPipeline:
                 if _pick_float(raw_payload.get("ocf_sales")) is None:
                     if operating_cash_flow is not None and revenue not in (None, 0):
                         raw_payload["ocf_sales"] = round(operating_cash_flow / revenue, 4)
+                        raw_payload.setdefault("ratio_units", {})["ocf_sales"] = "fraction"
                         changed = True
 
                 if _pick_float(raw_payload.get("fcf_yield")) is None:
@@ -4418,6 +4431,7 @@ class DataPipeline:
                         changed = True
                     if free_cash_flow is not None and market_cap not in (None, 0):
                         raw_payload["fcf_yield"] = round(free_cash_flow / market_cap, 4)
+                        raw_payload.setdefault("ratio_units", {})["fcf_yield"] = "fraction"
                         changed = True
 
                 if ratio_row.dps is None:

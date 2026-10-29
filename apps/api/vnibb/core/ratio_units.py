@@ -21,6 +21,8 @@ _ALIASES = {
     "payout_ratio": {"payout_ratio", "payoutratio", "dividend_payout_ratio", "dividendpayoutratio", "dividend_payout", "dividendpayout"},
 }
 
+FRACTION_RATIO_FIELDS = frozenset({"ocf_sales", "fcf_yield"})
+
 def admitted_ratio_value(
     value: Any, metric: str, *, ratio_units: Mapping[str, Any] | None = None,
     source: str | None = "vnstock",
@@ -28,6 +30,27 @@ def admitted_ratio_value(
     if metric in PERCENT_RATIO_FIELDS and (ratio_units or {}).get(metric) != "percent":
         return None
     return value
+
+
+def declared_ratio_value(
+    value: Any, metric: str, *, ratio_units: Mapping[str, Any] | None = None,
+) -> Any:
+    """Admit a percent cell only through its declared unit, converting fractions once.
+
+    `percent` passes through, `fraction` is scaled to canonical percent, and a
+    missing, `unknown` or `conflict` declaration is withheld rather than assumed.
+    """
+    if metric not in PERCENT_RATIO_FIELDS and metric not in FRACTION_RATIO_FIELDS:
+        return value
+    unit = (ratio_units or {}).get(metric)
+    if unit == "percent":
+        return value
+    if unit == "fraction" and value is not None:
+        try:
+            return float(value) * 100
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 

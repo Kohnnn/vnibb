@@ -21,7 +21,9 @@ from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.price_units import persisted_price_record, screener_price_record
-from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS, admitted_ratio_value
+from vnibb.core.ratio_units import (
+    FRACTION_RATIO_FIELDS, PERCENT_RATIO_FIELDS, admitted_ratio_value, declared_ratio_value,
+)
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
@@ -83,6 +85,11 @@ PERCENT_METRIC_LIMITS = {
 }
 
 
+# Comparison metrics declared `format="percent"` but absent from
+# `PERCENT_RATIO_FIELDS`; they still need a declared unit before publication.
+_DECLARED_UNIT_METRICS = FRACTION_RATIO_FIELDS
+
+
 def _normalize_comparison_metric(metric_key: str, value: Any) -> Optional[float]:
     """Coerce a stored comparison value without inferring a magnitude.
 
@@ -112,16 +119,13 @@ def _first_metric_value(metric_key: str, *values: Any) -> Optional[float]:
     return None
 
 # `ocf_sales` and `fcf_yield` have no `FinancialRatio` column, so the stored
-# number only ever reaches the comparison table through `FinancialRatio.raw_data`
-# JSON. The writer that produces it (`DataPipeline._enrich_ratio_rows`) stores a
+# number only ever reaches the comparison table through `FinancialRatio.raw_data`.
+# The writer that derives them (`DataPipeline._enrich_ratio_rows`) stores a
 # fraction — `operating_cash_flow / revenue` and `free_cash_flow / market_cap` —
-# while `vnibb.models.comparison.COMPARISON_METRICS` declares both
-# `format="percent"`. The conversion below is keyed by metric name, never by
-# magnitude, so a percent stored by any other path is passed through untouched
-# (issue #106).
-_RATIO_JSON_FRACTION_KEYS = frozenset({"ocf_sales", "fcf_yield"})
-
-
+# and declares that in `raw_data["ratio_units"]`. Conversion follows that
+# declaration only, never the metric name or magnitude, so a provider-declared
+# whole percent passes through untouched. A value with no declaration, an
+# `unknown` unit, or conflicting evidence is withheld rather than guessed (#106).
 def _ratio_json_metric(metric_key: str, raw_data: Any, *aliases: str) -> Optional[float]:
     """Read a percent metric that is carried only in `FinancialRatio.raw_data`."""
     if not isinstance(raw_data, dict):
@@ -129,7 +133,10 @@ def _ratio_json_metric(metric_key: str, raw_data: Any, *aliases: str) -> Optiona
     value = _coerce_number(_record_value(raw_data, metric_key, *aliases))
     if value is None:
         return None
-    return value * 100 if metric_key in _RATIO_JSON_FRACTION_KEYS else value
+    units = raw_data.get("ratio_units")
+    return _coerce_number(declared_ratio_value(
+        value, metric_key, ratio_units=units if isinstance(units, dict) else None,
+    ))
 
 
 def _normalize_ratio_period(period: str) -> tuple[str, Optional[int], bool]:
@@ -651,6 +658,9 @@ class ComparisonService:
             ratio_units = _record_value(data, "ratio_units") or (_record_value(data, "extended_metrics") or {}).get("ratio_units", {})
             for key in PERCENT_RATIO_FIELDS.intersection(metrics_dict):
                 metrics_dict[key] = admitted_ratio_value(metrics_dict[key], key, ratio_units=ratio_units)
+            # Percent-format metrics outside PERCENT_RATIO_FIELDS still need a unit.
+            for key in _DECLARED_UNIT_METRICS.intersection(metrics_dict):
+                metrics_dict[key] = declared_ratio_value(metrics_dict[key], key, ratio_units=ratio_units)
 
             async with async_session_maker() as session:
                 stock_row = (
@@ -1694,7 +1704,16 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
                         ratio_snapshot = (
                             latest.model_dump() if hasattr(latest, "model_dump") else {}
                         )
-
+                        # DB snapshots above are already admitted row by row; a
+                        # provider model carries these fraction-format metrics
+                        # outside `PERCENT_RATIO_FIELDS` with no unit, so they are
+                        # admitted only through the provider's own declaration.
+                        units = ratio_snapshot.get("ratio_units")
+                        units = units if isinstance(units, dict) else {}
+                        for metric in _DECLARED_UNIT_METRICS.intersection(ratio_snapshot):
+                            ratio_snapshot[metric] = _coerce_number(declared_ratio_value(
+                                ratio_snapshot[metric], metric, ratio_units=units,
+                            ))
                 for metric_key, metric_value in list(ratio_snapshot.items()):
                     ratio_snapshot[metric_key] = _normalize_comparison_metric(
                         metric_key, metric_value

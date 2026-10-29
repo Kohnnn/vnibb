@@ -754,3 +754,58 @@ async def test_complete_acquired_rerun_certifies_then_legacy_replay_publishes(ad
     async with stores.sessions() as session:
         reader = await CacheManager(db=session).get_screener_data()
         assert reader.hit and not reader.is_stale
+
+
+@pytest.mark.asyncio
+async def test_promoted_legacy_price_is_fenced_by_its_acquisition(admission_stores, monkeypatch):
+    """A promotion is acquisition evidence; it must not certify a rejected cohort.
+
+    `vietcap` and `vietcap_vnd` carry identical OHLCV for the same session, so an
+    incomplete board can still "acquire" a legacy row already on disk. Promotion
+    therefore has to name the symbol in the acquisition fence, in the same
+    transaction as the promotion: otherwise the later legacy publication path
+    treats a rejected session as complete.
+    """
+    stores = admission_stores
+    symbols = ["AAA", "BBB"]
+    async with stores.sessions.begin() as session:
+        stocks = [Stock(symbol=symbol, is_active=1) for symbol in symbols]
+        session.add_all(stocks)
+        await session.flush()
+        session.add_all([
+            StockPrice(stock_id=stock.id, symbol=stock.symbol, time=SESSION,
+                       open=10000, high=12000, low=9000, close=11000, volume=100,
+                       interval="1D", source="vietcap")
+            for stock in stocks
+        ])
+
+    pipeline = DataPipeline()
+    pipeline.cache_writes_enabled = False
+    rows = [board_row(symbol) for symbol in symbols]
+    monkeypatch.setattr(
+        VietcapClient, "get_price_board",
+        lambda *args, **kwargs: deepcopy(rows[:-1]) + [rows[-1], {}],
+    )
+    progress = {}
+    assert await pipeline.sync_screener_data(
+        enrich_ratios=False, acquire_sessions=True, progress=progress,
+    ) == 2
+    assert not progress["session_input_complete"]
+
+    async with stores.sessions() as session:
+        fences = (await session.scalars(select(SyncStatus).where(
+            SyncStatus.sync_type == "screener_session_acquisition",
+        ))).all()
+        promoted = set((await session.scalars(select(StockPrice.symbol).where(
+            StockPrice.time == SESSION, StockPrice.source == "vietcap_vnd",
+        ))).all())
+    assert promoted == set(symbols)
+    assert {symbol for fence in fences for symbol in fence.additional_data["expected_symbols"]} == promoted
+
+    await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=False)
+    async with stores.sessions() as session:
+        assert not (await session.scalars(select(SyncStatus).where(
+            SyncStatus.sync_type == "screener_universe",
+        ))).all()
+        reader = await CacheManager(db=session).get_screener_data()
+        assert not reader.hit or reader.is_stale
