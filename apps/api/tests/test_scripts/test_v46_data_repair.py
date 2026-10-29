@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 path = Path(__file__).resolve().parents[2] / "scripts/v46_data_repair.py"
 spec = importlib.util.spec_from_file_location("v46_data_repair", path)
 assert spec and spec.loader

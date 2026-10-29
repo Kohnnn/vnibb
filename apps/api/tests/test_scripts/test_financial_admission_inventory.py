@@ -1,14 +1,13 @@
 """Bounded SQL inventory uses the MCP collection admission contract."""
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, insert
-
 from scripts.financial_admission_inventory import MODELS, inventory, parse_scope
+from sqlalchemy import create_engine, insert
 
 
 def lineage(field="revenue", source="vietcap"):

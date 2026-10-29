@@ -4,13 +4,18 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-
-from vnibb.api.v1.screener import _hydrate_screener_rows
+from vnibb.api.v1.screener import (
+    _hydrate_screener_rows,
+    _to_screener_data_row,
+    apply_advanced_filters,
+)
 from vnibb.models.company import Company
-from vnibb.providers.vnstock.equity_screener import ScreenerData
-from vnibb.api.v1.screener import _to_screener_data_row, apply_advanced_filters
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.providers.vnstock.equity_screener import StockScreenerParams, VnstockScreenerFetcher
+from vnibb.providers.vnstock.equity_screener import (
+    ScreenerData,
+    StockScreenerParams,
+    VnstockScreenerFetcher,
+)
 from vnibb.services.cache_manager import CacheManager
 
 

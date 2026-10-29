@@ -13,6 +13,7 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Restore price pipeline database sessions for default and injected factories; session context managers are no longer returned as unawaited coroutines.
 - Align the PostgreSQL company-index migration contract with current share handling: competing writes still preserve one company and withhold unsupported zero shares, without assuming raw payload or market-cap provenance defaults.
 - Equity SQL statement fallback and ratio fallback/history selection withhold issuer-report rows before ordering and limits, without excluding legacy NULL sources. Other readers and writers remain outside this partial fence; issuer persistence and production cutover remain blocked.
 - Remove the retired Oracle premium bootstrap and check scripts restored by integration; release images continue to use free VCI without paid modules.

@@ -826,8 +826,8 @@ async def test_file_sqlite_screener_checkpoint_preserves_publication_and_resume(
     from sqlalchemy.ext.asyncio import create_async_engine
     from vnibb.core.database import Base
     from vnibb.models.stock import Stock, StockPrice
-    from vnibb.services.cache_manager import CacheManager
     from vnibb.services import data_pipeline as pipeline_module
+    from vnibb.services.cache_manager import CacheManager
 
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'screener.db'}", connect_args={"timeout": 0.1})
     sessions = async_sessionmaker(engine, expire_on_commit=False)
@@ -995,7 +995,6 @@ async def test_cancelled_final_commit_keeps_previous_same_day_admitted_cohort(sc
 
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import AsyncSession
-
     from vnibb.models.stock import Stock, StockPrice
     from vnibb.services.cache_manager import CacheManager
 

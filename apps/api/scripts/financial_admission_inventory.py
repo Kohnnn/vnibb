@@ -1,14 +1,15 @@
 """Bounded, provider-free SQL inventory for the MCP generic collection reader."""
+
 import argparse
 import json
 import os
 import re
 import sqlite3
-from collections import defaultdict
-from pathlib import Path
 import sys
 import tempfile
+from collections import defaultdict
 from contextlib import contextmanager
+from pathlib import Path
 
 
 def parse_args():
@@ -65,15 +66,13 @@ if __name__ == "__main__":
             raise ValueError("Explicit database URL required")
     except Exception as exc:
         print(json.dumps({"status": "inventory_failed", "error_type": type(exc).__name__}))
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+    from scripts.verify_database import FINANCIAL_DATASETS
+    from sqlalchemy import create_engine, select, text
+    from sqlalchemy.engine import make_url
 
-from sqlalchemy import create_engine, select, text
-from sqlalchemy.engine import make_url
-
-from scripts.verify_database import FINANCIAL_DATASETS
-if __name__ == "__main__":
     try:
         with isolated_import_environment():
             from vnibb.core.financial_sources import ADMITTED_FINANCIAL_SOURCES
@@ -81,11 +80,15 @@ if __name__ == "__main__":
             from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
     except Exception as exc:
         print(json.dumps({"status": "inventory_failed", "error_type": type(exc).__name__}))
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 else:
+    from scripts.verify_database import FINANCIAL_DATASETS
+    from sqlalchemy import create_engine, select, text
+    from sqlalchemy.engine import make_url
     from vnibb.core.financial_sources import ADMITTED_FINANCIAL_SOURCES
     from vnibb.mcp.server import _serialize_row, serialize_data_value
     from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+
 
 MODELS = {"income_statements": IncomeStatement, "balance_sheets": BalanceSheet, "cash_flows": CashFlow}
 MAX_SYMBOLS = 50
