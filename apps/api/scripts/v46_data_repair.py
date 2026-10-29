@@ -517,74 +517,61 @@ async def _backfill_ev_sales(batch_size: int) -> int:
         )
 
         updated = 0
-        income_owned: dict[int, tuple[float | None, float | None]] = {}
-        for start in range(0, len(ratio_rows), batch_size):
-            batch_rows = ratio_rows[start:start + batch_size]
-            income_ids = set()
-            for row in batch_rows:
-                year, quarter = _extract_year_quarter(row.period, row.fiscal_year, row.fiscal_quarter)
-                if year is not None:
-                    metrics = (quarterly_metrics.get((row.symbol, year, quarter)) if quarter else None) \
-                        or annual_metrics.get((row.symbol, year))
-                    if metrics is not None:
-                        income_ids.add(metrics[0])
-            # Lock every income row this batch derives from in one deterministic order so a
-            # concurrent writer draining a reverse-order list cannot form a wait cycle.
-            for income_id, revenue, ebitda in (await session.execute(
-                select(IncomeStatement.id, IncomeStatement.revenue, IncomeStatement.ebitda).where(
-                    IncomeStatement.id.in_(income_ids),
+        for row in ratio_rows:
+            year, quarter = _extract_year_quarter(row.period, row.fiscal_year, row.fiscal_quarter)
+            if year is None:
+                continue
+
+            metrics = None
+            if quarter is not None:
+                metrics = quarterly_metrics.get((row.symbol, year, quarter))
+            if metrics is None:
+                metrics = annual_metrics.get((row.symbol, year))
+            if metrics is None:
+                continue
+            income_id = metrics[0]
+            # Re-read under a single-row lock: holding two income locks at once could wait
+            # against a reverse-order writer and form a cycle in PostgreSQL.
+            income = (await session.execute(
+                select(IncomeStatement.revenue, IncomeStatement.ebitda).where(
+                    IncomeStatement.id == income_id,
                     IncomeStatement.revenue.is_not(None),
                     IncomeStatement.revenue != 0,
                     or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
-                ).order_by(IncomeStatement.symbol, IncomeStatement.period, IncomeStatement.id).with_for_update()
-            )).all():
-                income_owned[income_id] = (_to_float(revenue), _to_float(ebitda))
-            for row in batch_rows:
-                year, quarter = _extract_year_quarter(row.period, row.fiscal_year, row.fiscal_quarter)
-                if year is None:
-                    continue
-
-                metrics = None
-                if quarter is not None:
-                    metrics = quarterly_metrics.get((row.symbol, year, quarter))
-                if metrics is None:
-                    metrics = annual_metrics.get((row.symbol, year))
-                if metrics is None:
-                    continue
-                income_id = metrics[0]
-                owned = income_owned.get(income_id)
-                if owned is None:
-                    continue
-                revenue, ebitda = owned
-                if revenue in (None, 0):
-                    continue
-
-                raw = row.raw_data if isinstance(row.raw_data, dict) else {}
-                enterprise_value = _to_float(
-                    raw.get("enterprise_value") or raw.get("enterpriseValue") or raw.get("ev")
-                )
-                if enterprise_value is None:
-                    ev_ebitda = _to_float(row.ev_ebitda)
-                    if ev_ebitda is not None and ebitda not in (None, 0):
-                        enterprise_value = ev_ebitda * ebitda
-                if enterprise_value is None:
-                    enterprise_value = latest_market_cap_by_symbol.get(row.symbol)
-                if enterprise_value is None:
-                    continue
-
-                result = await session.execute(
-                    update(FinancialRatio).where(
-                        FinancialRatio.id == row.id,
-                        FinancialRatio.ev_sales.is_(None),
-                        or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
-                    ).values(ev_sales=enterprise_value / revenue)
-                    .returning(FinancialRatio.id)
-                )
-                updated += len(result.scalars().all())
-
+                ).with_for_update()
+            )).one_or_none()
             await session.commit()
-            income_owned.clear()
+            if income is None:
+                continue
+            revenue, ebitda = _to_float(income.revenue), _to_float(income.ebitda)
+            if revenue in (None, 0):
+                continue
 
+            raw = row.raw_data if isinstance(row.raw_data, dict) else {}
+            enterprise_value = _to_float(
+                raw.get("enterprise_value") or raw.get("enterpriseValue") or raw.get("ev")
+            )
+            if enterprise_value is None:
+                ev_ebitda = _to_float(row.ev_ebitda)
+                if ev_ebitda is not None and ebitda not in (None, 0):
+                    enterprise_value = ev_ebitda * ebitda
+            if enterprise_value is None:
+                enterprise_value = latest_market_cap_by_symbol.get(row.symbol)
+            if enterprise_value is None:
+                continue
+
+            # Ownership is rechecked atomically; the income lock is already released.
+            result = await session.execute(
+                update(FinancialRatio).where(
+                    FinancialRatio.id == row.id,
+                    FinancialRatio.ev_sales.is_(None),
+                    or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
+                ).values(ev_sales=enterprise_value / revenue)
+                .returning(FinancialRatio.id)
+            )
+            updated += len(result.scalars().all())
+
+        await session.commit()
         return updated
 
 

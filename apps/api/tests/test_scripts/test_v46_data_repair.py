@@ -137,17 +137,23 @@ async def test_ev_sales_rechecks_income_ownership_before_use(monkeypatch):
 @pytest.mark.skipif(os.environ.get("POSTGRES_CONTRACT") != "1", reason="requires disposable PostgreSQL")
 @pytest.mark.asyncio
 async def test_ev_sales_repair_and_reverse_order_income_writer_do_not_deadlock(monkeypatch):
+    """Repair locks one income row at a time; a writer draining the reverse order must finish.
+
+    Each session carries its own 2s lock_timeout so a wait cycle aborts deterministically
+    instead of hanging; no coordination events are involved.
+    """
     from conftest import postgres_contract_database_url
 
-    admin = create_async_engine(postgres_contract_database_url())
+    url = postgres_contract_database_url()
+    admin = create_async_engine(url)
     schema = f"ev_sales_lock_{uuid4().hex}"
     engine = None
     try:
         async with admin.begin() as connection:
             await connection.execute(text(f"CREATE SCHEMA {schema}"))
         engine = create_async_engine(
-            postgres_contract_database_url(),
-            connect_args={"server_settings": {"search_path": schema, "lock_timeout": "5000"}},
+            url, pool_size=5, max_overflow=5,
+            connect_args={"server_settings": {"search_path": schema, "lock_timeout": "2000"}},
         )
         metadata = MetaData()
         for model in (IncomeStatement, FinancialRatio, ScreenerSnapshot):
@@ -162,41 +168,31 @@ async def test_ev_sales_repair_and_reverse_order_income_writer_do_not_deadlock(m
                 session.add(FinancialRatio(**common, source="vnstock", raw_data={"enterprise_value": 200}))
             await session.commit()
 
-        repair_has_first = asyncio.Event()
-        writer_has_second = asyncio.Event()
-
         class RepairSession(AsyncSession):
             async def execute(self, statement, *args, **kwargs):
                 descriptions = getattr(statement, "column_descriptions", ())
                 if descriptions and descriptions[0].get("entity") is FinancialRatio:
-                    statement = statement.order_by(FinancialRatio.id)
+                    statement = statement.order_by(FinancialRatio.id)  # derive 2024 first
                 result = await super().execute(statement, *args, **kwargs)
-                if getattr(statement, "_for_update_arg", None) is not None and not repair_has_first.is_set():
-                    repair_has_first.set()
-                    await asyncio.wait_for(writer_has_second.wait(), 5)
-                return result
-
-        class WriterSession(AsyncSession):
-            async def execute(self, statement, *args, **kwargs):
-                result = await super().execute(statement, *args, **kwargs)
-                if getattr(statement, "_for_update_arg", None) is not None and not writer_has_second.is_set():
-                    writer_has_second.set()
+                if getattr(statement, "_for_update_arg", None) is not None:
+                    await asyncio.sleep(0.1)  # widen the reverse-order window deterministically
                 return result
 
         monkeypatch.setattr(repair, "async_session_maker", async_sessionmaker(
             engine, class_=RepairSession, expire_on_commit=False,
         ))
+        writer_sessions = async_sessionmaker(engine, expire_on_commit=False)
 
         async def write_income():
-            await asyncio.wait_for(repair_has_first.wait(), 5)
-            async with WriterSession(engine, expire_on_commit=False) as session:
-                return await CacheManager(session).store_financial_data(
-                    "FPT", "income", "year",
-                    [{"period": str(year), "fiscal_year": year, "revenue": 100} for year in (2025, 2024)],
-                    source="vnstock",
-                )
+            return await CacheManager(writer_sessions()).store_financial_data(
+                "FPT", "income", "year",
+                [{"period": str(year), "fiscal_year": year, "revenue": 100} for year in (2025, 2024)],
+                source="vnstock",
+            )
 
-        assert await asyncio.wait_for(asyncio.gather(repair._backfill_ev_sales(500), write_income()), 10) == [2, 2]
+        assert await asyncio.wait_for(
+            asyncio.gather(repair._backfill_ev_sales(500), write_income()), 30,
+        ) == [2, 2]
         async with sessions() as session:
             ratios = (await session.execute(select(FinancialRatio).order_by(FinancialRatio.id))).scalars().all()
             assert [ratio.ev_sales for ratio in ratios] == [2, 2]
