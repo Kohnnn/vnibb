@@ -468,6 +468,7 @@ async def _backfill_ev_sales(batch_size: int) -> int:
                     IncomeStatement.fiscal_year,
                     IncomeStatement.fiscal_quarter,
                     IncomeStatement.revenue,
+                    IncomeStatement.ebitda,
                 ).where(
                     IncomeStatement.revenue.is_not(None),
                     or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
