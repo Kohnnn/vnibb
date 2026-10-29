@@ -395,8 +395,8 @@ const BS_SECTION: SnapshotSectionDefinition = {
             label: 'Y/E shares out, mn',
             kind: 'shares_mn',
             getValue: (periodKey, context) => {
-                if (context.periodMode !== 'year' || context.profileSharesAsOf !== `${periodKey}-12-31`) return null;
-                return context.profileSharesOutstanding !== null ? context.profileSharesOutstanding / 1_000_000 : null;
+                if (context.periodMode !== 'year' || context.profileSharesOutstanding === null || context.profileSharesAsOf?.slice(0, 10) !== `${periodKey}-12-31`) return null;
+                return context.profileSharesOutstanding / 1_000_000;
             },
         },
     ],
