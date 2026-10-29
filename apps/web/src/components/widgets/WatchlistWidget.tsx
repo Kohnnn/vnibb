@@ -129,7 +129,7 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
 
     const symbolNameMap = useMemo(() => {
         if (!validSymbolsData?.data) return new Map<string, string>();
-        return new Map(validSymbolsData.data.map(s => [s.symbol.toUpperCase(), s.organ_name]));
+        return new Map(validSymbolsData.data.map(s => [s.symbol.toUpperCase(), s.organ_name ?? '']));
     }, [validSymbolsData]);
 
     const { prices: livePrices, isConnected, isReceiving, lastUpdate, protocolError } = useWebSocket({ symbols });
