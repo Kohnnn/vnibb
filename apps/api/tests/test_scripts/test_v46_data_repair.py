@@ -58,7 +58,7 @@ async def test_ev_sales_excludes_issuer_inputs_and_targets(monkeypatch):
             (2, "INPUT", "issuer_report", "vnstock"),
             (3, "TARGET", "vnstock", "issuer_report"),
         ):
-            common = dict(id=identifier, symbol=symbol, period="2025", period_type="year", fiscal_year=2025)
+            common = {"id": identifier, "symbol": symbol, "period": "2025", "period_type": "year", "fiscal_year": 2025}
             session.add(IncomeStatement(**common, source=income_source, revenue=100))
             session.add(FinancialRatio(**common, source=ratio_source, raw_data={"enterprise_value": 200}))
         await session.commit()
@@ -80,7 +80,7 @@ async def test_ev_sales_does_not_overwrite_concurrently_owned_ratio(monkeypatch)
         await connection.run_sync(metadata.create_all)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with sessions() as session:
-        common = dict(id=1, symbol="FPT", period="2025", period_type="year", fiscal_year=2025)
+        common = {"id": 1, "symbol": "FPT", "period": "2025", "period_type": "year", "fiscal_year": 2025}
         session.add(IncomeStatement(**common, source="vnstock", revenue=100))
         session.add(FinancialRatio(**common, source="vnstock", raw_data={"enterprise_value": 200}))
         await session.commit()
@@ -112,7 +112,7 @@ async def test_ev_sales_rechecks_income_ownership_before_use(monkeypatch):
         await connection.run_sync(metadata.create_all)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with sessions() as session:
-        common = dict(id=1, symbol="FPT", period="2025", period_type="year", fiscal_year=2025)
+        common = {"id": 1, "symbol": "FPT", "period": "2025", "period_type": "year", "fiscal_year": 2025}
         session.add(IncomeStatement(**common, source="vnstock", revenue=100))
         session.add(FinancialRatio(**common, source="vnstock", raw_data={"enterprise_value": 200}))
         await session.commit()
@@ -163,7 +163,7 @@ async def test_ev_sales_repair_and_reverse_order_income_writer_do_not_deadlock(m
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         async with sessions() as session:
             for identifier, year in enumerate((2024, 2025), 1):
-                common = dict(id=identifier, symbol="FPT", period=str(year), period_type="year", fiscal_year=year)
+                common = {"id": identifier, "symbol": "FPT", "period": str(year), "period_type": "year", "fiscal_year": year}
                 session.add(IncomeStatement(**common, source="vnstock", revenue=100))
                 session.add(FinancialRatio(**common, source="vnstock", raw_data={"enterprise_value": 200}))
             await session.commit()
