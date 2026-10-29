@@ -1529,15 +1529,15 @@ class DataPipeline:
         price_write_errors: dict[str, Exception] = {}
         acquisition_fence_id = None
 
-        async def record_acquisition(price_session: AsyncSession, symbol: str, *, commit_new: bool) -> None:
+        async def record_acquisition(price_session: AsyncSession, symbol: str, *, commit_new: bool) -> int:
             """Name `symbol` in the acquisition fence for the acquired session.
 
-            A newly created fence is committed only when `commit_new` is set. A
-            promotion writes its fence in the same transaction as the promotion
-            itself, so an interrupted promotion cannot leave a certified symbol
-            behind.
+            Returns the fence id; the caller publishes it only once its own
+            transaction is durable, so a rolled-back fence is never reused. A
+            newly created fence is committed only when `commit_new` is set; a
+            promotion writes its fence in the promotion's transaction so an
+            interrupted promotion cannot leave a certified symbol behind.
             """
-            nonlocal acquisition_fence_id
             if acquisition_fence_id is None:
                 fence = SyncStatus(
                     sync_type="screener_session_acquisition", status="partial",
@@ -1548,10 +1548,9 @@ class DataPipeline:
                 )
                 price_session.add(fence)
                 await price_session.flush()
-                acquisition_fence_id = fence.id
                 if commit_new:
                     await price_session.commit()
-                return
+                return fence.id
             fence = await price_session.get(SyncStatus, acquisition_fence_id, with_for_update=True)
             fence.additional_data = {
                 **fence.additional_data,
@@ -1559,10 +1558,12 @@ class DataPipeline:
             }
             fence.success_count += 1
             fence.completed_at = datetime.utcnow()
+            return acquisition_fence_id
         for symbol, market_session in market_sessions.items():
             if market_session["status"] != "traded":
                 continue
             try:
+                promoted_fence_id = None
                 match = market_session["raw"]["matchPrice"]
                 price_values = {
                     "stock_id": stock_metadata[symbol]["stock_id"], "symbol": symbol, "time": expected_session,
@@ -1583,7 +1584,8 @@ class DataPipeline:
                         ).returning(StockPrice.id)
                     )
                     if inserted is not None:
-                        await record_acquisition(price_session, symbol, commit_new=True)
+                        fence_id = await record_acquisition(price_session, symbol, commit_new=True)
+                        acquisition_fence_id = fence_id
                         continue
                     existing_price = await price_session.scalar(select(StockPrice).where(
                         StockPrice.symbol == symbol, StockPrice.time == expected_session,
@@ -1609,7 +1611,11 @@ class DataPipeline:
                         price_result = await price_session.execute(price_stmt.returning(StockPrice.id))
                         if not price_result.scalars().all():
                             raise StructuredPersistenceConflict(0, [{"symbol": symbol, "time": expected_session.isoformat()}])
-                        await record_acquisition(price_session, symbol, commit_new=False)
+                        promoted_fence_id = await record_acquisition(
+                            price_session, symbol, commit_new=False,
+                        )
+                if promoted_fence_id is not None:
+                    acquisition_fence_id = promoted_fence_id
             except Exception as exc:
                 price_write_errors[symbol] = exc
 

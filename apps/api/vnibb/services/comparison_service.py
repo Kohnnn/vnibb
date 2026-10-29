@@ -126,8 +126,13 @@ def _first_metric_value(metric_key: str, *values: Any) -> Optional[float]:
 # declaration only, never the metric name or magnitude, so a provider-declared
 # whole percent passes through untouched. A value with no declaration, an
 # `unknown` unit, or conflicting evidence is withheld rather than guessed (#106).
+#
+# Non-percent metrics such as `ocf_debt` carry no unit and pass through
+# `declared_ratio_value` unchanged; only percent-format metrics are admitted.
+
+
 def _ratio_json_metric(metric_key: str, raw_data: Any, *aliases: str) -> Optional[float]:
-    """Read a percent metric that is carried only in `FinancialRatio.raw_data`."""
+    """Read a metric that is carried only in `FinancialRatio.raw_data`."""
     if not isinstance(raw_data, dict):
         return None
     value = _coerce_number(_record_value(raw_data, metric_key, *aliases))

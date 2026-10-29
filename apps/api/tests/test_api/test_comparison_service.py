@@ -816,6 +816,30 @@ def test_ratio_json_percent_keys_follow_the_writer_unit_declaration():
     assert _metric_from_ratio_row(row, "pe") == pytest.approx(12.0)
 
 
+def test_ratio_json_scopes_unit_admission_to_percent_format_metrics():
+    """#106: only percent-format metrics need a declared unit.
+
+    `_metric_from_ratio_row` reads every metric missing its column through the
+    raw-JSON path. Plain ratios such as `ocf_debt` and `debt_service_coverage`
+    carry no unit and must keep the stored value; percent-format metrics without
+    a declaration must not.
+    """
+    from types import SimpleNamespace
+
+    from vnibb.services.comparison_service import _metric_from_ratio_row, _ratio_json_metric
+
+    raw = {"ocf_debt": 0.35, "debt_service_coverage": 6.0, "ocf_sales": 2.0}
+    assert _ratio_json_metric("ocf_debt", raw) == pytest.approx(0.35)
+    assert _ratio_json_metric("debt_service_coverage", raw) == pytest.approx(6.0)
+    # A percent-format metric with no declaration is still withheld.
+    assert _ratio_json_metric("ocf_sales", raw) is None
+
+    row = SimpleNamespace(pe_ratio=12.0, raw_data=raw)
+    assert _metric_from_ratio_row(row, "ocf_debt") == pytest.approx(0.35)
+    assert _metric_from_ratio_row(row, "debt_service_coverage") == pytest.approx(6.0)
+    assert _metric_from_ratio_row(row, "ocf_sales") is None
+
+
 def test_ttm_statement_snapshot_requires_consecutive_certified_single_quarters():
     """#106: a four-row sum is only TTM when the rows are certified consecutive quarters."""
     from types import SimpleNamespace
