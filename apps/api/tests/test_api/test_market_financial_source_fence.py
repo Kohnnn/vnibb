@@ -4,7 +4,6 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import MetaData, null
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from vnibb.api.v1 import market
 from vnibb.models.financials import IncomeStatement
 from vnibb.models.stock import Stock

@@ -3,7 +3,6 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import MetaData, null
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from vnibb.api.v1.quant import router
 from vnibb.core.database import get_db
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
@@ -23,22 +22,22 @@ async def test_earnings_quality_excludes_issuer_before_limit_and_keeps_legacy(is
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             for index in range(12):
                 year, quarter = 2020 + index // 4, index % 4 + 1
-                common = dict(
-                    id=index + 1, symbol="FPT", period=f"Q{quarter}-{year}",
-                    period_type="quarter", fiscal_year=year, fiscal_quarter=quarter,
-                    source=null() if index >= 6 else "vietcap",
-                )
+                common = {
+                    "id": index + 1, "symbol": "FPT", "period": f"Q{quarter}-{year}",
+                    "period_type": "quarter", "fiscal_year": year, "fiscal_quarter": quarter,
+                    "source": null() if index >= 6 else "vietcap",
+                }
                 session.add_all([
                     IncomeStatement(**common, revenue=100, net_income=20, eps=2),
                     CashFlow(**common, operating_cash_flow=80),
                     BalanceSheet(**common, total_assets=200),
                 ])
                 issuer_year = year + 3
-                issuer_common = dict(
-                    id=index + 101, symbol="FPT", period=f"Q{quarter}-{issuer_year}",
-                    period_type="quarter", fiscal_year=issuer_year, fiscal_quarter=quarter,
-                    source="issuer_report",
-                )
+                issuer_common = {
+                    "id": index + 101, "symbol": "FPT", "period": f"Q{quarter}-{issuer_year}",
+                    "period_type": "quarter", "fiscal_year": issuer_year, "fiscal_quarter": quarter,
+                    "source": "issuer_report",
+                }
                 session.add(issuer_model(**issuer_common))
             await session.commit()
 

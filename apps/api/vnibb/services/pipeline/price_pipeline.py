@@ -11,6 +11,7 @@ from typing import Any
 
 import pandas as pd
 from sqlalchemy import select, update
+
 from vnibb.core.cache import build_cache_key
 from vnibb.core.cache_constants import (
     PIPELINE_TTL_PRICE_LATEST,
