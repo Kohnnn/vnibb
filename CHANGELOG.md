@@ -13,6 +13,7 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- The legacy EV/Sales repair excludes issuer-owned income and ratio rows, rechecks and locks income before use, and atomically guards ratio updates. Legacy fiscal matching, reporting basis, units and the market-cap-as-EV fallback remain unverified; this safeguard does not certify derived values.
 - Pipeline screener backfill and ratio seeding/enrichment, admin financial samples and freshness, and period-repair targets withhold issuer-report rows while retaining legacy NULL sources. PostgreSQL ratio seeding uses insert-only conflicts, and cooperating sync/cache writers serialize per symbol after provider I/O; other writers remain outside this partial safeguard. Issuer persistence and production cutover remain blocked.
 - Remove two obsolete ingestion implementations restored by integration; the existing `DataPipeline` and Vietcap ingestion paths remain canonical.
 - Listing Browser normalizes company names from the API wire format and selects the widget's ticker group without broadcasting detached selections. Certified year-end shares accept supported timestamps, and comparison backfills withhold cross-statement ratios when fiscal periods differ.
