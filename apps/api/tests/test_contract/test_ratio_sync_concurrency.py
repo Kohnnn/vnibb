@@ -12,11 +12,13 @@ from sqlalchemy.pool import NullPool
 from vnibb.core.database import Base
 from vnibb.models.financials import IncomeStatement
 from vnibb.models.trading import FinancialRatio
-from vnibb.providers.vnstock.financial_ratios import FinancialRatioData, VnstockFinancialRatiosFetcher
+from vnibb.providers.vnstock.financial_ratios import (
+    FinancialRatioData,
+    VnstockFinancialRatiosFetcher,
+)
 from vnibb.services import data_pipeline as pipeline_module
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.data_pipeline import DataPipeline
-
 
 pytestmark = [
     pytest.mark.postgres_contract,
