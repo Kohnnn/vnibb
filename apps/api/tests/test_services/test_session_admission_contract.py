@@ -698,3 +698,59 @@ async def test_old_no_trade_receipt_cannot_certify_later_rejected_traded_price(a
         after = await CacheManager(db=session).get_screener_data()
         assert after.hit and not after.is_stale
         assert {row.symbol: (row.id, row.price, row.trade_date, row.extended_metrics) for row in after.data} == original
+
+
+@pytest.mark.asyncio
+async def test_complete_acquired_rerun_certifies_then_legacy_replay_publishes(admission_stores, monkeypatch):
+    stores = admission_stores
+    symbols = ["AAA", "BBB"]
+    async with stores.sessions.begin() as session:
+        stocks = [Stock(symbol=symbol, is_active=1) for symbol in symbols]
+        session.add_all(stocks)
+        await session.flush()
+        session.add_all([
+            StockPrice(stock_id=stock.id, symbol=stock.symbol, time=date(2026, 10, 23),
+                       open=10000, high=10000, low=10000, close=10000, volume=100,
+                       interval="1D", source="vietcap_vnd")
+            for stock in stocks
+        ])
+    pipeline = DataPipeline()
+    pipeline.cache_writes_enabled = False
+    rows = [board_row(symbol) for symbol in symbols]
+    monkeypatch.setattr(VietcapClient, "get_price_board", lambda *args, **kwargs: deepcopy(rows[:-1]) + [rows[-1], {}])
+    assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True) == 2
+    monkeypatch.setattr(VietcapClient, "get_price_board", lambda *args, **kwargs: deepcopy(rows))
+    progress = {}
+    assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress=progress) == 2
+    assert progress["session_input_complete"]
+    async with stores.sessions() as session:
+        receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+        assert len(receipts) == 1
+        certified = [
+            row.additional_data for row in (await session.scalars(select(SyncStatus).where(
+                SyncStatus.sync_type == "screener_session_acquisition",
+            ))).all()
+        ]
+        assert certified and all(item.get("certified_symbols") == symbols for item in certified)
+
+    async def durable_state():
+        async with stores.sessions() as session:
+            return (
+                [(row.id, row.price, row.trade_date, row.extended_metrics) for row in (await CacheManager(db=session).get_screener_data()).data],
+                [(row.id, row.additional_data, row.completed_at) for row in (await session.scalars(
+                    select(SyncStatus).where(SyncStatus.sync_type == "screener_universe")
+                )).all()],
+                [(row.id, row.close, row.created_at) for row in (await session.scalars(
+                    select(StockPrice).where(StockPrice.time == SESSION).order_by(StockPrice.symbol)
+                )).all()],
+            )
+
+    await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=False)
+    certified_state = await durable_state()
+    assert certified_state[1][0][1]["expected_count"] == 2
+    assert [(row[1], row[2]) for row in certified_state[0]] == [(11000, SESSION)] * 2
+    assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True) == 2
+    assert await durable_state() == certified_state
+    async with stores.sessions() as session:
+        reader = await CacheManager(db=session).get_screener_data()
+        assert reader.hit and not reader.is_stale
