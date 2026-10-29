@@ -15,7 +15,10 @@ from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.trading import FinancialRatio
 from vnibb.providers.vnstock import runtime
-from vnibb.providers.vnstock.financial_ratios import FinancialRatioData, VnstockFinancialRatiosFetcher
+from vnibb.providers.vnstock.financial_ratios import (
+    FinancialRatioData,
+    VnstockFinancialRatiosFetcher,
+)
 from vnibb.services import data_pipeline as pipeline_module
 from vnibb.services.data_pipeline import DataPipeline
 

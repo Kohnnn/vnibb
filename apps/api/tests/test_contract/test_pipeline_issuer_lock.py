@@ -9,10 +9,14 @@ from sqlalchemy import select, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
+
 from vnibb.core.database import Base
 from vnibb.models.financials import CashFlow, IncomeStatement
 from vnibb.models.trading import FinancialRatio
-from vnibb.providers.vnstock.financial_ratios import FinancialRatioData, VnstockFinancialRatiosFetcher
+from vnibb.providers.vnstock.financial_ratios import (
+    FinancialRatioData,
+    VnstockFinancialRatiosFetcher,
+)
 from vnibb.services import data_pipeline as pipeline_module
 from vnibb.services.data_pipeline import DataPipeline
 
