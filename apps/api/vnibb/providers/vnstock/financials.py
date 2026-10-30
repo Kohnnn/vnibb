@@ -372,12 +372,47 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 from vnibb.providers.vnstock.runtime import (
                     create_finance,
                     finance_method_kwargs,
+                    import_vnstock_symbol,
                     validate_source,
                 )
 
                 statement_type = query["statement_type"]
                 period = query["period"]
                 candidate_sources = [validate_source(settings.vnstock_source)]
+                Finance, _ = import_vnstock_symbol("Finance")
+                import sys
+                sdk_module = sys.modules.get("vnstock")
+                version_value = getattr(sdk_module, "__version__", None)
+                version_match = re.match(r"^\s*(\d+)\.(\d+)(?:\.|$)", str(version_value or ""))
+                generation_five = bool(version_match and int(version_match.group(1)) >= 5)
+
+                if generation_five:
+                    Fundamental, _ = import_vnstock_symbol("Fundamental")
+                    equity = Fundamental().equity(query["symbol"])
+                    method_name = {"income": "income_statement", "balance": "balance_sheet", "cashflow": "cash_flow"}.get(statement_type)
+                    if method_name is None:
+                        raise ValueError(f"Unknown statement type: {statement_type}")
+                    frame = getattr(equity, method_name)(
+                        period=period, lang="en", drop_empty=False, format="long", source=candidate_sources[0].lower()
+                    )
+                    if frame is None or frame.empty:
+                        return []
+                    records = frame.to_dict("records")
+                    fetched_at = datetime.now(UTC).isoformat()
+                    for record in records:
+                        record["_statement_type"] = statement_type
+                        record["_source"] = candidate_sources[0]
+                        record["_fetched_at"] = fetched_at
+                        record["_provider_attrs"] = dict(frame.attrs)
+                        record["_provider_value_multiplier"] = 1.0
+                        record["_value_unit"] = frame.attrs.get("value_unit")
+                        record["_normalization_contract"] = None
+                    params_model = FinancialsQueryParams(
+                        symbol=query["symbol"], statement_type=StatementType(statement_type),
+                        period=period, limit=query["limit"],
+                    )
+                    parsed = VnstockFinancialsFetcher.transform_data(params_model, records)
+                    return [item.model_dump(mode="json") for item in parsed]
 
                 def _get_statement_method(finance: Any):
                     if statement_type == "income":
