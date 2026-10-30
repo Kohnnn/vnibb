@@ -473,7 +473,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logger.info(
                     f"VNStock registration status: {result.reason} (source={result.source})"
                 )
-            elif result.reason in {"lock_busy", "no_api_key", "cached_local", "cached_persistent"}:
+            elif result.reason in {"lock_busy", "no_api_key", "cached_local"}:
                 logger.info(f"VNStock registration skipped: {result.reason}")
             else:
                 logger.warning(f"VNStock registration skipped: {result.reason}")

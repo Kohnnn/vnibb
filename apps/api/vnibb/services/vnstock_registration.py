@@ -1,15 +1,13 @@
 """
 VNStock API key registration guard.
 
-Prevents repeated device registration across workers by using a
-cross-process lock (Redis) with DB fallback.
+Serializes concurrent credential setup with a Redis lock and DB fallback.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
 import os
 from dataclasses import dataclass
@@ -26,11 +24,11 @@ from vnibb.models.app_kv import AppKeyValue
 
 logger = logging.getLogger(__name__)
 
-REGISTRATION_TTL_SECONDS = 60 * 60 * 24 * 30
 LOCK_TTL_SECONDS = 60
 
 _local_lock = asyncio.Lock()
 _local_registered: set[str] = set()
+
 
 
 @dataclass
@@ -44,12 +42,12 @@ def _fingerprint(api_key: str) -> str:
     return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:12]
 
 
-def _registration_key(fingerprint: str) -> str:
-    return build_cache_key("vnibb", "vnstock", "registration", fingerprint)
-
 
 def _lock_key(fingerprint: str) -> str:
     return build_cache_key("vnibb", "vnstock", "registration_lock", fingerprint)
+
+
+_registration_tasks: dict[str, asyncio.Task[RegistrationResult]] = {}
 
 
 async def ensure_vnstock_registration() -> RegistrationResult:
@@ -64,47 +62,61 @@ async def ensure_vnstock_registration() -> RegistrationResult:
     async with _local_lock:
         if fingerprint in _local_registered:
             return RegistrationResult(True, "cached_local")
+        task = _registration_tasks.get(fingerprint)
+        if task is None:
+            task = asyncio.create_task(_register_with_lock(api_key, fingerprint))
+            _registration_tasks[fingerprint] = task
+            task.add_done_callback(lambda done: _registration_finished(fingerprint, done))
+    return await asyncio.shield(task)
 
-        registration_key = _registration_key(fingerprint)
-        existing = await _read_registration_state(registration_key)
-        if existing:
-            _local_registered.add(fingerprint)
-            return RegistrationResult(True, "cached_persistent", existing.get("source"))
 
-        lock_key = _lock_key(fingerprint)
-        lock = await _acquire_lock(lock_key)
-        if not lock.acquired:
-            return RegistrationResult(False, "lock_busy", lock.source)
+def _registration_finished(fingerprint: str, task: asyncio.Task[RegistrationResult]) -> None:
+    if _registration_tasks.get(fingerprint) is task:
+        _registration_tasks.pop(fingerprint)
+    if not task.cancelled():
+        task.exception()
 
-        try:
-            os.environ["VNSTOCK_API_KEY"] = api_key
-            registered = await asyncio.to_thread(_register_api_key, api_key)
-            if not registered:
-                return RegistrationResult(False, "registration_failed", lock.source)
+async def _register_with_lock(api_key: str, fingerprint: str) -> RegistrationResult:
+    lock_key = _lock_key(fingerprint)
+    lock = await _acquire_lock(lock_key)
+    if not lock.acquired:
+        return RegistrationResult(False, "lock_busy", lock.source)
 
-            payload = {
-                "status": "registered",
-                "registered_at": datetime.utcnow().isoformat(),
-                "api_key_fingerprint": fingerprint,
-                "source": lock.source,
-            }
-            await _write_registration_state(registration_key, payload)
-            _local_registered.add(fingerprint)
-            return RegistrationResult(True, "registered", lock.source)
-        except BaseException as exc:
-            logger.warning(f"VNStock API key registration failed: {exc}")
-            return RegistrationResult(False, "exception", lock.source)
-        finally:
-            await _release_lock(lock_key, lock)
+    try:
+        os.environ["VNSTOCK_API_KEY"] = api_key
+        registered = await asyncio.to_thread(_register_api_key, api_key)
+        if not registered:
+            return RegistrationResult(False, "registration_failed", lock.source)
+        _local_registered.add(fingerprint)
+        return RegistrationResult(True, "registered", lock.source)
+    except Exception:
+        logger.warning("VNStock API key registration failed")
+        return RegistrationResult(False, "exception", lock.source)
+    finally:
+        await _release_lock(lock_key, lock)
 
 
 def _register_api_key(api_key: str) -> bool:
     try:
-        from vnstock import change_api_key
 
-        return bool(change_api_key(api_key))
-    except BaseException as exc:
-        logger.warning(f"change_api_key raised non-standard exception: {exc}")
+        from vnibb.providers.vnstock.runtime import validate_free_runtime, validate_source
+
+        if settings.vnstock_runtime_tier != "free" or os.getenv("VNSTOCK_RUNTIME_TIER", "free").strip().lower() != "free":
+            return False
+        validate_source(settings.vnstock_source)
+        validate_source(os.getenv("VNSTOCK_SOURCE", "VCI"))
+        validate_free_runtime()
+        import vnstock
+
+        setup_api_key = getattr(vnstock, "setup_api_key", None)
+        if callable(setup_api_key):
+            status = setup_api_key(api_key)
+            return isinstance(status, dict) and status.get("authenticated") is True
+
+        change_api_key = getattr(vnstock, "change_api_key", None)
+        return bool(change_api_key(api_key)) if callable(change_api_key) else False
+    except BaseException:
+        logger.warning("VNStock API key authentication failed")
         return False
 
 
@@ -163,53 +175,6 @@ async def _get_redis_client():
     except Exception:
         return None
 
-
-async def _read_registration_state(key: str) -> Optional[dict[str, Any]]:
-    redis = await _get_redis_client()
-    if redis:
-        try:
-            raw = await redis.get(key)
-            if raw:
-                return json.loads(raw)
-        except Exception:
-            pass
-    return await _read_db_state(key)
-
-
-async def _write_registration_state(key: str, payload: dict[str, Any]) -> None:
-    redis = await _get_redis_client()
-    if redis:
-        try:
-            await redis.set(key, json.dumps(payload), ex=REGISTRATION_TTL_SECONDS)
-        except Exception:
-            pass
-    await _write_db_state(key, payload)
-
-
-async def _read_db_state(key: str) -> Optional[dict[str, Any]]:
-    try:
-        async with async_session_maker() as session:
-            record = await session.get(AppKeyValue, key)
-            if record:
-                return record.value or None
-    except SQLAlchemyError as exc:
-        logger.warning(f"DB lookup failed for vnstock registration: {exc}")
-    return None
-
-
-async def _write_db_state(key: str, payload: dict[str, Any]) -> None:
-    try:
-        async with async_session_maker() as session:
-            record = await session.get(AppKeyValue, key)
-            now = datetime.utcnow()
-            if record:
-                record.value = payload
-                record.updated_at = now
-            else:
-                session.add(AppKeyValue(key=key, value=payload, updated_at=now))
-            await session.commit()
-    except SQLAlchemyError as exc:
-        logger.warning(f"DB write failed for vnstock registration: {exc}")
 
 
 async def _acquire_db_lock(lock_key: str) -> bool:
