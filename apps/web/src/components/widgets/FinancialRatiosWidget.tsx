@@ -33,6 +33,7 @@ function formatRatio(value: number | null | undefined, decimals = 2): string {
 const CANONICAL_PERCENT_KEYS: Record<string, true> = {
     roe: true, roa: true, roic: true, gross_margin: true, net_margin: true,
     operating_margin: true, revenue_growth: true, earnings_growth: true, debt_assets: true, dividend_yield: true, payout_ratio: true,
+    fcf_yield: true, ocf_sales: true,
 };
 
 function formatPct(metricKey: string, value: number | null | undefined): string {

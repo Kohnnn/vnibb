@@ -8,11 +8,12 @@ import asyncio
 import json
 import logging
 import re
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
@@ -462,26 +463,30 @@ async def _backfill_ev_sales(batch_size: int) -> int:
         income_rows = (
             await session.execute(
                 select(
+                    IncomeStatement.id,
                     IncomeStatement.symbol,
                     IncomeStatement.fiscal_year,
                     IncomeStatement.fiscal_quarter,
                     IncomeStatement.revenue,
                     IncomeStatement.ebitda,
-                ).where(IncomeStatement.revenue.is_not(None))
+                ).where(
+                    IncomeStatement.revenue.is_not(None),
+                    or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
+                )
             )
         ).all()
 
-        quarterly_metrics: dict[tuple[str, int, int], tuple[float, float | None]] = {}
-        annual_metrics: dict[tuple[str, int], tuple[float, float | None]] = {}
-        for symbol, year, quarter, revenue, ebitda in income_rows:
+        quarterly_metrics: dict[tuple[str, int, int], tuple[int, float, float | None]] = {}
+        annual_metrics: dict[tuple[str, int], tuple[int, float, float | None]] = {}
+        for income_id, symbol, year, quarter, revenue, ebitda in income_rows:
             rev = _to_float(revenue)
             if rev is None or rev == 0:
                 continue
-            ebitda_value = _to_float(ebitda)
+            metric = (income_id, rev, _to_float(ebitda))
             if year and quarter:
-                quarterly_metrics[(symbol, year, quarter)] = (rev, ebitda_value)
+                quarterly_metrics[(symbol, year, quarter)] = metric
             if year and (symbol, year) not in annual_metrics:
-                annual_metrics[(symbol, year)] = (rev, ebitda_value)
+                annual_metrics[(symbol, year)] = metric
 
         latest_snapshot_date = (
             await session.execute(select(func.max(ScreenerSnapshot.snapshot_date)))
@@ -503,13 +508,16 @@ async def _backfill_ev_sales(batch_size: int) -> int:
             }
 
         ratio_rows = (
-            (await session.execute(select(FinancialRatio).where(FinancialRatio.ev_sales.is_(None))))
+            (await session.execute(select(FinancialRatio).where(
+                FinancialRatio.ev_sales.is_(None),
+                or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
+            )))
             .scalars()
             .all()
         )
 
         updated = 0
-        for index, row in enumerate(ratio_rows, start=1):
+        for row in ratio_rows:
             year, quarter = _extract_year_quarter(row.period, row.fiscal_year, row.fiscal_quarter)
             if year is None:
                 continue
@@ -519,8 +527,23 @@ async def _backfill_ev_sales(batch_size: int) -> int:
                 metrics = quarterly_metrics.get((row.symbol, year, quarter))
             if metrics is None:
                 metrics = annual_metrics.get((row.symbol, year))
-
-            revenue = metrics[0] if metrics else None
+            if metrics is None:
+                continue
+            income_id = metrics[0]
+            # Re-read under a single-row lock: holding two income locks at once could wait
+            # against a reverse-order writer and form a cycle in PostgreSQL.
+            income = (await session.execute(
+                select(IncomeStatement.revenue, IncomeStatement.ebitda).where(
+                    IncomeStatement.id == income_id,
+                    IncomeStatement.revenue.is_not(None),
+                    IncomeStatement.revenue != 0,
+                    or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
+                ).with_for_update()
+            )).one_or_none()
+            await session.commit()
+            if income is None:
+                continue
+            revenue, ebitda = _to_float(income.revenue), _to_float(income.ebitda)
             if revenue in (None, 0):
                 continue
 
@@ -530,7 +553,6 @@ async def _backfill_ev_sales(batch_size: int) -> int:
             )
             if enterprise_value is None:
                 ev_ebitda = _to_float(row.ev_ebitda)
-                ebitda = metrics[1] if metrics else None
                 if ev_ebitda is not None and ebitda not in (None, 0):
                     enterprise_value = ev_ebitda * ebitda
             if enterprise_value is None:
@@ -538,72 +560,24 @@ async def _backfill_ev_sales(batch_size: int) -> int:
             if enterprise_value is None:
                 continue
 
-            row.ev_sales = enterprise_value / revenue
-            updated += 1
-
-            if index % batch_size == 0:
-                await session.commit()
+            # Ownership is rechecked atomically; the income lock is already released.
+            result = await session.execute(
+                update(FinancialRatio).where(
+                    FinancialRatio.id == row.id,
+                    FinancialRatio.ev_sales.is_(None),
+                    or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
+                ).values(ev_sales=enterprise_value / revenue)
+                .returning(FinancialRatio.id)
+            )
+            updated += len(result.scalars().all())
 
         await session.commit()
         return updated
 
 
 async def _backfill_income_eps_from_ratios(batch_size: int) -> int:
-    async with async_session_maker() as session:
-        ratio_rows = (
-            await session.execute(
-                select(
-                    FinancialRatio.symbol,
-                    FinancialRatio.period,
-                    FinancialRatio.fiscal_year,
-                    FinancialRatio.fiscal_quarter,
-                    FinancialRatio.eps,
-                ).where(FinancialRatio.eps.is_not(None))
-            )
-        ).all()
-
-        eps_by_year_quarter: dict[tuple[str, int, int], float] = {}
-        eps_by_year: dict[tuple[str, int], float] = {}
-        for symbol, period, fiscal_year, fiscal_quarter, eps in ratio_rows:
-            eps_value = _to_float(eps)
-            if eps_value is None:
-                continue
-            year, quarter = _extract_year_quarter(period, fiscal_year, fiscal_quarter)
-            if year is None:
-                continue
-            if (symbol, year) not in eps_by_year:
-                eps_by_year[(symbol, year)] = eps_value
-            if quarter is not None and (symbol, year, quarter) not in eps_by_year_quarter:
-                eps_by_year_quarter[(symbol, year, quarter)] = eps_value
-
-        income_rows = (
-            (await session.execute(select(IncomeStatement).where(IncomeStatement.eps.is_(None))))
-            .scalars()
-            .all()
-        )
-
-        updated = 0
-        for index, row in enumerate(income_rows, start=1):
-            year, quarter = _extract_year_quarter(row.period, row.fiscal_year, row.fiscal_quarter)
-            if year is None:
-                continue
-
-            eps_value = None
-            if quarter is not None:
-                eps_value = eps_by_year_quarter.get((row.symbol, year, quarter))
-            if eps_value is None:
-                eps_value = eps_by_year.get((row.symbol, year))
-            if eps_value is None:
-                continue
-
-            row.eps = eps_value
-            updated += 1
-
-            if index % batch_size == 0:
-                await session.commit()
-
-        await session.commit()
-        return updated
+    # ponytail: enable only with exact fiscal/source/basis admission and safe persistence.
+    raise RuntimeError("EPS backfill is disabled: financial lineage cannot be preserved")
 
 
 async def _backfill_industry(batch_size: int) -> dict[str, int]:
@@ -876,6 +850,13 @@ async def _backfill_market_cap(batch_size: int) -> int:
 async def main() -> int:
     args = parse_args()
 
+    if not args.audit_only and args.target in {"all", "eps"}:
+        try:
+            await _backfill_income_eps_from_ratios(args.batch_size)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+
     before = await _collect_metrics()
     operations: dict[str, Any] = {}
 
@@ -883,10 +864,6 @@ async def main() -> int:
         run_all = args.target == "all"
         if run_all or args.target == "ev-sales":
             operations["ev_sales_rows_updated"] = await _backfill_ev_sales(args.batch_size)
-        if run_all or args.target == "eps":
-            operations["income_eps_rows_updated"] = await _backfill_income_eps_from_ratios(
-                args.batch_size
-            )
         if run_all or args.target == "industry":
             operations.update(await _backfill_industry(args.batch_size))
         if run_all or args.target == "market-cap":

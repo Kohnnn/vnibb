@@ -2,11 +2,12 @@
 
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useFinancialRatios, useProfile, useScreenerData, useStockQuote } from '@/lib/queries'
 import { latestByFinancialPeriod } from '@/lib/financialPeriods'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
-import { resolveMetric } from './utils'
+import { marketCapExplanation, resolveMarketCap } from '@/lib/marketCap'
+import { certifiedProfileShares, resolveMetric } from './utils'
 import { formatDividendYield, formatNumber, formatPercent, formatVND, readDividendYield } from '@/lib/formatters'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
@@ -80,29 +81,12 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
   const latestRatio = latestByFinancialPeriod(ratios?.data) ?? null
   const profileData = profile?.data ?? null
 
-  const outstandingShares = resolveMetric([
-    { value: profileData?.outstanding_shares, source: 'Profile+Quote', positiveOnly: true },
-  ])
+  const outstandingShares = certifiedProfileShares(profileData)
 
-  // Reported market cap is authoritative. The profile-shares × quote fallback is
-  // valid only when the quote is explicitly priced in VND: an `index_points` or
-  // `unknown` unit is a different scale and would fabricate a market cap.
-  const confirmedVndPrice =
-    quote && quote.price_unit === 'VND' && typeof quote.price === 'number' && Number.isFinite(quote.price) && quote.price > 0
-      ? quote.price
-      : null
-
-  const marketCap = resolveMetric([
-    { value: stock?.market_cap, source: 'Screener', positiveOnly: true },
-    {
-      value:
-        outstandingShares.value && confirmedVndPrice
-          ? outstandingShares.value * confirmedVndPrice
-          : null,
-      source: 'Profile+Quote',
-      positiveOnly: true,
-    },
-  ])
+  const marketCap = useMemo(() => resolveMarketCap(
+    { label: 'Profile', value: profileData?.market_cap, provenance: profileData?.market_cap_provenance },
+    { label: 'Screener', value: stock?.market_cap, provenance: stock?.market_cap_provenance },
+  ), [profileData, stock])
 
   const pe = resolveMetric([
     { value: stock?.pe, source: 'Screener' },
@@ -151,7 +135,9 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
     pe.value !== null ||
     pb.value !== null ||
     volume.value !== null ||
-    roe.value !== null
+    roe.value !== null ||
+    profileData?.outstanding_shares != null || profileData?.market_cap != null || Boolean(profileData?.market_cap_provenance) ||
+    stock?.market_cap != null || Boolean(stock?.market_cap_provenance)
 
   const isLoading = screenerLoading || profileLoading || quoteLoading || ratiosLoading
   const isFetching = screenerFetching || profileFetching || quoteFetching || ratiosFetching
@@ -173,9 +159,12 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
       extra: {
         hasMarketCap: marketCap.value !== null,
         hasVolume: volume.value !== null,
+        marketCap,
+        profile: profileData,
+        quote,
       },
     }))
-  }, [error, hasData, marketCap.value, onDataChange, screenerUpdatedAt, volume.value])
+  }, [error, hasData, marketCap, onDataChange, profileData, quote, screenerUpdatedAt, volume.value])
 
   const handleRefresh = () => {
     refetchScreener()
@@ -200,7 +189,7 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
       showLinkToggle
       exportData={{
         marketCap: marketCap.value,
-        outstandingShares: outstandingShares.value,
+        outstandingShares,
         pe: pe.value,
         pb: pb.value,
         roe: roe.value,
@@ -242,23 +231,22 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
                   {industry}
                 </span>
               )}
-              {marketCap.source === 'Profile+Quote' && (
-                <span className="inline-flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
-                  MCap derived
-                </span>
-              )}
             </div>
 
             <div className="text-xs text-[var(--text-muted)] uppercase tracking-wider pb-1">Valuation</div>
             <StatRow
               label="Market Cap"
-              value={formatVND(marketCap.value)}
-              source={marketCap.source}
+              value={marketCap.status === 'available' ? formatVND(marketCap.value) : marketCap.status === 'conflict' ? 'Conflict' : 'Unavailable'}
+              source={marketCap.status === 'available' ? marketCap.inputs.find((input) => input.provenance?.status === 'available')?.provenance?.source ?? undefined : undefined}
             />
+            <details className="text-[10px] text-[var(--text-muted)]">
+              <summary className="cursor-pointer">Market cap provenance</summary>
+              <p>{marketCapExplanation(marketCap)}</p>
+            </details>
             <StatRow
               label="Shares Outstanding"
-              value={formatNumber(outstandingShares.value)}
-              source={outstandingShares.source}
+              value={outstandingShares === null ? 'Unavailable' : formatNumber(outstandingShares)}
+              source={outstandingShares === null ? undefined : profileData?.shares_source ?? undefined}
             />
             <StatRow label="P/E Ratio" value={pe.value !== null ? pe.value.toFixed(2) : '-'} source={pe.source} />
             <StatRow label="P/B Ratio" value={pb.value !== null ? pb.value.toFixed(2) : '-'} source={pb.source} />

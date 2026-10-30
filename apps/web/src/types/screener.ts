@@ -1,4 +1,5 @@
 // Screener data types from backend API
+import type { MarketCapProvenance } from '@/lib/marketCap';
 
 export interface ScreenerData {
     id?: string;
@@ -9,12 +10,14 @@ export interface ScreenerData {
     market_session?: { session_date: string; status: 'traded' | 'no_trade' | 'suspended'; source: string; scope: 'vietcap_board' } | null;
 
     company_name?: string;
+    organ_name?: string | null;
     exchange?: string;
     industry?: string;
     price?: number | null;
     change_1d?: number | null;
     volume?: number | null;
     market_cap?: number | null;
+    market_cap_provenance?: MarketCapProvenance | null;
     pe?: number | null;
     pb?: number | null;
     ps?: number | null;
@@ -108,7 +111,7 @@ export interface ColumnPreset {
 export const ALL_COLUMNS: ScreenerColumn[] = [
   // Basic
   { id: 'ticker', label: 'Symbol', accessor: 'ticker', category: 'basic', align: 'left' },
-  { id: 'organ_name', label: 'Company', accessor: 'organ_name' as any, category: 'basic', align: 'left', width: 200 },
+  { id: 'organ_name', label: 'Company', accessor: 'organ_name', category: 'basic', align: 'left', width: 200 },
   { id: 'exchange', label: 'Exchange', accessor: 'exchange', category: 'basic' },
   { id: 'industry_name', label: 'Industry', accessor: 'industry_name' as any, category: 'basic' },
   { id: 'listing_date', label: 'Listing Date', accessor: 'listing_date', category: 'basic', format: 'text' },

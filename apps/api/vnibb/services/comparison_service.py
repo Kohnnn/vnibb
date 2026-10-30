@@ -15,12 +15,15 @@ import unicodedata
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
+from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.price_units import persisted_price_record, screener_price_record
-from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS, admitted_ratio_value
+from vnibb.core.ratio_units import (
+    FRACTION_RATIO_FIELDS, PERCENT_RATIO_FIELDS, admitted_ratio_value, declared_ratio_value,
+)
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
@@ -82,6 +85,11 @@ PERCENT_METRIC_LIMITS = {
 }
 
 
+# Comparison metrics declared `format="percent"` but absent from
+# `PERCENT_RATIO_FIELDS`; they still need a declared unit before publication.
+_DECLARED_UNIT_METRICS = FRACTION_RATIO_FIELDS
+
+
 def _normalize_comparison_metric(metric_key: str, value: Any) -> Optional[float]:
     """Coerce a stored comparison value without inferring a magnitude.
 
@@ -111,24 +119,29 @@ def _first_metric_value(metric_key: str, *values: Any) -> Optional[float]:
     return None
 
 # `ocf_sales` and `fcf_yield` have no `FinancialRatio` column, so the stored
-# number only ever reaches the comparison table through `FinancialRatio.raw_data`
-# JSON. The writer that produces it (`DataPipeline._enrich_ratio_rows`) stores a
+# number only ever reaches the comparison table through `FinancialRatio.raw_data`.
+# The writer that derives them (`DataPipeline._enrich_ratio_rows`) stores a
 # fraction — `operating_cash_flow / revenue` and `free_cash_flow / market_cap` —
-# while `vnibb.models.comparison.COMPARISON_METRICS` declares both
-# `format="percent"`. The conversion below is keyed by metric name, never by
-# magnitude, so a percent stored by any other path is passed through untouched
-# (issue #106).
-_RATIO_JSON_FRACTION_KEYS = frozenset({"ocf_sales", "fcf_yield"})
+# and declares that in `raw_data["ratio_units"]`. Conversion follows that
+# declaration only, never the metric name or magnitude, so a provider-declared
+# whole percent passes through untouched. A value with no declaration, an
+# `unknown` unit, or conflicting evidence is withheld rather than guessed (#106).
+#
+# Non-percent metrics such as `ocf_debt` carry no unit and pass through
+# `declared_ratio_value` unchanged; only percent-format metrics are admitted.
 
 
 def _ratio_json_metric(metric_key: str, raw_data: Any, *aliases: str) -> Optional[float]:
-    """Read a percent metric that is carried only in `FinancialRatio.raw_data`."""
+    """Read a metric that is carried only in `FinancialRatio.raw_data`."""
     if not isinstance(raw_data, dict):
         return None
     value = _coerce_number(_record_value(raw_data, metric_key, *aliases))
     if value is None:
         return None
-    return value * 100 if metric_key in _RATIO_JSON_FRACTION_KEYS else value
+    units = raw_data.get("ratio_units")
+    return _coerce_number(declared_ratio_value(
+        value, metric_key, ratio_units=units if isinstance(units, dict) else None,
+    ))
 
 
 def _normalize_ratio_period(period: str) -> tuple[str, Optional[int], bool]:
@@ -252,6 +265,22 @@ def _consecutive_quarter_rows(rows: List[Any]) -> bool:
         ordinals.append(int(year) * 4 + int(quarter))
     return all(left == right + 1 for left, right in zip(ordinals, ordinals[1:], strict=False))
 
+def _statement_periods_match(
+    left: List[Any], right: List[Any], period_type: str, *, ttm: bool = False
+) -> bool:
+    count = 4 if ttm else 1
+    if len(left) < count or len(right) < count:
+        return False
+    for left_row, right_row in zip(left[:count], right[:count], strict=True):
+        year = getattr(left_row, "fiscal_year", None)
+        if year is None or year != getattr(right_row, "fiscal_year", None):
+            return False
+        if period_type == "quarter":
+            quarter = getattr(left_row, "fiscal_quarter", None)
+            if quarter not in (1, 2, 3, 4) or quarter != getattr(right_row, "fiscal_quarter", None):
+                return False
+    return True
+
 
 async def _load_statement_rows(
     symbol: str,
@@ -262,7 +291,10 @@ async def _load_statement_rows(
     limit: int,
 ) -> List[Any]:
     async with async_session_maker() as session:
-        stmt = select(model).where(model.symbol == symbol, model.period_type == period_type)
+        stmt = select(model).where(
+            model.symbol == symbol, model.period_type == period_type,
+            or_(model.source.is_(None), model.source != "issuer_report"),
+        )
         if requested_quarter is not None and hasattr(model, "fiscal_quarter"):
             stmt = stmt.where(model.fiscal_quarter == requested_quarter)
 
@@ -301,6 +333,8 @@ async def _build_comparison_backfill(
     ) or {}
     current_balance = _build_statement_snapshot(balance_rows, "balance", ttm=use_ttm) or {}
     current_cash = _build_statement_snapshot(cash_rows, "cash", ttm=use_ttm) or {}
+    income_balance_match = _statement_periods_match(income_rows, balance_rows, period_type)
+    income_cash_match = _statement_periods_match(income_rows, cash_rows, period_type, ttm=use_ttm)
 
     revenue = current_income.get("revenue")
     gross_profit = current_income.get("gross_profit")
@@ -337,7 +371,7 @@ async def _build_comparison_backfill(
         backfill["operating_margin"] = (operating_income / revenue) * 100
     if revenue not in (None, 0) and net_income is not None:
         backfill["net_margin"] = (net_income / revenue) * 100
-    if revenue not in (None, 0) and total_assets not in (None, 0):
+    if income_balance_match and revenue is not None and total_assets not in (None, 0):
         backfill["asset_turnover"] = revenue / total_assets
     if total_liabilities not in (None, 0) and total_assets not in (None, 0):
         backfill["debt_assets"] = (total_liabilities / total_assets) * 100
@@ -345,13 +379,14 @@ async def _build_comparison_backfill(
         backfill["debt_to_equity"] = total_liabilities / total_equity
     if operating_income is not None and interest_expense not in (None, 0):
         backfill["interest_coverage"] = operating_income / abs(interest_expense)
-    if operating_income is not None and interest_expense is not None:
+    if (operating_income is not None and interest_expense is not None
+            and (debt_repayment is None or income_cash_match)):
         debt_service = abs(interest_expense)
         if debt_repayment not in (None, 0):
             debt_service += abs(debt_repayment)
         if debt_service > 0:
             backfill["debt_service_coverage"] = operating_income / debt_service
-    if operating_cash_flow is not None and revenue not in (None, 0):
+    if income_cash_match and operating_cash_flow is not None and revenue not in (None, 0):
         backfill["ocf_sales"] = (operating_cash_flow / revenue) * 100
     if free_cash_flow is not None and market_cap not in (None, 0):
         backfill["fcf_yield"] = (free_cash_flow / market_cap) * 100
@@ -390,6 +425,9 @@ class StockMetrics(BaseModel):
     exchange: Optional[str] = None
     # Flexible metrics dictionary to hold all 84+ fields
     metrics: Dict[str, Any] = Field(default_factory=dict)
+    market_cap_provenance: Dict[str, Any] = Field(
+        default_factory=lambda: resolve_market_cap({}, source="comparison")
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -598,7 +636,6 @@ class ComparisonService:
             metrics_dict = {
                 "price": _record_value(data, "price"),
                 "volume": _record_value(data, "volume"),
-                "market_cap": _record_value(data, "market_cap", "marketCap"),
                 "pe": _record_value(data, "pe", "pe_ratio"),
                 "pb": _record_value(data, "pb", "pb_ratio"),
                 "ps": _record_value(data, "ps", "ps_ratio"),
@@ -626,6 +663,9 @@ class ComparisonService:
             ratio_units = _record_value(data, "ratio_units") or (_record_value(data, "extended_metrics") or {}).get("ratio_units", {})
             for key in PERCENT_RATIO_FIELDS.intersection(metrics_dict):
                 metrics_dict[key] = admitted_ratio_value(metrics_dict[key], key, ratio_units=ratio_units)
+            # Percent-format metrics outside PERCENT_RATIO_FIELDS still need a unit.
+            for key in _DECLARED_UNIT_METRICS.intersection(metrics_dict):
+                metrics_dict[key] = declared_ratio_value(metrics_dict[key], key, ratio_units=ratio_units)
 
             async with async_session_maker() as session:
                 stock_row = (
@@ -635,6 +675,7 @@ class ComparisonService:
                     await session.execute(
                         select(FinancialRatio)
                         .where(FinancialRatio.symbol == symbol)
+                        .where(or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"))
                         .order_by(
                             desc(FinancialRatio.fiscal_year),
                             desc(FinancialRatio.fiscal_quarter),
@@ -645,7 +686,7 @@ class ComparisonService:
                 ).scalar_one_or_none()
                 company_row = (
                     await session.execute(
-                        select(Company.outstanding_shares, Company.listed_shares)
+                        select(Company.outstanding_shares, Company.raw_data)
                         .where(Company.symbol == symbol)
                         .limit(1)
                     )
@@ -659,7 +700,19 @@ class ComparisonService:
                     )
                 ).scalar_one_or_none()
                 latest_price_record = persisted_price_record(latest_price_row) if latest_price_row is not None else {}
-
+            if latest_price_record and not latest_price_record.get("price_source"):
+                latest_price_record["price_source"] = latest_price_record.get("source")
+            shares_record = dict(company_row[1] or {}) if company_row else {}
+            if (company_row and company_row[0] is not None
+                    and shares_record.get("outstanding_shares") is None
+                    and shares_record.get("shares_outstanding") is None):
+                shares_record["outstanding_shares"] = company_row[0]
+            market_cap_provenance = resolve_market_cap(
+                data, source=source, price_record=latest_price_record or None,
+                shares_record=shares_record or None,
+            )
+            if market_cap_provenance["status"] == "available":
+                metrics_dict["market_cap"] = market_cap_provenance["value"]
             if ratio_row is not None:
                 ratio_fallbacks = {
                     "pe": ratio_row.pe_ratio,
@@ -688,34 +741,6 @@ class ComparisonService:
                     if metrics_dict.get(key) is None and value is not None:
                         metrics_dict[key] = value
 
-            if company_row is not None:
-                try:
-                    shares_value = _coerce_number(company_row[0]) or _coerce_number(company_row[1])
-                    latest_price = (
-                        _coerce_number(latest_price_record.get("close"))
-                        if latest_price_record.get("price_unit") == "VND"
-                        else None
-                    )
-                    if shares_value and shares_value > 0 and latest_price and latest_price > 0:
-                        # Preserve the existing share-count convention; price is canonical VND.
-                        multiplier = 1.0 if shares_value >= 1_000_000 else 1_000_000.0
-                        recomputed_market_cap = shares_value * multiplier * latest_price
-                        # Only override when the recompute lands within
-                        # 25% of the snapshot value (sanity-check).
-                        existing_market_cap = _coerce_number(metrics_dict.get("market_cap"))
-                        if (
-                            existing_market_cap is None
-                            or existing_market_cap <= 0
-                            or abs(recomputed_market_cap - existing_market_cap) / max(
-                                existing_market_cap, 1.0
-                            )
-                            <= 0.25
-                        ):
-                            metrics_dict["market_cap"] = recomputed_market_cap
-                except Exception as exc:
-                    logger.debug(
-                        "Live market_cap recompute skipped for %s: %s", symbol, exc
-                    )
 
             normalized_metrics: Dict[str, float] = {}
             for key, value in metrics_dict.items():
@@ -739,6 +764,7 @@ class ComparisonService:
                 industry=industry,
                 exchange=exchange,
                 metrics=metrics_dict,
+                market_cap_provenance=market_cap_provenance,
             )
         except Exception as e:
             logger.exception(f"Failed to fetch metrics for {symbol}: {e}")
@@ -888,6 +914,17 @@ class ComparisonService:
                     "price_unit",
                     "priceUnit",
                     "price_source",
+                    "market_cap_provenance",
+                    "market_cap_source",
+                    "market_cap_unit",
+                    "market_cap_currency",
+                    "market_cap_as_of",
+                    "outstanding_shares",
+                    "shares_outstanding",
+                    "shares_unit",
+                    "shares_as_of",
+                    "shares_source",
+                    "share_basis",
                     "extended_metrics",
                     "change_pct",
                     "changePct",
@@ -921,7 +958,8 @@ class ComparisonService:
                 return cleaned or None
 
             def _market_cap(stock: Any) -> Optional[float]:
-                return _to_float(_value(stock, "market_cap", "marketCap"))
+                result = resolve_market_cap(stock, source=source)
+                return result["value"] if result["status"] == "available" else None
 
             def _price(stock: Any) -> Optional[float]:
                 price = screener_price_record({**_as_payload(stock), "price": _value(stock, "price", "close")})
@@ -1059,8 +1097,37 @@ class ComparisonService:
                             payload["industry"] = industry
                         if payload.get("exchange") in (None, "") and exchange:
                             payload["exchange"] = exchange
-                        if payload.get("market_cap") in (None, "") and market_cap is not None:
-                            payload["market_cap"] = market_cap
+                        snapshot_cap = resolve_market_cap(
+                            {"market_cap": market_cap, "extended_metrics": extended_metrics},
+                            source="postgres:screener_snapshot",
+                        )
+                        if snapshot_cap["observations"] or snapshot_cap["status"] == "conflict":
+                            cached_cap = resolve_market_cap(payload, source=source)
+                            def entirely_before(result: dict[str, Any], as_of: str) -> bool:
+                                observations = result.get("observations", [])
+                                if any(item.get("shares_conflict") for item in observations):
+                                    return False
+                                observations = [item for item in observations if item.get("value") is not None]
+                                if not observations:
+                                    return False
+                                try:
+                                    cutoff = datetime.fromisoformat(as_of).date()
+                                    return all(
+                                        isinstance(item.get("as_of"), str)
+                                        and datetime.fromisoformat(item["as_of"].replace("Z", "+00:00")).date() < cutoff
+                                        for item in observations
+                                    )
+                                except ValueError:
+                                    return False
+
+                            if snapshot_cap["status"] == "available" and entirely_before(cached_cap, snapshot_cap["as_of"]):
+                                cap = snapshot_cap
+                            elif cached_cap["status"] == "available" and entirely_before(snapshot_cap, cached_cap["as_of"]):
+                                cap = cached_cap
+                            else:
+                                cap = reconcile_market_caps(cached_cap, snapshot_cap)
+                            payload["market_cap_provenance"] = cap
+                            payload["market_cap"] = cap["value"]
                         if _positive_float(payload.get("pe")) is None and _positive_float(pe) is not None:
                             payload["pe"] = pe
                         snapshot_units = (extended_metrics or {}).get("ratio_units", {})
@@ -1131,8 +1198,6 @@ class ComparisonService:
                         target_industry = str(latest_snapshot[0]).strip()
                     if not target_exchange and latest_snapshot[1]:
                         target_exchange = str(latest_snapshot[1]).strip()
-                    if target_market_cap <= 0:
-                        target_market_cap = _to_float(latest_snapshot[2]) or target_market_cap
 
                 if stock_row is not None:
                     if not target_industry and stock_row[0]:
@@ -1270,6 +1335,7 @@ class ComparisonService:
                             )
                             .where(FinancialRatio.symbol.in_(fallback_targets))
                             .where(FinancialRatio.period_type == "year")
+                            .where(or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"))
                             .order_by(
                                 FinancialRatio.symbol,
                                 desc(FinancialRatio.fiscal_year),
@@ -1365,18 +1431,18 @@ class ComparisonService:
             for key in metric_keys:
                 values = []
                 for stock in sector_stocks:
-                    val = _normalize_comparison_metric(
-                        key,
-                        _record_value(
-                            stock,
+                    val = (
+                        resolve_market_cap(stock, source=source)["value"]
+                        if key == "market_cap"
+                        else _normalize_comparison_metric(
                             key,
-                            f"{key}_ratio",
-                            {
-                                "pe": "pe_ratio",
-                                "pb": "pb_ratio",
-                                "ps": "ps_ratio",
-                            }.get(key, ""),
-                        ),
+                            _record_value(
+                                stock,
+                                key,
+                                f"{key}_ratio",
+                                {"pe": "pe_ratio", "pb": "pb_ratio", "ps": "ps_ratio"}.get(key, ""),
+                            ),
+                        )
                     )
                     if val is not None:
                         values.append(val)
@@ -1392,6 +1458,7 @@ class ComparisonService:
                             await session.execute(
                                 select(FinancialRatio)
                                 .where(FinancialRatio.symbol.in_(sector_symbols))
+                                .where(or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"))
                                 .order_by(
                                     FinancialRatio.symbol.asc(),
                                     FinancialRatio.fiscal_year.desc(),
@@ -1529,12 +1596,18 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
 
     for symbol in symbols:
         stock_metrics = await comparison_service.get_stock_metrics(symbol)
+        provenance = resolve_market_cap(
+            {"market_cap": stock_metrics.metrics.get("market_cap"),
+             "market_cap_provenance": stock_metrics.market_cap_provenance},
+            source="comparison",
+        )
+        market_cap = provenance["value"] if provenance["status"] == "available" else None
 
         ratio_snapshot: dict[str, Any] = {}
         derived_metrics = await _build_comparison_backfill(
             symbol,
             period,
-            _coerce_number(stock_metrics.metrics.get("market_cap")),
+            market_cap,
         )
         backfill_needed = any(
             _normalize_comparison_metric(key, stock_metrics.metrics.get(key)) is None
@@ -1563,6 +1636,7 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
                         .where(
                             FinancialRatio.symbol == symbol,
                             FinancialRatio.period_type == ratio_period,
+                            or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
                         )
                         .order_by(
                             desc(FinancialRatio.fiscal_year),
@@ -1635,7 +1709,16 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
                         ratio_snapshot = (
                             latest.model_dump() if hasattr(latest, "model_dump") else {}
                         )
-
+                        # DB snapshots above are already admitted row by row; a
+                        # provider model carries these fraction-format metrics
+                        # outside `PERCENT_RATIO_FIELDS` with no unit, so they are
+                        # admitted only through the provider's own declaration.
+                        units = ratio_snapshot.get("ratio_units")
+                        units = units if isinstance(units, dict) else {}
+                        for metric in _DECLARED_UNIT_METRICS.intersection(ratio_snapshot):
+                            ratio_snapshot[metric] = _coerce_number(declared_ratio_value(
+                                ratio_snapshot[metric], metric, ratio_units=units,
+                            ))
                 for metric_key, metric_value in list(ratio_snapshot.items()):
                     ratio_snapshot[metric_key] = _normalize_comparison_metric(
                         metric_key, metric_value
@@ -1659,9 +1742,7 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
                 stock_metrics.metrics.get("ev_ebitda"),
                 ratio_snapshot.get("ev_ebitda"),
             ),
-            "market_cap": _first_metric_value(
-                "market_cap", stock_metrics.metrics.get("market_cap")
-            ),
+            "market_cap": market_cap,
             "roe": _first_metric_value(
                 "roe", stock_metrics.metrics.get("roe"), ratio_snapshot.get("roe")
             ),
@@ -1755,10 +1836,13 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
                 derived_metrics.get("earnings_growth"),
             ),
         }
+        if market_cap is None:
+            metrics_map.pop("market_cap")
 
         results.append(
             StockComparison(
-                symbol=symbol, company_name=stock_metrics.name or symbol, metrics=metrics_map
+                symbol=symbol, company_name=stock_metrics.name or symbol, metrics=metrics_map,
+                market_cap_provenance=provenance,
             )
         )
 

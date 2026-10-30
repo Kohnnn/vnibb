@@ -595,8 +595,33 @@ async def test_premium_dataset_surfaces_unrepresentable_row_disclosures(monkeypa
     assert "unrepresentable_financial_identity" not in plain
 
 
+ISSUER_EVIDENCE = {
+    "document_sha256": "630f61f6ef9f07d5c593c3bf8f65bad1d56ecbb091921296ed5c4e830ea070a4",
+    "page": 12,
+    "currency": "VND",
+    "value_unit": "VND",
+}
+
+
 @pytest.mark.asyncio
-async def test_latest_financial_uses_only_explicit_vci_secondary(monkeypatch):
+async def test_latest_financial_withholds_issuer_even_with_partial_evidence(monkeypatch):
+    calls = []
+
+    async def read(collection, queries):
+        sources = queries[0]["values"]
+        calls.append(sources)
+        if sources == ["issuer_report"]:
+            return [{"source": "issuer_report", "fiscal_year": 2025,
+                     "raw_data": {"_financial_lineage": {"issuer_evidence": ISSUER_EVIDENCE}}}]
+        return []
+
+    monkeypatch.setattr(server, "list_collection_documents", read)
+    assert await server._get_latest_symbol_document("financial_ratios", "FPT") is None
+    assert calls == [["vietcap"], ["VCI"]]
+
+
+@pytest.mark.asyncio
+async def test_latest_financial_preserves_existing_source_precedence(monkeypatch):
     calls = []
 
     async def read(collection, queries):
@@ -605,20 +630,20 @@ async def test_latest_financial_uses_only_explicit_vci_secondary(monkeypatch):
         return [] if sources == ["vietcap"] else [{"source": "VCI"}]
 
     monkeypatch.setattr(server, "list_collection_documents", read)
-    row = await server._get_latest_symbol_document("financial_ratios", "FPT")
-    assert row["source"] == "VCI"
+    assert (await server._get_latest_symbol_document("financial_ratios", "FPT"))["source"] == "VCI"
     assert calls == [["vietcap"], ["VCI"]]
+
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "collection", ["income_statements", "balance_sheets", "cash_flows", "financial_ratios"]
 )
-async def test_generic_financial_query_admits_iq_and_vci_only(
+async def test_generic_financial_query_withholds_issuer_alongside_iq_and_vci(
     monkeypatch, test_engine, test_db, collection
 ):
     model = server.COLLECTION_MODELS[collection]
-    sources = ["vietcap", "VCI", "vnstock", "KBS", "DNSE", "VND"]
+    sources = ["vietcap", "VCI", "vnstock", "issuer_report", "KBS", "DNSE", "VND"]
     test_db.add_all(
         model(
             id=index,
@@ -626,12 +651,17 @@ async def test_generic_financial_query_admits_iq_and_vci_only(
             period=str(2026 - index),
             period_type="year",
             fiscal_year=2026 - index,
+            raw_data={"_financial_lineage": {"issuer_evidence": ISSUER_EVIDENCE}} if source == "issuer_report" else None,
             source=source,
         )
         for index, source in enumerate(sources, start=1)
     )
     test_db.add(
-        model(id=7, symbol="VNM", period="2025", period_type="year", fiscal_year=2025, source="VCI")
+        model(id=8, symbol="VNM", period="2025", period_type="year", fiscal_year=2025, source="VCI")
+    )
+    test_db.add(
+        model(id=9, symbol="ISSUER", period="2025", period_type="year", fiscal_year=2025,
+              source="issuer_report", raw_data={"_financial_lineage": {"issuer_evidence": ISSUER_EVIDENCE}})
     )
     await test_db.commit()
     monkeypatch.setattr(
@@ -646,6 +676,38 @@ async def test_generic_financial_query_admits_iq_and_vci_only(
     assert {row["id"] for row in result["items"]} == {1, 2}
     assert {row["source"] for row in result["items"]} == {"vietcap", "VCI"}
     assert result["filters_applied"]["admitted_sources"] == ["vietcap", "VCI"]
+    issuer_only = await server.query_database_collection_data(
+        collection=collection, symbol="ISSUER", period_type="year"
+    )
+    assert issuer_only["row_count"] == 0
+    assert issuer_only["items"] == []
+    assert issuer_only["filters_applied"]["admitted_sources"] == ["vietcap", "VCI"]
+
+
+@pytest.mark.asyncio
+async def test_ai_and_mcp_snapshots_do_not_expose_newer_issuer_ratio(monkeypatch, test_engine, test_db):
+    from vnibb.services import ai_context_service
+
+    test_db.add_all([
+        server.FinancialRatio(id=1, symbol="FPT", period="2025", period_type="year",
+                              fiscal_year=2025, source="issuer_report", pe_ratio=999,
+                              raw_data={"_financial_lineage": {"issuer_evidence": ISSUER_EVIDENCE}}),
+        server.FinancialRatio(id=2, symbol="FPT", period="2024", period_type="year",
+                              fiscal_year=2024, source="VCI", pe_ratio=12),
+    ])
+    await test_db.commit()
+    session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(server, "async_session_maker", session_maker)
+    monkeypatch.setattr(ai_context_service, "async_session_maker", session_maker)
+
+    async def database_available():
+        return True
+
+    monkeypatch.setattr(server, "check_database_connection", database_available)
+    ai_snapshot = await ai_context_service.AIContextService()._build_database_snapshot_direct("FPT")
+    mcp_snapshot = await server.get_symbol_snapshot("FPT")
+    assert ai_snapshot["ratios"]["pe"] == 12
+    assert mcp_snapshot["snapshot"]["ratios"]["pe"] == 12
 
 
 @pytest.mark.asyncio

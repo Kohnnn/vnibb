@@ -64,7 +64,7 @@ async def test_heatmap_preserves_change_1d_from_provider_screener_data(client, m
 
     # ---- act ----
     response = await client.get(
-        "/api/v1/market/heatmap?use_cache=false&limit=10&exchange=ALL"
+        "/api/v1/market/heatmap?use_cache=false&limit=10&exchange=ALL&size_metric=volume"
     )
     assert response.status_code == 200
 
@@ -122,7 +122,7 @@ async def test_heatmap_preserves_change_1d_from_cached_snapshot(client, monkeypa
     monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", lambda _syms: _async({}))
 
     # ---- act ----
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&size_metric=volume")
     assert response.status_code == 200
 
     payload = response.json()
@@ -177,7 +177,12 @@ async def test_heatmap_quote_volume_cannot_become_missing_size_metric(
     if size_metric == "volume":
         stock = _find_stock(payload, "VNM")
         assert stock is not None
-        assert stock["market_cap"] == stock["volume"] == 1_000_000
+        assert stock["market_cap"] is None
+        assert stock["market_cap_provenance"]["status"] == "unavailable"
+        assert stock["size_value"] == stock["volume"] == 1_000_000
+        assert payload["sectors"][0]["total_market_cap"] is None
+        assert payload["sectors"][0]["total_size_value"] == 1_000_000
+        assert payload["sectors"][0]["cap_count"] == 0
     else:
         assert payload["sectors"] == []
 

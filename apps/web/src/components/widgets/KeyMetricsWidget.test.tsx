@@ -242,10 +242,53 @@ describe('KeyMetricsWidget', () => {
     });
     expect(onDataChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        extra: {
-          metrics: expect.objectContaining({ pe: 12.3, market_cap: 123_000 }),
-        },
+        extra: expect.objectContaining({
+          metrics: expect.objectContaining({ pe: 12.3, market_cap: null }),
+          marketCap: expect.objectContaining({ status: 'unavailable' }),
+        }),
       }),
     );
+  });
+
+  it('withholds cap for undated unknown-unit profile shares and retains raw inputs', () => {
+    const onDataChange = jest.fn();
+    mockUseScreenerData.mockReturnValue(makeQueryResult<ScreenerResponse>({ data: [{ ticker: 'VCB', pe: 12.3 }] }));
+    mockUseProfile.mockReturnValue(makeQueryResult<EquityProfileResponse>({ symbol: 'VCB', data: { symbol: 'VCB', outstanding_shares: 850.1 } }));
+    mockUseStockQuote.mockReturnValue(makeQueryResult<StockQuoteView>({ ...emptyQuoteData, price: 19150, price_unit: 'VND' }));
+    render(<KeyMetricsWidget id="metrics" symbol="VCB" onDataChange={onDataChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Market' }));
+    expect(screen.getAllByText('Unavailable')).toHaveLength(2);
+    expect(screen.getByText(/lacks certified VND unit/)).toBeInTheDocument();
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({ extra: expect.objectContaining({
+      profile: expect.objectContaining({ outstanding_shares: 850.1 }),
+      quote: expect.objectContaining({ price: 19150 }),
+      marketCap: expect.objectContaining({ status: 'unavailable', value: null }),
+    }) }));
+  });
+
+  it('withholds captured VCI uncertified caps and exposes their values', () => {
+    mockUseScreenerData.mockReturnValue(makeQueryResult<ScreenerResponse>({ data: [{ ticker: 'VCI', pe: 12.3, market_cap: 22410910941.25 }] }));
+    mockUseProfile.mockReturnValue(makeQueryResult<EquityProfileResponse>({ symbol: 'VCI', data: { symbol: 'VCI', outstanding_shares: 1152231925, market_cap: 22065241363750 } }));
+    render(<KeyMetricsWidget id="metrics" symbol="VCI" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Market' }));
+    expect(screen.getAllByText('Unavailable')).toHaveLength(2);
+    expect(screen.getByText(/22410910941.25/)).toBeInTheDocument();
+    expect(screen.getByText(/22065241363750/)).toBeInTheDocument();
+  });
+
+  it.each([
+    [123_000.0001, 'available'],
+    [123_100, 'conflict'],
+  ] as const)('reconciles certified profile and screener caps: %s', (screenerCap, status) => {
+    const observation = { value: 123_000, source: 'certified', unit: 'VND', currency: 'VND', as_of: '2026-10-26', shares: 1, shares_unit: 'shares', shares_as_of: '2026-10-26', share_basis: 'outstanding', price: null, price_unit: null, price_as_of: null, calculation: null };
+    const provenance = { status: 'available' as const, value: 123_000, reason: null, source: 'certified', unit: 'VND' as const, currency: 'VND' as const, as_of: '2026-10-26', share_basis: 'outstanding' as const, observations: [observation] };
+    mockUseProfile.mockReturnValue(makeQueryResult<EquityProfileResponse>({ symbol: 'VCB', data: { symbol: 'VCB', market_cap: provenance.value, market_cap_provenance: provenance } }));
+    mockUseScreenerData.mockReturnValue(makeQueryResult<ScreenerResponse>({ data: [{ ticker: 'VCB', pe: 12.3, market_cap: screenerCap, market_cap_provenance: { ...provenance, value: screenerCap } }] }));
+    const onDataChange = jest.fn();
+    render(<KeyMetricsWidget id="metrics" symbol="VCB" onDataChange={onDataChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Market' }));
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({ extra: expect.objectContaining({ marketCap: expect.objectContaining({ status }) }) }));
+    if (status === 'conflict') expect(screen.getAllByText('Conflict')).toHaveLength(2);
+    else expect(screen.queryByText('Conflict')).not.toBeInTheDocument();
   });
 });

@@ -26,6 +26,11 @@ from sqlalchemy import select
 from vnibb.core.auth import User, require_active_user
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, check_database_connection
+from vnibb.core.financial_sources import (
+    ADMITTED_FINANCIAL_SOURCES,
+    PRIMARY_FINANCIAL_SOURCES,
+    SECONDARY_FINANCIAL_SOURCES,
+)
 from vnibb.core.logging_config import setup_logging
 from vnibb.core.price_units import normalize_price_record, persisted_price_record
 from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS, admitted_ratio_value
@@ -1170,8 +1175,8 @@ async def query_database_collection_data(
     )
     financial_collection = spec.collection in {*STATEMENT_COLLECTIONS.values(), "financial_ratios"}
     if financial_collection:
-        queries.insert(0, _query_equal("source", ["vietcap", "VCI"]))
-        applied_filters["admitted_sources"] = ["vietcap", "VCI"]
+        queries.insert(0, _query_equal("source", list(ADMITTED_FINANCIAL_SOURCES)))
+        applied_filters["admitted_sources"] = list(ADMITTED_FINANCIAL_SOURCES)
 
     rows = await list_collection_documents_paginated(
         spec.collection,
@@ -1212,7 +1217,10 @@ async def _get_latest_symbol_document(
             _query_limit(1),
         ]
     )
-    for source_values in (["vietcap"], ["VCI"]):
+    for source_values in (
+        list(PRIMARY_FINANCIAL_SOURCES),
+        list(SECONDARY_FINANCIAL_SOURCES),
+    ):
         source_queries = [_query_equal("source", source_values), *queries]
         rows = await list_collection_documents(collection_id, queries=source_queries)
         if rows:

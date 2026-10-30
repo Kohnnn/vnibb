@@ -8,22 +8,118 @@
 
 This document is a VNIBB-facing reference, not the canonical upstream manual. It is audited against the public docs site, the official version history, the upstream GitHub README/CHANGELOG, and the `vnstock-agent` README.
 
-When those sources disagree, use this order of precedence:
-- `vnstocks.com/docs` and the official version-history page for stable public behavior
-- GitHub `main` for newer runtime changes that may not be mirrored on the docs site yet
-- VNIBB config and `pyproject.toml` for local integration assumptions
+When those sources disagree, distinguish release availability from API examples:
+- The [official distribution index](https://vnstocks.com/api/packages/vnstock/) establishes published versions; documentation badges can lag.
+- Current first-party API guides establish generation-specific behavior; legacy examples below describe VNIBB's still-pinned 4.x runtime.
+- VNIBB config and `pyproject.toml` establish the enabled local runtime, not the latest upstream release.
 
 Context7 is still useful for deeper API lookup, but it should be treated as a supporting source rather than the primary source of truth.
 
-VNIBB uses Vietcap IQ as its primary Vietnamese ingestion source. Only free
-`vnstock` with `source="VCI"` may fill supported gaps. Sponsor packages are never
-imported by provider routing, even when installed. Other source examples below
-describe upstream interfaces, not enabled VNIBB runtime alternatives. Unsupported
-VCI datasets remain unavailable; existing historical source lineage stays readable.
-The image and API startup reject discoverable sponsor modules, including `vnii`,
-before VNStock import because VNAI can otherwise authenticate an installed `vnii`
-package during tier discovery. Use a clean community environment; old stored
-lineage is readable and is not subject to package-availability checks.
+VNIBB currently uses Vietcap IQ as its primary Vietnamese ingestion source, with
+free `vnstock` and explicit `source="VCI"` for supported gaps. Sponsor packages are
+not imported by existing routing, even when installed. Other source examples below
+are not enabled alternatives. Startup rejects discoverable sponsor modules,
+including `vnii`, before VNStock import because VNAI can authenticate them during
+tier discovery. Existing stored lineage stays readable. This is the current
+runtime boundary, not a claim that the user's Golden subscription is unavailable.
+
+## Generation-5 VCI financial interoperability (#183)
+
+On 30 October 2026, the official distribution index listed `vnstock==5.2.1`.
+An isolated review environment loaded that version and reported an authenticated
+`golden` account, expiring on 9 January 2027. Installed-SDK `SourceProbe` checks
+resolved income, balance, cash-flow, OHLCV and reference-list routes to `vci`
+without sending source queries. VNIBB's app environment remains on 4.0.9; its
+dependency constraint and production routing are unchanged.
+
+Generation 5 combines the old community and sponsored core into one `vnstock`
+package. It uses `Fundamental`, `Market` and `Reference`; `Vnstock().stock()` is
+removed. A blanket upgrade would break existing callers. See the
+[official 4.x migration guide](https://vnstocks.com/docs/vnstock/chuyen-doi/tu-vnstock-4x).
+
+The existing `VnstockFinancialsFetcher.transform_data` now accepts documented VCI
+VAS `long` rows: `period`, `id`, `name`, `order`, `level`, `unit`, `value`, plus
+`off_balance` for balance sheets. It groups complete periods before applying the
+requested period limit, maps supported documented IDs for all three statement
+families and retains original rows, attributes and taxonomy version. Per-item
+`VNĐ` values are already VND, not billions. Unknown IDs stay raw and unserved;
+unknown units, off-balance metrics, conflicting identity or duplicate values and
+unverified reporting basis cannot become admitted numbers. Consolidation scope
+and annual/quarterly flow basis are not inferred from a period or subscription.
+The existing `admit_statement_rows` gate remains authoritative. This is offline
+reader interoperability, not a complete SDK upgrade or a live financial fetch.
+Schema and taxonomy references:
+[Fundamental](https://vnstocks.com/docs/vnstock/co-ban-fundamental),
+[VAS analysis](https://vnstocks.com/blog/phan-tich-bao-cao-tai-chinh-tu-cau-truc-du-lieu-vnstock).
+
+The registration adapter supports the 4.x `change_api_key` boolean and the 5.x
+`setup_api_key` status dictionary without trusting legacy shared-registration
+records. The 5.x statement adapter explicitly requests VCI `long` income, balance
+and cash-flow frames via `Fundamental().equity(symbol)`; the 4.x route remains.
+Registration was exercised offline through both installed SDK facades with
+synthetic authentication. Statement verification used the actual 5.2.1 facade
+with synthetic native data and a synthetic 4.x SDK. No credentials or supplier
+requests were sent (#185, #186). Cancellation does not block the startup
+deadline while an in-flight registration worker completes.
+
+Provider-free verification on 30 October 2026 used a disposable PostgreSQL 17
+instance and synthetic VAS frames. Real extraction, `DataPipeline.sync_financials`,
+SQL read-back and the HTTP reader preserved three finite values and returned
+nine non-finite values as null with `missing_value`, across all three statements.
+All 12 HTTP responses succeeded; the strict JSON serializer rejected direct NaN
+and infinity inputs. No supplier or production database was contacted.
+
+Golden includes Pipeline; Quant is available from Bronze. Neither is needed for
+this reader, and no second scheduler, storage path or ratio engine is installed.
+Software entitlement does not establish source-owner permission to acquire,
+persist or publicly redistribute data. The published policy pages are marked
+effective 30 November 2026, so retain the account's actually accepted terms rather
+than assuming those future terms apply. #168 still requires source-owner/license
+permission and an explicit coverage/finality contract. Acquisition, production
+writes, scheduler enablement and redeployment remain gated. See
+[entitlements](https://vnstocks.com/docs/goi-quyen-su-dung/gioi-thieu) and
+[licence](https://vnstocks.com/policies/license).
+
+### Agent Skills Hub
+
+The isolated generation-5 environment includes the official skills loader; the
+hub skills are fetched on demand and cached in process memory, not installed as
+separate packages or copied into the repository. On 30 October 2026, all 16
+skills available through Golden loaded successfully; `risk-manager` requires
+Diamond. Load the catalog and a task-specific skill with the review environment's
+Python interpreter:
+
+```python
+from vnstock.utils.agents import load_skill, load_skill_catalog
+
+catalog = load_skill_catalog()
+guidance = load_skill("pipeline-cli")
+```
+
+The loader uses the account already configured on the machine. On the reviewed
+workstation, the interpreter is `~/.config/vnibb/vnstock5-review-20261030/venv/bin/python`,
+separate from the pinned VNIBB runtime. Never put keys in source, logs or chat.
+The older local `vnstock-env-setup`, `vnstock-migration-expert` and
+`vnstock-solution-architect` skills describe previous generations; follow the
+generation-5 official guidance instead. See the [Agent Skills Hub](https://vnstocks.com/agent-skills-hub)
+and the [official loader guide](https://vnstocks.com/docs/tai-lieu/vnstock-agent-skills).
+
+### Local financial inventory
+
+A provider-free, read-only transaction against the local PostgreSQL store on
+30 October 2026 covered FPT, VCI, VNM and MSR for 2025 and Q1–Q3 2026. Of 48
+selected symbol/period/statement cells, 12 had a row and 36 did not. The 12 rows
+came from Vietcap; 24 non-null income fields were withheld because currency or
+unit evidence was unverified. No inspected floating-point financial fields were
+admitted in this selected scope.
+This is a local snapshot, not production coverage or proof of source rights.
+The [bounded inventory instructions](../scripts/vietcap/README.md#bounded-sql-statement-admission-inventory)
+require a read-only database account and do not call a provider.
+
+Registration and financial-statement compatibility do not constitute a full
+generation-5 migration. Legacy price-unit and market-depth assumptions still
+require source-specific review. Keep the pinned runtime and admission gates until
+the migration and #168 authorization and coverage prerequisites are satisfied.
 
 ---
 
@@ -47,11 +143,9 @@ lineage is readable and is not subject to package-availability checks.
 ## Installation & Setup
 
 ```bash
-pip install -U vnstock
-# Legacy package alias kept only for old 3.1.0-era installs:
-# pip install vnstock3
-# GitHub main / unreleased runtime line used by VNIBB:
-# pip install git+https://github.com/thinh-vu/vnstock.git
+# From the VNIBB repository root; preserves the declared 4.x dependency constraint:
+python -m pip install -e "apps/api[dev]"
+# Do not use an unbounded `pip install -U vnstock` for this app.
 ```
 
 ### Basic Import Pattern

@@ -17,11 +17,18 @@ import {
   type ListingBrowserView,
 } from '@/lib/listingBrowserViews';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { useDashboardWidget } from '@/hooks/useDashboardWidget';
+import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
+import { readTickerScope } from '@/lib/widgetScope';
+import type { WidgetGroupId } from '@/types/widget';
 
 interface ListingBrowserWidgetProps {
   id: string;
   hideHeader?: boolean;
   onRemove?: () => void;
+  symbol?: string;
+  widgetGroup?: WidgetGroupId;
   onSymbolClick?: (symbol: string) => void;
   onDataChange?: (data: WidgetDataPayload) => void;
 }
@@ -43,9 +50,16 @@ export function ListingBrowserWidget({
   id,
   hideHeader,
   onRemove,
+  symbol,
+  widgetGroup,
   onSymbolClick,
   onDataChange,
 }: ListingBrowserWidgetProps) {
+  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetId: id, widgetType: 'listing_browser', symbol });
+  const { tickerOverrideFor } = useWidgetGroups();
+  const widgetLocation = useDashboardWidget(id);
+  const isDetached = Boolean(tickerOverrideFor(id)) || readTickerScope(widgetLocation?.widget.config).mode === 'override';
+  const selectSymbol = onSymbolClick ?? (isDetached ? undefined : setLinkedSymbol);
   const [exchange, setExchange] = useState<ExchangeFilter>('ALL')
   const [group, setGroup] = useState<GroupFilter>('ALL')
   const [search, setSearch] = useState('')
@@ -202,7 +216,7 @@ export function ListingBrowserWidget({
               ))}
             </div>
 
-            <select value={group} onChange={(event) => setGroup(event.target.value as GroupFilter)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500">
+            <select aria-label="Group filter" value={group} onChange={(event) => setGroup(event.target.value as GroupFilter)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500">
               {GROUP_OPTIONS.map((option) => (
                 <option key={option} value={option}>{option === 'ALL' ? 'All groups' : option}</option>
               ))}
@@ -221,7 +235,7 @@ export function ListingBrowserWidget({
               ))}
             </select>
 
-            <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500">
+            <select aria-label="Sort listings" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500">
               <option value="symbol">Sort: Symbol</option>
               <option value="company">Sort: Company</option>
               <option value="industry">Sort: Industry</option>
@@ -259,7 +273,7 @@ export function ListingBrowserWidget({
                   <button type="button" onClick={() => applySavedView(view)} className="inline-flex items-center gap-1 hover:text-[var(--text-primary)]">
                     <FolderOpen size={11} /> {view.name}
                   </button>
-                  <button type="button" onClick={() => setSavedViews(removeListingBrowserView(view.id))} className="text-[var(--text-muted)] hover:text-rose-300">
+                  <button type="button" aria-label={`Delete saved view ${view.name}`} onClick={() => setSavedViews(removeListingBrowserView(view.id))} className="text-[var(--text-muted)] hover:text-rose-300">
                     <X size={11} />
                   </button>
                 </div>
@@ -280,25 +294,29 @@ export function ListingBrowserWidget({
             />
           ) : (
             <div className="space-y-1.5">
-              {rows.map((item) => (
-                <button
-                  key={item.symbol}
-                  type="button"
-                  onClick={() => onSymbolClick?.(item.symbol)}
-                  className="block w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-3 text-left transition-colors hover:border-blue-500/30 hover:bg-[var(--bg-hover)]"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-[var(--text-primary)]">{item.symbol}</div>
-                      <div className="mt-1 text-[11px] text-[var(--text-secondary)]">{item.organ_name}</div>
+              {rows.map((item) => {
+                const Row = selectSymbol ? 'button' : 'div';
+                return (
+                  <Row
+                    key={item.symbol}
+                    type={selectSymbol ? 'button' : undefined}
+                    onClick={selectSymbol ? () => selectSymbol(item.symbol) : undefined}
+                    title={selectSymbol ? undefined : 'Ticker local to this widget; use its ticker selector to change it'}
+                    className="block w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-3 text-left transition-colors hover:border-blue-500/30 hover:bg-[var(--bg-hover)]"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-[var(--text-primary)]">{item.symbol}</div>
+                        <div className="mt-1 text-[11px] text-[var(--text-secondary)]">{item.organ_name}</div>
+                      </div>
+                      <div className="text-right text-[10px] text-[var(--text-muted)]">
+                        <div>{item.exchange || 'Exchange'}</div>
+                        <div>{item.industry || 'Industry unavailable'}</div>
+                      </div>
                     </div>
-                    <div className="text-right text-[10px] text-[var(--text-muted)]">
-                      <div>{item.exchange || 'Exchange'}</div>
-                      <div>{item.industry || 'Industry unavailable'}</div>
-                    </div>
-                  </div>
-                </button>
-              ))}
+                  </Row>
+                );
+              })}
             </div>
           )}
         </div>

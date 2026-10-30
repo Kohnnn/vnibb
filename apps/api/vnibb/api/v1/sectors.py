@@ -7,11 +7,12 @@ from typing import Literal
 
 from fastapi import APIRouter, Query, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc, or_
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.cache import cached
 from vnibb.core.database import get_db
+from vnibb.core.market_cap import resolve_market_cap
 from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.core.vn_sectors import get_all_sectors, get_sector_by_id
 from vnibb.models.screener import ScreenerSnapshot
@@ -168,8 +169,7 @@ def _build_sector_symbol_list(
         seen_symbols.add(symbol_upper)
 
     dynamic_matches.sort(
-        key=lambda symbol: (market_cap_by_symbol.get(symbol, 0.0), symbol),
-        reverse=True,
+        key=lambda symbol: (symbol not in market_cap_by_symbol, -market_cap_by_symbol.get(symbol, 0.0), symbol),
     )
 
     merged = manual_symbols + dynamic_matches
@@ -213,7 +213,7 @@ async def get_sector_top_movers(
 
 
 @router.get("")
-@cached(ttl=300, key_prefix="sector_catalog")
+@cached(ttl=300, key_prefix="sector_catalog_v2_cap_provenance")
 async def list_sectors(
     symbol_limit: int = Query(default=50, ge=5, le=200),
     db: AsyncSession = Depends(get_db),
@@ -239,16 +239,15 @@ async def list_sectors(
     if latest_snapshot_date is not None:
         snapshot_rows = (
             await db.execute(
-                select(ScreenerSnapshot.symbol, ScreenerSnapshot.market_cap).where(
+                select(ScreenerSnapshot).where(
                     ScreenerSnapshot.snapshot_date == latest_snapshot_date,
-                    ScreenerSnapshot.market_cap.is_not(None),
                 )
             )
-        ).all()
-        for symbol, market_cap in snapshot_rows:
-            market_cap_value = _coerce_optional_float(market_cap)
-            if market_cap_value is not None:
-                market_cap_by_symbol[str(symbol).strip().upper()] = market_cap_value
+        ).scalars().all()
+        for snapshot in snapshot_rows:
+            cap = resolve_market_cap(snapshot, source="postgres:screener_snapshot")
+            if cap["value"] is not None:
+                market_cap_by_symbol[str(snapshot.symbol).strip().upper()] = cap["value"]
 
         snapshot_industry_rows = (
             await db.execute(
@@ -284,7 +283,7 @@ async def list_sectors(
 
 
 @router.get("/{sector}/stocks")
-@cached(ttl=300, key_prefix="sector_stocks_v2_certified")
+@cached(ttl=300, key_prefix="sector_stocks_v3_cap_provenance")
 async def get_sector_stocks(
     sector: str,
     limit: int = Query(default=50, ge=1, le=200),
@@ -307,21 +306,13 @@ async def get_sector_stocks(
             Stock.exchange,
             Stock.industry,
             Stock.sector,
-            ScreenerSnapshot.price,
-            ScreenerSnapshot.market_cap,
-            ScreenerSnapshot.pe,
-            ScreenerSnapshot.pb,
-            ScreenerSnapshot.roe,
-            ScreenerSnapshot.revenue_growth,
-            ScreenerSnapshot.extended_metrics,
+            ScreenerSnapshot,
         )
         .join(
             ScreenerSnapshot,
             (ScreenerSnapshot.symbol == Stock.symbol)
             & (ScreenerSnapshot.snapshot_date == latest_snapshot_date),
         )
-        .order_by(desc(ScreenerSnapshot.market_cap))
-        .limit(limit)
     )
 
     filters = []
@@ -341,7 +332,17 @@ async def get_sector_stocks(
 
     stmt = stmt.where(or_(*filters))
 
-    rows = (await db.execute(stmt)).all()
+    candidates = []
+    for row in (await db.execute(stmt)).all():
+        cap = resolve_market_cap(row.ScreenerSnapshot, source="postgres:screener_snapshot")
+        candidates.append((row, cap))
+    candidates.sort(key=lambda item: (
+        item[1]["value"] is None,
+        -(item[1]["value"] or 0.0),
+        str(item[0].symbol).upper(),
+    ))
+    candidates = candidates[:limit]
+    rows = [row for row, _ in candidates]
 
     symbols = [row.symbol for row in rows]
     change_pct_map: dict[str, float] = {}
@@ -394,14 +395,15 @@ async def get_sector_stocks(
             "exchange": row.exchange,
             "industry": row.industry,
             "sector": row.sector,
-            "price": row.price,
-            "market_cap": row.market_cap,
-            "pe": row.pe,
-            "pb": row.pb,
-            "roe": admitted_ratio_value(row.roe, "roe", ratio_units=(row.extended_metrics or {}).get("ratio_units")),
-            "revenue_growth": admitted_ratio_value(row.revenue_growth, "revenue_growth", ratio_units=(row.extended_metrics or {}).get("ratio_units")),
+            "price": row.ScreenerSnapshot.price,
+            "market_cap": cap["value"],
+            "market_cap_provenance": cap,
+            "pe": row.ScreenerSnapshot.pe,
+            "pb": row.ScreenerSnapshot.pb,
+            "roe": admitted_ratio_value(row.ScreenerSnapshot.roe, "roe", ratio_units=(row.ScreenerSnapshot.extended_metrics or {}).get("ratio_units")),
+            "revenue_growth": admitted_ratio_value(row.ScreenerSnapshot.revenue_growth, "revenue_growth", ratio_units=(row.ScreenerSnapshot.extended_metrics or {}).get("ratio_units")),
             "change_pct": change_pct_map.get(str(row.symbol).strip().upper()),
         }
-        for row in rows
+        for row, cap in candidates
     ]
     return {"sector": sector, "count": len(data), "data": data}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from fastapi import BackgroundTasks
@@ -8,6 +9,7 @@ from fastapi import BackgroundTasks
 import pytest
 
 from vnibb.api.v1 import news
+from vnibb.core.market_cap import resolve_market_cap
 from vnibb.providers.vnstock.equity_screener import ScreenerData
 from vnibb.services.cache_manager import CacheResult
 from vnibb.services.world_news_service import (
@@ -18,6 +20,21 @@ from vnibb.services.world_news_service import (
     WorldNewsSourceInfo,
     WorldNewsSourcesResponse,
 )
+
+
+def _certified_cap(value: float) -> dict:
+    return {
+        "market_cap": value,
+        "market_cap_source": "issuer:capitalization",
+        "market_cap_unit": "VND",
+        "market_cap_currency": "VND",
+        "market_cap_as_of": "2026-10-26",
+        "outstanding_shares": 100,
+        "shares_unit": "shares",
+        "shares_as_of": "2026-10-26",
+        "shares_source": "issuer:shares",
+        "share_basis": "outstanding",
+    }
 
 
 class _EmptyHeatmapCache:
@@ -43,6 +60,7 @@ def _heatmap_row(
         change_1d=change_1d,
         volume=10_000.0,
         market_cap=market_cap,
+        market_cap_provenance=resolve_market_cap(_certified_cap(market_cap), source="test"),
     )
 
 
@@ -144,20 +162,13 @@ class _FakeHeatmapCache:
         pass
 
     async def get_screener_data(self, **_kwargs):
-        class _FakeSnapshot:
-            symbol = "VCB"
-            company_name = "VCB Corp"
-            exchange = "HOSE"
-            industry = "Ngân hàng - Dịch vụ tài chính"
-            price = 100.0
-            volume = 10_000.0
-            market_cap = 1_000_000.0
-            pe = 10.0
-            pb = 1.0
-            extended_metrics = {"change_1d": 4.5}
-
         return CacheResult(
-            data=[_FakeSnapshot()],
+            data=[SimpleNamespace(
+                symbol="VCB", company_name="VCB Corp", exchange="HOSE",
+                industry="Ngân hàng - Dịch vụ tài chính", price=100.0,
+                volume=10_000.0, market_cap=1_000_000.0, pe=10.0, pb=1.0,
+                extended_metrics={"change_1d": 4.5, **_certified_cap(1_000_000.0)},
+            )],
             is_stale=False,
             cached_at=None,
             hit=True,
@@ -181,6 +192,119 @@ async def test_news_heatmap_endpoint_uses_cached_change_pct_from_extended_metric
     assert stock["symbol"] == "VCB"
     assert stock["change_pct"] == 4.5
     assert stock["change"] == 4.5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size_metric,expected_size", [("volume", 10_000.0), ("value_traded", 250_000.0)])
+async def test_news_heatmap_cached_uncertified_cap_keeps_independent_size(
+    client, monkeypatch, size_metric, expected_size
+):
+    class Cache:
+        async def get_screener_data(self, **_kwargs):
+            return CacheResult(data=[SimpleNamespace(
+                symbol="VCB", company_name="VCB", exchange="HOSE", industry="Banking",
+                price=100.0, volume=10_000.0, market_cap=9_000_000.0, pe=None, pb=None,
+                extended_metrics={"change_1d": 4.5, "value_traded": 250_000.0},
+            )], is_stale=False, cached_at=None, hit=True)
+
+    monkeypatch.setattr(news, "CacheManager", Cache)
+    response = await client.get("/api/v1/news/heatmap", params={"size_metric": size_metric})
+    assert response.status_code == 200
+    sector = response.json()["sectors"][0]
+    stock = sector["stocks"][0]
+    assert stock["market_cap"] is None
+    assert stock["market_cap_provenance"]["status"] == "unavailable"
+    assert any(item["value"] == 9_000_000.0 for item in stock["market_cap_provenance"]["observations"])
+    assert stock["size_value"] == expected_size
+    assert sector["total_market_cap"] is None
+    assert sector["cap_count"] == 0
+    assert sector["total_size_value"] == expected_size
+
+
+@pytest.mark.asyncio
+async def test_news_heatmap_provider_uncertified_cap_is_not_ranked_or_relabelled(client, monkeypatch):
+    raw = _heatmap_row("HNXRAW", exchange="HNX", market_cap=9_000_000.0)
+    raw.market_cap_provenance = None
+    admitted = _heatmap_row("HNXOK", exchange="HNX", market_cap=100.0)
+
+    async def fake_fetch(_params):
+        return [raw, admitted]
+
+    monkeypatch.setattr(news.VnstockScreenerFetcher, "fetch", fake_fetch)
+    response = await client.get("/api/v1/news/heatmap", params={
+        "group_by": "hnx30", "exchange": "ALL", "size_metric": "volume", "use_cache": False,
+    })
+    assert response.status_code == 200
+    sector = response.json()["sectors"][0]
+    assert [stock["symbol"] for stock in sector["stocks"]] == ["HNXOK"]
+    assert sector["stocks"][0]["market_cap"] == 100.0
+    assert sector["stocks"][0]["market_cap_provenance"]["status"] == "available"
+    assert sector["stocks"][0]["size_value"] == 10_000.0
+    assert sector["total_market_cap"] == 100.0
+    assert sector["total_size_value"] == 10_000.0
+    assert sector["cap_count"] == 1
+
+    response = await client.get("/api/v1/news/heatmap", params={
+        "exchange": "ALL", "size_metric": "market_cap", "use_cache": False,
+    })
+    assert response.status_code == 200
+    assert [stock["symbol"] for sector in response.json()["sectors"] for stock in sector["stocks"]] == ["HNXOK"]
+
+
+@pytest.mark.asyncio
+async def test_news_heatmap_volume_weights_mixed_provider_caps(client, monkeypatch):
+    certified = _heatmap_row("AAA", market_cap=100.0, change_1d=2.0)
+    unknown = _heatmap_row("BBB", market_cap=900.0, change_1d=8.0)
+    unknown.market_cap_provenance = None
+    unknown.volume = 30_000.0
+
+    async def fake_fetch(_params):
+        return [certified, unknown]
+
+    monkeypatch.setattr(news.VnstockScreenerFetcher, "fetch", fake_fetch)
+    response = await client.get("/api/v1/news/heatmap", params={
+        "size_metric": "volume", "use_cache": False,
+    })
+    assert response.status_code == 200
+    sector = response.json()["sectors"][0]
+    stocks = {stock["symbol"]: stock for stock in sector["stocks"]}
+    assert stocks["AAA"]["market_cap"] == 100.0
+    assert stocks["BBB"]["market_cap"] is None
+    assert stocks["BBB"]["market_cap_provenance"]["status"] == "unavailable"
+    assert stocks["BBB"]["size_value"] == 30_000.0
+    assert sector["total_market_cap"] == 100.0
+    assert sector["cap_count"] == 1
+    assert sector["total_size_value"] == 40_000.0
+    assert sector["avg_change_pct"] == 6.5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["value_traded", "valueTraded", "trading_value"])
+async def test_news_heatmap_provider_explicit_value_size_with_unknown_cap(client, monkeypatch, field):
+    from vnibb.providers.vnstock.equity_screener import StockScreenerParams
+
+    rows = news.VnstockScreenerFetcher.transform_data(StockScreenerParams(), [{
+        "ticker": "VCB", "exchange": "HOSE", "price": 100.0,
+        "volume": 10_000.0, "change_1d": 3.0, "market_cap": 900.0,
+        field: 12_345.0,
+    }])
+
+    async def fake_fetch(_params):
+        return rows
+
+    monkeypatch.setattr(news.VnstockScreenerFetcher, "fetch", fake_fetch)
+    response = await client.get("/api/v1/news/heatmap", params={
+        "size_metric": "value_traded", "use_cache": False,
+    })
+    assert response.status_code == 200
+    sector = response.json()["sectors"][0]
+    stock = sector["stocks"][0]
+    assert stock["market_cap"] is None
+    assert stock["market_cap_provenance"]["status"] == "unavailable"
+    assert stock["size_value"] == 12_345.0
+    assert sector["total_market_cap"] is None
+    assert sector["total_size_value"] == 12_345.0
+    assert sector["cap_count"] == 0
 
 
 @pytest.mark.asyncio

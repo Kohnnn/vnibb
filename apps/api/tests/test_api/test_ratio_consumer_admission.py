@@ -160,8 +160,10 @@ async def test_sector_stocks_withholds_unknown_cells_without_dropping_rows(test_
         ))
     await test_db.commit()
     response = await sectors.get_sector_stocks.__wrapped__(sector="securities", limit=50, db=test_db)
-    assert [row["roe"] for row in response["data"]] == [0.0, -5.0, None, None]
-    assert [row["revenue_growth"] for row in response["data"]] == [0.0, -5.0, None, None]
+    rows = {row["symbol"]: row for row in response["data"]}
+    for symbol, expected in zip(["VCI", "SSI", "HCM", "FTS"], [0.0, -5.0, None, None], strict=True):
+        assert rows[symbol]["roe"] == expected
+        assert rows[symbol]["revenue_growth"] == expected
     assert response["count"] == 4
 
 
@@ -174,7 +176,10 @@ async def test_industry_bubble_uses_real_ratio_sql_evidence(test_engine, test_db
 
     async def cached_rows(*args, **kwargs):
         return SimpleNamespace(data=[
-            {"symbol": symbol, "industry": "Chung khoan", "sector": "securities", "market_cap": 100.0 - index}
+            {"symbol": symbol, "industry": "Chung khoan", "sector": "securities", "market_cap": 100.0 - index,
+             "market_cap_source": "issuer:cap", "market_cap_unit": "VND", "market_cap_currency": "VND",
+             "market_cap_as_of": "2026-10-23", "outstanding_shares": 100, "shares_unit": "shares",
+             "shares_as_of": "2026-10-23", "shares_source": "issuer:shares", "share_basis": "outstanding"}
             for index, symbol in enumerate(symbols)
         ])
 

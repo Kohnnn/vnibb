@@ -137,6 +137,8 @@ def admit_statement_rows(
         year = _extract_period_year(row.period)
         quarter = _extract_period_quarter(row.period)
         reason = row.unavailable_reason or snapshot_reason
+        if row.source == "issuer_report" and not reason:
+            reason = "issuer_field_evidence_not_admitted"
         if year and row.fiscal_year is not None and year != row.fiscal_year:
             reason = "conflicting_fiscal_identity"
         if quarter and row.fiscal_quarter is not None and quarter != row.fiscal_quarter:

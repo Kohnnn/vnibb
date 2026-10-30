@@ -75,6 +75,7 @@ class FakeSession:
         return None
 
 
+
 @pytest.mark.asyncio
 async def test_fetch_quote_history_frame_uses_community_quote_and_bypasses_retry(monkeypatch):
 

@@ -108,7 +108,7 @@ async def test_heatmap_cached_sparse_retries_fresh_and_returns_cached_false(
     monkeypatch.setattr("vnibb.api.v1.market._load_latest_price_time", lambda _syms: _async(None))
 
     # ---- act ----
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&size_metric=volume")
     assert response.status_code == 200
 
     payload = response.json()
@@ -178,7 +178,7 @@ async def test_heatmap_group_by_industry_groups_by_industry(client, monkeypatch)
 
     # ---- act ----
     response = await client.get(
-        "/api/v1/market/heatmap?group_by=industry&limit=10&exchange=ALL&use_cache=false"
+        "/api/v1/market/heatmap?group_by=industry&limit=10&exchange=ALL&use_cache=false&size_metric=volume"
     )
     assert response.status_code == 200
 
@@ -274,7 +274,7 @@ async def test_heatmap_cached_snapshot_preserves_price_change_1d_pct_alias(clien
     monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", lambda _syms: _async({}))
     monkeypatch.setattr("vnibb.api.v1.market._load_latest_price_time", lambda _syms: _async(None))
 
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&size_metric=volume")
     assert response.status_code == 200
 
     payload = response.json()
@@ -323,7 +323,7 @@ async def test_heatmap_smoke_shape(client, monkeypatch):
     monkeypatch.setattr("vnibb.api.v1.market._load_latest_price_time", lambda _syms: _async(None))
 
     # ---- act ----
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&use_cache=false")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&use_cache=false&size_metric=volume")
     assert response.status_code == 200
 
     payload = response.json()
@@ -340,7 +340,7 @@ async def test_heatmap_smoke_shape(client, monkeypatch):
     assert payload["count"] == 1
     assert payload["group_by"] == "sector"  # default
     assert payload["color_metric"] == "change_pct"  # default
-    assert payload["size_metric"] == "market_cap"  # default
+    assert payload["size_metric"] == "volume"
     assert payload["cached"] is False
     assert payload["partial"] is True
     assert payload["constituents_as_of"] is None
@@ -357,7 +357,9 @@ async def test_heatmap_smoke_shape(client, monkeypatch):
     assert "stock_count" in sector
 
     assert sector["stock_count"] == 1
-    assert sector["total_market_cap"] > 0
+    assert sector["total_market_cap"] is None
+    assert sector["total_size_value"] == 300_000
+    assert sector["cap_count"] == 0
 
     stock = sector["stocks"][0]
 
@@ -410,7 +412,7 @@ async def test_heatmap_reports_oldest_included_constituent_separately_from_price
         lambda _syms: _async(recent_day.isoformat()),
     )
 
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&size_metric=volume")
     assert response.status_code == 200
     payload = response.json()
     assert payload["count"] == 2
@@ -443,7 +445,7 @@ async def test_heatmap_db_rows_do_not_call_old_trades_current(client, monkeypatc
     monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", lambda _syms: _async({}))
     monkeypatch.setattr("vnibb.api.v1.market._load_latest_price_time", lambda _syms: _async(today.isoformat()))
 
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&size_metric=volume")
     assert response.status_code == 200
     payload = response.json()
     assert payload["count"] == 1
@@ -477,7 +479,7 @@ async def test_heatmap_current_provider_rows_keep_current_dates_without_cache(cl
         lambda _syms: _async(today.isoformat()),
     )
 
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&use_cache=false")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&use_cache=false&size_metric=volume")
     assert response.status_code == 200
     payload = response.json()
     assert payload["count"] == 1
@@ -928,7 +930,8 @@ async def test_heatmap_quote_only_uses_real_listing_exchange_before_limit(client
     assert payload["count"] == 1
     stock = _find_stock(payload, "VNM")
     assert stock["price"] == 100_000.0
-    assert stock["market_cap"] == 1_000_000
+    assert stock["market_cap"] is None
+    assert stock["size_value"] == 1_000_000
 
 
 @pytest.fixture
@@ -1010,7 +1013,8 @@ async def test_heatmap_acquires_quotes_without_financial_ratios(client, screener
     assert payload["cached"] is False
     stock = _find_stock(payload, "VNM")
     assert stock["price"] == 100_000.0
-    assert stock["market_cap"] == 1_000_000
+    assert stock["market_cap"] is None
+    assert stock["size_value"] == 1_000_000
     assert stock["change_pct"] == 3.2
 
 

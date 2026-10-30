@@ -614,7 +614,7 @@ export function WidgetWrapper({
                 return;
             }
 
-            onSymbolChange?.(newSymbol);
+            if (widgetGroup === 'global') onSymbolChange?.(newSymbol);
             // Update the group symbol so other widgets in same group sync
             setGroupSymbol(widgetGroup, newSymbol);
         }

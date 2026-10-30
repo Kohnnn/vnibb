@@ -21,6 +21,8 @@ _ALIASES = {
     "payout_ratio": {"payout_ratio", "payoutratio", "dividend_payout_ratio", "dividendpayoutratio", "dividend_payout", "dividendpayout"},
 }
 
+FRACTION_RATIO_FIELDS = frozenset({"ocf_sales", "fcf_yield"})
+
 def admitted_ratio_value(
     value: Any, metric: str, *, ratio_units: Mapping[str, Any] | None = None,
     source: str | None = "vnstock",
@@ -28,6 +30,61 @@ def admitted_ratio_value(
     if metric in PERCENT_RATIO_FIELDS and (ratio_units or {}).get(metric) != "percent":
         return None
     return value
+
+
+def declared_ratio_value(
+    value: Any, metric: str, *, ratio_units: Mapping[str, Any] | None = None,
+) -> Any:
+    """Admit a percent cell only through its declared unit, converting fractions once.
+
+    `percent` passes through, `fraction` is scaled to canonical percent, and a
+    missing, `unknown` or `conflict` declaration is withheld rather than assumed.
+    """
+    if metric not in PERCENT_RATIO_FIELDS and metric not in FRACTION_RATIO_FIELDS:
+        return value
+    unit = (ratio_units or {}).get(metric)
+    if unit == "percent":
+        return value
+    if unit == "fraction" and value is not None:
+        try:
+            return float(value) * 100
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+ADMITTED_RATIO_FIELDS = PERCENT_RATIO_FIELDS | FRACTION_RATIO_FIELDS
+
+
+def admit_ratio_units(item: Any, fields: frozenset[str] = ADMITTED_RATIO_FIELDS) -> Any:
+    """Admit every declared ratio cell once and stamp the canonical unit.
+
+    Idempotent: an admitted cell is stamped `percent`, so a second pass is a
+    no-op. That lets every publication point call this without knowing whether
+    an earlier one already ran, which is why no row can be scaled twice.
+    """
+    units = getattr(item, "ratio_units", None)
+    units = {} if units is None else dict(units)
+    for metric in fields:
+        declared = units.get(metric)
+        if declared == "percent":
+            continue
+        if declared == "fraction" and getattr(item, metric, None) is not None:
+            admitted = declared_ratio_value(
+                getattr(item, metric, None), metric, ratio_units=units,
+            )
+            setattr(item, metric, admitted)
+            # A failed conversion keeps the declaration visible as `unknown`.
+            units[metric] = "unknown" if admitted is None else "percent"
+            continue
+        # No declaration means no unit evidence: withhold the value without
+        # inventing a `ratio_units` entry, because merge treats a present key
+        # as "this source has evidence" and would resurrect the cell.
+        setattr(item, metric, None)
+        if declared is not None:
+            units[metric] = "unknown"
+    item.ratio_units = units
+    return item
 
 
 

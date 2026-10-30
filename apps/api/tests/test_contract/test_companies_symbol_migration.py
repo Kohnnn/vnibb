@@ -144,11 +144,10 @@ async def test_companies_index_repair_preserves_identity_rows_and_references(dup
                 assert len(rows) == 3
                 assert rows[2].id > 2
                 assert rows[2].symbol == "VCB"
-                payload = (await connection.execute(text(
-                    "SELECT raw_data, outstanding_shares FROM companies WHERE symbol='VCB'"
-                ))).one()
-                assert payload.raw_data == {"company_name": "New", "outstanding_shares": 0}
-                assert payload.outstanding_shares is None
+                assert rows[2].company_name == "New"
+                assert (await connection.execute(text(
+                    "SELECT outstanding_shares FROM companies WHERE symbol='VCB'"
+                ))).scalar_one() is None
     finally:
         async with engine.begin() as cleanup:
             await cleanup.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))

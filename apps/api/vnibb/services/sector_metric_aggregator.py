@@ -25,10 +25,11 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Iterable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from vnibb.core.database import async_session_maker
+from vnibb.core.market_cap import resolve_market_cap
 from vnibb.models.market import SectorMetricSnapshot
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
@@ -53,6 +54,8 @@ class SectorAggregate:
     avg_net_margin: float | None
     avg_dividend_yield: float | None
     avg_market_cap: float | None
+    market_cap_sample_size: int
+    market_cap_provenance: dict[str, dict[str, Any]]
 
     def to_db_dict(self) -> dict[str, Any]:
         return {
@@ -140,21 +143,34 @@ async def aggregate_sector_metrics(
                 continue
             industry_by_symbol[symbol.upper()] = (industry, sector)
 
-        # Pull screener snapshot for market_cap and dividend_yield
-        snap_result = await session.execute(
+        # Select each symbol's latest snapshot at or before the aggregation date.
+        ranked_snapshots = (
             select(
-                ScreenerSnapshot.symbol,
-                ScreenerSnapshot.market_cap,
-                ScreenerSnapshot.dividend_yield,
+                ScreenerSnapshot.id.label("id"),
+                func.row_number().over(
+                    partition_by=func.upper(ScreenerSnapshot.symbol),
+                    order_by=(ScreenerSnapshot.snapshot_date.desc(), ScreenerSnapshot.id.desc()),
+                ).label("rank"),
             )
+            .where(ScreenerSnapshot.snapshot_date <= target_date)
+            .subquery()
+        )
+        snap_result = await session.execute(
+            select(ScreenerSnapshot)
+            .join(ranked_snapshots, ScreenerSnapshot.id == ranked_snapshots.c.id)
+            .where(ranked_snapshots.c.rank == 1)
         )
         screener_by_symbol: dict[str, dict[str, Any]] = {}
-        for symbol, market_cap, dividend_yield in snap_result.all():
+        for snapshot in snap_result.scalars().all():
+            symbol = (snapshot.symbol or "").upper()
             if not symbol:
                 continue
-            screener_by_symbol[symbol.upper()] = {
-                "market_cap": market_cap,
-                "dividend_yield": dividend_yield,
+            cap = resolve_market_cap(snapshot, source="postgres:screener_snapshot")
+            cap["snapshot_date"] = snapshot.snapshot_date.isoformat()
+            screener_by_symbol[symbol] = {
+                "market_cap": cap["value"],
+                "market_cap_provenance": cap,
+                "dividend_yield": snapshot.dividend_yield,
             }
 
     # Bucket by industry
@@ -169,6 +185,7 @@ async def aggregate_sector_metrics(
             "net_margin": [],
             "dividend_yield": [],
             "market_cap": [],
+            "market_cap_provenance": {},
         }
     )
 
@@ -180,6 +197,8 @@ async def aggregate_sector_metrics(
 
         bucket = buckets[industry]
         bucket["sector_code"] = sector or bucket["sector_code"]
+        if snap.get("market_cap_provenance") is not None:
+            bucket["market_cap_provenance"][symbol] = snap["market_cap_provenance"]
         for key, source in (
             ("pe", ratio.get("pe")),
             ("pb", ratio.get("pb")),
@@ -218,7 +237,9 @@ async def aggregate_sector_metrics(
                 avg_roa=_safe_mean(bucket["roa"]),
                 avg_net_margin=_safe_mean(bucket["net_margin"]),
                 avg_dividend_yield=_safe_mean(bucket["dividend_yield"]),
-                avg_market_cap=_safe_mean(bucket["market_cap"]),
+                avg_market_cap=_safe_mean(bucket["market_cap"]) if len(bucket["market_cap"]) >= 3 else None,
+                market_cap_sample_size=len(bucket["market_cap"]),
+                market_cap_provenance=bucket["market_cap_provenance"],
             )
         )
 

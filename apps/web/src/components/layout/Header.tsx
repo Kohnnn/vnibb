@@ -394,7 +394,7 @@ export function Header({
             </button>
           </div>
 
-          <div data-tour="header-tools" className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          <div data-tour="header-tools" className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 sm:shrink-0 sm:gap-2">
             <button
               type="button"
               onClick={() => window.dispatchEvent(new CustomEvent('vnibb:open-command-palette', {

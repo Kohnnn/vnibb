@@ -292,10 +292,15 @@ class NewsCrawlerService:
 
     @staticmethod
     def _parse_rss_item(item: ET.Element, source: str) -> dict[str, Any] | None:
+        namespaces = {
+            "content": "http://purl.org/rss/1.0/modules/content/",
+            "dc": "http://purl.org/dc/elements/1.1/",
+        }
+
         def _text(tag: str) -> str | None:
-            child = item.find(tag) or item.find(
-                f"{{http://www.w3.org/2005/Atom}}{tag}"
-            )
+            child = item.find(tag, namespaces)
+            if child is None:
+                child = item.find(f"{{http://www.w3.org/2005/Atom}}{tag}")
             if child is not None and child.text:
                 return child.text.strip()
             return None
@@ -363,6 +368,10 @@ class NewsCrawlerService:
         if isinstance(related_symbols, list):
             related_symbols = ",".join(related_symbols[:10])  # Limit to 10 symbols
 
+        category = article.get("category")
+        if category is not None:
+            category = category[:50]
+
         insert_stmt = pg_insert(MarketNews).values(
             title=article.get("title", ""),
             summary=article.get("description") or article.get("summary", ""),
@@ -371,7 +380,7 @@ class NewsCrawlerService:
             url=url,
             author=article.get("author"),
             image_url=article.get("image") or article.get("image_url"),
-            category=article.get("category"),
+            category=category,
             related_symbols=related_symbols if related_symbols else None,
             published_date=pub_date,
             is_processed=False,  # Mark for sentiment analysis

@@ -339,14 +339,42 @@ async def test_screener_enrichment_withholds_uncertified_stored_percentages():
     assert rows[0].roic is None
 
 
-def test_screener_market_cap_preserves_low_vnd_and_rejects_unknown_prices():
+def test_screener_market_cap_requires_dated_outstanding_share_basis():
+    from vnibb.core.market_cap import resolve_market_cap
+
+    certified = resolve_market_cap({
+        "price": 80, "price_unit": "VND", "price_source": "exchange:quote",
+        "trade_date": "2026-10-26", "shares_outstanding": 1_000_000,
+        "shares_unit": "shares", "shares_as_of": "2026-10-26",
+        "shares_source": "issuer:shares", "share_basis": "outstanding",
+    }, source="provider:sample")
     rows = fill_market_cap([
-        ScreenerData(symbol="LOW", price=80, price_unit="VND", shares_outstanding=1_000_000),
+        ScreenerData(symbol="LOW", market_cap=certified["value"], market_cap_provenance=certified),
         ScreenerData(symbol="BAD", price=80_000, price_unit="unknown", shares_outstanding=1_000_000),
+        ScreenerData(symbol="UNDATED", price=80, price_unit="VND", shares_outstanding=1_000_000),
+        ScreenerData(symbol="VCI", market_cap=22_410_910_941.25, price=19_150,
+                     price_unit="VND", trade_date="2026-10-26", shares_outstanding=1_152_231_925),
     ])
 
     assert rows[0].market_cap == 80_000_000
-    assert rows[1].market_cap is None
+    assert rows[0].market_cap_provenance["status"] == "available"
+    assert all(row.market_cap is None for row in rows[1:])
+    assert rows[3].market_cap_provenance["observations"][0]["value"] == 22_410_910_941.25
+
+
+def test_cached_screener_exposes_cap_observation_without_borrowing_price_date():
+    row = _to_screener_data_row(SimpleNamespace(
+        symbol="VCI", market_cap=22_410_910_941.25, price=19_150,
+        trade_date=date(2026, 10, 26), shares_outstanding=1_152_231_925,
+        extended_metrics={"price_unit": "VND", "price_source": "vietcap_vnd"},
+    ))
+    assert row.market_cap is None
+    assert row.market_cap_provenance["status"] == "unavailable"
+    observation = row.market_cap_provenance["observations"][0]
+    assert observation["value"] == 22_410_910_941.25
+    assert observation["unit"] is None
+    assert observation["as_of"] is None
+    assert observation["shares_as_of"] is None
 
 
 class _PriceEnrichmentDB:

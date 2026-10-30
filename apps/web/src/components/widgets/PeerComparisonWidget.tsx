@@ -32,6 +32,7 @@ import { useUnit } from '@/contexts/UnitContext';
 import { logClientError } from '@/lib/clientLogger';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { marketCapExplanation, resolveMarketCap, type MarketCapResult } from '@/lib/marketCap';
 import {
 
     Radar as ReRadar,
@@ -244,11 +245,13 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
     const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'peer_comparison' });
 
     const comparisonData = useMemo(() => {
-        if (!compData?.stocks) return {} as Record<string, { name: string; metrics: Record<string, number | null> }>;
-        return compData.stocks.reduce<Record<string, { name: string; metrics: Record<string, number | null> }>>((acc, stock) => {
+        if (!compData?.stocks) return {} as Record<string, { name: string; metrics: Record<string, number | null>; marketCap: MarketCapResult }>;
+        return compData.stocks.reduce<Record<string, { name: string; metrics: Record<string, number | null>; marketCap: MarketCapResult }>>((acc, stock) => {
+            const marketCap = stock.market_cap_result ?? resolveMarketCap({ label: stock.symbol, value: stock.metrics?.market_cap, provenance: stock.market_cap_provenance });
             acc[stock.symbol] = {
                 name: stock.company_name || stock.name || stock.symbol,
-                metrics: stock.metrics || {},
+                metrics: { ...stock.metrics, market_cap: marketCap.value },
+                marketCap,
             };
             return acc;
         }, {});
@@ -298,9 +301,9 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
             lastDataDate: null,
             fetchedAt: dataUpdatedAt || null,
             derived: true,
-            extra: { symbols: peers.length, period, metrics: normalizedMetrics.length },
+            extra: { symbols: peers.length, period, metrics: normalizedMetrics.length, marketCaps: Object.fromEntries(Object.entries(comparisonData).map(([symbol, stock]) => [symbol, stock.marketCap])) },
         }))
-    }, [dataUpdatedAt, hasData, normalizedMetrics.length, onDataChange, peers.length, period]);
+    }, [comparisonData, dataUpdatedAt, hasData, normalizedMetrics.length, onDataChange, peers.length, period]);
 
     const allMetricValues = useMemo(() => {
         if (!Object.keys(comparisonData).length) return {};
@@ -513,7 +516,12 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
 
                                         return (
                                             <td key={`${sym}-${index}`} className={cellClass} style={cellStyle}>
-                                                {formatCellValue(value, metric.format, unitConfig)}
+                                                {metric.key === 'market_cap' && comparisonData[sym] ? (
+                                                    <details>
+                                                        <summary className="cursor-pointer">{comparisonData[sym].marketCap.status === 'available' ? formatCellValue(value, metric.format, unitConfig) : comparisonData[sym].marketCap.status === 'conflict' ? 'Conflict' : 'Unavailable'}</summary>
+                                                        <span className="text-left text-[10px]">{marketCapExplanation(comparisonData[sym].marketCap)}</span>
+                                                    </details>
+                                                ) : formatCellValue(value, metric.format, unitConfig)}
                                             </td>
                                         );
 

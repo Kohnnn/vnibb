@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import List, Dict, Optional
+from pydantic import BaseModel, Field
+from typing import Any, List, Dict, Optional
 from enum import Enum
 
 class RatioCategory(str, Enum):
@@ -21,6 +21,7 @@ class StockComparison(BaseModel):
     symbol: str
     company_name: str
     metrics: Dict[str, Optional[float]]  # metric_id -> value
+    market_cap_provenance: Dict[str, Any] = Field(default_factory=dict)
 
 class ComparisonResponse(BaseModel):
     metrics: List[ComparisonMetric]
