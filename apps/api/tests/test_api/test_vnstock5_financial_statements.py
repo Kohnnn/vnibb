@@ -113,6 +113,104 @@ async def test_generation_five_explicit_synthetic_basis_admits_vnd_unscaled(sdk,
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("statement", STATEMENTS)
+@pytest.mark.parametrize("scenario", ["basisless", "verified", "rejected_metric", "no_metric"])
+async def test_sync_preserves_existing_statement_and_receipts(sdk, statement, scenario, monkeypatch, test_engine):
+    from datetime import datetime
+    from unittest.mock import AsyncMock
+
+    from sqlalchemy import BigInteger, Integer, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+    from vnibb.models.sync_status import SyncStatus
+    import vnibb.services.data_pipeline as pipeline_module
+    from vnibb.services.data_pipeline import DataPipeline
+
+    models = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow}
+    model = models[statement]
+    metric = STATEMENTS[statement][3]
+    second_metric = {"income": "gross_profit", "balance": "inventory",
+                     "cashflow": "investing_cash_flow"}[statement]
+    year = datetime.utcnow().year - 1
+    period = str(year)
+    original_time = datetime(2020, 1, 2)
+    original_raw = {"_financial_lineage": {"source": "VCI", "evidence": "retained"}}
+
+    if test_engine.dialect.name == "sqlite":
+        def recreate(connection):
+            table = model.__table__
+            table.drop(connection)
+            original = table.c.id.type
+            table.c.id.type = BigInteger().with_variant(Integer, "sqlite")
+            try:
+                table.create(connection)
+            finally:
+                table.c.id.type = original
+        async with test_engine.begin() as connection:
+            await connection.run_sync(recreate)
+
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    async with sessions() as session:
+        session.add(model(id=1, symbol="HPG", period=period, period_type="year", fiscal_year=year,
+                          source="VCI", raw_data=original_raw, created_at=original_time,
+                          updated_at=original_time, **{metric: 777, second_metric: 444}))
+        await session.commit()
+
+    _, frames, _ = sdk
+    report = STATEMENTS[statement][1]
+    frame = sdk_frame(report, statement, period, basis=scenario != "basisless")
+    if scenario == "no_metric":
+        frame["id"] = "UNKNOWN_METRIC"
+        frame["name"] = "UNKNOWN_METRIC"
+        frame.attrs.pop("consolidation_basis", None)
+        frame.attrs.pop("flow_basis", None)
+    if scenario == "rejected_metric":
+        rejected_ids = {"income": "IS_GROSS_PROFIT", "balance": "BS_INVENTORIES",
+                        "cashflow": STATEMENTS[statement][2]}
+        row = frame.iloc[0].to_dict()
+        row.update(id=rejected_ids[statement], name=rejected_ids[statement], unit="unknown", value=123)
+        frame = pd.concat([frame, pd.DataFrame([row])], ignore_index=True)
+        frame.attrs.update(source="vci", symbol="HPG", report=report, format="long",
+                           consolidation_basis="consolidated", flow_basis="annual")
+    frames[(statement, "year", report)] = frame
+    monkeypatch.setattr(pipeline_module, "async_session_maker", sessions)
+    monkeypatch.setattr(pipeline_module, "engine", test_engine)
+    pipeline = DataPipeline()
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", AsyncMock())
+    cache = AsyncMock()
+    monkeypatch.setattr(pipeline, "_cache_set_json", cache)
+    progress = {}
+
+    result = await pipeline.sync_financials(symbols=["HPG"], period="year", count=1,
+                                            statement_types=[statement], progress=progress)
+    outcome = progress["financial_acquisition"]["outcomes"]["HPG"][statement]
+    async with sessions() as session:
+        stored = (await session.scalars(select(model).where(model.symbol == "HPG"))).one()
+        receipts = (await session.scalars(select(SyncStatus).where(
+            SyncStatus.sync_type == "financial_acquisition", SyncStatus.status != "running"
+        ))).all()
+        assert receipts[-1].additional_data == outcome
+        if scenario == "verified":
+            assert result == 1 and outcome["complete"] is True
+            assert outcome["period_outcomes"][period]["status"] == "stored"
+            assert getattr(stored, metric) == 100
+            cache.assert_awaited_once()
+        else:
+            assert result == 0 and outcome["complete"] is False
+            assert outcome["persisted_rows"] == 0
+            assert outcome["period_outcomes"][period]["status"] == "withheld"
+            assert outcome["period_outcomes"][period]["unavailable_reason"]
+            if scenario == "no_metric":
+                assert outcome["period_outcomes"][period]["unavailable_reason"] == "no_admitted_metrics"
+            assert outcome["source_returned_periods"] == [period]
+            assert outcome["source_shortfall"] is False
+            assert getattr(stored, metric) == 777
+            assert getattr(stored, second_metric) == 444
+            assert stored.raw_data == original_raw and stored.source == "VCI"
+            assert stored.updated_at == original_time and stored.created_at == original_time
+            cache.assert_not_awaited()
+
+
 async def test_generation_five_provider_failure_does_not_fallback_to_another_source(monkeypatch):
     import sys
     from types import ModuleType

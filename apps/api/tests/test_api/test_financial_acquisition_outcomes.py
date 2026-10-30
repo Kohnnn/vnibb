@@ -77,9 +77,14 @@ def acquisition(monkeypatch):
         periods = state.periods or [str(datetime.utcnow().year - 1)]
         if state.failure_by_symbol == query['symbol']:
             raise RuntimeError(f'{kind} unavailable for {query["symbol"]}')
+        metric = {'income': 'revenue', 'balance': 'total_assets', 'cashflow': 'operating_cash_flow'}[kind]
         return [FinancialStatementData(symbol=query['symbol'], statement_type=kind, period=period,
-                    source=state.source, value_unit=None, unavailable_reason='unknown_source_unit',
-                    raw_data={'provider_value': 123}).model_dump(mode='json') for period in periods]
+                    source=state.source, currency='VND', value_unit='VND',
+                    consolidation_basis='consolidated',
+                    flow_basis='single_quarter' if query['period'] == 'quarter' else 'annual',
+                    unit_metadata={metric: {'source_unit': 'VND', 'value_unit': 'VND'}},
+                    raw_data={'provider_value': 123}, **{metric: 123}).model_dump(mode='json')
+                for period in periods]
 
     monkeypatch.setattr(module, 'async_session_maker', Session)
     monkeypatch.setattr(module, 'get_upsert_stmt', lambda model, keys, values, **kwargs: Upsert(values))
@@ -120,11 +125,46 @@ async def test_gap_is_durable_and_not_row_count_completeness(acquisition):
     outcome = progress['financial_acquisition']['outcomes']['VNM']['income']
     assert outcome['expected_periods'] == [str(year - offset) for offset in range(3)]
     assert outcome['period_outcomes'][str(year - 1)]['status'] == 'missing'
-    assert outcome['period_outcomes'][str(year)]['unavailable_reason'] == 'unknown_source_unit'
+    assert outcome['period_outcomes'][str(year)]['status'] == 'stored'
+    assert outcome['period_outcomes'][str(year - 2)]['unavailable_reason'] == 'duplicate_statement_period'
     assert outcome['source_returned_period_count'] == 2
     assert outcome['complete'] is False
-    assert rows[0]['raw_data']['_financial_lineage']['unavailable_reason'] == 'unknown_source_unit'
     assert receipts[-1]['additional_data']['complete'] is False
+
+
+@pytest.mark.asyncio
+async def test_withheld_period_does_not_block_other_verified_periods_or_replace_cache(acquisition, monkeypatch):
+    pipeline, _, _, rows, receipts, _ = acquisition
+    year = datetime.utcnow().year - 1
+    cache = []
+
+    async def extract(query):
+        return [FinancialStatementData(
+            symbol=query['symbol'], statement_type='income', period=str(period), source='VCI',
+            currency='VND', value_unit='VND', consolidation_basis='consolidated' if verified else None,
+            flow_basis='annual', revenue=100,
+            unit_metadata={'revenue': {'source_unit': 'VND', 'value_unit': 'VND'}},
+        ).model_dump(mode='json') for period, verified in ((year, True), (year - 1, False))]
+
+    async def record_cache(*args):
+        cache.append(args)
+
+    monkeypatch.setattr(VnstockFinancialsFetcher, 'extract_data', extract)
+    monkeypatch.setattr(pipeline, '_cache_set_json', record_cache)
+    progress = {}
+    assert await pipeline.sync_financials(symbols=['VNM'], count=2, statement_types=['income'],
+                                          progress=progress) == 0
+    outcome = progress['financial_acquisition']['outcomes']['VNM']['income']
+    assert outcome['persisted_rows'] == 1
+    assert outcome['status'] == 'partial' and not outcome['complete']
+    assert outcome['period_outcomes'][str(year)]['status'] == 'stored'
+    withheld = outcome['period_outcomes'][str(year - 1)]
+    assert withheld['status'] == 'withheld'
+    assert withheld['rejected_metrics']['revenue'] == 'unverified_statement_basis'
+    assert outcome['source_shortfall'] is False
+    assert len(rows) == 1 and rows[0]['revenue'] == 100
+    assert cache == []
+    assert receipts[-2]['additional_data'] == outcome
 
 
 @pytest.mark.asyncio
