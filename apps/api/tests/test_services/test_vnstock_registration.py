@@ -167,6 +167,32 @@ async def test_registration_rejects_authenticated_empty_tier(
     assert result.registered is False
     assert cleared == [True]
 
+@pytest.mark.asyncio
+async def test_login_succeeds_then_status_raises_clears_persisted_key(
+    isolated_registration, monkeypatch
+):
+    cleared = []
+
+    def exploding_status():
+        raise RuntimeError("status transport down")
+
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
+    _sdk(
+        monkeypatch,
+        setup_api_key=lambda key: True,
+        status=exploding_status,
+        logout=lambda: cleared.append(True),
+    )
+
+    result = await registration.ensure_vnstock_registration()
+
+    assert result.registered is False
+    assert result.reason == "registration_failed"
+    # The persisted credential is cleared even though the status read raised.
+    assert cleared == [True]
+
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error", [SystemExit(67), KeyboardInterrupt()])

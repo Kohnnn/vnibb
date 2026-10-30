@@ -144,12 +144,14 @@ def _register_api_key(api_key: str) -> bool:
         result = persist(api_key)
         if result is False:
             return False
-        status = _normalized_status(read()) if callable(read) else None
-        if status is None:
+        try:
+            status = _normalized_status(read()) if callable(read) else None
+        except BaseException:
             _clear_persisted_login(clear)
-            return False
+            raise
         admitted = (
-            status.get("authenticated") is True
+            status is not None
+            and status.get("authenticated") is True
             and status.get("tier") in {"golden", "diamond"}
         )
         if not admitted:
