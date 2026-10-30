@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
-
 from vnibb.providers.vnstock.financials import (
     FinancialsQueryParams,
     StatementType,
