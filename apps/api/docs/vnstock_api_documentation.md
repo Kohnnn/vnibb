@@ -52,6 +52,23 @@ Schema and taxonomy references:
 [Fundamental](https://vnstocks.com/docs/vnstock/co-ban-fundamental),
 [VAS analysis](https://vnstocks.com/blog/phan-tich-bao-cao-tai-chinh-tu-cau-truc-du-lieu-vnstock).
 
+The registration adapter supports the 4.x `change_api_key` boolean and the 5.x
+`setup_api_key` status dictionary without trusting legacy shared-registration
+records. The 5.x statement adapter explicitly requests VCI `long` income, balance
+and cash-flow frames via `Fundamental().equity(symbol)`; the 4.x route remains.
+Registration was exercised offline through both installed SDK facades with
+synthetic authentication. Statement verification used the actual 5.2.1 facade
+with synthetic native data and a synthetic 4.x SDK. No credentials or supplier
+requests were sent (#185, #186). Cancellation does not block the startup
+deadline while an in-flight registration worker completes.
+
+Provider-free verification on 30 October 2026 used a disposable PostgreSQL 17
+instance and synthetic VAS frames. Real extraction, `DataPipeline.sync_financials`,
+SQL read-back and the HTTP reader preserved three finite values and returned
+nine non-finite values as null with `missing_value`, across all three statements.
+All 12 HTTP responses succeeded; the strict JSON serializer rejected direct NaN
+and infinity inputs. No supplier or production database was contacted.
+
 Golden includes Pipeline; Quant is available from Bronze. Neither is needed for
 this reader, and no second scheduler, storage path or ratio engine is installed.
 Software entitlement does not establish source-owner permission to acquire,
@@ -62,6 +79,47 @@ permission and an explicit coverage/finality contract. Acquisition, production
 writes, scheduler enablement and redeployment remain gated. See
 [entitlements](https://vnstocks.com/docs/goi-quyen-su-dung/gioi-thieu) and
 [licence](https://vnstocks.com/policies/license).
+
+### Agent Skills Hub
+
+The isolated generation-5 environment includes the official skills loader; the
+hub skills are fetched on demand and cached in process memory, not installed as
+separate packages or copied into the repository. On 30 October 2026, all 16
+skills available through Golden loaded successfully; `risk-manager` requires
+Diamond. Load the catalog and a task-specific skill with the review environment's
+Python interpreter:
+
+```python
+from vnstock.utils.agents import load_skill, load_skill_catalog
+
+catalog = load_skill_catalog()
+guidance = load_skill("pipeline-cli")
+```
+
+The loader uses the account already configured on the machine. On the reviewed
+workstation, the interpreter is `~/.config/vnibb/vnstock5-review-20261030/venv/bin/python`,
+separate from the pinned VNIBB runtime. Never put keys in source, logs or chat.
+The older local `vnstock-env-setup`, `vnstock-migration-expert` and
+`vnstock-solution-architect` skills describe previous generations; follow the
+generation-5 official guidance instead. See the [Agent Skills Hub](https://vnstocks.com/agent-skills-hub)
+and the [official loader guide](https://vnstocks.com/docs/tai-lieu/vnstock-agent-skills).
+
+### Local financial inventory
+
+A provider-free, read-only transaction against the local PostgreSQL store on
+30 October 2026 covered FPT, VCI, VNM and MSR for 2025 and Q1–Q3 2026. Of 48
+selected symbol/period/statement cells, 12 had a row and 36 did not. The 12 rows
+came from Vietcap; 24 non-null income fields were withheld because currency or
+unit evidence was unverified. No inspected floating-point financial fields were
+admitted in this selected scope.
+This is a local snapshot, not production coverage or proof of source rights.
+The [bounded inventory instructions](../scripts/vietcap/README.md#bounded-sql-statement-admission-inventory)
+require a read-only database account and do not call a provider.
+
+Registration and financial-statement compatibility do not constitute a full
+generation-5 migration. Legacy price-unit and market-depth assumptions still
+require source-specific review. Keep the pinned runtime and admission gates until
+the migration and #168 authorization and coverage prerequisites are satisfied.
 
 ---
 
